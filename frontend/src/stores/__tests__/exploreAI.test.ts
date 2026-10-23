@@ -16,7 +16,7 @@ describe("useExploreAIStore", () => {
     vi.spyOn(sourcesApi, "getTeamSource").mockReturnValue(ok({ id: 3, name: "app-logs" }) as never);
     useContextStore().selectTeam(1);
     useContextStore().selectSource(3);
-    await useSourcesStore().loadSourceDetails(3);
+    await useSourcesStore().loadSourceDetails(1, 3);
   });
   afterEach(() => {
     vi.restoreAllMocks();

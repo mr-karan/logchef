@@ -12,6 +12,9 @@ import (
 func (s *Store) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error) {
 	managed, err := s.q.IsSourceManaged(ctx, int64(id))
 	if err != nil {
+		if notFound(err) {
+			return false, models.ErrNotFound
+		}
 		return false, err
 	}
 	return managed, nil
@@ -21,15 +24,9 @@ func (s *Store) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, 
 func (s *Store) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error) {
 	managed, err := s.q.IsTeamManaged(ctx, int64(id))
 	if err != nil {
-		return false, err
-	}
-	return managed, nil
-}
-
-// IsUserManaged returns true if the user is managed by provisioning config.
-func (s *Store) IsUserManaged(ctx context.Context, id models.UserID) (bool, error) {
-	managed, err := s.q.IsUserManaged(ctx, int64(id))
-	if err != nil {
+		if notFound(err) {
+			return false, models.ErrNotFound
+		}
 		return false, err
 	}
 	return managed, nil
@@ -110,4 +107,21 @@ func (s *Store) SetUserManaged(ctx context.Context, id models.UserID, managed bo
 		return fmt.Errorf("error setting user managed: %w", err)
 	}
 	return nil
+}
+
+// ListUsersForProvisioning loads the users referenced by provisioning.
+func (s *Store) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListUsersForProvisioning(ctx, emails)
+	if err != nil {
+		return nil, fmt.Errorf("error loading provisioning users: %w", err)
+	}
+	users := make([]*models.User, 0, len(rows))
+	for i := range rows {
+		row := rows[i]
+		users = append(users, userToModel(row))
+	}
+	return users, nil
 }

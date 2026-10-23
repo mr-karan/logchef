@@ -186,23 +186,30 @@ func UpdateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID
 }
 
 // DeleteTeam deletes a team and its associations (members, sources, queries).
-func DeleteTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID) error {
-	// Validate team exists
-	_, err := db.GetTeam(ctx, teamID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrTeamNotFound
+func DeleteTeam(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID) error {
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
 		}
-		log.Error("failed to get team for deletion check", "error", err, "team_id", teamID)
-		return fmt.Errorf("error checking existing team: %w", err)
-	}
+		_, err := tx.GetTeam(ctx, teamID)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrTeamNotFound
+			}
+			log.Error("failed to get team for deletion check", "error", err, "team_id", teamID)
+			return fmt.Errorf("error checking existing team: %w", err)
+		}
 
-	log.Warn("deleting team and all associated data", "team_id", teamID)
+		log.Warn("deleting team and all associated data", "team_id", teamID)
 
-	// Delete team (DB constraints should handle cascading deletes for members, sources, queries)
-	if err := db.DeleteTeam(ctx, teamID); err != nil {
-		log.Error("failed to delete team from db", "error", err, "team_id", teamID)
-		return fmt.Errorf("error deleting team: %w", err)
+		if err := tx.DeleteTeam(ctx, teamID); err != nil {
+			log.Error("failed to delete team from db", "error", err, "team_id", teamID)
+			return fmt.Errorf("error deleting team: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Info("team deleted successfully", "team_id", teamID)
@@ -305,7 +312,7 @@ func RemoveTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 // --- Team Source Functions ---
 
 // ListTeamSources returns basic information for all sources associated with a specific team,
-// including provider-derived feature metadata and current connection status.
+// including provider-derived feature metadata and cached connection status.
 func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
 	// First, validate the team exists
 	_, err := GetTeam(ctx, db, teamID) // Use existing GetTeam function
@@ -330,18 +337,11 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 		return nil, fmt.Errorf("error listing team sources from db: %w", err)
 	}
 
-	// Iterate and populate connection status from the manager's cache
+	if err := populateSourceStatuses(ds, sources); err != nil {
+		return nil, err
+	}
 	for _, source := range sources {
-		if source == nil { // Safety check
-			continue
-		}
-		if err := ds.ApplySourceMetadata(source); err != nil {
-			return nil, fmt.Errorf("error annotating source features: %w", err)
-		}
-		source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
-
-		// Optionally log if status is unhealthy for debugging
-		if !source.IsConnected {
+		if source != nil && !source.IsConnected {
 			log.Debug("source reported unhealthy during team source listing",
 				"source_id", source.ID,
 				"team_id", teamID,
@@ -353,39 +353,32 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 }
 
 // AddTeamSource associates a source with a team.
-func AddTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
-	// Validate team exists
-	if _, err := GetTeam(ctx, db, teamID); err != nil {
-		return err // Propagate ErrTeamNotFound or other DB errors
-	}
-
-	// Validate source exists
-	if _, err := db.GetSource(ctx, sourceID); err != nil { // Check DB directly for now
-		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || errors.Is(err, models.ErrNotFound) {
-			return ErrSourceNotFound // Use error from source.go
+func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
+	return db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
 		}
-		return fmt.Errorf("error getting source: %w", err)
-	}
+		if _, err := GetTeam(ctx, tx, teamID); err != nil {
+			return err
+		}
+		if _, err := tx.GetSource(ctx, sourceID); err != nil {
+			if models.IsNotFound(err) {
+				return ErrSourceNotFound
+			}
+			return fmt.Errorf("error getting source: %w", err)
+		}
 
-	// Add source to team (DB handles potential duplicates gracefully or via error)
-	log.Info("adding source to team", "team_id", teamID, "source_id", sourceID)
-	if err := db.AddTeamSource(ctx, teamID, sourceID); err != nil {
-		log.Error("failed to add team source in db", "error", err, "team_id", teamID, "source_id", sourceID)
-		return fmt.Errorf("error adding team source: %w", err)
-	}
-
-	return nil
+		log.Info("adding source to team", "team_id", teamID, "source_id", sourceID)
+		if err := tx.AddTeamSource(ctx, teamID, sourceID); err != nil {
+			log.Error("failed to add team source in db", "error", err, "team_id", teamID, "source_id", sourceID)
+			return fmt.Errorf("error adding team source: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemoveTeamSource removes the association between a source and a team.
 func RemoveTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
-	// Optional: Validate team and source exist first
-	// _, err := GetTeam(ctx, db, teamID)
-	// if err != nil { return err }
-	// _, err = db.GetSource(ctx, sourceID) // Check DB directly
-	// if err != nil { ... handle ErrSourceNotFound ... }
-
-	// Remove source from team
 	log.Info("removing source from team", "team_id", teamID, "source_id", sourceID)
 	if err := db.RemoveTeamSource(ctx, teamID, sourceID); err != nil {
 		log.Error("failed to remove team source from db", "error", err, "team_id", teamID, "source_id", sourceID)
@@ -443,40 +436,6 @@ func IsAnyTeamAdmin(ctx context.Context, db store.StoreOps, userID models.UserID
 	}
 	for _, team := range teams {
 		if team.Role == models.TeamRoleAdmin {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// IsTeamCollectionMutator reports whether the user has the role required to
-// mutate shared resources (collections) in a specific team. Both team admins
-// and team editors qualify. The per-collection ownership check happens
-// separately in core/collections.go and is unaffected by this role gate.
-func IsTeamCollectionMutator(ctx context.Context, db store.StoreOps, teamID models.TeamID, userID models.UserID) (bool, error) {
-	member, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
-			return false, nil
-		}
-		return false, fmt.Errorf("error checking team collection mutator status: %w", err)
-	}
-	if member == nil {
-		return false, nil
-	}
-	return member.Role == models.TeamRoleAdmin || member.Role == models.TeamRoleEditor, nil
-}
-
-// IsAnyTeamCollectionMutator reports whether the user is an admin or editor
-// in at least one team. Used as the coarse gate on collection mutation
-// endpoints — the per-collection owner check is enforced inside core.
-func IsAnyTeamCollectionMutator(ctx context.Context, db store.StoreOps, userID models.UserID) (bool, error) {
-	teams, err := db.ListTeamsForUser(ctx, userID)
-	if err != nil {
-		return false, fmt.Errorf("error listing teams for user: %w", err)
-	}
-	for _, team := range teams {
-		if team.Role == models.TeamRoleAdmin || team.Role == models.TeamRoleEditor {
 			return true, nil
 		}
 	}

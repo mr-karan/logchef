@@ -118,7 +118,7 @@ vi.mock("@/stores/sources", () => ({
   useSourcesStore: () => ({
     teamSources: [],
     currentSourceDetails: null,
-    loadTeamSources: vi.fn(() => Promise.resolve()),
+    loadTeamSources: loadSources,
   }),
 }));
 vi.mock("@/stores/explore", () => ({
@@ -134,8 +134,8 @@ vi.mock("@/stores/explore", () => ({
 }));
 vi.mock("@/stores/variables", () => ({ useVariableStore: () => ({ allVariables: [] }) }));
 vi.mock("pinia", () => ({ storeToRefs: () => ({ allVariables: ref([]) }) }));
-vi.mock("vue-router", () => ({ useRoute: () => ({ query: {} }) }));
-vi.mock("@/composables/useToast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+const { loadSources, toast } = vi.hoisted(() => ({ loadSources: vi.fn(() => Promise.resolve()), toast: vi.fn() }));
+vi.mock("@/composables/useToast", () => ({ useToast: () => ({ toast }) }));
 
 import SaveQueryModal from "../SaveQueryModal.vue";
 
@@ -143,12 +143,32 @@ describe("SaveQueryModal submission lock", () => {
   let host: HTMLDivElement;
 
   beforeEach(() => {
+    loadSources.mockReset().mockResolvedValue(undefined);
+    toast.mockReset();
     host = document.createElement("div");
     document.body.appendChild(host);
   });
 
   afterEach(() => {
     host.remove();
+  });
+
+  it("handles a failed source list load without rejecting the mounted hook", async () => {
+    loadSources.mockRejectedValueOnce(new Error("Sources unavailable"));
+    const app = createApp(SaveQueryModal, { isOpen: true, queryContent: JSON.stringify(queryContentFixture), queryType: "logchefql" });
+    const errors: unknown[] = [];
+    app.config.errorHandler = error => { errors.push(error); };
+    app.use(i18n);
+    app.mount(host);
+    try {
+      await vi.waitFor(() => expect(loadSources).toHaveBeenCalledTimes(1));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(errors).toEqual([]);
+      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive", description: "Sources unavailable" }));
+      expect(host.querySelector("#name")).not.toBeNull();
+    } finally {
+      app.unmount();
+    }
   });
 
   it("does not emit a second save while the first save is pending", async () => {

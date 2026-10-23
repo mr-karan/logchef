@@ -1,4 +1,5 @@
 export type QueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type NativeQueryLanguage = Exclude<QueryLanguage, "logchefql">;
 export type SavedQueryEditorMode = "builder" | "native";
 export type AlertEditorMode = "condition" | "native";
 
@@ -32,17 +33,6 @@ function getSupportedQueryLanguages(source: SourceDescriptor): QueryLanguage[] {
     : ["logchefql", "clickhouse-sql"];
 }
 
-function getSupportedSavedQueryEditorModes(source: SourceDescriptor): SavedQueryEditorMode[] {
-  const explicit = typeof source === "string" ? null : source?.saved_query_editor_modes;
-  if (explicit && explicit.length > 0) {
-    return explicit.filter(
-      (mode): mode is SavedQueryEditorMode => mode === "builder" || mode === "native"
-    );
-  }
-
-  return ["builder", "native"];
-}
-
 function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode[] {
   const explicit = typeof source === "string" ? null : source?.alert_editor_modes;
   if (explicit && explicit.length > 0) {
@@ -56,10 +46,6 @@ function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode
 
 export function supportsQueryLanguage(source: SourceDescriptor, language: QueryLanguage): boolean {
   return getSupportedQueryLanguages(source).includes(language);
-}
-
-export function supportsSavedQueryEditorMode(source: SourceDescriptor, mode: SavedQueryEditorMode): boolean {
-  return getSupportedSavedQueryEditorModes(source).includes(mode);
 }
 
 export function supportsAlertEditorMode(source: SourceDescriptor, mode: AlertEditorMode): boolean {
@@ -99,7 +85,7 @@ export function isVictoriaLogsSource(source: SourceDescriptor): boolean {
   return getNativeQueryLanguageForSource(source) === "logsql";
 }
 
-export function getNativeQueryLanguageForSource(source: SourceDescriptor): QueryLanguage {
+export function getNativeQueryLanguageForSource(source: SourceDescriptor): NativeQueryLanguage {
   return supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
 }
 
@@ -132,7 +118,8 @@ export function resolveSavedQueryMetadata(input: {
     queryLanguage = getNativeQueryLanguageForSource(source);
   }
 
-  if (!supportsQueryLanguage(source, queryLanguage)) {
+  const sourceKnown = !!(source.source_type || source.query_languages?.length);
+  if (sourceKnown && !supportsQueryLanguage(source, queryLanguage)) {
     queryLanguage = getNativeQueryLanguageForSource(source);
   }
 

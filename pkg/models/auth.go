@@ -1,6 +1,17 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// MaxEmailLength is the maximum account email length in bytes.
+const MaxEmailLength = 254
+
+// NormalizeEmail returns the canonical account email for validation, storage, and lookup.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
 
 // UserStatus represents the possible user statuses
 type UserStatus string
@@ -101,14 +112,6 @@ type CreateUserRequest struct {
 	Email    string   `json:"email"`
 	FullName string   `json:"full_name"`
 	Role     UserRole `json:"role"`
-}
-
-// UpdateUserRequest represents a request to update a user
-type UpdateUserRequest struct {
-	Email    string     `json:"email,omitempty"`
-	FullName string     `json:"full_name,omitempty"`
-	Role     UserRole   `json:"role,omitempty"`
-	Status   UserStatus `json:"status,omitempty"`
 }
 
 // Session represents a user session

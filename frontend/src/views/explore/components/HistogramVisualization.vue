@@ -3,8 +3,9 @@ import { useI18n } from "vue-i18n";
 
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
+import { useExploreHistogramStore } from '@/stores/exploreHistogram'
+import { useExploreRuns } from '@/stores/exploreRuns'
 import LogHistogram from '@/components/visualizations/LogHistogram.vue'
-import { useExploreWindowedStore } from '@/stores/exploreWindowed'
 import { cn } from '@/lib/utils'
 
 const { t } = useI18n();
@@ -19,13 +20,15 @@ const emit = defineEmits<{
 }>()
 
 const exploreStore = useExploreStore()
-const windowed = useExploreWindowedStore()
+const histogram = useExploreHistogramStore()
+const runs = useExploreRuns()
+const windowed = computed(() => runs.shown?.search)
 
 // Reactive computed properties
-const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('executeQuery'))
-const groupByField = computed(() => exploreStore.groupByField === '__none__' ? undefined : exploreStore.groupByField)
+const isExecutingQuery = computed(() => runs.isRunning)
+const groupByField = computed(() => histogram.groupByField === '__none__' ? undefined : histogram.groupByField)
 const sourceId = computed(() => exploreStore.sourceId)
-const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
+const isHistogramEligible = computed(() => runs.isHistogramEligible)
 
 // Event handlers for histogram interactions
 const handleZoomTimeRange = (range: TimeRangeEvent) => {
@@ -38,11 +41,11 @@ const handleZoomTimeRange = (range: TimeRangeEvent) => {
   <div v-if="isHistogramEligible" class="histogram-container">
     <LogHistogram
       :key="`histogram-${sourceId}`"
-      :is-loading="isExecutingQuery && !windowed.active"
+      :is-loading="isExecutingQuery && !windowed"
       :group-by="groupByField"
       @zoom-time-range="handleZoomTimeRange"
     />
-    <div v-if="windowed.active" class="flex flex-col gap-1 pt-1">
+    <div v-if="windowed" class="flex flex-col gap-1 pt-1">
       <div class="flex h-2 gap-px" :aria-label="t('sources.windowedCountCoverage')">
         <button v-for="window in [...windowed.coverage].reverse()" :key="window.index" type="button"
           :class="cn('rounded-sm', window.count === 'complete' ? 'bg-primary' : window.count === 'failed' ? 'bg-destructive' : 'bg-muted')"

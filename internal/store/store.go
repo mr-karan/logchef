@@ -58,11 +58,19 @@ type UserPreferenceStore interface {
 type UserStore interface {
 	CreateUser(ctx context.Context, user *models.User) error
 	GetUser(ctx context.Context, id models.UserID) (*models.User, error)
+	// GetUserForUpdate reads a user and, inside WithTx, blocks other full-row
+	// writers of that user until the transaction ends.
+	GetUserForUpdate(ctx context.Context, id models.UserID) (*models.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
 	UpdateUser(ctx context.Context, user *models.User) error
+	// UpdateUserLastLogin sets only last_login_at, so a login never rewrites
+	// a concurrent role or status change.
+	UpdateUserLastLogin(ctx context.Context, id models.UserID, at time.Time) error
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
 	CountAdminUsers(ctx context.Context) (int, error)
+	// LockMembershipWrites serializes provisioning, cascading deletes, and admin removals until WithTx ends.
+	LockMembershipWrites(ctx context.Context) error
 	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
 	// local email+password authentication.
 	SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error
@@ -139,12 +147,15 @@ type AlertStore interface {
 	ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*models.Alert, error)
 	ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error)
 	MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error
+	TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error
 	MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error
 	InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error)
 	// GetAlertHistoryEntry returns models.ErrNotFound when the alert has no
 	// entry with that ID.
 	GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error)
+	RecoverAlertDeliveries(ctx context.Context) error
+	// ResolveAlertHistory resolves every unresolved firing entry of the alert that owns historyID.
 	ResolveAlertHistory(ctx context.Context, historyID int64, message string) error
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)
@@ -184,9 +195,10 @@ type QueryHistoryStore interface {
 
 // ExportJobStore persists asynchronous CSV/export job records.
 type ExportJobStore interface {
+	ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]models.ReapedExportJob, error)
 	CreateExportJob(ctx context.Context, job *models.ExportJob) error
 	GetExportJob(ctx context.Context, id string) (*models.ExportJob, error)
-	UpdateExportJobRunning(ctx context.Context, id string, updatedAt time.Time) error
+	UpdateExportJobRunning(ctx context.Context, id string) error
 	CompleteExportJob(ctx context.Context, id, fileName, filePath string, rowsExported int, bytesWritten int64, completedAt time.Time) error
 	FailExportJob(ctx context.Context, id, errorMessage string, updatedAt time.Time) error
 	ListExpiredExportJobPaths(ctx context.Context, before time.Time) ([]string, error)
@@ -210,10 +222,11 @@ type QueryShareStore interface {
 type ProvisioningStore interface {
 	IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error)
 	IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error)
-	IsUserManaged(ctx context.Context, id models.UserID) (bool, error)
 
 	ListManagedSources(ctx context.Context) ([]*models.Source, error)
 	ListManagedTeams(ctx context.Context) ([]*models.Team, error)
+	// ListUsersForProvisioning loads the users referenced by provisioning.
+	ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error)
 	// GetSourceByNameForProvisioning looks a source up by name (managed or not),
 	// returning models.ErrNotFound when absent.
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error)
@@ -238,7 +251,6 @@ type TeamStore interface {
 	GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error)
 	UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
-	ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 	ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 
 	AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error
@@ -250,16 +262,9 @@ type TeamStore interface {
 	UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceID models.SourceID) (bool, error)
 }
 
-// SettingsStore persists system settings. The typed getters return a default
-// when a key is absent or unparseable; the list/upsert/delete methods manage
-// the raw entries.
+// SettingsStore persists system settings.
 type SettingsStore interface {
 	GetSetting(ctx context.Context, key string) (string, error)
-	GetSettingWithDefault(ctx context.Context, key, defaultValue string) string
-	GetBoolSetting(ctx context.Context, key string, defaultValue bool) bool
-	GetIntSetting(ctx context.Context, key string, defaultValue int) int
-	GetFloat64Setting(ctx context.Context, key string, defaultValue float64) float64
-	GetDurationSetting(ctx context.Context, key string, defaultValue time.Duration) time.Duration
 	ListSettings(ctx context.Context) ([]*models.SystemSetting, error)
 	ListSettingsByCategory(ctx context.Context, category string) ([]*models.SystemSetting, error)
 	UpsertSetting(ctx context.Context, key, value, valueType, category, description string, isSensitive bool) error
@@ -278,7 +283,7 @@ type TokenStore interface {
 }
 
 // OAuthStore persists Logchef's OAuth authorization server state: pending
-// authorization requests, device authorizations, grants and token hashes.
+// authorization requests, grants and token hashes.
 // Every code and token argument is a models.OAuthSecretHash; plaintext never
 // reaches storage. now is passed in so every expiry check uses the caller's
 // clock.
@@ -303,23 +308,6 @@ type OAuthStore interface {
 	// code revokes its grant and returns models.ErrOAuthCodeReplay. Unknown,
 	// expired or revoked codes return models.ErrOAuthInvalidGrant.
 	ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, error)
-
-	// CreateOAuthDeviceAuthorization returns models.ErrConflict when the user
-	// code hash is already in use.
-	CreateOAuthDeviceAuthorization(ctx context.Context, d models.NewOAuthDeviceAuthorization) error
-	// GetPendingOAuthDeviceAuthorization returns an undecided, unexpired
-	// request by user code, or models.ErrNotFound.
-	GetPendingOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, now time.Time) (*models.OAuthDeviceAuthorization, error)
-	ApproveOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) (*models.OAuthGrant, error)
-	DenyOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) error
-	// RecordDevicePoll records one token-endpoint poll and reports its status
-	// in one conditional update. The poll interval applies only to requests
-	// that are not expired or denied. Unknown, consumed or other-client
-	// device codes return models.ErrNotFound.
-	RecordDevicePoll(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (models.OAuthDevicePoll, error)
-	// ConsumeDeviceCode marks an approved, unexpired code used, once, and
-	// returns its grant. Anything else returns models.ErrOAuthInvalidGrant.
-	ConsumeDeviceCode(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (*models.OAuthGrant, error)
 
 	// IssueOAuthTokens stores a new access token, and a refresh token when
 	// issue.RefreshHash is set, for an active grant. A revoked grant returns
@@ -348,8 +336,8 @@ type OAuthStore interface {
 	RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) error
 	// ListGrantsForUser returns userID's active grants, newest first.
 	ListGrantsForUser(ctx context.Context, userID models.UserID) ([]*models.OAuthGrant, error)
-	// DeleteExpiredOAuthRows removes expired requests, device authorizations
-	// and access tokens. Refresh rows, consumed ones included, stay until no
+	// DeleteExpiredOAuthRows removes expired requests and access
+	// tokens. Refresh rows, consumed ones included, stay until no
 	// token of their grant is live, so replays are still detected.
 	DeleteExpiredOAuthRows(ctx context.Context, now time.Time) error
 }

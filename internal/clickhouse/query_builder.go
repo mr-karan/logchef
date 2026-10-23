@@ -78,30 +78,128 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 	return result.SQL, nil
 }
 
-// BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit
-// default/max limit policy. The default limit is used for SQL without LIMIT;
-// the max limit is only a ceiling.
-func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
+// FormatSelectQuery parses a single SELECT statement and renders it from the
+// AST without comments. Literals and identifiers are written back verbatim, so
+// the output runs as parsed only where the parser and ClickHouse lex them alike.
+func FormatSelectQuery(rawSQL string) (string, error) {
+	selectQuery, err := parseSelectQuery(rawSQL)
+	if err != nil {
+		return "", err
+	}
+	return formatSQL(selectQuery), nil
+}
+
+func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 	// The parser lexer accepts ClickHouse's doubled apostrophes and keeps them
 	// in StringLiteral.Literal. Do not preprocess raw SQL: the formatter emits
 	// literal contents verbatim, while comments are intentionally omitted.
 	parser := clickhouseparser.NewParser(rawSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
-		return QueryBuildResult{}, fmt.Errorf("invalid SQL syntax: %w", err)
+		return nil, fmt.Errorf("invalid SQL syntax: %w", err)
 	}
 
 	if len(stmts) == 0 {
-		return QueryBuildResult{}, fmt.Errorf("no SQL statements found")
+		return nil, fmt.Errorf("no SQL statements found")
 	}
 	if len(stmts) > 1 {
-		return QueryBuildResult{}, fmt.Errorf("multiple SQL statements are not supported")
+		return nil, fmt.Errorf("multiple SQL statements are not supported")
 	}
 
 	stmt := stmts[0]
 	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
 	if !ok {
-		return QueryBuildResult{}, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
+		return nil, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
+	}
+	if err := checkIdentifiers(rawSQL, selectQuery); err != nil {
+		return nil, err
+	}
+	return selectQuery, nil
+}
+
+// checkIdentifiers rejects quoted identifiers that ClickHouse reads as a
+// different token or a different name than the parser does, and names it
+// lexes as $$ heredocs.
+func checkIdentifiers(rawSQL string, query *clickhouseparser.SelectQuery) error {
+	var err error
+	clickhouseparser.Walk(query, func(node clickhouseparser.Expr) bool {
+		ident, ok := node.(*clickhouseparser.Ident)
+		if !ok {
+			return true
+		}
+		// The parser ends a quoted token at the first matching quote, so
+		// NameEnd indexes it. ClickHouse reads a doubled one as an embedded quote.
+		start, closing := int(ident.NamePos)-1, int(ident.NameEnd)
+		quoted := start >= 0 && closing < len(rawSQL) && rawSQL[closing] == rawSQL[start] && (rawSQL[start] == '`' || rawSQL[start] == '"')
+		switch {
+		case ident.QuoteType == 0 && quoted:
+			// Paths such as a table function's named argument leave QuoteType
+			// unset, and the formatter then writes the name without quotes.
+			err = fmt.Errorf("quoted names before = in table function arguments are not supported: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
+		case ident.QuoteType == 0, ident.QuoteType == clickhouseparser.Unquoted:
+			if strings.HasPrefix(ident.Name, "$") {
+				err = fmt.Errorf("identifiers starting with $ are not supported: %q: %w", ident.Name, ErrInvalidQuery)
+			}
+		case closing+1 < len(rawSQL) && rawSQL[closing+1] == rawSQL[closing]:
+			hint := "use backticks"
+			if rawSQL[closing] == '`' {
+				hint = "write a backtick as \\x60"
+			}
+			err = fmt.Errorf("doubled quotes inside quoted identifiers are not supported, %s: %s: %w", hint, rawSQL[start:closing+2], ErrInvalidQuery)
+		default:
+			if _, ok := decodeQuotedIdentifier(ident.Name); !ok {
+				err = fmt.Errorf("quoted identifiers support only the \\\\ and \\x60 escapes: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
+			}
+		}
+		return err == nil
+	})
+	return err
+}
+
+// decodeQuotedIdentifier returns the name ClickHouse reads from the body of a
+// quoted identifier. It reports false for any escape other than \\ and \x60,
+// the ones queryescape writes: ClickHouse would decode it to another name or
+// consume the closing quote.
+func decodeQuotedIdentifier(body string) (string, bool) {
+	if !strings.Contains(body, `\`) {
+		return body, true
+	}
+	var name strings.Builder
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			name.WriteByte(body[i])
+			continue
+		}
+		switch rest := body[i+1:]; {
+		case strings.HasPrefix(rest, `\`):
+			name.WriteByte('\\')
+			i++
+		case strings.HasPrefix(rest, "x60"):
+			name.WriteByte('`')
+			i += 3
+		default:
+			return "", false
+		}
+	}
+	return name.String(), true
+}
+
+// identIs reports whether ClickHouse reads ident as name.
+func identIs(ident *clickhouseparser.Ident, name string) bool {
+	if ident.QuoteType == clickhouseparser.Unquoted {
+		return ident.Name == name
+	}
+	decoded, ok := decodeQuotedIdentifier(ident.Name)
+	return ok && decoded == name
+}
+
+// BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit
+// default/max limit policy. The default limit is used for SQL without LIMIT;
+// the max limit is only a ceiling.
+func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
+	selectQuery, err := parseSelectQuery(rawSQL)
+	if err != nil {
+		return QueryBuildResult{}, err
 	}
 
 	// Mode-specific validation
@@ -128,7 +226,7 @@ func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLim
 		return QueryBuildResult{}, fmt.Errorf("LIMIT must be a numeric literal")
 	}
 
-	result.SQL = formatSQL(stmt)
+	result.SQL = formatSQL(selectQuery)
 
 	return result, nil
 }
@@ -285,28 +383,10 @@ func legacyDefaultLimit(maxLimit int) int {
 
 // RemoveLimitClause parses the SQL and removes any LIMIT clause.
 func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
-	parser := clickhouseparser.NewParser(rawSQL)
-	stmts, err := parser.ParseStmts()
+	selectQuery, err := parseSelectQuery(rawSQL)
 	if err != nil {
-		return "", fmt.Errorf("invalid SQL syntax: %w", err)
+		return "", err
 	}
-
-	if len(stmts) == 0 {
-		return "", fmt.Errorf("no SQL statements found")
-	}
-	if len(stmts) > 1 {
-		return "", fmt.Errorf("multiple SQL statements are not supported")
-	}
-
-	stmt := stmts[0]
-	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
-	if !ok {
-		return "", fmt.Errorf("only SELECT queries are supported")
-	}
-
 	selectQuery.Limit = nil
-
-	result := formatSQL(stmt)
-
-	return result, nil
+	return formatSQL(selectQuery), nil
 }

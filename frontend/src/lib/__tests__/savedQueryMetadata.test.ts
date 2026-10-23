@@ -24,4 +24,9 @@ describe('saved query editor metadata', () => {
     expect(resolveSavedQueryMetadata({ query_language: 'logchefql', editor_mode: 'builder' }))
       .toEqual({ queryLanguage: 'logchefql', editorMode: 'builder' });
   });
+
+  it('trusts the stored native language when the source is unknown', () => {
+    expect(resolveSavedQueryMetadata({ query_language: 'logsql', editor_mode: 'native' }))
+      .toEqual({ queryLanguage: 'logsql', editorMode: 'native' });
+  });
 });

@@ -1,0 +1,217 @@
+{
+  "Server": {
+    "Port": 8125,
+    "Host": "0.0.0.0",
+    "FrontendURL": "",
+    "HTTPServerTimeout": 900000000000,
+    "SecureCookie": false,
+    "TrustedProxies": null,
+    "ProxyHeader": "X-Forwarded-For",
+    "PublicURL": "",
+    "BrowserURL": ""
+  },
+  "Database": {
+    "Driver": "sqlite"
+  },
+  "SQLite": {
+    "Path": "local.db"
+  },
+  "Postgres": {
+    "DSN": "",
+    "MaxOpenConns": 25,
+    "MaxIdleConns": 5,
+    "ConnMaxLifetime": 1800000000000
+  },
+  "Clickhouse": {
+    "Host": "",
+    "Port": 0,
+    "Database": "",
+    "Username": "",
+    "Password": ""
+  },
+  "OIDC": {
+    "ProviderURL": "http://localhost:5556/dex",
+    "AuthURL": "http://localhost:5556/dex/auth",
+    "TokenURL": "http://localhost:5556/dex/token",
+    "ClientID": "logchef",
+    "ClientSecret": "logchef-secret",
+    "RedirectURL": "http://localhost:8125/api/v1/auth/callback",
+    "Scopes": [
+      "openid",
+      "email",
+      "profile"
+    ],
+    "SkipEmailVerifiedCheck": false,
+    "AllowedIssuers": null
+  },
+  "Auth": {
+    "AdminEmails": [
+      "admin@logchef.internal"
+    ],
+    "SessionDuration": 28800000000000,
+    "MaxConcurrentSessions": 1,
+    "APITokenSecret": "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677",
+    "DefaultTokenExpiry": 7776000000000000,
+    "Local": {
+      "Enabled": false,
+      "AdminEmail": "",
+      "AdminPassword": ""
+    },
+    "AutoProvision": {
+      "Enabled": false,
+      "AllowedDomains": null,
+      "DefaultTeamIDs": null
+    },
+    "OAuth": {
+      "Enabled": false,
+      "Clients": null,
+      "MCPAllowedOrigins": null
+    }
+  },
+  "Logging": {
+    "Level": "debug"
+  },
+  "AI": {
+    "Provider": "",
+    "Region": "",
+    "APIKey": "",
+    "Model": "gpt-4o",
+    "MaxTokens": 1024,
+    "Temperature": 0.1,
+    "ReasoningEffort": "",
+    "Enabled": true,
+    "BaseURL": "https://api.openai.com/v1",
+    "AskChefModel": ""
+  },
+  "Alerts": {
+    "Enabled": true,
+    "EvaluationInterval": 60000000000,
+    "DefaultLookback": 300000000000,
+    "HistoryLimit": 50,
+    "WebhookAllowedHosts": null,
+    "WebhookAllowlist": {}
+  },
+  "Query": {
+    "MaxLimit": 100000,
+    "DefaultPreviewLimit": 1000,
+    "MaxPreviewLimit": 100000,
+    "MaxResponseBytes": 67108864,
+    "DefaultTimeoutSeconds": 30,
+    "MaxTimeoutSeconds": 300,
+    "MCPCallTimeoutSeconds": 60,
+    "MaxConcurrentPerUser": 3,
+    "MaxConcurrentGlobal": 30
+  },
+  "Export": {
+    "InstanceID": "",
+    "MaxRows": 1000000,
+    "DefaultTimeoutSeconds": 120,
+    "MaxTimeoutSeconds": 600,
+    "MaxConcurrentPerUser": 1,
+    "MaxConcurrentGlobal": 5,
+    "ArtifactTTL": 86400000000000,
+    "Formats": [
+      "csv",
+      "ndjson"
+    ]
+  },
+  "Tail": {
+    "PollInterval": 2000000000,
+    "MaxPerUser": 2,
+    "MaxGlobal": 20,
+    "SessionTTL": 840000000000,
+    "MaxRowsPerSec": 100,
+    "LookbackMargin": 5000000000
+  },
+  "Shares": {
+    "DefaultTTL": 2592000000000000,
+    "MaxQueryTextBytes": 1048576
+  },
+  "RateLimit": {
+    "Enabled": false,
+    "AuthPerIPPerMinute": 20,
+    "AuthGlobalPerMinute": 300,
+    "QueryPerUserPerMinute": 120
+  },
+  "DashboardCache": {
+    "Enabled": true,
+    "DefaultTTL": 600000000000,
+    "MaxTTL": 3600000000000,
+    "MaxBytes": 67108864,
+    "MaxEntryBytes": 4194304,
+    "MaxEntries": 1024,
+    "MaxConcurrentFills": 8
+  },
+  "Provisioning": {
+    "File": "../../dev/provisioning.toml",
+    "ManageSources": true,
+    "ManageTeams": true,
+    "Prune": false,
+    "DryRun": false,
+    "sources": [
+      {
+        "name": "HTTP Access Logs",
+        "source_type": "clickhouse",
+        "connection": {
+          "database": "default",
+          "host": "127.0.0.1:9000",
+          "password": "",
+          "table_name": "http",
+          "username": "default"
+        },
+        "description": "Demo HTTP access logs (vector -c http.toml)",
+        "meta_ts_field": "timestamp"
+      },
+      {
+        "name": "Syslog Logs",
+        "source_type": "clickhouse",
+        "connection": {
+          "database": "default",
+          "host": "127.0.0.1:9000",
+          "password": "",
+          "table_name": "syslogs",
+          "username": "default"
+        },
+        "description": "Demo syslog data (vector -c syslog.toml)",
+        "meta_ts_field": "timestamp",
+        "meta_severity_field": "lvl"
+      },
+      {
+        "name": "VictoriaLogs Demo",
+        "source_type": "victorialogs",
+        "connection": {
+          "base_url": "http://127.0.0.1:9428"
+        },
+        "description": "Local VictoriaLogs datasource for LogsQL and datasource UI testing",
+        "meta_ts_field": "_time",
+        "meta_severity_field": "level"
+      }
+    ],
+    "teams": [
+      {
+        "name": "Dev Team",
+        "description": "Local development team",
+        "sources": [
+          "HTTP Access Logs",
+          "Syslog Logs",
+          "VictoriaLogs Demo"
+        ],
+        "members": [
+          {
+            "email": "admin@logchef.internal",
+            "role": "admin"
+          },
+          {
+            "email": "demo@logchef.internal",
+            "role": "member"
+          }
+        ]
+      }
+    ]
+  },
+  "Demo": {
+    "ReadOnly": false,
+    "ShowLoginCredentials": false,
+    "ProvisioningToken": ""
+  }
+}

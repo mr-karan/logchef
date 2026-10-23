@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -280,6 +281,149 @@ func TestQueryBuilderPreservesSQLLiteralsAndIdentifiers(t *testing.T) {
 				if strings.Contains(result, part) {
 					t.Errorf("BuildRawQuery() = %q, must not contain %q", result, part)
 				}
+			}
+		})
+	}
+}
+
+func TestFormatSelectQuery(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{query: "SELECT count() AS value FROM logs -- trailing", want: "SELECT count() AS value FROM logs"},
+		{query: "/* /* */ SELECT '*/ SELECT 42 AS value -- '", want: "SELECT '*/ SELECT 42 AS value -- '"},
+		{
+			query: "SELECT count(*) as value\nFROM logs\nWHERE severity = 'ERROR'\n  AND `timestamp` >= now() - toIntervalSecond(300)",
+			want:  "SELECT count(*) AS value FROM logs WHERE severity = 'ERROR' AND `timestamp` >= now() - toIntervalSecond(300)",
+		},
+		{query: `SELECT "service.name", sum(t.bytes$total) AS value FROM db.logs AS t WHERE msg = 'a\\b'`, want: `SELECT "service.name", sum(t.bytes$total) AS value FROM db.logs AS t WHERE msg = 'a\\b'`},
+	} {
+		got, err := FormatSelectQuery(tc.query)
+		if err != nil || got != tc.want {
+			t.Errorf("FormatSelectQuery(%q) = %q, %v; want %q", tc.query, got, err, tc.want)
+		}
+	}
+
+	for _, query := range []string{
+		"",
+		"DROP TABLE x",
+		"INSERT INTO x SELECT 1",
+		"/* c */ DROP TABLE x",
+		"SYSTEM SHUTDOWN",
+		"OPTIMIZE TABLE x",
+		"KILL QUERY WHERE 1",
+		"SELECT 1; DROP TABLE x",
+		// ClickHouse reads an escaped backtick or a heredoc string here, so the
+		// formatted text would run the hidden 42 AS value.
+		"SELECT 'n' AS `\\`, '`, 42 AS value -- '",
+		`SELECT 'n' AS "\", '", 42 AS value -- '`,
+		"SELECT $$ AS a, '$$, 42 AS value -- '",
+		"SELECT count() FROM logs WHERE `a\\b` = 1",
+	} {
+		if got, err := FormatSelectQuery(query); err == nil {
+			t.Errorf("FormatSelectQuery(%q) = %q, want error", query, got)
+		}
+	}
+}
+
+// acceptedQuotedIdentifiers maps quoted identifiers to the name ClickHouse reads.
+var acceptedQuotedIdentifiers = []struct {
+	quote, body, name string
+}{
+	{"`", `a\\b`, `a\b`},
+	{"`", `a\x60b`, "a`b"},
+	{"`", `a\\\x60b`, "a\\`b"},
+	{"`", `a\\`, `a\`},
+	{"`", `\x60`, "`"},
+	{"`", `a\x60`, "a`"},
+	{"`", `a\\x60`, `a\x60`},
+	{"`", `a\x600`, "a`0"},
+	{"`", `\\\\`, `\\`},
+	{`"`, `a\x60b`, "a`b"},
+	{`"`, `a\\b`, `a\b`},
+	{`"`, "a`b", "a`b"},
+	{`"`, "a``b", "a``b"},
+	{"`", `a"b`, `a"b`},
+}
+
+// rejectedQuotedIdentifiers lists column references ClickHouse reads as a
+// different token or a different name than the parser does.
+var rejectedQuotedIdentifiers = []string{
+	// ClickHouse reads past the parser's closing quote.
+	"`a\\`",
+	"`a\\\\\\`",
+	"`a\\x6`",
+	"`a\\x`",
+	`"a\"`,
+	`"a\x6"`,
+	// ClickHouse reads a doubled quote as one embedded quote.
+	"`a``b`",
+	`"a""b"`,
+	"````",
+	"`a\\x60``b`",
+	"`a\\\\``b`",
+	`"a\x60""b"`,
+	`"a\\""b"`,
+	"`t`.`a``b`",
+	// Escapes outside the allowlist. ClickHouse decodes most to another name.
+	"`a\\x6gb`",
+	"`a\\X60b`",
+	"`a\\x41b`",
+	"`a\\\"b`",
+	"`a\\'b`",
+	"`a\\nb`",
+	"`a\\0b`",
+	"`a\\é`",
+}
+
+// acceptedNamedArguments pass a table function's named argument as a bare name.
+var acceptedNamedArguments = []string{
+	"WITH 5 AS n SELECT count() FROM numbers(n = 5)",
+	"WITH 5 AS n SELECT count() FROM numbers(n  = 5)",
+	"WITH 5 AS n SELECT number FROM numbers(10, n = 5)",
+	"WITH 2 AS n SELECT number FROM numbers(n = 2, 3)",
+}
+
+// rejectedNamedArguments quote a table function's named argument. The parser
+// leaves its quote type unset, so the formatter would drop the quotes.
+var rejectedNamedArguments = []string{
+	"SELECT number FROM numbers(`5) UNION ALL SELECT number FROM numbers(100000) --` = 10)",
+	"SELECT * FROM numbers(`1` = 10)",
+	`SELECT * FROM numbers("1" = 10)`,
+}
+
+func TestQuotedIdentifierEscapes(t *testing.T) {
+	qb := NewExtendedQueryBuilder("", 0)
+	for _, tc := range acceptedQuotedIdentifiers {
+		ident := tc.quote + tc.body + tc.quote
+		t.Run(ident, func(t *testing.T) {
+			got, err := qb.BuildRawQuery("SELECT 1 AS "+ident+", 2 AS marker", 0)
+			if err != nil || !strings.Contains(got, "1 AS "+ident+", 2 AS marker") {
+				t.Fatalf("BuildRawQuery = %q, %v; want %s kept verbatim", got, err, ident)
+			}
+		})
+	}
+	for _, ident := range rejectedQuotedIdentifiers {
+		t.Run(ident, func(t *testing.T) {
+			got, err := qb.BuildRawQuery("SELECT "+ident+" FROM logs", 0)
+			if !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
+			}
+		})
+	}
+	for _, sql := range append(acceptedNamedArguments, "SELECT * FROM numbers(n  = 10)") {
+		t.Run(sql, func(t *testing.T) {
+			if got, err := qb.BuildRawQuery(sql, 0); err != nil {
+				t.Fatalf("BuildRawQuery = %q, %v; want no error", got, err)
+			}
+		})
+	}
+	for _, sql := range append(rejectedNamedArguments, "WITH 5 AS n SELECT count() FROM numbers(`n` = 5)") {
+		t.Run(sql, func(t *testing.T) {
+			got, err := qb.BuildRawQuery(sql, 0)
+			if !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
 			}
 		})
 	}

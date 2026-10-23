@@ -13,7 +13,7 @@ This directory contains the official Grafana dashboards for Logchef monitoring a
   - Query performance metrics by source
   - Error tracking and success/failure rates
   - Resource utilization (goroutines, memory, GC)
-  - Session operations by user
+  - Session operations by role
 
 ## Dashboard Structure
 

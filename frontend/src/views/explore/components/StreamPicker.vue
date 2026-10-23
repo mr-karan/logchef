@@ -9,12 +9,12 @@ import { getStreamFields } from '@/api/windowed';
 import { sourcesApi, getVictoriaLogsOptimizer, type FieldValuesResult } from '@/api/sources';
 import { useSourcesStore } from '@/stores/sources';
 import { useTeamsStore } from '@/stores/teams';
-import { useExploreWindowedStore } from '@/stores/exploreWindowed';
+import { useExploreStore } from '@/stores/explore';
 
 const { t } = useI18n();
 const sources = useSourcesStore();
 const teams = useTeamsStore();
-const store = useExploreWindowedStore();
+const store = useExploreStore();
 const fields = ref<string[]>([]);
 const values = ref<Record<string, FieldValuesResult>>({});
 const selectedField = ref('');

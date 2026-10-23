@@ -1,11 +1,23 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v3"
+
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -137,5 +149,234 @@ func TestExportJobURLsAreRelativePaths(t *testing.T) {
 	}
 	if strings.Contains(resp.DownloadURL, "://") {
 		t.Fatalf("DownloadURL should be a relative path, got %q", resp.DownloadURL)
+	}
+}
+
+func TestExportOptionalBlocksWithoutVariables(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	for _, operation := range []string{"stream", "job"} {
+		t.Run(operation, func(t *testing.T) {
+			s := newDashboardTestServer(t)
+			s.config = &config.Config{Export: config.ExportConfig{
+				MaxRows: 10, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
+				ArtifactTTL: time.Hour, Formats: []string{"ndjson"},
+			}}
+			s.clickhouse = clickhouse.NewManager(s.log)
+			t.Cleanup(func() { _ = s.clickhouse.Close() })
+			s.datasources = datasource.NewService(s.store, s.log)
+			s.datasources.Register(datasource.NewClickHouseProvider(s.clickhouse, s.log))
+			source := &models.Source{Name: "export", SourceType: models.SourceTypeClickHouse,
+				Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "one"}}
+			if err := s.store.CreateSource(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.clickhouse.AddSource(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			user, src := authorizeTestSource(t, s.store, source.ID)
+			handler := s.handleExportLogs
+			if operation == "job" {
+				handler = s.handleCreateExportJob
+			}
+			app := fiber.New()
+			withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
+			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID),
+				strings.NewReader(`{"query_text":"SELECT 1 AS value [[WHERE 1={{x}}]]","format":"ndjson"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req, fiber.TestConfig{Timeout: 10 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if operation == "stream" {
+				if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"row":{"value":1}`) || strings.Contains(string(body), `"type":"error"`) {
+					t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+				}
+				return
+			}
+			if resp.StatusCode != http.StatusAccepted {
+				t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+			}
+			var result struct {
+				Data models.ExportJobResponse `json:"data"`
+			}
+			if err := json.Unmarshal(body, &result); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				job, err := s.store.GetExportJob(t.Context(), result.Data.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if job.Status == models.ExportJobStatusFailed {
+					t.Fatalf("export failed: %s", job.ErrorMessage)
+				}
+				if job.Status == models.ExportJobStatusComplete {
+					t.Cleanup(func() { _ = os.Remove(job.FilePath) })
+					data, err := os.ReadFile(job.FilePath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !strings.Contains(string(data), `"row":{"value":1}`) || strings.Contains(string(data), `"type":"error"`) {
+						t.Fatalf("artifact=%s", data)
+					}
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			t.Fatal("export did not finish before deadline")
+		})
+	}
+}
+
+// exportCapabilityProvider reports the exports capability only when exports is set.
+type exportCapabilityProvider struct {
+	fakeClickHouseCompiler
+	exports bool
+}
+
+func (p *exportCapabilityProvider) Describe() datasource.Descriptor {
+	descriptor := p.fakeClickHouseCompiler.Describe()
+	if p.exports {
+		descriptor.Capabilities = []datasource.Capability{datasource.CapabilityExports}
+	}
+	return descriptor
+}
+
+func TestExportRequestValidation(t *testing.T) {
+	const (
+		unsupportedFormat = "Unsupported export format. Use csv or ndjson."
+		streamingCSV      = "Streaming CSV exports are not supported. Create an export job instead."
+	)
+	cases := []struct {
+		name       string
+		noExports  bool
+		formats    []string
+		accept     string
+		body       string
+		wantStream string
+		wantJob    string
+	}{
+		{name: "source without exports", noExports: true, body: `{"raw_sql":"SELECT 1"}`,
+			wantStream: "Exports are not supported for this source type yet", wantJob: "Exports are not supported for this source type yet"},
+		{name: "invalid body", body: `{`, wantStream: "Invalid request body", wantJob: "Invalid request body"},
+		{name: "missing query", body: `{"format":"ndjson"}`,
+			wantStream: "raw_sql (or query_text) is required", wantJob: "raw_sql (or query_text) is required"},
+		{name: "unknown format", body: `{"raw_sql":"SELECT 1","format":"xml"}`, wantStream: unsupportedFormat, wantJob: unsupportedFormat},
+		{name: "format not allowed", formats: []string{"csv"}, body: `{"query_text":"SELECT 1","format":"jsonl"}`,
+			wantStream: unsupportedFormat, wantJob: unsupportedFormat},
+		{name: "explicit csv", body: `{"raw_sql":"SELECT 1","format":"CSV","query_timeout":120}`,
+			wantStream: streamingCSV, wantJob: "query timeout cannot exceed 60 seconds for Download"},
+		{name: "csv from accept", accept: "text/csv", body: `{"raw_sql":"SELECT 1","query_timeout":120}`,
+			wantStream: streamingCSV, wantJob: "query timeout cannot exceed 60 seconds for Download"},
+		{name: "default format", formats: []string{"ndjson"}, body: `{"raw_sql":"SELECT 1","query_timeout":120}`,
+			wantStream: "Query timeout cannot exceed 60 seconds for Download", wantJob: unsupportedFormat},
+		{name: "invalid timeout", body: `{"raw_sql":"SELECT 1","format":"ndjson","query_timeout":0}`,
+			wantStream: "Query timeout must be a positive number", wantJob: "Query timeout must be a positive number"},
+	}
+	for _, tc := range cases {
+		for _, endpoint := range []string{"stream", "job"} {
+			t.Run(tc.name+"/"+endpoint, func(t *testing.T) {
+				s := newDashboardTestServer(t)
+				s.config = &config.Config{}
+				s.config.Export.Formats = []string{"csv", "ndjson"}
+				if tc.formats != nil {
+					s.config.Export.Formats = tc.formats
+				}
+				s.config.Export.DefaultTimeoutSeconds = 30
+				s.config.Export.MaxTimeoutSeconds = 60
+				s.datasources = datasource.NewService(s.store, s.log)
+				s.datasources.Register(&exportCapabilityProvider{exports: !tc.noExports})
+				source := &models.Source{Name: "export-validation", SourceType: models.SourceTypeClickHouse}
+				if err := s.store.CreateSource(t.Context(), source); err != nil {
+					t.Fatal(err)
+				}
+				user, src := authorizeTestSource(t, s.store, source.ID)
+				app := fiber.New()
+				handler, want := s.handleExportLogs, tc.wantStream
+				if endpoint == "job" {
+					handler, want = s.handleCreateExportJob, tc.wantJob
+				}
+				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
+				req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID), strings.NewReader(tc.body))
+				req.Header.Set("Content-Type", "application/json")
+				if tc.accept != "" {
+					req.Header.Set("Accept", tc.accept)
+				}
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				var body map[string]any
+				if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != http.StatusBadRequest || body["message"] != want || body["error_type"] != string(models.ValidationErrorType) {
+					t.Fatalf("status=%d body=%v, want 400 %q", resp.StatusCode, body, want)
+				}
+			})
+		}
+	}
+}
+
+func TestExportSourceLoadFailureLogs(t *testing.T) {
+	for _, endpoint := range []struct{ name, want string }{
+		{"stream", "failed to get source for export"},
+		{"job", "failed to get source for export job"},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			s := newDashboardTestServer(t)
+			s.datasources = datasource.NewService(s.store, s.log)
+			s.datasources.Register(&exportCapabilityProvider{exports: true})
+			source := &models.Source{Name: "export-source-error", SourceType: models.SourceTypeClickHouse}
+			if err := s.store.CreateSource(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			user, src := authorizeTestSource(t, s.store, source.ID)
+			var logs bytes.Buffer
+			s.log = slog.New(slog.NewJSONHandler(&logs, nil))
+			handler := s.handleExportLogs
+			if endpoint.name == "job" {
+				handler = s.handleCreateExportJob
+			}
+			app := fiber.New()
+			withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, func(c fiber.Ctx) error {
+				if err := s.store.(interface{ Close() error }).Close(); err != nil {
+					return err
+				}
+				return handler(c)
+			})
+			path := fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID)
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"raw_sql":"SELECT 1"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("status=%d, want 500", resp.StatusCode)
+			}
+			var entry struct {
+				Message  string          `json:"msg"`
+				SourceID models.SourceID `json:"source_id"`
+				Error    string          `json:"error"`
+			}
+			if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
+				t.Fatal(err)
+			}
+			if entry.Message != endpoint.want || entry.SourceID != source.ID || entry.Error == "" {
+				t.Fatalf("log=%+v, want message %q, source %d, and an error", entry, endpoint.want, source.ID)
+			}
+		})
 	}
 }

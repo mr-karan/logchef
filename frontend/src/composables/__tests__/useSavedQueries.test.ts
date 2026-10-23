@@ -1,18 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  route: { query: { id: "41" } },
   router: { replace: vi.fn(), push: vi.fn() },
   exploreStore: {
+    selectedQueryId: "41",
     activeMode: "logchefql",
     logchefqlCode: 'level="{{ level }}"',
     nativeQuery: "",
-    setActiveSavedQueryName: vi.fn(),
-    setSelectedQueryId: vi.fn(),
     resetQueryToDefaults: vi.fn(),
   },
   savedQueriesStore: {
     data: { queries: [] as Array<{ id: number; name: string; source_id: number }> },
+    get queries() { return this.data.queries; },
     create: vi.fn(),
     update: vi.fn(),
     list: vi.fn(() => Promise.resolve({ success: true, data: [] })),
@@ -27,7 +26,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("vue-router", () => ({
-  useRoute: () => mocks.route,
   useRouter: () => mocks.router,
 }));
 vi.mock("@/stores/explore", () => ({ useExploreStore: () => mocks.exploreStore }));
@@ -62,7 +60,7 @@ const formData = {
 describe("useSavedQueries save intent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.route.query = { id: "41" };
+    mocks.exploreStore.selectedQueryId = "41";
     mocks.exploreStore.logchefqlCode = 'level="{{ level }}"';
     mocks.exploreStore.nativeQuery = "";
     mocks.savedQueriesStore.data.queries = [];
@@ -71,13 +69,13 @@ describe("useSavedQueries save intent", () => {
     vi.stubGlobal("window", { confirm: vi.fn(() => false) });
   });
 
-  it("creates a new query even when the current route has a saved-query id", async () => {
+  it("creates a new query even when a saved query is open", async () => {
     const queries = useSavedQueries();
     await queries.handleSaveAsNewQueryClick();
 
     const result = await queries.handleSaveQuery(formData);
 
-    expect(result.success).toBe(true);
+    expect(result).toEqual({ id: 99 });
     expect(mocks.savedQueriesStore.create).toHaveBeenCalledOnce();
     expect(mocks.savedQueriesStore.update).not.toHaveBeenCalled();
   });
@@ -90,8 +88,8 @@ describe("useSavedQueries save intent", () => {
     const first = await queries.handleSaveQuery(formData);
     const second = await queries.handleSaveQuery(formData);
 
-    expect(first).toEqual({ success: false, canceled: true });
-    expect(second).toEqual({ success: false, canceled: true });
+    expect(first).toBeNull();
+    expect(second).toBeNull();
     expect(mocks.savedQueriesStore.update).not.toHaveBeenCalled();
     expect(mocks.savedQueriesStore.create).not.toHaveBeenCalled();
 

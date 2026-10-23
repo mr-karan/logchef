@@ -97,8 +97,8 @@ func TestIsTimeoutError(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isTimeoutError(tc.err); got != tc.want {
-				t.Errorf("isTimeoutError(%v) = %v, want %v", tc.err, got, tc.want)
+			if got := IsTimeoutError(tc.err); got != tc.want {
+				t.Errorf("IsTimeoutError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}
@@ -140,7 +140,7 @@ func TestIsTimeoutError_LiveDeadlineExceeded(t *testing.T) {
 	if queryErr == nil {
 		t.Fatal("expected an error from Ping with an already-expired context, got nil")
 	}
-	if !isTimeoutError(queryErr) {
-		t.Errorf("isTimeoutError(%v) = false, want true for an expired-context query", queryErr)
+	if !IsTimeoutError(queryErr) {
+		t.Errorf("IsTimeoutError(%v) = false, want true for an expired-context query", queryErr)
 	}
 }

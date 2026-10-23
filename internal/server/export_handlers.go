@@ -31,69 +31,22 @@ func exportQueryText(rawSQL, queryText string) string {
 	return queryText
 }
 
-type exportLogsRequest struct {
-	// RawSQL is the query to export; QueryText is accepted as an alias (the web
-	// UI posts query_text, the CLI posts raw_sql). Whichever is non-empty wins.
-	RawSQL       string                    `json:"raw_sql"`
-	QueryText    string                    `json:"query_text"`
-	Format       string                    `json:"format"`
-	Limit        int                       `json:"limit"`
-	QueryTimeout *int                      `json:"query_timeout,omitempty"`
-	Variables    []models.TemplateVariable `json:"variables,omitempty"`
-}
-
-func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+func (s *Server) handleExportLogs(c fiber.Ctx) error {
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-	}
-	user := c.Locals("user").(*models.User)
+	sourceID, teamID := src.SourceID(), src.TeamID()
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
-	// Gate exports behind the source capability before doing any work or
-	// touching the ClickHouse connection. Non-supporting sources (e.g.
-	// VictoriaLogs) get a clean 400 instead of an opaque connection error.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source for export", "source_id", sourceID, "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	exp, ok := s.prepareExport(c, sourceID, inferExportFormatFromAccept(c.Get("Accept")), "failed to get source for export")
+	if !ok {
+		return nil
 	}
-	if !source.HasCapability(string(datasource.CapabilityExports)) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Exports are not supported for this source type yet", models.ValidationErrorType)
-	}
-
-	var req exportLogsRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
-	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql (or query_text) is required", models.ValidationErrorType)
-	}
-
-	formatInput := strings.TrimSpace(req.Format)
-	format := formatInput
-	if format == "" {
-		format = inferExportFormatFromAccept(c.Get("Accept"))
-	} else {
-		normalized, ok := normalizeExplicitExportFormat(format)
-		if !ok {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
-		}
-		format = normalized
-	}
-	if !isExportFormatAllowed(format, s.config.Export.Formats) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
-	}
+	source, req, format := exp.source, exp.body, exp.format
 	if format == "csv" {
 		return SendErrorWithType(c, fiber.StatusBadRequest,
 			"Streaming CSV exports are not supported. Create an export job instead.",
@@ -113,22 +66,18 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // reque
 			models.ValidationErrorType)
 	}
 
-	processedSQL := req.RawSQL
-	if len(req.Variables) > 0 {
-		vars := make([]template.Variable, len(req.Variables))
-		for i, v := range req.Variables {
-			vars[i] = template.Variable{
-				Name:  v.Name,
-				Type:  template.VariableType(v.Type),
-				Value: v.Value,
-			}
+	vars := make([]template.Variable, len(req.Variables))
+	for i, v := range req.Variables {
+		vars[i] = template.Variable{
+			Name:  v.Name,
+			Type:  template.VariableType(v.Type),
+			Value: v.Value,
 		}
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest,
-				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
-		}
-		processedSQL = substituted
+	}
+	processedSQL, err := template.SubstituteVariables(req.RawSQL, vars)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest,
+			fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
 	}
 
 	client, err := s.clickhouse.GetConnection(sourceID)
@@ -217,6 +166,64 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // reque
 	})
 
 	return nil
+}
+
+// exportRequest is an export request whose source supports exports, whose
+// query text is set and whose format is normalized and allowed.
+type exportRequest struct {
+	source *models.Source
+	// body.RawSQL holds the resolved query text; body.Format is as sent.
+	body   models.CreateExportJobRequest
+	format string
+}
+
+// prepareExport loads the source and validates the export request body.
+// defaultFormat applies when the body names no format. On failure it writes
+// the error response and returns ok=false; the caller must then return nil.
+func (s *Server) prepareExport(c fiber.Ctx, sourceID models.SourceID, defaultFormat, sourceLoadLogMessage string) (exportRequest, bool) {
+	// Gate exports behind the source capability before doing any work or
+	// touching the ClickHouse connection. Non-supporting sources (e.g.
+	// VictoriaLogs) get a clean 400 instead of an opaque connection error.
+	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			s.sendLoadFailure(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			return exportRequest{}, false
+		}
+		s.log.Error(sourceLoadLogMessage, "source_id", sourceID, "error", err)
+		s.sendLoadFailure(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return exportRequest{}, false
+	}
+	if !source.HasCapability(string(datasource.CapabilityExports)) {
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Exports are not supported for this source type yet", models.ValidationErrorType)
+		return exportRequest{}, false
+	}
+
+	var req models.CreateExportJobRequest
+	if err := c.Bind().Body(&req); err != nil {
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+		return exportRequest{}, false
+	}
+	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
+	if strings.TrimSpace(req.RawSQL) == "" {
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "raw_sql (or query_text) is required", models.ValidationErrorType)
+		return exportRequest{}, false
+	}
+
+	format := defaultFormat
+	if strings.TrimSpace(req.Format) != "" {
+		normalized, ok := normalizeExplicitExportFormat(req.Format)
+		if !ok {
+			s.sendLoadFailure(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
+			return exportRequest{}, false
+		}
+		format = normalized
+	}
+	if !isExportFormatAllowed(format, s.config.Export.Formats) {
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
+		return exportRequest{}, false
+	}
+	return exportRequest{source: source, body: req, format: format}, true
 }
 
 func normalizeExplicitExportFormat(format string) (string, bool) {

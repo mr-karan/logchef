@@ -1,5 +1,6 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
+import type { TeamSummary } from "./teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 
 export interface SavedQueryTimeRange {
@@ -59,24 +60,15 @@ export interface ResolvedSavedQuery extends SavedQuery {
 }
 
 /**
- * Team information
- */
-export interface Team {
-  id: number;
-  name: string;
-  description?: string;
-}
-
-/**
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  list: (sourceId?: number) => {
+  list: (sourceId?: number, options?: { signal?: AbortSignal }) => {
     const url =
       sourceId !== undefined && sourceId !== null
         ? `/saved-queries?source_id=${sourceId}`
         : "/saved-queries";
-    return apiClient.get<SavedQuery[]>(url);
+    return apiClient.get<SavedQuery[]>(url, options);
   },
 
   // listAll returns every saved query across all sources (global-admin only),
@@ -106,10 +98,10 @@ export const savedQueriesApi = {
   delete: (queryId: number | string) =>
     apiClient.delete<{ message: string }>(`/saved-queries/${queryId}`),
 
-  resolve: (queryId: number | string, preferredTeamId?: number | string | null) => {
+  resolve: (queryId: number | string, preferredTeamId?: number | string | null, options?: RequestOptions) => {
     const suffix = preferredTeamId ? `?team_id=${encodeURIComponent(String(preferredTeamId))}` : "";
-    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`);
+    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`, options);
   },
 
-  getUserTeams: () => apiClient.get<Team[]>("/me/teams"),
+  getUserTeams: () => apiClient.get<TeamSummary[]>("/me/teams"),
 };

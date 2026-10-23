@@ -24,7 +24,7 @@ func (s *Server) newAskChef(chat askchef.ChatModel) *askchef.Agent {
 		return nil
 	}
 	tools := mcp.NewToolServer(mcp.Deps{
-		DB:          s.sqlite,
+		DB:          s.store,
 		Datasources: s.datasources,
 		Config:      s.config,
 		Version:     s.version,
@@ -51,9 +51,9 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 	if s.askChef == nil {
 		return SendErrorWithType(c, fiber.StatusNotFound, "Ask Chef is not enabled", models.NotFoundErrorType)
 	}
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+	user := currentUser(c)
+	if user == nil {
+		return sendMissingUser(c)
 	}
 	// A cross-origin JSON POST needs a CORS preflight, so a form on another
 	// site cannot start a turn with the user's cookie.
@@ -70,7 +70,7 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 
 	ctx := c.Context()
 	p := access.AssistantPrincipal(user)
-	_, err = access.AuthorizeTeamSource(ctx, s.sqlite, p, req.TeamID, req.SourceID, models.TokenScopeLogsRead)
+	_, err = access.AuthorizeTeamSource(ctx, s.store, p, req.TeamID, req.SourceID, models.TokenScopeLogsRead)
 	switch {
 	case err == nil:
 	case errors.Is(err, access.ErrNotTeamMember):
@@ -84,7 +84,7 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 
 	var alert *askchef.AlertContext
 	if ref := req.View.Alert; ref != nil {
-		alert, err = askchef.LoadAlertContext(ctx, s.sqlite, s.log, p, req.SourceID, *ref)
+		alert, err = askchef.LoadAlertContext(ctx, s.store, s.log, p, req.SourceID, *ref)
 		switch {
 		case err == nil:
 		case errors.Is(err, core.ErrAlertNotFound):

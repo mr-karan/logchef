@@ -1,9 +1,15 @@
 import type { RouteLocationNormalized } from 'vue-router'
+import { EXPLORE_PATH } from '@/lib/exploreLocation'
 import { useAuthStore } from '@/stores/auth'
 import { useContextStore } from '@/stores/context'
 import { useTeamsStore } from '@/stores/teams'
 
-export async function contextRouterGuard(to: Pick<RouteLocationNormalized, 'params' | 'query'>) {
+type GuardLocation = Pick<RouteLocationNormalized, 'path' | 'params' | 'query'>
+
+export async function contextRouterGuard(to: GuardLocation) {
+  // Explorer resolves its own team and source with the rest of its link.
+  if (to.path === EXPLORE_PATH) return
+
   const authStore = useAuthStore()
   const contextStore = useContextStore()
   const teamsStore = useTeamsStore()

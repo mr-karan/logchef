@@ -80,27 +80,12 @@ export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstr
   };
 }
 
-// Helper function for single-line mode options
-export function getSingleLineModeOptions(): Partial<monaco.editor.IStandaloneEditorConstructionOptions> {
-  return {
-    lineNumbers: "off",
-    folding: false,
-    wordWrap: "off",
-    scrollBeyondLastLine: false,
-    // These help prevent newlines
-    acceptSuggestionOnEnter: "on",
-    lineDecorationsWidth: 0, // Set to 0 to prevent shifting when editing
-    glyphMargin: false,
-    minimap: { enabled: false }
-  };
-}
-
 // Track initialization state
 let setupComplete = false;
 let setupPromise: Promise<void> | null = null;
 
 // Initialize Monaco only once
-export function initMonacoSetup() {
+function initMonacoSetup() {
   // Skip if already initialized
   if (setupComplete) {
     return;
@@ -370,31 +355,6 @@ function pruneModelCache() {
 
 // Export types for external use
 export type { ClickHouseColumn, FieldInfo };
-
-// Clean up all Monaco resources when app is unloaded
-export function disposeAllMonacoResources() {
-  // Dispose all active editors
-  for (const editor of activeEditorInstances) {
-    try {
-      editor.dispose();
-    } catch (e) {
-      console.warn("Error disposing editor:", e);
-    }
-  }
-  activeEditorInstances.clear();
-
-  // Dispose all cached models
-  for (const [key, entry] of globalModelCache.entries()) {
-    try {
-      if (!entry.model.isDisposed()) {
-        entry.model.dispose();
-      }
-    } catch (e) {
-      console.warn(`Error disposing model ${key}:`, e);
-    }
-  }
-  globalModelCache.clear();
-}
 
 function registerLogchefQL() {
   const LANGUAGE_ID = "logchefql";

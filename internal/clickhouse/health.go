@@ -6,40 +6,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
-	"time"
 )
 
 // Ping checks the connectivity to the ClickHouse server and optionally verifies a table exists.
-// It uses short timeouts internally. Returns nil on success, or an error indicating the failure reason.
+// One timeout bounds the ping and the optional table check.
 func (c *Client) Ping(ctx context.Context, database, table string) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return net.ErrClosed
-	}
-	conn := c.conn
-	if conn == nil {
+	ctx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
+	defer cancel()
+
+	if err := c.conn.Ping(ctx); err != nil {
+		// The server may come back as another version, so probe capabilities again.
+		c.capabilitiesMu.Lock()
+		c.flattenedJSON = nil
+		c.capabilitiesMu.Unlock()
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
-		}
-		return errors.New("clickhouse connection is nil")
-	}
-
-	// 1. Check basic connection with a short timeout.
-	pingCtx, pingCancel := context.WithTimeout(ctx, 1*time.Second)
-	defer pingCancel()
-
-	if err := conn.Ping(pingCtx); err != nil {
-		if c.metrics != nil {
-			c.metrics.RecordConnectionValidation(false)
-			c.metrics.UpdateConnectionStatus(false)
 		}
 
 		// Check if the error is due to the context deadline exceeding
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.logger.Debug("ping timed out after 1 second")
+			c.logger.Debug("ping timed out", "timeout", HealthCheckTimeout)
 			return fmt.Errorf("ping timed out: %w", err)
 		}
 		return fmt.Errorf("ping failed: %w", err)
@@ -49,13 +36,9 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	if database == "" || table == "" {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(true)
-			c.metrics.UpdateConnectionStatus(true)
 		}
 		return nil // Basic ping successful, no table check needed.
 	}
-
-	tableCtx, tableCancel := context.WithTimeout(ctx, 1*time.Second)
-	defer tableCancel()
 
 	// Query system.tables to check if the table exists. Using QueryRow and Scan.
 	// If the table doesn't exist, QueryRow will return an error (sql.ErrNoRows or similar).
@@ -64,15 +47,14 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	var exists uint8
 
 	// No need for executeQueryWithHooks here, it's a simple metadata check.
-	err := conn.QueryRow(tableCtx, query, database, table).Scan(&exists)
+	err := c.conn.QueryRow(ctx, query, database, table).Scan(&exists)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
-			c.metrics.UpdateConnectionStatus(false)
 		}
 
 		if errors.Is(err, context.DeadlineExceeded) {
-			c.logger.Debug("table check timed out", "database", database, "table", table, "timeout", "1s")
+			c.logger.Debug("table check timed out", "database", database, "table", table, "timeout", HealthCheckTimeout)
 			return fmt.Errorf("table check timed out for %s.%s: %w", database, table, err)
 		}
 		// Check specifically for sql.ErrNoRows which indicates the table doesn't exist.
@@ -90,7 +72,6 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	// If Scan succeeds without error, the table exists.
 	if c.metrics != nil {
 		c.metrics.RecordConnectionValidation(true)
-		c.metrics.UpdateConnectionStatus(true)
 	}
 	return nil
 }

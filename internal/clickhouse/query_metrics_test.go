@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -60,8 +63,25 @@ func TestQueryProgressOverflow(t *testing.T) {
 	}
 }
 
-func queryCounter(source *models.Source, queryType, result string) *vmmetrics.Counter {
-	return vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email="",user_role=""}`,
+func exposedCount(t *testing.T, series string) uint64 {
+	t.Helper()
+	var buf bytes.Buffer
+	vmmetrics.WritePrometheus(&buf, false)
+	for line := range strings.Lines(buf.String()) {
+		if value, ok := strings.CutPrefix(line, series+" "); ok {
+			n, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+			if err != nil {
+				t.Fatalf("parsing %q: %v", line, err)
+			}
+			return n
+		}
+	}
+	return 0
+}
+
+func queryCount(t *testing.T, source *models.Source, queryType, result string) uint64 {
+	t.Helper()
+	return exposedCount(t, fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result))
 }
 
@@ -78,29 +98,27 @@ func TestQueryMetricsCountFailuresOnce(t *testing.T) {
 		t.Run(fmt.Sprint(hookFailure), func(t *testing.T) {
 			source := &models.Source{Name: t.Name()}
 			client := &Client{metrics: metrics.NewClickHouseMetrics(source), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			t.Cleanup(client.metrics.Unregister)
 			if hookFailure {
-				client.AddQueryHook(failedQueryHook{})
+				client.queryHooks = []QueryHook{failedQueryHook{}}
 			}
-			counter := queryCounter(source, "select", "failure")
-			before := counter.Get()
-			timeouts := vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_query_timeouts_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type="select"}`,
-				source.ID, source.Name, source.Connection.Database, source.Connection.TableName))
-			beforeTimeouts := timeouts.Get()
 			err := client.executeQueryWithHooks(context.Background(), "SELECT 1", func(context.Context) error {
 				if hookFailure {
 					t.Fatal("query ran after hook rejected it")
 				}
 				return context.DeadlineExceeded
 			})
-			if err == nil || counter.Get()-before != 1 {
-				t.Fatalf("err=%v, counter increment=%d", err, counter.Get()-before)
+			if failures := queryCount(t, source, "select", "failure"); err == nil || failures != 1 {
+				t.Fatalf("err=%v, failures=%d", err, failures)
 			}
 			wantTimeouts := uint64(1)
 			if hookFailure {
 				wantTimeouts = 0
 			}
-			if timeouts.Get()-beforeTimeouts != wantTimeouts {
-				t.Fatalf("timeout count=%d, want %d", timeouts.Get()-beforeTimeouts, wantTimeouts)
+			timeouts := exposedCount(t, fmt.Sprintf(`logchef_query_timeouts_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type="select"}`,
+				source.ID, source.Name, source.Connection.Database, source.Connection.TableName))
+			if timeouts != wantTimeouts {
+				t.Fatalf("timeout count=%d, want %d", timeouts, wantTimeouts)
 			}
 		})
 	}
@@ -131,23 +149,19 @@ func TestQueryScannedWorkClickHouse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	table := fmt.Sprintf("logchef_query_metrics_%d", time.Now().UnixNano())
-	createCounter := queryCounter(source, "create", "success")
-	beforeCreate := createCounter.Get()
 	if _, err := client.Query(ctx, "CREATE TABLE "+table+" (number UInt64) ENGINE=Memory"); err != nil {
 		t.Fatal(err)
 	}
-	defer client.connection().Exec(ctx, "DROP TABLE "+table)
-	if createCounter.Get()-beforeCreate != 1 {
-		t.Fatalf("DDL counted %d times", createCounter.Get()-beforeCreate)
+	defer client.conn.Exec(ctx, "DROP TABLE "+table)
+	if n := queryCount(t, source, "create", "success"); n != 1 {
+		t.Fatalf("DDL counted %d times", n)
 	}
-	if err := client.connection().Exec(ctx, "INSERT INTO "+table+" SELECT number FROM numbers(100000)"); err != nil {
+	if err := client.conn.Exec(ctx, "INSERT INTO "+table+" SELECT number FROM numbers(100000)"); err != nil {
 		t.Fatal(err)
 	}
 	var profiles atomic.Int64
 	ctx = ch.Context(ctx, ch.WithQueryID("logchef-scanned-work-test"), ch.WithProfileInfo(func(*ch.ProfileInfo) { profiles.Add(1) }))
 	query := "SELECT sum(number), initialQueryID() FROM " + table
-	counter := queryCounter(source, "select", "success")
-	before := counter.Get()
 	result, err := client.QueryWithOptions(ctx, query, QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -169,8 +183,8 @@ func TestQueryScannedWorkClickHouse(t *testing.T) {
 	}
 	assertScannedWork(stats)
 	assertScannedWork(writer.stats)
-	if !writer.finished || profiles.Load() < 2 || counter.Get()-before != 2 {
-		t.Fatalf("finished=%v profiles=%d query count=%d", writer.finished, profiles.Load(), counter.Get()-before)
+	if !writer.finished || profiles.Load() < 2 || queryCount(t, source, "select", "success") != 2 {
+		t.Fatalf("finished=%v profiles=%d query count=%d", writer.finished, profiles.Load(), queryCount(t, source, "select", "success"))
 	}
 
 	// Filtering all input still scans rows even though no result rows survive.
@@ -182,15 +196,13 @@ func TestQueryScannedWorkClickHouse(t *testing.T) {
 		t.Fatalf("empty result lost scanned work: %+v", empty.Stats)
 	}
 
-	failed := queryCounter(source, "select", "failure")
-	beforeFailure := failed.Get()
 	if _, err := client.Query(ctx, "SELECT unknown_logchef_test_function()"); err == nil {
 		t.Fatal("expected SQL failure")
 	}
 	if _, err := client.QueryStream(ctx, query, QueryOptions{}, &testRowWriter{err: io.ErrClosedPipe}); err == nil {
 		t.Fatal("expected writer failure")
 	}
-	if failed.Get()-beforeFailure != 2 {
-		t.Fatalf("failures counted %d times, want 2", failed.Get()-beforeFailure)
+	if n := queryCount(t, source, "select", "failure"); n != 2 {
+		t.Fatalf("failures counted %d times, want 2", n)
 	}
 }

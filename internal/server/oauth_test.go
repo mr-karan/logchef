@@ -28,6 +28,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
@@ -73,9 +74,12 @@ func testOAuthConfig() *config.Config {
 	}
 }
 
-func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServer *oauth.Server) *Server {
+func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServer *oauth.Server, logs ...*slog.Logger) *Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if len(logs) > 0 {
+		log = logs[0]
+	}
 	datasources := datasource.NewService(db, log)
 	datasources.Register(datasource.NewClickHouseProvider(clickhouse.NewManager(log), log))
 	datasources.Register(victorialogs.NewProvider(log))
@@ -858,7 +862,7 @@ func TestOAuthDeactivatedUser(t *testing.T) {
 	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusOK {
 		t.Fatalf("/me status %d", resp.StatusCode)
 	}
-	if err := core.UpdateUser(context.Background(), e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), e.user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if err := core.UpdateUser(context.Background(), e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), access.SystemPrincipal(), e.user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatal(err)
 	}
 	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusUnauthorized {

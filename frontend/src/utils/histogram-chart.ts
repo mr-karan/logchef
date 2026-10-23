@@ -1,8 +1,9 @@
+import { escapeHtml } from "@/lib/html";
 import type { ChartConfig } from "@/components/ui/chart";
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import { epochMs, formatInZone, isSameZonedDay, type ZoneId } from "@/utils/timeWindow";
 
-export interface HistogramChartSeries {
+interface HistogramChartSeries {
   key: string;
   label: string;
   color: string;
@@ -15,7 +16,7 @@ export interface HistogramChartRow extends Record<string, number | string> {
   total: number;
 }
 
-export interface HistogramChartModel {
+interface HistogramChartModel {
   rows: HistogramChartRow[];
   series: HistogramChartSeries[];
   chartConfig: ChartConfig;
@@ -138,7 +139,7 @@ export function formatCompactCount(value: number): string {
 }
 
 /** A chart's time range plus the zone its labels render in. */
-export interface HistogramLabelRange {
+interface HistogramLabelRange {
   start: number;
   end: number;
   zone: ZoneId;
@@ -233,7 +234,7 @@ function inferBucketWidthMs(sortedTimestamps: number[], fallback = 60_000): numb
 }
 
 export function buildHistogramChartModel(
-  buckets: HistogramData[],
+  buckets: HistogramDataPoint[],
   granularity?: string | null,
   forceGrouped = false,
 ): HistogramChartModel {
@@ -401,4 +402,52 @@ export function buildHistogramChartModel(
     isGrouped: true,
     bucketWidthMs: derivedBucketWidth,
   };
+}
+
+const SAFE_COLOR_PATTERN =
+  /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)|hsla?\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+\s*)?\)|var\(--[\w-]+\))$/;
+const DEFAULT_SAFE_COLOR = "var(--chart-1)";
+
+export function sanitizeChartColor(value: unknown): string {
+  const str = typeof value === "string" ? value.trim() : "";
+  return str && SAFE_COLOR_PATTERN.test(str) ? str : DEFAULT_SAFE_COLOR;
+}
+
+export function buildHistogramTooltip({
+  datum,
+  series,
+  range,
+  totalLabel,
+}: {
+  datum: HistogramChartRow;
+  series: HistogramChartSeries[];
+  range: HistogramLabelRange;
+  totalLabel: string;
+}): string {
+  const timeLabel = formatTooltipTimestamp(datum.ts, range);
+  const totalCount = typeof datum.total === "number" ? datum.total : 0;
+
+  let seriesHtml = "";
+  for (const s of series) {
+    const val = typeof datum[s.key] === "number" ? datum[s.key] : 0;
+    seriesHtml += `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <span style="width:8px;height:8px;border-radius:50%;background:${sanitizeChartColor(s.color)};flex-shrink:0;"></span>
+          <span>${escapeHtml(s.label)}</span>
+        </div>
+        <strong style="font-variant-numeric:tabular-nums;">${val.toLocaleString()}</strong>
+      </div>`;
+  }
+
+  const totalHtml =
+    series.length > 1
+      ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);"><span>${escapeHtml(totalLabel)}</span><strong>${totalCount.toLocaleString()}</strong></div>`
+      : "";
+
+  return `<div style="min-width:160px;padding:0.625rem 0.75rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
+    <div style="margin-bottom:0.375rem;font-size:0.75rem;font-weight:600;">${timeLabel}</div>
+    ${totalHtml}
+    <div style="display:flex;flex-direction:column;gap:0.25rem;">${seriesHtml}</div>
+  </div>`;
 }

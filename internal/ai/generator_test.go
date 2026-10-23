@@ -191,18 +191,3 @@ func TestGenerateQueryRepairLoop(t *testing.T) {
 		}
 	})
 }
-
-func TestGenerateSQLDelegatesToClickHouseTarget(t *testing.T) {
-	p := &mockProvider{resps: []string{"```sql\nSELECT * FROM default.logs LIMIT 5\n```"}}
-	g := newTestGenerator(p)
-	out, err := g.GenerateSQL(context.Background(), "all logs", "[]", "default.logs", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out == "" {
-		t.Fatal("expected non-empty SQL from GenerateSQL wrapper")
-	}
-	if p.calls != 1 {
-		t.Fatalf("expected 1 provider call, got %d", p.calls)
-	}
-}

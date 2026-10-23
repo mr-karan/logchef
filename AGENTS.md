@@ -36,7 +36,7 @@ rfcs/, plans/      # design docs
 ```bash
 just build               # full build: frontend dist first, then backend (embeds dist)
 just build-backend       # backend only (skip when only Go changed; runs sqlc-generate)
-just run                 # build + run with config.toml (override: just CONFIG=x.toml run)
+just run                 # build + run with dev/config.toml (override: just CONFIG=x.toml run)
 just check               # REQUIRED before committing: fmt + vet + lint + sqlc-generate + test
 just test-short          # fast Go tests (no -race, no coverage)
 just sqlc-generate       # regenerate sqlc code (required after touching queries.sql)
@@ -64,11 +64,9 @@ CLI (in `cli/`): `just build-cli`, `just check-cli` (fmt + clippy + tests).
 **Metadata DB schema change** (applies to both stores):
 1. Add a numbered migration pair: `internal/store/<store>/migrations/NNNNNN_name.up.sql`
    + `.down.sql` (next sequence number, both stores versioned independently).
-2. **Add the new up-migration to the `schema:` list in `sqlc.yaml`** — easy to forget,
-   and sqlc will silently type-check against the old schema without it.
-3. Update `internal/store/<store>/queries.sql`, then `just sqlc-generate`.
-4. Update models in `pkg/models/`.
-5. Both `sqlite` and `postgres` stores implement the same store interface — a schema
+2. Update `internal/store/<store>/queries.sql`, then `just sqlc-generate`.
+3. Update models in `pkg/models/`.
+4. Both `sqlite` and `postgres` stores implement the same store interface — a schema
    or query change usually needs to be mirrored in both. Conformance tests live in
    `internal/store/storetest/` and run against each backend.
 
@@ -114,3 +112,8 @@ frontend parsing in `frontend/src/utils/logchefql/` and run its vitest suite.
   commit them.
 - This is a public repo: no credentials, internal URLs, or org-specific config in
   committed files.
+- **Merge PRs with rebase, never a merge commit**: `gh pr merge <n> --rebase`. History
+  stays linear, one commit per change. For a stack, merge the bottom PR, then move
+  the next branch onto main without the merged commits
+  (`git rebase --onto origin/main <old-parent-tip> <branch>`), push it with
+  `--force-with-lease`, retarget the PR to `main`, and merge it the same way.

@@ -13,10 +13,22 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+// currentUser returns the user that requireAuth or requireSession stored on
+// the request, or nil when the route has neither.
+func currentUser(c fiber.Ctx) *models.User {
+	user, _ := c.Locals("user").(*models.User)
+	return user
+}
+
+// sendMissingUser answers a handler that found no user on the request.
+func sendMissingUser(c fiber.Ctx) error {
+	return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+}
+
 // getUserIDFromContext extracts the user ID from the context
 func getUserIDFromContext(c fiber.Ctx) models.UserID {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		return 0
 	}
 	return user.ID
@@ -61,7 +73,7 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 	}
 
 	// Authenticate token and get associated user
-	user, apiToken, err := core.AuthenticateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, token)
+	user, apiToken, err := core.AuthenticateAPIToken(c.Context(), s.store, s.log, &s.config.Auth, token)
 	if err != nil {
 		metrics.RecordAuthAttempt("token", false, nil)
 
@@ -73,6 +85,8 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 		s.log.Error("error authenticating API token", "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
 	}
+
+	s.recordTokenLastUsed(apiToken.ID)
 
 	// Record successful token authentication with user context
 	metrics.RecordAuthAttempt("token", true, user)
@@ -143,7 +157,7 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 	sessionID := models.SessionID(sessionIDStr)
 
 	// Validate the session exists and is not expired.
-	session, err := core.ValidateSession(c.Context(), s.sqlite, s.log, sessionID)
+	session, err := core.ValidateSession(c.Context(), s.store, s.log, sessionID)
 	if err != nil {
 		metrics.RecordSessionOperation("validate", false, nil)
 
@@ -157,7 +171,7 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 	}
 
 	// Retrieve associated user information.
-	user, err := core.GetUser(c.Context(), s.sqlite, session.UserID)
+	user, err := core.GetUser(c.Context(), s.store, session.UserID)
 	if err != nil {
 		// If user not found for a valid session, treat as an auth issue.
 		if errors.Is(err, core.ErrUserNotFound) {
@@ -194,8 +208,8 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 // OAuth access tokens never pass, whatever the user's role: an OAuth client
 // holds read scopes only and must not reach administrative routes.
 func (s *Server) requireAdmin(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context for admin check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
@@ -220,7 +234,7 @@ func (s *Server) requireAdmin(c fiber.Ctx) error {
 // A request without a known auth method gets the zero Principal, which every
 // scope check denies.
 func principalFromLocals(c fiber.Ctx) access.Principal {
-	user, _ := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	switch c.Locals("auth_method") {
 	case "session":
 		return access.SessionPrincipal(user)
@@ -263,8 +277,16 @@ func (s *Server) requireSourceNotManaged(c fiber.Ctx) error {
 	if err != nil {
 		return c.Next() // let handler deal with bad ID
 	}
-	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
-	if err == nil && managed {
+	managed, err := s.store.IsSourceManaged(c.Context(), sourceID)
+	if models.IsNotFound(err) {
+		return c.Next()
+	}
+	if err != nil {
+		s.log.Error("failed to check source provisioning status", "error", err, "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError,
+			"Failed to verify source provisioning status", models.GeneralErrorType)
+	}
+	if managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This source is managed by provisioning config and cannot be modified via API",
 			models.ManagedResourceErrorType)
@@ -282,8 +304,16 @@ func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 	if err != nil {
 		return c.Next()
 	}
-	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
-	if err == nil && managed {
+	managed, err := s.store.IsTeamManaged(c.Context(), teamID)
+	if models.IsNotFound(err) {
+		return c.Next()
+	}
+	if err != nil {
+		s.log.Error("failed to check team provisioning status", "error", err, "team_id", teamID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError,
+			"Failed to verify team provisioning status", models.GeneralErrorType)
+	}
+	if managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This team is managed by provisioning config and cannot be modified via API",
 			models.ManagedResourceErrorType)
@@ -296,8 +326,8 @@ func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 // without requiring a specific team context (e.g., listing users to add to teams).
 // It assumes requireAuth has already run.
 func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context for any team admin check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
@@ -308,7 +338,7 @@ func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 	}
 
 	// Check if the user is an admin of any team.
-	isAnyAdmin, err := core.IsAnyTeamAdmin(c.Context(), s.sqlite, user.ID)
+	isAnyAdmin, err := core.IsAnyTeamAdmin(c.Context(), s.store, user.ID)
 	if err != nil {
 		s.log.Error("failed to check if user is any team admin", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
@@ -326,8 +356,8 @@ func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 // specified by the ':teamID' path parameter, or is a global admin.
 // It assumes requireAuth has already run.
 func (s *Server) requireTeamMember(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context for team member check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
@@ -344,7 +374,7 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 	}
 
 	// Check membership using core function.
-	isMember, err := core.IsTeamMember(c.Context(), s.sqlite, teamID, user.ID)
+	isMember, err := core.IsTeamMember(c.Context(), s.store, teamID, user.ID)
 	if err != nil {
 		s.log.Error("failed to verify team membership", "error", err, "team_id", teamID, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team membership")
@@ -378,7 +408,7 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 	}
 
 	// Check if the user is a team admin
-	isTeamAdmin, err := core.IsTeamAdmin(c.Context(), s.sqlite, teamID, userID)
+	isTeamAdmin, err := core.IsTeamAdmin(c.Context(), s.store, teamID, userID)
 	if err != nil {
 		s.log.Error("Error checking team admin status", "error", err, "team_id", teamID, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
@@ -410,7 +440,7 @@ func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
 		}
 
 		p := principalFromLocals(c)
-		src, err := access.AuthorizeTeamSource(c.Context(), s.sqlite, p, teamID, sourceID, scope)
+		src, err := access.AuthorizeTeamSource(c.Context(), s.store, p, teamID, sourceID, scope)
 		switch {
 		case err == nil:
 		case errors.Is(err, access.ErrNotTeamMember):
@@ -436,7 +466,7 @@ func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
 func (s *Server) authorizedSource(c fiber.Ctx) (src access.AuthorizedSource, ok bool) {
 	src, ok = c.Locals(authorizedSourceKey).(access.AuthorizedSource)
 	if !ok {
-		s.log.Error("route reached handler without source authorization", "path", c.Route().Path)
+		s.log.Error("route reached handler without source authorization", "route", redactedRequestPath(c))
 		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Authorization context missing", models.GeneralErrorType)
 	}
 	return src, ok

@@ -52,6 +52,10 @@ RETURNING id;
 -- Get a user by ID
 SELECT * FROM users WHERE id = $1;
 
+-- name: GetUserForUpdate :one
+-- Get a user by ID and lock the row until the transaction ends
+SELECT * FROM users WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: GetUserByEmail :one
 -- Get a user by email
 SELECT * FROM users WHERE email = $1;
@@ -72,6 +76,10 @@ SET email = $1,
     updated_at = $7
 WHERE id = $8;
 
+-- name: UpdateUserLastLogin :exec
+-- Record a login without rewriting the rest of the user row
+UPDATE users SET last_login_at = $2, updated_at = now() WHERE id = $1;
+
 -- name: ListUsers :many
 -- List all users
 SELECT * FROM users ORDER BY created_at ASC;
@@ -83,6 +91,10 @@ SELECT * FROM users WHERE account_type = 'service' ORDER BY created_at ASC;
 -- name: CountAdminUsers :one
 -- Count active admin users
 SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2;
+
+-- name: LockMembershipWrites :exec
+-- Hold a transaction-scoped advisory lock
+SELECT pg_advisory_xact_lock($1);
 
 -- name: DeleteUser :exec
 -- Delete a user by ID
@@ -164,9 +176,10 @@ ORDER BY t.created_at DESC;
 -- Team Members
 
 -- name: AddTeamMember :exec
--- Add a member to a team
+-- Add a member to a team; adding an existing member is a no-op and keeps their role.
 INSERT INTO team_members (team_id, user_id, role)
-VALUES ($1, $2, $3);
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING;
 
 -- name: GetTeamMember :one
 -- Get a team member
@@ -182,13 +195,6 @@ WHERE team_id = $2 AND user_id = $3;
 -- Remove a member from a team
 DELETE FROM team_members
 WHERE team_id = $1 AND user_id = $2;
-
--- name: ListTeamMembers :many
--- List all members of a team
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = $1
-ORDER BY tm.created_at;
 
 -- name: ListTeamMembersWithDetails :many
 -- List all members of a team with user details
@@ -209,9 +215,10 @@ ORDER BY t.name;
 -- Team Sources
 
 -- name: AddTeamSource :exec
--- Add a data source to a team
+-- Add a data source to a team; linking an already linked source is a no-op.
 INSERT INTO team_sources (team_id, source_id)
-VALUES ($1, $2);
+VALUES ($1, $2)
+ON CONFLICT (team_id, source_id) DO NOTHING;
 
 -- name: RemoveTeamSource :exec
 -- Remove a data source from a team
@@ -383,6 +390,8 @@ WHERE expires_at < $1;
 -- Persist an async export job
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -391,26 +400,11 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 -- name: GetExportJob :one
 -- Retrieve an export job by ID
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = $1;
 
@@ -420,8 +414,9 @@ UPDATE export_jobs
 SET
     status = $1,
     error_message = NULL,
-    updated_at = $2
-WHERE id = $3
+    updated_at = now()
+WHERE id = $2
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: CompleteExportJob :one
@@ -437,6 +432,7 @@ SET
     completed_at = $6,
     updated_at = $7
 WHERE id = $8
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: FailExportJob :one
@@ -544,7 +540,8 @@ SELECT * FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC;
 UPDATE api_tokens
 SET last_used_at = now(),
     updated_at = now()
-WHERE id = $1;
+WHERE id = $1
+  AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds');
 
 -- name: DeleteAPIToken :exec
 -- Delete an API token by ID and user ID (ensure user owns the token)
@@ -631,6 +628,12 @@ SET last_state = 'resolved',
     updated_at = now()
 WHERE id = $1;
 
+-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = now(),
+    updated_at = now()
+WHERE id = $1;
+
 -- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',
@@ -660,18 +663,34 @@ INSERT INTO alert_history (
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
--- name: ResolveAlertHistory :one
+-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
+    'delivery_in_progress', false,
+    'delivery_failed', true,
+    'delivery_error', 'delivery interrupted',
+    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
+WHERE status = 'triggered'
+  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
+  AND (sqlc.arg(history_id)::bigint = 0 OR id = sqlc.arg(history_id))
+  AND (sqlc.arg(alert_id)::bigint = 0 OR alert_id = sqlc.arg(alert_id));
+
+-- name: GetTriggeredAlertHistoryAlertID :one
+SELECT alert_id FROM alert_history
+WHERE id = $1 AND status = 'triggered'
+FOR UPDATE;
+
+-- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
-    message = $1
-WHERE id = $2
-RETURNING id;
+    message = sqlc.arg(message)
+WHERE alert_id = sqlc.arg(alert_id) AND status = 'triggered';
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
-WHERE id = $2
+WHERE id = $2 AND status = 'triggered'
 RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one
@@ -693,6 +712,13 @@ LIMIT $2;
 -- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
+  AND target.id NOT IN (
+    SELECT active.id
+    FROM alert_history AS active
+    WHERE active.alert_id = $1 AND active.status = 'triggered'
+    ORDER BY active.triggered_at DESC, active.id DESC
+    LIMIT 1
+  )
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
@@ -723,14 +749,15 @@ ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     value_type = excluded.value_type,
     description = excluded.description,
-    is_sensitive = excluded.is_sensitive,
+    is_sensitive = system_settings.is_sensitive OR excluded.is_sensitive,
     updated_at = now();
 
 -- name: DeleteSystemSetting :exec
 DELETE FROM system_settings
 WHERE key = $1;
 
--- Provisioning Queries
+-- name: ListUsersForProvisioning :many
+SELECT * FROM users WHERE email = ANY(sqlc.arg(emails)::text[]) ORDER BY id;
 
 -- name: ListManagedSources :many
 -- Get all sources managed by provisioning config
@@ -739,10 +766,6 @@ SELECT * FROM sources WHERE managed = true ORDER BY id;
 -- name: ListManagedTeams :many
 -- Get all teams managed by provisioning config
 SELECT * FROM teams WHERE managed = true ORDER BY id;
-
--- name: ListManagedUsers :many
--- Get all users managed by provisioning config
-SELECT * FROM users WHERE managed = true ORDER BY id;
 
 -- name: SetSourceManaged :exec
 -- Mark a source as managed/unmanaged and set secret_ref
@@ -763,10 +786,6 @@ SELECT managed FROM sources WHERE id = $1;
 -- name: IsTeamManaged :one
 -- Check if a team is managed
 SELECT managed FROM teams WHERE id = $1;
-
--- name: IsUserManaged :one
--- Check if a user is managed
-SELECT managed FROM users WHERE id = $1;
 
 -- name: GetSourceByNameForProvisioning :one
 -- Get source by name for provisioning lookup
@@ -1227,70 +1246,10 @@ WHERE a.id_hash = sqlc.arg(id_hash)
   AND u.status = 'active'
   AND u.account_type = 'human';
 
--- name: CreateOAuthDeviceAuthorization :exec
-INSERT INTO oauth_device_authorizations (
-    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
-    interval_secs, expires_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
-
--- name: GetPendingOAuthDeviceAuthorization :one
-SELECT * FROM oauth_device_authorizations
-WHERE user_code_hash = sqlc.arg(user_code_hash)
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now)::timestamptz;
-
--- name: ApproveOAuthDeviceAuthorization :one
-UPDATE oauth_device_authorizations
-SET approved_at = sqlc.arg(now)::timestamptz, user_id = sqlc.arg(user_id)
-WHERE user_code_hash = sqlc.arg(user_code_hash)
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now)::timestamptz
-RETURNING *;
-
--- name: DenyOAuthDeviceAuthorization :execrows
-UPDATE oauth_device_authorizations
-SET denied_at = sqlc.arg(now)::timestamptz, user_id = sqlc.arg(user_id)
-WHERE user_code_hash = sqlc.arg(user_code_hash)
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now)::timestamptz;
-
--- name: SetOAuthDeviceAuthorizationGrant :exec
-UPDATE oauth_device_authorizations SET grant_id = $1 WHERE device_code_hash = $2;
-
--- name: RecordOAuthDevicePoll :one
--- Record one poll. An early poll on a nonterminal request (not expired, not
--- denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
--- last_polled_at, so on_time is false. Expired and denied requests are
--- never slowed down: they report their terminal state on every poll. Every
--- SET expression reads the pre-update row.
-UPDATE oauth_device_authorizations
-SET interval_secs = CASE WHEN (expires_at > sqlc.arg(now)::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > sqlc.arg(now)::timestamptz - make_interval(secs => interval_secs)) THEN interval_secs + 5 ELSE interval_secs END,
-    last_polled_at = CASE WHEN (expires_at > sqlc.arg(now)::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > sqlc.arg(now)::timestamptz - make_interval(secs => interval_secs)) THEN last_polled_at ELSE sqlc.arg(now)::timestamptz END
-WHERE device_code_hash = sqlc.arg(device_code_hash)
-  AND client_id = sqlc.arg(client_id)
-  AND consumed_at IS NULL
-RETURNING *, CAST(last_polled_at = sqlc.arg(now)::timestamptz AS BOOLEAN) AS on_time;
-
--- name: ConsumeOAuthDeviceCode :one
--- Single-use consumption of an approved code. Expiry is checked here, before
--- consumption, so an approved but expired code never issues tokens.
-UPDATE oauth_device_authorizations
-SET consumed_at = sqlc.arg(now)::timestamptz
-WHERE device_code_hash = sqlc.arg(device_code_hash)
-  AND oauth_device_authorizations.client_id = sqlc.arg(client_id)
-  AND approved_at IS NOT NULL
-  AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now)::timestamptz
-  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
-RETURNING grant_id;
-
 -- name: DeleteExpiredOAuthAuthRequests :exec
 DELETE FROM oauth_auth_requests
 WHERE expires_at <= sqlc.arg(now)::timestamptz
   AND (code_expires_at IS NULL OR code_expires_at <= sqlc.arg(now)::timestamptz);
-
--- name: DeleteExpiredOAuthDeviceAuthorizations :exec
-DELETE FROM oauth_device_authorizations WHERE expires_at <= $1;
 
 -- name: DeleteExpiredOAuthAccessTokens :exec
 DELETE FROM oauth_access_tokens WHERE expires_at <= $1;
@@ -1305,3 +1264,21 @@ WHERE NOT EXISTS (
     WHERE live.grant_id = oauth_refresh_tokens.grant_id
       AND live.expires_at > sqlc.arg(now)::timestamptz
 );
+
+-- name: ReapInterruptedExportJobs :many
+UPDATE export_jobs AS e
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
+FROM (
+    SELECT j.id, j.updated_at FROM export_jobs j
+    WHERE j.status IN ('pending', 'running')
+      AND (j.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+        OR (sqlc.arg(instance_id)::text <> '' AND j.owner_instance_id = sqlc.arg(instance_id) AND j.owner_process_id <> sqlc.arg(process_id)))
+    ORDER BY j.id
+    LIMIT 100
+    FOR UPDATE
+) AS interrupted
+WHERE e.id = interrupted.id
+RETURNING e.id, e.file_path, interrupted.updated_at AS previous_updated_at;
+
+-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = $1;

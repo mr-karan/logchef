@@ -9,15 +9,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestCheckEmailVerified(t *testing.T) {
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-
 	tests := []struct {
 		name      string
 		claims    OIDCClaims
@@ -67,7 +64,7 @@ func TestCheckEmailVerified(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := CheckEmailVerified(tt.claims, tt.skipCheck, log, "test")
+			err := CheckEmailVerified(tt.claims, tt.skipCheck)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CheckEmailVerified() error = %v, wantErr %v", err, tt.wantErr)
 			}

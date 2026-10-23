@@ -6,8 +6,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+// LoadSource returns the stored source without contacting the log backend.
+func (s *Service) LoadSource(ctx context.Context, sourceID models.SourceID) (*models.Source, error) {
+	return s.loadSource(ctx, sourceID)
+}
 
 func (s *Service) GetSource(ctx context.Context, sourceID models.SourceID) (*models.Source, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
@@ -106,7 +112,12 @@ func (s *Service) DeleteSource(ctx context.Context, sourceID models.SourceID) er
 			"error", err)
 	}
 
-	if err := s.db.DeleteSource(ctx, source.ID); err != nil {
+	if err := s.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		return tx.DeleteSource(ctx, source.ID)
+	}); err != nil {
 		return fmt.Errorf("delete source from database: %w", err)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -18,40 +17,52 @@ var ErrSourceNotFound = fmt.Errorf("source not found")
 // ErrSourceAlreadyExists is returned when a source with the same identity already exists.
 var ErrSourceAlreadyExists = fmt.Errorf("source already exists")
 
-// ListSources returns all sources with basic connection status but without schema details.
-// This is optimized for list views where source metadata is enough.
+// ListSources returns stored sources with cached health and provider capabilities.
 func ListSources(ctx context.Context, db store.Store, ds *datasource.Service) ([]*models.Source, error) {
 	sources, err := db.ListSources(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
 
-	var wg sync.WaitGroup
-	for i := range sources {
-		source := sources[i]
+	if err := populateSourceStatuses(ds, sources); err != nil {
+		return nil, err
+	}
+
+	return sources, nil
+}
+
+func populateSourceStatuses(ds *datasource.Service, sources []*models.Source) error {
+	for _, source := range sources {
 		if source == nil {
 			continue
 		}
-
-		source.IsConnected = false
+		source.IsConnected = ds.CachedSourceConnectionStatus(source)
 		source.Columns = nil
 		source.Schema = ""
 		source.Engine = ""
 		source.EngineParams = nil
 		source.SortKeys = nil
 		if err := ds.ApplySourceMetadata(source); err != nil {
-			return nil, fmt.Errorf("error annotating source features: %w", err)
+			return fmt.Errorf("error annotating source features: %w", err)
 		}
-
-		wg.Add(1)
-		go func(s *models.Source) {
-			defer wg.Done()
-			s.IsConnected = ds.CheckSourceConnectionStatus(ctx, s)
-		}(source)
 	}
-	wg.Wait()
 
-	return sources, nil
+	return nil
+}
+
+// LoadSource returns stored source metadata with provider capabilities and no backend requests.
+func LoadSource(ctx context.Context, ds *datasource.Service, id models.SourceID) (*models.Source, error) {
+	source, err := ds.LoadSource(ctx, id)
+	if err != nil {
+		if errors.Is(err, models.ErrNotFound) {
+			return nil, ErrSourceNotFound
+		}
+		return nil, fmt.Errorf("error getting source: %w", err)
+	}
+	if err := ds.ApplySourceMetadata(source); err != nil {
+		return nil, fmt.Errorf("error annotating source features: %w", err)
+	}
+	return source, nil
 }
 
 // GetSource retrieves a source by ID including connection status and provider-populated details.
@@ -84,18 +95,6 @@ func DeleteSource(ctx context.Context, ds *datasource.Service, id models.SourceI
 		return fmt.Errorf("error deleting source: %w", err)
 	}
 	return nil
-}
-
-// GetSourceHealth retrieves the health status of a source from its registered datasource provider.
-func GetSourceHealth(ctx context.Context, ds *datasource.Service, id models.SourceID) (models.SourceHealth, error) {
-	health, err := ds.GetSourceHealth(ctx, id)
-	if err != nil {
-		if errors.Is(err, models.ErrNotFound) {
-			return models.SourceHealth{}, ErrSourceNotFound
-		}
-		return models.SourceHealth{}, fmt.Errorf("error getting source health: %w", err)
-	}
-	return health, nil
 }
 
 type SourceInspection = datasource.SourceInspection

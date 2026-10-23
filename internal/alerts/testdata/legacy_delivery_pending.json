@@ -1,0 +1,6 @@
+{
+  "delivery_attempts": 1,
+  "delivery_failed": true,
+  "delivery_pending": ["webhook:pending"],
+  "delivery_error": "webhook 2: status 500"
+}

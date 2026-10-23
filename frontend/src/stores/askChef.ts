@@ -18,6 +18,7 @@ import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/
 import type { ZoneId } from "@/utils/timeWindow";
 import { useAuthStore } from "./auth";
 import { useExploreStore } from "./explore";
+import { useExploreRuns } from "./exploreRuns";
 import { usePreferencesStore } from "./preferences";
 import { useTeamsStore } from "./teams";
 
@@ -185,8 +186,8 @@ export const useAskChefStore = defineStore("askChef", () => {
     if (!teamId || !explore.sourceId || !explore.hasWindow) return null;
     const mode = explore.activeMode;
     const query = (mode === "native" ? explore.nativeQuery : explore.logchefqlCode).trim();
-    // The window the Explorer's log query reads.
-    const { start, end, zone } = explore.resolved;
+    // The window of the results Explorer shows, or the editor's window before anything ran.
+    const { start, end, zone } = useExploreRuns().shown?.resolved ?? explore.resolveNow();
     return {
       subject: { kind: "explorer" },
       teamId,

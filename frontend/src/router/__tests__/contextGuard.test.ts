@@ -78,7 +78,7 @@ describe('contextRouterGuard', () => {
     expect(context.teamId).toBe(2)
     expect(context.sourceId).toBe(20)
     expect(storedContext().lastTeamId).toBe(2)
-    expect(listTeamSources.mock.calls).toEqual([[2]])
+    expect(listTeamSources.mock.calls).toEqual([[2, expect.anything()]])
   })
 
   it('falls back to a remaining team before loading sources for a revoked team', async () => {
@@ -94,7 +94,7 @@ describe('contextRouterGuard', () => {
     const context = useContextStore()
     expect(context.teamId).toBe(3)
     expect(context.sourceId).toBe(30)
-    expect(listTeamSources.mock.calls).toEqual([[3]])
+    expect(listTeamSources.mock.calls).toEqual([[3, expect.anything()]])
     expect(storedContext()).toEqual({ lastTeamId: 3, sourcePerTeam: { 3: 30 } })
   })
 
@@ -144,9 +144,19 @@ describe('contextRouterGuard', () => {
     await signIn('member')
     persistContext(2, {})
 
-    await contextRouterGuard(router.resolve({ name: 'LogExplorer', query: { team: '99' } }))
+    await contextRouterGuard(router.resolve({ name: 'Library', query: { team: '99' } }))
 
     expect(useContextStore().teamId).toBe(99)
+    expect(listUserTeams).not.toHaveBeenCalled()
+  })
+
+  it('leaves every Explorer navigation to Explorer', async () => {
+    await signIn('member')
+
+    await contextRouterGuard(router.resolve({ name: 'LogExplorer', query: { team: '2', source: '20' } }))
+
+    expect(useContextStore().teamId).toBeNull()
+    expect(useContextStore().sourceId).toBeNull()
     expect(listUserTeams).not.toHaveBeenCalled()
   })
 

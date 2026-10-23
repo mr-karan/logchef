@@ -25,15 +25,13 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Type() models.SourceType { return models.SourceTypeClickHouse }
 
-func (f *fakeProvider) Capabilities() []datasource.Capability { return nil }
-
-func (f *fakeProvider) SupportedQueryLanguages() []models.QueryLanguage { return f.queryLanguages }
-
-func (f *fakeProvider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return f.savedQueryModes
+func (f *fakeProvider) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		QueryLanguages:        f.queryLanguages,
+		SavedQueryEditorModes: f.savedQueryModes,
+		AlertEditorModes:      f.alertModes,
+	}
 }
-
-func (f *fakeProvider) SupportedAlertEditorModes() []models.AlertEditorMode { return f.alertModes }
 
 func (f *fakeProvider) PrepareSource(context.Context, *models.CreateSourceRequest) (*models.Source, error) {
 	return nil, nil
@@ -87,11 +85,9 @@ func (f *fakeProvider) InitializeSource(context.Context, *models.Source) error {
 
 func (f *fakeProvider) RemoveSource(models.SourceID) error { return nil }
 
-func (f *fakeProvider) CheckSourceConnectionStatus(context.Context, *models.Source) bool { return true }
+func (f *fakeProvider) CachedSourceConnectionStatus(models.SourceID) bool { return true }
 
-func (f *fakeProvider) GetSourceHealth(context.Context, models.SourceID) models.SourceHealth {
-	return models.SourceHealth{}
-}
+func (f *fakeProvider) CheckSourceConnectionStatus(context.Context, *models.Source) bool { return true }
 
 // newFakeDatasourceService returns a *datasource.Service backed by db with a
 // fakeProvider registered for clickhouse (the default source type when a test

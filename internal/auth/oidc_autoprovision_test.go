@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,7 +12,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,11 +32,18 @@ import (
 // the spec's allowance for an httptest-based substitute for a full browser
 // OIDC dance.
 type fakeOIDCServer struct {
-	srv *httptest.Server
-	key *rsa.PrivateKey
+	srv             *httptest.Server
+	key             *rsa.PrivateKey
+	jwksRequests    atomic.Int64
+	jwksUnavailable atomic.Bool
 
 	mu     sync.Mutex
-	tokens map[string]OIDCClaims // authorization code -> claims to embed in the id_token
+	tokens map[string]fakeOIDCToken
+}
+
+type fakeOIDCToken struct {
+	claims OIDCClaims
+	nonce  string
 }
 
 func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
@@ -44,7 +54,7 @@ func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
 		t.Fatalf("generate rsa key: %v", err)
 	}
 
-	f := &fakeOIDCServer{key: key, tokens: make(map[string]OIDCClaims)}
+	f := &fakeOIDCServer{key: key, tokens: make(map[string]fakeOIDCToken)}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +68,11 @@ func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		f.jwksRequests.Add(1)
+		if f.jwksUnavailable.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{
 			Keys: []jose.JSONWebKey{{
@@ -76,14 +91,14 @@ func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
 		code := r.FormValue("code")
 
 		f.mu.Lock()
-		claims, ok := f.tokens[code]
+		token, ok := f.tokens[code]
 		f.mu.Unlock()
 		if !ok {
 			http.Error(w, "unknown code", http.StatusBadRequest)
 			return
 		}
 
-		idToken, err := f.signIDToken(claims)
+		idToken, err := f.signIDToken(token.claims, token.nonce)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -105,15 +120,13 @@ func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
 	return f
 }
 
-// registerCode maps an authorization code to the claims the fake token
-// endpoint will embed in the signed id_token it returns for that code.
-func (f *fakeOIDCServer) registerCode(code string, claims OIDCClaims) {
+func (f *fakeOIDCServer) registerCode(code string, claims OIDCClaims, nonce string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.tokens[code] = claims
+	f.tokens[code] = fakeOIDCToken{claims: claims, nonce: nonce}
 }
 
-func (f *fakeOIDCServer) signIDToken(claims OIDCClaims) (string, error) {
+func (f *fakeOIDCServer) signIDToken(claims OIDCClaims, nonce string) (string, error) {
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: f.key}, (&jose.SignerOptions{}).WithHeader("kid", "test-key"))
 	if err != nil {
 		return "", err
@@ -129,6 +142,9 @@ func (f *fakeOIDCServer) signIDToken(claims OIDCClaims) (string, error) {
 	custom := map[string]any{
 		"email": claims.Email,
 		"name":  claims.Name,
+	}
+	if nonce != "" {
+		custom["nonce"] = nonce
 	}
 	if claims.EmailVerified != nil {
 		custom["email_verified"] = *claims.EmailVerified
@@ -197,9 +213,9 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 		Email:         "newhire@example.com",
 		EmailVerified: new(true),
 		Name:          "New Hire",
-	})
+	}, "nonce")
 
-	user, session, err := provider.HandleCallback(ctx, db, log, authCfg, "code-first-login", "state")
+	user, session, err := provider.HandleCallback(ctx, db, log, authCfg, "code-first-login", "nonce", "test-pkce-verifier")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -215,8 +231,12 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 	if user.Status != models.UserStatusActive {
 		t.Errorf("status = %q, want active", user.Status)
 	}
-	if managed, err := db.IsUserManaged(ctx, user.ID); err != nil || managed {
-		t.Errorf("auto-provisioned user must be unmanaged (managed=%v err=%v)", managed, err)
+	stored, err := db.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if stored.Managed {
+		t.Error("auto-provisioned user must be unmanaged")
 	}
 
 	member, err := db.GetTeamMember(ctx, team.ID, user.ID)
@@ -259,9 +279,9 @@ func TestHandleCallback_AutoProvisionDisabledRejects(t *testing.T) {
 		Email:         "someone@example.com",
 		EmailVerified: new(true),
 		Name:          "Someone",
-	})
+	}, "nonce")
 
-	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-disabled", "state")
+	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-disabled", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("HandleCallback error = %v, want ErrUnauthorizedUser", err)
 	}
@@ -298,9 +318,9 @@ func TestHandleCallback_AutoProvisionUnlistedDomainRejects(t *testing.T) {
 		Email:         "outsider@not-allowed.com",
 		EmailVerified: new(true),
 		Name:          "Outsider",
-	})
+	}, "nonce")
 
-	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-unlisted-domain", "state")
+	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-unlisted-domain", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("HandleCallback error = %v, want ErrUnauthorizedUser", err)
 	}
@@ -335,8 +355,8 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 	}
 
 	claims := OIDCClaims{Email: "racer@example.com", EmailVerified: new(true), Name: "Racer"}
-	fake.registerCode("code-race-1", claims)
-	fake.registerCode("code-race-2", claims)
+	fake.registerCode("code-race-1", claims, "nonce")
+	fake.registerCode("code-race-2", claims, "nonce")
 
 	var wg sync.WaitGroup
 	users := make([]*models.User, 2)
@@ -347,7 +367,7 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			users[i], _, errs[i] = provider.HandleCallback(ctx, db, log, authCfg, codes[i], "state")
+			users[i], _, errs[i] = provider.HandleCallback(ctx, db, log, authCfg, codes[i], "nonce", "test-pkce-verifier")
 		}(i)
 	}
 	wg.Wait()
@@ -364,4 +384,42 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 
 func discardLoggerAP() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestCallbackFailureLeavesLoggingToCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		claims OIDCClaims
+		skip   bool
+		want   error
+	}{
+		{"unverified", OIDCClaims{Email: "user@example.com", EmailVerified: new(false)}, false, ErrOIDCEmailNotVerified},
+		{"missing verification", OIDCClaims{Email: "user@example.com"}, false, ErrOIDCEmailNotVerified},
+		{"unknown user", OIDCClaims{Email: "user@example.com", EmailVerified: new(true)}, false, ErrUnauthorizedUser},
+		{"missing verification allowed but unknown user", OIDCClaims{Email: "user@example.com"}, true, ErrUnauthorizedUser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeOIDCServer(t)
+			fake.registerCode("code", tc.claims, "nonce")
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, nil))
+			cfg := testOIDCConfig(fake)
+			cfg.SkipEmailVerifiedCheck = tc.skip
+			p, err := NewOIDCProvider(t.Context(), cfg, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logs.Reset()
+			_, _, err = p.HandleCallback(t.Context(), newAuthTestDB(t), log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), "email="+tc.claims.Email) {
+				t.Errorf("callback error lost identity: %v", err)
+			}
+			if logs.Len() != 0 {
+				t.Fatalf("provider logged a failure before the caller handled it: %s", logs.String())
+			}
+		})
+	}
 }

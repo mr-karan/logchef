@@ -2,12 +2,10 @@ package clickhouse
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"reflect"
 	"sync"
@@ -36,7 +34,7 @@ func integrationClient(t *testing.T) (*Client, context.Context) {
 func TestFieldValuesAndSchemaClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	table := fmt.Sprintf("logchef_driver_test_%d", time.Now().UnixNano())
-	conn := client.connection()
+	conn := client.conn
 	if err := conn.Exec(ctx, "CREATE TABLE "+table+" (ts DateTime64(9, 'Asia/Kolkata'), msg String, n Nullable(Int16), attributes Map(String,String), category LowCardinality(Nullable(String)) COMMENT 'category description') ENGINE=MergeTree ORDER BY (ts, msg)"); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +131,7 @@ func TestFieldValuesAndSchemaClickHouse(t *testing.T) {
 func TestReadonlyDDLClickHouse(t *testing.T) {
 	base, ctx := integrationClient(t)
 	for _, readonly := range []int{1, 2} {
-		client, err := NewClient(ClientOptions{Host: base.opts.Addr[0], QuerySettings: map[string]any{"readonly": readonly}}, base.logger)
+		client, err := NewClient(ClientOptions{Host: testClickHouseAddr(t), QuerySettings: map[string]any{"readonly": readonly}}, base.logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +142,7 @@ func TestReadonlyDDLClickHouse(t *testing.T) {
 		table := fmt.Sprintf("logchef_readonly_test_%d", time.Now().UnixNano())
 		_, err = client.Query(ctx, "CREATE TABLE "+table+" (n UInt8) ENGINE=Memory")
 		if err == nil {
-			_ = base.connection().Exec(ctx, "DROP TABLE "+table)
+			_ = base.conn.Exec(ctx, "DROP TABLE "+table)
 			t.Fatalf("source readonly=%d did not reject DDL", readonly)
 		}
 	}
@@ -170,39 +168,6 @@ func TestDailyHistogramDSTClickHouse(t *testing.T) {
 	}
 }
 
-func TestConcurrentReconnectClickHouse(t *testing.T) {
-	client, ctx := integrationClient(t)
-	var group sync.WaitGroup
-	for range 4 {
-		group.Go(func() {
-			for range 5 {
-				// An in-flight query may fail when its pool closes; it must not race.
-				_, _ = client.Query(ctx, "SELECT 1")
-			}
-		})
-	}
-	for range 3 {
-		if err := client.Reconnect(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
-	group.Wait()
-	result, err := client.Query(ctx, "SELECT 1 AS n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := json.Marshal(result.Logs)
-	if err != nil || string(encoded) != `[{"n":1}]` {
-		t.Fatalf("replacement pool failed: %s %v", encoded, err)
-	}
-	if err := client.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.Reconnect(ctx); !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("closed client reopened: %v", err)
-	}
-}
-
 func TestNativeJSONCapabilityRetryClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	cancelled, cancel := context.WithCancel(ctx)
@@ -218,18 +183,6 @@ func TestNativeJSONCapabilityRetryClickHouse(t *testing.T) {
 	if client.flattenedJSON == nil {
 		t.Fatal("successful query did not retry capability detection")
 	}
-	if err := client.Reconnect(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if client.flattenedJSON != nil {
-		t.Fatal("reconnect retained capability from the previous pool")
-	}
-	if _, err := client.Query(ctx, "SELECT 1"); err != nil {
-		t.Fatal(err)
-	}
-	if client.flattenedJSON == nil {
-		t.Fatal("replacement pool did not detect capabilities")
-	}
 }
 
 func TestConcurrentCloseClickHouse(t *testing.T) {
@@ -243,15 +196,14 @@ func TestConcurrentCloseClickHouse(t *testing.T) {
 			}
 		})
 	}
-	group.Go(func() { _ = client.Reconnect(ctx) })
 	if err := client.Close(); err != nil {
 		t.Fatal(err)
 	}
 	group.Wait()
-	if _, err := client.Query(ctx, "SELECT 1"); !errors.Is(err, net.ErrClosed) {
+	if _, err := client.Query(ctx, "SELECT 1"); !errors.Is(err, ch.ErrConnectionClosed) {
 		t.Fatalf("query on closed client: %v", err)
 	}
-	if err := client.Ping(ctx, "", ""); !errors.Is(err, net.ErrClosed) {
+	if err := client.Ping(ctx, "", ""); !errors.Is(err, ch.ErrConnectionClosed) {
 		t.Fatalf("ping on closed client: %v", err)
 	}
 }

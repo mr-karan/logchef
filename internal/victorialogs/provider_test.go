@@ -3,6 +3,7 @@ package victorialogs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -625,7 +627,9 @@ func newPermissiveVLServer(t *testing.T) *httptest.Server {
 }
 
 // Finding #16: custom headers must never override the provider-computed
+
 // auth/tenant headers. Reject the collision at validation time.
+
 func TestValidateConnectionRejectsReservedCustomHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -651,7 +655,9 @@ func TestValidateConnectionRejectsReservedCustomHeaders(t *testing.T) {
 }
 
 // Finding #16: even if a reserved header somehow reaches applyHeaders, the
+
 // computed auth/tenant values must win on the wire.
+
 func TestApplyHeadersSkipsReservedCustomHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -694,7 +700,9 @@ func TestApplyHeadersSkipsReservedCustomHeaders(t *testing.T) {
 }
 
 // Finding #15: switching auth mode must only carry over the credential the NEW
+
 // mode uses, so a stale token/password cannot be resurrected via a later switch.
+
 func TestUpdateSourceCarriesOnlyActiveModeCredential(t *testing.T) {
 	t.Parallel()
 
@@ -753,7 +761,9 @@ func TestUpdateSourceCarriesOnlyActiveModeCredential(t *testing.T) {
 }
 
 // Regression guard for Finding #15: within the same mode, a blank redacted
+
 // credential still means "keep the existing one".
+
 func TestUpdateSourceKeepsActiveModeCredentialOnBlank(t *testing.T) {
 	t.Parallel()
 
@@ -787,6 +797,7 @@ func TestUpdateSourceKeepsActiveModeCredentialOnBlank(t *testing.T) {
 }
 
 // Finding #17: validation must probe the real query path, not just field_names.
+
 func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
 	t.Parallel()
 
@@ -825,7 +836,9 @@ func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
 }
 
 // Finding #18: lifecycle operations for the same source ID must be serialised so
-// concurrent init/remove/health calls cannot deadlock or interleave unsafely.
+
+// concurrent init/remove/status-check calls cannot deadlock or interleave unsafely.
+
 func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 	t.Parallel()
 
@@ -836,10 +849,9 @@ func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 50 {
-		wg.Add(4)
+		wg.Add(3)
 		go func() { defer wg.Done(); _ = provider.InitializeSource(context.Background(), source) }()
 		go func() { defer wg.Done(); _ = provider.RemoveSource(source.ID) }()
-		go func() { defer wg.Done(); _ = provider.GetSourceHealth(context.Background(), source.ID) }()
 		go func() { defer wg.Done(); _ = provider.CheckSourceConnectionStatus(context.Background(), source) }()
 	}
 	wg.Wait()
@@ -856,5 +868,116 @@ func TestOrderFieldNamesPrioritizesMetadata(t *testing.T) {
 	want := []string{"_time", "level", "_msg", "service"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("unexpected ordered fields: got=%v want=%v", got, want)
+	}
+}
+
+func TestProviderSourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	service := datasource.NewService(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	provider := newTestProvider(nil)
+	service.Register(provider)
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs}
+	if err := service.ApplySourceMetadata(source); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		got, want any
+	}{
+		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogsQL}},
+		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
+		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "live_tail", "ai_sql_generation"}},
+		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRejectedQueryDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ name, contentType, body, message string }{
+		{"plain", "text/plain; charset=utf-8", "remoteAddr: 127.0.0.1:1234; requestURI: /select/logsql/query?token=private; cannot parse\n\t query pipe", "cannot parse query pipe"},
+		{"html", "text/html", "<html>internal gateway details</html>", "Invalid query or query parameters"},
+		{"json", "application/json", `{"internal":"details"}`, "Invalid query or query parameters"},
+		{"bounded", "text/plain", strings.Repeat("界", 300), strings.Repeat("界", 240) + "..."},
+		{"split rune", "text/plain", "unknown stats func \"countt\"; " + strings.Repeat("界", 1400), "unknown stats func \"countt\"; " + strings.Repeat("界", 240-len(`unknown stats func "countt"; `)) + "..."},
+		{"malformed prefix", "text/plain", "remoteAddr: 127.0.0.1:1234", "Invalid query or query parameters"},
+		{"control characters", "text/plain", "invalid\x00query", "Invalid query or query parameters"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer upstream.Close()
+			conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: upstream.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
+			p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			_, err = p.QueryLogs(t.Context(), source, datasource.QueryRequest{RawQuery: "* | invalid"})
+			validation, ok := errors.AsType[*datasource.ValidationError](err)
+			if !ok || validation.Message != tc.message || validation.Err == nil || !strings.Contains(validation.Err.Error(), tc.body[:min(len(tc.body), 4096)]) {
+				t.Fatalf("error=%#v, want safe message %q and original cause", err, tc.message)
+			}
+		})
+	}
+}
+
+func TestHistogramRejectsInvalidWindow(t *testing.T) {
+	p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
+	for _, window := range []string{"1d12h", "1y", "2x", "0s", "-1m", "NaNd", "Infw", "1e99d"} {
+		t.Run(window, func(t *testing.T) {
+			_, err := p.Histogram(t.Context(), source, datasource.HistogramRequest{Window: window})
+			validation, ok := errors.AsType[*datasource.ValidationError](err)
+			if !ok || validation.Field != "window" || !strings.Contains(validation.Message, "positive duration") {
+				t.Fatalf("error=%v, want local window validation", err)
+			}
+		})
+	}
+}
+
+func TestHealthLockWaitRespectsCallerContext(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	provider := newTestProvider(server)
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+	done := make(chan struct{})
+	go func() { defer close(done); provider.CheckSourceConnectionStatus(context.Background(), source) }()
+	<-entered
+	defer func() { close(release); <-done }()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	waiter := make(chan bool, 1)
+	go func() { waiter <- provider.CheckSourceConnectionStatus(ctx, source) }()
+	select {
+	case connected := <-waiter:
+		if connected {
+			t.Error("expired waiter reported connected")
+		}
+	case <-time.After(time.Second):
+		t.Error("health lock waiter ignored caller deadline")
 	}
 }

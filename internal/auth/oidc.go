@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -23,15 +24,11 @@ import (
 
 // Define OIDC/Auth specific errors.
 var (
-	ErrSessionNotFound      = errors.New("session not found") // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
-	ErrSessionExpired       = errors.New("session expired")   // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
-	ErrUserNotFound         = errors.New("user not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
-	ErrTeamNotFound         = errors.New("team not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
 	ErrUnauthorizedUser     = errors.New("unauthorized user")
 	ErrUserInactive         = errors.New("user inactive")
 	ErrOIDCInvalidToken     = errors.New("invalid OIDC token")
+	ErrOIDCInvalidNonce     = errors.New("invalid OIDC nonce")
 	ErrOIDCEmailNotVerified = errors.New("email not verified")
-	ErrAdminNotFound        = errors.New("admin not found") // May not be needed if admin check moves to core
 )
 
 // OIDCClaims represents the claims extracted from an OIDC ID token.
@@ -44,38 +41,43 @@ type OIDCClaims struct {
 	Name          string `json:"name"`
 }
 
-// CheckEmailVerified validates the email_verified claim according to the
-// skip_email_verified_check configuration. The three cases are:
-//   - claim is true: always allowed.
-//   - claim is missing/null (nil): allowed only when skipCheck is true.
-//   - claim is explicitly false: always rejected, even when skipCheck is true.
-func CheckEmailVerified(claims OIDCClaims, skipCheck bool, log *slog.Logger, logCtx string) error {
-	switch {
-	case claims.EmailVerified != nil && *claims.EmailVerified:
-		// Email is verified, nothing to do.
+// CheckEmailVerified rejects explicitly false claims and optionally permits missing claims.
+func CheckEmailVerified(claims OIDCClaims, skipCheck bool) error {
+	if claims.EmailVerified != nil && *claims.EmailVerified {
 		return nil
-	case claims.EmailVerified != nil && !*claims.EmailVerified:
-		// Provider explicitly says email is NOT verified — always reject.
-		log.Warn(logCtx+": email_verified is explicitly false", "email", claims.Email)
-		return ErrOIDCEmailNotVerified
-	default:
-		// Claim is missing/null.
-		if skipCheck {
-			log.Warn(logCtx+": email_verified claim is missing, proceeding anyway (skip_email_verified_check=true)", "email", claims.Email)
-			return nil
-		}
-		log.Warn(logCtx+": email_verified claim is missing", "email", claims.Email)
-		return ErrOIDCEmailNotVerified
 	}
+	if claims.EmailVerified == nil && skipCheck {
+		return nil
+	}
+	return ErrOIDCEmailNotVerified
 }
+
+func checkOIDCClaims(claims OIDCClaims, skipEmailVerifiedCheck bool) error {
+	if err := CheckEmailVerified(claims, skipEmailVerifiedCheck); err != nil {
+		return err
+	}
+	if claims.Email != strings.TrimSpace(claims.Email) {
+		return fmt.Errorf("%w: email claim contains surrounding whitespace", ErrUnauthorizedUser)
+	}
+	return nil
+}
+
+func checkOIDCNonce(expected, claim string) error {
+	if expected == "" || subtle.ConstantTimeCompare([]byte(claim), []byte(expected)) != 1 {
+		return ErrOIDCInvalidNonce
+	}
+	return nil
+}
+
+const oidcRequestTimeout = 10 * time.Second
 
 // OIDCProvider handles OIDC authentication interactions.
 type OIDCProvider struct {
-	provider  *oidc.Provider
-	verifier  *oidc.IDTokenVerifier
-	oauthConf *oauth2.Config
-	log       *slog.Logger
-	oidcCfg   *config.OIDCConfig
+	verifier       *oidc.IDTokenVerifier
+	oauthConf      *oauth2.Config
+	log            *slog.Logger
+	oidcCfg        *config.OIDCConfig
+	requestTimeout time.Duration
 	// allowedIssuers, when non-empty, is the explicit set of acceptable `iss`
 	// claim values. It is populated only when the operator overrides issuer
 	// validation via config; otherwise it is nil and the go-oidc verifier
@@ -130,11 +132,11 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 	//     (see verify), which is the only way to support multi-realm IdPs that
 	//     share one JWKS across issuers.
 	allowedIssuers := normalizeIssuers(oidcCfg.AllowedIssuers)
-	verifier := provider.Verifier(&oidc.Config{
+	verifierConfig := &oidc.Config{
 		ClientID:        oidcCfg.ClientID,
 		SkipExpiryCheck: false,
 		SkipIssuerCheck: len(allowedIssuers) > 0,
-	})
+	}
 	if len(allowedIssuers) > 0 {
 		log.Info("OIDC issuer validation using explicit allow-list", "allowed_issuers", allowedIssuers)
 	}
@@ -144,11 +146,11 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 	}
 
 	return &OIDCProvider{
-		provider:       provider,
-		verifier:       verifier,
+		verifier:       provider.Verifier(verifierConfig),
 		oauthConf:      oauthConf,
 		log:            log,
 		oidcCfg:        oidcCfg,
+		requestTimeout: oidcRequestTimeout,
 		allowedIssuers: allowedIssuers,
 	}, nil
 }
@@ -164,7 +166,7 @@ func discoverProvider(ctx context.Context, providerURL string, retry discoveryRe
 	for attempt := 1; ; attempt++ {
 		transport := &discoveryTransport{}
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, retry.attemptTimeout)
-		attemptCtx = oidc.ClientContext(attemptCtx, &http.Client{Transport: transport})
+		attemptCtx = oidc.ClientContext(attemptCtx, &http.Client{Transport: transport, Timeout: oidcRequestTimeout})
 		provider, err := oidc.NewProvider(attemptCtx, providerURL)
 		cancelAttempt()
 		if err == nil {
@@ -188,10 +190,7 @@ func discoverProvider(ctx context.Context, providerURL string, retry discoveryRe
 	}
 }
 
-// discoveryTransport records whether the discovery request went out, its
-// response status, and whether reading the body failed, so a booting IdP can
-// be told apart from a broken config. go-oidc keeps this client for later JWKS
-// fetches, hence the atomics.
+// discoveryTransport tracks retryable network and response failures.
 type discoveryTransport struct {
 	sent       atomic.Bool
 	status     atomic.Int64
@@ -267,16 +266,15 @@ func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDT
 	if len(p.allowedIssuers) > 0 {
 		allowed := slices.Contains(p.allowedIssuers, idToken.Issuer)
 		if !allowed {
-			p.log.Warn("OIDC token issuer not in allow-list", "issuer", idToken.Issuer)
 			return nil, fmt.Errorf("%w: issuer %q not allowed", ErrOIDCInvalidToken, idToken.Issuer)
 		}
 	}
 	return idToken, nil
 }
 
-// GetAuthURL returns the URL for the OIDC authorization endpoint with the given state.
-func (p *OIDCProvider) GetAuthURL(state string) string {
-	return p.oauthConf.AuthCodeURL(state)
+// GetAuthURL returns the OIDC authorization URL with state, nonce, and PKCE binding.
+func (p *OIDCProvider) GetAuthURL(state, nonce, verifier string) string {
+	return p.oauthConf.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
 }
 
 // GetIssuer returns the OIDC issuer URL.
@@ -287,36 +285,47 @@ func (p *OIDCProvider) GetIssuer() string {
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
-func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
+func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, nonce, verifier string) (*models.User, *models.Session, error) {
+	idpCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
+	defer cancel()
+
 	// Exchange authorization code for OAuth2 tokens.
-	oauth2Token, err := p.oauthConf.Exchange(ctx, code)
+	oauth2Token, err := p.oauthConf.Exchange(idpCtx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
-		p.log.Error("failed to exchange code for token", "error", err)
-		return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
+		var rejection *oauth2.RetrieveError
+		if errors.As(err, &rejection) && rejection.Response.StatusCode == http.StatusBadRequest && rejection.ErrorCode == "invalid_grant" {
+			return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
+		}
+		return nil, nil, fmt.Errorf("failed to exchange code for token: %w", err)
 	}
 
 	// Extract and verify the ID Token.
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		p.log.Error("no id_token field in oauth2 token")
-		return nil, nil, ErrOIDCInvalidToken
+		return nil, nil, fmt.Errorf("%w: token response has no id_token", ErrOIDCInvalidToken)
 	}
-	idToken, err := p.verify(ctx, rawIDToken)
+	idToken, err := p.verify(idpCtx, rawIDToken)
 	if err != nil {
-		p.log.Error("failed to verify ID token", "error", err)
+		// go-oidc flattens key-fetch errors with %v at the verifier boundary.
+		if idpCtx.Err() != nil || strings.HasPrefix(err.Error(), "failed to verify signature: fetching keys ") {
+			return nil, nil, fmt.Errorf("failed to verify ID token: %w", err)
+		}
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)
 	}
+	if err := checkOIDCNonce(nonce, idToken.Nonce); err != nil {
+		return nil, nil, err
+	}
+
+	cancel()
 
 	// Extract required claims.
 	var claims OIDCClaims
 	if err := idToken.Claims(&claims); err != nil {
-		p.log.Error("failed to parse ID token claims", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to parse ID token claims: %w", ErrOIDCInvalidToken, err)
 	}
 
-	// Verify email_verified claim.
-	if err := CheckEmailVerified(claims, p.oidcCfg.SkipEmailVerifiedCheck, p.log, "OIDC callback"); err != nil {
-		return nil, nil, err
+	if err := checkOIDCClaims(claims, p.oidcCfg.SkipEmailVerifiedCheck); err != nil {
+		return nil, nil, fmt.Errorf("%w: email=%s", err, claims.Email)
 	}
 
 	// Look up user in the local database.
@@ -328,38 +337,30 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		if errors.Is(err, core.ErrUserNotFound) {
 			provisioned, attempted, provErr := autoProvisionUser(ctx, db, log, authCfg.AutoProvision, claims.Email, claims.Name)
 			if provErr != nil {
-				p.log.Error("failed to auto-provision user", "error", provErr, "email", claims.Email)
-				return nil, nil, fmt.Errorf("failed to auto-provision user: %w", provErr)
+				return nil, nil, fmt.Errorf("failed to auto-provision user for email=%s: %w", claims.Email, provErr)
 			}
 			if !attempted {
-				p.log.Warn("unauthorized user attempted login (user not found in db)", "email", claims.Email, "name", claims.Name)
-				return nil, nil, ErrUnauthorizedUser
+				return nil, nil, fmt.Errorf("%w: email=%s", ErrUnauthorizedUser, claims.Email)
 			}
 			user = provisioned
 		} else {
-			// Log other unexpected DB errors.
-			p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
-			return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
+			return nil, nil, fmt.Errorf("failed to lookup user for email=%s: %w", claims.Email, err)
 		}
 	}
 	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
-		p.log.Warn("inactive user attempted login", "user_id", user.ID, "email", user.Email)
-		return nil, nil, ErrUserInactive
+		return nil, nil, fmt.Errorf("%w: email=%s", ErrUserInactive, claims.Email)
 	}
 
 	// Update user's last login time (best effort).
-	now := time.Now()
-	updateData := models.User{LastLoginAt: &now}
-	if err := core.UpdateUser(ctx, db, log, user.ID, updateData); err != nil {
+	if err := db.UpdateUserLastLogin(ctx, user.ID, time.Now().UTC()); err != nil {
 		// Log failure but don't block login.
-		p.log.Error("failed to update user last login via core function", "error", err, "user_id", user.ID)
+		p.log.Error("failed to update user last login", "error", err, "user_id", user.ID)
 	}
 
 	// Create a new application session for the user.
 	session, err := core.CreateSession(ctx, db, log, user.ID, authCfg.SessionDuration, authCfg.MaxConcurrentSessions)
 	if err != nil {
-		// Error should have been logged within core.CreateSession.
-		return nil, nil, fmt.Errorf("failed to create session: %w", err)
+		return nil, nil, fmt.Errorf("failed to create session for email=%s: %w", claims.Email, err)
 	}
 
 	return user, session, nil

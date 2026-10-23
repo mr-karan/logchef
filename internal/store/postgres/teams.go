@@ -114,6 +114,7 @@ func (s *Store) ListTeams(ctx context.Context) ([]*models.Team, error) {
 			Name:        row.Name,
 			Description: textStr(row.Description),
 			MemberCount: int(row.MemberCount),
+			Managed:     row.Managed,
 			Timestamps:  models.Timestamps{CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time},
 		})
 	}
@@ -135,10 +136,6 @@ func (s *Store) AddTeamMember(ctx context.Context, teamID models.TeamID, userID 
 		Role:   string(role),
 	})
 	if err != nil {
-		if isUniqueViolation(err) {
-			s.log.Warn("attempted to add existing team member", "team_id", teamID, "user_id", userID)
-			return nil
-		}
 		s.log.Error("failed to add team member record", "error", err, "team_id", teamID, "user_id", userID)
 		return fmt.Errorf("error adding team member: %w", err)
 	}
@@ -191,20 +188,6 @@ func (s *Store) RemoveTeamMember(ctx context.Context, teamID models.TeamID, user
 	return nil
 }
 
-// ListTeamMembers retrieves basic membership info for a team.
-func (s *Store) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-	rows, err := s.q.ListTeamMembers(ctx, int64(teamID))
-	if err != nil {
-		s.log.Error("failed to list team members from db", "error", err, "team_id", teamID)
-		return nil, fmt.Errorf("error listing team members: %w", err)
-	}
-	members := make([]*models.TeamMember, 0, len(rows))
-	for _, row := range rows {
-		members = append(members, teamMemberToModel(row))
-	}
-	return members, nil
-}
-
 // ListTeamMembersWithDetails retrieves membership info plus user email/full name.
 func (s *Store) ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
 	rows, err := s.q.ListTeamMembersWithDetails(ctx, int64(teamID))
@@ -252,10 +235,6 @@ func (s *Store) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceI
 		SourceID: int64(sourceID),
 	})
 	if err != nil {
-		if isUniqueViolation(err) {
-			s.log.Warn("attempted to add existing team-source association", "team_id", teamID, "source_id", sourceID)
-			return nil
-		}
 		s.log.Error("failed to add team source record", "error", err, "team_id", teamID, "source_id", sourceID)
 		return fmt.Errorf("error adding team source: %w", err)
 	}

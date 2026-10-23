@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -113,6 +114,10 @@ func validateAPITokenCreation(name string, scopes []models.TokenScope) ([]models
 	if len(name) < 2 || len(name) > 100 {
 		return nil, &ValidationError{Field: "name", Message: "token name must be between 2 and 100 characters"}
 	}
+	return validateTokenScopes(scopes)
+}
+
+func validateTokenScopes(scopes []models.TokenScope) ([]models.TokenScope, error) {
 	if len(scopes) == 0 {
 		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
 	}
@@ -123,19 +128,37 @@ func validateAPITokenCreation(name string, scopes []models.TokenScope) ([]models
 		if _, ok := validTokenScopes[scope]; !ok {
 			return nil, &ValidationError{Field: "scopes", Message: "invalid token scope"}
 		}
-		if scope == models.TokenScopeAll {
-			return []models.TokenScope{models.TokenScopeAll}, nil
-		}
 		if _, ok := seen[scope]; ok {
 			continue
 		}
 		seen[scope] = struct{}{}
 		normalized = append(normalized, scope)
 	}
-	if len(normalized) == 0 {
-		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
+	if _, ok := seen[models.TokenScopeAll]; ok {
+		return []models.TokenScope{models.TokenScopeAll}, nil
 	}
 	return normalized, nil
+}
+
+// AuthorizeAPITokenCreation limits a child token to its parent's scopes and lifetime.
+func AuthorizeAPITokenCreation(parent *models.APIToken, scopes []models.TokenScope, expiresAt *time.Time) error {
+	normalized, err := validateTokenScopes(scopes)
+	if err != nil {
+		return err
+	}
+	if parent == nil {
+		return errors.New("API token required to delegate a token")
+	}
+	principal := access.APITokenPrincipal(nil, parent)
+	for _, scope := range normalized {
+		if err := principal.Require(scope); err != nil {
+			return errors.New("requested token scopes exceed the caller token's scopes")
+		}
+	}
+	if parent.ExpiresAt != nil && (expiresAt == nil || expiresAt.After(*parent.ExpiresAt)) {
+		return errors.New("token expiry must be set and no later than the caller token's expiry")
+	}
+	return nil
 }
 
 // CreateAPIToken creates a new API token for a user
@@ -273,19 +296,7 @@ func AuthenticateAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logg
 		return nil, nil, ErrInvalidToken
 	}
 
-	//nolint:contextcheck // Background goroutine for async last-used update
-	go func() { //nolint:gosec // G118: detached background last-used update, must outlive request
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = UpdateAPITokenLastUsed(ctx, db, apiToken.ID)
-	}()
-
 	return user, apiToken, nil
-}
-
-// UpdateAPITokenLastUsed updates the last used timestamp for an API token
-func UpdateAPITokenLastUsed(ctx context.Context, db store.StoreOps, tokenID int) error {
-	return db.UpdateAPITokenLastUsed(ctx, tokenID)
 }
 
 // Helper functions

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -18,8 +19,10 @@ import (
 var (
 	// ErrUserNotFound is returned when a user is not found.
 	ErrUserNotFound = errors.New("user not found")
-	// ErrCannotDeleteLastAdmin is returned when attempting to delete or deactivate the last admin.
-	ErrCannotDeleteLastAdmin = errors.New("cannot delete or deactivate the last admin user")
+	// ErrCannotDeleteLastAdmin is returned when an operation would remove the last active admin.
+	ErrCannotDeleteLastAdmin = errors.New("cannot delete, deactivate, or demote the last admin user")
+	// ErrAdminGrantForbidden means the credential cannot grant active admin access.
+	ErrAdminGrantForbidden = errors.New("granting active admin access requires a browser session or an API token with '*' scope")
 	// ErrUserAlreadyExists is returned when trying to create a user that already exists.
 	ErrUserAlreadyExists = errors.New("user already exists")
 	// ErrTeamAlreadyExists is returned when trying to create a team that already exists.
@@ -38,6 +41,9 @@ var (
 
 // validateUserCreation validates parameters for creating a new user.
 func validateUserCreation(email, fullName string, role models.UserRole) error {
+	if len(email) > models.MaxEmailLength {
+		return &ValidationError{Field: "email", Message: fmt.Sprintf("email must be at most %d bytes", models.MaxEmailLength)}
+	}
 	if email == "" {
 		return &ValidationError{Field: "email", Message: "email is required"}
 	}
@@ -90,6 +96,17 @@ func validateUserUpdate(updateData models.User) error {
 }
 
 // --- User Management Functions ---
+
+// AuthorizeAdminTransition requires full credential authority to grant active admin access.
+func AuthorizeAdminTransition(principal access.Principal, before, after models.User) error {
+	if isActiveAdmin(&before) || !isActiveAdmin(&after) {
+		return nil
+	}
+	if principal.Method == access.AuthSystem || principal.Method == access.AuthSession || (principal.Method == access.AuthAPIToken && principal.Require(models.TokenScopeAll) == nil) {
+		return nil
+	}
+	return ErrAdminGrantForbidden
+}
 
 // ListUsers returns all interactive users from the database.
 func ListUsers(ctx context.Context, db store.StoreOps) ([]*models.User, error) {
@@ -152,7 +169,8 @@ func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*mode
 }
 
 // CreateUser creates a new user in the database.
-func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, principal access.Principal, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+	email = models.NormalizeEmail(email)
 	// Default role if empty
 	if role == "" {
 		role = models.UserRoleMember
@@ -160,6 +178,10 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 	// Default status if empty
 	if status == "" {
 		status = models.UserStatusActive
+	}
+
+	if err := AuthorizeAdminTransition(principal, models.User{}, models.User{Role: role, Status: status}); err != nil {
+		return nil, err
 	}
 
 	// Validate input parameters
@@ -217,6 +239,7 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 // The created user is left unmanaged (the DB default) so the provisioning
 // reconciler never adopts or deletes it.
 func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
+	email = models.NormalizeEmail(email)
 	if fullName == "" {
 		fullName = email
 	}
@@ -256,82 +279,77 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 	return user, nil
 }
 
-// UpdateUser updates an existing user's information.
-//
-// Deactivating a user (status -> inactive) is handled specially: the write, the
-// last-admin guard, and the revocation of the user's live sessions all run
-// inside a single transaction. This closes two issues at once:
-//   - #96: re-checking the admin count inside the tx (immediately before the
-//     write) prevents two concurrent deactivations from both passing a stale
-//     count and locking the org out of all admin functions.
-//   - #90: the user's sessions are revoked atomically with the status change so
-//     a deactivated account cannot keep using an already-issued session cookie.
-func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID models.UserID, updateData models.User) error {
+// requestMayRemoveAdmin reports whether an update could leave its target
+// without an active admin role. Unknown values count as removals.
+func requestMayRemoveAdmin(u models.User) bool {
+	return (u.Role != "" && u.Role != models.UserRoleAdmin) ||
+		(u.Status != "" && u.Status != models.UserStatusActive)
+}
+
+// UpdateUser authorizes the transition while preserving an active admin and revoking deactivated sessions.
+func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal access.Principal, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
 	}
 
-	existing, err := db.GetUser(ctx, userID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrUserNotFound
+	// Decide from the request alone so the advisory lock is always taken
+	// before the row lock and never after a stale read.
+	mayRemoveAdmin := requestMayRemoveAdmin(updateData)
+	var deactivated bool
+	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if mayRemoveAdmin {
+			if err := tx.LockMembershipWrites(ctx); err != nil {
+				return err
+			}
 		}
-		log.Error("failed to get existing user for update", "error", err, "user_id", userID)
-		return fmt.Errorf("error getting user for update: %w", err)
-	}
+		existing, err := tx.GetUserForUpdate(ctx, userID)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrUserNotFound
+			}
+			return fmt.Errorf("error getting user for update: %w", err)
+		}
 
-	updated, deactivating, err := applyUserUpdates(existing, updateData)
-	if err != nil {
+		before := *existing
+		updated, deactivating, err := applyUserUpdates(existing, updateData)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return nil
+		}
+		if err := AuthorizeAdminTransition(principal, before, *existing); err != nil {
+			return err
+		}
+		if isActiveAdmin(&before) && !isActiveAdmin(existing) {
+			if err := ensureAnotherActiveAdmin(ctx, tx); err != nil {
+				return err
+			}
+		}
+
+		existing.UpdatedAt = time.Now().UTC()
+		if err := tx.UpdateUser(ctx, existing); err != nil {
+			return fmt.Errorf("error updating user: %w", err)
+		}
+		if deactivating {
+			if err := RevokeUserSessions(ctx, tx, log, userID); err != nil {
+				return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
+			}
+			deactivated = true
+		}
+		return nil
+	}); err != nil {
+		if !errors.Is(err, ErrCannotDeleteLastAdmin) && !errors.Is(err, ErrUserNotFound) && !errors.Is(err, ErrAdminGrantForbidden) {
+			log.Error("failed to update user", "error", err, "user_id", userID)
+		}
 		return err
 	}
 
-	if !updated {
-		return nil
-	}
-
-	existing.UpdatedAt = time.Now().UTC()
-
-	if deactivating {
-		if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-			// #96: re-check the last-admin guard inside the write tx. On SQLite
-			// the write connection uses BEGIN IMMEDIATE, so concurrent
-			// deactivations serialize and the second one sees the decremented
-			// active-admin count here and is rejected.
-			if existing.Role == models.UserRoleAdmin {
-				count, err := tx.CountAdminUsers(ctx)
-				if err != nil {
-					return fmt.Errorf("error counting admin users: %w", err)
-				}
-				if count <= 1 {
-					return ErrCannotDeleteLastAdmin
-				}
-			}
-			if err := tx.UpdateUser(ctx, existing); err != nil {
-				return fmt.Errorf("error updating user: %w", err)
-			}
-			// #90: end the deactivated user's live sessions in the same tx.
-			if err := RevokeUserSessions(ctx, tx, log, existing.ID); err != nil {
-				return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
-			}
-			return nil
-		}); err != nil {
-			// The last-admin guard is an expected validation rejection, not a
-			// failure — don't log it at Error level.
-			if !errors.Is(err, ErrCannotDeleteLastAdmin) {
-				log.Error("failed to deactivate user", "error", err, "user_id", userID)
-			}
-			return err
-		}
+	if deactivated {
 		log.Info("user.deactivated", "user_id", userID)
-		return nil
+	} else {
+		log.Debug("user updated", "user_id", userID)
 	}
-
-	if err := db.UpdateUser(ctx, existing); err != nil {
-		log.Error("failed to update user in db", "error", err, "user_id", userID)
-		return fmt.Errorf("error updating user: %w", err)
-	}
-
-	log.Debug("user updated", "user_id", userID)
 	return nil
 }
 
@@ -361,15 +379,23 @@ func applyUserUpdates(existing *models.User, updateData models.User) (updated, d
 		deactivating = toInactive
 	}
 
-	if updateData.LastLoginAt != nil {
-		loginTimeUTC := updateData.LastLoginAt.UTC()
-		if existing.LastLoginAt == nil || !loginTimeUTC.Equal(existing.LastLoginAt.UTC()) {
-			existing.LastLoginAt = &loginTimeUTC
-			updated = true
-		}
-	}
-
 	return updated, deactivating, nil
+}
+
+func isActiveAdmin(user *models.User) bool {
+	return user.Role == models.UserRoleAdmin && user.Status == models.UserStatusActive
+}
+
+// ensureAnotherActiveAdmin must run under LockMembershipWrites.
+func ensureAnotherActiveAdmin(ctx context.Context, tx store.StoreOps) error {
+	count, err := tx.CountAdminUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("error counting admin users: %w", err)
+	}
+	if count <= 1 {
+		return ErrCannotDeleteLastAdmin
+	}
+	return nil
 }
 
 func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error) {
@@ -402,29 +428,20 @@ func applyStatusUpdate(existing *models.User, updateData models.User) (changed, 
 // user holds. The user row and session rows are removed in the same
 // transaction so a deleted user can never be left with a live session.
 func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
-	// Validate user exists
-	existing, err := db.GetUser(ctx, id)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrUserNotFound
-		}
-		log.Error("failed to get user for deletion check", "error", err, "user_id", id)
-		return fmt.Errorf("error checking existing user: %w", err)
-	}
-
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		// #96: re-check the last-admin guard inside the write tx so two
-		// concurrent deletions of different admins can't both pass a stale
-		// count and leave the org with zero admins. On SQLite the write
-		// connection uses BEGIN IMMEDIATE, so these txs serialize and the
-		// second one sees the decremented active-admin count.
-		if existing.Role == models.UserRoleAdmin {
-			count, err := tx.CountAdminUsers(ctx)
-			if err != nil {
-				return fmt.Errorf("error counting admin users: %w", err)
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		existing, err := tx.GetUser(ctx, id)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrUserNotFound
 			}
-			if count <= 1 {
-				return ErrCannotDeleteLastAdmin
+			return fmt.Errorf("error checking existing user: %w", err)
+		}
+		if isActiveAdmin(existing) {
+			if err := ensureAnotherActiveAdmin(ctx, tx); err != nil {
+				return err
 			}
 		}
 		if err := tx.DeleteUser(ctx, id); err != nil {
@@ -448,22 +465,27 @@ func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models
 }
 
 // DeleteServiceAccount deletes a service principal and its tokens/memberships.
-func DeleteServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
-	existing, err := db.GetUser(ctx, id)
-	if err != nil {
-		if models.IsNotFound(err) {
+func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
+	return db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		existing, err := tx.GetUser(ctx, id)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrUserNotFound
+			}
+			return fmt.Errorf("error checking existing service account: %w", err)
+		}
+		if existing.AccountType != models.UserAccountTypeService {
 			return ErrUserNotFound
 		}
-		return fmt.Errorf("error checking existing service account: %w", err)
-	}
-	if existing.AccountType != models.UserAccountTypeService {
-		return ErrUserNotFound
-	}
-	if err := db.DeleteUser(ctx, id); err != nil {
-		log.Error("failed to delete service account from db", "error", err, "user_id", id)
-		return fmt.Errorf("error deleting service account: %w", err)
-	}
-	return nil
+		if err := tx.DeleteUser(ctx, id); err != nil {
+			log.Error("failed to delete service account from db", "error", err, "user_id", id)
+			return fmt.Errorf("error deleting service account: %w", err)
+		}
+		return nil
+	})
 }
 
 // InitAdminUsers ensures that specified admin users exist and are configured correctly.
@@ -485,7 +507,7 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 			if models.IsNotFound(err) {
 				// User doesn't exist, create a new admin user
 				log.Debug("creating admin user", "email", email)
-				_, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
+				_, createErr := CreateUser(ctx, db, log, access.SystemPrincipal(), email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
 				if createErr != nil {
 					errMsg := fmt.Sprintf("failed to create admin user %s: %v", email, createErr)
 					log.Error(errMsg)

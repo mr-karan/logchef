@@ -3,22 +3,15 @@ import { Toaster } from '@/components/ui/sonner'
 import 'vue-sonner/style.css'
 import OuterApp from '@/layouts/OuterApp.vue'
 import InnerApp from '@/layouts/InnerApp.vue'
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { useThemeStore } from '@/stores/theme'
-import { useColorMode, useTitle } from '@vueuse/core'
+import { useTitle } from '@vueuse/core'
 import { useExploreStore } from '@/stores/explore'
 import { useI18n } from 'vue-i18n'
 
 const route = useRoute()
-const themeStore = useThemeStore()
-const colorMode = useColorMode()
 const exploreStore = useExploreStore()
 const { t } = useI18n()
-
-onMounted(() => {
-  colorMode.value = themeStore.preference
-})
 
 // Dynamic page title - shows saved query name when viewing a collection
 const pageTitle = computed(() => {

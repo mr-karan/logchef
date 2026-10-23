@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
@@ -44,10 +43,7 @@ func (db *DB) CreateDashboard(ctx context.Context, dashboard *models.Dashboard) 
 func (db *DB) GetDashboard(ctx context.Context, id int) (*models.Dashboard, error) {
 	row, err := db.readQueries.GetDashboard(ctx, int64(id))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound
-		}
-		return nil, fmt.Errorf("getting dashboard id %d: %w", id, err)
+		return nil, fmt.Errorf("getting dashboard id %d: %w", id, translateNotFound(err))
 	}
 	d := &models.Dashboard{
 		ID:          int(row.ID),
@@ -113,11 +109,7 @@ func (db *DB) UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) 
 		ID:          int64(dashboard.ID),
 	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return models.ErrNotFound
-		}
-		db.log.Error("failed to update dashboard", "error", err, "dashboard_id", dashboard.ID)
-		return fmt.Errorf("error updating dashboard: %w", err)
+		return fmt.Errorf("error updating dashboard: %w", translateNotFound(err))
 	}
 	return nil
 }
@@ -126,11 +118,7 @@ func (db *DB) UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) 
 // does not exist.
 func (db *DB) DeleteDashboard(ctx context.Context, id int) error {
 	if _, err := db.writeQueries.DeleteDashboard(ctx, int64(id)); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return models.ErrNotFound
-		}
-		db.log.Error("failed to delete dashboard", "error", err, "dashboard_id", id)
-		return fmt.Errorf("error deleting dashboard: %w", err)
+		return fmt.Errorf("error deleting dashboard: %w", translateNotFound(err))
 	}
 	return nil
 }

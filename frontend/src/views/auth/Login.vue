@@ -53,19 +53,20 @@ const localAuthEnabled = computed(() => metaStore.localAuthEnabled)
 // default assumption so the SSO button never flickers away for OIDC users.
 const oidcEnabled = computed(() => metaStore.oidcEnabled)
 
-// Error message mapping
-// Get error message if present
 const errorMessage = computed(() => {
-  const code = route.query.error as string
+  const code = route.query.error
   if (!code) return null
+  if (typeof code !== 'string') return t('pages.unexpectedError')
   const messages: Record<string, string> = {
-    UNAUTHORIZED_USER: t('pages.loginUnauthorized'),
-    USER_INACTIVE: t('pages.loginInactive'),
-    invalid_state: t('pages.loginSessionExpired'),
-    invalid_request: t('pages.loginInvalidRequest'),
-    authentication_failed: t('pages.loginFailed'),
+    access_denied: t('pages.loginUnauthorized'),
+    unauthorized: t('pages.loginUnauthorized'),
+    user_inactive: t('pages.loginInactive'),
+    invalid_token: t('pages.loginFailed'),
+    email_not_verified: t('pages.loginEmailNotVerified'),
+    session_expired: t('pages.loginSessionExpired'),
+    auth_error: t('pages.unexpectedError'),
   }
-  return messages[code] || t('pages.unexpectedError')
+  return Object.hasOwn(messages, code) ? messages[code] : t('pages.unexpectedError')
 })
 
 async function handleLogin() {

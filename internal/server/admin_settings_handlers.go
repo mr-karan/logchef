@@ -13,6 +13,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -47,16 +48,17 @@ type SettingsByCategoryResponse struct {
 // handleListSettings returns all system settings grouped by category.
 // GET /api/v1/admin/settings
 func (s *Server) handleListSettings(c fiber.Ctx) error {
-	settings, err := s.sqlite.ListSettings(c.Context())
+	settings, err := s.store.ListSettings(c.Context())
 	if err != nil {
 		s.log.Error("failed to list settings", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
 	}
 
+	reveal := c.Locals("auth_method") == "session"
 	// Group settings by category
 	categoriesMap := make(map[string][]SystemSettingResponse)
 	for i := range settings {
-		response := s.settingToResponse(settings[i])
+		response := settingToResponse(reveal, settings[i])
 		categoriesMap[settings[i].Category] = append(categoriesMap[settings[i].Category], response)
 	}
 
@@ -80,15 +82,16 @@ func (s *Server) handleListSettingsByCategory(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "category parameter is required")
 	}
 
-	settings, err := s.sqlite.ListSettingsByCategory(c.Context(), category)
+	settings, err := s.store.ListSettingsByCategory(c.Context(), category)
 	if err != nil {
 		s.log.Error("failed to list settings by category", "category", category, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
 	}
 
+	reveal := c.Locals("auth_method") == "session"
 	var response []SystemSettingResponse
 	for i := range settings {
-		response = append(response, s.settingToResponse(settings[i]))
+		response = append(response, settingToResponse(reveal, settings[i]))
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)
@@ -102,21 +105,27 @@ func (s *Server) handleGetSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
-	value, err := s.sqlite.GetSetting(c.Context(), key)
+	settings, err := s.store.ListSettings(c.Context())
 	if err != nil {
 		s.log.Error("failed to get setting", "key", key, "error", err)
-		return SendError(c, fiber.StatusNotFound, "setting not found")
+		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve setting")
 	}
-
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{"key": key, "value": value})
+	reveal := c.Locals("auth_method") == "session"
+	for _, setting := range settings {
+		if setting.Key == key {
+			response := settingToResponse(reveal, setting)
+			return SendSuccess(c, fiber.StatusOK, fiber.Map{"key": key, "value": response.Value})
+		}
+	}
+	return SendError(c, fiber.StatusNotFound, "setting not found")
 }
 
 // handleUpdateSetting updates or creates a setting.
 // PUT /api/v1/admin/settings/:key
 func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	// Get user from context
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -129,6 +138,10 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	var req UpdateSettingRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
+	}
+
+	if !s.allowSettingWrite(c, key, req.IsSensitive) {
+		return nil
 	}
 
 	// Validate the setting value based on its type
@@ -148,7 +161,7 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	}
 
 	// Upsert the setting
-	if err := s.sqlite.UpsertSetting(c.Context(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
+	if err := s.store.UpsertSetting(c.Context(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
 		s.log.Error("failed to update setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to update setting")
 	}
@@ -161,8 +174,8 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 // DELETE /api/v1/admin/settings/:key
 func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 	// Get user from context
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -172,7 +185,11 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
-	if err := s.sqlite.DeleteSetting(c.Context(), key); err != nil {
+	if !s.allowSettingWrite(c, key, false) {
+		return nil
+	}
+
+	if err := s.store.DeleteSetting(c.Context(), key); err != nil {
 		s.log.Error("failed to delete setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to delete setting")
 	}
@@ -181,8 +198,33 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "setting deleted successfully"})
 }
 
+func (s *Server) allowSettingWrite(c fiber.Ctx, key string, sensitive bool) bool {
+	if c.Locals("auth_method") == "session" {
+		return true
+	}
+	if !sensitive && !models.IsSessionOnlySetting(key) {
+		settings, err := s.store.ListSettings(c.Context())
+		if err != nil {
+			s.log.Error("failed to authorize setting write", "key", key, "error", err)
+			s.sendLoadFailure(c, fiber.StatusInternalServerError, "failed to retrieve setting", models.GeneralErrorType)
+			return false
+		}
+		for _, setting := range settings {
+			if setting.Key == key {
+				sensitive = setting.IsSensitive
+				break
+			}
+		}
+		if !sensitive {
+			return true
+		}
+	}
+	s.sendLoadFailure(c, fiber.StatusForbidden, "This setting requires a browser session", models.AuthorizationErrorType)
+	return false
+}
+
 // settingToResponse converts a database setting to API response format.
-func (s *Server) settingToResponse(setting *models.SystemSetting) SystemSettingResponse {
+func settingToResponse(reveal bool, setting *models.SystemSetting) SystemSettingResponse {
 	response := SystemSettingResponse{
 		Key:         setting.Key,
 		Value:       setting.Value,
@@ -197,6 +239,9 @@ func (s *Server) settingToResponse(setting *models.SystemSetting) SystemSettingR
 	// Mask sensitive values in responses.
 	if response.IsSensitive && response.Value != "" {
 		response.MaskedValue = "********"
+		if !reveal {
+			response.Value = response.MaskedValue
+		}
 	}
 
 	return response
@@ -212,8 +257,7 @@ func (s *Server) validateSettingValue(value, valueType string) error {
 		_, err := strconv.ParseFloat(value, 64)
 		return err
 	case "duration":
-		_, err := time.ParseDuration(value)
-		return err
+		return validatePositiveDuration(value)
 	case "string":
 		return nil // Strings are always valid
 	default:
@@ -231,6 +275,11 @@ func (s *Server) validateSpecificSetting(key, value string) error {
 }
 
 var specificSettingValidators = map[string]func(string) error{
+	"auth.session_duration":        validatePositiveDuration,
+	"auth.default_token_expiry":    validatePositiveDuration,
+	"alerts.evaluation_interval":   validatePositiveDuration,
+	"alerts.default_lookback":      validatePositiveDuration,
+	"alerts.request_timeout":       validatePositiveDuration,
 	"alerts.external_url":          validateOptionalURL,
 	"alerts.frontend_url":          validateOptionalURL,
 	"server.frontend_url":          validateOptionalURL,
@@ -258,6 +307,17 @@ func validateReasoningEffort(value string) error {
 	return nil
 }
 
+func validatePositiveDuration(value string) error {
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return err
+	}
+	if duration <= 0 {
+		return fmt.Errorf("duration must be greater than 0")
+	}
+	return nil
+}
+
 func validateOptionalURL(value string) error {
 	if value == "" {
 		return nil
@@ -266,8 +326,8 @@ func validateOptionalURL(value string) error {
 	if err != nil {
 		return fmt.Errorf("invalid URL format")
 	}
-	if parsedURL.Scheme != "" && parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return fmt.Errorf("URL must use http or https scheme")
+	if (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Hostname() == "" {
+		return fmt.Errorf("URL must be an absolute http or https URL with a host")
 	}
 	return nil
 }
@@ -335,15 +395,15 @@ type TestWebhookRequest struct {
 
 func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 	return alerts.EmailSenderOptions{
-		Host:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
-		Port:          s.sqlite.GetIntSetting(ctx, "alerts.smtp_port", 587),
-		Username:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
-		Password:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
-		From:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
-		ReplyTo:       s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
-		Security:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
-		Timeout:       s.sqlite.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Host:          store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_host", ""),
+		Port:          store.GetIntSetting(ctx, s.store, "alerts.smtp_port", 587),
+		Username:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_username", ""),
+		Password:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_password", ""),
+		From:          store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_from", ""),
+		ReplyTo:       store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_reply_to", ""),
+		Security:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_security", "starttls"),
+		Timeout:       store.GetDurationSetting(ctx, s.store, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(ctx, s.store, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	}
 }
@@ -352,8 +412,8 @@ func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 // POST /api/v1/admin/settings/test-email
 func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	// Get current user for default recipient and audit log
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -405,7 +465,7 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	}
 
 	// Send test email
-	if err := sender.Send(c.Context(), notification); err != nil {
+	if err := sender.Send(c.Context(), notification).Err(); err != nil {
 		s.log.Error("failed to send test email", "error", err, "recipient", recipientEmail, "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test email: %v", err))
 	}
@@ -421,8 +481,8 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 // POST /api/v1/admin/settings/test-webhook
 func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	// Get current user for audit log
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -446,12 +506,6 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
 
-	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
-		Logger:        s.log,
-	})
-
 	// Build test notification
 	notification := alerts.AlertNotification{
 		AlertName:      "Test Alert",
@@ -471,12 +525,12 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	}
 
 	// Send test webhook
-	if err := sender.Send(c.Context(), notification); err != nil {
-		s.log.Error("failed to send test webhook", "error", err, "url", webhookURL, "user", user.Email)
+	if err := s.webhookSender.Send(c.Context(), notification).Err(); err != nil {
+		s.log.Error("failed to send test webhook", "error", err, "host", parsedURL.Hostname(), "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test webhook: %v", err))
 	}
 
-	s.log.Info("test webhook sent successfully", "url", webhookURL, "user", user.Email)
+	s.log.Info("test webhook sent successfully", "host", parsedURL.Hostname(), "user", user.Email)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
 		"message": "Test webhook sent successfully",
 		"url":     webhookURL,

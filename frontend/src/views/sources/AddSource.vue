@@ -278,11 +278,6 @@ async function submitForm() {
 
       const result = await sourcesStore.updateSource(editingSourceId.value, updatePayload);
       if (result.success) {
-        toast({
-          title: t("sources.success"),
-          description: t("sources.sourceUpdated"),
-          duration: TOAST_DURATION.SUCCESS,
-        });
         router.push({ name: "Sources" });
       } else {
         formError.value = result.error?.message || t("sources.updateFailed");

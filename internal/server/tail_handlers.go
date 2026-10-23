@@ -32,22 +32,19 @@ const tailHeartbeatInterval = 15 * time.Second
 //
 // GET /api/v1/teams/:teamID/sources/:sourceID/logs/tail?query=&query_language=
 func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-	}
-	user := c.Locals("user").(*models.User)
+	sourceID, teamID := src.SourceID(), src.TeamID()
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	// Gate on the source capability before any streaming setup so non-supporting
 	// sources get a clean 400.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)

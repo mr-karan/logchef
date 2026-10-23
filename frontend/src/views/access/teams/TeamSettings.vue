@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -221,7 +221,7 @@ async function confirmRemoval() {
     const pending = pendingRemoval.value
     if (!pending) return
     if (pending.kind === 'member') {
-        await removeMember(pending.teamId, pending.member)
+        await teamsStore.removeTeamMember(pending.teamId, Number(pending.member.user_id))
     } else {
         // Make sure we're on the sources tab
         activeTab.value = 'sources'
@@ -290,31 +290,6 @@ const handleAddMember = async () => {
     }
 }
 
-const removeMember = async (teamId: number, member: TeamMember) => {
-    try {
-        const result = await teamsStore.removeTeamMember(teamId, Number(member.user_id));
-
-        if (!result.success) {
-            // API call failed, show an error toast.
-            // The success toast ("Member removed successfully") is handled by the store's callApi utility.
-            toast({
-                title: t('ui.error'),
-                description: result.error?.message || t('access.removeTeamMemberFailed'),
-                variant: 'destructive',
-            });
-        }
-        // If result.success is true, the store handles the success toast.
-    } catch (error) {
-        // This catch is for unexpected errors during the teamsStore.removeTeamMember call itself
-        console.error('Error removing team member:', error);
-        toast({
-            title: t('ui.error'),
-            description: t('access.removeTeamMemberUnexpected'),
-            variant: 'destructive',
-        });
-    }
-};
-
 const handleAddSource = async () => {
     if (!team.value || !selectedSourceId.value) return
 
@@ -330,9 +305,9 @@ const handleAddSource = async () => {
     }
 }
 
-// Optimized initialization to load everything in parallel
-onMounted(async () => {
-    const id = teamId.value
+watch(teamId, async (id, _previousId, onCleanup) => {
+    const teamRequests = new AbortController()
+    onCleanup(() => teamRequests.abort())
 
     if (isNaN(id) || id <= 0) {
         toast({
@@ -347,26 +322,19 @@ onMounted(async () => {
     try {
         isLoading.value = true
 
-        // Load basic data in parallel for better performance
-        // Global admins load all teams, team admins load their user teams
-        const teamsLoadPromise = isGlobalAdmin.value
-            ? teamsStore.loadAdminTeams()
-            : teamsStore.loadUserTeams()
+        if (isGlobalAdmin.value) {
+            await teamsStore.loadAdminTeams()
+        } else {
+            await teamsStore.loadUserTeams()
+        }
 
+        if (teamRequests.signal.aborted) return
+        await teamsStore.getTeam(id, teamRequests.signal)
+
+        if (teamRequests.signal.aborted) return
         await Promise.all([
-            teamsLoadPromise,
-            // Load users and sources in parallel for efficiency
-            usersStore.loadUsers(),
-            sourcesStore.loadSources()
-        ])
-
-        // Get detailed team info after confirming teams are loaded
-        await teamsStore.getTeam(id)
-
-        // Load team-specific data in parallel
-        await Promise.all([
-            teamsStore.listTeamMembers(id),
-            teamsStore.listTeamSources(id)
+            teamsStore.listTeamMembers(id, teamRequests.signal),
+            teamsStore.listTeamSources(id, teamRequests.signal)
         ])
 
     } catch (error) {
@@ -377,9 +345,9 @@ onMounted(async () => {
             variant: 'destructive',
         })
     } finally {
-        isLoading.value = false
+        if (!teamRequests.signal.aborted) isLoading.value = false
     }
-})
+}, { immediate: true })
 </script>
 
 <template>

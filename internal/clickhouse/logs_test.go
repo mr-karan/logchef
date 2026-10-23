@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
 // TestEnsureTimestampInQuery tests the ensureTimestampInQuery function
@@ -104,6 +106,18 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 			timestampField: "ts",
 			wantUnchanged:  true,
 		},
+		{
+			name:           "escaped backtick in quoted timestamp is selected",
+			query:          "SELECT `event\\x60time`, msg FROM logs",
+			timestampField: "event`time",
+			wantUnchanged:  true,
+		},
+		{
+			name:           "escaped backslash in timestamp alias is selected",
+			query:          "SELECT ts AS \"event\\\\time\" FROM logs",
+			timestampField: `event\time`,
+			wantUnchanged:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -140,7 +154,7 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 
 func TestGetSurroundingLogsDateTime64Nanoseconds(t *testing.T) {
 	client, ctx := integrationClient(t)
-	conn := client.connection()
+	conn := client.conn
 	table := fmt.Sprintf("log_context_test_%d", time.Now().UnixNano())
 	if err := conn.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (ts DateTime64(9, 'UTC'), msg String) ENGINE=MergeTree ORDER BY (ts, msg)", table)); err != nil {
 		t.Fatal(err)
@@ -202,8 +216,8 @@ func TestContextTimestampFormattingAndIdentifierQuoting(t *testing.T) {
 	if got, want := quoteTableName("default.logs"), "`default`.`logs`"; got != want {
 		t.Fatalf("quoteTableName = %q, want %q", got, want)
 	}
-	if got, want := quoteIdentifier("event`time"), "`event``time`"; got != want {
-		t.Fatalf("quoteIdentifier = %q, want %q", got, want)
+	if got, want := queryescape.ClickHouseIdentifier("event`time"), "`event\\x60time`"; got != want {
+		t.Fatalf("ClickHouseIdentifier = %q, want %q", got, want)
 	}
 }
 
@@ -459,50 +473,6 @@ func TestExtractGroupValueDereferencesPointerTypes(t *testing.T) {
 	}
 }
 
-// TestLogQueryParams tests query parameter validation
-func TestLogQueryParams(t *testing.T) {
-	tests := []struct {
-		name    string
-		params  LogQueryParams
-		wantErr bool
-	}{
-		{
-			name: "valid params with SQL",
-			params: LogQueryParams{
-				Limit:     100,
-				QueryText: "SELECT * FROM logs",
-			},
-			wantErr: false,
-		},
-		{
-			name: "zero limit is valid (uses default)",
-			params: LogQueryParams{
-				Limit:     0,
-				QueryText: "SELECT * FROM logs",
-			},
-			wantErr: false,
-		},
-		{
-			name: "with timeout",
-			params: LogQueryParams{
-				Limit:        100,
-				QueryText:    "SELECT * FROM logs",
-				QueryTimeout: new(30),
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Structural validation - these params should be valid
-			if tt.params.QueryText == "" && !tt.wantErr {
-				t.Errorf("expected QueryText to be set for valid params")
-			}
-		})
-	}
-}
-
 // TestHistogramParams tests histogram parameter validation
 func TestHistogramParams(t *testing.T) {
 	tests := []struct {
@@ -706,4 +676,11 @@ func normalizeWhitespace(s string) string {
 		result = result[:len(result)-1]
 	}
 	return string(result)
+}
+
+func TestHistogramRejectsUnparseableQueryAsValidation(t *testing.T) {
+	_, err := (&Client{}).GetHistogramData(t.Context(), "logs.app", "ts", HistogramParams{Query: "SELEC * FROM logs.app", Window: TimeWindow1m})
+	if !IsValidationError(err) {
+		t.Fatalf("err = %v, want a ValidationError the API maps to 400", err)
+	}
 }

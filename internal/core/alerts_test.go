@@ -3,9 +3,15 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -88,6 +94,162 @@ func newTestCreateAlertRequest() *models.CreateAlertRequest {
 		Severity:          models.AlertSeverityWarning,
 		IsActive:          true,
 	}
+}
+
+func TestClickHouseAlertQueryValidation(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	owner := newTestUser(t, db, "sql-owner@example.com", "Owner")
+	source := newTestSource(t, db, "sql-alerts")
+	ds := datasource.NewService(db, log)
+	ds.Register(datasource.NewClickHouseProvider(nil, log))
+
+	req := newTestCreateAlertRequest()
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		"DROP TABLE x",
+		"SELECT 1; DROP TABLE x",
+		// Valid ClickHouse that Explore's raw SQL path also rejects.
+		"SELECT count() FROM logs # comment",
+		"SELECT /* a /* b */ c */ count() FROM logs",
+		"WITH RECURSIVE t AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT count() FROM t",
+		"SELECT count() FILTER (WHERE status >= 500) FROM logs",
+	} {
+		t.Run(query, func(t *testing.T) {
+			badRequest := newTestCreateAlertRequest()
+			badRequest.Query = query
+			if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, badRequest); !isInvalidAlertQuery(err) {
+				t.Errorf("CreateAlert() error = %v, want invalid alert query", err)
+			}
+			if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &query}); !isInvalidAlertQuery(err) {
+				t.Errorf("UpdateAlert() error = %v, want invalid alert query", err)
+			}
+			stored, err := db.GetAlert(ctx, alert.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Query != req.Query {
+				t.Errorf("stored query = %q, want %q", stored.Query, req.Query)
+			}
+		})
+	}
+
+	blank := newTestCreateAlertRequest()
+	blank.Query = "   "
+	if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, blank); err == nil || !strings.Contains(err.Error(), "query is required for native alerts") {
+		t.Errorf("CreateAlert(blank query) error = %v, want query is required", err)
+	}
+
+	for _, aggregate := range []string{"count(*)", "sum(`duration`)", "avg(`duration`)", "min(`duration`)", "max(`duration`)"} {
+		t.Run(aggregate, func(t *testing.T) {
+			conditionRequest := newTestCreateAlertRequest()
+			conditionRequest.EditorMode = models.AlertEditorModeCondition
+			conditionRequest.ConditionJSON = `severity = "ERROR"`
+			conditionRequest.Query = "SELECT " + aggregate + " as value\nFROM default.logs\nWHERE (severity = 'ERROR') AND `timestamp` >= now() - toIntervalSecond(300)"
+			created, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, conditionRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if created.Query != conditionRequest.Query {
+				t.Errorf("query changed to %q, want %q", created.Query, conditionRequest.Query)
+			}
+		})
+	}
+}
+
+func TestUpdateAlertWithUnparseableStoredQuery(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	owner := newTestUser(t, db, "legacy-owner@example.com", "Owner")
+	source := newTestSource(t, db, "legacy-alerts")
+	ds := datasource.NewService(db, log)
+	ds.Register(datasource.NewClickHouseProvider(nil, log))
+
+	legacyQuery := "SELECT count() FROM logs # saved before validation"
+	alert := &models.Alert{
+		SourceID:          source.ID,
+		Name:              "legacy",
+		QueryLanguage:     models.QueryLanguageClickHouseSQL,
+		EditorMode:        models.AlertEditorModeNative,
+		Query:             legacyQuery,
+		LookbackSeconds:   300,
+		ThresholdOperator: models.AlertThresholdGreaterThan,
+		ThresholdValue:    10,
+		FrequencySeconds:  60,
+		Severity:          models.AlertSeverityWarning,
+		IsActive:          true,
+		CreatedBy:         &owner.ID,
+	}
+	if err := db.CreateAlert(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+
+	inactive := false
+	renamed := "legacy (paused)"
+	updated, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Name: &renamed, IsActive: &inactive, Query: &legacyQuery})
+	if err != nil {
+		t.Fatalf("UpdateAlert(pause, unchanged query) error = %v", err)
+	}
+	if updated.IsActive || updated.Name != renamed || updated.Query != legacyQuery {
+		t.Errorf("UpdateAlert() = active %v name %q query %q", updated.IsActive, updated.Name, updated.Query)
+	}
+
+	edited := "SELECT count() FROM logs # edited"
+	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &edited}); !isInvalidAlertQuery(err) {
+		t.Errorf("UpdateAlert(changed query) error = %v, want invalid alert query", err)
+	}
+}
+
+func TestTestAlertQueryReportsTruncation(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db := newTestDB(t)
+	log := discardLogger()
+	source := &models.Source{Name: "truncation", Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "numbers"}}
+	if err := db.CreateSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	manager := clickhouse.NewManager(log)
+	defer manager.Close()
+	if err := manager.AddSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	ds := datasource.NewService(db, log)
+	ds.Register(datasource.NewClickHouseProvider(manager, log))
+	request := func(query string) *models.TestAlertQueryRequest {
+		return &models.TestAlertQueryRequest{
+			QueryLanguage:     models.QueryLanguageClickHouseSQL,
+			EditorMode:        models.AlertEditorModeNative,
+			Query:             query,
+			ThresholdOperator: models.AlertThresholdGreaterThan,
+			ThresholdValue:    10,
+		}
+	}
+
+	resp, err := testAlertQuery(ctx, db, ds, source.ID, request("SELECT number AS value FROM numbers(1000) WHERE number >= 0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(resp.Warnings, "Results were capped at 100 buffered rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).") {
+		t.Errorf("testAlertQuery() warnings = %q, want the 100-row cap reported", resp.Warnings)
+	}
+
+	if resp, err := testAlertQuery(ctx, db, ds, source.ID, request("SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)")); err == nil {
+		t.Errorf("testAlertQuery(first row over byte limit) = %+v, want error", resp)
+	}
+}
+
+func isInvalidAlertQuery(err error) bool {
+	return errors.Is(err, ErrInvalidAlertConfiguration) && strings.Contains(err.Error(), "invalid alert query")
 }
 
 // TestCreateAlertFullLifecycle exercises CreateAlert -> GetAlert -> UpdateAlert
@@ -429,8 +591,31 @@ func TestCompareAlertThreshold(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := compareAlertThreshold(tc.value, tc.threshold, tc.operator); got != tc.want {
-				t.Errorf("compareAlertThreshold(%v, %v, %q) = %v, want %v", tc.value, tc.threshold, tc.operator, got, tc.want)
+			if got := util.CompareAlertThreshold(tc.value, tc.threshold, tc.operator); got != tc.want {
+				t.Errorf("CompareAlertThreshold(%v, %v, %q) = %v, want %v", tc.value, tc.threshold, tc.operator, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGenerateQueryWarningsNamesTruncationCause(t *testing.T) {
+	const query = "SELECT count() AS value FROM logs WHERE ts > now() - INTERVAL 5 MINUTE"
+	rows := []map[string]any{{"value": 1}, {"value": 2}, {"value": 3}}
+
+	tests := []struct {
+		name   string
+		stats  models.QueryStats
+		prefix string
+	}{
+		{"byte limit", models.QueryStats{Truncated: true, TruncatedReason: "byte_limit"}, "Results were cut off by the response size limit after 3 rows."},
+		{"row limit", models.QueryStats{Truncated: true, TruncatedReason: "row_limit"}, "Results were capped at 3 buffered rows."},
+		{"complete", models.QueryStats{}, "Query returned 3 rows."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			warnings := generateQueryWarnings(query, time.Millisecond, &models.QueryResult{Logs: rows, Stats: tc.stats})
+			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], tc.prefix) {
+				t.Fatalf("warnings = %q, want one starting with %q", warnings, tc.prefix)
 			}
 		})
 	}

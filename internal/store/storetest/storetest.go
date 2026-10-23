@@ -20,11 +20,18 @@ import (
 func Run(t *testing.T, s store.Store) {
 	ctx := context.Background()
 
+	t.Run("ExportJobOwnership", func(t *testing.T) { testExportJobOwnership(t, ctx, s) })
 	t.Run("Users", func(t *testing.T) { testUsers(t, ctx, s) })
 	t.Run("UserPasswordHash", func(t *testing.T) { testUserPasswordHash(t, ctx, s) })
+	t.Run("CollectionMapping", func(t *testing.T) { testCollectionMapping(t, ctx, s) })
+	t.Run("TeamMapping", func(t *testing.T) { testTeamMapping(t, ctx, s) })
+	t.Run("GetNotFound", func(t *testing.T) { testGetNotFound(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
+	t.Run("SettingFallbackLogs", func(t *testing.T) { testSettingFallbackLogs(t, s) })
+	t.Run("SettingsParsing", func(t *testing.T) { testSettingsParsing(t, ctx, s) })
+	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
@@ -36,7 +43,9 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("Provisioning", func(t *testing.T) { testProvisioning(t, ctx, s) })
 	t.Run("WithTxCommit", func(t *testing.T) { testWithTxCommit(t, ctx, s) })
 	t.Run("WithTxRollback", func(t *testing.T) { testWithTxRollback(t, ctx, s) })
+	t.Run("LockMembershipWrites", func(t *testing.T) { testLockMembershipWrites(t, ctx, s) })
 	t.Run("WithTxNoNesting", func(t *testing.T) { testWithTxNoNesting(t, ctx, s) })
+	t.Run("ConcurrentAdminRemovals", func(t *testing.T) { testConcurrentAdminRemovals(t, s) })
 }
 
 // --- helpers ---
@@ -104,6 +113,24 @@ func assertSourceAccess(t *testing.T, ctx context.Context, s store.Store, teamID
 
 // --- domains ---
 
+func verifyUserLastLogin(t *testing.T, ctx context.Context, s store.Store, user *models.User) {
+	t.Helper()
+	loginAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if err := s.UpdateUserLastLogin(ctx, user.ID, loginAt); err != nil {
+		t.Fatalf("UpdateUserLastLogin: %v", err)
+	}
+	afterLogin, err := s.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser after login: %v", err)
+	}
+	if afterLogin.LastLoginAt == nil || !afterLogin.LastLoginAt.Equal(loginAt) {
+		t.Errorf("last_login_at = %v, want %v", afterLogin.LastLoginAt, loginAt)
+	}
+	if afterLogin.Email != user.Email || afterLogin.Role != user.Role || afterLogin.Status != user.Status {
+		t.Errorf("UpdateUserLastLogin changed other fields: %+v", afterLogin)
+	}
+}
+
 func testUsers(t *testing.T, ctx context.Context, s store.Store) {
 	u := mkUser(t, ctx, s, "alice@test.dev")
 
@@ -114,6 +141,8 @@ func testUsers(t *testing.T, ctx context.Context, s store.Store) {
 	if got.AccountType != models.UserAccountTypeHuman {
 		t.Errorf("default account_type = %q, want human", got.AccountType)
 	}
+
+	verifyUserLastLogin(t, ctx, s, got)
 
 	byEmail, err := s.GetUserByEmail(ctx, "alice@test.dev")
 	if err != nil || byEmail.ID != u.ID {
@@ -179,6 +208,7 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.AddTeamSource(ctx, team.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
+	assertDuplicateLinksAreNoOps(t, ctx, s, team.ID, alice.ID, src.ID)
 	assertSourceAccess(t, ctx, s, team.ID, alice.ID, src.ID, true)
 	// Negative case: an unlinked source must report no access (no error).
 	other := mkSource(t, ctx, s, "unlinked")
@@ -187,6 +217,27 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 	srcs, err := s.ListTeamSources(ctx, team.ID)
 	if err != nil || len(srcs) != 1 {
 		t.Fatalf("ListTeamSources: %v / %d", err, len(srcs))
+	}
+}
+
+// assertDuplicateLinksAreNoOps checks that re-adding a member or source succeeds, keeps the member's role, and leaves a transaction committable.
+func assertDuplicateLinksAreNoOps(t *testing.T, ctx context.Context, s store.Store, teamID models.TeamID, userID models.UserID, sourceID models.SourceID) {
+	t.Helper()
+	if err := s.AddTeamSource(ctx, teamID, sourceID); err != nil {
+		t.Fatalf("AddTeamSource duplicate: %v", err)
+	}
+	if err := s.WithTx(ctx, func(tx store.StoreOps) error {
+		return tx.AddTeamSource(ctx, teamID, sourceID)
+	}); err != nil {
+		t.Fatalf("AddTeamSource duplicate in transaction: %v", err)
+	}
+	if err := s.WithTx(ctx, func(tx store.StoreOps) error {
+		return tx.AddTeamMember(ctx, teamID, userID, models.TeamRoleMember)
+	}); err != nil {
+		t.Fatalf("AddTeamMember duplicate in transaction: %v", err)
+	}
+	if m, err := s.GetTeamMember(ctx, teamID, userID); err != nil || m == nil || m.Role != models.TeamRoleAdmin {
+		t.Fatalf("duplicate AddTeamMember changed membership: %v / %+v", err, m)
 	}
 }
 
@@ -230,6 +281,94 @@ func testSessions(t *testing.T, ctx context.Context, s store.Store) {
 	}
 }
 
+func testSettingsParsing(t *testing.T, ctx context.Context, s store.Store) {
+	for _, tc := range []struct {
+		name, value string
+		missing     bool
+		text        string
+		boolean     bool
+		integer     int
+		decimal     float64
+		duration    time.Duration
+	}{
+		{name: "missing", missing: true, text: "fallback", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "empty", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "invalid", value: "invalid", text: "invalid", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "zero", value: "0", text: "0", duration: time.Second},
+		{name: "negative", value: "-2", text: "-2", boolean: true, integer: -2, decimal: -2, duration: time.Second},
+		{name: "positive", value: "2", text: "2", boolean: true, integer: 2, decimal: 2, duration: time.Second},
+		{name: "float", value: "2.5", text: "2.5", boolean: true, integer: 42, decimal: 2.5, duration: time.Second},
+		{name: "duration", value: "3m", text: "3m", boolean: true, integer: 42, decimal: 1.5, duration: 3 * time.Minute},
+		{name: "zero duration", value: "0s", text: "0s", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "negative duration", value: "-1h", text: "-1h", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const key = "test.parsing"
+			if err := s.DeleteSetting(ctx, key); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.missing {
+				if err := s.UpsertSetting(ctx, key, tc.value, "string", "alerts", "", false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := store.GetSettingWithDefault(ctx, s, key, "fallback"); got != tc.text {
+				t.Errorf("string = %q, want %q", got, tc.text)
+			}
+			if got := store.GetBoolSetting(ctx, s, key, true); got != tc.boolean {
+				t.Errorf("bool = %v, want %v", got, tc.boolean)
+			}
+			if got := store.GetIntSetting(ctx, s, key, 42); got != tc.integer {
+				t.Errorf("int = %v, want %v", got, tc.integer)
+			}
+			if got := store.GetFloat64Setting(ctx, s, key, 1.5); got != tc.decimal {
+				t.Errorf("float = %v, want %v", got, tc.decimal)
+			}
+			if got := store.GetDurationSetting(ctx, s, key, time.Second); got != tc.duration {
+				t.Errorf("duration = %v, want %v", got, tc.duration)
+			}
+		})
+	}
+	for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
+		t.Run(value, func(t *testing.T) {
+			if err := s.UpsertSetting(ctx, "test.bool", value, "boolean", "alerts", "", false); err != nil {
+				t.Fatal(err)
+			}
+			want := value == "1" || value == "t" || value == "T" || value == "TRUE" || value == "true" || value == "True"
+			if got := store.GetBoolSetting(ctx, s, "test.bool", !want); got != want {
+				t.Errorf("bool %q = %v, want %v", value, got, want)
+			}
+		})
+	}
+}
+
+func testSettingsSensitivity(t *testing.T, ctx context.Context, s store.Store) {
+	for _, key := range []string{"ai.api_key", "alerts.smtp_password", "custom.secret"} {
+		if err := s.UpsertSetting(ctx, key, "old", "string", "ai", "", key == "custom.secret"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpsertSetting(ctx, key, "new", "string", "ai", "", false); err != nil {
+			t.Fatal(err)
+		}
+		settings, err := s.ListSettings(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, setting := range settings {
+			if setting.Key == key {
+				found = true
+				if !setting.IsSensitive {
+					t.Errorf("%s is not sensitive", key)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("missing setting %s", key)
+		}
+	}
+}
+
 func testSettings(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.UpsertSetting(ctx, "alerts.enabled", "true", "boolean", "alerts", "Enable alerts", false); err != nil {
 		t.Fatalf("UpsertSetting: %v", err)
@@ -237,7 +376,7 @@ func testSettings(t *testing.T, ctx context.Context, s store.Store) {
 	if v, err := s.GetSetting(ctx, "alerts.enabled"); err != nil || v != "true" {
 		t.Errorf("GetSetting = %q / %v", v, err)
 	}
-	if !s.GetBoolSetting(ctx, "alerts.enabled", false) {
+	if !store.GetBoolSetting(ctx, s, "alerts.enabled", false) {
 		t.Error("GetBoolSetting = false, want true")
 	}
 	list, err := s.ListSettings(ctx)
@@ -763,6 +902,8 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Errorf("fresh active alert %d not returned by ListActiveAlertsDue", a.ID)
 	}
 
+	testAlertEvaluationState(t, ctx, s, a.ID)
+
 	// History round-trip.
 	val := 12.0
 	if _, err := s.InsertAlertHistory(ctx, a.ID, models.AlertStatusTriggered, &val, "fired", map[string]any{"k": "v"}); err != nil {
@@ -773,6 +914,9 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListAlertHistory: %v / %d", err, len(hist))
 	}
 	testAlertHistoryEntry(t, ctx, s, hist[0])
+	t.Run("ManualResolveUpdatesState", func(t *testing.T) { testManualResolveState(t, ctx, s, a.ID) })
+
+	t.Run("PruneAlertHistoryPreservesFiring", func(t *testing.T) { testAlertHistoryPruning(t, ctx, s, src.ID) })
 
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
 		t.Fatalf("DeleteAlert: %v", err)
@@ -785,6 +929,52 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if err := s.DeleteAlert(ctx, a.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("DeleteAlert(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+func testAlertEvaluationState(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	for _, state := range []models.AlertState{models.AlertStateResolved, models.AlertStateFiring} {
+		t.Run("TouchAlertEvaluated/"+string(state), func(t *testing.T) {
+			if state == models.AlertStateFiring {
+				if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := s.GetAlert(ctx, alertID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.TouchAlertEvaluated(ctx, alertID); err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.GetAlert(ctx, alertID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.LastState != state {
+				t.Errorf("state = %s, want %s", after.LastState, state)
+			}
+			if after.LastEvaluatedAt == nil || after.LastEvaluatedAt.IsZero() {
+				t.Errorf("evaluation timestamp = %v, want nonzero", after.LastEvaluatedAt)
+			}
+			if after.UpdatedAt.Before(before.UpdatedAt) {
+				t.Errorf("updated timestamp moved backward from %v to %v", before.UpdatedAt, after.UpdatedAt)
+			}
+			if before.LastTriggeredAt == nil {
+				if after.LastTriggeredAt != nil {
+					t.Errorf("trigger timestamp = %v, want nil", after.LastTriggeredAt)
+				}
+			} else if after.LastTriggeredAt == nil || !after.LastTriggeredAt.Equal(*before.LastTriggeredAt) {
+				t.Errorf("trigger timestamp changed from %v to %v", before.LastTriggeredAt, after.LastTriggeredAt)
+			}
+		})
+	}
+	if err := s.MarkAlertEvaluated(ctx, alertID); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := s.GetAlert(ctx, alertID); err != nil || resolved.LastState != models.AlertStateResolved {
+		t.Fatalf("state after MarkAlertEvaluated = %+v, %v; want resolved", resolved, err)
 	}
 }
 
@@ -829,15 +1019,22 @@ func testUserPreferences(t *testing.T, ctx context.Context, s store.Store) {
 }
 
 func testProvisioning(t *testing.T, ctx context.Context, s store.Store) {
+	if _, err := s.IsSourceManaged(ctx, 999999); !models.IsNotFound(err) {
+		t.Errorf("missing source error = %v, want ErrNotFound", err)
+	}
+	if _, err := s.IsTeamManaged(ctx, 999999); !models.IsNotFound(err) {
+		t.Errorf("missing team error = %v, want ErrNotFound", err)
+	}
 	u := mkUser(t, ctx, s, "managed@test.dev")
-	if managed, err := s.IsUserManaged(ctx, u.ID); err != nil || managed {
-		t.Errorf("IsUserManaged(new) = %v / %v, want false", managed, err)
+	if got, err := s.GetUser(ctx, u.ID); err != nil || got.Managed {
+		t.Errorf("GetUser(new).Managed = %v / %v, want false", got != nil && got.Managed, err)
 	}
 	if err := s.SetUserManaged(ctx, u.ID, true); err != nil {
 		t.Fatalf("SetUserManaged: %v", err)
 	}
-	if managed, err := s.IsUserManaged(ctx, u.ID); err != nil || !managed {
-		t.Errorf("IsUserManaged(after set) = %v / %v, want true", managed, err)
+	got, err := s.GetUser(ctx, u.ID)
+	if err != nil || !got.Managed {
+		t.Errorf("GetUser(after set).Managed = %v / %v, want true", got != nil && got.Managed, err)
 	}
 }
 
@@ -890,5 +1087,121 @@ func testWithTxNoNesting(t *testing.T, ctx context.Context, s store.Store) {
 	})
 	if err != nil {
 		t.Fatalf("outer WithTx: %v", err)
+	}
+}
+
+func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, sourceID models.SourceID) {
+	t.Helper()
+	alert := &models.Alert{
+		SourceID: sourceID, Name: "prune fixture", Query: "SELECT count() FROM logs",
+		QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
+		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true,
+		ThresholdOperator: models.AlertThresholdGreaterThan, ThresholdValue: 10,
+		Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
+	}
+	if err := s.CreateAlert(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	alertID := alert.ID
+	var legacyIDs []int64
+	for range 3 {
+		legacy, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacyIDs = append(legacyIDs, legacy.ID)
+	}
+	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+		"delivery_attempts": 3, "delivery_failed": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keep = 2
+	for range keep + 1 {
+		if _, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusError, nil, "evaluation failed", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, err := s.GetLatestUnresolvedAlertHistory(ctx, alertID)
+	if err != nil || latest.ID != entry.ID || latest.Payload["delivery_attempts"] != float64(3) {
+		t.Fatalf("unresolved history after pruning = %+v, %v; want firing entry %d with 3 attempts", latest, err, entry.ID)
+	}
+	history, err := s.ListAlertHistory(ctx, alertID, 10)
+	if err != nil || len(history) != keep+1 {
+		t.Fatalf("history after pruning = %d entries, %v; want the firing entry and %d recent entries", len(history), err, keep)
+	}
+	for _, id := range legacyIDs {
+		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); !models.IsNotFound(err) {
+			t.Errorf("legacy duplicate %d after pruning error = %v, want not found", id, err)
+		}
+	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetAlertHistoryEntry(ctx, alertID, entry.ID); !models.IsNotFound(err) {
+		t.Errorf("resolved history after pruning error = %v, want not found", err)
+	}
+	if latest, err := s.GetLatestUnresolvedAlertHistory(ctx, alertID); !models.IsNotFound(err) {
+		t.Errorf("unresolved history after resolution = %+v, %v; want not found", latest, err)
+	}
+	t.Run("RecentDuplicates", func(t *testing.T) { testRecentDuplicatePruning(t, ctx, s, alertID) })
+}
+
+func testRecentDuplicatePruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	var ids []int64
+	for range 3 {
+		entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, entry.ID)
+	}
+	const keep = 2
+	if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := s.ListAlertHistory(ctx, alertID, 10)
+	if err != nil || len(recent) != keep || recent[0].ID != ids[2] || recent[1].ID != ids[1] {
+		t.Fatalf("recent duplicate history = %+v, %v; want the newest %d entries", recent, err, keep)
+	}
+}
+
+func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved manually"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.GetAlert(ctx, alertID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.LastState != models.AlertStateResolved {
+		t.Errorf("last_state = %s, want resolved", after.LastState)
+	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "second resolution"); !models.IsNotFound(err) {
+		t.Errorf("second resolution = %v, want not found", err)
+	}
+	if err := s.UpdateAlertHistoryPayload(ctx, entry.ID, map[string]any{"delivery_failed": false}); !models.IsNotFound(err) {
+		t.Errorf("resolved history payload update = %v, want not found", err)
+	}
+
+	history, err := s.ListAlertHistory(ctx, alertID, 1)
+	if err != nil || len(history) != 1 || history[0].Status != models.AlertStatusResolved || history[0].Payload["delivery_failed"] != true {
+		t.Fatalf("resolved history = %+v, %v", history, err)
 	}
 }

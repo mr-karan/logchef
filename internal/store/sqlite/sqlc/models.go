@@ -106,21 +106,23 @@ type Dashboard struct {
 }
 
 type ExportJob struct {
-	ID           string         `json:"id"`
-	SourceID     int64          `json:"source_id"`
-	CreatedBy    int64          `json:"created_by"`
-	Status       string         `json:"status"`
-	Format       string         `json:"format"`
-	RequestJson  string         `json:"request_json"`
-	FileName     sql.NullString `json:"file_name"`
-	FilePath     sql.NullString `json:"file_path"`
-	ErrorMessage sql.NullString `json:"error_message"`
-	RowsExported int64          `json:"rows_exported"`
-	BytesWritten int64          `json:"bytes_written"`
-	ExpiresAt    time.Time      `json:"expires_at"`
-	CompletedAt  sql.NullTime   `json:"completed_at"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID              string         `json:"id"`
+	SourceID        int64          `json:"source_id"`
+	CreatedBy       int64          `json:"created_by"`
+	Status          string         `json:"status"`
+	Format          string         `json:"format"`
+	RequestJson     string         `json:"request_json"`
+	FileName        sql.NullString `json:"file_name"`
+	FilePath        sql.NullString `json:"file_path"`
+	ErrorMessage    sql.NullString `json:"error_message"`
+	RowsExported    int64          `json:"rows_exported"`
+	BytesWritten    int64          `json:"bytes_written"`
+	ExpiresAt       time.Time      `json:"expires_at"`
+	CompletedAt     sql.NullTime   `json:"completed_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	OwnerInstanceID string         `json:"owner_instance_id"`
+	OwnerProcessID  string         `json:"owner_process_id"`
 }
 
 type OauthAccessToken struct {
@@ -148,24 +150,6 @@ type OauthAuthRequest struct {
 	Denied         int64          `json:"denied"`
 	ExpiresAt      int64          `json:"expires_at"`
 	CreatedAt      int64          `json:"created_at"`
-}
-
-type OauthDeviceAuthorization struct {
-	DeviceCodeHash string        `json:"device_code_hash"`
-	UserCodeHash   string        `json:"user_code_hash"`
-	ClientID       string        `json:"client_id"`
-	Resource       string        `json:"resource"`
-	Scopes         string        `json:"scopes"`
-	OfflineAccess  int64         `json:"offline_access"`
-	IntervalSecs   int64         `json:"interval_secs"`
-	LastPolledAt   sql.NullInt64 `json:"last_polled_at"`
-	UserID         sql.NullInt64 `json:"user_id"`
-	GrantID        sql.NullInt64 `json:"grant_id"`
-	ApprovedAt     sql.NullInt64 `json:"approved_at"`
-	DeniedAt       sql.NullInt64 `json:"denied_at"`
-	ConsumedAt     sql.NullInt64 `json:"consumed_at"`
-	ExpiresAt      int64         `json:"expires_at"`
-	CreatedAt      int64         `json:"created_at"`
 }
 
 type OauthGrant struct {

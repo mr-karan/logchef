@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -81,6 +82,7 @@ const addTeamMember = `-- name: AddTeamMember :exec
 
 INSERT INTO team_members (team_id, user_id, role)
 VALUES (?, ?, ?)
+ON CONFLICT (team_id, user_id) DO NOTHING
 `
 
 type AddTeamMemberParams struct {
@@ -90,7 +92,7 @@ type AddTeamMemberParams struct {
 }
 
 // Team Members
-// Add a member to a team
+// Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.exec(ctx, q.addTeamMemberStmt, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
 	return err
@@ -100,6 +102,7 @@ const addTeamSource = `-- name: AddTeamSource :exec
 
 INSERT INTO team_sources (team_id, source_id)
 VALUES (?, ?)
+ON CONFLICT (team_id, source_id) DO NOTHING
 `
 
 type AddTeamSourceParams struct {
@@ -108,48 +111,10 @@ type AddTeamSourceParams struct {
 }
 
 // Team Sources
-// Add a data source to a team
+// Add a data source to a team; linking an already linked source is a no-op.
 func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error {
 	_, err := q.exec(ctx, q.addTeamSourceStmt, addTeamSource, arg.TeamID, arg.SourceID)
 	return err
-}
-
-const approveOAuthDeviceAuthorization = `-- name: ApproveOAuthDeviceAuthorization :one
-UPDATE oauth_device_authorizations
-SET approved_at = ?1, user_id = ?2
-WHERE user_code_hash = ?3
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > ?1
-RETURNING device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at
-`
-
-type ApproveOAuthDeviceAuthorizationParams struct {
-	Now          sql.NullInt64 `json:"now"`
-	UserID       sql.NullInt64 `json:"user_id"`
-	UserCodeHash string        `json:"user_code_hash"`
-}
-
-func (q *Queries) ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
-	row := q.queryRow(ctx, q.approveOAuthDeviceAuthorizationStmt, approveOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
-	var i OauthDeviceAuthorization
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const authenticateOAuthAccessToken = `-- name: AuthenticateOAuthAccessToken :one
@@ -255,15 +220,16 @@ func (q *Queries) ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOA
 const completeExportJob = `-- name: CompleteExportJob :one
 UPDATE export_jobs
 SET
-    status = ?,
-    file_name = ?,
-    file_path = ?,
+    status = ?1,
+    file_name = ?2,
+    file_path = ?3,
     error_message = NULL,
-    rows_exported = ?,
-    bytes_written = ?,
-    completed_at = ?,
-    updated_at = ?
-WHERE id = ?
+    rows_exported = ?4,
+    bytes_written = ?5,
+    completed_at = CAST(?6 AS TEXT),
+    updated_at = CAST(?7 AS TEXT)
+WHERE id = ?8
+  AND status IN ('pending', 'running')
 RETURNING id
 `
 
@@ -273,8 +239,8 @@ type CompleteExportJobParams struct {
 	FilePath     sql.NullString `json:"file_path"`
 	RowsExported int64          `json:"rows_exported"`
 	BytesWritten int64          `json:"bytes_written"`
-	CompletedAt  sql.NullTime   `json:"completed_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	CompletedAt  string         `json:"completed_at"`
+	UpdatedAt    string         `json:"updated_at"`
 	ID           string         `json:"id"`
 }
 
@@ -334,33 +300,6 @@ func (q *Queries) ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuth
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const consumeOAuthDeviceCode = `-- name: ConsumeOAuthDeviceCode :one
-UPDATE oauth_device_authorizations
-SET consumed_at = ?1
-WHERE device_code_hash = ?2
-  AND oauth_device_authorizations.client_id = ?3
-  AND approved_at IS NOT NULL
-  AND consumed_at IS NULL
-  AND expires_at > ?1
-  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
-RETURNING grant_id
-`
-
-type ConsumeOAuthDeviceCodeParams struct {
-	Now            sql.NullInt64 `json:"now"`
-	DeviceCodeHash string        `json:"device_code_hash"`
-	ClientID       string        `json:"client_id"`
-}
-
-// Single-use consumption of an approved code. Expiry is checked here, before
-// consumption, so an approved but expired code never issues tokens.
-func (q *Queries) ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (sql.NullInt64, error) {
-	row := q.queryRow(ctx, q.consumeOAuthDeviceCodeStmt, consumeOAuthDeviceCode, arg.Now, arg.DeviceCodeHash, arg.ClientID)
-	var grant_id sql.NullInt64
-	err := row.Scan(&grant_id)
-	return grant_id, err
 }
 
 const consumeOAuthRefreshToken = `-- name: ConsumeOAuthRefreshToken :one
@@ -669,6 +608,8 @@ const createExportJob = `-- name: CreateExportJob :exec
 
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -677,19 +618,33 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    CAST(?9 AS TEXT),
+    CAST(?10 AS TEXT),
+    CAST(?11 AS TEXT)
+)
 `
 
 type CreateExportJobParams struct {
-	ID          string    `json:"id"`
-	SourceID    int64     `json:"source_id"`
-	CreatedBy   int64     `json:"created_by"`
-	Status      string    `json:"status"`
-	Format      string    `json:"format"`
-	RequestJson string    `json:"request_json"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string `json:"id"`
+	OwnerInstanceID string `json:"owner_instance_id"`
+	OwnerProcessID  string `json:"owner_process_id"`
+	SourceID        int64  `json:"source_id"`
+	CreatedBy       int64  `json:"created_by"`
+	Status          string `json:"status"`
+	Format          string `json:"format"`
+	RequestJson     string `json:"request_json"`
+	ExpiresAt       string `json:"expires_at"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // Export Jobs
@@ -697,6 +652,8 @@ type CreateExportJobParams struct {
 func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams) error {
 	_, err := q.exec(ctx, q.createExportJobStmt, createExportJob,
 		arg.ID,
+		arg.OwnerInstanceID,
+		arg.OwnerProcessID,
 		arg.SourceID,
 		arg.CreatedBy,
 		arg.Status,
@@ -743,40 +700,6 @@ func (q *Queries) CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAut
 		arg.OfflineAccess,
 		arg.CodeChallenge,
 		arg.State,
-		arg.ExpiresAt,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const createOAuthDeviceAuthorization = `-- name: CreateOAuthDeviceAuthorization :exec
-INSERT INTO oauth_device_authorizations (
-    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
-    interval_secs, expires_at, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`
-
-type CreateOAuthDeviceAuthorizationParams struct {
-	DeviceCodeHash string `json:"device_code_hash"`
-	UserCodeHash   string `json:"user_code_hash"`
-	ClientID       string `json:"client_id"`
-	Resource       string `json:"resource"`
-	Scopes         string `json:"scopes"`
-	OfflineAccess  int64  `json:"offline_access"`
-	IntervalSecs   int64  `json:"interval_secs"`
-	ExpiresAt      int64  `json:"expires_at"`
-	CreatedAt      int64  `json:"created_at"`
-}
-
-func (q *Queries) CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error {
-	_, err := q.exec(ctx, q.createOAuthDeviceAuthorizationStmt, createOAuthDeviceAuthorization,
-		arg.DeviceCodeHash,
-		arg.UserCodeHash,
-		arg.ClientID,
-		arg.Resource,
-		arg.Scopes,
-		arg.OfflineAccess,
-		arg.IntervalSecs,
 		arg.ExpiresAt,
 		arg.CreatedAt,
 	)
@@ -1067,12 +990,12 @@ func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) 
 
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
-WHERE expires_at < ?
+WHERE expires_at < CAST(?1 AS TEXT)
 `
 
 // Delete expired export jobs
-func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error {
-	_, err := q.exec(ctx, q.deleteExpiredExportJobsStmt, deleteExpiredExportJobs, expiresAt)
+func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, before string) error {
+	_, err := q.exec(ctx, q.deleteExpiredExportJobsStmt, deleteExpiredExportJobs, before)
 	return err
 }
 
@@ -1093,15 +1016,6 @@ WHERE expires_at <= ?1
 
 func (q *Queries) DeleteExpiredOAuthAuthRequests(ctx context.Context, now int64) error {
 	_, err := q.exec(ctx, q.deleteExpiredOAuthAuthRequestsStmt, deleteExpiredOAuthAuthRequests, now)
-	return err
-}
-
-const deleteExpiredOAuthDeviceAuthorizations = `-- name: DeleteExpiredOAuthDeviceAuthorizations :exec
-DELETE FROM oauth_device_authorizations WHERE expires_at <= ?
-`
-
-func (q *Queries) DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt int64) error {
-	_, err := q.exec(ctx, q.deleteExpiredOAuthDeviceAuthorizationsStmt, deleteExpiredOAuthDeviceAuthorizations, expiresAt)
 	return err
 }
 
@@ -1216,45 +1130,23 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	return err
 }
 
-const denyOAuthDeviceAuthorization = `-- name: DenyOAuthDeviceAuthorization :execrows
-UPDATE oauth_device_authorizations
-SET denied_at = ?1, user_id = ?2
-WHERE user_code_hash = ?3
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > ?1
-`
-
-type DenyOAuthDeviceAuthorizationParams struct {
-	Now          sql.NullInt64 `json:"now"`
-	UserID       sql.NullInt64 `json:"user_id"`
-	UserCodeHash string        `json:"user_code_hash"`
-}
-
-func (q *Queries) DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error) {
-	result, err := q.exec(ctx, q.denyOAuthDeviceAuthorizationStmt, denyOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
 const failExportJob = `-- name: FailExportJob :one
 UPDATE export_jobs
 SET
-    status = ?,
+    status = ?1,
     file_name = NULL,
     file_path = NULL,
-    error_message = ?,
+    error_message = ?2,
     completed_at = NULL,
-    updated_at = ?
-WHERE id = ?
+    updated_at = CAST(?3 AS TEXT)
+WHERE id = ?4
 RETURNING id
 `
 
 type FailExportJobParams struct {
 	Status       string         `json:"status"`
 	ErrorMessage sql.NullString `json:"error_message"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	UpdatedAt    string         `json:"updated_at"`
 	ID           string         `json:"id"`
 }
 
@@ -1501,22 +1393,7 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 }
 
 const getExportJob = `-- name: GetExportJob :one
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = ?
 `
@@ -1541,6 +1418,8 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerInstanceID,
+		&i.OwnerProcessID,
 	)
 	return i, err
 }
@@ -1665,41 +1544,6 @@ func (q *Queries) GetOAuthRefreshTokenState(ctx context.Context, tokenHash strin
 		&i.OauthGrant.LastUsedAt,
 		&i.OauthGrant.RevokedAt,
 		&i.OauthGrant.RevokeReason,
-	)
-	return i, err
-}
-
-const getPendingOAuthDeviceAuthorization = `-- name: GetPendingOAuthDeviceAuthorization :one
-SELECT device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at FROM oauth_device_authorizations
-WHERE user_code_hash = ?1
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > ?2
-`
-
-type GetPendingOAuthDeviceAuthorizationParams struct {
-	UserCodeHash string `json:"user_code_hash"`
-	Now          int64  `json:"now"`
-}
-
-func (q *Queries) GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
-	row := q.queryRow(ctx, q.getPendingOAuthDeviceAuthorizationStmt, getPendingOAuthDeviceAuthorization, arg.UserCodeHash, arg.Now)
-	var i OauthDeviceAuthorization
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1978,6 +1822,18 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 	return i, err
 }
 
+const getTriggeredAlertHistoryAlertID = `-- name: GetTriggeredAlertHistoryAlertID :one
+SELECT alert_id FROM alert_history
+WHERE id = ? AND status = 'triggered'
+`
+
+func (q *Queries) GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.getTriggeredAlertHistoryAlertIDStmt, getTriggeredAlertHistoryAlertID, id)
+	var alert_id int64
+	err := row.Scan(&alert_id)
+	return alert_id, err
+}
+
 const getUser = `-- name: GetUser :one
 SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE id = ?
 `
@@ -2236,6 +2092,29 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 	return id, err
 }
 
+const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = json_set(json_remove(payload_json, '$.delivery_deadline_at'),
+    '$.delivery_in_progress', json('false'),
+    '$.delivery_failed', json('true'),
+    '$.delivery_error', 'delivery interrupted',
+    '$.delivery_retries_exhausted', json(CASE WHEN COALESCE(json_extract(payload_json, '$.delivery_attempts'), 1) >= 3 THEN 'true' ELSE 'false' END))
+WHERE status = 'triggered'
+  AND json_extract(payload_json, '$.delivery_in_progress') = 1
+  AND (CAST(?1 AS INTEGER) = 0 OR id = ?1)
+  AND (CAST(?2 AS INTEGER) = 0 OR alert_id = ?2)
+`
+
+type InterruptAlertDeliveriesParams struct {
+	HistoryID int64 `json:"history_id"`
+	AlertID   int64 `json:"alert_id"`
+}
+
+func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
+	_, err := q.exec(ctx, q.interruptAlertDeliveriesStmt, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
+	return err
+}
+
 const isSourceManaged = `-- name: IsSourceManaged :one
 SELECT managed FROM sources WHERE id = ?
 `
@@ -2255,18 +2134,6 @@ SELECT managed FROM teams WHERE id = ?
 // Check if a team is managed
 func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (int64, error) {
 	row := q.queryRow(ctx, q.isTeamManagedStmt, isTeamManaged, id)
-	var managed int64
-	err := row.Scan(&managed)
-	return managed, err
-}
-
-const isUserManaged = `-- name: IsUserManaged :one
-SELECT managed FROM users WHERE id = ?
-`
-
-// Check if a user is managed
-func (q *Queries) IsUserManaged(ctx context.Context, id int64) (int64, error) {
-	row := q.queryRow(ctx, q.isUserManagedStmt, isUserManaged, id)
 	var managed int64
 	err := row.Scan(&managed)
 	return managed, err
@@ -2301,38 +2168,6 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAccessibleSourceIDsForUser = `-- name: ListAccessibleSourceIDsForUser :many
-SELECT DISTINCT ts.source_id
-FROM team_sources ts
-JOIN team_members tm ON tm.team_id = ts.team_id
-WHERE tm.user_id = ?
-`
-
-// Source IDs the user can reach via any team, used to mark runnable on browse
-// lists without an N+1 access check per row.
-func (q *Queries) ListAccessibleSourceIDsForUser(ctx context.Context, userID int64) ([]int64, error) {
-	rows, err := q.query(ctx, q.listAccessibleSourceIDsForUserStmt, listAccessibleSourceIDsForUser, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []int64{}
-	for rows.Next() {
-		var source_id int64
-		if err := rows.Scan(&source_id); err != nil {
-			return nil, err
-		}
-		items = append(items, source_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -2969,13 +2804,13 @@ func (q *Queries) ListDashboards(ctx context.Context) ([]ListDashboardsRow, erro
 const listExpiredExportJobPaths = `-- name: ListExpiredExportJobPaths :many
 SELECT file_path
 FROM export_jobs
-WHERE expires_at < ?
+WHERE expires_at < CAST(?1 AS TEXT)
   AND file_path IS NOT NULL
 `
 
 // List artifact paths for expired export jobs
-func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error) {
-	rows, err := q.query(ctx, q.listExpiredExportJobPathsStmt, listExpiredExportJobPaths, expiresAt)
+func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, before string) ([]sql.NullString, error) {
+	rows, err := q.query(ctx, q.listExpiredExportJobPathsStmt, listExpiredExportJobPaths, before)
 	if err != nil {
 		return nil, err
 	}
@@ -2997,12 +2832,55 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt time.
 	return items, nil
 }
 
-const listManagedSources = `-- name: ListManagedSources :many
+const listInterruptedExportJobs = `-- name: ListInterruptedExportJobs :many
+SELECT id, file_path, updated_at
+FROM export_jobs
+WHERE status IN ('pending', 'running')
+  AND (updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(?1 AS INTEGER) || ' seconds')
+    OR (CAST(?2 AS TEXT) <> '' AND owner_instance_id = ?2 AND owner_process_id <> ?3))
+ORDER BY id
+LIMIT 100
+`
 
+type ListInterruptedExportJobsParams struct {
+	MaxAgeSeconds int64  `json:"max_age_seconds"`
+	InstanceID    string `json:"instance_id"`
+	ProcessID     string `json:"process_id"`
+}
+
+type ListInterruptedExportJobsRow struct {
+	ID        string         `json:"id"`
+	FilePath  sql.NullString `json:"file_path"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+func (q *Queries) ListInterruptedExportJobs(ctx context.Context, arg ListInterruptedExportJobsParams) ([]ListInterruptedExportJobsRow, error) {
+	rows, err := q.query(ctx, q.listInterruptedExportJobsStmt, listInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInterruptedExportJobsRow{}
+	for rows.Next() {
+		var i ListInterruptedExportJobsRow
+		if err := rows.Scan(&i.ID, &i.FilePath, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listManagedSources = `-- name: ListManagedSources :many
 SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
 `
 
-// Provisioning Queries
 // Get all sources managed by provisioning config
 func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 	rows, err := q.query(ctx, q.listManagedSourcesStmt, listManagedSources)
@@ -3063,47 +2941,6 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Managed,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE managed = 1 ORDER BY id
-`
-
-// Get all users managed by provisioning config
-func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.query(ctx, q.listManagedUsersStmt, listManagedUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.FullName,
-			&i.Role,
-			&i.Status,
-			&i.LastLoginAt,
-			&i.LastActiveAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Managed,
-			&i.AccountType,
-			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -3684,42 +3521,6 @@ func (q *Queries) ListSystemSettingsByCategory(ctx context.Context, category str
 	return items, nil
 }
 
-const listTeamMembers = `-- name: ListTeamMembers :many
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = ?
-ORDER BY tm.created_at
-`
-
-// List all members of a team
-func (q *Queries) ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error) {
-	rows, err := q.query(ctx, q.listTeamMembersStmt, listTeamMembers, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamMember{}
-	for rows.Next() {
-		var i TeamMember
-		if err := rows.Scan(
-			&i.TeamID,
-			&i.UserID,
-			&i.Role,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listTeamMembersWithDetails = `-- name: ListTeamMembersWithDetails :many
 SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
 FROM team_members tm
@@ -4008,6 +3809,56 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listUsersForProvisioning = `-- name: ListUsersForProvisioning :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE email IN (/*SLICE:emails*/?) ORDER BY id
+`
+
+func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error) {
+	query := listUsersForProvisioning
+	var queryParams []interface{}
+	if len(emails) > 0 {
+		for _, v := range emails {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:emails*/?", strings.Repeat(",?", len(emails))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:emails*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FullName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.LastActiveAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Managed,
+			&i.AccountType,
+			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
@@ -4018,6 +3869,15 @@ WHERE id = ?
 
 func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, id)
+	return err
+}
+
+const markAlertResolved = `-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.markAlertResolvedStmt, markAlertResolved, id)
 	return err
 }
 
@@ -4039,6 +3899,13 @@ const pruneAlertHistory = `-- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = ?
   AND target.id NOT IN (
+    SELECT active.id
+    FROM alert_history AS active
+    WHERE active.alert_id = ? AND active.status = 'triggered'
+    ORDER BY active.triggered_at DESC, active.id DESC
+    LIMIT 1
+  )
+  AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
     WHERE keep.alert_id = ?
@@ -4050,11 +3917,17 @@ WHERE target.alert_id = ?
 type PruneAlertHistoryParams struct {
 	AlertID   int64 `json:"alert_id"`
 	AlertID_2 int64 `json:"alert_id_2"`
+	AlertID_3 int64 `json:"alert_id_3"`
 	Limit     int64 `json:"limit"`
 }
 
 func (q *Queries) PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error {
-	_, err := q.exec(ctx, q.pruneAlertHistoryStmt, pruneAlertHistory, arg.AlertID, arg.AlertID_2, arg.Limit)
+	_, err := q.exec(ctx, q.pruneAlertHistoryStmt, pruneAlertHistory,
+		arg.AlertID,
+		arg.AlertID_2,
+		arg.AlertID_3,
+		arg.Limit,
+	)
 	return err
 }
 
@@ -4130,62 +4003,35 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate string) ([]Qu
 	return items, nil
 }
 
-const recordOAuthDevicePoll = `-- name: RecordOAuthDevicePoll :one
-UPDATE oauth_device_authorizations
-SET interval_secs = CASE WHEN (expires_at > ?1 AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > ?1 - interval_secs * 1000) THEN interval_secs + 5 ELSE interval_secs END,
-    last_polled_at = CASE WHEN (expires_at > ?1 AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > ?1 - interval_secs * 1000) THEN last_polled_at ELSE ?1 END
-WHERE device_code_hash = ?2
-  AND client_id = ?3
-  AND consumed_at IS NULL
-RETURNING client_id, resource, scopes, offline_access, interval_secs, user_id,
-    grant_id, approved_at, denied_at, expires_at, created_at,
-    CASE WHEN last_polled_at = ?1 THEN 1 ELSE 0 END AS on_time
+const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
+UPDATE export_jobs
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
+  AND status IN ('pending', 'running')
+RETURNING id
 `
 
-type RecordOAuthDevicePollParams struct {
-	Now            int64  `json:"now"`
-	DeviceCodeHash string `json:"device_code_hash"`
-	ClientID       string `json:"client_id"`
-}
-
-type RecordOAuthDevicePollRow struct {
-	ClientID      string        `json:"client_id"`
-	Resource      string        `json:"resource"`
-	Scopes        string        `json:"scopes"`
-	OfflineAccess int64         `json:"offline_access"`
-	IntervalSecs  int64         `json:"interval_secs"`
-	UserID        sql.NullInt64 `json:"user_id"`
-	GrantID       sql.NullInt64 `json:"grant_id"`
-	ApprovedAt    sql.NullInt64 `json:"approved_at"`
-	DeniedAt      sql.NullInt64 `json:"denied_at"`
-	ExpiresAt     int64         `json:"expires_at"`
-	CreatedAt     int64         `json:"created_at"`
-	Column12      int64         `json:"column_12"`
-}
-
-// Record one poll. An early poll on a nonterminal request (not expired, not
-// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
-// last_polled_at, so on_time is false. Expired and denied requests are
-// never slowed down: they report their terminal state on every poll. Every
-// SET expression reads the pre-update row.
-func (q *Queries) RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error) {
-	row := q.queryRow(ctx, q.recordOAuthDevicePollStmt, recordOAuthDevicePoll, arg.Now, arg.DeviceCodeHash, arg.ClientID)
-	var i RecordOAuthDevicePollRow
-	err := row.Scan(
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.Column12,
-	)
-	return i, err
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error) {
+	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, idsJson)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
@@ -4264,25 +4110,22 @@ func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourcePara
 	return err
 }
 
-const resolveAlertHistory = `-- name: ResolveAlertHistory :one
+const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    message = ?
-WHERE id = ?
-RETURNING id
+    message = ?1
+WHERE alert_id = ?2 AND status = 'triggered'
 `
 
-type ResolveAlertHistoryParams struct {
+type ResolveAlertHistoryForAlertParams struct {
 	Message sql.NullString `json:"message"`
-	ID      int64          `json:"id"`
+	AlertID int64          `json:"alert_id"`
 }
 
-func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error) {
-	row := q.queryRow(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+func (q *Queries) ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error {
+	_, err := q.exec(ctx, q.resolveAlertHistoryForAlertStmt, resolveAlertHistoryForAlert, arg.Message, arg.AlertID)
+	return err
 }
 
 const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows
@@ -4394,20 +4237,6 @@ type SetOAuthAuthRequestGrantParams struct {
 
 func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error {
 	_, err := q.exec(ctx, q.setOAuthAuthRequestGrantStmt, setOAuthAuthRequestGrant, arg.GrantID, arg.ID)
-	return err
-}
-
-const setOAuthDeviceAuthorizationGrant = `-- name: SetOAuthDeviceAuthorizationGrant :exec
-UPDATE oauth_device_authorizations SET grant_id = ? WHERE device_code_hash = ?
-`
-
-type SetOAuthDeviceAuthorizationGrantParams struct {
-	GrantID        sql.NullInt64 `json:"grant_id"`
-	DeviceCodeHash string        `json:"device_code_hash"`
-}
-
-func (q *Queries) SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error {
-	_, err := q.exec(ctx, q.setOAuthDeviceAuthorizationGrantStmt, setOAuthDeviceAuthorizationGrant, arg.GrantID, arg.DeviceCodeHash)
 	return err
 }
 
@@ -4602,6 +4431,18 @@ func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesPa
 	return items, nil
 }
 
+const touchAlertEvaluated = `-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?
+`
+
+func (q *Queries) TouchAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.touchAlertEvaluatedStmt, touchAlertEvaluated, id)
+	return err
+}
+
 const touchOAuthGrant = `-- name: TouchOAuthGrant :exec
 UPDATE oauth_grants SET last_used_at = ? WHERE id = ?
 `
@@ -4635,9 +4476,10 @@ func (q *Queries) TouchQueryShare(ctx context.Context, arg TouchQueryShareParams
 
 const updateAPITokenLastUsed = `-- name: UpdateAPITokenLastUsed :exec
 UPDATE api_tokens
-SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?
+  AND (last_used_at IS NULL OR julianday(last_used_at) < julianday('now', '-60 seconds'))
 `
 
 // Update the last used timestamp for an API token
@@ -4720,7 +4562,7 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
-WHERE id = ?
+WHERE id = ? AND status = 'triggered'
 RETURNING id
 `
 
@@ -4791,20 +4633,20 @@ UPDATE export_jobs
 SET
     status = ?,
     error_message = NULL,
-    updated_at = ?
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?
+  AND status IN ('pending', 'running')
 RETURNING id
 `
 
 type UpdateExportJobRunningParams struct {
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
-	ID        string    `json:"id"`
+	Status string `json:"status"`
+	ID     string `json:"id"`
 }
 
 // Mark an export job as running and return its ID
 func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error) {
-	row := q.queryRow(ctx, q.updateExportJobRunningStmt, updateExportJobRunning, arg.Status, arg.UpdatedAt, arg.ID)
+	row := q.queryRow(ctx, q.updateExportJobRunningStmt, updateExportJobRunning, arg.Status, arg.ID)
 	var id string
 	err := row.Scan(&id)
 	return id, err
@@ -4976,6 +4818,21 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 	return err
 }
 
+const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
+UPDATE users SET last_login_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+type UpdateUserLastLoginParams struct {
+	LastLoginAt sql.NullTime `json:"last_login_at"`
+	ID          int64        `json:"id"`
+}
+
+// Record a login without rewriting the rest of the user row
+func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
+	_, err := q.exec(ctx, q.updateUserLastLoginStmt, updateUserLastLogin, arg.LastLoginAt, arg.ID)
+	return err
+}
+
 const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
@@ -4983,7 +4840,7 @@ ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     value_type = excluded.value_type,
     description = excluded.description,
-    is_sensitive = excluded.is_sensitive,
+    is_sensitive = system_settings.is_sensitive OR excluded.is_sensitive,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 `
 

@@ -63,7 +63,7 @@ func TestWithTx_RollbackOnError(t *testing.T) {
 		t.Fatalf("WithTx should surface fn's error, got: %v", err)
 	}
 
-	if _, err := db.GetUserByEmail(ctx, "rollback@example.com"); !errors.Is(err, ErrUserNotFound) {
+	if _, err := db.GetUserByEmail(ctx, "rollback@example.com"); !models.IsNotFound(err) {
 		t.Fatalf("user should not exist after rollback, got err: %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestWithTx_RollbackOnPanic(t *testing.T) {
 		})
 	}()
 
-	if _, err := db.GetUserByEmail(ctx, "panic@example.com"); !errors.Is(err, ErrUserNotFound) {
+	if _, err := db.GetUserByEmail(ctx, "panic@example.com"); !models.IsNotFound(err) {
 		t.Fatalf("user should not exist after panic rollback, got err: %v", err)
 	}
 }

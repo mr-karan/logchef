@@ -47,17 +47,20 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// Build canonical log line — one line per request with all useful context
 		attrs := []slog.Attr{
 			slog.String("method", c.Method()),
-			slog.String("path", path),
+			slog.String("route", redactedRequestPath(c)),
 			slog.Int("status", status),
 			slog.Int64("duration_ms", duration.Milliseconds()),
 		}
 
 		// User context
-		if user, ok := c.Locals("user").(*models.User); ok && user != nil {
+		if user := currentUser(c); user != nil {
 			attrs = append(attrs, slog.String("user", user.Email))
 		}
 
 		// Resource context from path params
+		if token := c.Params("token"); token != "" {
+			attrs = append(attrs, slog.String("token", models.RedactShareToken(token)))
+		}
 		if teamID := c.Params("teamID"); teamID != "" {
 			attrs = append(attrs, slog.String("team_id", teamID))
 		}
@@ -69,7 +72,9 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// directly, avoiding the per-request []any conversion.
 		var level slog.Level
 		switch {
-		case status >= 500:
+		case c.Locals(queryCancellationKey{}) == true:
+			level = slog.LevelInfo
+		case status >= 500 && c.Locals(queryErrorLoggedKey) != true:
 			level = slog.LevelError
 		case status >= 400:
 			level = slog.LevelWarn
@@ -80,4 +85,12 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 
 		return chainErr
 	}
+}
+
+func redactedRequestPath(c fiber.Ctx) string {
+	route := c.Route()
+	if route.Path == "" || c.IsMiddleware() || strings.Contains(route.Path, "*") {
+		return "<unmatched>"
+	}
+	return route.Path
 }

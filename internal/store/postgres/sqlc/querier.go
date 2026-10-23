@@ -18,12 +18,11 @@ type Querier interface {
 	// Share a collection with a team; idempotent on (collection_id, team_id).
 	AddCollectionTeam(ctx context.Context, arg AddCollectionTeamParams) error
 	// Team Members
-	// Add a member to a team
+	// Add a member to a team; adding an existing member is a no-op and keeps their role.
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error
 	// Team Sources
-	// Add a data source to a team
+	// Add a data source to a team; linking an already linked source is a no-op.
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
-	ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
 	// Record the first decision on a pending, unexpired request. Zero rows means
 	// the request is unknown, expired or already decided.
@@ -32,9 +31,6 @@ type Querier interface {
 	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
 	// Single-use consumption. Exactly one concurrent caller gets the row.
 	ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (OauthAuthRequest, error)
-	// Single-use consumption of an approved code. Expiry is checked here, before
-	// consumption, so an approved but expired code never issues tokens.
-	ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (pgtype.Int8, error)
 	// Rotation claim. Exactly one concurrent caller gets the row.
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
 	// Count active admin users
@@ -67,7 +63,6 @@ type Querier interface {
 	// token. Postgres runs at READ COMMITTED: a conditional UPDATE waits on the
 	// row lock and re-checks its predicate, so exactly one writer wins.
 	CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAuthRequestParams) error
-	CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error
 	CreateOAuthGrant(ctx context.Context, arg CreateOAuthGrantParams) (OauthGrant, error)
 	// Query Shares
 	// Persist an ad hoc query share token
@@ -98,7 +93,6 @@ type Querier interface {
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt pgtype.Timestamptz) error
 	DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt pgtype.Timestamptz) error
 	DeleteExpiredOAuthAuthRequests(ctx context.Context, now pgtype.Timestamptz) error
-	DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt pgtype.Timestamptz) error
 	// Delete refresh rows only when no row of the same grant is still live. A
 	// consumed row therefore stays while its family can still be refreshed, so a
 	// replay of it is still detected.
@@ -120,7 +114,6 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
 	DeleteUserSessions(ctx context.Context, userID int64) error
-	DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error)
 	// Mark an export job as failed and return its ID
 	FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error)
 	// Get an API token by ID
@@ -142,7 +135,6 @@ type Querier interface {
 	GetOAuthAuthRequest(ctx context.Context, id string) (OauthAuthRequest, error)
 	GetOAuthGrant(ctx context.Context, id int64) (OauthGrant, error)
 	GetOAuthRefreshTokenState(ctx context.Context, tokenHash string) (GetOAuthRefreshTokenStateRow, error)
-	GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
 	// Find the caller's personal collection if it exists
 	GetPersonalCollection(ctx context.Context, createdBy pgtype.Int8) (Collection, error)
 	// Retrieve an ad hoc query share by token with creator details
@@ -165,10 +157,13 @@ type Querier interface {
 	GetTeamByName(ctx context.Context, name string) (Team, error)
 	// Get a team member
 	GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (TeamMember, error)
+	GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error)
 	// Get a user by ID
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// Get a user by ID and lock the row until the transaction ends
+	GetUserForUpdate(ctx context.Context, id int64) (User, error)
 	// User Preferences
 	// Get user preferences by user ID
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
@@ -187,12 +182,11 @@ type Querier interface {
 	// Query history ---------------------------------------------------------------
 	// Record one executed query and return its id.
 	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
+	InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (bool, error)
 	// Check if a team is managed
 	IsTeamManaged(ctx context.Context, id int64) (bool, error)
-	// Check if a user is managed
-	IsUserManaged(ctx context.Context, id int64) (bool, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
@@ -220,13 +214,10 @@ type Querier interface {
 	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtype.Timestamptz) ([]pgtype.Text, error)
-	// Provisioning Queries
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
 	ListManagedTeams(ctx context.Context) ([]Team, error)
-	// Get all users managed by provisioning config
-	ListManagedUsers(ctx context.Context) ([]User, error)
 	ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]OauthGrant, error)
 	// Most recent query_history rows across all users, newest first, enriched with
 	// the executing user's email and the source's display name. LEFT JOIN on
@@ -250,8 +241,6 @@ type Querier interface {
 	ListSourcesForUser(ctx context.Context, userID int64) ([]Source, error)
 	ListSystemSettings(ctx context.Context) ([]SystemSetting, error)
 	ListSystemSettingsByCategory(ctx context.Context, category string) ([]SystemSetting, error)
-	// List all members of a team
-	ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error)
 	// List all members of a team with user details
 	ListTeamMembersWithDetails(ctx context.Context, teamID int64) ([]ListTeamMembersWithDetailsRow, error)
 	// List all data sources in a team
@@ -264,7 +253,11 @@ type Querier interface {
 	ListUserTeams(ctx context.Context, userID int64) ([]Team, error)
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
+	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
+	// Hold a transaction-scoped advisory lock
+	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
+	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares
@@ -274,12 +267,7 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
-	// Record one poll. An early poll on a nonterminal request (not expired, not
-	// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
-	// last_polled_at, so on_time is false. Expired and denied requests are
-	// never slowed down: they report their terminal state on every poll. Every
-	// SET expression reads the pre-update row.
-	RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error)
+	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection
@@ -290,7 +278,7 @@ type Querier interface {
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
-	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error)
+	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
 	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)
 	// Revoke the grant that owns an access-token ID hash or refresh-token hash,
 	// only when the grant belongs to the given client.
@@ -299,7 +287,6 @@ type Querier interface {
 	// Attach the code to an approved request. A request carries at most one code.
 	SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error)
 	SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error
-	SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error
 	// Mark a team as managed/unmanaged
@@ -318,6 +305,7 @@ type Querier interface {
 	// Top users by total query count over rollup rows on/after `since`, joined to
 	// users for the email.
 	TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error)
+	TouchAlertEvaluated(ctx context.Context, id int64) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
@@ -341,6 +329,8 @@ type Querier interface {
 	UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// Record a login without rewriting the rest of the user row
+	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// Insert or update user preferences
 	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error

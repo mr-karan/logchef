@@ -2,8 +2,10 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/store/storetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -165,8 +167,9 @@ func TestListActiveAlertsDue_TimestampFormats(t *testing.T) {
 // so any evaluation written before the query is due.
 func TestListActiveAlertsDue_AfterMark(t *testing.T) {
 	marks := map[string]func(*DB, context.Context, models.AlertID) error{
-		"MarkAlertEvaluated": (*DB).MarkAlertEvaluated,
-		"MarkAlertTriggered": (*DB).MarkAlertTriggered,
+		"MarkAlertEvaluated":  (*DB).MarkAlertEvaluated,
+		"TouchAlertEvaluated": (*DB).TouchAlertEvaluated,
+		"MarkAlertTriggered":  (*DB).MarkAlertTriggered,
 	}
 	for name, mark := range marks {
 		t.Run(name, func(t *testing.T) {
@@ -188,5 +191,32 @@ func TestListActiveAlertsDue_AfterMark(t *testing.T) {
 				t.Fatalf("alert not due after %s once its interval elapsed", name)
 			}
 		})
+	}
+}
+
+func TestPruneAlertHistoryPlan(t *testing.T) {
+	db := newTxTestDB(t)
+	query := storetest.GeneratedQuery(t, "sqlc/queries.sql.go", "pruneAlertHistory")
+	args := make([]any, strings.Count(query, "?"))
+	for i := range args {
+		args[i] = 1
+	}
+	rows, err := db.writeDB.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(detail, "CORRELATED") {
+			t.Errorf("pruning repeats a subquery per history row: %s", detail)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }

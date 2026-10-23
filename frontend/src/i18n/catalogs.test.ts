@@ -42,6 +42,19 @@ describe("translation catalogs", () => {
     ];
     for (const key of keys) expect(Object.hasOwn(english, key), key).toBe(true);
   });
+  it.each(locales.filter(locale => locale.code !== "en"))("translates Explorer link errors in $code", ({ code }) => {
+    const messages = catalog(code);
+    for (const key of ["explore.linkOpenFailed", "explore.sourcesChanged", "explore.shareNotFound", "explore.teamAccessDenied", "explore.sourceAccessDenied", "explore.sourceUnavailableFallback", "explore.teamNotFound", "pages.savedQueryNotFound"]) {
+      expect(messages[key], `${code}:${key}`).toBeDefined();
+      expect(messages[key], `${code}:${key}`).not.toBe(english[key]);
+    }
+  });
+
+  it.each(locales)("describes an empty team without a selector placeholder in $code", ({ code }) => {
+    const messages = catalog(code);
+    expect(placeholders(messages["explore.noTeamSources"])).toEqual([]);
+  });
+
   it("registers every catalog exactly once", () => {
     const files = readdirSync(resolve("src/i18n/locales")).map(name => name.replace(/\.json$/, "")).sort();
     expect(locales.map(locale => locale.code).sort()).toEqual(files);
@@ -49,7 +62,7 @@ describe("translation catalogs", () => {
 
   it.each(locales)("validates every $code message and interpolation", ({ code }) => {
     const messages = catalog(code);
-    const expectedKeys = Object.keys(english).filter(key => code === "en" || code === "zh-CN" || (!key.startsWith("sources.") && !key.startsWith("pages.") && !key.startsWith("routes.") && !key.startsWith("tokens.") && !key.startsWith("access.") && !key.startsWith("admin.") && !key.startsWith("library.")));
+    const expectedKeys = Object.keys(english).filter(key => code === "en" || code === "zh-CN" || key === "pages.savedQueryNotFound" || (!key.startsWith("sources.") && !key.startsWith("pages.") && !key.startsWith("routes.") && !key.startsWith("tokens.") && !key.startsWith("access.") && !key.startsWith("admin.") && !key.startsWith("library.")));
     expect(Object.keys(messages).sort()).toEqual(expectedKeys.sort());
     const translator = createI18n({ legacy: false, locale: code, fallbackLocale: false, flatJson: true, messages: { [code]: { ...messages } } });
     try {

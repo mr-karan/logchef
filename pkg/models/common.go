@@ -49,17 +49,6 @@ type Timestamps struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// HealthStatus represents the health status of a resource
-type HealthStatus string
-
-const (
-	// HealthStatusHealthy indicates the resource is healthy
-	HealthStatusHealthy HealthStatus = "healthy"
-
-	// HealthStatusUnhealthy indicates the resource is unhealthy
-	HealthStatusUnhealthy HealthStatus = "unhealthy"
-)
-
 // QueryStats represents statistics about query execution
 type QueryStats struct {
 	ExecutionTimeMs float64 `json:"execution_time_ms"`

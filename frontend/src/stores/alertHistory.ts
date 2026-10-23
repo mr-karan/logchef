@@ -1,9 +1,27 @@
 import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
-import { useBaseStore } from "./base";
+import { createLatestRequests, useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
-import type { APIErrorResponse } from "@/api/types";
+import { alertsDisabledResult } from "@/lib/alerts";
+import { i18n } from "@/i18n";
+
+const legacyDeliveryAttemptLimit = 3;
+
+export interface AlertDeliveryFailure {
+  message: string;
+  retriesExhausted: boolean;
+}
+
+export function alertDeliveryFailure(entry: AlertHistoryEntry): AlertDeliveryFailure | null {
+  const payload = entry.payload;
+  const message = typeof payload?.delivery_error === "string" ? payload.delivery_error : "";
+  if (payload?.delivery_failed !== true) return null;
+  const retriesExhausted = typeof payload?.delivery_retries_exhausted === "boolean"
+    ? payload.delivery_retries_exhausted
+    : typeof payload?.delivery_attempts === "number" && payload.delivery_attempts >= legacyDeliveryAttemptLimit;
+  return { message, retriesExhausted };
+}
 
 interface AlertHistoryState {
   entries: AlertHistoryEntry[];
@@ -20,76 +38,67 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
 
   const entries = computed(() => state.data.value.entries);
   const currentAlertId = computed(() => state.data.value.currentAlertId);
-  const hasHistory = computed(() => entries.value.length > 0);
+
+  let historyRequestId = 0;
+  const historyLoads = createLatestRequests({
+    request: (alertId: number, limit: number) => `${alertId}:${limit}`,
+    slot: () => "history",
+    load: fetchHistory,
+  });
 
   function setCurrentContext(alertId: number | null) {
-    state.data.value.currentAlertId = alertId;
-    if (!alertId) {
+    if (alertId !== state.data.value.currentAlertId || alertId === null) {
+      historyRequestId++;
+      historyLoads.cancelAll();
       state.data.value.entries = [];
     }
+    state.data.value.currentAlertId = alertId;
   }
 
   function setLimit(limit: number) {
     state.data.value.limit = limit > 0 ? limit : state.data.value.limit;
   }
 
-  // Belt-and-braces: match the guard in useAlertsStore so that a stale
-  // bookmarked URL bypassing the router guard cannot fire alert HTTP.
-  function alertsDisabledResult() {
-    return { success: false as const, data: null };
-  }
-
-  async function loadHistory(alertId: number, _teamId?: number | null, _sourceId?: number | null, limit?: number) {
+  async function loadHistory(alertId: number, limit?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     setCurrentContext(alertId);
-    const effectiveLimit = limit ?? state.data.value.limit;
-    return await state.withLoading(`loadHistory-${alertId}`, async () => {
-      return await state.callApi<AlertHistoryEntry[]>({
-        apiCall: () => alertsApi.history(alertId, effectiveLimit),
-        operationKey: `loadHistory-${alertId}`,
-        onSuccess: (response) => {
-          state.data.value.entries = response ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    historyRequestId++;
+    return await historyLoads.run([alertId, limit ?? state.data.value.limit]);
+  }
+
+  async function fetchHistory(signal: AbortSignal, alertId: number, limit: number) {
+    return await state.callApi<AlertHistoryEntry[]>({
+      apiCall: () => alertsApi.history(alertId, limit, { signal }),
+      operationKey: `loadHistory-${alertId}`,
+      onSuccess: (response) => {
+        state.data.value.entries = response ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
-  async function resolveCurrentAlert(message?: string) {
-    const alertId = state.data.value.currentAlertId;
-    if (!alertId) {
-      const error: APIErrorResponse = {
-        status: "error",
-        message: "Missing alert context",
-        error_type: "ValidationError",
-      };
-      return { success: false, error };
-    }
-    return resolveAlert(undefined, undefined, alertId, { message });
-  }
-
-  async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
+  async function resolveAlert(alertId: number, payload: ResolveAlertRequest) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    return await state.withLoading(`resolveAlert-${alertId}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.resolve(alertId, payload),
-        operationKey: `resolveAlert-${alertId}`,
-        successMessage: "Alert resolved",
-        onSuccess: () => {
-          // Optimistically mark the latest triggered entry as resolved.
-          const idx = state.data.value.entries.findIndex((entry) => entry.status === "triggered");
-          if (idx !== -1) {
-            const entry = state.data.value.entries[idx];
-            state.data.value.entries.splice(idx, 1, {
-              ...entry,
-              status: "resolved",
-              resolved_at: new Date().toISOString(),
-              message: payload.message ?? entry.message ?? undefined,
-            });
-          }
-        },
-      });
+    const requestId = historyRequestId;
+    return await state.callApi<{ message: string }>({
+      apiCall: () => alertsApi.resolve(alertId, payload),
+      operationKey: `resolveAlert-${alertId}`,
+      successMessage: i18n.global.t("alerts.alertResolved"),
+      onSuccess: () => {
+        if (requestId !== historyRequestId || alertId !== currentAlertId.value) return;
+        // Optimistically mark the latest triggered entry as resolved.
+        const idx = state.data.value.entries.findIndex((entry) => entry.status === "triggered");
+        if (idx !== -1) {
+          const entry = state.data.value.entries[idx];
+          state.data.value.entries.splice(idx, 1, {
+            ...entry,
+            status: "resolved",
+            resolved_at: new Date().toISOString(),
+            message: payload.message ?? entry.message ?? undefined,
+          });
+        }
+      },
     });
   }
 
@@ -100,11 +109,9 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     loadingStates: state.loadingStates,
     entries,
     currentAlertId,
-    hasHistory,
     isLoadingOperation: state.isLoadingOperation,
     loadHistory,
     resolveAlert,
-    resolveCurrentAlert,
     setCurrentContext,
     setLimit,
   };

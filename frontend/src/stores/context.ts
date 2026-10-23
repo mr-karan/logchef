@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
+import type { Source } from '@/api/sources'
 
 // Persists team/source selection. Stores last source PER TEAM so switching teams restores previous source.
 const STORAGE_KEY = 'logchef_context'
@@ -33,6 +34,27 @@ function saveToStorage(data: PersistedContext): void {
   }
 }
 
+/** The requested team when permitted, else the stored team, else the first. */
+export function pickTeam(permittedTeamIds: number[], requestedTeamId: number | null): number | null {
+  const permitted = (id: number | null): id is number => id !== null && permittedTeamIds.includes(id)
+  if (permitted(requestedTeamId)) return requestedTeamId
+  const storedTeamId = loadFromStorage().lastTeamId
+  return permitted(storedTeamId) ? storedTeamId : permittedTeamIds[0] ?? null
+}
+
+/**
+ * The requested source when it is in the team, even when not connected, so
+ * a link never silently opens another source. Else the team's stored source,
+ * else the first connected source, else the first.
+ */
+export function pickSource(teamId: number, sources: Source[], requestedSourceId: number | null): number | null {
+  const inTeam = (id: number | null): id is number => id !== null && sources.some((source) => source.id === id)
+  if (inTeam(requestedSourceId)) return requestedSourceId
+  const storedSourceId = loadFromStorage().sourcePerTeam[teamId] ?? null
+  if (inTeam(storedSourceId)) return storedSourceId
+  return (sources.find((source) => source.is_connected) ?? sources[0])?.id ?? null
+}
+
 export const useContextStore = defineStore('context', () => {
   const teamId = ref<number | null>(null)
   const sourceId = ref<number | null>(null)
@@ -61,15 +83,20 @@ export const useContextStore = defineStore('context', () => {
     saveToStorage(persisted)
   }
 
+  // A selected source may be stale (old links, revoked access), so only rememberCurrentSource persists it.
   function selectSource(newSourceId: number) {
     if (!hasTeam.value) {
       console.warn(`ContextStore: Cannot select source ${newSourceId} without team`)
       return
     }
     sourceId.value = newSourceId
+  }
 
+  // Called once the team's source list confirms the current source.
+  function rememberCurrentSource() {
+    if (teamId.value === null || sourceId.value === null) return
     const persisted = loadFromStorage()
-    persisted.sourcePerTeam[teamId.value!] = newSourceId
+    persisted.sourcePerTeam[teamId.value] = sourceId.value
     saveToStorage(persisted)
   }
 
@@ -140,11 +167,6 @@ export const useContextStore = defineStore('context', () => {
     return { teamId: storedTeamId, sourceId: storedSourceId }
   }
 
-  function getStoredSourceForTeam(forTeamId: number): number | null {
-    const persisted = loadFromStorage()
-    return persisted.sourcePerTeam[forTeamId] ?? null
-  }
-
   return {
     teamId,
     sourceId,
@@ -153,12 +175,12 @@ export const useContextStore = defineStore('context', () => {
     hasValidContext,
     selectTeam,
     selectSource,
+    rememberCurrentSource,
     clearSource,
     clear,
     clearStorage,
     setFromRoute,
     restoreTeam,
     getStoredDefaults,
-    getStoredSourceForTeam,
   }
 })

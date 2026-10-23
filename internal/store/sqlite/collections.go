@@ -27,25 +27,24 @@ func (db *DB) CreateCollection(ctx context.Context, name, description string, is
 		return nil, fmt.Errorf("error creating collection: %w", err)
 	}
 
-	owner := createdBy
-	return &models.Collection{
-		ID:          int(row.ID),
+	return collectionToModel(sqlc.Collection{
+		ID:          row.ID,
 		Name:        name,
-		Description: description,
-		IsPersonal:  isPersonal,
-		CreatedBy:   &owner,
+		Description: nullString(description),
+		IsPersonal:  boolToInt(isPersonal),
+		CreatedBy:   sql.NullInt64{Int64: int64(createdBy), Valid: true},
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
-	}, nil
+	}), nil
 }
 
 // GetCollection returns a collection by id, or ErrNotFound if missing.
 func (db *DB) GetCollection(ctx context.Context, collectionID int) (*models.Collection, error) {
 	row, err := db.readQueries.GetCollection(ctx, int64(collectionID))
 	if err != nil {
-		return nil, handleNotFoundError(err, fmt.Sprintf("getting collection id %d", collectionID))
+		return nil, fmt.Errorf("getting collection id %d: %w", collectionID, translateNotFound(err))
 	}
-	c := mapCollectionRow(sqlc.Collection{
+	c := collectionToModel(sqlc.Collection{
 		ID:          row.ID,
 		Name:        row.Name,
 		Description: row.Description,
@@ -65,9 +64,9 @@ func (db *DB) GetCollection(ctx context.Context, collectionID int) (*models.Coll
 func (db *DB) GetPersonalCollection(ctx context.Context, userID models.UserID) (*models.Collection, error) {
 	row, err := db.readQueries.GetPersonalCollection(ctx, sql.NullInt64{Int64: int64(userID), Valid: true})
 	if err != nil {
-		return nil, translateNotFound(err)
+		return nil, fmt.Errorf("getting personal collection for user %d: %w", userID, translateNotFound(err))
 	}
-	return mapCollectionRow(row), nil
+	return collectionToModel(row), nil
 }
 
 // UpdateCollection updates name and description.
@@ -103,22 +102,17 @@ func (db *DB) ListCollectionsForUser(ctx context.Context, userID models.UserID) 
 	out := make([]*models.Collection, 0, len(rows))
 	for i := range rows {
 		r := rows[i]
-		c := &models.Collection{
-			ID:          int(r.ID),
+		c := collectionToModel(sqlc.Collection{
+			ID:          r.ID,
 			Name:        r.Name,
-			Description: r.Description.String,
-			IsPersonal:  r.IsPersonal == 1,
-			CallerRole:  models.CollectionRole(r.CallerRole),
-			MemberCount: int(r.MemberCount),
-			TeamCount:   int(r.TeamCount),
-			ItemCount:   int(r.ItemCount),
+			Description: r.Description,
+			IsPersonal:  r.IsPersonal,
+			CreatedBy:   r.CreatedBy,
 			CreatedAt:   r.CreatedAt,
 			UpdatedAt:   r.UpdatedAt,
-		}
-		if r.CreatedBy.Valid {
-			uid := models.UserID(r.CreatedBy.Int64)
-			c.CreatedBy = &uid
-		}
+		})
+		c.CallerRole = models.CollectionRole(r.CallerRole)
+		c.MemberCount, c.TeamCount, c.ItemCount = int(r.MemberCount), int(r.TeamCount), int(r.ItemCount)
 		out = append(out, c)
 	}
 	return out, nil
@@ -150,7 +144,7 @@ func (db *DB) GetCollectionMember(ctx context.Context, collectionID int, userID 
 		UserID:       int64(userID),
 	})
 	if err != nil {
-		return nil, translateNotFound(err)
+		return nil, fmt.Errorf("getting collection %d member %d: %w", collectionID, userID, translateNotFound(err))
 	}
 	member := &models.CollectionMember{
 		CollectionID: int(row.CollectionID),
@@ -336,7 +330,7 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 	return out, nil
 }
 
-func mapCollectionRow(row sqlc.Collection) *models.Collection {
+func collectionToModel(row sqlc.Collection) *models.Collection {
 	c := &models.Collection{
 		ID:          int(row.ID),
 		Name:        row.Name,

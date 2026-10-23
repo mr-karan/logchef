@@ -32,13 +32,6 @@ func RunOAuth(t *testing.T, open Opener) {
 	t.Run("RefreshReplayRevocationSurvives", func(t *testing.T) { o.testRefreshReplay(t, ctx, open) })
 	t.Run("RefreshCheckDetectsReplay", func(t *testing.T) { o.testRefreshCheckReplay(t, ctx, open) })
 	t.Run("RefreshExpiredAndUnknown", func(t *testing.T) { o.testRefreshInvalid(t, ctx, open) })
-	t.Run("DeviceCodeIssueAndApproval", func(t *testing.T) { o.testDeviceApproval(t, ctx, open) })
-	t.Run("DeviceCodeConsumedOnce", func(t *testing.T) { o.testDeviceConsume(t, ctx, open) })
-	t.Run("DeviceCodeConsumedOnceConcurrently", func(t *testing.T) { o.testDeviceConcurrent(t, ctx, open) })
-	t.Run("DeviceApprovedButExpired", func(t *testing.T) { o.testDeviceExpired(t, ctx, open) })
-	t.Run("DeviceDeniedAndUnknown", func(t *testing.T) { o.testDeviceDenied(t, ctx, open) })
-	t.Run("DevicePollInterval", func(t *testing.T) { o.testDevicePoll(t, ctx, open) })
-	t.Run("DeviceEarlyPollReportsTerminalState", func(t *testing.T) { o.testDeviceEarlyTerminalPoll(t, ctx, open) })
 	t.Run("AccessTokenAuthentication", func(t *testing.T) { o.testAccessToken(t, ctx, open) })
 	t.Run("GrantRevocation", func(t *testing.T) { o.testRevocation(t, ctx, open) })
 	t.Run("CleanupKeepsLiveRefreshFamilies", func(t *testing.T) { o.testCleanup(t, ctx, open) })
@@ -141,26 +134,6 @@ func (o *oauthFixture) rotation(refreshExpiresAt time.Time) models.OAuthTokenIss
 		RefreshHash:      &refresh,
 		RefreshExpiresAt: refreshExpiresAt,
 	}
-}
-
-func (o *oauthFixture) device(t *testing.T, ctx context.Context, s store.StoreOps, expiresAt time.Time) (deviceCode, userCode models.OAuthSecretHash) {
-	t.Helper()
-	deviceCode = o.hash(o.name("device"))
-	userCode = o.hash(o.name("user-code"))
-	if err := s.CreateOAuthDeviceAuthorization(ctx, models.NewOAuthDeviceAuthorization{
-		DeviceCodeHash: deviceCode,
-		UserCodeHash:   userCode,
-		ClientID:       cliClient,
-		Resource:       apiResource,
-		Scopes:         []models.TokenScope{models.TokenScopeLogsRead},
-		OfflineAccess:  true,
-		Interval:       5 * time.Second,
-		ExpiresAt:      expiresAt,
-		CreatedAt:      o.base,
-	}); err != nil {
-		t.Fatalf("CreateOAuthDeviceAuthorization: %v", err)
-	}
-	return deviceCode, userCode
 }
 
 // race runs a and b at the same moment on separate goroutines.
@@ -423,227 +396,6 @@ func (o *oauthFixture) testRefreshInvalid(t *testing.T, ctx context.Context, ope
 	}
 }
 
-func (o *oauthFixture) testDeviceApproval(t *testing.T, ctx context.Context, open Opener) {
-	s1 := open(t)
-	user := o.user(t, ctx, s1)
-
-	deviceCode, userCode := o.device(t, ctx, s1, o.base.Add(10*time.Minute))
-	if err := s1.CreateOAuthDeviceAuthorization(ctx, models.NewOAuthDeviceAuthorization{
-		DeviceCodeHash: o.hash(o.name("device")), UserCodeHash: userCode, ClientID: cliClient,
-		Resource: apiResource, Interval: 5 * time.Second, ExpiresAt: o.base.Add(time.Minute), CreatedAt: o.base,
-	}); !errors.Is(err, models.ErrConflict) {
-		t.Fatalf("duplicate user code err = %v, want ErrConflict", err)
-	}
-	pending, err := s1.GetPendingOAuthDeviceAuthorization(ctx, userCode, o.base)
-	if err != nil || pending.ClientID != cliClient || pending.Resource != apiResource || pending.Interval != 5*time.Second {
-		t.Fatalf("pending device = %+v / %v", pending, err)
-	}
-	if poll, err := s1.RecordDevicePoll(ctx, deviceCode, cliClient, o.base); err != nil || poll.Status != models.DevicePollPending {
-		t.Fatalf("poll before approval = %+v / %v", poll, err)
-	}
-	if _, err := s1.ConsumeDeviceCode(ctx, deviceCode, cliClient, o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
-		t.Fatalf("consume before approval err = %v, want ErrOAuthInvalidGrant", err)
-	}
-	grant, err := s1.ApproveOAuthDeviceAuthorization(ctx, userCode, user.ID, o.base)
-	if err != nil || grant.UserID != user.ID || grant.Resource != apiResource || grant.ClientID != cliClient {
-		t.Fatalf("approve device = %+v / %v", grant, err)
-	}
-	if _, err := s1.GetPendingOAuthDeviceAuthorization(ctx, userCode, o.base); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("decided device still pending: %v", err)
-	}
-	if err := s1.DenyOAuthDeviceAuthorization(ctx, userCode, user.ID, o.base); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("deny after approve err = %v, want ErrNotFound", err)
-	}
-}
-
-// T-ST-4: an approved device code is consumed once.
-func (o *oauthFixture) testDeviceConsume(t *testing.T, ctx context.Context, open Opener) {
-	s1 := open(t)
-	user := o.user(t, ctx, s1)
-	deviceCode, userCode := o.device(t, ctx, s1, o.base.Add(10*time.Minute))
-	if _, err := s1.RecordDevicePoll(ctx, deviceCode, cliClient, o.base); err != nil {
-		t.Fatalf("first poll: %v", err)
-	}
-	grant, err := s1.ApproveOAuthDeviceAuthorization(ctx, userCode, user.ID, o.base)
-	if err != nil {
-		t.Fatalf("approve device: %v", err)
-	}
-	poll, err := s1.RecordDevicePoll(ctx, deviceCode, cliClient, o.base.Add(5*time.Second))
-	if err != nil || poll.Status != models.DevicePollApproved || poll.Authorization.GrantID == nil || *poll.Authorization.GrantID != grant.ID {
-		t.Fatalf("poll after approval = %+v / %v", poll, err)
-	}
-	if _, err := s1.ConsumeDeviceCode(ctx, deviceCode, "other-client", o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
-		t.Fatalf("consume by other client err = %v, want ErrOAuthInvalidGrant", err)
-	}
-	got, err := s1.ConsumeDeviceCode(ctx, deviceCode, cliClient, o.base)
-	if err != nil || got.ID != grant.ID {
-		t.Fatalf("first consume = %+v / %v", got, err)
-	}
-	if _, err := s1.ConsumeDeviceCode(ctx, deviceCode, cliClient, o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
-		t.Fatalf("second consume err = %v, want ErrOAuthInvalidGrant", err)
-	}
-	if _, err := s1.RecordDevicePoll(ctx, deviceCode, cliClient, o.base.Add(time.Minute)); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("poll after consumption err = %v, want ErrNotFound", err)
-	}
-}
-
-// T-ST-4 under concurrency: two connections, exactly one consume.
-func (o *oauthFixture) testDeviceConcurrent(t *testing.T, ctx context.Context, open Opener) {
-	s1, s2 := open(t), open(t)
-	user := o.user(t, ctx, s1)
-	for round := range raceRounds {
-		dc, uc := o.device(t, ctx, s1, o.base.Add(10*time.Minute))
-		if _, err := s1.ApproveOAuthDeviceAuthorization(ctx, uc, user.ID, o.base); err != nil {
-			t.Fatalf("round %d approve: %v", round, err)
-		}
-		var err1, err2 error
-		race(
-			func() { _, err1 = s1.ConsumeDeviceCode(ctx, dc, cliClient, o.base) },
-			func() { _, err2 = s2.ConsumeDeviceCode(ctx, dc, cliClient, o.base) },
-		)
-		if (err1 == nil) == (err2 == nil) {
-			t.Fatalf("round %d: want exactly one consume, got %v / %v", round, err1, err2)
-		}
-	}
-}
-
-// Auditor F4: approved, then expired before the poll. Storage reports expiry
-// first and refuses to consume.
-func (o *oauthFixture) testDeviceExpired(t *testing.T, ctx context.Context, open Opener) {
-	s1 := open(t)
-	user := o.user(t, ctx, s1)
-	dc, uc := o.device(t, ctx, s1, o.base.Add(time.Minute))
-	if _, err := s1.ApproveOAuthDeviceAuthorization(ctx, uc, user.ID, o.base); err != nil {
-		t.Fatalf("approve: %v", err)
-	}
-	late := o.base.Add(2 * time.Minute)
-	if poll, err := s1.RecordDevicePoll(ctx, dc, cliClient, late); err != nil || poll.Status != models.DevicePollExpired {
-		t.Fatalf("poll of approved but expired code = %+v / %v, want DevicePollExpired", poll, err)
-	}
-	if _, err := s1.ConsumeDeviceCode(ctx, dc, cliClient, late); !errors.Is(err, models.ErrOAuthInvalidGrant) {
-		t.Fatalf("consume of approved but expired code err = %v, want ErrOAuthInvalidGrant", err)
-	}
-}
-
-func (o *oauthFixture) testDeviceDenied(t *testing.T, ctx context.Context, open Opener) {
-	s1 := open(t)
-	user := o.user(t, ctx, s1)
-	late := o.base.Add(2 * time.Minute)
-	denied, deniedUser := o.device(t, ctx, s1, o.base.Add(10*time.Minute))
-	if err := s1.DenyOAuthDeviceAuthorization(ctx, deniedUser, user.ID, o.base); err != nil {
-		t.Fatalf("deny: %v", err)
-	}
-	if poll, err := s1.RecordDevicePoll(ctx, denied, cliClient, o.base); err != nil || poll.Status != models.DevicePollDenied {
-		t.Fatalf("poll of denied code = %+v / %v", poll, err)
-	}
-	if _, err := s1.ApproveOAuthDeviceAuthorization(ctx, deniedUser, user.ID, o.base); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("approve after deny err = %v, want ErrNotFound", err)
-	}
-
-	expiredDevice, expiredUser := o.device(t, ctx, s1, o.base.Add(time.Minute))
-	if _, err := s1.ApproveOAuthDeviceAuthorization(ctx, expiredUser, user.ID, late); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("approve expired err = %v, want ErrNotFound", err)
-	}
-	if poll, err := s1.RecordDevicePoll(ctx, expiredDevice, cliClient, late); err != nil || poll.Status != models.DevicePollExpired {
-		t.Fatalf("poll of expired code = %+v / %v", poll, err)
-	}
-	if _, err := s1.RecordDevicePoll(ctx, o.hash("never-issued"), cliClient, o.base); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("poll of unknown code err = %v, want ErrNotFound", err)
-	}
-	if _, err := s1.RecordDevicePoll(ctx, expiredDevice, webClient, late.Add(time.Minute)); !errors.Is(err, models.ErrNotFound) {
-		t.Fatalf("poll by other client err = %v, want ErrNotFound", err)
-	}
-}
-
-// T-ST-5: a poll before the interval elapses is slowed down, and the stored
-// interval grows by 5 s each time. The interval counts from the last on-time
-// poll; early polls do not reset it.
-func (o *oauthFixture) testDevicePoll(t *testing.T, ctx context.Context, open Opener) {
-	s := open(t)
-	deviceCode, userCode := o.device(t, ctx, s, o.base.Add(10*time.Minute))
-	at := func(d time.Duration) models.OAuthDevicePollStatus {
-		t.Helper()
-		poll, err := s.RecordDevicePoll(ctx, deviceCode, cliClient, o.base.Add(d))
-		if err != nil {
-			t.Fatalf("poll at +%s: %v", d, err)
-		}
-		return poll.Status
-	}
-	interval := func() time.Duration {
-		t.Helper()
-		d, err := s.GetPendingOAuthDeviceAuthorization(ctx, userCode, o.base)
-		if err != nil {
-			t.Fatalf("GetPendingOAuthDeviceAuthorization: %v", err)
-		}
-		return d.Interval
-	}
-
-	steps := []struct {
-		at       time.Duration
-		want     models.OAuthDevicePollStatus
-		interval time.Duration
-	}{
-		{0, models.DevicePollPending, 5 * time.Second},
-		{time.Second, models.DevicePollSlowDown, 10 * time.Second},
-		{9 * time.Second, models.DevicePollSlowDown, 15 * time.Second},
-		{15 * time.Second, models.DevicePollPending, 15 * time.Second},
-		{16 * time.Second, models.DevicePollSlowDown, 20 * time.Second},
-	}
-	for _, step := range steps {
-		if got := at(step.at); got != step.want {
-			t.Fatalf("poll at +%s = %v, want %v", step.at, got, step.want)
-		}
-		if got := interval(); got != step.interval {
-			t.Fatalf("interval after poll at +%s = %s, want %s", step.at, got, step.interval)
-		}
-	}
-}
-
-// An early poll on an expired, denied, or approved-but-expired request
-// reports the terminal state instead of slow_down, and does not grow the
-// interval.
-func (o *oauthFixture) testDeviceEarlyTerminalPoll(t *testing.T, ctx context.Context, open Opener) {
-	s := open(t)
-	user := o.user(t, ctx, s)
-	// interval is the stored interval the poll must report; 0 for slow_down,
-	// which carries no authorization.
-	poll := func(deviceCode models.OAuthSecretHash, at time.Duration, want models.OAuthDevicePollStatus, interval time.Duration) {
-		t.Helper()
-		got, err := s.RecordDevicePoll(ctx, deviceCode, cliClient, o.base.Add(at))
-		if err != nil || got.Status != want {
-			t.Fatalf("poll at +%s = %+v / %v, want status %v", at, got, err, want)
-		}
-		if got.Authorization.Interval != interval {
-			t.Fatalf("poll at +%s interval = %s, want %s", at, got.Authorization.Interval, interval)
-		}
-	}
-
-	expired, _ := o.device(t, ctx, s, o.base.Add(time.Minute))
-	poll(expired, 58*time.Second, models.DevicePollPending, 5*time.Second)
-	poll(expired, 60*time.Second, models.DevicePollExpired, 5*time.Second)
-	poll(expired, 61*time.Second, models.DevicePollExpired, 5*time.Second)
-
-	denied, deniedUser := o.device(t, ctx, s, o.base.Add(10*time.Minute))
-	poll(denied, 0, models.DevicePollPending, 5*time.Second)
-	if err := s.DenyOAuthDeviceAuthorization(ctx, deniedUser, user.ID, o.base); err != nil {
-		t.Fatalf("deny: %v", err)
-	}
-	poll(denied, time.Second, models.DevicePollDenied, 5*time.Second)
-	poll(denied, 2*time.Second, models.DevicePollDenied, 5*time.Second)
-
-	approved, approvedUser := o.device(t, ctx, s, o.base.Add(time.Minute))
-	if _, err := s.ApproveOAuthDeviceAuthorization(ctx, approvedUser, user.ID, o.base); err != nil {
-		t.Fatalf("approve: %v", err)
-	}
-	poll(approved, 58*time.Second, models.DevicePollApproved, 5*time.Second)
-	// Approved is not terminal until consumed, so the interval still applies.
-	poll(approved, 59*time.Second, models.DevicePollSlowDown, 0)
-	poll(approved, 60*time.Second, models.DevicePollExpired, 10*time.Second)
-	if _, err := s.ConsumeDeviceCode(ctx, approved, cliClient, o.base.Add(60*time.Second)); !errors.Is(err, models.ErrOAuthInvalidGrant) {
-		t.Fatalf("consume after early expired poll err = %v, want ErrOAuthInvalidGrant", err)
-	}
-}
-
 func (o *oauthFixture) testAccessToken(t *testing.T, ctx context.Context, open Opener) {
 	s := open(t)
 	user := o.user(t, ctx, s)
@@ -770,7 +522,6 @@ func (o *oauthFixture) testCleanup(t *testing.T, ctx context.Context, open Opene
 		t.Fatalf("rotate = %+v / %v", out, err)
 	}
 	pendingReq := o.authRequest(t, ctx, s, o.base.Add(10*time.Minute))
-	_, userCode := o.device(t, ctx, s, o.base.Add(10*time.Minute))
 
 	// r0's own expiry has passed but r1 keeps the family live.
 	if err := s.DeleteExpiredOAuthRows(ctx, o.base.Add(90*time.Minute)); err != nil {
@@ -778,13 +529,6 @@ func (o *oauthFixture) testCleanup(t *testing.T, ctx context.Context, open Opene
 	}
 	if _, err := s.GetOAuthAuthRequest(ctx, pendingReq); !errors.Is(err, models.ErrNotFound) {
 		t.Fatalf("expired auth request survived cleanup: %v", err)
-	}
-	// The expired device row is gone, so its user code can be issued again.
-	if err := s.CreateOAuthDeviceAuthorization(ctx, models.NewOAuthDeviceAuthorization{
-		DeviceCodeHash: o.hash(o.name("device")), UserCodeHash: userCode, ClientID: cliClient,
-		Resource: apiResource, Interval: 5 * time.Second, ExpiresAt: o.base.Add(2 * time.Hour), CreatedAt: o.base,
-	}); err != nil {
-		t.Fatalf("reuse of cleaned user code: %v", err)
 	}
 	if out, err := s.CheckRefreshToken(ctx, r0, o.base.Add(90*time.Minute)); err != nil || out.Kind != models.RefreshReplay {
 		t.Fatalf("consumed r0 after cleanup = %+v / %v, want RefreshReplay (row kept)", out, err)
@@ -813,10 +557,6 @@ func (o *oauthFixture) testRestart(t *testing.T, ctx context.Context, open Opene
 	user := o.user(t, ctx, first)
 	grant, code := o.approvedCode(t, ctx, first, user, o.base.Add(2*time.Minute))
 	access, refresh := o.tokens(t, ctx, first, grant.ID, o.base.Add(time.Hour))
-	deviceCode, _ := o.device(t, ctx, first, o.base.Add(10*time.Minute))
-	if _, err := first.RecordDevicePoll(ctx, deviceCode, cliClient, o.base); err != nil {
-		t.Fatalf("RecordDevicePoll: %v", err)
-	}
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -830,9 +570,6 @@ func (o *oauthFixture) testRestart(t *testing.T, ctx context.Context, open Opene
 	}
 	if _, err := second.ConsumeAuthCode(ctx, code, o.base); err != nil {
 		t.Fatalf("auth code lost across restart: %v", err)
-	}
-	if poll, err := second.RecordDevicePoll(ctx, deviceCode, cliClient, o.base.Add(time.Second)); err != nil || poll.Status != models.DevicePollSlowDown {
-		t.Fatalf("poll timestamp lost across restart = %+v / %v, want slow down", poll, err)
 	}
 	if out, err := second.RotateRefreshToken(ctx, refresh, o.rotation(o.base.Add(time.Hour)), o.base); err != nil || out.Kind != models.RefreshOK {
 		t.Fatalf("refresh token lost across restart = %+v / %v", out, err)

@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { createPinia, setActivePinia } from 'pinia';
-import { useExploreWindowedStore } from '../exploreWindowed';
+import { sourcesApi, type Source } from '@/api/sources';
+import { useSourcesStore } from '../sources';
+import { useExploreStore } from '../explore';
+import { useExploreRuns } from '../exploreRuns';
+import { useContextStore } from '../context';
+import { createWindowedSession } from '../exploreWindowed';
 import type { LogRow, WindowedEvent, WindowedRequest } from '@/api/windowed';
 
 const windows = [
@@ -13,6 +18,7 @@ const row = (message: string, timestamp = windows[0].start): LogRow => ({ _time:
 let server: Server;
 let requests: WindowedRequest[];
 let cancellations: number;
+const sessions: ReturnType<typeof createWindowedSession>[] = [];
 let respond: (request: WindowedRequest) => WindowedEvent[] | null;
 // Events written before a stream stays open, used when respond returns null.
 let openEvents: WindowedEvent[];
@@ -56,7 +62,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  useExploreWindowedStore().stop();
+  useExploreRuns().enter(null);
+  for (const session of sessions.splice(0)) session.stop();
+  vi.restoreAllMocks();
+  localStorage.clear();
   globalThis.fetch = originalFetch;
   server.closeAllConnections();
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -66,18 +75,59 @@ function event(value: Omit<WindowedEvent, 'complete'> & { complete?: boolean }):
   return { complete: false, ...value };
 }
 function start(histogram = true, overrides: Partial<WindowedRequest> = {}) {
-  const store = useExploreWindowedStore();
   const loaded: LogRow[][] = [];
-  const finished = store.start({ teamId: 1, sourceId: 1, request: { ...request, ...overrides }, histogram, onRows: rows => loaded.push(rows) }, new AbortController().signal);
+  const store = createWindowedSession({ teamId: 1, sourceId: 1, request: { ...request, ...overrides }, histogram, onRows: rows => loaded.push(rows) });
+  sessions.push(store);
+  const finished = store.start();
   return { store, loaded, finished };
 }
 
 describe('windowed explorer over HTTP', () => {
+  it.each(['retry', 'skip', 'older'])('shows and keeps as run the rows that %s finds after a Stop before any rows', async action => {
+    const source: Source = {
+      id: 1, name: 'logs', source_type: 'victorialogs', _meta_is_auto_created: false,
+      _meta_ts_field: '_time', connection: { base_url: 'http://logs.test', optimizer: { enabled: true, histogram_enabled: false } },
+      ttl_days: 1, created_at: '', updated_at: '', is_connected: true,
+    };
+    vi.spyOn(sourcesApi, 'listTeamSources').mockResolvedValue({ status: 'success', data: [source] });
+    vi.spyOn(sourcesApi, 'getTeamSource').mockResolvedValue({ status: 'success', data: source });
+    const context = useContextStore();
+    context.selectTeam(1);
+    context.selectSource(1);
+    const sources = useSourcesStore();
+    await vi.waitFor(() => expect(sources.currentSourceDetails?.id).toBe(1));
+    const explore = useExploreStore();
+    explore.open({ teamId: 1, sourceId: 1, content: { kind: 'query', mode: 'native', text: '*', window: { kind: 'relative', spec: '1h' }, limit: 2 } });
+    explore.setNativeQuery('level:error');
+    respond = req => {
+      if (req.count) return [event({ type: 'end' })];
+      if (req.window_index === 0) return [event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('retried')], cursor: 'second' }), event({ type: 'end', cursor: 'second' })];
+      if (req.skip_window === 0 || req.cursor === 'second') return [event({ type: 'rows', window: windows[1], status: 'complete', logs: [row('older', windows[1].start)] }), event({ type: 'end', complete: true })];
+      return null;
+    };
+    const runs = useExploreRuns();
+    runs.run(explore.editorQuery);
+    const windowed = runs.current?.search;
+    if (!windowed) throw new Error("run has no windowed session");
+    await vi.waitFor(() => expect(windowed.skippableWindow?.index).toBe(0));
+    runs.stop();
+    expect(runs.shown).toBeNull();
+    expect(JSON.parse(localStorage.getItem('logchef.explore.draft.1.1') ?? '{}').nativeQuery).toBe('level:error');
+    if (action === 'skip') await runs.page('skip');
+    else {
+      await runs.page({ retry: windowed.coverage[0] });
+      if (action === 'older') await runs.page('older');
+    }
+    expect(runs.results?.rows.map(log => log._msg)).toEqual(action === 'retry' ? ['retried'] : action === 'skip' ? ['older'] : ['retried', 'older']);
+    expect(runs.shown?.query).toEqual({ mode: 'native', text: 'level:error' });
+  });
+
   it('uses exact JSON stream filters and builds a complete first-page histogram without counts', async () => {
     respond = () => [event({ type: 'plan', windows }), event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('one')] }), event({ type: 'end', complete: true })];
     const { store, loaded, finished } = start();
-    store.selectedStreams = { 'kubernetes.namespace': ['a.b', 'a|b', 'quoted"value'] };
-    expect(store.streamFilters).toEqual([JSON.stringify({ 'kubernetes.namespace': ['a.b', 'a|b', 'quoted"value'] })]);
+    const explore = useExploreStore();
+    explore.selectedStreams = { 'kubernetes.namespace': ['a.b', 'a|b', 'quoted"value'] };
+    expect(explore.streamFilters).toEqual([JSON.stringify({ 'kubernetes.namespace': ['a.b', 'a|b', 'quoted"value'] })]);
     await finished;
     expect(loaded.at(-1)).toEqual([row('one')]);
     expect(requests).toHaveLength(1);
@@ -103,7 +153,7 @@ describe('windowed explorer over HTTP', () => {
     await store.retryCount(1);
     expect(store.total).toBe(5);
     expect(store.countComplete).toBe(true);
-    await store.loadOlder();
+    await store.page('older');
     expect(requests.at(-1)?.start_time).toBe(windows[1].start);
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
     expect(store.histogramEnabled).toBe(false);
@@ -118,11 +168,11 @@ describe('windowed explorer over HTTP', () => {
     };
     const { store, loaded, finished } = start();
     await vi.waitFor(() => expect(store.skippableWindow?.index).toBe(0));
-    await store.skipWindow();
+    await store.page('skip');
     await finished;
     expect(store.coverage[0].search).toBe('skipped');
     expect(store.complete).toBe(false);
-    await store.retrySearch(store.coverage[0]);
+    await store.page({ retry: store.coverage[0] });
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
     expect(store.complete).toBe(true);
     expect(requests.find(req => req.skip_window === 0)?.cursor).toBe('first');
@@ -153,11 +203,11 @@ describe('windowed explorer over HTTP', () => {
     await finished;
     expect(store.coverage.map(w => w.search)).toEqual(['failed', 'pending']);
     expect(store.cursor).toBe('first');
-    await store.retrySearch(store.coverage[1]);
+    await store.page({ retry: store.coverage[1] });
     expect(requests.some(req => req.window_index === 1)).toBe(false);
-    await store.retrySearch(store.coverage[0]);
+    await store.page({ retry: store.coverage[0] });
     expect(store.cursor).toBe('second');
-    await store.loadOlder();
+    await store.page('older');
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
     expect(store.coverage.map(w => w.search)).toEqual(['complete', 'complete']);
     expect(store.complete).toBe(true);
@@ -176,14 +226,14 @@ describe('windowed explorer over HTTP', () => {
     expect(store.coverage[0]).toMatchObject({ search: 'failed', message });
     expect(store.skippableWindow?.index).toBe(0);
     expect(store.canRetrySearch(store.coverage[1])).toBe(false);
-    await store.skipWindow();
+    await store.page('skip');
     expect(requests.find(req => req.skip_window === 0)?.cursor).toBe('first');
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['older']);
     expect(store.coverage.map(w => w.search)).toEqual(['skipped', 'complete']);
     expect(store.skippableWindow).toBeUndefined();
     expect(store.complete).toBe(false);
     expect(store.canRetrySearch(store.coverage[0])).toBe(true);
-    await store.retrySearch(store.coverage[0]);
+    await store.page({ retry: store.coverage[0] });
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
   });
 
@@ -204,13 +254,13 @@ describe('windowed explorer over HTTP', () => {
     openEvents = [event({ type: 'plan', windows: three, cursor: 'c0' }), event({ type: 'window', window: three[0], status: 'running', cursor: 'c0' })];
     const { store, loaded, finished } = start(true, { start_time: three[2].start, end_time: three[0].end, limit: 1 });
     await vi.waitFor(() => expect(store.skippableWindow?.index).toBe(0));
-    await store.skipWindow();
+    await store.page('skip');
     await finished;
     expect(store.coverage.map(w => w.search)).toEqual(['skipped', 'failed', 'pending']);
-    const retry = store.retrySearch(store.coverage[0]);
+    const retry = store.page({ retry: store.coverage[0] });
     await vi.waitFor(() => expect(store.coverage[0].search).toBe('running'));
     expect(store.skippableWindow?.index).toBe(1);
-    await store.skipWindow();
+    await store.page('skip');
     await retry;
     expect(store.coverage.map(w => w.search)).toEqual(['failed', 'skipped', 'partial']);
     expect(store.cursor).toBe('c2b');
@@ -218,7 +268,7 @@ describe('windowed explorer over HTTP', () => {
     expect(store.canRetrySearch(store.coverage[1])).toBe(true);
     expect(store.canRetrySearch(store.coverage[2])).toBe(false);
     slow = false;
-    await store.retrySearch(store.coverage[0]);
+    await store.page({ retry: store.coverage[0] });
     expect(store.cursor).toBe('c2b');
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newest', 'oldest']);
     expect(store.complete).toBe(false);
@@ -235,7 +285,7 @@ describe('windowed explorer over HTTP', () => {
     };
     const { store, loaded, finished } = start();
     await vi.waitFor(() => expect(store.skippableWindow?.index).toBe(0));
-    await store.skipWindow();
+    await store.page('skip');
     await finished;
     expect(store.error).toBe('Connection closed before the windowed query finished');
     expect(store.coverage.map(w => w.search)).toEqual(['failed', 'pending']);
@@ -244,7 +294,7 @@ describe('windowed explorer over HTTP', () => {
     expect(store.canRetrySearch(store.coverage[0])).toBe(true);
     expect(store.canRetrySearch(store.coverage[1])).toBe(false);
     skipFails = false;
-    await store.skipWindow();
+    await store.page('skip');
     expect(requests.filter(req => req.skip_window === 0).map(req => req.cursor)).toEqual(['first', 'first']);
     expect(store.coverage.map(w => w.search)).toEqual(['skipped', 'complete']);
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['older']);
@@ -305,12 +355,12 @@ describe('windowed explorer over HTTP', () => {
     };
     const { store, loaded, finished } = start();
     await finished;
-    await store.retrySearch(store.coverage[0]);
+    await store.page({ retry: store.coverage[0] });
     expect(store.cursor).toBe(lastWindow ? '' : 'second');
     expect(store.complete).toBe(lastWindow);
     if (!lastWindow) {
       expect(store.coverage[1].search).toBe('pending');
-      await store.loadOlder();
+      await store.page('older');
       expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
       expect(store.complete).toBe(true);
     }

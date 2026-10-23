@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -37,6 +38,9 @@ func (s *Store) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
+	if !alert.IsActive && s.pool != nil {
+		return s.WithTx(ctx, func(tx store.StoreOps) error { return tx.UpdateAlert(ctx, alert) })
+	}
 	createParams, err := alertCreateParams(alert)
 	if err != nil {
 		return err
@@ -66,6 +70,11 @@ func (s *Store) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert: %w", err)
+	}
+	if !alert.IsActive {
+		if err := s.q.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: int64(alert.ID)}); err != nil {
+			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
+		}
 	}
 	return nil
 }
@@ -128,6 +137,14 @@ func (s *Store) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) 
 	return nil
 }
 
+// TouchAlertEvaluated records an evaluation without changing the alert state.
+func (s *Store) TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
+	if err := s.q.TouchAlertEvaluated(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to touch alert evaluated: %w", err)
+	}
+	return nil
+}
+
 // MarkAlertTriggered updates state when an alert fires.
 func (s *Store) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
 	if err := s.q.MarkAlertTriggered(ctx, int64(alertID)); err != nil {
@@ -179,16 +196,26 @@ func (s *Store) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID
 	return alertHistoryFromSQLC(row)
 }
 
-// ResolveAlertHistory marks a history entry resolved with an optional message.
+// ResolveAlertHistory resolves all firing history for the selected entry's alert.
 func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
-	if _, err := s.q.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{
-		Message: text(message),
-		ID:      historyID,
-	}); err != nil {
+	if s.pool != nil {
+		return s.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
+	}
+	alertID, err := s.q.GetTriggeredAlertHistoryAlertID(ctx, historyID)
+	if err != nil {
 		if notFound(err) {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if err := s.q.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: alertID}); err != nil {
+		return fmt.Errorf("failed to interrupt legacy alert deliveries: %w", err)
+	}
+	if err := s.q.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: text(message)}); err != nil {
+		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
+	}
+	if err := s.q.MarkAlertResolved(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to mark alert resolved: %w", err)
 	}
 	return nil
 }
@@ -232,7 +259,7 @@ func (s *Store) ListAlertHistory(ctx context.Context, alertID models.AlertID, li
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries for an alert.
+// PruneAlertHistory keeps the most recent N entries and the newest unresolved firing.
 func (s *Store) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -415,4 +442,12 @@ func float8FromPtr(v *float64) pgtype.Float8 {
 		return pgtype.Float8{}
 	}
 	return pgtype.Float8{Float64: *v, Valid: true}
+}
+
+// RecoverAlertDeliveries finalizes delivery reservations left by a stopped manager.
+func (s *Store) RecoverAlertDeliveries(ctx context.Context) error {
+	if err := s.q.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
+		return fmt.Errorf("failed to recover alert deliveries: %w", err)
+	}
+	return nil
 }

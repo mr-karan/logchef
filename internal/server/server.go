@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
@@ -29,6 +31,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/compress"
 	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/static"
+	"github.com/google/uuid"
 
 	// Import generated docs (will be created after running swag init)
 	_ "github.com/mr-karan/logchef/docs"
@@ -41,6 +44,7 @@ type ServerOptions struct {
 	SQLite        store.Store
 	ClickHouse    *clickhouse.Manager
 	Datasources   *datasource.Service
+	WebhookSender *alerts.DynamicWebhookSender
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	OAuth         *oauth.Server      // OAuth authorization server; nil when auth.oauth is disabled.
@@ -58,9 +62,10 @@ type ServerOptions struct {
 type Server struct {
 	app           *fiber.App
 	config        *config.Config
-	sqlite        store.Store
+	store         store.Store
 	clickhouse    *clickhouse.Manager
 	datasources   *datasource.Service
+	webhookSender *alerts.DynamicWebhookSender
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	oauth         *oauth.Server      // nil when auth.oauth is disabled
@@ -73,7 +78,22 @@ type Server struct {
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
 	askChefTurns  askChefTurns
 
-	stop chan struct{} // closed by Shutdown to stop background maintenance loops
+	localLoginLimiter *auth.LoginRateLimiter
+
+	listener        net.Listener
+	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
+	backgroundMu    sync.Mutex
+	shutdownOnce    sync.Once
+	shutdownErr     error
+	backgroundDone  chan struct{}
+	exportOwner     models.ExportJobOwner
+	historyQueue    chan *models.QueryHistory
+	historyDropped  atomic.Uint64
+	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
+	tokenQueue      chan int
+	tokenLastQueued map[int]time.Time
+	tokenDropped    atomic.Uint64
+	stop            chan struct{} // closed by Shutdown to stop background maintenance loops
 	// cancelRequests cancels the base context every request runs on (see
 	// requestContext).
 	cancelRequests context.CancelFunc
@@ -123,14 +143,16 @@ func New(opts ServerOptions) *Server {
 		ProxyHeader:        opts.Config.Server.ProxyHeader,
 		EnableIPValidation: true,
 		ErrorHandler: func(c fiber.Ctx, err error) error {
-			code := fiber.StatusInternalServerError
+			// Server errors can contain driver details or recovered panic text.
+			code, message := fiber.StatusInternalServerError, "Internal server error"
 			if e, ok := errors.AsType[*fiber.Error](err); ok {
-				code = e.Code // Use Fiber's error code if available.
+				code = e.Code
+				if code < fiber.StatusInternalServerError {
+					message = e.Message
+				}
 			}
-			// Log the internal error details.
-			log.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
-			// Return a standardized JSON error response to the client.
-			return SendError(c, code, err.Error()) // Assumes SendError is defined elsewhere.
+			log.Error("request error", "route", redactedRequestPath(c), "method", c.Method(), "error", err.Error())
+			return SendError(c, code, message)
 		},
 	})
 
@@ -158,10 +180,11 @@ func New(opts ServerOptions) *Server {
 	s := &Server{
 		app:           app,
 		config:        opts.Config,
-		sqlite:        opts.SQLite,
+		store:         opts.SQLite,
 		clickhouse:    opts.ClickHouse,
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
+		webhookSender: opts.WebhookSender,
 		oidcProvider:  opts.OIDCProvider,
 		oauth:         opts.OAuth,
 		fs:            opts.FS,
@@ -177,8 +200,18 @@ func New(opts ServerOptions) *Server {
 			MaxEntries:         opts.Config.DashboardCache.MaxEntries,
 			MaxConcurrentFills: opts.Config.DashboardCache.MaxConcurrentFills,
 		}),
-		stop:           make(chan struct{}),
-		cancelRequests: cancelRequests,
+		exportOwner:     models.ExportJobOwner{InstanceID: opts.Config.Export.InstanceID, ProcessID: uuid.NewString()},
+		baseCtx:         baseCtx,
+		backgroundDone:  make(chan struct{}),
+		historyQueue:    make(chan *models.QueryHistory, 128),
+		tokenQueue:      make(chan int, 128),
+		tokenLastQueued: make(map[int]time.Time),
+		stop:            make(chan struct{}),
+		cancelRequests:  cancelRequests,
+	}
+
+	if opts.Config.Auth.Local.Enabled {
+		s.localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 	}
 
 	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())
@@ -188,8 +221,10 @@ func New(opts ServerOptions) *Server {
 	s.indexHTML = indexHTML
 	s.askChef = s.newAskChef(opts.AskChefChat)
 
-	// Register all application routes.
+	s.reapInterruptedExportJobs(s.exportOwner)
 	s.setupRoutes()
+	s.startQueryHistoryWorker()
+	s.startTokenLastUsedWorker()
 	s.startBackgroundCleanup()
 
 	return s
@@ -226,7 +261,7 @@ func recoverMiddleware(log *slog.Logger) fiber.Handler {
 		EnableStackTrace: true,
 		StackTraceHandler: func(c fiber.Ctx, panicValue any) {
 			log.Error("panic recovered",
-				"path", c.Path(),
+				"route", redactedRequestPath(c),
 				"method", c.Method(),
 				"panic", panicValue,
 				"stack", string(debug.Stack()),
@@ -355,7 +390,7 @@ func (s *Server) setupRoutes() {
 	admin.Get("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleGetSetting)
 	admin.Put("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleUpdateSetting)
 	admin.Delete("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleDeleteSetting)
-	admin.Post("/settings/test-email", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestEmail)
+	admin.Post("/settings/test-email", s.requireSession, s.requireAlertsEnabled, s.handleTestEmail)
 	admin.Post("/settings/test-webhook", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestWebhook)
 
 	// --- Team Routes (Access controlled by team membership) ---
@@ -422,7 +457,7 @@ func (s *Server) setupRoutes() {
 	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember)
 	// Get detailed source info including connection status and schema
 	teamSourceOps.Get("/", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSource)
-	teamSourceOps.Get("/stats", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
+	teamSourceOps.Get("/stats", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetSourceStats)
 	teamSourceOps.Get("/activity", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
 
 	// Query and explore logs. The heavy query/exploration endpoints are
@@ -543,19 +578,68 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 	s.log.Info("starting http server", "address", addr)
-	return s.app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true})
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(s.baseCtx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	s.backgroundMu.Lock()
+	select {
+	case <-s.stop:
+		s.backgroundMu.Unlock()
+		_ = listener.Close()
+		return nil
+	default:
+	}
+	s.listener = listener
+	s.backgroundMu.Unlock()
+	return s.app.Listener(listener, fiber.ListenConfig{DisableStartupMessage: true})
 }
 
-// Shutdown gracefully shuts down the Fiber server within the given context timeout.
-// It also stops background maintenance loops (e.g. the expired-session/export-job
-// sweeper) and waits for them to exit before returning.
+// Shutdown closes admission, cancels workers, and waits for at most five seconds.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
-	close(s.stop)
-	s.cancelRequests()
-	if s.dashCache != nil {
-		s.dashCache.Close()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	s.shutdownOnce.Do(func() {
+		s.backgroundMu.Lock()
+		s.historyDrainCtx = ctx
+		close(s.stop)
+		if s.listener != nil {
+			_ = s.listener.Close()
+		}
+		s.cancelRequests()
+		s.backgroundMu.Unlock()
+		go func() {
+			err := s.app.ShutdownWithContext(ctx)
+			if err != nil && !errors.Is(err, fiber.ErrNotRunning) && !errors.Is(err, net.ErrClosed) {
+				s.shutdownErr = err
+				s.log.Warn("HTTP shutdown failed", "error", err)
+			}
+			s.wg.Wait()
+			s.logBackgroundDrops()
+			if s.dashCache != nil {
+				s.dashCache.Close()
+			}
+			close(s.backgroundDone)
+		}()
+	})
+	select {
+	case <-s.backgroundDone:
+		return s.shutdownErr
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	s.wg.Wait()
-	return s.app.ShutdownWithContext(ctx)
+}
+
+func (s *Server) startBackgroundTask(run func()) bool {
+	s.backgroundMu.Lock()
+	defer s.backgroundMu.Unlock()
+	select {
+	case <-s.stop:
+		return false
+	default:
+		s.wg.Go(run)
+		return true
+	}
 }

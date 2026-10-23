@@ -2,7 +2,7 @@
 import { useI18n } from "vue-i18n";
 import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
 
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useTeamsStore } from "@/stores/teams";
 import { useToast } from "@/composables/useToast";
 import { alertHistoryExploreQuery } from "@/utils/alertExplore";
+import AlertDeliveryStatus from "@/components/alerts/AlertDeliveryStatus.vue";
 import AlertForm from "@/components/alerts/AlertForm.vue";
 import { EmptyState, LoadingState } from "@/components/layout";
 import type { Alert, AlertHistoryEntry, UpdateAlertRequest } from "@/api/alerts";
@@ -45,7 +46,13 @@ function formatEventTime(timestamp: string): string {
 }
 
 const alertId = computed(() => Number(route.params.alertID));
-const currentTab = ref<"edit" | "history">("edit");
+const currentTab = computed({
+  get: () => route.query.tab === "history" ? "history" : "edit",
+  set: (tab: string | number) => {
+    const { tab: _tab, ...query } = route.query;
+    void router.replace({ query: tab === "history" ? { ...query, tab } : query });
+  },
+});
 const showDeleteDialog = ref(false);
 
 const alert = computed(() => {
@@ -77,13 +84,13 @@ function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outli
 }
 
 function goBack() {
-  router.push({ name: "AlertsOverview", query: route.query });
+  const { tab: _tab, ...query } = route.query;
+  router.push({ name: "AlertsOverview", query });
 }
 
 async function handleUpdate(payload: UpdateAlertRequest) {
   if (!alert.value) return;
-  // Alerts are no longer team-scoped — drop the team/source guards.
-  await alertsStore.updateAlert(undefined, undefined, alert.value.id, payload);
+  await alertsStore.updateAlert(alert.value.id, payload);
 }
 
 function confirmDelete() {
@@ -92,7 +99,7 @@ function confirmDelete() {
 
 async function handleDelete() {
   if (!alert.value) return;
-  const result = await alertsStore.deleteAlert(undefined, undefined, alert.value.id);
+  const result = await alertsStore.deleteAlert(alert.value.id);
   if (result.success) {
     goBack();
   }
@@ -107,10 +114,10 @@ async function findTeamWithSource(sourceId: number): Promise<number | null> {
   const teamIds = new Set([currentTeamId.value, ...teamsStore.userTeams.map((team) => team.id)]);
   for (const teamId of teamIds) {
     if (teamId == null) continue;
-    if (!teamsStore.getTeamSources(teamId).length) {
+    if (!teamsStore.getTeamSourcesByTeamId(teamId).length) {
       await teamsStore.listTeamSources(teamId);
     }
-    if (teamsStore.getTeamSources(teamId).some((source) => source.id === sourceId)) {
+    if (teamsStore.getTeamSourcesByTeamId(teamId).some((source) => source.id === sourceId)) {
       return teamId;
     }
   }
@@ -143,8 +150,6 @@ async function loadHistory() {
 async function handleResolve(_historyId: number, message: string) {
   if (!alertId.value) return;
   const result = await alertHistoryStore.resolveAlert(
-    undefined,
-    undefined,
     alertId.value,
     { message }
   );
@@ -153,25 +158,16 @@ async function handleResolve(_historyId: number, message: string) {
   }
 }
 
-watch(
-  currentTab,
-  async (tab) => {
-    if (tab === "history" && !historyEntries.value.length) {
-      await loadHistory();
-    }
-  },
-  { immediate: true }
-);
-
-onMounted(async () => {
+watch([alertId, currentTab], ([id, tab]) => {
+  alertHistoryStore.setCurrentContext(id || null);
+  if (!id) return;
   if (!alert.value) {
-    await alertsStore.refreshAlert(undefined, undefined, alertId.value);
+    void alertsStore.refreshAlert(id);
   }
-  if (route.query.tab === "history") {
-    currentTab.value = "history";
-    await loadHistory();
+  if (tab === "history") {
+    void loadHistory();
   }
-});
+}, { immediate: true });
 </script>
 
 <template>
@@ -185,7 +181,7 @@ onMounted(async () => {
     <!-- Header Section -->
     <div class="flex items-start justify-between gap-4">
       <div class="flex items-start gap-3">
-        <Button variant="ghost" size="icon" @click="goBack">
+        <Button variant="ghost" size="icon" :aria-label="t('ui.goBack')" @click="goBack">
           <ArrowLeft class="h-5 w-5" />
         </Button>
         <div class="space-y-1">
@@ -347,6 +343,8 @@ onMounted(async () => {
                       </Button>
                     </div>
                   </div>
+
+                  <AlertDeliveryStatus :entry="entry" />
 
                   <!-- Resolution Info -->
                   <div v-if="entry.resolved_at" class="text-xs text-muted-foreground">

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
 // Translate parses a LogchefQL query and returns the SQL translation with metadata.
@@ -312,29 +314,6 @@ func validateTableName(name string) *ParseError {
 	return nil
 }
 
-// BuildFullQuery builds a complete SQL query from LogchefQL with time range and other parameters.
-// This is used when executing the query against ClickHouse.
-func BuildFullQuery(params QueryBuildParams) (string, error) {
-	start, end, err := prepareTimeRange(params)
-	if err != nil {
-		return "", err
-	}
-
-	pq, parseErr := ParseLogchefQL(params.LogchefQL)
-	if parseErr != nil {
-		return "", convertParticipleError(parseErr)
-	}
-	translateResult := translateAST(ConvertToAST(pq), params.Schema)
-	if !translateResult.Valid {
-		if translateResult.Error != nil {
-			return "", translateResult.Error
-		}
-		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
-	}
-
-	return buildFullQueryFromTranslation(params, start, end, translateResult)
-}
-
 // BuildFullQueryFromTranslation builds a complete SQL query from an already
 // translated query. Callers that need both preview metadata and executable SQL
 // can translate once and pass that result here.
@@ -410,9 +389,9 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 
 	query.WriteString("SELECT ")
 	if translateResult.SelectClause != "" {
-		timestampInSelect := strings.Contains(translateResult.SelectClause, "`"+params.TimestampField+"`")
+		timestampInSelect := strings.Contains(translateResult.SelectClause, queryescape.ClickHouseIdentifier(params.TimestampField))
 		if params.TimestampField != "" && !timestampInSelect {
-			fmt.Fprintf(&query, "`%s`, ", params.TimestampField)
+			fmt.Fprintf(&query, "%s, ", queryescape.ClickHouseIdentifier(params.TimestampField))
 		}
 		query.WriteString(translateResult.SelectClause)
 	} else {
@@ -426,12 +405,12 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 	query.WriteString("\n")
 
 	// WHERE clause with time range
-	query.WriteString("WHERE `")
-	query.WriteString(params.TimestampField)
+	query.WriteString("WHERE ")
+	query.WriteString(queryescape.ClickHouseIdentifier(params.TimestampField))
 	if strings.Contains(start.value, ".") || strings.Contains(end.value, ".") {
-		fmt.Fprintf(&query, "` BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", start.value, start.zone, end.value, end.zone)
+		fmt.Fprintf(&query, " BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", start.value, start.zone, end.value, end.zone)
 	} else {
-		fmt.Fprintf(&query, "` BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", start.value, start.zone, end.value, end.zone)
+		fmt.Fprintf(&query, " BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", start.value, start.zone, end.value, end.zone)
 	}
 
 	// Add LogchefQL conditions if present
@@ -443,9 +422,9 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 	query.WriteString("\n")
 
 	// ORDER BY clause
-	query.WriteString("ORDER BY `")
-	query.WriteString(params.TimestampField)
-	query.WriteString("` DESC\n")
+	query.WriteString("ORDER BY ")
+	query.WriteString(queryescape.ClickHouseIdentifier(params.TimestampField))
+	query.WriteString(" DESC\n")
 
 	// LIMIT clause
 	if params.Limit > 0 {

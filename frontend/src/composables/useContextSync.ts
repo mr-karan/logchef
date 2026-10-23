@@ -1,148 +1,68 @@
-import { ref, computed, watch, type Ref } from 'vue';
-import { useRoute } from 'vue-router';
-import { useContextStore } from '@/stores/context';
+import { watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { usePendingNavigation } from '@/router/navigation';
+import { pickTeam, useContextStore } from '@/stores/context';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
-import { useTeamSourceRouteSync } from '@/composables/useTeamSourceRouteSync';
 
-export type ContextSyncState = 'idle' | 'loading' | 'ready' | 'error';
-
-interface UseContextSyncOptions {
-  syncUrl?: boolean;
-  basePath?: string;
-  allowMissingSource?: boolean;
-}
-
-interface UseContextSyncReturn {
-  state: Ref<ContextSyncState>;
-  error: Ref<string | null>;
-  isReady: Ref<boolean>;
-  isLoading: Ref<boolean>;
-  teamId: Ref<number | null>;
-  sourceId: Ref<number | null>;
-  initialize: () => Promise<void>;
-  handleTeamChange: (teamId: number, options?: { clearSource?: boolean }) => Promise<void>;
-  handleSourceChange: (sourceId: number) => Promise<void>;
-  clearSourceSelection: () => Promise<void>;
-}
-
-export function useContextSync(options: UseContextSyncOptions = {}): UseContextSyncReturn {
-  const { syncUrl = true, basePath, allowMissingSource = false } = options;
-
+/** Team and source selection for pages other than Explorer, kept in the page's URL. */
+export function useContextSync(options: { basePath?: string } = {}) {
+  const route = useRoute();
+  const router = useRouter();
+  const pendingNavigation = usePendingNavigation(router);
   const contextStore = useContextStore();
   const teamsStore = useTeamsStore();
   const sourcesStore = useSourcesStore();
-  const route = useRoute();
-  const routeSync = useTeamSourceRouteSync(basePath);
+  // LogsLayout caches views, so a cached page must never rewrite another route.
+  const syncPath = options.basePath ?? route.path;
+  let requestId = 0;
 
-  const state = ref<ContextSyncState>('idle');
-  const error = ref<string | null>(null);
-  const isReady = computed(() => state.value === 'ready');
-  const isLoading = computed(() => state.value === 'loading');
-
-  const teamId = computed(() => contextStore.teamId);
-  const sourceId = computed(() => contextStore.sourceId);
-
-  async function initialize(): Promise<void> {
-    if (state.value === 'loading') return;
-
-    state.value = 'loading';
-    error.value = null;
-
+  watch(() => [contextStore.teamId, contextStore.sourceId, route.path, pendingNavigation.value], async (_value, _oldValue, onCleanup) => {
+    let current = true;
+    onCleanup(() => { current = false; });
+    if (route.path !== syncPath || pendingNavigation.value) return;
     try {
-      if (!teamsStore.teams || teamsStore.teams.length === 0) {
-        await teamsStore.loadTeams(false, false);
-      }
-
-      if (teamsStore.teams.length === 0) {
-        error.value = 'No teams available.';
-        state.value = 'error';
-        return;
-      }
-
-      const { teamId: targetTeamId } = await routeSync.applyRouteContext({ allowMissingSource });
-
-      if (!targetTeamId) {
-        error.value = 'No team available.';
-        state.value = 'error';
-        return;
-      }
-      
-      if (syncUrl) {
-        await routeSync.syncUrlToContext();
-      }
-
-      state.value = 'ready';
-
-    } catch (err: any) {
-      console.error('useContextSync: Initialization error:', err);
-      error.value = err.message || 'Failed to initialize context.';
-      state.value = 'error';
-    }
-  }
-
-  async function syncUrlToContext(): Promise<void> {
-    await routeSync.syncUrlToContext();
-  }
-
-  async function handleTeamChange(
-    newTeamId: number,
-    changeOptions: { clearSource?: boolean } = {}
-  ): Promise<void> {
-    if (newTeamId === contextStore.teamId) return;
-
-    await routeSync.selectTeam(newTeamId, {
-      clearSource: changeOptions.clearSource,
-      syncUrl,
-    });
-  }
-
-  async function handleSourceChange(newSourceId: number): Promise<void> {
-    if (newSourceId === contextStore.sourceId) return;
-    if (!contextStore.teamId) return;
-
-    if (!sourcesStore.teamSources.some(s => s.id === newSourceId)) {
-      console.warn(`useContextSync: Source ${newSourceId} not found`);
+      await sourcesStore.loadContext();
+    } catch (error) {
+      console.error('error loading team sources', error);
       return;
     }
-
-    await routeSync.selectSource(newSourceId, { syncUrl });
-  }
-
-  async function clearSourceSelection(): Promise<void> {
-    await routeSync.clearSourceSelection({ syncUrl });
-  }
-
-  watch(
-    () => [route.query.team, route.query.source] as const,
-    async ([nextRouteTeam, nextRouteSource], previousRouteSelection) => {
-      if (state.value !== 'ready') return;
-      if (!routeSync.isCurrentRoute()) return;
-      const [previousRouteTeam, previousRouteSource] = previousRouteSelection ?? [undefined, undefined];
-      if (nextRouteTeam === previousRouteTeam && nextRouteSource === previousRouteSource) {
-        return;
-      }
-
-      const { teamId: nextTeamId, sourceId: nextSourceId } = await routeSync.applyRouteContext({
-        allowMissingSource,
-      });
-
-      if (syncUrl && (nextTeamId !== null || nextSourceId !== null || contextStore.teamId !== null)) {
-        await syncUrlToContext();
-      }
+    if (!current || route.path !== syncPath || pendingNavigation.value) return;
+    const query: Record<string, string> = {};
+    if (contextStore.teamId) query.team = String(contextStore.teamId);
+    if (contextStore.sourceId) query.source = String(contextStore.sourceId);
+    if (route.query.team !== query.team || route.query.source !== query.source) {
+      await router.replace({ path: syncPath, query });
     }
-  );
+  }, { immediate: true });
 
-  return {
-    state,
-    error,
-    isReady,
-    isLoading,
-    teamId,
-    sourceId,
-    initialize,
-    handleTeamChange,
-    handleSourceChange,
-    clearSourceSelection,
-  };
+  async function select(teamId: number, sourceId: number | null) {
+    requestId++;
+    contextStore.selectTeam(teamId);
+    if (sourceId !== null) contextStore.selectSource(sourceId);
+    try {
+      await sourcesStore.loadContext();
+    } catch (error) {
+      console.error('error loading team sources', error);
+    }
+  }
+
+  /** Keeps the router's context and records it after its source list loads. */
+  async function initialize() {
+    const id = ++requestId;
+    if (teamsStore.teams.length === 0) await teamsStore.loadTeams(false, false);
+    if (id !== requestId) return;
+    const teamId = contextStore.teamId ?? pickTeam(teamsStore.teams.map((team) => team.id), null);
+    if (teamId) await select(teamId, contextStore.sourceId);
+  }
+
+  function handleTeamChange(teamId: number) {
+    return select(teamId, null);
+  }
+
+  function handleSourceChange(sourceId: number) {
+    if (contextStore.teamId) return select(contextStore.teamId, sourceId);
+  }
+
+  return { initialize, handleTeamChange, handleSourceChange };
 }

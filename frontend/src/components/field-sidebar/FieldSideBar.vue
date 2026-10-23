@@ -23,9 +23,9 @@ import {
   X,
 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
+import { useExploreRuns } from '@/stores/exploreRuns'
 import { toRfc3339 } from '@/utils/timeWindow'
 import { cn } from '@/lib/utils'
-import { useVariables } from '@/composables/useVariables'
 import { useFieldValuesLoader } from '@/composables/useFieldValuesLoader'
 import { getNativeQueryLanguageForSource, supportsQueryLanguage, type QueryLanguage } from '@/lib/queryMetadata'
 import { buildSourceFieldGroups, type SourceFieldGroup } from '@/lib/sourceFields'
@@ -46,42 +46,21 @@ const props = withDefaults(defineProps<{
   source: null,
 })
 
-// Get time range and query from explore store
 const exploreStore = useExploreStore()
-const { getVariablesForApi } = useVariables()
+const runs = useExploreRuns()
 
-// Get the current datasource-native query for filtering field values.
+// The query on screen filters field values: LogchefQL, or the native query of a source without LogchefQL.
 const getCurrentFilterQuery = (): string => {
-  if (exploreStore.activeMode === 'logchefql') {
-    const query = exploreStore.logchefqlCode || ''
-    return query
-  }
-
-  if (!supportsQueryLanguage(props.source, 'logchefql')) {
-    const query = exploreStore.nativeQuery || ''
-    return query
-  }
-
-  return ''
+  const ran = runs.shown?.query
+  if (ran?.mode === 'logchefql') return ran.text
+  return supportsQueryLanguage(props.source, 'logchefql') ? '' : ran?.text ?? ''
 }
 
-const getCurrentFilterVariables = () => {
-  if (exploreStore.activeMode !== 'logchefql') {
-    return []
-  }
-  return getVariablesForApi()
-}
+const getCurrentFilterVariables = () => (runs.shown?.query.mode === 'logchefql' ? runs.shown.variables : [])
 
 const getCurrentFilterQueryLanguage = (): QueryLanguage | undefined => {
-  if (exploreStore.activeMode === 'logchefql') {
-    return 'logchefql'
-  }
-
-  if (!supportsQueryLanguage(props.source, 'logchefql')) {
-    return getNativeQueryLanguageForSource(props.source)
-  }
-
-  return undefined
+  if (runs.shown?.query.mode === 'logchefql') return 'logchefql'
+  return supportsQueryLanguage(props.source, 'logchefql') ? undefined : getNativeQueryLanguageForSource(props.source)
 }
 
 // Emits
@@ -197,24 +176,25 @@ const toggleField = async (field: FieldInfo) => {
   }
 }
 
-// The resolved window as RFC3339 instants for API calls
+// The window on screen as RFC3339 instants, or the editor's window before anything ran.
 const getTimeRangeForApi = () => {
   if (!exploreStore.hasWindow) {
     return null
   }
-  const { start, end } = exploreStore.resolved
+  const { start, end } = runs.shown?.resolved ?? exploreStore.resolveNow()
   return { startTime: toRfc3339(start), endTime: toRfc3339(end) }
 }
 
 // Auto-expand threshold - fields with this many or fewer values are auto-expanded
 const AUTO_EXPAND_THRESHOLD = 6
 
+// Values describe the results on screen, so they wait for a run that has shown nothing yet.
+const canLoadValues = () => props.expanded && !!props.teamId && !!props.sourceId && (runs.shown !== null || !runs.isRunning)
+
 const resetFieldValues = () => {
   clearCache()
   expandedFields.value = new Set()
-  if (props.expanded && props.teamId && props.sourceId) {
-    loadPriorityFields(renderedFields.value)
-  }
+  if (canLoadValues()) loadPriorityFields(renderedFields.value)
 }
 
 // Add filter to query
@@ -227,18 +207,12 @@ const handleFieldClick = (fieldName: string) => {
   emit('field-click', fieldName)
 }
 
-// A new query, source, or reopened panel invalidates every loaded value.
-watch(
-  [() => props.expanded, () => props.teamId, () => props.sourceId, () => exploreStore.lastExecutionTimestamp],
-  resetFieldValues,
-  { immediate: true },
-)
+// A new source, a reopened panel or other results on screen invalidate every loaded value.
+watch([() => props.expanded, () => props.teamId, () => props.sourceId, () => runs.shown], resetFieldValues, { immediate: true })
 
 // Search and "show more" only add rows: load the new ones, keep the rest.
 watch(renderedFields, (fields) => {
-  if (props.expanded && props.teamId && props.sourceId) {
-    loadPriorityFields(fields)
-  }
+  if (canLoadValues()) loadPriorityFields(fields)
 })
 
 // Expand a field with few distinct values once, when its values first arrive,

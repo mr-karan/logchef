@@ -157,7 +157,10 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
     <DropdownMenuTrigger as-child>
       <Button variant="outline" class="max-w-[200px]">
         <Save class="w-4 h-4 mr-2 flex-shrink-0" />
-        <span class="truncate">{{ activeSavedQueryName || t('common.collections') }}</span>
+        <span class="truncate">
+          {{ activeSavedQueryName || t('common.collections') }}
+          <span v-if="activeSavedQueryName && exploreStore.hasDivergedFromSavedQuery" class="text-muted-foreground">{{ t('ui.unsaved') }}</span>
+        </span>
         <ChevronDown class="w-4 h-4 ml-2 flex-shrink-0" />
       </Button>
     </DropdownMenuTrigger>

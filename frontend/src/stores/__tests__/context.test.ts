@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useContextStore } from '../context'
+import type { Source } from '@/api/sources'
+import { pickSource, pickTeam, useContextStore } from '../context'
 
 describe('useContextStore', () => {
   beforeEach(() => {
@@ -71,12 +72,21 @@ describe('useContextStore', () => {
       expect(store.sourceId).toBeNull()
     })
 
-    it('persists sourceId per team in localStorage', () => {
+    it('does not remember a source until it is confirmed', () => {
       const store = useContextStore()
       store.selectTeam(1)
       store.selectSource(10)
+      expect(store.getStoredDefaults().sourceId).toBeNull()
+    })
+
+    it('remembers confirmed sources per team in localStorage', () => {
+      const store = useContextStore()
+      store.selectTeam(1)
+      store.selectSource(10)
+      store.rememberCurrentSource()
       store.selectTeam(2)
       store.selectSource(20)
+      store.rememberCurrentSource()
 
       const stored = JSON.parse(localStorage.getItem('logchef_context')!)
       expect(stored.sourcePerTeam[1]).toBe(10)
@@ -118,6 +128,7 @@ describe('useContextStore', () => {
       const store = useContextStore()
       store.selectTeam(1)
       store.selectSource(10)
+      store.rememberCurrentSource()
 
       const defaults = store.getStoredDefaults()
       expect(defaults.teamId).toBe(1)
@@ -132,18 +143,36 @@ describe('useContextStore', () => {
     })
   })
 
-  describe('getStoredSourceForTeam', () => {
-    it('returns stored source for specific team', () => {
+  describe('pickTeam', () => {
+    it('takes the requested team when permitted, else the stored team, else the first', () => {
       const store = useContextStore()
-      store.selectTeam(1)
-      store.selectSource(10)
+      store.selectTeam(2)
 
-      expect(store.getStoredSourceForTeam(1)).toBe(10)
+      expect(pickTeam([1, 2, 3], 3)).toBe(3)
+      expect(pickTeam([1, 2, 3], 99)).toBe(2)
+      expect(pickTeam([1, 3], null)).toBe(1)
+      expect(pickTeam([], 3)).toBeNull()
+    })
+  })
+
+  describe('pickSource', () => {
+    const offline = { id: 6, is_connected: false } as Source
+    const online = { id: 7, is_connected: true } as Source
+
+    it('keeps a requested source of the team even when it is not connected', () => {
+      expect(pickSource(1, [offline, online], 6)).toBe(6)
     })
 
-    it('returns null for unknown team', () => {
+    it('takes the stored source, else the first connected, else the first', () => {
       const store = useContextStore()
-      expect(store.getStoredSourceForTeam(999)).toBeNull()
+      expect(pickSource(1, [offline, online], 99)).toBe(7)
+      expect(pickSource(1, [offline], null)).toBe(6)
+      expect(pickSource(1, [], null)).toBeNull()
+
+      store.selectTeam(1)
+      store.selectSource(6)
+      store.rememberCurrentSource()
+      expect(pickSource(1, [offline, online], null)).toBe(6)
     })
   })
 

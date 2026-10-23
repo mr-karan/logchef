@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -36,11 +35,7 @@ func (db *DB) CreateQueryShare(ctx context.Context, share *models.QueryShare) er
 func (db *DB) GetQueryShare(ctx context.Context, token string) (*models.QueryShare, error) {
 	row, err := db.readQueries.GetQueryShare(ctx, token)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound
-		}
-		db.log.Error("failed to get query share", "error", err, "token", token)
-		return nil, fmt.Errorf("error getting query share: %w", err)
+		return nil, fmt.Errorf("error getting query share: %w", translateNotFound(err))
 	}
 
 	share := &models.QueryShare{
@@ -70,7 +65,7 @@ func (db *DB) TouchQueryShare(ctx context.Context, token string, accessedAt time
 		LastAccessedAt: sql.NullTime{Time: accessedAt, Valid: true},
 		Token:          token,
 	}); err != nil {
-		db.log.Error("failed to touch query share", "error", err, "token", token)
+		db.log.Error("failed to touch query share", "error", err, "token_prefix", models.RedactShareToken(token))
 		return fmt.Errorf("error touching query share: %w", err)
 	}
 	return nil
@@ -79,11 +74,7 @@ func (db *DB) TouchQueryShare(ctx context.Context, token string, accessedAt time
 // DeleteQueryShare removes a query share by token.
 func (db *DB) DeleteQueryShare(ctx context.Context, token string) error {
 	if _, err := db.writeQueries.DeleteQueryShare(ctx, token); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return models.ErrNotFound
-		}
-		db.log.Error("failed to delete query share", "error", err, "token", token)
-		return fmt.Errorf("error deleting query share: %w", err)
+		return fmt.Errorf("error deleting query share: %w", translateNotFound(err))
 	}
 	return nil
 }
@@ -95,7 +86,7 @@ func (db *DB) GetUserTeamForSource(ctx context.Context, userID models.UserID, so
 		SourceID: int64(sourceID),
 	})
 	if err != nil {
-		return 0, translateNotFound(err)
+		return 0, fmt.Errorf("getting user %d team for source %d: %w", userID, sourceID, translateNotFound(err))
 	}
 	return models.TeamID(teamID), nil
 }

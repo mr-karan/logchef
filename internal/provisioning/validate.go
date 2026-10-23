@@ -16,7 +16,7 @@ import (
 // ClickHouse SQL, so validate them here too (defense-in-depth, matching the API).
 var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// ValidateConfig checks the provisioning config for internal consistency.
+// ValidateConfig checks resolved provisioning config for internal consistency.
 func ValidateConfig(cfg *config.ProvisioningConfig) error {
 	var errs []string
 
@@ -192,12 +192,14 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 		}
 		seen[team.Name] = true
 
-		// Validate source references
-		if cfg.ManageSources {
-			for _, srcName := range team.Sources {
-				if !sourceNames[srcName] {
-					errs = append(errs, fmt.Sprintf("%s: references unknown source %q", prefix, srcName))
-				}
+		sourceSeen := make(map[string]bool)
+		for _, srcName := range team.Sources {
+			if sourceSeen[srcName] {
+				errs = append(errs, fmt.Sprintf("%s: duplicate source %q", prefix, srcName))
+			}
+			sourceSeen[srcName] = true
+			if cfg.ManageSources && !sourceNames[srcName] {
+				errs = append(errs, fmt.Sprintf("%s: references unknown source %q", prefix, srcName))
 			}
 		}
 
@@ -206,14 +208,18 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 		for j, member := range team.Members {
 			memberPrefix := fmt.Sprintf("%s.members[%d]", prefix, j)
 
-			if member.Email == "" {
+			email := member.Email
+			if email == "" {
 				errs = append(errs, fmt.Sprintf("%s: email is required", memberPrefix))
 				continue
 			}
-			if memberSeen[member.Email] {
+			if len(email) > models.MaxEmailLength {
+				errs = append(errs, fmt.Sprintf("%s: email must be at most %d bytes", memberPrefix, models.MaxEmailLength))
+			}
+			if memberSeen[email] {
 				errs = append(errs, fmt.Sprintf("%s: duplicate email %q", memberPrefix, member.Email))
 			}
-			memberSeen[member.Email] = true
+			memberSeen[email] = true
 
 			role := strings.ToLower(member.Role)
 			if role == "" {
@@ -227,9 +233,8 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 	return errs
 }
 
-// ResolveSecrets resolves password values from environment variables.
-// Must be called after ValidateConfig.
-func ResolveSecrets(cfg *config.ProvisioningConfig) {
+// ResolveConfig applies defaults, normalizes members, and resolves environment secrets.
+func ResolveConfig(cfg *config.ProvisioningConfig) {
 	for i := range cfg.Sources {
 		source := &cfg.Sources[i]
 		source.SourceType = source.NormalizedSourceType()
@@ -270,8 +275,11 @@ func ResolveSecrets(cfg *config.ProvisioningConfig) {
 	// Default member roles
 	for i := range cfg.Teams {
 		for j := range cfg.Teams[i].Members {
-			if cfg.Teams[i].Members[j].Role == "" {
-				cfg.Teams[i].Members[j].Role = "member"
+			member := &cfg.Teams[i].Members[j]
+			member.Email = models.NormalizeEmail(member.Email)
+			member.Role = strings.ToLower(member.Role)
+			if member.Role == "" {
+				member.Role = "member"
 			}
 		}
 	}

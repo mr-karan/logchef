@@ -1,14 +1,12 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { exploreApi } from "@/api/explore";
-import { useTeamsStore } from "@/stores/teams";
-import { useContextStore } from "@/stores/context";
-import { HistogramService, type HistogramData } from '@/services/HistogramService';
-import { useVariables } from "@/composables/useVariables";
+import { exploreApi, type HistogramDataPoint } from "@/api/explore";
+import type { TemplateVariable } from "@/api/logchefql";
+import { calculateOptimalGranularity } from '@/services/HistogramService';
 import { toRfc3339, type ResolvedWindow } from "@/utils/timeWindow";
 
 interface HistogramState {
-  data: HistogramData[];
+  data: HistogramDataPoint[];
   isLoading: boolean;
   error: string | null;
   notice: string | null;
@@ -17,8 +15,6 @@ interface HistogramState {
 }
 
 export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
-  const contextStore = useContextStore();
-
   const state = ref<HistogramState>({
     data: [],
     isLoading: false,
@@ -57,71 +53,41 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     state.value.groupByField = field;
   }
 
-  function setWindowedHistogram(data: HistogramData[], granularity: string, isLoading: boolean) {
-    state.value.data = data;
-    state.value.granularity = granularity;
-    state.value.isLoading = isLoading && data.length === 0;
-    state.value.error = null;
-    state.value.notice = null;
-    state.value.groupByField = null;
-  }
-
   async function fetchHistogramData(options: {
+    teamId: number;
+    sourceId: number;
+    variables: TemplateVariable[];
     extraStreamFilters?: string[];
     queryText: string;
     window: ResolvedWindow;
-    queryTimeout?: number;
-    granularity?: string;
+    queryTimeout: number;
   }) {
-    const { queryText, window, queryTimeout, granularity } = options;
+    const { teamId, sourceId, variables, queryText, window } = options;
 
     if (!queryText) {
       clearHistogramData();
       state.value.error = "Run a query first to see the histogram";
-      return { success: false, error: { message: "Run a query first" } };
+      return;
     }
 
     // Supersede any earlier in-flight fetch so its response can't overwrite
     // this newer one (#101).
-    if (inFlightController) {
-      inFlightController.abort();
-    }
+    inFlightController?.abort();
     const controller = new AbortController();
     inFlightController = controller;
-    const isCurrent = () => inFlightController === controller && !controller.signal.aborted;
 
     state.value.isLoading = true;
     state.value.error = null;
     state.value.notice = null;
 
     try {
-      const currentTeamId = useTeamsStore().currentTeamId;
-      if (!currentTeamId) {
-        state.value.error = "No team selected";
-        state.value.isLoading = false;
-        return { success: false, error: { message: "No team selected" } };
-      }
-
-      const sourceId = contextStore.sourceId;
-      if (!sourceId) {
-        state.value.error = "No source selected";
-        state.value.isLoading = false;
-        return { success: false, error: { message: "No source selected" } };
-      }
-
       const startISO = toRfc3339(window.start);
       const endISO = toRfc3339(window.end);
-      const windowGranularity = granularity || HistogramService.calculateOptimalGranularity(startISO, endISO);
-
-      // Get variables for backend substitution
-      const { getVariablesForApi } = useVariables();
-      const variables = getVariablesForApi();
-
-      const params = {
+      const response = await exploreApi.getHistogramData(sourceId, {
         extra_stream_filters: options.extraStreamFilters,
         query_text: queryText,
         limit: 100,
-        window: windowGranularity,
+        window: calculateOptimalGranularity(startISO, endISO),
         // Day buckets align to the zone the labels show.
         timezone: window.zone,
         start_time: startISO,
@@ -129,41 +95,24 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         group_by: state.value.groupByField === "__none__" || state.value.groupByField === null
           ? undefined
           : state.value.groupByField,
-        query_timeout: queryTimeout,
+        query_timeout: options.queryTimeout,
         variables: variables.length > 0 ? variables : undefined,
-      };
+      }, teamId, controller.signal);
 
-      const response = await exploreApi.getHistogramData(sourceId, params, currentTeamId, controller.signal);
-
-      // A newer fetch started (or this one was cancelled) while awaiting — drop
+      // A newer fetch started (or this one was cancelled) while awaiting: drop
       // the result so it can't clobber fresher data (#101).
-      if (!isCurrent()) {
-        return { success: false, error: { message: "Superseded by a newer histogram fetch" } };
-      }
+      if (inFlightController !== controller) return;
 
-      if (response.data) {
-        state.value.data = response.data.data || [];
-        state.value.granularity = response.data.granularity || null;
-        state.value.notice = response.data.notice || null;
-        state.value.error = null;
-        return { success: true, data: response.data };
-      } else {
-        state.value.data = [];
-        state.value.granularity = null;
-        state.value.notice = null;
-        state.value.error = "Failed to fetch histogram data";
-        return { success: false, error: { message: "Failed to fetch histogram data" } };
-      }
+      state.value.data = response.data?.data || [];
+      state.value.granularity = response.data?.granularity || null;
+      state.value.notice = response.data?.notice || null;
+      state.value.error = response.data ? null : "Failed to fetch histogram data";
     } catch (error) {
-      // A cancelled/superseded fetch must stay silent — leave the newer fetch's
+      // A cancelled/superseded fetch must stay silent, leaving the newer fetch's
       // state (or the cleared state) untouched.
-      if (controller.signal.aborted || inFlightController !== controller) {
-        return { success: false, error: { message: "Histogram fetch cancelled" } };
-      }
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (inFlightController !== controller) return;
       clearHistogramData();
-      state.value.error = errorMessage;
-      return { success: false, error: { message: errorMessage } };
+      state.value.error = error instanceof Error ? error.message : String(error);
     } finally {
       // Only clear loading/controller if this run is still the active one; a
       // superseded run must not flip the newer run's loading flag.
@@ -185,6 +134,5 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     clearHistogramData,
     setGroupByField,
     fetchHistogramData,
-    setWindowedHistogram,
   };
 });

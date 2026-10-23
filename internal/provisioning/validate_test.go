@@ -382,20 +382,20 @@ func TestValidateConfig_SourcesNotManagedTeamRefsIgnored(t *testing.T) {
 	}
 }
 
-func TestResolveSecrets_DefaultMetaTSField(t *testing.T) {
+func TestResolveConfig_DefaultMetaTSField(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
 			{Name: "src1", MetaTSField: ""},
 		},
 	}
-	ResolveSecrets(cfg)
+	ResolveConfig(cfg)
 	if cfg.Sources[0].MetaTSField != "timestamp" {
 		t.Errorf("expected default MetaTSField 'timestamp', got %q", cfg.Sources[0].MetaTSField)
 	}
 }
 
-func TestResolveSecrets_DefaultVictoriaLogsMetaTSField(t *testing.T) {
+func TestResolveConfig_DefaultVictoriaLogsMetaTSField(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
@@ -408,13 +408,13 @@ func TestResolveSecrets_DefaultVictoriaLogsMetaTSField(t *testing.T) {
 			},
 		},
 	}
-	ResolveSecrets(cfg)
+	ResolveConfig(cfg)
 	if cfg.Sources[0].MetaTSField != "_time" {
 		t.Errorf("expected default MetaTSField '_time', got %q", cfg.Sources[0].MetaTSField)
 	}
 }
 
-func TestResolveSecrets_DefaultMemberRole(t *testing.T) {
+func TestResolveConfig_DefaultMemberRole(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageTeams: true,
 		Teams: []config.ProvisionTeam{
@@ -426,7 +426,7 @@ func TestResolveSecrets_DefaultMemberRole(t *testing.T) {
 			},
 		},
 	}
-	ResolveSecrets(cfg)
+	ResolveConfig(cfg)
 	if cfg.Teams[0].Members[0].Role != "member" {
 		t.Errorf("expected default role 'member', got %q", cfg.Teams[0].Members[0].Role)
 	}
@@ -494,5 +494,21 @@ schema_lookback_seconds = %d
 		if conn.Optimizer == nil || conn.Optimizer.SchemaLookbackSeconds != tc.lookback {
 			t.Fatalf("decoded optimizer %+v", conn.Optimizer)
 		}
+	}
+}
+
+func TestValidateConfig_DuplicateTeamSources(t *testing.T) {
+	for _, manageSources := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manage_sources=%t", manageSources), func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{
+				ManageTeams:   true,
+				ManageSources: manageSources,
+				Sources:       []config.ProvisionSource{{Name: "logs", Connection: map[string]any{"host": "localhost:9000", "database": "default", "table_name": "logs"}}},
+				Teams:         []config.ProvisionTeam{{Name: "team", Sources: []string{"logs", "logs"}}},
+			}
+			if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "duplicate source") {
+				t.Fatalf("expected duplicate source validation error, got %v", err)
+			}
+		})
 	}
 }

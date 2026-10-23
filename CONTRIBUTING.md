@@ -27,7 +27,7 @@ just dev-docker
 just build
 
 # Run with development config
-just CONFIG=dev/config.toml run
+just run
 ```
 
 Access Logchef at `http://localhost:8125`

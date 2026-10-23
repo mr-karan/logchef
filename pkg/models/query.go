@@ -391,6 +391,14 @@ type QueryShare struct {
 	CreatedByName  string          `json:"created_by_name,omitempty"`
 }
 
+// shareTokenLogPrefix is how much of a share token may appear in logs.
+const shareTokenLogPrefix = 8
+
+// RedactShareToken returns a log-safe prefix of a share token.
+func RedactShareToken(token string) string {
+	return token[:min(len(token), shareTokenLogPrefix)]
+}
+
 // QuerySharePayload is the client-owned, durable state for a shared ad hoc query.
 type QuerySharePayload struct {
 	Version   int                  `json:"version"`
@@ -442,8 +450,15 @@ type CreateExportJobRequest struct {
 	Variables    []TemplateVariable `json:"variables,omitempty"`
 }
 
+// ExportJobOwner identifies a replica and its current process.
+type ExportJobOwner struct {
+	InstanceID string
+	ProcessID  string
+}
+
 // ExportJob stores an async export request and its eventual artifact metadata.
 type ExportJob struct {
+	Owner          ExportJobOwner  `json:"-"`
 	ID             string          `json:"id" db:"id"`
 	SourceID       SourceID        `json:"source_id" db:"source_id"`
 	CreatedBy      UserID          `json:"created_by" db:"created_by"`
@@ -459,6 +474,13 @@ type ExportJob struct {
 	CompletedAt    *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
 	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+// ReapedExportJob records cleanup metadata and the timestamp before reaping.
+type ReapedExportJob struct {
+	ID                string
+	FilePath          string
+	PreviousUpdatedAt time.Time
 }
 
 // ExportJobResponse is returned for create/status operations.

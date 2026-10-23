@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
@@ -14,7 +13,7 @@ import (
 func (db *DB) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error) {
 	managed, err := db.readQueries.IsSourceManaged(ctx, int64(id))
 	if err != nil {
-		return false, err
+		return false, translateNotFound(err)
 	}
 	return managed == 1, nil
 }
@@ -23,16 +22,7 @@ func (db *DB) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, er
 func (db *DB) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error) {
 	managed, err := db.readQueries.IsTeamManaged(ctx, int64(id))
 	if err != nil {
-		return false, err
-	}
-	return managed == 1, nil
-}
-
-// IsUserManaged returns true if the user is managed by provisioning config.
-func (db *DB) IsUserManaged(ctx context.Context, id models.UserID) (bool, error) {
-	managed, err := db.readQueries.IsUserManaged(ctx, int64(id))
-	if err != nil {
-		return false, err
+		return false, translateNotFound(err)
 	}
 	return managed == 1, nil
 }
@@ -62,16 +52,7 @@ func (db *DB) ListManagedTeams(ctx context.Context) ([]*models.Team, error) {
 	}
 	teams := make([]*models.Team, 0, len(rows))
 	for _, row := range rows {
-		teams = append(teams, &models.Team{
-			ID:          models.TeamID(row.ID),
-			Name:        row.Name,
-			Description: row.Description.String,
-			Timestamps: models.Timestamps{
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
-			},
-			Managed: row.Managed == 1,
-		})
+		teams = append(teams, teamToModel(row))
 	}
 	return teams, nil
 }
@@ -81,11 +62,7 @@ func (db *DB) ListManagedTeams(ctx context.Context) ([]*models.Team, error) {
 func (db *DB) GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error) {
 	row, err := db.readQueries.GetSourceByNameForProvisioning(ctx, name)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound
-		}
-		db.log.Error("failed to get source by name for provisioning", "error", err, "name", name)
-		return nil, fmt.Errorf("error getting source by name: %w", err)
+		return nil, fmt.Errorf("error getting source by name: %w", translateNotFound(err))
 	}
 	return mapSourceRowToModel(&row), nil
 }
@@ -129,4 +106,21 @@ func (db *DB) SetUserManaged(ctx context.Context, id models.UserID, managed bool
 		return fmt.Errorf("error setting user managed: %w", err)
 	}
 	return nil
+}
+
+// ListUsersForProvisioning loads the users referenced by provisioning.
+func (db *DB) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	rows, err := db.readQueries.ListUsersForProvisioning(ctx, emails)
+	if err != nil {
+		return nil, fmt.Errorf("error loading provisioning users: %w", err)
+	}
+	users := make([]*models.User, 0, len(rows))
+	for i := range rows {
+		row := rows[i]
+		users = append(users, mapUserRowToModel(row))
+	}
+	return users, nil
 }

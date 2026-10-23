@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, reactive, watch } from "vue";
-import { useTeamsStore } from "./teams";
-import { useContextStore } from "./context";
+import { pickSource, useContextStore } from "./context";
 import { sourcesApi, asClickHouseConnection } from "@/api/sources";
 import type {
   Source,
@@ -13,6 +12,9 @@ import type {
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
+import { i18n } from "@/i18n";
+import type { RequestOptions } from "@/api/apiUtils";
+import { isAbortError } from "@/api/error-handler";
 
 type SourceActivityRequestResult = {
   success: boolean;
@@ -22,51 +24,53 @@ type SourceActivityRequestResult = {
 
 interface SourcesState {
   sources: Source[];
-  teamSources: Source[];
   sourceQueries: Record<string, any>;
   sourceInspections: Record<string, SourceInspection>;
   sourceActivities: Record<string, SourceActivity>;
   sourceActivityErrors: Record<string, string>;
-  currentSourceDetails: Source | null;
-  // Loading states
-  isLoadingTeamSources: boolean;
-  isLoadingSourceDetails: boolean;
-  // Error states
-  teamSourcesError: string | null;
-  sourceDetailsError: string | null;
+  // The context's team sources and source details only. Keyed, so a value
+  // never shows under another team or source while the context switches.
+  sourcesByTeam: Record<number, Source[]>;
+  sourceDetails: Record<number, Record<number, Source>>;
 }
 
 export const useSourcesStore = defineStore("sources", () => {
-  const teamsStore = useTeamsStore();
   const contextStore = useContextStore();
 
   const state = useBaseStore<SourcesState>({
     sources: [],
-    teamSources: [],
     sourceQueries: {},
     sourceInspections: {},
     sourceActivities: {},
     sourceActivityErrors: {},
-    currentSourceDetails: null,
-    isLoadingTeamSources: false,
-    isLoadingSourceDetails: false,
-    teamSourcesError: null,
-    sourceDetailsError: null
+    sourcesByTeam: {},
+    sourceDetails: {},
   });
 
   // Computed properties
   const sources = computed(() => state.data.value.sources);
-  const teamSources = computed(() => state.data.value.teamSources);
   const sourceInspections = computed(() => state.data.value.sourceInspections);
   const sourceActivities = computed(() => state.data.value.sourceActivities);
   const sourceActivityErrors = computed(() => state.data.value.sourceActivityErrors);
-  const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
-  
-  // Loading state computed properties
-  const isLoadingTeamSources = computed(() => state.data.value.isLoadingTeamSources);
-  const isLoadingSourceDetails = computed(() => state.data.value.isLoadingSourceDetails);
-  const teamSourcesError = computed(() => state.data.value.teamSourcesError);
-  const sourceDetailsError = computed(() => state.data.value.sourceDetailsError);
+
+  const detailsKey = (teamId: number, sourceId: number) => `${teamId}-${sourceId}`;
+  const teamSources = computed(() =>
+    contextStore.teamId ? state.data.value.sourcesByTeam[contextStore.teamId] ?? [] : []
+  );
+  const currentSourceDetails = computed(() => {
+    const { teamId, sourceId } = contextStore;
+    return teamId && sourceId ? state.data.value.sourceDetails[teamId]?.[sourceId] ?? null : null;
+  });
+
+  const isLoadingTeamSources = computed(() =>
+    !!contextStore.teamId && state.isLoadingOperation(`loadTeamSources-${contextStore.teamId}`)
+  );
+  const isLoadingSourceDetailsForId = (sourceId: number) =>
+    !!contextStore.teamId && !!sourceId &&
+    state.isLoadingOperation(`loadSourceDetails-${detailsKey(contextStore.teamId, sourceId)}`);
+  const isLoadingSourceDetails = computed(() =>
+    !!contextStore.sourceId && isLoadingSourceDetailsForId(contextStore.sourceId)
+  );
 
   // Filtered sources
   const visibleSources = computed(() =>
@@ -93,6 +97,16 @@ export const useSourcesStore = defineStore("sources", () => {
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
   const sourceActivityRequests = new Map<number, Promise<SourceActivityRequestResult>>();
+  // Source selection keeps the team's pending list valid.
+  let generation = 0;
+  let detailsGeneration = 0;
+
+  function invalidateRequests() {
+    generation++;
+    detailsGeneration++;
+  }
+  const teamSourcesRequests = new Map<string, { teamId: number; controller: AbortController; promise: Promise<Source[]> }>();
+  const sourceDetailsRequests = new Map<string, Promise<Source>>();
 
   // Hydration state
   const isHydrated = ref(false);
@@ -110,7 +124,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
   // Check if current source is valid for querying (connected according to the backend check)
   const hasValidCurrentSource = computed(() => {
-    const details = state.data.value.currentSourceDetails;
+    const details = currentSourceDetails.value;
     // A source is considered valid for querying if the backend check marked it as connected.
     // We still need the details object to exist.
     return !!(details && details.is_connected === true);
@@ -118,7 +132,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
   // Get formatted table name from current source details
   const getCurrentSourceTableName = computed(() => {
-    const details = state.data.value.currentSourceDetails;
+    const details = currentSourceDetails.value;
     const chConn = asClickHouseConnection(details?.connection);
     if (chConn?.database && chConn?.table_name) {
       return `${chConn.database}.${chConn.table_name}`;
@@ -126,121 +140,53 @@ export const useSourcesStore = defineStore("sources", () => {
     return null; // Or a default/placeholder
   });
 
-  // Reactive watchers for centralized team/source loading
-  // Track last processed IDs to prevent duplicate loading
-  let lastProcessedTeamId: number | null = null;
-  let lastProcessedSourceId: number | null = null;
+  // Pages other than Explorer select a team and source through the context
+  // only. Keep a valid source selected and its details loaded for them.
+  async function loadContext(refresh = false) {
+    const { teamId } = contextStore;
+    if (!teamId) return;
+    const requestedIn = generation;
+    const list = await loadTeamSources(teamId, refresh);
+    if (requestedIn !== generation || contextStore.teamId !== teamId) return;
+    const sourceId = pickSource(teamId, list, contextStore.sourceId);
+    if (sourceId !== contextStore.sourceId) {
+      if (sourceId) contextStore.selectSource(sourceId);
+      else contextStore.clearSource();
+      return;
+    }
+    if (sourceId) {
+      contextStore.rememberCurrentSource();
+      await loadSourceDetails(teamId, sourceId, refresh);
+    }
+  }
 
-  // Watch team changes and auto-load sources
+  // Synchronous, so a request made right after a context change, before the
+  // watcher below runs, already belongs to the new generation.
+  watch(() => [contextStore.teamId, contextStore.sourceId], ([teamId], [leftTeamId]) => {
+    detailsGeneration++;
+    if (teamId !== leftTeamId) {
+      generation++;
+      for (const request of teamSourcesRequests.values()) {
+        if (request.teamId === leftTeamId) request.controller.abort();
+      }
+    }
+  }, { flush: "sync" });
+
+  // A left team or source drops its cache, so a return fetches it again.
   watch(
-    () => contextStore.teamId,
-    async (newTeamId, _oldTeamId) => {
-      // Prevent duplicate processing
-      if (newTeamId === lastProcessedTeamId) {
-        return;
+    () => [contextStore.teamId, contextStore.sourceId] as const,
+    ([teamId, sourceId], left) => {
+      const [leftTeamId, leftSourceId] = left ?? [null, null];
+      const cache = state.data.value;
+      if (leftTeamId && leftTeamId !== teamId) {
+        delete cache.sourcesByTeam[leftTeamId];
+        delete cache.sourceDetails[leftTeamId];
+      } else if (leftTeamId && leftSourceId && leftSourceId !== sourceId) {
+        delete cache.sourceDetails[leftTeamId]?.[leftSourceId];
       }
-
-      lastProcessedTeamId = newTeamId;
-      
-      // Clear previous state
-      state.data.value.teamSourcesError = null;
-      state.data.value.teamSources = [];
-      state.data.value.currentSourceDetails = null;
-
-      if (!newTeamId) {
-        return;
-      }
-
-      try {
-        state.data.value.isLoadingTeamSources = true;
-        await loadTeamSources(newTeamId);
-
-        if (contextStore.teamId !== newTeamId) {
-          return;
-        }
-
-        if (teamSources.value.length > 0) {
-          const currentSourceId = contextStore.sourceId;
-          const currentSourceValid = currentSourceId && teamSources.value.some(s => s.id === currentSourceId);
-          
-          if (!currentSourceValid) {
-            const cachedSourceId = contextStore.getStoredSourceForTeam(newTeamId);
-            const validCachedSource = cachedSourceId && teamSources.value.some(s => s.id === cachedSourceId);
-            const targetSourceId = validCachedSource ? cachedSourceId : teamSources.value[0].id;
-
-            contextStore.selectSource(targetSourceId);
-          }
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to load sources';
-        state.data.value.teamSourcesError = errorMessage;
-        console.error(`SourcesStore: Error loading sources for team ${newTeamId}:`, error);
-      } finally {
-        state.data.value.isLoadingTeamSources = false;
-      }
-    },
-    { immediate: true }
-  );
-
-  watch(
-    () => [contextStore.sourceId, state.data.value.isLoadingTeamSources] as const,
-    async ([newSourceId, isLoadingTeamSources], oldValue) => {
-      const [_oldSourceId, wasLoadingTeamSources] = oldValue ?? [null, false];
-
-      const teamSourcesJustFinishedLoading = wasLoadingTeamSources && !isLoadingTeamSources;
-      if (teamSourcesJustFinishedLoading && newSourceId) {
-        lastProcessedSourceId = null;
-      }
-
-      if (newSourceId === lastProcessedSourceId) {
-        return;
-      }
-
-      state.data.value.sourceDetailsError = null;
-      state.data.value.currentSourceDetails = null;
-
-      if (!newSourceId) {
-        lastProcessedSourceId = null;
-        return;
-      }
-
-      const currentTeamId = contextStore.teamId;
-      if (!currentTeamId) {
-        return;
-      }
-
-      if (isLoadingTeamSources) {
-        return;
-      }
-
-      lastProcessedSourceId = newSourceId;
-
-      const sourceExistsInTeam = teamSources.value.some(s => s.id === newSourceId);
-
-      if (teamSources.value.length === 0) {
-        state.data.value.sourceDetailsError = 'Team has no sources configured';
-        return;
-      }
-
-      if (!sourceExistsInTeam) {
-        contextStore.selectSource(teamSources.value[0].id);
-        return;
-      }
-
-      try {
-        state.data.value.isLoadingSourceDetails = true;
-        await loadSourceDetails(newSourceId);
-
-        if (contextStore.sourceId !== newSourceId || contextStore.teamId !== currentTeamId) {
-          return;
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to load source details';
-        state.data.value.sourceDetailsError = errorMessage;
-        console.error(`SourcesStore: Error loading details for source ${newSourceId}:`, error);
-      } finally {
-        state.data.value.isLoadingSourceDetails = false;
-      }
+      loadContext().catch((error) => {
+        if (!isAbortError(error)) console.error("error loading the context's sources", error);
+      });
     },
     { immediate: true }
   );
@@ -273,31 +219,50 @@ export const useSourcesStore = defineStore("sources", () => {
     return isHydrated.value;
   }
 
-  async function loadTeamSources(teamId: number, _version?: number) {
-    return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.listTeamSources(teamId),
+  /**
+   * The team's sources: cached for the current team, else fetched, joining a
+   * request in flight. Only the current team's are cached. Rejects when the
+   * request fails.
+   */
+  function loadTeamSources(teamId: number, refresh = false, options?: RequestOptions): Promise<Source[]> {
+    const current = teamId === contextStore.teamId;
+    const key = `${generation}-${teamId}-${!!options?.suppressForbiddenRedirect}`;
+    const pending = teamSourcesRequests.get(key);
+    if (pending) return pending.promise;
+    const cached = current && !refresh ? state.data.value.sourcesByTeam[teamId] : undefined;
+    if (cached) return Promise.resolve(cached);
+
+    const requestedIn = generation;
+    const controller = new AbortController();
+    const request = state
+      .callApi<Source[]>({
+        apiCall: () => sourcesApi.listTeamSources(teamId, { ...options, signal: controller.signal }),
         operationKey: `loadTeamSources-${teamId}`,
-        onSuccess: async (data) => {
-          state.data.value.teamSources = data ?? [];
-        },
-        defaultData: [],
         showToast: false,
-      });
-    });
+      })
+      .then((result) => {
+        if (!result.success) throw result.error;
+        const list = result.data ?? [];
+        if (current && requestedIn === generation) state.data.value.sourcesByTeam[teamId] = list;
+        return list;
+      })
+      .finally(() => teamSourcesRequests.delete(key));
+    teamSourcesRequests.set(key, { teamId, controller, promise: request });
+    return request;
   }
 
   async function createSource(payload: CreateSourcePayload) {
     const result = await state.withLoading("createSource", async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.createSource(payload),
-        successMessage: "Source created successfully",
+        successMessage: i18n.global.t("sources.sourceCreated"),
         operationKey: "createSource"
       });
     });
 
     if (result.success) {
       // Refresh sources
+      invalidateTeamSources();
       await loadSources();
     }
 
@@ -308,7 +273,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const result = await state.withLoading(`deleteSource-${id}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.deleteSource(id),
-        successMessage: "Source deleted successfully",
+        successMessage: i18n.global.t("sources.sourceDeleted"),
         operationKey: `deleteSource-${id}`,
         onSuccess: () => {
           // Remove from local state
@@ -321,6 +286,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     if (result.success) {
       // Refresh sources
+      invalidateTeamSources();
       await loadSources();
     }
 
@@ -412,99 +378,42 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  async function getSource(sourceId: number) {
-    const currentTeamId = teamsStore.currentTeamId;
+  /**
+   * A source's details: cached for the current source, else fetched, joining
+   * a request in flight. Only the current source's are
+   * cached. Rejects when the request fails.
+   */
+  function loadSourceDetails(teamId: number, sourceId: number, refresh = false, options?: RequestOptions): Promise<Source> {
+    const current = teamId === contextStore.teamId && sourceId === contextStore.sourceId;
+    const key = `${detailsGeneration}-${detailsKey(teamId, sourceId)}-${!!options?.suppressForbiddenRedirect}`;
+    const pending = sourceDetailsRequests.get(key);
+    if (pending) return pending;
+    const cached = current && !refresh ? state.data.value.sourceDetails[teamId]?.[sourceId] : undefined;
+    if (cached) return Promise.resolve(cached);
 
-    if (!currentTeamId) {
-      return state.handleError(
-        {
-          status: "error",
-          message: "No team selected",
-          error_type: "ValidationError"
-        } as APIErrorResponse,
-        `getSource-${sourceId}`
-      );
-    }
-
-    return await state.withLoading(`getSource-${sourceId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
-        operationKey: `getSource-${sourceId}`,
-        onSuccess: (data: any) => {
-          if (!data) return;
-
-          // Update the source in teamSources if it exists
-          const index = teamSources.value.findIndex((s) => s.id === sourceId);
-          if (index >= 0) {
-            // Create a new array to trigger reactivity
-            const newTeamSources = [...teamSources.value];
-            newTeamSources[index] = data as Source;
-            state.data.value.teamSources = newTeamSources;
-          }
-        },
-        showToast: true,
-      });
-    });
+    const requestedIn = detailsGeneration;
+    const request = state
+      .callApi<Source>({
+        apiCall: () => options ? sourcesApi.getTeamSource(teamId, sourceId, options) : sourcesApi.getTeamSource(teamId, sourceId),
+        operationKey: `loadSourceDetails-${detailsKey(teamId, sourceId)}`,
+        showToast: false,
+      })
+      .then((result) => {
+        if (!result.success || !result.data) throw result.error ?? new Error("Source not found.");
+        if (current && requestedIn === detailsGeneration) (state.data.value.sourceDetails[teamId] ??= {})[sourceId] = result.data;
+        return result.data;
+      })
+      .finally(() => sourceDetailsRequests.delete(key));
+    sourceDetailsRequests.set(key, request);
+    return request;
   }
 
-  async function loadSourceDetails(sourceId: number, _version?: number) {
-    // Use a unique loading key
-    const loadingKey = `loadSourceDetails-${sourceId}`;
-
-    // Check cache first (optional but recommended)
-    const cachedSource = state.data.value.teamSources.find(s => s.id === sourceId);
-    if (cachedSource && cachedSource.columns && cachedSource.columns.length > 0) {
-       // Check if current details are already set to this source to avoid redundant updates
-       if (state.data.value.currentSourceDetails?.id !== sourceId) {
-          state.data.value.currentSourceDetails = cachedSource;
-       }
-       // Return success immediately if cached
-       return { success: true, data: cachedSource };
-    }
-
-    return await state.withLoading(loadingKey, async () => {
-      // Reset current details before fetching (only if not already loading this specific source)
-      if (!state.isLoadingOperation(loadingKey)) {
-         state.data.value.currentSourceDetails = null;
-      }
-
-      // Use the existing getSource function which seems to handle team context
-      const currentTeamId = teamsStore.currentTeamId;
-      if (!currentTeamId) {
-        return state.handleError(
-          { status: "error", message: "No team selected", error_type: "ValidationError" } as APIErrorResponse,
-          loadingKey
-        );
-      }
-
-      return await state.callApi<Source>({
-        // Use getTeamSource API call as it seems to be the one implemented
-        apiCall: () => sourcesApi.getTeamSource(currentTeamId, sourceId),
-        onSuccess: async (data: any) => {
-          if (!data) return;
-
-          // Stale-request guard: only commit if this source is still the
-          // one the user has selected. A fast source switch can cause an
-          // older request to resolve after a newer one.
-          if (contextStore.sourceId !== sourceId) return;
-
-          state.data.value.currentSourceDetails = data as Source;
-
-          // Update the source in teamSources as well (like the existing getSource does)
-          const index = state.data.value.teamSources.findIndex((s) => s.id === sourceId);
-          if (index >= 0) {
-            const newTeamSources = [...state.data.value.teamSources];
-            newTeamSources[index] = data as Source;
-            state.data.value.teamSources = newTeamSources;
-          }
-        },
-        onError: (_error) => {
-          state.data.value.currentSourceDetails = null; // Clear on error
-        },
-        operationKey: loadingKey,
-        showToast: false, // Don't show toast for background loading
-      });
-    });
+  /** Caches what an Explorer navigation resolved, just before it opens that team and source. */
+  function holdResolved(teamId: number, list: Source[], details: Source | null, resolvedIn: number): boolean {
+    if (resolvedIn !== generation) return false;
+    state.data.value.sourcesByTeam[teamId] = list;
+    if (details) (state.data.value.sourceDetails[teamId] ??= {})[details.id] = details;
+    return true;
   }
 
   async function validateSourceConnection(connectionInfo: ValidateConnectionRequestInfo) {
@@ -527,31 +436,24 @@ export const useSourcesStore = defineStore("sources", () => {
     return validatedConnections.has(connectionKey);
   }
 
+  /** Refetches the context's sources and details after a source or team change, keeping the old ones until then. */
+  function invalidateTeamSources() {
+    invalidateRequests();
+    loadContext(true).catch((error) => {
+      if (!isAbortError(error)) console.error("error reloading the context's sources", error);
+    });
+  }
+
   function invalidateSourceCache(sourceId: number) {
     state.data.value.sources = state.data.value.sources.filter(
       s => s.id !== sourceId
     );
-    state.data.value.teamSources = state.data.value.teamSources.filter(
-      s => s.id !== sourceId
-    );
+    invalidateTeamSources();
 
     // Also clear any stats for this source
     delete state.data.value.sourceInspections[sourceId.toString()];
     delete state.data.value.sourceActivities[sourceId.toString()];
     delete state.data.value.sourceActivityErrors[sourceId.toString()];
-
-    // Clear current source details if it matches this source
-    if (state.data.value.currentSourceDetails?.id === sourceId) {
-      state.data.value.currentSourceDetails = null;
-    }
-  }
-
-  function clearCurrentSourceDetails() {
-    state.data.value.currentSourceDetails = null;
-  }
-
-  function clearTeamSources() {
-    state.data.value.teamSources = [];
   }
 
   // Use the centralized error handler from base store
@@ -559,78 +461,34 @@ export const useSourcesStore = defineStore("sources", () => {
   // Update source
   async function updateSource(id: number, payload: UpdateSourcePayload) {
     return await state.withLoading(`updateSource-${id}`, async () => {
-      return await state.callApi({
+      return await state.callApi<Source>({
         apiCall: () => sourcesApi.updateSource(id, payload),
-        successMessage: "Source updated successfully",
+        successMessage: i18n.global.t("sources.sourceUpdated"),
         operationKey: `updateSource-${id}`,
-        onSuccess: (data) => {
-          // Ensure data is treated as a Source object
-          const updatedSourceData = data as Source | null;
+        onSuccess: (updatedSourceData) => {
           if (!updatedSourceData) return;
 
           // Update in local state
           const index = sources.value.findIndex(s => s.id === id);
           if (index >= 0) {
-            const updatedSource = { ...sources.value[index], ...updatedSourceData };
             state.data.value.sources = [
               ...sources.value.slice(0, index),
-              updatedSource,
+              updatedSourceData,
               ...sources.value.slice(index + 1)
             ];
           }
 
-          // Also update in team sources if present
-          const teamIndex = teamSources.value.findIndex(s => s.id === id);
-          if (teamIndex >= 0) {
-            const updatedTeamSource = { ...teamSources.value[teamIndex], ...updatedSourceData };
-            state.data.value.teamSources = [
-              ...teamSources.value.slice(0, teamIndex),
-              updatedTeamSource,
-              ...teamSources.value.slice(teamIndex + 1)
-            ];
+          for (const list of Object.values(state.data.value.sourcesByTeam)) {
+            const index = list.findIndex(source => source.id === id);
+            if (index >= 0) list[index] = updatedSourceData;
           }
-
-          // Invalidate cache for this source
-          invalidateSourceCache(id);
+          for (const details of Object.values(state.data.value.sourceDetails)) {
+            if (details[id]) details[id] = updatedSourceData;
+          }
+          delete state.data.value.sourceInspections[id.toString()];
+          delete state.data.value.sourceActivities[id.toString()];
+          delete state.data.value.sourceActivityErrors[id.toString()];
         }
-      });
-    });
-  }
-
-  // Load the schema for a source
-  async function getSourceSchema(teamId: number, sourceId: number) {
-    return await state.withLoading(`getSourceSchema-${sourceId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.getTeamSourceSchema(teamId, sourceId),
-        operationKey: `getSourceSchema-${sourceId}`,
-        onSuccess: (data: string | null) => {
-          // Handle null case
-          if (data === null) return;
-
-          const schema = data;
-
-          // Store schema in the source
-          // Use the existing getter function - we need to ignore the teamId parameter
-          // since the actual function has a different signature
-          const source = getSourceById.value(sourceId);
-          if (source) {
-            const updatedSource = { ...source, schema };
-
-            // Update in sources collection
-            const index = state.data.value.sources.findIndex(s => s.id === sourceId);
-            if (index >= 0) {
-              const newSources = [...state.data.value.sources];
-              newSources[index] = updatedSource as Source;
-              state.data.value.sources = newSources;
-            }
-
-            // Also update current source details if loaded
-            if (state.data.value.currentSourceDetails?.id === sourceId) {
-              state.data.value.currentSourceDetails = updatedSource as Source;
-            }
-          }
-        },
-        showToast: false,
       });
     });
   }
@@ -656,19 +514,10 @@ export const useSourcesStore = defineStore("sources", () => {
     // Centralized loading states
     isLoadingTeamSources,
     isLoadingSourceDetails,
-    teamSourcesError,
-    sourceDetailsError,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
-    isLoadingSource: (sourceId: number) =>
-      state.isLoadingOperation(`getSource-${sourceId}`),
-    isLoadingTeamSourcesForTeam: (teamId: number) =>
-      state.isLoadingOperation(`loadTeamSources-${teamId}`),
-    isLoadingSourceDetailsForId: (id: number) => {
-      if (!id) return false;
-      return state.isLoadingOperation(`loadSourceDetails-${id}`);
-    },
+    isLoadingSourceDetailsForId,
 
     // Getters
     getSourceById,
@@ -680,6 +529,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     // Actions
     loadSources,
+    loadContext,
     loadTeamSources,
     createSource,
     updateSource,
@@ -688,14 +538,13 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourceInspection,
     getSourceActivity,
     getTeamSourceInspection,
-    getSource,
     validateSourceConnection,
     invalidateSourceCache,
+    invalidateTeamSources,
     loadSourceDetails,
-    clearCurrentSourceDetails,
-    clearTeamSources,
+    holdResolved,
+    getMetadataGeneration: () => generation,
     hydrate,
     loadAllSourcesForAdmin,
-    getSourceSchema,
   };
 });

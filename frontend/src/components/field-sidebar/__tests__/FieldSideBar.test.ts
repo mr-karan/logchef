@@ -74,9 +74,13 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
     expect(collapsibles()).toHaveLength(1)
     expect(getFieldValues).toHaveBeenCalledTimes(21)
 
-    // A new query invalidates every loaded value and reloads the rendered set.
-    await new Promise(resolve => setTimeout(resolve, 2))
     exploreStore.resetQueryToDefaults()
+    await flush()
+    expect(getFieldValues).toHaveBeenCalledTimes(21)
+
+    const refresh = host.querySelector<HTMLButtonElement>('button')
+    if (!refresh) throw new Error('Refresh button was not rendered')
+    refresh.click()
     await flush()
     expect(getFieldValues).toHaveBeenCalledTimes(22)
     expect(getFieldValues.mock.calls.at(-1)?.[2]).toBe('field_0990')

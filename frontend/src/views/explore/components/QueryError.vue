@@ -3,18 +3,14 @@ import { useI18n } from "vue-i18n";
 
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
+import { useExploreRuns } from '@/stores/exploreRuns'
 
 const { t } = useI18n();
 
-interface Props {
-  queryError?: string
-}
-
-const props = defineProps<Props>()
 const exploreStore = useExploreStore()
+const runs = useExploreRuns()
 
-// Combined error display from props and store
-const displayError = computed(() => props.queryError || exploreStore.error?.message)
+const displayError = computed(() => runs.error ?? exploreStore.error?.message)
 </script>
 
 <template>

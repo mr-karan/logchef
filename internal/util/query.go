@@ -2,13 +2,17 @@ package util
 
 import (
 	"fmt"
+	"math"
+	"math/big"
+	"reflect"
 	"strconv"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// ExtractFirstNumeric extracts a numeric value from the first column of the first row
-// in a query result. If the query returns no rows, it returns 0.
+// ExtractFirstNumeric reads the first column of the first row, or zero for no rows.
 func ExtractFirstNumeric(result *models.QueryResult) (float64, error) {
 	if result == nil || len(result.Logs) == 0 {
 		return 0, nil
@@ -16,105 +20,61 @@ func ExtractFirstNumeric(result *models.QueryResult) (float64, error) {
 	if len(result.Columns) == 0 {
 		return 0, fmt.Errorf("query returned no columns")
 	}
-
-	rawValue, err := findFirstValue(result)
+	column := result.Columns[0].Name
+	raw, ok := result.Logs[0][column]
+	if !ok {
+		return 0, fmt.Errorf("query result is missing first column %q", column)
+	}
+	value, err := convertToFloat64(raw)
 	if err != nil {
 		return 0, err
 	}
-
-	return convertToFloat64(rawValue)
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("query result must be a finite number")
+	}
+	return value, nil
 }
 
-func findFirstValue(result *models.QueryResult) (any, error) {
-	row := result.Logs[0]
-	firstColumn := result.Columns[0].Name
-
-	if val, ok := row[firstColumn]; ok {
-		return val, nil
+// Alert thresholds use float64, so integers wider than 53 bits can lose precision.
+func convertToFloat64(raw any) (float64, error) {
+	value := reflect.ValueOf(raw)
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return 0, fmt.Errorf("nil numeric pointer in result (%T)", raw)
+		}
+		value = value.Elem()
 	}
-
-	for _, v := range row {
-		return v, nil
+	if !value.IsValid() {
+		return 0, fmt.Errorf("query result is null, expected a number")
 	}
-
-	return nil, fmt.Errorf("unable to locate numeric value in query result")
-}
-
-func convertToFloat64(v any) (float64, error) {
-	switch val := v.(type) {
-	case float64:
-		return val, nil
-	case *float64:
-		return derefFloat64(val)
-	case float32:
-		return float64(val), nil
-	case *float32:
-		return derefFloat32(val)
-	case int:
-		return float64(val), nil
-	case *int:
-		return derefInt(val)
-	case int64:
-		return float64(val), nil
-	case *int64:
-		return derefInt64(val)
-	case uint64:
-		return float64(val), nil
-	case *uint64:
-		return derefUint64(val)
-	case uint32:
-		return float64(val), nil
-	case *uint32:
-		return derefUint32(val)
-	case string:
-		parsed, err := strconv.ParseFloat(val, 64)
+	switch number := value.Interface().(type) {
+	case decimal.Decimal:
+		result, _ := number.Float64()
+		return result, nil
+	case decimal.NullDecimal:
+		if !number.Valid {
+			return 0, fmt.Errorf("query result is null, expected a number")
+		}
+		result, _ := number.Decimal.Float64()
+		return result, nil
+	case big.Int:
+		result, _ := number.Float64()
+		return result, nil
+	}
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(value.Int()), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(value.Uint()), nil
+	case reflect.Float32, reflect.Float64:
+		return value.Float(), nil
+	case reflect.String:
+		parsed, err := strconv.ParseFloat(value.String(), 64)
 		if err != nil {
-			return 0, fmt.Errorf("unable to parse numeric value %q: %w", val, err)
+			return 0, fmt.Errorf("unable to parse numeric value %q: %w", value.String(), err)
 		}
 		return parsed, nil
 	default:
-		return 0, fmt.Errorf("unsupported result type %T", v)
+		return 0, fmt.Errorf("unsupported numeric result type %T", raw)
 	}
-}
-
-func derefFloat64(p *float64) (float64, error) {
-	if p == nil {
-		return 0, fmt.Errorf("nil float64 pointer in result")
-	}
-	return *p, nil
-}
-
-func derefFloat32(p *float32) (float64, error) {
-	if p == nil {
-		return 0, fmt.Errorf("nil float32 pointer in result")
-	}
-	return float64(*p), nil
-}
-
-func derefInt(p *int) (float64, error) {
-	if p == nil {
-		return 0, fmt.Errorf("nil int pointer in result")
-	}
-	return float64(*p), nil
-}
-
-func derefInt64(p *int64) (float64, error) {
-	if p == nil {
-		return 0, fmt.Errorf("nil int64 pointer in result")
-	}
-	return float64(*p), nil
-}
-
-func derefUint64(p *uint64) (float64, error) {
-	if p == nil {
-		return 0, fmt.Errorf("nil uint64 pointer in result")
-	}
-	return float64(*p), nil
-}
-
-func derefUint32(p *uint32) (float64, error) {
-	if p == nil {
-		return 0, fmt.Errorf("nil uint32 pointer in result")
-	}
-	return float64(*p), nil
 }

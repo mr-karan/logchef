@@ -478,7 +478,7 @@ describe("validatePanelsBlob", () => {
   });
 
   it("rejects an invalid panel type", () => {
-    const panels = [panel("a", { team_id: 1, source_id: 1, type: "pie" as any })];
+    const panels = [{ ...panel("a", { team_id: 1, source_id: 1 }), type: "pie" }] as unknown as DashboardPanel[];
     expect(validatePanelsBlob(base({ panels }))).toMatch(/type/i);
   });
 
@@ -501,7 +501,7 @@ describe("validatePanelsBlob", () => {
   // B7: mirror pkg/models/dashboards.go's query_language enum + layout id
   // empty/duplicate checks, which this validator previously omitted.
   it("rejects an invalid query_language", () => {
-    const panels = [panel("a", { team_id: 1, source_id: 1, query_language: "bogus" as any })];
+    const panels = [{ ...panel("a", { team_id: 1, source_id: 1 }), query_language: "bogus" }] as unknown as DashboardPanel[];
     expect(validatePanelsBlob(base({ panels }))).toMatch(/query language/i);
   });
 

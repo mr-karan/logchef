@@ -2,8 +2,6 @@ package alerts
 
 import (
 	"context"
-	"fmt"
-	"strings"
 )
 
 type MultiSender struct {
@@ -21,18 +19,10 @@ func NewMultiSender(senders ...AlertSender) AlertSender {
 	return MultiSender{senders: filtered}
 }
 
-func (m MultiSender) Send(ctx context.Context, notification AlertNotification) error {
-	if len(m.senders) == 0 {
-		return nil
-	}
-	var errs []string
+func (m MultiSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
+	var results DeliveryResults
 	for _, sender := range m.senders {
-		if err := sender.Send(ctx, notification); err != nil {
-			errs = append(errs, err.Error())
-		}
+		results = append(results, sender.Send(ctx, notification)...)
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("notification delivery failed: %s", strings.Join(errs, "; "))
-	}
-	return nil
+	return results
 }

@@ -105,21 +105,23 @@ type Dashboard struct {
 }
 
 type ExportJob struct {
-	ID           string             `json:"id"`
-	SourceID     int64              `json:"source_id"`
-	CreatedBy    int64              `json:"created_by"`
-	Status       string             `json:"status"`
-	Format       string             `json:"format"`
-	RequestJson  string             `json:"request_json"`
-	FileName     pgtype.Text        `json:"file_name"`
-	FilePath     pgtype.Text        `json:"file_path"`
-	ErrorMessage pgtype.Text        `json:"error_message"`
-	RowsExported int64              `json:"rows_exported"`
-	BytesWritten int64              `json:"bytes_written"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID              string             `json:"id"`
+	SourceID        int64              `json:"source_id"`
+	CreatedBy       int64              `json:"created_by"`
+	Status          string             `json:"status"`
+	Format          string             `json:"format"`
+	RequestJson     string             `json:"request_json"`
+	FileName        pgtype.Text        `json:"file_name"`
+	FilePath        pgtype.Text        `json:"file_path"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	RowsExported    int64              `json:"rows_exported"`
+	BytesWritten    int64              `json:"bytes_written"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	OwnerInstanceID string             `json:"owner_instance_id"`
+	OwnerProcessID  string             `json:"owner_process_id"`
 }
 
 type OauthAccessToken struct {
@@ -145,24 +147,6 @@ type OauthAuthRequest struct {
 	CodeConsumedAt pgtype.Timestamptz `json:"code_consumed_at"`
 	DecidedAt      pgtype.Timestamptz `json:"decided_at"`
 	Denied         bool               `json:"denied"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-type OauthDeviceAuthorization struct {
-	DeviceCodeHash string             `json:"device_code_hash"`
-	UserCodeHash   string             `json:"user_code_hash"`
-	ClientID       string             `json:"client_id"`
-	Resource       string             `json:"resource"`
-	Scopes         string             `json:"scopes"`
-	OfflineAccess  bool               `json:"offline_access"`
-	IntervalSecs   int32              `json:"interval_secs"`
-	LastPolledAt   pgtype.Timestamptz `json:"last_polled_at"`
-	UserID         pgtype.Int8        `json:"user_id"`
-	GrantID        pgtype.Int8        `json:"grant_id"`
-	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
-	DeniedAt       pgtype.Timestamptz `json:"denied_at"`
-	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
 	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }

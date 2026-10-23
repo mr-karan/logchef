@@ -30,37 +30,22 @@ func (p *ClickHouseProvider) Type() models.SourceType {
 	return models.SourceTypeClickHouse
 }
 
-func (p *ClickHouseProvider) Capabilities() []Capability {
-	return []Capability{
-		CapabilitySchemaInspection,
-		CapabilityHistogram,
-		CapabilityFieldValues,
-		CapabilitySourceInspection,
-		CapabilityAISQLGeneration,
-		CapabilityLogContext,
-		CapabilityExports,
-		CapabilityLiveTail,
-	}
-}
-
-func (p *ClickHouseProvider) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{
-		models.QueryLanguageLogchefQL,
-		models.QueryLanguageClickHouseSQL,
-	}
-}
-
-func (p *ClickHouseProvider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return []models.SavedQueryEditorMode{
-		models.SavedQueryEditorModeBuilder,
-		models.SavedQueryEditorModeNative,
-	}
-}
-
-func (p *ClickHouseProvider) SupportedAlertEditorModes() []models.AlertEditorMode {
-	return []models.AlertEditorMode{
-		models.AlertEditorModeCondition,
-		models.AlertEditorModeNative,
+func (p *ClickHouseProvider) Describe() Descriptor {
+	return Descriptor{
+		Capabilities: []Capability{
+			CapabilitySchemaInspection,
+			CapabilityHistogram,
+			CapabilityFieldValues,
+			CapabilitySourceInspection,
+			CapabilityAISQLGeneration,
+			CapabilityLogContext,
+			CapabilityExports,
+			CapabilityLiveTail,
+		},
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},
+		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
+		AlertEditorModes:      []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative},
+		LogchefQLNeedsColumns: true,
 	}
 }
 
@@ -357,7 +342,7 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), req.MaxLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(req.RawQuery, req.Limit, req.DefaultLimit, req.MaxLimit)
 	if err != nil {
-		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("invalid query syntax: %w", err)
+		return nil, "", clickhouse.QueryOptions{}, &clickhouse.ValidationError{Message: err.Error()}
 	}
 
 	opts := clickhouse.QueryOptions{
@@ -425,14 +410,14 @@ func (p *ClickHouseProvider) Histogram(ctx context.Context, source *models.Sourc
 		req.QueryTimeout = &defaultTimeout
 	}
 
-	client, err := p.manager.GetConnection(source.ID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
-	}
-
 	window, err := parseTimeWindow(req.Window)
 	if err != nil {
 		return nil, err
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
 	result, err := client.GetHistogramData(ctx, source.GetFullTableName(), source.MetaTSField, clickhouse.HistogramParams{
@@ -616,12 +601,33 @@ func hasLeadingTimestampSortKey(info *clickhouse.TableInfo, timestamp string) bo
 	return strings.Trim(strings.TrimSpace(info.SortKeys[0]), "`") == strings.Trim(strings.TrimSpace(timestamp), "`")
 }
 
+// Alerts read a single value; these bounds stop a query such as
+// SELECT * FROM logs from buffering the whole table.
+const (
+	alertMaxRows          = 100
+	alertMaxResponseBytes = 1 << 20
+)
+
+// formatAlertQuery is the one ClickHouse alert SQL check, shared by save-time
+// validation and evaluation so both accept and run the same statement.
+func formatAlertQuery(raw string) (string, error) {
+	query, err := clickhouse.FormatSelectQuery(raw)
+	if err != nil {
+		return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	return query, nil
+}
+
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
 	}
 	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageClickHouseSQL {
 		return nil, fmt.Errorf("clickhouse alerts require %q, got %q", models.QueryLanguageClickHouseSQL, language)
+	}
+	query, err := formatAlertQuery(req.Query)
+	if err != nil {
+		return nil, err
 	}
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds
@@ -633,7 +639,19 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
-	return client.QueryWithTimeout(ctx, req.Query, req.QueryTimeout)
+	result, err := client.QueryWithOptions(ctx, query, clickhouse.QueryOptions{
+		TimeoutSeconds:   req.QueryTimeout,
+		MaxRows:          alertMaxRows,
+		MaxResponseBytes: alertMaxResponseBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// An empty truncated result would read as value 0 and drive the alert state.
+	if result.Stats.Truncated && len(result.Logs) == 0 {
+		return nil, fmt.Errorf("alert query's first row exceeds the %d byte result limit", alertMaxResponseBytes)
+	}
+	return result, nil
 }
 
 func (p *ClickHouseProvider) InitializeSource(ctx context.Context, source *models.Source) error {
@@ -644,16 +662,17 @@ func (p *ClickHouseProvider) RemoveSource(sourceID models.SourceID) error {
 	return p.manager.RemoveSource(sourceID)
 }
 
+// CachedSourceConnectionStatus returns the manager's last health result without backend I/O.
+func (p *ClickHouseProvider) CachedSourceConnectionStatus(sourceID models.SourceID) bool {
+	return p.manager.CachedSourceConnectionStatus(sourceID)
+}
+
 func (p *ClickHouseProvider) CheckSourceConnectionStatus(ctx context.Context, source *models.Source) bool {
 	client, err := p.manager.GetConnection(source.ID)
 	if err != nil {
 		return false
 	}
 	return client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
-}
-
-func (p *ClickHouseProvider) GetSourceHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
-	return p.manager.GetCachedHealth(sourceID)
 }
 
 func (p *ClickHouseProvider) connectionFromConfig(raw json.RawMessage) (models.ConnectionInfo, error) {
@@ -732,7 +751,7 @@ func parseTimeWindow(window string) (clickhouse.TimeWindow, error) {
 	if tw, ok := windowMap[window]; ok {
 		return tw, nil
 	}
-	return "", fmt.Errorf("invalid histogram window: %s", window)
+	return "", &ValidationError{Field: "window", Message: fmt.Sprintf("invalid histogram window: %s", window)}
 }
 
 func extractTTLFromTableInfo(ctx context.Context, client *clickhouse.Client, tableInfo *clickhouse.TableInfo) string {

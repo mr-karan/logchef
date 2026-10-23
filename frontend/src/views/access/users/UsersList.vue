@@ -41,14 +41,13 @@ import AddUser from './AddUser.vue'
 
 const usersStore = useUsersStore()
 const { t } = useI18n()
-const { isLoading, error: _userError } = storeToRefs(usersStore)
+const { isLoading } = storeToRefs(usersStore)
 const showDeleteDialog = ref(false)
 const userToDelete = ref<User | null>(null)
 const showEditDialog = ref(false)
 const userToEdit = ref<User | null>(null)
 const editForm = ref({
     full_name: '',
-    email: '',
     role: '' as 'admin' | 'member'
 })
 
@@ -99,7 +98,6 @@ const handleEdit = (user: User) => {
     userToEdit.value = user
     editForm.value = {
         full_name: user.full_name,
-        email: user.email,
         role: user.role
     }
     showEditDialog.value = true
@@ -110,7 +108,6 @@ const confirmEdit = async () => {
 
     await usersStore.updateUser(userToEdit.value.id.toString(), {
         full_name: editForm.value.full_name,
-        email: editForm.value.email,
         role: editForm.value.role
     });
     showEditDialog.value = false;
@@ -254,7 +251,7 @@ onMounted(() => {
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="email" class="text-right">{{ t('ui.email') }}</Label>
-                        <Input id="email" type="email" v-model="editForm.email" class="col-span-3" />
+                        <Input id="email" type="email" :model-value="userToEdit?.email" disabled class="col-span-3" />
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="role" class="text-right">{{ t('ui.role') }}</Label>

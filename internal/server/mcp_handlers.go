@@ -26,7 +26,7 @@ const mcpMaxBodyBytes = 1 << 20
 // stateless and does not stream, so GET and DELETE get 405.
 func (s *Server) registerMCPRoutes() {
 	handler := mcp.NewServer(mcp.Deps{
-		DB:                  s.sqlite,
+		DB:                  s.store,
 		Datasources:         s.datasources,
 		Config:              s.config,
 		Version:             s.version,

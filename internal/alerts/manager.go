@@ -2,10 +2,10 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +24,12 @@ import (
 // first; this deadline is the backstop that stops a wedged source from blocking
 // the sequential evaluation loop.
 const alertEvaluationTimeout = (models.DefaultQueryTimeoutSeconds + 30) * time.Second
+
+const maxDeliveryAttempts = 3
+
+const deliveryBookkeepingTimeout = 2 * time.Second
+
+const deliveryAttemptTimeout = alertEvaluationTimeout + smtpDialTimeout + deliveryBookkeepingTimeout
 
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
@@ -48,8 +54,10 @@ type Manager struct {
 	evalTimeout time.Duration
 	evalFn      func(context.Context, *models.Alert) error
 
-	stop chan struct{}
-	wg   sync.WaitGroup
+	lifecycleMu sync.Mutex
+	stopped     bool
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 // NewManager constructs a new alert manager instance.
@@ -65,7 +73,6 @@ func NewManager(opts Options) *Manager {
 		log:         opts.Logger.With("component", "alert_manager"),
 		sender:      sender,
 		evalTimeout: alertEvaluationTimeout,
-		stop:        make(chan struct{}),
 	}
 	m.evalFn = m.evaluateAlert
 	return m
@@ -73,17 +80,37 @@ func NewManager(opts Options) *Manager {
 
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
 func (m *Manager) Start(ctx context.Context) {
+	m.lifecycleMu.Lock()
+	if m.stopped || m.cancel != nil {
+		m.lifecycleMu.Unlock()
+		return
+	}
 	if !m.cfg.Enabled {
+		m.lifecycleMu.Unlock()
 		m.log.Debug("alerting disabled")
 		return
 	}
+	ctx, m.cancel = context.WithCancel(ctx)
 	interval := m.cfg.EvaluationInterval
 	if interval <= 0 {
 		interval = time.Minute
 	}
+	ctx, m.cancel = context.WithCancel(ctx)
+	m.wg.Add(1)
+	m.lifecycleMu.Unlock()
+
+	// One manager owns delivery reservations, as required by docs/src/content/docs/operations/database-backends.md.
+	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
+	err := m.db.RecoverAlertDeliveries(recoveryCtx)
+	cancel()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
+	}
+
 	m.log.Debug("starting alert manager", "interval", interval)
 
-	m.wg.Go(func() {
+	go func() {
+		defer m.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -94,27 +121,44 @@ func (m *Manager) Start(ctx context.Context) {
 			select {
 			case <-ticker.C:
 				m.evaluateCycle(ctx)
-			case <-m.stop:
-				m.log.Debug("alert manager stopping")
-				return
 			case <-ctx.Done():
 				m.log.Debug("alert manager context cancelled")
 				return
 			}
 		}
-	})
+	}()
 }
 
 // Stop signals the manager to stop evaluating alerts.
 func (m *Manager) Stop() {
-	close(m.stop)
-	m.wg.Wait()
+	_ = m.StopWithContext(context.Background())
+}
+
+// StopWithContext cancels evaluation and waits within the shutdown budget.
+func (m *Manager) StopWithContext(ctx context.Context) error {
+	m.lifecycleMu.Lock()
+	m.stopped = true
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.lifecycleMu.Unlock()
+	done := make(chan struct{})
+	go func() { m.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (m *Manager) evaluateCycle(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	alerts, err := m.db.ListActiveAlertsDue(ctx)
 	if err != nil {
-		m.log.Error("failed to fetch alerts for evaluation", "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to fetch alerts for evaluation", "error", err)
 		return
 	}
 	if len(alerts) == 0 {
@@ -122,8 +166,11 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 
 	for _, alert := range alerts {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
-			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
+			m.log.Log(ctx, evaluationLogLevel(ctx, err), "alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
 	}
 }
@@ -178,7 +225,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return fmt.Errorf("failed to extract alert result: %w", err)
 	}
 
-	triggered := compareThreshold(value, alert.ThresholdValue, alert.ThresholdOperator)
+	triggered := util.CompareAlertThreshold(value, alert.ThresholdValue, alert.ThresholdOperator)
 
 	m.log.Debug("alert evaluation complete",
 		"alert_id", alert.ID,
@@ -194,14 +241,26 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 	return m.handleResolved(ctx, alert, value)
 }
 
+func evaluationLogLevel(ctx context.Context, err error) slog.Level {
+	if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+		return slog.LevelDebug
+	}
+	return slog.LevelError
+}
+
 func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert, evalErr error) {
 	if alert == nil || evalErr == nil {
 		return
 	}
+	if errors.Is(ctx.Err(), context.Canceled) && errors.Is(evalErr, context.Canceled) {
+		return
+	}
+	// Evaluation deadlines must not prevent recording genuine failures.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 
-	// Update last_evaluated_at even on error so the alert respects its frequency_seconds
-	// instead of being re-evaluated every cycle
-	if err := m.db.MarkAlertEvaluated(ctx, alert.ID); err != nil {
+	// Failed evaluations still count toward the alert's evaluation frequency.
+	if err := m.db.TouchAlertEvaluated(ctx, alert.ID); err != nil {
 		m.log.Error("failed to mark alert evaluated after error", "alert_id", alert.ID, "error", err)
 	}
 
@@ -216,7 +275,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 
 	_, err := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)
 	if err != nil {
-		m.log.Error("failed to insert error history entry", "alert_id", alert.ID, "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to insert error history entry", "alert_id", alert.ID, "error", err)
 		return
 	}
 
@@ -229,27 +288,13 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, value float64) error {
 	prevHistory, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
 	if err != nil && !models.IsNotFound(err) {
-		m.log.Warn("failed to check existing alert history", "alert_id", alert.ID, "error", err)
+		return fmt.Errorf("failed to check existing alert history: %w", err)
 	}
 	alreadyActive := err == nil && prevHistory != nil
 
-	// Check if previous delivery failed - if so, we should retry
-	shouldRetryDelivery := false
-	if alreadyActive && prevHistory.Payload != nil {
-		if deliveryFailed, ok := prevHistory.Payload["delivery_failed"].(bool); ok && deliveryFailed {
-			m.log.Debug("retrying alert delivery", "alert_id", alert.ID, "history_id", prevHistory.ID)
-			shouldRetryDelivery = true
-		}
-	}
-
-	if markErr := m.db.MarkAlertTriggered(ctx, alert.ID); markErr != nil {
-		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
-	}
-
-	// If already active and delivery succeeded previously, suppress duplicate notification
+	deliveryAttempts, shouldRetryDelivery := deliveryRetryState(prevHistory)
 	if alreadyActive && !shouldRetryDelivery {
-		m.log.Debug("alert already active with successful delivery, suppressing duplicate alert notification", "alert_id", alert.ID)
-		return nil
+		return m.suppressDuplicateDelivery(ctx, alert.ID, prevHistory, deliveryAttempts)
 	}
 
 	m.log.Info("alert triggered",
@@ -265,62 +310,124 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	valueCopy := value
 	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
 
-	var deliveryErr error
-	var history *models.AlertHistoryEntry
-	if shouldRetryDelivery && prevHistory != nil {
-		// Retry on existing history entry - update it with new attempt
-		history = prevHistory
-		deliveryErr = m.sendNotification(ctx, alert, history, labels, annotations, models.AlertStatusTriggered, value)
-	} else {
-		// Create new history entry
-		now := time.Now().UTC()
-		history = &models.AlertHistoryEntry{
-			AlertID:     alert.ID,
-			Status:      models.AlertStatusTriggered,
-			TriggeredAt: now,
-			Value:       &valueCopy,
-			Message:     message,
+	notificationHistory := prevHistory
+	if notificationHistory == nil {
+		notificationHistory = &models.AlertHistoryEntry{TriggeredAt: time.Now().UTC(), Message: message}
+	}
+	notification := m.buildNotification(ctx, alert, notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
+	if shouldRetryDelivery {
+		notification.deliveryTargets = pendingDeliveryTargets(prevHistory.Payload)
+		notification.attemptedTargets = storedDeliveryTargets(prevHistory.Payload, "delivery_attempted")
+	}
+	selectedTargets := notification.targetIDs()
+	attemptedIDs := notification.attemptedTargetIDs()
+	deliveryAttempts++
+	historyPayload := make(map[string]any)
+	if prevHistory != nil {
+		maps.Copy(historyPayload, prevHistory.Payload)
+	}
+	maps.Copy(historyPayload, map[string]any{
+		"labels":                     copyStringMap(labels),
+		"annotations":                copyStringMap(annotations),
+		"status":                     string(models.AlertStatusTriggered),
+		"delivery_failed":            false,
+		"delivery_in_progress":       true,
+		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
+		"delivery_attempted":         attemptedIDs,
+		"delivery_attempts":          deliveryAttempts,
+		"delivery_pending":           selectedTargets,
+		"delivery_retries_exhausted": deliveryAttempts >= maxDeliveryAttempts,
+	})
+
+	history, err := m.reserveTriggeredHistory(ctx, alert.ID, prevHistory, valueCopy, message, historyPayload)
+	if err != nil {
+		if !models.IsNotFound(err) {
+			m.log.Error("failed to reserve alert delivery attempt", "alert_id", alert.ID, "error", err)
 		}
-		deliveryErr = m.sendNotification(ctx, alert, history, labels, annotations, models.AlertStatusTriggered, value)
+		return nil
 	}
 
-	// Record history with delivery status
-	historyPayload := map[string]any{
-		"labels":          copyStringMap(labels),
-		"annotations":     copyStringMap(annotations),
-		"status":          string(models.AlertStatusTriggered),
-		"delivery_failed": deliveryErr != nil,
+	notification.TriggeredAt = history.TriggeredAt
+	results := m.sender.Send(ctx, notification)
+	deliveryErr := results.Err()
+	// Removing every pending target leaves delivery failed until a current target succeeds.
+	if shouldRetryDelivery && len(selectedTargets) == 0 && len(results) == 0 {
+		deliveryErr = errors.New("no pending notification targets remain")
 	}
+	historyPayload["delivery_in_progress"] = false
+	delete(historyPayload, "delivery_deadline_at")
+	historyPayload["delivery_pending"] = results.failedTargets()
+	historyPayload["delivery_retries_exhausted"] = deliveryErr != nil && deliveryAttempts >= maxDeliveryAttempts
+	delete(historyPayload, "delivery_error")
+	historyPayload["delivery_failed"] = deliveryErr != nil
 	if deliveryErr != nil {
 		historyPayload["delivery_error"] = deliveryErr.Error()
 		m.log.Warn("failed to send alert notifications", "alert_id", alert.ID, "error", deliveryErr)
+		if deliveryAttempts == maxDeliveryAttempts {
+			m.log.Error("alert delivery retries exhausted", "alert_id", alert.ID, "history_id", history.ID, "attempts", deliveryAttempts)
+		}
 	} else {
 		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
-
-	if !shouldRetryDelivery {
-		// Insert new history entry
-		_, insertErr := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
-		if insertErr != nil {
-			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
+	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBookkeepingTimeout)
+	defer cancel()
+	if err := m.db.UpdateAlertHistoryPayload(bookkeepingCtx, history.ID, historyPayload); err != nil {
+		if models.IsNotFound(err) {
+			m.log.Debug("alert history resolved during delivery", "alert_id", alert.ID, "history_id", history.ID)
 		} else {
-			if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
-				m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
-			}
-		}
-	} else {
-		// Update existing history entry to reflect the retry outcome
-		if updateErr := m.db.UpdateAlertHistoryPayload(ctx, history.ID, historyPayload); updateErr != nil {
-			m.log.Error("failed to update alert history payload after retry", "alert_id", alert.ID, "history_id", history.ID, "error", updateErr)
+			m.log.Error("failed to update alert history payload after delivery", "alert_id", alert.ID, "history_id", history.ID, "error", err)
 		}
 	}
 
 	return nil
 }
 
+func (m *Manager) suppressDuplicateDelivery(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, attempts int) error {
+	if attempts >= maxDeliveryAttempts && history.Payload["delivery_in_progress"] == true {
+		history.Payload["delivery_in_progress"] = false
+		delete(history.Payload, "delivery_deadline_at")
+		history.Payload["delivery_failed"] = true
+		history.Payload["delivery_retries_exhausted"] = true
+		history.Payload["delivery_error"] = "delivery interrupted"
+		if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, history.Payload); err != nil && !models.IsNotFound(err) {
+			m.log.Error("failed to record interrupted alert delivery", "alert_id", alertID, "history_id", history.ID, "error", err)
+		}
+	}
+	if err := m.db.TouchAlertEvaluated(ctx, alertID); err != nil {
+		return err
+	}
+	m.log.Debug("suppressing duplicate alert notification", "alert_id", alertID, "delivery_attempts", attempts)
+	return nil
+}
+
+func (m *Manager) reserveTriggeredHistory(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, value float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
+	newHistory := history == nil
+	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if newHistory {
+			var err error
+			history, err = tx.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, &value, message, payload)
+			if err != nil {
+				return err
+			}
+		} else if err := tx.UpdateAlertHistoryPayload(ctx, history.ID, payload); err != nil {
+			return err
+		}
+		return tx.MarkAlertTriggered(ctx, alertID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if newHistory {
+		if err := m.db.PruneAlertHistory(ctx, alertID, m.cfg.HistoryLimit); err != nil {
+			m.log.Warn("failed to prune alert history", "alert_id", alertID, "error", err)
+		}
+	}
+	return history, nil
+}
+
 func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value float64) error {
 	if err := m.db.MarkAlertEvaluated(ctx, alert.ID); err != nil {
-		m.log.Error("failed to mark alert evaluated", "alert_id", alert.ID, "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to mark alert evaluated", "alert_id", alert.ID, "error", err)
 	}
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
@@ -414,11 +521,11 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 	}
 
 	notification := m.buildNotification(ctx, alert, history, labels, annotations, status, value)
-	return m.sender.Send(ctx, notification)
+	return m.sender.Send(ctx, notification).Err()
 }
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
-	recipientEmails, missingRecipients := m.resolveRecipientEmails(ctx, alert)
+	recipientEmails, missingRecipients, recipientTargets := m.resolveRecipientEmails(ctx, alert)
 	sourceName := labels["source"]
 
 	return AlertNotification{
@@ -444,19 +551,21 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Message:                 history.Message,
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
 		RecipientEmails:         recipientEmails,
+		recipientTargets:        recipientTargets,
 		MissingRecipientUserIDs: missingRecipients,
 		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
 }
 
-func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID) {
+func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, targets map[string]DeliveryTargetID) {
 	if alert == nil || len(alert.RecipientUserIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Recipients are users (not team-scoped). Resolve each by id directly.
 	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
 	emails := make([]string, 0, len(alert.RecipientUserIDs))
+	targets = make(map[string]DeliveryTargetID)
 	missing := make([]models.UserID, 0)
 	for _, userID := range alert.RecipientUserIDs {
 		user, err := m.db.GetUser(ctx, userID)
@@ -474,9 +583,10 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 		}
 		seen[email] = struct{}{}
 		emails = append(emails, email)
+		targets[email] = emailUserTarget(userID)
 	}
 
-	return emails, missing
+	return emails, missing, targets
 }
 
 func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {
@@ -484,9 +594,9 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 		return trimmed
 	}
 
-	base := strings.TrimSpace(m.db.GetSettingWithDefault(ctx, "alerts.frontend_url", ""))
+	base := strings.TrimSpace(store.GetSettingWithDefault(ctx, m.db, "alerts.frontend_url", ""))
 	if base == "" {
-		base = strings.TrimSpace(m.db.GetSettingWithDefault(ctx, "alerts.external_url", ""))
+		base = strings.TrimSpace(store.GetSettingWithDefault(ctx, m.db, "alerts.external_url", ""))
 	}
 	if base == "" {
 		return ""
@@ -498,7 +608,7 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 
 type noopSender struct{}
 
-func (noopSender) Send(_ context.Context, _ AlertNotification) error {
+func (noopSender) Send(_ context.Context, _ AlertNotification) DeliveryResults {
 	return nil
 }
 
@@ -510,17 +620,11 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
-		if models.IsNotFound(err) {
-			return fmt.Errorf("no active alert to resolve")
-		}
 		return fmt.Errorf("failed to find unresolved alert history: %w", err)
 	}
 
 	// Update the history entry in the database
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if models.IsNotFound(err) {
-			return fmt.Errorf("alert history entry not found")
-		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
 
@@ -558,22 +662,4 @@ func copyStringMap(src map[string]string) map[string]string {
 	dst := make(map[string]string, len(src))
 	maps.Copy(dst, src)
 	return dst
-}
-func compareThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {
-	switch operator {
-	case models.AlertThresholdGreaterThan:
-		return value > threshold
-	case models.AlertThresholdGreaterThanOrEqual:
-		return value >= threshold
-	case models.AlertThresholdLessThan:
-		return value < threshold
-	case models.AlertThresholdLessThanOrEqual:
-		return value <= threshold
-	case models.AlertThresholdEqual:
-		return math.Abs(value-threshold) < 1e-9
-	case models.AlertThresholdNotEqual:
-		return math.Abs(value-threshold) >= 1e-9
-	default:
-		return false
-	}
 }

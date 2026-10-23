@@ -47,15 +47,13 @@ type fakeClickHouseCompiler struct {
 	timeRangeErr error
 }
 
-func (f *fakeClickHouseCompiler) Type() models.SourceType               { return models.SourceTypeClickHouse }
-func (f *fakeClickHouseCompiler) Capabilities() []datasource.Capability { return nil }
-func (f *fakeClickHouseCompiler) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL}
+func (f *fakeClickHouseCompiler) Type() models.SourceType { return models.SourceTypeClickHouse }
+func (f *fakeClickHouseCompiler) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},
+		LogchefQLNeedsColumns: true,
+	}
 }
-func (f *fakeClickHouseCompiler) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return nil
-}
-func (f *fakeClickHouseCompiler) SupportedAlertEditorModes() []models.AlertEditorMode { return nil }
 func (f *fakeClickHouseCompiler) CheckSourceConnectionStatus(ctx context.Context, source *models.Source) bool {
 	return true
 }
@@ -99,11 +97,11 @@ func newTranslateTestApp(timeRangeErr error) *fiber.App {
 	svc := datasource.NewService(db, slog.Default())
 	svc.Register(&fakeClickHouseCompiler{timeRangeErr: timeRangeErr})
 
-	s := &Server{datasources: svc, sqlite: db, log: slog.Default()}
+	s := &Server{datasources: svc, store: db, log: slog.Default()}
 
 	app := fiber.New()
 	admin := &models.User{ID: 1, Role: models.UserRoleAdmin}
-	withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/logchefql/translate", admin, s.handleLogchefQLTranslate)
+	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/logchefql/translate", admin, s.handleLogchefQLTranslate)
 	return app
 }
 

@@ -1,5 +1,6 @@
-import { apiClient } from "./apiUtils";
-import type { Team } from "./types";
+import { apiClient, type RequestOptions } from "./apiUtils";
+import type { TeamSummary } from "./teams";
+import type { ColumnInfo } from "./explore";
 import type { QueryLanguage } from "@/lib/queryMetadata";
 import type { TemplateVariable } from "@/api/logchefql";
 
@@ -120,18 +121,13 @@ export interface Source {
   sort_keys?: string[];
 }
 
-export interface ColumnInfo {
-  name: string;
-  type: string;
-}
-
 export interface SourceWithTeamsResponse {
   source: Source;
-  teams: Team[];
+  teams: TeamSummary[];
 }
 
 export interface SourceWithTeams extends Source {
-  teams: Team[];
+  teams: SourceWithTeamsResponse["teams"];
 }
 
 export interface CreateSourcePayload {
@@ -227,10 +223,10 @@ export const sourcesApi = {
   // Source management
   listAllSourcesForAdmin: () =>
     apiClient.get<Source[]>("/admin/sources"),
-  listTeamSources: (teamId: number) =>
-    apiClient.get<Source[]>(`/teams/${teamId}/sources`),
-  getTeamSource: (teamId: number, sourceId: number) =>
-    apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`),
+  listTeamSources: (teamId: number, options?: RequestOptions) =>
+    apiClient.get<Source[]>(`/teams/${teamId}/sources`, options),
+  getTeamSource: (teamId: number, sourceId: number, options?: RequestOptions) =>
+    apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`, options),
   createSource: (payload: CreateSourcePayload) =>
     apiClient.post<Source>("/admin/sources", payload),
   updateSource: (id: number, payload: UpdateSourcePayload) =>

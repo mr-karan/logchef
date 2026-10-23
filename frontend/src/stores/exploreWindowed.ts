@@ -1,9 +1,8 @@
-import { computed, markRaw, ref } from 'vue';
-import { defineStore } from 'pinia';
+import { computed, markRaw, reactive, ref } from 'vue';
 import { epochMs, parseZoneId, zoneOffsetMs } from '@/utils/timeWindow';
 import { streamWindowedQuery, WindowedHTTPError, type LogRow, type SearchWindow, type WindowStatus, type WindowedRequest, type WindowedEvent } from '@/api/windowed';
 import type { HistogramDataPoint, QueryStats } from '@/api/explore';
-import { HistogramService } from '@/services/HistogramService';
+import { calculateOptimalGranularity } from '@/services/HistogramService';
 
 export interface WindowCoverage extends SearchWindow {
   search: WindowStatus;
@@ -11,33 +10,33 @@ export interface WindowCoverage extends SearchWindow {
   cursor: string;
   message: string;
 }
-interface SearchOptions { cursor?: string; skip?: number; retry?: number; signal?: AbortSignal }
+interface SearchOptions { cursor?: string; skip?: number; retry?: number }
 interface SearchSnapshot {
   teamId: number;
   sourceId: number;
   request: WindowedRequest;
   histogram: boolean;
+  // The rows found so far: after each page, and once a search that found none ends.
   onRows: (rows: LogRow[], stats: QueryStats | null) => void;
 }
+/** A Load older, a Skip of the slow window, or a Retry of one window. */
+export type Paging = 'older' | 'skip' | { retry: WindowCoverage };
 
-export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
-  const active = ref(false);
+/** Creates one run's resumable search, coverage and counts. */
+export function createWindowedSession(snapshot: SearchSnapshot) {
   const coverage = ref<WindowCoverage[]>([]);
   const cursor = ref('');
   const isSearching = ref(false);
   const isCounting = ref(false);
   const complete = ref(false);
   const error = ref<string | null>(null);
-  const histogramEnabled = ref(true);
-  const selectedStreams = ref<Record<string, string[]>>({});
   const histogram = ref<HistogramDataPoint[]>([]);
-  const granularity = ref('1m');
+  const granularity = calculateOptimalGranularity(snapshot.request.start_time ?? '', snapshot.request.end_time ?? '');
   const rowsByWindow = new Map<number, LogRow[]>();
   const countsByWindow = new Map<number, HistogramDataPoint[]>();
   const countControllers = new Set<AbortController>();
-  let snapshot: SearchSnapshot | null = null;
   let searchController: AbortController | null = null;
-  let searchTask: Promise<void> | null = null;
+  let searchTask: Promise<boolean> | null = null;
   let generation = 0;
   let countsStarted = false;
   let rangeExhausted = false;
@@ -49,9 +48,6 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
   // The head is the window the main cursor continues. Windows before it are history, windows after it were never shown.
   const headIndex = computed(() => cursor.value ? coverage.value.find(w => w.search === 'pending' || w.cursor === cursor.value)?.index ?? coverage.value.length : coverage.value.length);
   const skippableWindow = computed(() => coverage.value.find(w => (w.search === 'running' || w.search === 'failed') && w.index === headIndex.value && w.cursor === cursor.value));
-  const streamFilters = computed(() => Object.entries(selectedStreams.value)
-    .filter(([, values]) => values.length > 0)
-    .map(([field, values]) => JSON.stringify({ [field]: values })));
 
   function stop() {
     generation++;
@@ -79,26 +75,9 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
     return window.index < headIndex.value || window.search === 'failed' && window.index === headIndex.value && window.cursor === cursor.value;
   }
 
-  function reset(clearFilters = false) {
-    stop();
-    active.value = false;
-    snapshot = null;
-    coverage.value = [];
-    cursor.value = '';
-    complete.value = false;
-    error.value = null;
-    rowsByWindow.clear();
-    countsByWindow.clear();
-    histogram.value = [];
-    countsStarted = false;
-    rangeExhausted = false;
-    stats = null;
-    if (clearFilters) selectedStreams.value = {};
-  }
-
   function publishRows() {
     const rows = [...rowsByWindow.entries()].sort(([a], [b]) => a - b).flatMap(([, rows]) => rows);
-    snapshot?.onRows(markRaw(rows), stats);
+    snapshot.onRows(markRaw(rows), stats);
   }
 
   function publishCounts() {
@@ -160,8 +139,8 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
   }
 
   function histogramFromRows() {
-    const stepMs = Number.parseFloat(granularity.value) * (granularity.value.endsWith('h') ? 3600000 : granularity.value.endsWith('m') ? 60000 : 1000);
-    const offsetMs = snapshot ? requestOffsetMs(snapshot.request) : 0;
+    const stepMs = Number.parseFloat(granularity) * (granularity.endsWith('h') ? 3600000 : granularity.endsWith('m') ? 60000 : 1000);
+    const offsetMs = requestOffsetMs(snapshot.request);
     const buckets = new Map<string, number>();
     for (const rows of rowsByWindow.values()) for (const row of rows) {
       if (typeof row._time !== 'string') continue;
@@ -175,12 +154,11 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
   }
 
   async function countWindows(windowIndex?: number) {
-    if (!snapshot) return;
     const run = generation;
     const controller = new AbortController();
     countControllers.add(controller);
     isCounting.value = true;
-    const request = { ...snapshot.request, count: true, step: granularity.value, window_index: windowIndex };
+    const request = { ...snapshot.request, count: true, step: granularity, window_index: windowIndex };
     try {
       await streamWindowedQuery(snapshot.teamId, snapshot.sourceId, request, controller.signal, event => {
         if (run === generation) applyEvent(event, true, windowIndex !== undefined);
@@ -206,34 +184,31 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
     }
   }
 
-  async function executeSearch(options: SearchOptions) {
-    if (!snapshot || options.signal?.aborted) return;
+  // Cancelled or superseded searches cannot settle their run.
+  async function executeSearch(options: SearchOptions): Promise<boolean> {
     searchController?.abort();
     const controller = new AbortController();
     searchController = controller;
-    const cancel = () => controller.abort();
-    options.signal?.addEventListener('abort', cancel, { once: true });
     const run = generation;
     isSearching.value = true;
     error.value = null;
     const advanceRetry = options.retry !== undefined && cursor.value === options.cursor;
     try {
       await streamWindowedQuery(snapshot.teamId, snapshot.sourceId, { ...snapshot.request, cursor: options.cursor, skip_window: options.skip, window_index: options.retry }, controller.signal, event => {
-        if (run === generation && searchController === controller) applyEvent(event, false, options.retry !== undefined, advanceRetry);
+        if (run === generation && !controller.signal.aborted) applyEvent(event, false, options.retry !== undefined, advanceRetry);
       });
-      if (run !== generation || controller.signal.aborted) return;
-      if (!countsStarted) {
+      if (run !== generation || controller.signal.aborted) return false;
+      if (!error.value && rowsByWindow.size === 0) publishRows();
+      if (!countsStarted && !error.value) {
         if (complete.value) histogramFromRows();
         else { countsStarted = true; void countWindows(); }
       }
     } catch (err) {
-      if (run === generation && !controller.signal.aborted) {
-        if (err instanceof WindowedHTTPError && err.status === 422) { reset(); throw err; }
-        error.value = err instanceof Error ? err.message : 'Search request failed';
-        interruptSearch();
-      }
+      if (run !== generation || controller.signal.aborted) return false;
+      if (err instanceof WindowedHTTPError && err.status === 422) { stop(); throw err; }
+      error.value = err instanceof Error ? err.message : 'Search request failed';
+      interruptSearch();
     } finally {
-      options.signal?.removeEventListener('abort', cancel);
       if (searchController === controller) {
         searchController = null;
         isSearching.value = false;
@@ -242,33 +217,33 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
         else for (const window of coverage.value) if (window.search === 'running') window.search = 'pending';
       }
     }
+    return true;
   }
 
-  async function search(options: SearchOptions = {}) {
+  async function search(options: SearchOptions = {}): Promise<boolean> {
+    const run = generation;
     searchController?.abort();
     if (searchTask) await searchTask.catch(() => undefined);
+    // A Stop while the search before this one was ending cancels this one too.
+    if (run !== generation) return false;
     const task = executeSearch(options);
     searchTask = task;
-    try { await task; }
+    try { return await task; }
     finally { if (searchTask === task) searchTask = null; }
   }
 
-  async function start(input: SearchSnapshot, signal: AbortSignal) {
-    reset();
-    snapshot = input;
-    active.value = true;
-    histogramEnabled.value = input.histogram;
-    granularity.value = HistogramService.calculateOptimalGranularity(input.request.start_time ?? '', input.request.end_time ?? '');
-    await search({ signal });
+  /** Returns no task when the requested page is unavailable. */
+  function page(action: Paging): Promise<boolean> | undefined {
+    if (action === 'skip') {
+      const window = skippableWindow.value;
+      return window && search({ cursor: window.cursor, skip: window.index });
+    }
+    if (isSearching.value) return;
+    if (action === 'older') return cursor.value ? search({ cursor: cursor.value }) : undefined;
+    return canRetrySearch(action.retry) ? search({ cursor: action.retry.cursor, retry: action.retry.index }) : undefined;
   }
-  function loadOlder() { if (!isSearching.value && cursor.value) return search({ cursor: cursor.value }); }
-  async function skipWindow() {
-    const window = skippableWindow.value;
-    if (!window) return;
-    searchController?.abort();
-    await search({ cursor: window.cursor, skip: window.index });
-  }
-  function retrySearch(window: WindowCoverage) { if (!isSearching.value && canRetrySearch(window)) return search({ cursor: window.cursor, retry: window.index }); }
 
-  return { active, coverage, cursor, isSearching, isCounting, complete, error, histogramEnabled, selectedStreams, histogram, granularity, searchedWindows, total, countComplete, skippableWindow, streamFilters, start, stop, reset, loadOlder, skipWindow, canRetrySearch, retrySearch, retryFailedCounts, retryCount: countWindows };
-});
+  return reactive({ coverage, cursor, isSearching, isCounting, complete, error, histogramEnabled: snapshot.histogram, histogram, granularity, searchedWindows, total, countComplete, skippableWindow, start: search, stop, page, canRetrySearch, retryFailedCounts, retryCount: countWindows });
+}
+
+export type WindowedSession = ReturnType<typeof createWindowedSession>;

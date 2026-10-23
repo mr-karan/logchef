@@ -81,6 +81,7 @@ const addTeamMember = `-- name: AddTeamMember :exec
 
 INSERT INTO team_members (team_id, user_id, role)
 VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING
 `
 
 type AddTeamMemberParams struct {
@@ -90,7 +91,7 @@ type AddTeamMemberParams struct {
 }
 
 // Team Members
-// Add a member to a team
+// Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.db.Exec(ctx, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
 	return err
@@ -100,6 +101,7 @@ const addTeamSource = `-- name: AddTeamSource :exec
 
 INSERT INTO team_sources (team_id, source_id)
 VALUES ($1, $2)
+ON CONFLICT (team_id, source_id) DO NOTHING
 `
 
 type AddTeamSourceParams struct {
@@ -108,48 +110,10 @@ type AddTeamSourceParams struct {
 }
 
 // Team Sources
-// Add a data source to a team
+// Add a data source to a team; linking an already linked source is a no-op.
 func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error {
 	_, err := q.db.Exec(ctx, addTeamSource, arg.TeamID, arg.SourceID)
 	return err
-}
-
-const approveOAuthDeviceAuthorization = `-- name: ApproveOAuthDeviceAuthorization :one
-UPDATE oauth_device_authorizations
-SET approved_at = $1::timestamptz, user_id = $2
-WHERE user_code_hash = $3
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > $1::timestamptz
-RETURNING device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at
-`
-
-type ApproveOAuthDeviceAuthorizationParams struct {
-	Now          pgtype.Timestamptz `json:"now"`
-	UserID       pgtype.Int8        `json:"user_id"`
-	UserCodeHash string             `json:"user_code_hash"`
-}
-
-func (q *Queries) ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
-	row := q.db.QueryRow(ctx, approveOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
-	var i OauthDeviceAuthorization
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const authenticateOAuthAccessToken = `-- name: AuthenticateOAuthAccessToken :one
@@ -264,6 +228,7 @@ SET
     completed_at = $6,
     updated_at = $7
 WHERE id = $8
+  AND status IN ('pending', 'running')
 RETURNING id
 `
 
@@ -334,33 +299,6 @@ func (q *Queries) ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuth
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const consumeOAuthDeviceCode = `-- name: ConsumeOAuthDeviceCode :one
-UPDATE oauth_device_authorizations
-SET consumed_at = $1::timestamptz
-WHERE device_code_hash = $2
-  AND oauth_device_authorizations.client_id = $3
-  AND approved_at IS NOT NULL
-  AND consumed_at IS NULL
-  AND expires_at > $1::timestamptz
-  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
-RETURNING grant_id
-`
-
-type ConsumeOAuthDeviceCodeParams struct {
-	Now            pgtype.Timestamptz `json:"now"`
-	DeviceCodeHash string             `json:"device_code_hash"`
-	ClientID       string             `json:"client_id"`
-}
-
-// Single-use consumption of an approved code. Expiry is checked here, before
-// consumption, so an approved but expired code never issues tokens.
-func (q *Queries) ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (pgtype.Int8, error) {
-	row := q.db.QueryRow(ctx, consumeOAuthDeviceCode, arg.Now, arg.DeviceCodeHash, arg.ClientID)
-	var grant_id pgtype.Int8
-	err := row.Scan(&grant_id)
-	return grant_id, err
 }
 
 const consumeOAuthRefreshToken = `-- name: ConsumeOAuthRefreshToken :one
@@ -669,6 +607,8 @@ const createExportJob = `-- name: CreateExportJob :exec
 
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -677,19 +617,21 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type CreateExportJobParams struct {
-	ID          string             `json:"id"`
-	SourceID    int64              `json:"source_id"`
-	CreatedBy   int64              `json:"created_by"`
-	Status      string             `json:"status"`
-	Format      string             `json:"format"`
-	RequestJson string             `json:"request_json"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID              string             `json:"id"`
+	OwnerInstanceID string             `json:"owner_instance_id"`
+	OwnerProcessID  string             `json:"owner_process_id"`
+	SourceID        int64              `json:"source_id"`
+	CreatedBy       int64              `json:"created_by"`
+	Status          string             `json:"status"`
+	Format          string             `json:"format"`
+	RequestJson     string             `json:"request_json"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Export Jobs
@@ -697,6 +639,8 @@ type CreateExportJobParams struct {
 func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams) error {
 	_, err := q.db.Exec(ctx, createExportJob,
 		arg.ID,
+		arg.OwnerInstanceID,
+		arg.OwnerProcessID,
 		arg.SourceID,
 		arg.CreatedBy,
 		arg.Status,
@@ -744,40 +688,6 @@ func (q *Queries) CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAut
 		arg.OfflineAccess,
 		arg.CodeChallenge,
 		arg.State,
-		arg.ExpiresAt,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const createOAuthDeviceAuthorization = `-- name: CreateOAuthDeviceAuthorization :exec
-INSERT INTO oauth_device_authorizations (
-    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
-    interval_secs, expires_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-`
-
-type CreateOAuthDeviceAuthorizationParams struct {
-	DeviceCodeHash string             `json:"device_code_hash"`
-	UserCodeHash   string             `json:"user_code_hash"`
-	ClientID       string             `json:"client_id"`
-	Resource       string             `json:"resource"`
-	Scopes         string             `json:"scopes"`
-	OfflineAccess  bool               `json:"offline_access"`
-	IntervalSecs   int32              `json:"interval_secs"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error {
-	_, err := q.db.Exec(ctx, createOAuthDeviceAuthorization,
-		arg.DeviceCodeHash,
-		arg.UserCodeHash,
-		arg.ClientID,
-		arg.Resource,
-		arg.Scopes,
-		arg.OfflineAccess,
-		arg.IntervalSecs,
 		arg.ExpiresAt,
 		arg.CreatedAt,
 	)
@@ -1097,15 +1007,6 @@ func (q *Queries) DeleteExpiredOAuthAuthRequests(ctx context.Context, now pgtype
 	return err
 }
 
-const deleteExpiredOAuthDeviceAuthorizations = `-- name: DeleteExpiredOAuthDeviceAuthorizations :exec
-DELETE FROM oauth_device_authorizations WHERE expires_at <= $1
-`
-
-func (q *Queries) DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, deleteExpiredOAuthDeviceAuthorizations, expiresAt)
-	return err
-}
-
 const deleteExpiredOAuthRefreshFamilies = `-- name: DeleteExpiredOAuthRefreshFamilies :exec
 DELETE FROM oauth_refresh_tokens
 WHERE NOT EXISTS (
@@ -1215,28 +1116,6 @@ DELETE FROM sessions WHERE user_id = $1
 func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := q.db.Exec(ctx, deleteUserSessions, userID)
 	return err
-}
-
-const denyOAuthDeviceAuthorization = `-- name: DenyOAuthDeviceAuthorization :execrows
-UPDATE oauth_device_authorizations
-SET denied_at = $1::timestamptz, user_id = $2
-WHERE user_code_hash = $3
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > $1::timestamptz
-`
-
-type DenyOAuthDeviceAuthorizationParams struct {
-	Now          pgtype.Timestamptz `json:"now"`
-	UserID       pgtype.Int8        `json:"user_id"`
-	UserCodeHash string             `json:"user_code_hash"`
-}
-
-func (q *Queries) DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, denyOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const failExportJob = `-- name: FailExportJob :one
@@ -1502,22 +1381,7 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 }
 
 const getExportJob = `-- name: GetExportJob :one
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = $1
 `
@@ -1542,6 +1406,8 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerInstanceID,
+		&i.OwnerProcessID,
 	)
 	return i, err
 }
@@ -1666,41 +1532,6 @@ func (q *Queries) GetOAuthRefreshTokenState(ctx context.Context, tokenHash strin
 		&i.OauthGrant.LastUsedAt,
 		&i.OauthGrant.RevokedAt,
 		&i.OauthGrant.RevokeReason,
-	)
-	return i, err
-}
-
-const getPendingOAuthDeviceAuthorization = `-- name: GetPendingOAuthDeviceAuthorization :one
-SELECT device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at FROM oauth_device_authorizations
-WHERE user_code_hash = $1
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > $2::timestamptz
-`
-
-type GetPendingOAuthDeviceAuthorizationParams struct {
-	UserCodeHash string             `json:"user_code_hash"`
-	Now          pgtype.Timestamptz `json:"now"`
-}
-
-func (q *Queries) GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
-	row := q.db.QueryRow(ctx, getPendingOAuthDeviceAuthorization, arg.UserCodeHash, arg.Now)
-	var i OauthDeviceAuthorization
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1979,6 +1810,19 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 	return i, err
 }
 
+const getTriggeredAlertHistoryAlertID = `-- name: GetTriggeredAlertHistoryAlertID :one
+SELECT alert_id FROM alert_history
+WHERE id = $1 AND status = 'triggered'
+FOR UPDATE
+`
+
+func (q *Queries) GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, getTriggeredAlertHistoryAlertID, id)
+	var alert_id int64
+	err := row.Scan(&alert_id)
+	return alert_id, err
+}
+
 const getUser = `-- name: GetUser :one
 SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE id = $1
 `
@@ -2011,6 +1855,31 @@ SELECT id, email, full_name, role, status, last_login_at, last_active_at, manage
 // Get a user by email
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.FullName,
+		&i.Role,
+		&i.Status,
+		&i.LastLoginAt,
+		&i.LastActiveAt,
+		&i.Managed,
+		&i.AccountType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PasswordHash,
+	)
+	return i, err
+}
+
+const getUserForUpdate = `-- name: GetUserForUpdate :one
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Get a user by ID and lock the row until the transaction ends
+func (q *Queries) GetUserForUpdate(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, getUserForUpdate, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -2237,6 +2106,29 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 	return id, err
 }
 
+const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
+    'delivery_in_progress', false,
+    'delivery_failed', true,
+    'delivery_error', 'delivery interrupted',
+    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
+WHERE status = 'triggered'
+  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
+  AND ($1::bigint = 0 OR id = $1)
+  AND ($2::bigint = 0 OR alert_id = $2)
+`
+
+type InterruptAlertDeliveriesParams struct {
+	HistoryID int64 `json:"history_id"`
+	AlertID   int64 `json:"alert_id"`
+}
+
+func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
+	_, err := q.db.Exec(ctx, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
+	return err
+}
+
 const isSourceManaged = `-- name: IsSourceManaged :one
 SELECT managed FROM sources WHERE id = $1
 `
@@ -2256,18 +2148,6 @@ SELECT managed FROM teams WHERE id = $1
 // Check if a team is managed
 func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (bool, error) {
 	row := q.db.QueryRow(ctx, isTeamManaged, id)
-	var managed bool
-	err := row.Scan(&managed)
-	return managed, err
-}
-
-const isUserManaged = `-- name: IsUserManaged :one
-SELECT managed FROM users WHERE id = $1
-`
-
-// Check if a user is managed
-func (q *Queries) IsUserManaged(ctx context.Context, id int64) (bool, error) {
-	row := q.db.QueryRow(ctx, isUserManaged, id)
 	var managed bool
 	err := row.Scan(&managed)
 	return managed, err
@@ -2923,11 +2803,9 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtyp
 }
 
 const listManagedSources = `-- name: ListManagedSources :many
-
 SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE managed = true ORDER BY id
 `
 
-// Provisioning Queries
 // Get all sources managed by provisioning config
 func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 	rows, err := q.db.Query(ctx, listManagedSources)
@@ -2985,44 +2863,6 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 			&i.Managed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE managed = true ORDER BY id
-`
-
-// Get all users managed by provisioning config
-func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.db.Query(ctx, listManagedUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.FullName,
-			&i.Role,
-			&i.Status,
-			&i.LastLoginAt,
-			&i.LastActiveAt,
-			&i.Managed,
-			&i.AccountType,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -3567,39 +3407,6 @@ func (q *Queries) ListSystemSettingsByCategory(ctx context.Context, category str
 	return items, nil
 }
 
-const listTeamMembers = `-- name: ListTeamMembers :many
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = $1
-ORDER BY tm.created_at
-`
-
-// List all members of a team
-func (q *Queries) ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error) {
-	rows, err := q.db.Query(ctx, listTeamMembers, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamMember{}
-	for rows.Next() {
-		var i TeamMember
-		if err := rows.Scan(
-			&i.TeamID,
-			&i.UserID,
-			&i.Role,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listTeamMembersWithDetails = `-- name: ListTeamMembersWithDetails :many
 SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
 FROM team_members tm
@@ -3870,6 +3677,53 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listUsersForProvisioning = `-- name: ListUsersForProvisioning :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE email = ANY($1::text[]) ORDER BY id
+`
+
+func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsersForProvisioning, emails)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FullName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.LastActiveAt,
+			&i.Managed,
+			&i.AccountType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockMembershipWrites = `-- name: LockMembershipWrites :exec
+SELECT pg_advisory_xact_lock($1)
+`
+
+// Hold a transaction-scoped advisory lock
+func (q *Queries) LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error {
+	_, err := q.db.Exec(ctx, lockMembershipWrites, pgAdvisoryXactLock)
+	return err
+}
+
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
@@ -3880,6 +3734,15 @@ WHERE id = $1
 
 func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markAlertEvaluated, id)
+	return err
+}
+
+const markAlertResolved = `-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = $1
+`
+
+func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markAlertResolved, id)
 	return err
 }
 
@@ -3900,6 +3763,13 @@ func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
 const pruneAlertHistory = `-- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
+  AND target.id NOT IN (
+    SELECT active.id
+    FROM alert_history AS active
+    WHERE active.alert_id = $1 AND active.status = 'triggered'
+    ORDER BY active.triggered_at DESC, active.id DESC
+    LIMIT 1
+  )
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
@@ -3989,68 +3859,52 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) 
 	return items, nil
 }
 
-const recordOAuthDevicePoll = `-- name: RecordOAuthDevicePoll :one
-UPDATE oauth_device_authorizations
-SET interval_secs = CASE WHEN (expires_at > $1::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > $1::timestamptz - make_interval(secs => interval_secs)) THEN interval_secs + 5 ELSE interval_secs END,
-    last_polled_at = CASE WHEN (expires_at > $1::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > $1::timestamptz - make_interval(secs => interval_secs)) THEN last_polled_at ELSE $1::timestamptz END
-WHERE device_code_hash = $2
-  AND client_id = $3
-  AND consumed_at IS NULL
-RETURNING device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at, CAST(last_polled_at = $1::timestamptz AS BOOLEAN) AS on_time
+const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
+UPDATE export_jobs AS e
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
+FROM (
+    SELECT j.id, j.updated_at FROM export_jobs j
+    WHERE j.status IN ('pending', 'running')
+      AND (j.updated_at < now() - $1::bigint * interval '1 second'
+        OR ($2::text <> '' AND j.owner_instance_id = $2 AND j.owner_process_id <> $3))
+    ORDER BY j.id
+    LIMIT 100
+    FOR UPDATE
+) AS interrupted
+WHERE e.id = interrupted.id
+RETURNING e.id, e.file_path, interrupted.updated_at AS previous_updated_at
 `
 
-type RecordOAuthDevicePollParams struct {
-	Now            pgtype.Timestamptz `json:"now"`
-	DeviceCodeHash string             `json:"device_code_hash"`
-	ClientID       string             `json:"client_id"`
+type ReapInterruptedExportJobsParams struct {
+	MaxAgeSeconds int64  `json:"max_age_seconds"`
+	InstanceID    string `json:"instance_id"`
+	ProcessID     string `json:"process_id"`
 }
 
-type RecordOAuthDevicePollRow struct {
-	DeviceCodeHash string             `json:"device_code_hash"`
-	UserCodeHash   string             `json:"user_code_hash"`
-	ClientID       string             `json:"client_id"`
-	Resource       string             `json:"resource"`
-	Scopes         string             `json:"scopes"`
-	OfflineAccess  bool               `json:"offline_access"`
-	IntervalSecs   int32              `json:"interval_secs"`
-	LastPolledAt   pgtype.Timestamptz `json:"last_polled_at"`
-	UserID         pgtype.Int8        `json:"user_id"`
-	GrantID        pgtype.Int8        `json:"grant_id"`
-	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
-	DeniedAt       pgtype.Timestamptz `json:"denied_at"`
-	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	OnTime         bool               `json:"on_time"`
+type ReapInterruptedExportJobsRow struct {
+	ID                string             `json:"id"`
+	FilePath          pgtype.Text        `json:"file_path"`
+	PreviousUpdatedAt pgtype.Timestamptz `json:"previous_updated_at"`
 }
 
-// Record one poll. An early poll on a nonterminal request (not expired, not
-// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
-// last_polled_at, so on_time is false. Expired and denied requests are
-// never slowed down: they report their terminal state on every poll. Every
-// SET expression reads the pre-update row.
-func (q *Queries) RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error) {
-	row := q.db.QueryRow(ctx, recordOAuthDevicePoll, arg.Now, arg.DeviceCodeHash, arg.ClientID)
-	var i RecordOAuthDevicePollRow
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.OnTime,
-	)
-	return i, err
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error) {
+	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReapInterruptedExportJobsRow{}
+	for rows.Next() {
+		var i ReapInterruptedExportJobsRow
+		if err := rows.Scan(&i.ID, &i.FilePath, &i.PreviousUpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
@@ -4129,25 +3983,22 @@ func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourcePara
 	return err
 }
 
-const resolveAlertHistory = `-- name: ResolveAlertHistory :one
+const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
     message = $1
-WHERE id = $2
-RETURNING id
+WHERE alert_id = $2 AND status = 'triggered'
 `
 
-type ResolveAlertHistoryParams struct {
+type ResolveAlertHistoryForAlertParams struct {
 	Message pgtype.Text `json:"message"`
-	ID      int64       `json:"id"`
+	AlertID int64       `json:"alert_id"`
 }
 
-func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error) {
-	row := q.db.QueryRow(ctx, resolveAlertHistory, arg.Message, arg.ID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+func (q *Queries) ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error {
+	_, err := q.db.Exec(ctx, resolveAlertHistoryForAlert, arg.Message, arg.AlertID)
+	return err
 }
 
 const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows
@@ -4259,20 +4110,6 @@ type SetOAuthAuthRequestGrantParams struct {
 
 func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error {
 	_, err := q.db.Exec(ctx, setOAuthAuthRequestGrant, arg.GrantID, arg.ID)
-	return err
-}
-
-const setOAuthDeviceAuthorizationGrant = `-- name: SetOAuthDeviceAuthorizationGrant :exec
-UPDATE oauth_device_authorizations SET grant_id = $1 WHERE device_code_hash = $2
-`
-
-type SetOAuthDeviceAuthorizationGrantParams struct {
-	GrantID        pgtype.Int8 `json:"grant_id"`
-	DeviceCodeHash string      `json:"device_code_hash"`
-}
-
-func (q *Queries) SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error {
-	_, err := q.db.Exec(ctx, setOAuthDeviceAuthorizationGrant, arg.GrantID, arg.DeviceCodeHash)
 	return err
 }
 
@@ -4461,6 +4298,18 @@ func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesPa
 	return items, nil
 }
 
+const touchAlertEvaluated = `-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = now(),
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) TouchAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, touchAlertEvaluated, id)
+	return err
+}
+
 const touchOAuthGrant = `-- name: TouchOAuthGrant :exec
 UPDATE oauth_grants SET last_used_at = $1 WHERE id = $2
 `
@@ -4497,6 +4346,7 @@ UPDATE api_tokens
 SET last_used_at = now(),
     updated_at = now()
 WHERE id = $1
+  AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')
 `
 
 // Update the last used timestamp for an API token
@@ -4579,7 +4429,7 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
-WHERE id = $2
+WHERE id = $2 AND status = 'triggered'
 RETURNING id
 `
 
@@ -4650,20 +4500,20 @@ UPDATE export_jobs
 SET
     status = $1,
     error_message = NULL,
-    updated_at = $2
-WHERE id = $3
+    updated_at = now()
+WHERE id = $2
+  AND status IN ('pending', 'running')
 RETURNING id
 `
 
 type UpdateExportJobRunningParams struct {
-	Status    string             `json:"status"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	ID        string             `json:"id"`
+	Status string `json:"status"`
+	ID     string `json:"id"`
 }
 
 // Mark an export job as running and return its ID
 func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error) {
-	row := q.db.QueryRow(ctx, updateExportJobRunning, arg.Status, arg.UpdatedAt, arg.ID)
+	row := q.db.QueryRow(ctx, updateExportJobRunning, arg.Status, arg.ID)
 	var id string
 	err := row.Scan(&id)
 	return id, err
@@ -4835,6 +4685,21 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 	return err
 }
 
+const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
+UPDATE users SET last_login_at = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateUserLastLoginParams struct {
+	ID          int64              `json:"id"`
+	LastLoginAt pgtype.Timestamptz `json:"last_login_at"`
+}
+
+// Record a login without rewriting the rest of the user row
+func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
+	_, err := q.db.Exec(ctx, updateUserLastLogin, arg.ID, arg.LastLoginAt)
+	return err
+}
+
 const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
@@ -4842,7 +4707,7 @@ ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     value_type = excluded.value_type,
     description = excluded.description,
-    is_sensitive = excluded.is_sensitive,
+    is_sensitive = system_settings.is_sensitive OR excluded.is_sensitive,
     updated_at = now()
 `
 

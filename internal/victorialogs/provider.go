@@ -3,9 +3,11 @@ package victorialogs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,12 +15,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-const defaultHealthTimeout = 5 * time.Second
+const defaultHealthTimeout = models.SourceHealthTimeout
 const defaultValidationTimeout = 8 * time.Second
 
 const (
@@ -35,9 +38,6 @@ const (
 	// phase for every call — including the tail connect — without ever
 	// interrupting an already-streaming body.
 	responseHeaderTimeout = 30 * time.Second
-	// healthCacheTTL serves recently-computed health without a live round-trip,
-	// so UI polling on a down source does not multiply blocking calls.
-	healthCacheTTL = 10 * time.Second
 )
 
 // reservedHeaderKeys are HTTP headers the provider computes from validated
@@ -65,15 +65,20 @@ type Provider struct {
 	log     *slog.Logger
 	mu      sync.RWMutex
 	sources map[models.SourceID]models.VictoriaLogsConnectionInfo
-	health  map[models.SourceID]models.SourceHealth
-	// opLocks serialises lifecycle operations (initialize / remove / health
-	// refresh) per source ID. Each of those operations is a read-modify sequence
-	// over the sources+health maps; the maps are individually mutex-guarded, but
-	// without per-ID serialisation two concurrent operations for the SAME source
-	// can interleave and leave stale state (e.g. health cached for a source that
-	// a concurrent remove already deleted).
-	opLocks      keyedMutex
-	windowLimits map[models.SourceID]*windowLimiter
+	// opLocks serialises lifecycle operations (initialize / remove / status
+	// check) per source ID. Each of those operations is a read-modify sequence
+	// over the sources map; the map is mutex-guarded, but without per-ID
+	// serialisation two concurrent operations for the SAME source can interleave
+	// and leave stale state (e.g. a connection cached for a source that a
+	// concurrent remove already deleted).
+	opLocks       keyedMutex
+	windowLimits  map[models.SourceID]*windowLimiter
+	health        map[models.SourceID]bool
+	healthCtx     context.Context //nolint:containedctx // The provider owns cancellation of checks that outlive requests.
+	cancelHealth  context.CancelFunc
+	healthWG      sync.WaitGroup
+	healthStarted bool
+	closed        bool
 }
 
 // keyedMutex hands out one mutex per key, so callers can serialise operations
@@ -82,25 +87,34 @@ type Provider struct {
 // key space here is the set of source IDs, which is small and bounded.
 type keyedMutex struct {
 	mu    sync.Mutex
-	locks map[models.SourceID]*sync.Mutex
+	locks map[models.SourceID]chan struct{}
 }
 
-// lock acquires the mutex for id and returns its unlock function, so callers can
-// write `defer p.opLocks.lock(id)()`.
 func (k *keyedMutex) lock(id models.SourceID) func() {
+	unlock, _ := k.lockContext(context.Background(), id)
+	return unlock
+}
+
+func (k *keyedMutex) lockContext(ctx context.Context, id models.SourceID) (func(), error) {
 	k.mu.Lock()
 	if k.locks == nil {
-		k.locks = make(map[models.SourceID]*sync.Mutex)
+		k.locks = make(map[models.SourceID]chan struct{})
 	}
-	m, ok := k.locks[id]
+	lock, ok := k.locks[id]
 	if !ok {
-		m = &sync.Mutex{}
-		k.locks[id] = m
+		lock = make(chan struct{}, 1)
+		k.locks[id] = lock
 	}
 	k.mu.Unlock()
-
-	m.Lock()
-	return m.Unlock
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func NewProvider(log *slog.Logger) *Provider {
@@ -116,11 +130,14 @@ func NewProvider(log *slog.Logger) *Provider {
 	}).DialContext
 	transport.ResponseHeaderTimeout = responseHeaderTimeout
 
+	healthCtx, cancelHealth := context.WithCancel(context.Background())
 	return &Provider{
-		client:  &http.Client{Transport: transport},
-		log:     log.With("component", "victorialogs_provider"),
-		sources: make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
-		health:  make(map[models.SourceID]models.SourceHealth),
+		client:       &http.Client{Transport: transport},
+		log:          log.With("component", "victorialogs_provider"),
+		sources:      make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
+		health:       make(map[models.SourceID]bool),
+		healthCtx:    healthCtx,
+		cancelHealth: cancelHealth,
 	}
 }
 
@@ -128,35 +145,19 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeVictoriaLogs
 }
 
-func (p *Provider) Capabilities() []datasource.Capability {
-	return []datasource.Capability{
-		datasource.CapabilitySchemaInspection,
-		datasource.CapabilityHistogram,
-		datasource.CapabilityFieldValues,
-		datasource.CapabilitySourceInspection,
-		datasource.CapabilityLiveTail,
-		datasource.CapabilityAISQLGeneration,
-	}
-}
-
-func (p *Provider) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{
-		models.QueryLanguageLogchefQL,
-		models.QueryLanguageLogsQL,
-	}
-}
-
-func (p *Provider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return []models.SavedQueryEditorMode{
-		models.SavedQueryEditorModeBuilder,
-		models.SavedQueryEditorModeNative,
-	}
-}
-
-func (p *Provider) SupportedAlertEditorModes() []models.AlertEditorMode {
-	return []models.AlertEditorMode{
-		models.AlertEditorModeCondition,
-		models.AlertEditorModeNative,
+func (p *Provider) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		Capabilities: []datasource.Capability{
+			datasource.CapabilitySchemaInspection,
+			datasource.CapabilityHistogram,
+			datasource.CapabilityFieldValues,
+			datasource.CapabilitySourceInspection,
+			datasource.CapabilityLiveTail,
+			datasource.CapabilityAISQLGeneration,
+		},
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogsQL},
+		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
+		AlertEditorModes:      []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative},
 	}
 }
 
@@ -294,7 +295,11 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 		return fmt.Errorf("source is required")
 	}
 
-	defer p.opLocks.lock(source.ID)()
+	unlock, err := p.opLocks.lockContext(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	conn, err := source.VictoriaLogsConnection()
 	if err != nil {
@@ -302,16 +307,16 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 	}
 
 	p.mu.Lock()
-	p.sources[source.ID] = conn
-	p.mu.Unlock()
-
-	healthy, healthErr := p.checkHealth(ctx, source.ID, conn)
-	p.updateHealth(source.ID, healthy, healthErr)
-	if healthErr != nil {
-		return healthErr
+	if p.closed {
+		p.mu.Unlock()
+		return fmt.Errorf("victorialogs provider is closed")
 	}
-
-	return nil
+	p.sources[source.ID] = conn
+	p.health[source.ID] = false
+	p.mu.Unlock()
+	err = p.checkHealth(ctx, source.ID, conn)
+	p.recordHealth(source.ID, err == nil)
+	return err
 }
 
 func (p *Provider) RemoveSource(sourceID models.SourceID) error {
@@ -331,53 +336,20 @@ func (p *Provider) CheckSourceConnectionStatus(ctx context.Context, source *mode
 		return false
 	}
 
-	defer p.opLocks.lock(source.ID)()
+	unlock, err := p.opLocks.lockContext(ctx, source.ID)
+	if err != nil {
+		return false
+	}
+	defer unlock()
 
 	conn, err := p.connectionForSource(source)
 	if err != nil {
-		p.updateHealth(source.ID, false, err)
 		return false
 	}
 
-	healthy, healthErr := p.checkHealth(ctx, source.ID, conn)
-	p.updateHealth(source.ID, healthy, healthErr)
-	return healthy
-}
-
-func (p *Provider) GetSourceHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
-	defer p.opLocks.lock(sourceID)()
-
-	p.mu.RLock()
-	conn, ok := p.sources[sourceID]
-	health, hasHealth := p.health[sourceID]
-	p.mu.RUnlock()
-
-	if !ok {
-		if hasHealth {
-			return health
-		}
-		return models.SourceHealth{
-			SourceID:    sourceID,
-			Status:      models.HealthStatusUnhealthy,
-			Error:       "victorialogs source not initialized",
-			LastChecked: time.Now(),
-		}
-	}
-
-	// Serve fresh cached health without a live round-trip, so UI polling on a
-	// down source doesn't stack up blocking checks (each up to the dial /
-	// response-header bounds). Matches the ClickHouse provider serving cached
-	// health.
-	if hasHealth && time.Since(health.LastChecked) < healthCacheTTL {
-		return health
-	}
-
-	healthy, err := p.checkHealth(ctx, sourceID, conn)
-	p.updateHealth(sourceID, healthy, err)
-
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.health[sourceID]
+	connected := p.checkHealth(ctx, source.ID, conn) == nil
+	p.recordHealth(source.ID, connected)
+	return connected
 }
 
 func (p *Provider) connectionFromConfig(raw json.RawMessage) (models.VictoriaLogsConnectionInfo, error) {
@@ -393,6 +365,10 @@ func (p *Provider) connectionFromConfig(raw json.RawMessage) (models.VictoriaLog
 
 func (p *Provider) connectionForSource(source *models.Source) (models.VictoriaLogsConnectionInfo, error) {
 	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return models.VictoriaLogsConnectionInfo{}, fmt.Errorf("victorialogs provider is closed")
+	}
 	conn, ok := p.sources[source.ID]
 	p.mu.RUnlock()
 	if ok {
@@ -405,49 +381,49 @@ func (p *Provider) connectionForSource(source *models.Source) (models.VictoriaLo
 	}
 
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return models.VictoriaLogsConnectionInfo{}, fmt.Errorf("victorialogs provider is closed")
+	}
 	p.sources[source.ID] = conn
-	p.mu.Unlock()
 	return conn, nil
 }
 
-func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, conn models.VictoriaLogsConnectionInfo) (bool, error) {
+func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, conn models.VictoriaLogsConnectionInfo) error {
 	if strings.TrimSpace(conn.BaseURL) == "" {
-		return false, fmt.Errorf("victorialogs base_url is required")
+		return fmt.Errorf("victorialogs base_url is required")
 	}
 
-	healthCtx := ctx
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		healthCtx, cancel = context.WithTimeout(ctx, defaultHealthTimeout)
-		defer cancel()
-	}
+	healthCtx, cancel := context.WithTimeout(ctx, defaultHealthTimeout)
+	defer cancel()
 
 	healthURL, err := url.JoinPath(conn.BaseURL, "/health")
 	if err != nil {
-		return false, fmt.Errorf("invalid victorialogs base_url: %w", err)
+		return fmt.Errorf("invalid victorialogs base_url: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, http.NoBody)
 	if err != nil {
-		return false, fmt.Errorf("create victorialogs health request: %w", err)
+		return fmt.Errorf("create victorialogs health request: %w", err)
 	}
 
 	applyHeaders(req, conn)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		p.log.Warn("victorialogs health check failed", "source_id", sourceID, "error", err)
-		return false, fmt.Errorf("victorialogs health check failed: %w", err)
+		if !errors.Is(err, context.Canceled) {
+			p.log.Warn("victorialogs health check failed", "source_id", sourceID, "error", err)
+		}
+		return fmt.Errorf("victorialogs health check failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err := fmt.Errorf("victorialogs health check returned status %d", resp.StatusCode)
 		p.log.Warn("victorialogs health check returned non-success status", "source_id", sourceID, "status_code", resp.StatusCode)
-		return false, err
+		return fmt.Errorf("victorialogs health check returned status %d", resp.StatusCode)
 	}
 
-	return true, nil
+	return nil
 }
 
 // mergeRedactedConnectionSecrets carries over credentials and custom headers
@@ -565,7 +541,7 @@ func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.Victor
 }
 
 func (p *Provider) validateConnectionAccess(ctx context.Context, conn models.VictoriaLogsConnectionInfo) error {
-	if _, err := p.checkHealth(ctx, 0, conn); err != nil {
+	if err := p.checkHealth(ctx, 0, conn); err != nil {
 		return &datasource.ValidationError{Field: "connection.base_url", Message: "Failed to reach the VictoriaLogs server", Err: err}
 	}
 	if err := p.validateQueryAccess(ctx, conn); err != nil {
@@ -642,7 +618,10 @@ func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaL
 	}
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	detail := sanitizeVictoriaLogsValidationBody(body)
+	detail := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"), form.Get("query"))
+	if detail != "" {
+		detail = ": " + detail
+	}
 	switch resp.StatusCode {
 	case http.StatusBadRequest:
 		return &datasource.ValidationError{
@@ -672,39 +651,33 @@ func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaL
 	}
 }
 
-func sanitizeVictoriaLogsValidationBody(body []byte) string {
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
+func sanitizeVictoriaLogsValidationBody(body []byte, contentType, query string) string {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "text/plain" {
 		return ""
 	}
-	trimmed = strings.ReplaceAll(trimmed, "\n", " ")
-	trimmed = strings.ReplaceAll(trimmed, "\t", " ")
-	trimmed = strings.Join(strings.Fields(trimmed), " ")
-	if len(trimmed) > 240 {
-		trimmed = trimmed[:240] + "..."
-	}
-	return ": " + trimmed
-}
-
-func (p *Provider) updateHealth(sourceID models.SourceID, healthy bool, err error) {
-	status := models.HealthStatusHealthy
-	errMsg := ""
-	if !healthy {
-		status = models.HealthStatusUnhealthy
-		if err != nil {
-			errMsg = err.Error()
+	text := strings.TrimSpace(strings.ToValidUTF8(string(body), ""))
+	if strings.HasPrefix(text, "remoteAddr:") {
+		_, remainder, ok := strings.Cut(text, "; requestURI:")
+		if !ok {
+			return ""
+		}
+		_, text, ok = strings.Cut(remainder, ";")
+		if !ok {
+			return ""
 		}
 	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.health[sourceID] = models.SourceHealth{
-		SourceID:    sourceID,
-		Status:      status,
-		Error:       errMsg,
-		LastChecked: time.Now(),
+	text = strings.TrimPrefix(strings.TrimSpace(text), "cannot parse `query` arg ["+query+"]: ")
+	text = strings.Join(strings.Fields(text), " ")
+	if strings.ContainsFunc(text, unicode.IsControl) {
+		return ""
 	}
+	const maxDiagnosticRunes = 240
+	runes := []rune(text)
+	if len(runes) > maxDiagnosticRunes {
+		text = string(runes[:maxDiagnosticRunes]) + "..."
+	}
+	return text
 }
 
 func applyHeaders(req *http.Request, conn models.VictoriaLogsConnectionInfo) {

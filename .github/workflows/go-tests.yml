@@ -54,7 +54,7 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test (SQLite + Postgres conformance)
-        run: go test -race ./...
+        run: go test -race -timeout 20m ./...
 
   # Dedicated job for the VictoriaLogs provider integration tests. Kept separate
   # from the main `test` job so VL image/startup flakiness can never slow or
@@ -134,7 +134,7 @@ jobs:
         with:
           # Pinned: each release can add checks that fail CI with no code change.
           # `just lint` refuses to run with a different local version.
-          version: v2.14.0
+          version: v2.15.0
 
   sqlc:
     runs-on: ubuntu-latest

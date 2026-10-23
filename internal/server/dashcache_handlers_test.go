@@ -36,15 +36,15 @@ func TestRawQueryRejectsStreamFiltersBeforeStreaming(t *testing.T) {
 	s := newDashboardTestServer(t)
 	s.config = &config.Config{Query: config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 10}}
 	provider := &failingDashboardQueryProvider{sourceType: models.SourceTypeClickHouse}
-	s.datasources = datasource.NewService(s.sqlite, s.log)
+	s.datasources = datasource.NewService(s.store, s.log)
 	s.datasources.Register(provider)
 	source := &models.Source{Name: "stream-filter-validation", SourceType: models.SourceTypeClickHouse}
-	if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+	if err := s.store.CreateSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	app := fiber.New()
-	user, src := authorizeTestSource(t, s.sqlite, source.ID)
-	withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, s.handleQueryLogs)
+	user, src := authorizeTestSource(t, s.store, source.ID)
+	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, s.handleQueryLogs)
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID), strings.NewReader(`{"query_text":"SELECT * FROM logs","extra_stream_filters":["{app=\"api\"}"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -121,13 +121,13 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					provider := &failingDashboardQueryProvider{
 						sourceType: sourceType, err: failure.err, partial: failure.partial, release: make(chan struct{}),
 					}
-					s.datasources = datasource.NewService(s.sqlite, s.log)
+					s.datasources = datasource.NewService(s.store, s.log)
 					s.datasources.Register(provider)
 					source := &models.Source{Name: "dashboard-cache-test", SourceType: sourceType}
 					if sourceType == models.SourceTypeVictoriaLogs {
 						source.ConnectionConfig = json.RawMessage(`{"url":"http://localhost:9428"}`)
 					}
-					if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+					if err := s.store.CreateSource(t.Context(), source); err != nil {
 						t.Fatal(err)
 					}
 					app := fiber.New()
@@ -135,8 +135,8 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					if endpoint == "logchefql" {
 						handler = s.handleLogchefQLQuery
 					}
-					user, src := authorizeTestSource(t, s.sqlite, source.ID)
-					withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, handler)
+					user, src := authorizeTestSource(t, s.store, source.ID)
+					withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, handler)
 					path := fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID)
 					body := `{"query_text":"SELECT * FROM logs","query":"level=\"error\"","start_time":"2026-09-01 00:00:00","end_time":"2026-09-01 01:00:00"`
 					if endpoint == "logs" {
@@ -203,16 +203,16 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					wantStatus := http.StatusInternalServerError
 					wantErrorType := models.DatabaseErrorType
 					switch {
-					case sourceType == models.SourceTypeClickHouse:
+					case failure.partial:
 						wantStatus = http.StatusOK
 					case failure.name == "canceled" || failure.name == "deadline":
 						// A caller that went away is not a server failure.
 						wantStatus = http.StatusRequestTimeout
 						wantErrorType = models.ExternalServiceErrorType
-					case failure.name == "unsupported" || (endpoint == "logs" && failure.name == "validation"):
+					case failure.name == "unsupported" || failure.name == "validation":
 						wantStatus = http.StatusBadRequest
 						wantErrorType = models.ValidationErrorType
-					case endpoint == "logs" && failure.name == "source missing":
+					case failure.name == "source missing":
 						wantStatus = http.StatusNotFound
 						wantErrorType = models.NotFoundErrorType
 					}
@@ -226,13 +226,13 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 						t.Fatalf("error type=%v, want %s", uncached.body["error_type"], wantErrorType)
 					}
 					if failure.partial {
-						data, ok := uncached.body["data"].(map[string]any)
-						if !ok || data["error"] != failure.err.Error() {
-							t.Fatalf("missing partial-stream error: %v", uncached.body)
-						}
-						logsKey := "data"
+						logsKey, wantFailure := "data", logsQueryFailure
 						if endpoint == "logchefql" {
-							logsKey = "logs"
+							logsKey, wantFailure = "logs", logchefQLQueryFailure
+						}
+						data, ok := uncached.body["data"].(map[string]any)
+						if !ok || data["error"] != wantFailure {
+							t.Fatalf("missing partial-stream error: %v", uncached.body)
 						}
 						rows, ok := data[logsKey].([]any)
 						if !ok || len(rows) != 1 {

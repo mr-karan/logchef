@@ -6,6 +6,11 @@
 #
 # Values can be overridden via environment variables prefixed with LOGCHEF_.
 # Use double underscores for nesting: LOGCHEF_SERVER__PORT=8125.
+#
+# This is the sample shipped in the release archives and the container image.
+# Set auth.admin_emails and auth.api_token_secret, and enable a login method
+# ([auth.local] or [oidc]) before you start.
+# Contributors running the local dev stack use dev/config.toml instead.
 
 # -----------------------------------------------------------------------------
 # Server (required)
@@ -17,8 +22,9 @@ port = 8125
 host = "0.0.0.0"
 # HTTP server request timeout. Must exceed preview and export execution ceilings.
 http_server_timeout = "15m"
-# Secure cookie flag (set to false for local HTTP development).
-secure_cookie = false
+# Send session cookies only over HTTPS. Set to false when you serve Logchef
+# over plain HTTP, otherwise the browser drops the cookie and login fails.
+secure_cookie = true
 # Public URL of the web UI (auth redirects, share links, and the subpath when
 # served under one, e.g. https://example.com/logchef) is managed in the Admin UI.
 # For first boot, set LOGCHEF_SERVER__FRONTEND_URL.
@@ -71,34 +77,37 @@ path = "local.db"
 # Logchef ships with built-in email + password login ([auth.local] below), so
 # an external identity provider is not required to run it. Configure OIDC to
 # offer SSO alongside — or instead of — local login.
-[oidc]
+# Uncomment this block to use OIDC. Every value below is then required.
+# [oidc]
 # OIDC provider discovery URL.
-provider_url = "http://localhost:5556/dex"
+# provider_url = "https://idp.example.com"
 # Explicit auth/token endpoints (required even when discovery is available).
-auth_url = "http://localhost:5556/dex/auth"
-token_url = "http://localhost:5556/dex/token"
+# auth_url = "https://idp.example.com/auth"
+# token_url = "https://idp.example.com/token"
 # OIDC client credentials for the web UI login flow.
-client_id = "logchef"
-# Dev-only secret. Replace this in production.
-client_secret = "logchef-secret"
+# client_id = "logchef"
+# Prefer LOGCHEF_OIDC__CLIENT_SECRET over storing the secret in this file.
+# client_secret = ""
 # Callback URL for OIDC authentication (must match provider config).
-redirect_url = "http://localhost:8125/api/v1/auth/callback"
+# redirect_url = "https://logchef.example.com/api/v1/auth/callback"
 # OIDC scopes to request.
-scopes = ["openid", "email", "profile"]
+# scopes = ["openid", "email", "profile"]
 # Keep false unless your OIDC provider omits email_verified while verifying
 # email addresses by other means. Missing/null email_verified is allowed only
 # when this is true; explicit email_verified=false is always rejected.
-skip_email_verified_check = false
+# skip_email_verified_check = false
 
 # -----------------------------------------------------------------------------
 # Authentication (required)
 # -----------------------------------------------------------------------------
 [auth]
-# Admin email addresses (required).
-admin_emails = ["admin@logchef.internal"]
-# Secret key for API token hashing (required; generate with: openssl rand -hex 32).
-# Dev-only value. Replace this in production.
-api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677"
+# Admin email addresses (required). Replace with your own.
+admin_emails = ["admin@example.com"]
+# Secret key for API token hashing (required, at least 32 characters).
+# Generate one with: openssl rand -hex 32
+# Prefer LOGCHEF_AUTH__API_TOKEN_SECRET over storing the secret in this file.
+# Logchef refuses to start while this is empty.
+api_token_secret = ""
 
 # Built-in email + password authentication (optional).
 # The fastest way to run Logchef without an external identity provider: enable
@@ -179,6 +188,11 @@ max_concurrent_per_user = 3
 max_concurrent_global = 30
 
 [export]
+# Optional replica identity for immediate recovery of interrupted exports.
+# Keep this stable across restarts and unique to each concurrent replica.
+# Stop the previous process before starting its replacement with the same ID.
+# An empty ID uses only the age-based recovery fallback.
+instance_id = ""
 # Download jobs use this higher cap and keep completed artifacts for a limited time.
 max_rows = 1000000
 default_timeout_seconds = 120
@@ -207,5 +221,8 @@ max_query_text_bytes = 1048576
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access
 # -----------------------------------------------------------------------------
-[provisioning]
-file = "dev/provisioning.toml"
+# Uncomment to provision teams, sources and access from a file. A relative path
+# is resolved against this config file's directory, not the working directory.
+# The file must exist when Logchef starts, otherwise it exits with an error.
+# [provisioning]
+# file = "provisioning.toml"

@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -19,19 +23,19 @@ import (
 func TestHistogramAdmissionLifecycle(t *testing.T) {
 	s := newDashboardTestServer(t)
 	s.config = &config.Config{}
-	s.datasources = datasource.NewService(s.sqlite, s.log)
+	s.datasources = datasource.NewService(s.store, s.log)
 	s.config.Query.MaxConcurrentPerUser = 1
 	s.config.DashboardCache.MaxConcurrentFills = 1
 	source := &models.Source{Name: "histogram-admission", Connection: models.ConnectionInfo{
 		Host: "ch:9000", Username: "default", Database: "default", TableName: "histogram_admission",
 	}}
-	if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+	if err := s.store.CreateSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
-	_, src := authorizeTestSource(t, s.sqlite, source.ID)
+	_, src := authorizeTestSource(t, s.store, source.ID)
 	// The source disappears after authorization, so execution reaches the
 	// datasource lookup and fails there.
-	if err := s.sqlite.DeleteSource(t.Context(), source.ID); err != nil {
+	if err := s.store.DeleteSource(t.Context(), source.ID); err != nil {
 		t.Fatal(err)
 	}
 	userID, sourceID, teamID := src.UserID(), src.SourceID(), src.TeamID()
@@ -85,20 +89,28 @@ func TestHistogramAdmissionLifecycle(t *testing.T) {
 
 func TestHistogramErrorResponses(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		err    error
-		status int
+		name    string
+		err     error
+		status  int
+		message string
 	}{
-		{"bucket budget", fmt.Errorf("provider: %w", models.ErrHistogramBudgetExceeded), fiber.StatusBadRequest},
-		{"stream filters", fmt.Errorf("provider: %w", &datasource.ValidationError{Field: "extra_stream_filters", Message: "unsupported source"}), fiber.StatusBadRequest},
-		{"admission", &QueryAdmissionError{Message: "Too many active preview queries"}, fiber.StatusTooManyRequests},
-		{"canceled fill", fmt.Errorf("provider: %w", context.Canceled), fiber.StatusRequestTimeout},
-		{"fill deadline", context.DeadlineExceeded, fiber.StatusRequestTimeout},
+		{"bucket budget", fmt.Errorf("provider: %w", models.ErrHistogramBudgetExceeded), fiber.StatusBadRequest, models.ErrHistogramBudgetExceeded.Error()},
+		{"stream filters", fmt.Errorf("provider: %w", &datasource.ValidationError{Field: "extra_stream_filters", Message: "unsupported source"}), fiber.StatusBadRequest, "unsupported source"},
+		{"validation cause", fmt.Errorf("%s: %w", internalDetail, &datasource.ValidationError{Field: "window", Message: "invalid histogram window", Err: errors.New(internalDetail)}), fiber.StatusBadRequest, "invalid histogram window"},
+		{"admission", &QueryAdmissionError{Message: "Too many active preview queries"}, fiber.StatusTooManyRequests, "Too many active preview queries"},
+		{"canceled fill", fmt.Errorf("provider: %w", context.Canceled), fiber.StatusRequestTimeout, "Request cancelled"},
+		{"server timeout", fmt.Errorf("query: %w", &ch.Exception{Code: 159, Message: internalDetail}), fiber.StatusRequestTimeout, "Request timed out"},
+		{"socket timeout", fmt.Errorf("query: %w", &ch.Exception{Code: 209, Message: internalDetail}), fiber.StatusRequestTimeout, "Request timed out"},
+		{"memory limit", &ch.Exception{Code: 241, Message: internalDetail}, fiber.StatusInternalServerError, histogramFailure},
+		{"fill deadline", context.DeadlineExceeded, fiber.StatusRequestTimeout, "Request timed out"},
+		{"untyped invalid error", fmt.Errorf("invalid response: %s", internalDetail), fiber.StatusInternalServerError, histogramFailure},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			app := fiber.New()
-			s := &Server{}
-			app.Get("/", func(c fiber.Ctx) error { return s.handleHistogramError(c, 1, tc.err) })
+			s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			app.Get("/", func(c fiber.Ctx) error {
+				return s.sendQueryError(c, 1, tc.err, histogramFailure, "Histogram generation")
+			})
 			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/", http.NoBody))
 			if err != nil {
 				t.Fatal(err)
@@ -106,6 +118,13 @@ func TestHistogramErrorResponses(t *testing.T) {
 			defer response.Body.Close()
 			if response.StatusCode != tc.status {
 				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
+			}
+			var body Response
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Message != tc.message {
+				t.Errorf("message = %q, want %q", body.Message, tc.message)
 			}
 		})
 	}

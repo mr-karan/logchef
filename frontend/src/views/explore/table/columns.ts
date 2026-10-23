@@ -1,4 +1,5 @@
 import { h } from "vue";
+import "./badges.css";
 import { ArrowDown, ArrowUp } from "lucide-vue-next";
 import type { Column, ColumnDef, Row } from "./tableFeatures";
 import { formatTimestamp, formatLogContent } from "@/lib/utils";
@@ -349,23 +350,6 @@ export function createColumns(
       filterFn: columnFilterFn,
     };
   });
-}
-
-// Helper function to get initial visible columns (timestamp + first column if exists)
-export function getInitialVisibleColumns(
-  columns: ColumnInfo[],
-  timestampField: string = "timestamp"
-): string[] {
-  const hasTimestamp = columns.some((col) => col.name === timestampField);
-  if (hasTimestamp) {
-    return columns.length > 1
-      ? [
-          timestampField,
-          columns.find((col) => col.name !== timestampField)!.name,
-        ]
-      : [timestampField];
-  }
-  return columns.length > 0 ? [columns[0].name] : [];
 }
 
 // Add helper functions for status codes and HTTP methods

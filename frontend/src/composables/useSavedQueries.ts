@@ -1,45 +1,36 @@
-import { ref, computed, type Ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useCollectionsStore } from '@/stores/collections'
 import { useContextStore } from '@/stores/context'
-import { useVariableStore } from '@/stores/variables'
-import type { VariableState } from '@/stores/variables'
 import { useTeamPermissions } from '@/composables/useTeamPermissions'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
-import { decodeStoredRange, encodeWindowForUrl } from '@/utils/timeWindowCodec'
-import type { Source } from "@/api/sources";
-import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
-export function useSavedQueries(
-    queries?: Ref<SavedQuery[] | undefined>,
-    _currentSource?: Ref<Source | undefined>
-) {
-  const localQueries = ref<SavedQuery[]>([]);
-  const queriesRef = queries || localQueries;
+export function useSavedQueries() {
   const router = useRouter()
-  const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
   const collectionsStore = useCollectionsStore()
   const contextStore = useContextStore()
-  const variableStore = useVariableStore();
   const { toast } = useToast()
 
   const showSaveQueryModal = ref(false)
   const editingQuery = ref<SavedQuery | null>(null)
-  const isLoading = ref(false)
+  const isUpdating = ref(false)
   const isLoadingQueryDetails = ref(false)
   const openingQueryId = ref<number | null>(null)
   const searchQuery = ref('')
   const saveAsNewQuery = ref(false)
+  const queriesRef = computed(() => savedQueriesStore.queries)
+  const isLoading = computed(() =>
+    isUpdating.value || savedQueriesStore.isLoadingOperation(`listSavedQueries-${contextStore.sourceId}`))
 
-  const isEditingExistingQuery = computed(() => !!route.query.id);
+  const isEditingExistingQuery = computed(() => !!exploreStore.selectedQueryId);
 
   // Role gates delegate to useTeamPermissions so the matrix stays
   // consistent with the backend role contract.
@@ -86,7 +77,7 @@ export function useSavedQueries(
       return
     }
 
-    const queryId = route.query.id
+    const queryId = exploreStore.selectedQueryId
     if (queryId && !saveAsNewQuery.value) {
       try {
         isLoadingQueryDetails.value = true
@@ -124,13 +115,14 @@ export function useSavedQueries(
     saveAsNewQuery.value = false
   }
 
-  async function handleSaveQuery(formData: SaveQueryFormData) {
+  /** Saves the form's query and returns it, or null when canceled or failed. The caller marks Explorer with it. */
+  async function handleSaveQuery(formData: SaveQueryFormData): Promise<SavedQuery | null> {
     try {
       let response;
 
-      const queryIdFromUrl = route.query.id as string | undefined;
-      const isUpdate = !saveAsNewQuery.value && (!!editingQuery.value || !!queryIdFromUrl);
-      const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
+      const openQueryId = exploreStore.selectedQueryId;
+      const isUpdate = !saveAsNewQuery.value && (!!editingQuery.value || !!openQueryId);
+      const queryId = editingQuery.value?.id.toString() || openQueryId;
 
       if (!formData.source_id) {
         throw new Error("Missing source ID for save/update operation");
@@ -156,7 +148,7 @@ export function useSavedQueries(
               `A query named "${formData.name}" already exists for this source. Do you want to overwrite it?`
           );
           if (!confirmOverwrite) {
-            return { success: false, canceled: true };
+            return null;
           }
           response = await savedQueriesStore.update(existingQuery.id, {
             name: formData.name,
@@ -191,20 +183,6 @@ export function useSavedQueries(
         editingQuery.value = null;
         saveAsNewQuery.value = false;
 
-        const savedQueryName = formData.name;
-        if (savedQueryName) {
-          exploreStore.setActiveSavedQueryName(savedQueryName);
-        }
-
-        if (response.data && response.data.id) {
-          exploreStore.setSelectedQueryId(response.data.id.toString());
-
-          const next = { ...route.query };
-          next.source = formData.source_id.toString();
-          next.id = response.data.id.toString();
-          router.replace({ query: next });
-        }
-
         if (formData.source_id) {
           await loadSourceQueries(formData.source_id);
         }
@@ -213,13 +191,13 @@ export function useSavedQueries(
         // Best-effort: the query is already saved, so a pin failure shouldn't
         // surface as a save failure — addItem shows its own error toast.
         if (formData.collection_id && response.data?.id) {
-          await collectionsStore.addItem(formData.collection_id, { saved_query_id: response.data.id });
+          await collectionsStore.addItem(formData.collection_id, { saved_query_id: response.data.id }, { notify: false });
         }
-        return { success: true, data: response.data };
+        return response.data ?? null;
       } else if (response) {
         throw new Error(getErrorMessage(response.error) || 'Failed to save query');
       } else {
-        return { success: false };
+        return null;
       }
     } catch (error) {
       console.error("Error saving query:", error);
@@ -229,117 +207,7 @@ export function useSavedQueries(
         variant: 'destructive',
         duration: TOAST_DURATION.ERROR
       });
-      return { success: false, error };
-    }
-  }
-
-  async function loadSavedQuery(queryData: SavedQuery) {
-    if (!queryData?.query_content || !queryData?.id) {
-      toast({
-        title: 'Error',
-        description: 'Invalid saved query data.',
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR
-      })
-      return false
-    }
-
-    try {
-      const content = JSON.parse(queryData.query_content)
-      const metadata = resolveSavedQueryMetadata({
-        query_language: queryData.query_language,
-        editor_mode: queryData.editor_mode,
-        source_type: _currentSource?.value?.source_type,
-        query_languages: _currentSource?.value?.query_languages,
-        saved_query_editor_modes: _currentSource?.value?.saved_query_editor_modes,
-      })
-      const isLogchefQL = metadata.queryLanguage === 'logchefql'
-      const queryToLoad = content.content || ''
-
-      exploreStore.clearError()
-
-      // Set the correct mode based on the saved query language
-      exploreStore.setActiveMode(getExploreModeForQueryLanguage(metadata.queryLanguage))
-
-      const resolvedTeamId = 'resolved_team_id' in queryData
-        ? Number((queryData as SavedQuery & { resolved_team_id?: number }).resolved_team_id)
-        : null;
-
-      if (resolvedTeamId && resolvedTeamId !== contextStore.teamId) {
-        contextStore.selectTeam(resolvedTeamId);
-      }
-
-      if (queryData.source_id && queryData.source_id !== contextStore.sourceId) {
-        exploreStore.suppressNextSourceReset(queryData.source_id);
-        contextStore.selectSource(queryData.source_id);
-      }
-
-      if (isLogchefQL) {
-        exploreStore.setLogchefqlCode(queryToLoad)
-      } else {
-        exploreStore.setNativeQuery(queryToLoad)
-      }
-
-      if (content.limit) exploreStore.setLimit(content.limit)
-
-      // A saved query without a time range keeps the current one.
-      const window = decodeStoredRange(content.timeRange, {
-        format: 'saved-query',
-        version: typeof content.version === 'number' ? content.version : 1,
-        prefZone: exploreStore.resolved.zone,
-      })
-      if (window) exploreStore.setWindow(window)
-
-      if (Array.isArray(content.variables)) {
-        try {
-          const normalizedVariables = (content.variables as VariableState[]).map((variable) => {
-            const hasValue = variable.value !== '' && variable.value !== null && variable.value !== undefined;
-            if (!hasValue && variable.defaultValue !== undefined && variable.defaultValue !== null && variable.defaultValue !== '') {
-              return { ...variable, value: variable.defaultValue };
-            }
-            return variable;
-          });
-          variableStore.setAllVariable(normalizedVariables);
-        } catch (e) {
-          console.error("Failed to restore variables from saved query:", e);
-        }
-      }
-
-      exploreStore.setSelectedQueryId(queryData.id.toString());
-      if (queryData.name) {
-        exploreStore.setActiveSavedQueryName(queryData.name);
-      }
-
-      // Only include resolved execution context + id; don't carry forward stale
-      // limit/time/mode params from the previous explorer state.
-      const queryParams: Record<string, string> = {
-        ...(resolvedTeamId ? { team: resolvedTeamId.toString() } : {}),
-        source: queryData.source_id.toString(),
-        id: queryData.id.toString(),
-      };
-
-      const currentId = route.query.id as string | undefined;
-      if (
-        currentId !== queryData.id.toString() ||
-        route.query.source !== queryParams.source ||
-        (queryParams.team && route.query.team !== queryParams.team)
-      ) {
-        router.replace({ path: '/logs/explore', query: queryParams });
-      }
-
-      return true
-    } catch (error) {
-      console.error('Error loading saved query:', error)
-      exploreStore.setActiveSavedQueryName(null);
-      exploreStore.setSelectedQueryId(null);
-
-      toast({
-        title: 'Error',
-        description: getErrorMessage(error),
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR
-      })
-      return false
+      return null;
     }
   }
 
@@ -391,102 +259,22 @@ export function useSavedQueries(
     }
   }
 
-  async function deleteQuery(query: SavedQuery) {
-    if (window.confirm(`Are you sure you want to delete "${query.name}"? This action cannot be undone.`)) {
-      try {
-        await savedQueriesStore.remove(query.id)
-
-        if (exploreStore.selectedQueryId === query.id.toString()) {
-          exploreStore.setActiveSavedQueryName(null);
-          exploreStore.setSelectedQueryId(null);
-
-          if (route.query.id) {
-            const currentQuery = { ...route.query };
-            delete currentQuery.id;
-            router.replace({ query: currentQuery });
-          }
-        }
-
-        return { success: true }
-      } catch (error) {
-        toast({
-          title: 'Error',
-          description: getErrorMessage(error),
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        })
-        return { success: false, error }
-      }
-    }
-    return { success: false, canceled: true }
-  }
-
   // loadSourceQueries fetches saved queries for a single source. teamId is no
   // longer needed — visibility is gated by source access via any team membership.
   async function loadSourceQueries(sourceId: number) {
-    try {
-      isLoading.value = true
-      searchQuery.value = ''
+    searchQuery.value = ''
+    if (!sourceId) return { success: false, error: 'No source ID provided' }
 
-      if (!sourceId) {
-        queriesRef.value = []
-        return { success: false, error: 'No source ID provided' }
-      }
-
-      const result = await savedQueriesStore.list(sourceId)
-
-      if (result.success) {
-        queriesRef.value = result.data ?? []
-        return { success: true, data: result.data }
-      }
-
-      queriesRef.value = []
-      if (result.error) {
-        toast({
-          title: 'Error',
-          description: result.error.message,
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        })
-      }
-      return { success: false, error: result.error }
-    } catch (error) {
-      queriesRef.value = []
+    const result = await savedQueriesStore.list(sourceId)
+    if (result.error && contextStore.sourceId === sourceId) {
       toast({
         title: 'Error',
-        description: getErrorMessage(error),
+        description: result.error.message,
         variant: 'destructive',
         duration: TOAST_DURATION.ERROR,
       })
-      return { success: false, error }
-    } finally {
-      isLoading.value = false
     }
-  }
-
-  function createNewQuery(sourceId?: number) {
-    exploreStore.resetQueryToDefaults();
-
-    const newQuery: Record<string, string> = {};
-    if (route.query.team) {
-      newQuery.team = route.query.team as string;
-    }
-    if (sourceId) {
-      newQuery.source = sourceId.toString();
-    } else if (route.query.source) {
-      newQuery.source = route.query.source as string;
-    }
-
-    newQuery.limit = exploreStore.limit.toString();
-
-    Object.assign(newQuery, encodeWindowForUrl(exploreStore.window));
-
-    newQuery.mode = exploreStore.activeMode;
-
-    return router.push({
-      path: '/logs/explore',
-      query: newQuery
-    });
+    return result
   }
 
   // updateSavedQuery wraps the saved-queries store action used by edit dialogs.
@@ -500,7 +288,7 @@ export function useSavedQueries(
         editor_mode: 'builder' | 'native';
       }
   ) {
-    isLoading.value = true;
+    isUpdating.value = true;
     try {
       const result = await savedQueriesStore.update(queryId, {
         name: updateData.name,
@@ -524,7 +312,7 @@ export function useSavedQueries(
       });
       throw error;
     } finally {
-      isLoading.value = false;
+      isUpdating.value = false;
     }
   }
 
@@ -548,14 +336,11 @@ export function useSavedQueries(
     handleSaveAsNewQueryClick,
     closeSaveQueryModal,
     handleSaveQuery,
-    loadSavedQuery,
     updateSavedQuery,
     loadSourceQueries,
     getQueryUrl,
     openQuery,
     editQuery,
-    deleteQuery,
-    createNewQuery,
     clearSearch,
   }
 }

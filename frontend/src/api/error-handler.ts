@@ -1,14 +1,6 @@
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
-import type { AxiosError } from "axios";
-
-export interface APIErrorResponse {
-  status: "error";
-  message: string;
-  error_type: string;
-  data?: any;
-  _toastShown?: boolean;
-}
+import type { APIErrorResponse } from "@/api/types";
 
 // Error type mapping
 const ERROR_TITLES: Record<string, string> = {
@@ -23,57 +15,24 @@ const ERROR_TITLES: Record<string, string> = {
 };
 
 /**
- * Formats an error message from various error types
+ * Formats an error message from an Error, an API error response, or any object with a message
  */
-export function formatErrorMessage(error: unknown): string {
-  // API error response object
-  if (error && typeof error === "object" && "status" in error) {
-    const response = error as APIErrorResponse;
-    if (response.status === "error") return response.message;
+export function formatErrorMessage(error: unknown, fallback = "An unexpected error occurred"): string {
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message || fallback;
   }
-
-  // Axios error
-  if (error && typeof error === "object" && "isAxiosError" in error) {
-    const axiosError = error as AxiosError<APIErrorResponse>;
-
-    // Network error (no response)
-    if (!axiosError.response) {
-      return "Network error: Unable to connect to the server";
-    }
-
-    // Server error with proper format
-    if (axiosError.response.data?.status === "error") {
-      return axiosError.response.data.message;
-    }
-
-    // Fallback to status text
-    return `Server error: ${axiosError.response.statusText || "Unknown error"}`;
-  }
-
-  // Standard Error object
-  if (error instanceof Error) return error.message;
-
-  // Unknown error type
-  return "An unexpected error occurred";
+  return fallback;
 }
 
 /**
  * Gets the error type from an error object
  */
-export function getErrorType(error: unknown): string {
+function getErrorType(error: unknown): string {
   // API error response
   if (error && typeof error === "object" && "status" in error) {
     const response = error as APIErrorResponse;
     if (response.status === "error" && response.error_type) {
       return response.error_type;
-    }
-  }
-
-  // Axios error
-  if (error && typeof error === "object" && "isAxiosError" in error) {
-    const axiosError = error as AxiosError<APIErrorResponse>;
-    if (axiosError.response?.data?.error_type) {
-      return axiosError.response.data.error_type;
     }
   }
 
@@ -96,30 +55,25 @@ export function formatErrorTypeToTitle(errorType: string): string {
 }
 
 /**
- * Parse error to get both title and message
- */
-export function parseError(error: unknown): { title: string; message: string } {
-  return {
-    title: formatErrorTypeToTitle(getErrorType(error)),
-    message: formatErrorMessage(error)
-  };
-}
-
-/**
  * Checks if an error is a canceled request error that should be handled silently
  */
 export function isCanceledError(error: unknown): boolean {
   if (error && typeof error === "object") {
     // Check for our custom _silent flag
-    if ("_silent" in error && (error as any)._silent === true) {
+    if ("_silent" in error && error._silent === true) {
       return true;
     }
     // Check for CanceledError type
-    if ("error_type" in error && (error as any).error_type === "CanceledError") {
+    if ("error_type" in error && error.error_type === "CanceledError") {
       return true;
     }
   }
   return false;
+}
+
+/** Checks if an error came from an aborted or canceled request (fetch AbortError or our CanceledError). */
+export function isAbortError(error: unknown): boolean {
+  return isCanceledError(error) || (error !== null && typeof error === "object" && "name" in error && error.name === "AbortError");
 }
 
 /** Returns true when an interceptor already surfaced this error to the user. */
@@ -137,7 +91,7 @@ export function showErrorToast(error: unknown, customMessage?: string): void {
   }
 
   const { toast } = useToast();
-  const { title } = parseError(error);
+  const title = formatErrorTypeToTitle(getErrorType(error));
   const message = customMessage || formatErrorMessage(error);
 
   toast({

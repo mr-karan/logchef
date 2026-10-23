@@ -3,19 +3,30 @@ package alerts
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"strings"
+	"syscall"
 	"time"
 
 	"log/slog"
 )
 
+const smtpDialTimeout = 5 * time.Second
+
 const (
 	smtpSecurityNone     = "none"
 	smtpSecurityStartTLS = "starttls"
 	smtpSecurityTLS      = "tls"
+)
+
+var (
+	errSMTPNotConfigured = errors.New("smtp is not configured")
+	errSMTPTLS           = errors.New("smtp TLS failed")
+	errSMTPAuth          = errors.New("smtp authentication failed")
 )
 
 type EmailSenderOptions struct {
@@ -55,7 +66,7 @@ func NewEmailSender(opts EmailSenderOptions) *EmailSender {
 	}
 	timeout := opts.Timeout
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = smtpDialTimeout
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -75,38 +86,44 @@ func NewEmailSender(opts EmailSenderOptions) *EmailSender {
 	}
 }
 
-func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) error {
-	if len(notification.RecipientUserIDs) == 0 && len(notification.RecipientEmails) == 0 && notification.RecipientResolutionErr == "" {
-		return nil
-	}
-	if notification.RecipientResolutionErr != "" {
-		return fmt.Errorf("recipient resolution failed: %s", notification.RecipientResolutionErr)
-	}
-	if len(notification.RecipientEmails) == 0 {
-		if len(notification.RecipientUserIDs) > 0 {
-			return fmt.Errorf("no valid email recipients resolved")
+func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
+	var results DeliveryResults
+	resolutionTarget := deliveryTargetID("email", "recipient-resolution")
+	if notification.selects(resolutionTarget) {
+		var err error
+		switch {
+		case notification.RecipientResolutionErr != "":
+			err = fmt.Errorf("recipient resolution failed: %s", notification.RecipientResolutionErr)
+		case len(notification.RecipientUserIDs) > 0 && len(notification.RecipientEmails) == 0 && len(notification.MissingRecipientUserIDs) == 0:
+			err = fmt.Errorf("no valid email recipients resolved")
 		}
-		return nil
-	}
-	if s.host == "" || s.port == 0 || s.from == "" {
-		return fmt.Errorf("smtp is not configured")
-	}
-
-	recipients := uniqueEmails(notification.RecipientEmails)
-	var errs []string
-	for _, recipient := range recipients {
-		message := s.buildMessage(notification, recipient)
-		if err := s.sendEmail(ctx, recipient, message); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
+		if err != nil {
+			results = append(results, DeliveryResult{Target: resolutionTarget, Err: err})
 		}
 	}
-	if len(notification.MissingRecipientUserIDs) > 0 {
-		errs = append(errs, fmt.Sprintf("missing recipient user IDs: %v", notification.MissingRecipientUserIDs))
+	for _, id := range notification.MissingRecipientUserIDs {
+		target := emailUserTarget(id)
+		if notification.selects(target) {
+			results = append(results, DeliveryResult{Target: target, Err: fmt.Errorf("missing recipient user ID: %d", id)})
+		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("email delivery failed: %s", strings.Join(errs, "; "))
+	for index, recipient := range uniqueEmails(notification.RecipientEmails) {
+		target := notification.emailTarget(recipient)
+		if !notification.selects(target) {
+			continue
+		}
+		var err error
+		if s.host == "" || s.port == 0 || s.from == "" {
+			err = errSMTPNotConfigured
+		} else {
+			err = s.sendEmail(ctx, recipient, s.buildMessage(notification, recipient))
+		}
+		if err != nil {
+			err = fmt.Errorf("email delivery failed: email recipient %d: %w", index+1, sanitizeSMTPError(err))
+		}
+		results = append(results, DeliveryResult{Target: target, Err: err})
 	}
-	return nil
+	return results
 }
 
 func (s *EmailSender) buildMessage(notification AlertNotification, recipient string) []byte {
@@ -205,15 +222,20 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
 		tlsDialer := &tls.Dialer{NetDialer: dialer, Config: tlsConfig}
 		conn, err = tlsDialer.DialContext(ctx, "tcp", address)
+		if err != nil {
+			err = fmt.Errorf("%w: %w", errSMTPTLS, err)
+		}
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", address)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if s.timeout > 0 {
-		_ = conn.SetDeadline(time.Now().Add(s.timeout))
+	deadline := time.Now().Add(s.timeout)
+	if evaluationDeadline, ok := ctx.Deadline(); ok && evaluationDeadline.Before(deadline) {
+		deadline = evaluationDeadline
 	}
+	_ = conn.SetDeadline(deadline)
 	client, err := smtp.NewClient(conn, s.host)
 	if err != nil {
 		_ = conn.Close()
@@ -222,19 +244,19 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 	if s.security == smtpSecurityStartTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			_ = client.Close()
-			return nil, fmt.Errorf("smtp server does not support STARTTLS")
+			return nil, errSMTPTLS
 		}
 		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
 		if err := client.StartTLS(tlsConfig); err != nil {
 			_ = client.Close()
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errSMTPTLS, err)
 		}
 	}
 	if s.username != "" {
 		auth := smtp.PlainAuth("", s.username, s.password, s.host)
 		if err := client.Auth(auth); err != nil {
 			_ = client.Close()
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errSMTPAuth, err)
 		}
 	}
 	return client, nil
@@ -255,4 +277,44 @@ func uniqueEmails(emails []string) []string {
 		out = append(out, normalized)
 	}
 	return out
+}
+
+func sanitizeSMTPError(err error) error {
+	if errors.Is(err, errSMTPNotConfigured) {
+		return errSMTPNotConfigured
+	}
+	if errors.Is(err, context.Canceled) {
+		return errors.New("smtp request canceled")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errors.New("smtp request timed out")
+	}
+	if networkErr, ok := errors.AsType[net.Error](err); ok && networkErr.Timeout() {
+		return errors.New("smtp request timed out")
+	}
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
+		return errors.New("smtp DNS lookup failed")
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return errors.New("smtp connection refused")
+	}
+	if errors.Is(err, errSMTPTLS) {
+		return errSMTPTLS
+	}
+	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
+		return errSMTPTLS
+	}
+	if _, ok := errors.AsType[tls.RecordHeaderError](err); ok {
+		return errSMTPTLS
+	}
+	if errors.Is(err, errSMTPAuth) {
+		return errSMTPAuth
+	}
+	if reply, ok := errors.AsType[*textproto.Error](err); ok && (reply.Code == 530 || reply.Code == 534 || reply.Code == 535 || reply.Code == 538) {
+		return errSMTPAuth
+	}
+	if reply, ok := errors.AsType[*textproto.Error](err); ok && reply.Code >= 400 && reply.Code < 600 {
+		return errors.New("smtp message rejected by server")
+	}
+	return errors.New("smtp connection failed")
 }

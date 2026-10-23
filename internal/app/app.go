@@ -14,6 +14,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
@@ -28,16 +29,17 @@ import (
 
 // App represents the core application context, holding dependencies and configuration.
 type App struct {
-	Config      *config.Config
-	SQLite      store.Store
-	ClickHouse  *clickhouse.Manager
-	Datasources *datasource.Service
-	Logger      *slog.Logger
-	server      *server.Server
-	WebFS       http.FileSystem
-	BuildInfo   string
-	Version     string
-	Alerts      *alerts.Manager
+	Config       *config.Config
+	SQLite       store.Store
+	ClickHouse   *clickhouse.Manager
+	VictoriaLogs *victorialogs.Provider
+	Datasources  *datasource.Service
+	Logger       *slog.Logger
+	server       *server.Server
+	WebFS        http.FileSystem
+	BuildInfo    string
+	Version      string
+	Alerts       *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -62,6 +64,8 @@ func New(opts Options) (*App, error) {
 		BuildInfo: opts.BuildInfo,
 		Version:   opts.Version,
 	}
+
+	slog.SetDefault(app.Logger)
 
 	return app, nil
 }
@@ -114,7 +118,8 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
 	a.Datasources = datasource.NewService(a.SQLite, a.Logger)
 	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
-	a.Datasources.Register(victorialogs.NewProvider(a.Logger))
+	a.VictoriaLogs = victorialogs.NewProvider(a.Logger)
+	a.Datasources.Register(a.VictoriaLogs)
 
 	// OIDC is optional only with local auth and no provider_url (enforced by
 	// config validation). Once configured, a failed discovery aborts startup so
@@ -163,13 +168,12 @@ func (a *App) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize datasource connections: %w", err)
 	}
 
-	// Start background health checks for the ClickHouse manager.
-	// Use 0 to trigger the default interval defined in the manager.
-	a.ClickHouse.StartBackgroundHealthChecks(0) //nolint:contextcheck // health checks run for the app lifetime on their own context
+	a.ClickHouse.StartBackgroundHealthChecks(0)
+	a.VictoriaLogs.StartBackgroundHealthChecks(0)
 
 	// Initialize alerts manager with dynamic senders that read config from DB
 	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
-	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, a.Logger)
+	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, alerts.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
@@ -187,6 +191,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		ClickHouse:    a.ClickHouse,
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
+		WebhookSender: webhookSender,
 		OIDCProvider:  oidcProvider,
 		OAuth:         oauthServer,
 		FS:            a.WebFS,
@@ -232,6 +237,13 @@ func (a *App) Start() error {
 //nolint:contextcheck // Shutdown receives its own context from caller (e.g., signal handler)
 func (a *App) Shutdown(ctx context.Context) error {
 	a.Logger.Info("shutting down application")
+	if a.VictoriaLogs != nil {
+		defer func() {
+			if err := a.VictoriaLogs.Close(); err != nil {
+				a.Logger.Error("error closing victorialogs provider", "error", err)
+			}
+		}()
+	}
 
 	// Ensure a shutdown context with timeout exists.
 	if ctx == nil {
@@ -247,31 +259,24 @@ func (a *App) Shutdown(ctx context.Context) error {
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
 
+	alertDone := make(chan error, 1)
 	if a.Alerts != nil {
-		a.Logger.Info("stopping alert manager")
-		a.Alerts.Stop()
+		go func() { alertDone <- a.Alerts.StopWithContext(serverCtx) }()
+	} else {
+		alertDone <- nil
 	}
 
-	// Shutdown server first to stop accepting new requests.
+	var shutdownErr error
 	if a.server != nil {
-		a.Logger.Info("shutting down HTTP server")
-
-		serverDone := make(chan error, 1)
-		go func() {
-			serverDone <- a.server.Shutdown(serverCtx)
-		}()
-
-		// Wait for server shutdown or timeout
-		select {
-		case err := <-serverDone:
-			if err != nil {
-				a.Logger.Error("error shutting down server", "error", err)
-			} else {
-				a.Logger.Info("HTTP server shut down successfully")
-			}
-		case <-serverCtx.Done():
-			a.Logger.Warn("timeout shutting down HTTP server, continuing")
+		if err := a.server.Shutdown(serverCtx); err != nil {
+			shutdownErr = fmt.Errorf("error shutting down server: %w", err)
 		}
+	}
+	if err := <-alertDone; err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("error stopping alerts: %w", err))
+	}
+	if shutdownErr != nil {
+		return shutdownErr
 	}
 
 	// Close ClickHouse manager (stops health checks and closes clients).
@@ -550,14 +555,8 @@ func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, l
 		return fmt.Errorf("looking up local admin: %w", err)
 	}
 	if user == nil || errors.Is(err, models.ErrNotFound) {
-		user = &models.User{
-			Email:       local.AdminEmail,
-			FullName:    "Local Admin",
-			Role:        models.UserRoleAdmin,
-			Status:      models.UserStatusActive,
-			AccountType: models.UserAccountTypeHuman,
-		}
-		if err := db.CreateUser(ctx, user); err != nil {
+		user, err = core.CreateUser(ctx, db, log, access.SystemPrincipal(), local.AdminEmail, "Local Admin", models.UserRoleAdmin, models.UserStatusActive)
+		if err != nil {
 			return fmt.Errorf("creating local admin: %w", err)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/logchefql"
+	"github.com/mr-karan/logchef/internal/queryescape"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -104,9 +105,9 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 		return nil, err
 	}
 
-	quotedField := quoteIdentifier(params.FieldName)
-	quotedTS := quoteIdentifier(params.TimestampField)
-	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
+	quotedField := queryescape.ClickHouseIdentifier(params.FieldName)
+	quotedTS := queryescape.ClickHouseIdentifier(params.TimestampField)
+	qualifiedTable := fmt.Sprintf("%s.%s", queryescape.ClickHouseIdentifier(database), queryescape.ClickHouseIdentifier(table))
 
 	// Enum columns can contain an empty enum value, but comparing an Enum to
 	// the string literal '' raises UNKNOWN_ELEMENT_OF_ENUM in ClickHouse. Only
@@ -241,9 +242,9 @@ func extractInt64FromRow(row map[string]any, key string) (int64, bool) {
 }
 
 func (c *Client) queryTotalDistinct(ctx context.Context, database, table string, params FieldValuesParams, startTimeStr, endTimeStr, additionalConditions string, timeoutSeconds *int) (int64, error) {
-	quotedField := quoteIdentifier(params.FieldName)
-	quotedTS := quoteIdentifier(params.TimestampField)
-	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
+	quotedField := queryescape.ClickHouseIdentifier(params.FieldName)
+	quotedTS := queryescape.ClickHouseIdentifier(params.TimestampField)
+	qualifiedTable := fmt.Sprintf("%s.%s", queryescape.ClickHouseIdentifier(database), queryescape.ClickHouseIdentifier(table))
 	emptyFilter := emptyValueFilter(params.FieldType, quotedField)
 
 	query := fmt.Sprintf(`
@@ -458,10 +459,4 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 
 	wg.Wait()
 	return results, nil //nolint:nilerr // on cancellation, return the fields already fetched
-}
-
-// GetAllLowCardinalityFieldValues is deprecated, use GetAllFilterableFieldValues instead.
-// Kept for backwards compatibility.
-func (c *Client) GetAllLowCardinalityFieldValues(ctx context.Context, database, table string, params AllFieldValuesParams) (map[string]*FieldValuesResult, error) {
-	return c.GetAllFilterableFieldValues(ctx, database, table, params)
 }

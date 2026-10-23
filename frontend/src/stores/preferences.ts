@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useBaseStore } from "./base";
 import { preferencesApi, type UserPreferences, type UserPreferencesResponse } from "@/api/preferences";
 import { useThemeStore, type ThemeMode } from "./theme";
@@ -11,7 +11,6 @@ import { zoneFromPreference, type ZoneId } from "@/utils/timeWindow";
 interface PreferencesState {
   preferences: UserPreferences;
   isLoaded: boolean;
-  isDefault: boolean;
 }
 
 const STORAGE_KEY = "logchef_user_preferences";
@@ -57,8 +56,8 @@ function readStoredPreferences(themeFallback: ThemeMode): UserPreferences {
       const parsed = JSON.parse(stored) as Partial<UserPreferences>;
       return normalizePreferences({
         ...DEFAULT_PREFERENCES,
-        theme: themeFallback,
         ...parsed,
+        theme: parsed.theme && isThemeMode(parsed.theme) ? parsed.theme : themeFallback,
       } as UserPreferences);
     } catch (error) {
       console.warn("Failed to parse stored preferences, using defaults.", error);
@@ -89,7 +88,8 @@ function readStoredPreferences(themeFallback: ThemeMode): UserPreferences {
 
 function persistPreferences(preferences: UserPreferences) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+  const { theme, ...storedPreferences } = preferences;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(storedPreferences));
 }
 
 function persistLegacyKeys(preferences: UserPreferences) {
@@ -123,12 +123,13 @@ export const usePreferencesStore = defineStore("preferences", () => {
   const state = useBaseStore<PreferencesState>({
     preferences: initialPreferences,
     isLoaded: false,
-    isDefault: false,
   });
 
   const preferences = computed(() => state.data.value.preferences);
+  watch(() => themeStore.preference, (theme) => {
+    state.data.value.preferences.theme = theme;
+  }, { flush: "sync" });
   const isLoaded = computed(() => state.data.value.isLoaded);
-  const isDefault = computed(() => state.data.value.isDefault);
 
   function applyPreferences(next: UserPreferences, options?: { syncTheme?: boolean }) {
     const normalized = normalizePreferences(next);
@@ -141,7 +142,7 @@ export const usePreferencesStore = defineStore("preferences", () => {
     }
   }
 
-  applyPreferences(state.data.value.preferences, { syncTheme: false });
+  applyPreferences(state.data.value.preferences);
 
   async function loadPreferences(forceReload = false) {
     const userId = authStore.user?.id ?? null;
@@ -170,7 +171,6 @@ export const usePreferencesStore = defineStore("preferences", () => {
       if ((authStore.user?.id ?? null) !== userId || revision !== preferencesRevision) return { success: false };
       const result = await state.callApi<UserPreferencesResponse>({
         apiCall: () => preferencesApi.getPreferences(),
-        operationKey: "loadPreferences",
         showToast: false,
       });
       if (!result.success || !result.data || (authStore.user?.id ?? null) !== userId || revision !== preferencesRevision) return result;
@@ -184,11 +184,9 @@ export const usePreferencesStore = defineStore("preferences", () => {
           locale: serverPreferences.locale,
         });
         applyPreferences(merged);
-        state.data.value.isDefault = true;
         if (!preferencesEqual(serverPreferences, merged)) await savePreferences(merged, "syncPreferences");
       } else {
         applyPreferences(serverPreferences);
-        state.data.value.isDefault = false;
       }
       if ((authStore.user?.id ?? null) === userId && revision === preferencesRevision) {
         state.data.value.isLoaded = true;
@@ -245,8 +243,6 @@ export const usePreferencesStore = defineStore("preferences", () => {
   return {
     preferences,
     zone,
-    isLoaded,
-    isDefault,
     isLoading: state.isLoading,
     error: state.error,
     loadPreferences,

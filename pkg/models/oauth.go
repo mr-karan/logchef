@@ -25,9 +25,9 @@ type OAuthAuthRequestID string
 // the server secret by the caller; storage never sees the secret.
 type OAuthHashKey [32]byte
 
-// OAuthSecretHash is the stored form of an authorization code, device code,
-// user code, access-token ID or refresh token. It can only be built by
-// HashOAuthSecret, so a plaintext value cannot reach storage by accident.
+// OAuthSecretHash is the stored form of an authorization code, access-token
+// ID or refresh token. It can only be built by HashOAuthSecret, so a plaintext
+// value cannot reach storage by accident.
 type OAuthSecretHash struct{ hex string }
 
 // HashOAuthSecret returns the HMAC-SHA256 of secret under key.
@@ -57,8 +57,8 @@ const (
 )
 
 var (
-	// ErrOAuthInvalidGrant means a code, refresh token or device code cannot
-	// be used: it is unknown, expired, already used, or its grant is revoked.
+	// ErrOAuthInvalidGrant means a code or refresh token cannot be
+	// used: it is unknown, expired, already used, or its grant is revoked.
 	// The token endpoint maps it to invalid_grant.
 	ErrOAuthInvalidGrant = errors.New("oauth: invalid grant")
 	// ErrOAuthCodeReplay is a consumed authorization code presented again.
@@ -99,63 +99,6 @@ type OAuthAuthRequest struct {
 	Denied        bool
 	ExpiresAt     time.Time
 	CreatedAt     time.Time
-}
-
-// OAuthDeviceAuthorization is a device-flow request (RFC 8628). The device
-// code and user code are identified by their hashes and are not part of the
-// model.
-type OAuthDeviceAuthorization struct {
-	ClientID      OAuthClientID
-	Resource      string
-	Scopes        []TokenScope
-	OfflineAccess bool
-	Interval      time.Duration
-	UserID        *UserID
-	GrantID       *OAuthGrantID
-	ApprovedAt    *time.Time
-	DeniedAt      *time.Time
-	ExpiresAt     time.Time
-	CreatedAt     time.Time
-}
-
-// NewOAuthDeviceAuthorization holds the values for a new device request.
-type NewOAuthDeviceAuthorization struct {
-	DeviceCodeHash OAuthSecretHash
-	UserCodeHash   OAuthSecretHash
-	ClientID       OAuthClientID
-	Resource       string
-	Scopes         []TokenScope
-	OfflineAccess  bool
-	Interval       time.Duration
-	ExpiresAt      time.Time
-	CreatedAt      time.Time
-}
-
-// OAuthDevicePollStatus is the result of one device-code poll.
-type OAuthDevicePollStatus int
-
-const (
-	// DevicePollPending: the user has not decided yet.
-	DevicePollPending OAuthDevicePollStatus = iota + 1
-	// DevicePollSlowDown: the poll came before the interval elapsed on a
-	// request that is not expired or denied. Storage has increased the
-	// interval by 5 s (RFC 8628 §3.5). Expired and denied requests always
-	// report their terminal status instead.
-	DevicePollSlowDown
-	// DevicePollApproved: the user approved and the code is not expired. The
-	// caller must still win ConsumeDeviceCode before issuing tokens.
-	DevicePollApproved
-	// DevicePollDenied: the user denied the request.
-	DevicePollDenied
-	// DevicePollExpired: the code expired. This takes precedence over an
-	// approval, so an approved but expired code never issues tokens.
-	DevicePollExpired
-)
-
-// OAuthDevicePoll is the outcome of RecordDevicePoll.
-type OAuthDevicePoll struct {
-	Status        OAuthDevicePollStatus
-	Authorization OAuthDeviceAuthorization
 }
 
 // OAuthTokenIssue holds the hashes and expiries for a new access token and,

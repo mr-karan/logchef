@@ -20,7 +20,9 @@ import (
 // (the suite drops and recreates the public schema for a clean run).
 func TestConformance(t *testing.T) {
 	dsn := resetSchema(t)
-	storetest.Run(t, opener(dsn)(t))
+	s := opener(dsn)(t)
+	storetest.Run(t, s)
+	t.Run("MembershipWritesSerialized", func(t *testing.T) { storetest.RunMembershipWritesSerialized(t, s) })
 }
 
 // TestOAuthConformance runs the OAuth suite. Each opened store has its own
@@ -64,4 +66,21 @@ func opener(dsn string) storetest.Opener {
 		t.Cleanup(func() { _ = s.Close() })
 		return s
 	}
+}
+
+// TestShareLogRedaction asserts share error logs never carry the full token.
+func TestShareLogRedaction(t *testing.T) {
+	dsn := resetSchema(t)
+	storetest.RunShareLogRedaction(t, func(t *testing.T, logger *slog.Logger) store.Store {
+		t.Helper()
+		s, err := postgres.New(context.Background(), postgres.Options{
+			Logger: logger,
+			Config: config.PostgresConfig{DSN: dsn},
+		})
+		if err != nil {
+			t.Fatalf("postgres.New: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	})
 }

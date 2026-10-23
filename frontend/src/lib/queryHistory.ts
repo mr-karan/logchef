@@ -1,16 +1,16 @@
 import type { QueryHistoryRecord } from "@/api/explore";
 import { getExploreModeForQueryLanguage } from "@/lib/queryMetadata";
 import { epochMs, formatInZone, type ZoneId } from "@/utils/timeWindow";
+import { normalizeDateString } from "@/utils/format";
 
 /**
  * Build the router query params that re-run a query-history entry in the log
- * explorer. The explorer's URL watcher (useUrlState) picks these params up,
- * switches team/source as needed, loads the query into the editor, and
- * executes it — so re-run works even when the entry belongs to a different
- * team or source than the one currently open.
+ * explorer. The Explorer navigator opens these params, switches team and
+ * source as needed, loads the query into the editor and runs it, so re-run
+ * works even when the entry belongs to another team or source.
  *
- * History rows carry no time range or limit, so those are intentionally
- * omitted: the explorer keeps whatever range/limit is currently active.
+ * History rows carry no time range or limit, so the link names neither: the
+ * explorer opens the last 15 minutes and keeps the current limit.
  */
 export function buildHistoryRerunQuery(entry: QueryHistoryRecord): Record<string, string> {
   const mode = getExploreModeForQueryLanguage(entry.query_language);
@@ -38,10 +38,7 @@ export function buildHistoryRerunQuery(entry: QueryHistoryRecord): Record<string
  * as ISO strings.
  */
 export function formatHistoryTimeAgo(createdAt: string, zone: ZoneId, nowMs: number = Date.now(), locale = "en"): string {
-  const normalized =
-    createdAt.includes("T") || createdAt.includes("Z") || createdAt.includes("+")
-      ? createdAt
-      : createdAt.replace(" ", "T") + "Z";
+  const normalized = normalizeDateString(createdAt);
 
   const then = new Date(normalized).getTime();
   if (Number.isNaN(then)) {

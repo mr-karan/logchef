@@ -26,6 +26,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
@@ -96,11 +97,7 @@ const baseLayout = computed<DashboardLayoutItem[]>(() =>
   placements.value.map((p) => ({ id: p.panel.id, x: p.x, y: p.y, w: p.w, h: p.h }))
 );
 
-// --- Panel builder drawer ----------------------------------------------------
-// DashboardView owns editorOpen + editingPanelId; the drawer is draft-first
-// (it reads/writes editDraft directly by id, see PanelBuilderDrawer.vue), so
-// there's no panel object to pass in or a "save" event to listen for. Closing
-// the drawer only exits panel-editing — the dashboard stays in edit mode.
+// The drawer edits editDraft by panel id, so there is no panel to pass in or save event to handle.
 const editorOpen = ref(false);
 const editingPanelId = ref<string | null>(null);
 // Tracks a panel created via "Add panel" so a cancel-while-pristine (no
@@ -153,13 +150,7 @@ function removePanel(id: string) {
   store.removeDraftPanel(id);
 }
 
-// --- Cache TTL (edit mode) ---------------------------------------------------
-// Presets for the per-dashboard result-cache TTL, persisted in the panels blob
-// as cache_ttl_seconds. Off (0) disables caching. When a dashboard sets no
-// value, the effective TTL is the SERVER's advertised default — so the "Default"
-// shown here is derived from the server policy (falling back to a constant only
-// when the server advertises no policy). We never rewrite a dashboard's saved
-// cache_ttl_seconds just because the current server would clamp it differently.
+// Unset TTL follows the server policy without rewriting the saved dashboard.
 const CACHE_TTL_OPTIONS = [
   { get label() { return t('ui.off'); }, seconds: 0 },
   { label: "1m", seconds: 60 },
@@ -198,7 +189,6 @@ const defaultTimeRangeLabel = computed(() => {
   return value ? rangeLabel(value) : t("dashboards.defaultRangeNone");
 });
 
-// --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
 const gridEl = ref<HTMLElement | null>(null);
 const containerWidth = ref(1200);
 let resizeObserver: ResizeObserver | null = null;
@@ -378,14 +368,17 @@ const movePlaceholder = computed(() => {
   return item ? cellRect(item, renderGeom.value) : null;
 });
 
-// --- Edit lifecycle + dirty guard -------------------------------------------
-function startEdit() {
-  store.enterEdit();
-}
+const pendingDiscard = ref<'cancel' | 'leave' | null>(null);
+
 function cancelEdit() {
-  if (store.isDirty && !window.confirm("Discard unsaved changes to this dashboard?")) {
+  if (store.isDirty) {
+    pendingDiscard.value = 'cancel';
     return;
   }
+  discardEdit();
+}
+
+function discardEdit() {
   editorOpen.value = false;
   editingPanelId.value = null;
   pendingNewPanelId.value = null;
@@ -399,11 +392,18 @@ async function saveEdit() {
 }
 
 function goBack() {
-  // The in-app Back control honors the same dirty guard as route navigation.
-  if (store.isEditing && store.isDirty && !window.confirm("Discard unsaved changes and leave?")) {
+  if (store.isEditing && store.isDirty) {
+    pendingDiscard.value = 'leave';
     return;
   }
   router.push("/dashboards");
+}
+
+function confirmDiscard() {
+  const action = pendingDiscard.value;
+  pendingDiscard.value = null;
+  discardEdit();
+  if (action === 'leave') router.push("/dashboards");
 }
 
 function panelOuterHeight(rowSpan: number): number {
@@ -423,7 +423,6 @@ const creatorLabel = computed(
   () => store.current?.created_by_name || store.current?.created_by_email || t('common.unknown')
 );
 
-// --- Auto-refresh timer (cleaned up on unmount and route leave) -------------
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 function clearRefreshTimer() {
@@ -494,24 +493,19 @@ onBeforeUnmount(() => {
 });
 
 onBeforeRouteLeave(() => {
-  // Guard against leaving with unsaved edits (browser confirm; the in-app Back
-  // control routes through goBack() which applies the same check).
   if (store.isEditing && store.isDirty) {
-    if (!window.confirm("You have unsaved changes to this dashboard. Leave anyway?")) {
+    if (!window.confirm(t('dashboards.unsavedLeaveConfirmation'))) {
       return false;
     }
   }
   clearRefreshTimer();
 });
 
-// Param-only navigation (/dashboards/1 → /dashboards/2) reuses this component
-// instance, so the previous dashboard's edit draft would otherwise ride along
-// and Save could write #1's panels onto #2's id (#119 A1). Confirm on a dirty
-// draft, then clear the store so the incoming load() starts from a clean slate.
+// Parameter navigation reuses the component, so discard the previous dashboard draft.
 onBeforeRouteUpdate((to, from) => {
   if (to.params.id === from.params.id) return true;
   if (store.isEditing && store.isDirty) {
-    if (!window.confirm("You have unsaved changes to this dashboard. Leave anyway?")) {
+    if (!window.confirm(t('dashboards.unsavedLeaveConfirmation'))) {
       return false;
     }
   }
@@ -522,11 +516,20 @@ onBeforeRouteUpdate((to, from) => {
 
 <template>
   <div class="mx-auto w-full max-w-[1600px] px-4 py-4">
+    <ConfirmDialog
+      :open="pendingDiscard !== null"
+      @update:open="(open) => { if (!open) pendingDiscard = null; }"
+      :title="t('dashboards.discardChangesTitle')"
+      :description="t('dashboards.discardChangesConfirmation')"
+      :confirm-text="t('dashboards.discardChanges')"
+      destructive
+      @confirm="confirmDiscard"
+    />
     <!-- Header -->
     <div class="mb-4 flex items-start justify-between gap-4 flex-wrap">
       <div class="min-w-0">
         <div class="flex items-center gap-2">
-          <Button variant="ghost" size="sm" class="h-8 px-2 -ml-2" @click="goBack">
+          <Button variant="ghost" size="sm" class="h-8 px-2 -ml-2" @click="goBack" :aria-label="t('ui.backToDashboards')">
             <ArrowLeft class="h-4 w-4" />
           </Button>
           <LayoutDashboard class="h-5 w-5 text-muted-foreground shrink-0" />
@@ -570,7 +573,7 @@ onBeforeRouteUpdate((to, from) => {
       <div class="flex items-center gap-2 flex-wrap">
         <DashboardToolbar v-if="dashboard && !isEditing" />
         <template v-if="dashboard && !isEditing && canEdit">
-          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="startEdit">
+          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="store.enterEdit()">
             <Pencil class="h-3.5 w-3.5" />
             {{ t('ui.edit') }}
           </Button>
@@ -757,7 +760,7 @@ onBeforeRouteUpdate((to, from) => {
           {{ t('ui.addAPanelToStartVisualizingLogsPickASourceWriteA') }}
         </p>
       </div>
-      <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" @click="startEdit">
+      <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" @click="store.enterEdit()">
         <Plus class="h-4 w-4" />
         {{ t('ui.addYourFirstPanel') }}
       </Button>

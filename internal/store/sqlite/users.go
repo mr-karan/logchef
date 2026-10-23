@@ -13,20 +13,13 @@ import (
 
 // User methods
 
-// normalizeEmail lowercases and trims an email address so that storage and
-// lookup are case-insensitive (#95). Uses Go's Unicode-aware ToLower, matching
-// the normalization applied to existing rows by migration 000030.
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
-
 // CreateUser inserts a new user record into the database.
 // It sets default status if necessary and handles potential unique email constraint errors.
 // Populates the user ID and timestamps on the input model upon success.
 func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 
 	// Normalize the email so accounts are unique/looked-up case-insensitively.
-	user.Email = normalizeEmail(user.Email)
+	user.Email = models.NormalizeEmail(user.Email)
 
 	// Default status if not provided by caller.
 	if user.Status == "" {
@@ -93,11 +86,17 @@ func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, erro
 	return mapUserRowToModel(userRow), nil
 }
 
+// GetUserForUpdate retrieves a user by ID. BEGIN IMMEDIATE already
+// serializes writers, so no row lock is needed.
+func (db *DB) GetUserForUpdate(ctx context.Context, id models.UserID) (*models.User, error) {
+	return db.GetUser(ctx, id)
+}
+
 // GetUserByEmail retrieves a single user by their email address.
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 
-	email = normalizeEmail(email)
+	email = models.NormalizeEmail(email)
 	userRow, err := db.readQueries.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting user email %s", email))
@@ -144,6 +143,17 @@ func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
 	return nil
 }
 
+// UpdateUserLastLogin records a user's last login time.
+func (db *DB) UpdateUserLastLogin(ctx context.Context, id models.UserID, at time.Time) error {
+	if err := db.writeQueries.UpdateUserLastLogin(ctx, sqlc.UpdateUserLastLoginParams{
+		LastLoginAt: sql.NullTime{Time: at, Valid: true},
+		ID:          int64(id),
+	}); err != nil {
+		return fmt.Errorf("failed to update user last login: %w", err)
+	}
+	return nil
+}
+
 // ListUsers retrieves all user records, ordered by creation date.
 func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 
@@ -182,6 +192,11 @@ func (db *DB) ListServiceAccounts(ctx context.Context) ([]*models.User, error) {
 	}
 
 	return users, nil
+}
+
+// LockMembershipWrites is a no-op: BEGIN IMMEDIATE already serializes writers.
+func (db *DB) LockMembershipWrites(context.Context) error {
+	return nil
 }
 
 // CountAdminUsers counts active users with the admin role.

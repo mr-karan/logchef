@@ -1,6 +1,12 @@
 import { format } from "date-fns";
 import type { Source } from "@/api/sources";
 
+export function normalizeDateString(value: string): string {
+  return value.includes('T') || value.includes('Z') || value.includes('+')
+    ? value
+    : value.replace(' ', 'T') + 'Z';
+}
+
 /**
  * Format a date string using date-fns
  * @param dateString - The date string to format
@@ -13,7 +19,7 @@ export function formatDate(
 ): string {
   if (!dateString) return "Never";
   try {
-    const normalizedDateStr = dateString.includes('T') || dateString.includes('Z') || dateString.includes('+') ? dateString : dateString.replace(' ', 'T') + 'Z';
+    const normalizedDateStr = normalizeDateString(dateString);
     const date = new Date(normalizedDateStr);
     return format(date, formatStr);
   } catch {
@@ -44,7 +50,7 @@ export function formatSourceName(source: Source): string {
   return `Source ${source.id}`;
 }
 
-export interface SourceConnectionDetail {
+interface SourceConnectionDetail {
   label: string;
   value: string;
   monospace?: boolean;
@@ -94,23 +100,4 @@ export function getSourceConnectionDetails(source: Source): SourceConnectionDeta
   }
 
   return [];
-}
-
-/**
- * Format a source's display name with optional schema type
- * @param source - The source object containing connection info
- * @param includeSchema - Whether to include the schema type in parentheses
- * @returns Formatted source name string with optional schema type
- */
-export function formatSourceNameWithSchema(
-  source: Source,
-  includeSchema = true
-): string {
-  const baseName = formatSourceName(source);
-  const connection = source.connection as Record<string, unknown>;
-  const tableName = typeof connection.table_name === "string" ? connection.table_name : null;
-
-  return includeSchema && source.source_type === "clickhouse" && tableName
-    ? `${baseName} (${tableName})`
-    : baseName;
 }

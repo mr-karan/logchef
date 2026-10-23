@@ -15,6 +15,7 @@ import (
 	"math"
 	"math/big"
 	"net"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -242,7 +243,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	defer cancel()
 
 	if isDDLStatement(query) {
-		return models.QueryStats{}, fmt.Errorf("streaming DDL statements is not supported")
+		return models.QueryStats{}, &ValidationError{Message: "only SELECT queries are supported"}
 	}
 
 	var stats models.QueryStats
@@ -261,6 +262,9 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		}()
 
 		hasRow := rows.Next()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 		columnsInfo, scanDest, scanPtrs := prepareRowScan(rows)
 		if err := writer.Begin(columnsInfo); err != nil {
 			return err
@@ -367,20 +371,23 @@ const (
 	chExceptionSocketTimeout   int32 = 209 // SOCKET_TIMEOUT: the connection's socket timed out mid-query.
 )
 
-// isTimeoutError reports whether err represents a query timeout, so the
-// query metrics can distinguish timeouts from other kinds of failures. It
-// checks, in order:
-//   - the Go context deadline (queryTimeoutGrace backstop) expiring, surfaced
-//     as context.DeadlineExceeded anywhere in the error chain;
-//   - ClickHouse itself reporting the query was aborted for taking too long
-//     (*clickhouse.Exception with code 159 TIMEOUT_EXCEEDED or 209
-//     SOCKET_TIMEOUT);
-//   - the underlying net.Conn reporting a read/write timeout.
-//
-// A plain context.Canceled (e.g. the caller/request going away) is
-// deliberately not treated as a timeout — that's a cancellation, not a
-// deadline being hit.
-func isTimeoutError(err error) bool {
+// IsQueryTimeoutError reports query deadlines separately from transport timeouts.
+func IsQueryTimeoutError(err error) bool {
+	if exception, ok := errors.AsType[*clickhouse.Exception](err); ok {
+		return exception.Code == chExceptionTimeoutExceeded || exception.Code == chExceptionSocketTimeout
+	}
+	if _, ok := errors.AsType[*net.OpError](err); ok {
+		return false
+	}
+	// Client.Timeout also wraps DeadlineExceeded, but has its own transport budget.
+	if requestErr, ok := errors.AsType[*url.Error](err); ok {
+		return requestErr.Err == context.DeadlineExceeded //nolint:errorlint // Client.Timeout's wrapper must remain a transport failure.
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+// IsTimeoutError reports whether a context, ClickHouse, or network error indicates a timeout.
+func IsTimeoutError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -747,7 +754,7 @@ func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSe
 		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: timeoutSeconds})
 		c.logger.Debug("applying DDL query timeout", "timeout_seconds", *timeoutSeconds)
 
-		return c.execQuery(hookCtx, query)
+		return c.conn.Exec(hookCtx, query)
 	})
 
 	if err != nil {

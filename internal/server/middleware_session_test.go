@@ -14,6 +14,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -35,7 +36,7 @@ func newSessionTestServer(t *testing.T, db *sqlite.DB) *fiber.App {
 	t.Helper()
 	s := &Server{
 		log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		sqlite: db,
+		store:  db,
 		config: &config.Config{},
 	}
 	app := fiber.New()
@@ -82,7 +83,7 @@ func TestSessionRejectedAfterDeactivation(t *testing.T) {
 
 	// Deactivate through the core flow (revokes sessions transactionally).
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := core.UpdateUser(ctx, db, log, user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if err := core.UpdateUser(ctx, db, log, access.SystemPrincipal(), user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatalf("UpdateUser(deactivate): %v", err)
 	}
 

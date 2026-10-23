@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
+import { getErrorMessage } from '@/api/types';
+import { isAbortError } from '@/api/error-handler';
 
 import { ref, computed, onMounted, watch } from 'vue';
 import { SaveIcon, Pencil } from 'lucide-vue-next';
@@ -30,7 +32,6 @@ import { useSourcesStore } from '@/stores/sources';
 import { asClickHouseConnection } from '@/api/sources';
 import { useExploreStore } from '@/stores/explore';
 import { useVariableStore } from '@/stores/variables';
-import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import { storeToRefs } from "pinia";
@@ -42,14 +43,10 @@ const { t } = useI18n();
 
 const props = defineProps<{
   isOpen: boolean;
-  initialData?: any; // For creating a new query
   editData?: any;    // For editing an existing query
   queryContent?: string;
-  isEditMode?: boolean;
   queryType?: ExploreMode;
 }>();
-
-const route = useRoute();
 
 const emit = defineEmits<{
   (e: 'close'): void;
@@ -91,7 +88,7 @@ const collectionOptions = computed(() => {
   return personal ? [personal, ...shared] : shared;
 });
 const isSubmitting = ref(false);
-const isEditing = computed(() => !!props.editData || (!!props.initialData && props.isEditMode));
+const isEditing = computed(() => !!props.editData);
 const queryId = ref('');
 const { allVariables } = storeToRefs(variableStore);
 
@@ -104,18 +101,6 @@ const currentSourceId = computed(() => {
   // Try to get from explore store
   if (exploreStore.sourceId) {
     return exploreStore.sourceId;
-  }
-
-  // If we have initial data, try to parse it
-  if (props.initialData?.query_content) {
-    try {
-      const content = JSON.parse(props.initialData.query_content);
-      if (content.sourceId) {
-        return content.sourceId;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content", e);
-    }
   }
 
   // If query content is provided, try to parse it
@@ -136,7 +121,6 @@ const currentSourceId = computed(() => {
 // Get source name for display
 const sourceName = computed(() => {
   if (props.editData?.source_name) return props.editData.source_name;
-  if (props.initialData?.source_name) return props.initialData.source_name;
   if (!currentSourceId.value) return '';
 
   // Find the source in the sources list
@@ -158,8 +142,8 @@ const isValid = computed(() => {
 const resolvedQueryMetadata = computed(() =>
   resolveSavedQueryMetadata({
     active_mode: props.queryType,
-    query_language: props.editData?.query_language || props.initialData?.query_language,
-    editor_mode: props.editData?.editor_mode || props.initialData?.editor_mode,
+    query_language: props.editData?.query_language,
+    editor_mode: props.editData?.editor_mode,
     source_type: currentSourceDescriptor.value?.source_type,
     query_languages: currentSourceDescriptor.value?.query_languages,
     saved_query_editor_modes: currentSourceDescriptor.value?.saved_query_editor_modes,
@@ -175,7 +159,7 @@ const displayQueryMode = computed(() => {
 
 const displayQueryLanguageLabel = computed(() => getQueryLanguageLabel(resolvedQueryMetadata.value.queryLanguage));
 
-// Get the query content for display - prioritize props then editData/initialData
+// Get the query content for display - prioritize props then editData
 const displayQueryContent = computed(() => {
   // First, try to get content from queryContent prop if provided (e.g. from Explorer)
   // This is the CURRENT editor content, so it takes priority over saved data
@@ -199,18 +183,6 @@ const displayQueryContent = computed(() => {
       }
     } catch (e) {
       console.error("Failed to parse editData query content for display", e);
-    }
-  }
-  
-  // Then try initialData (when editing with initialData + isEditMode from Collections)
-  if (props.initialData?.query_content) {
-    try {
-      const content = JSON.parse(props.initialData.query_content);
-      if (content.content !== undefined) {
-        return content.content;
-      }
-    } catch (e) { 
-       console.error("Failed to parse initialData query content for display", e);
     }
   }
   
@@ -246,90 +218,46 @@ onMounted(async () => {
   }
 
   if (promises.length > 0) {
-    await Promise.all(promises);
+    const results = await Promise.allSettled(promises);
+    const failure = results.find(result => result.status === 'rejected' && !isAbortError(result.reason));
+    if (failure?.status === 'rejected') {
+      toast({ title: t('ui.error'), description: getErrorMessage(failure.reason), variant: 'destructive', duration: TOAST_DURATION.ERROR });
+    }
   }
 
   // Default the collection picker to the user's personal collection.
   if (!selectedCollectionId.value && collectionsStore.personalCollection) {
     selectedCollectionId.value = String(collectionsStore.personalCollection.id);
   }
-
-  // Initialize form with data if provided
-  if (props.editData) {
-    // We're editing an existing query
-    name.value = props.editData.name || '';
-    description.value = props.editData.description || '';
-    queryId.value = props.editData.id?.toString() || '';
-
-    try {
-      const content = JSON.parse(props.editData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from editData", e);
-    }
-  } else if (props.initialData) {
-    // Creating new query with initial data OR editing with initialData + isEditMode
-    name.value = props.initialData.name || '';
-    description.value = props.initialData.description || '';
-    // Set queryId if editing (isEditMode is true and initialData has an id)
-    queryId.value = props.isEditMode ? (props.initialData.id?.toString() || '') : '';
-
-    try {
-      const content = JSON.parse(props.initialData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from initialData", e);
-    }
-  }
-
-  // Also check URL parameters for editing existing query
-  if (route.query.id && !props.initialData && !props.editData) {
-    queryId.value = route.query.id.toString();
-  }
 });
 
-// Watch for changes in initialData or editData
-watch([() => props.initialData, () => props.editData], ([newInitialData, newEditData]) => {
-  if (newEditData) {
-    // Editing existing query takes precedence
-    name.value = newEditData.name || '';
-    description.value = newEditData.description || '';
-    queryId.value = newEditData.id?.toString() || '';
-
+function initFromProps() {
+  const data = props.editData;
+  name.value = data?.name || '';
+  description.value = data?.description || '';
+  queryId.value = isEditing.value ? data?.id?.toString() || '' : '';
+  saveTimestampUserModified.value = false;
+  saveTimestamp.value = !data;
+  if (data?.query_content) {
     try {
-      const content = JSON.parse(newEditData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from editData in watcher", e);
-    }
-  } else if (newInitialData) {
-    // Creating new query OR editing with initialData + isEditMode
-    name.value = newInitialData.name || '';
-    description.value = newInitialData.description || '';
-    // Set queryId if editing (isEditMode is true and initialData has an id)
-    queryId.value = props.isEditMode ? (newInitialData.id?.toString() || '') : '';
-
-    try {
-      const content = JSON.parse(newInitialData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from initialData in watcher", e);
+      const content = JSON.parse(data.query_content);
+      saveTimestamp.value = !!(content.timeRange?.absolute || content.timeRange?.relative);
+    } catch (error) {
+      console.error("Failed to parse saved query content", error);
     }
   }
-}, { deep: true });
+}
+
+watch(
+  () => props.editData,
+  initFromProps,
+  { immediate: true },
+);
 
 // Prepare query content with proper structure
 function prepareQueryContent(saveTimestamp: boolean): string {
   try {
-    // Use displayQueryMode to get the correct mode (from editData/initialData when editing)
+    // Use displayQueryMode to get the correct mode (from editData when editing)
     const activeMode = displayQueryMode.value;
 
     // Get initial content if available
@@ -346,12 +274,6 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       } catch (e) {
         console.error("Failed to parse edit query content", e);
       }
-    } else if (props.initialData?.query_content) {
-      try {
-        content = JSON.parse(props.initialData.query_content);
-      } catch (e) {
-        console.error("Failed to parse initial query content", e);
-      }
     }
 
     // `content` above resolves from props.queryContent FIRST when present -
@@ -359,7 +281,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     // which has no timeRange/limit of its own). That makes `content.timeRange`
     // /`content.limit` useless for "what was actually persisted" once a query
     // is loaded in the Explorer. The metadata-only path below needs the
-    // *actual saved record*, so parse editData/initialData directly here,
+    // *actual saved record*, so parse editData directly here,
     // independent of the queryContent prop.
     let originalSavedContent: Record<string, any> = {};
     if (props.editData?.query_content) {
@@ -368,15 +290,9 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       } catch (e) {
         console.error("Failed to parse edit query content", e);
       }
-    } else if (props.initialData?.query_content) {
-      try {
-        originalSavedContent = JSON.parse(props.initialData.query_content);
-      } catch (e) {
-        console.error("Failed to parse initial query content", e);
-      }
     }
 
-    // Use displayQueryContent which handles fallback from editData/initialData
+    // Use displayQueryContent which handles fallback from editData
     const queryContent = displayQueryContent.value;
 
     if (!queryContent.trim()) {

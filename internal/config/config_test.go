@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -551,5 +552,258 @@ func TestAIConfigAskChefEnabled(t *testing.T) {
 				t.Fatalf("AskChefEnabled() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadWebhookAllowedHosts(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		want        []string
+	}{
+		{name: "default"},
+		{name: "internal receivers", extra: "\n[alerts]\nwebhook_allowed_hosts = [\"localhost\", \"127.0.0.1\"]\n", want: []string{"localhost", "127.0.0.1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, tc.extra))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(cfg.Alerts.WebhookAllowedHosts, tc.want) {
+				t.Errorf("webhook_allowed_hosts = %v; want %v", cfg.Alerts.WebhookAllowedHosts, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidWebhookAllowedHosts(t *testing.T) {
+	for _, entry := range []string{"example.com:443", "https://example.com", "example.com/path", "bad host", "", "[::1]:80", "host?token=value", "fe80::1%eth0", "bad\thost", "-host", "host..example", "host#fragment"} {
+		t.Run(entry, func(t *testing.T) {
+			_, err := Load(writeConfig(t, fmt.Sprintf("\n[alerts]\nwebhook_allowed_hosts = [%q]\n", entry)))
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", entry)) {
+				t.Fatalf("Load invalid entry %q = %v; want startup error naming entry", entry, err)
+			}
+		})
+	}
+}
+
+func TestLoadCanonicalWebhookAllowlist(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[alerts]
+webhook_allowed_hosts = [" LOCALHOST. ", "2001:0db8:0000::1", "::ffff:127.0.0.1"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"localhost", "LOCALHOST.", "2001:db8::1", "127.0.0.1", "::ffff:7f00:1"} {
+		if !cfg.Alerts.WebhookAllowlist.Contains(host) {
+			t.Errorf("allowlist does not match canonical host %q", host)
+		}
+	}
+	if cfg.Alerts.WebhookAllowlist.Contains("example.com") {
+		t.Error("unlisted hostname accepted")
+	}
+}
+
+func setRequiredEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOGCHEF_AUTH__ADMIN_EMAILS", "admin@example.com")
+	t.Setenv("LOGCHEF_AUTH__API_TOKEN_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("LOGCHEF_OIDC__PROVIDER_URL", "http://localhost/dex")
+	t.Setenv("LOGCHEF_OIDC__AUTH_URL", "http://localhost/dex/auth")
+	t.Setenv("LOGCHEF_OIDC__TOKEN_URL", "http://localhost/dex/token")
+	t.Setenv("LOGCHEF_OIDC__CLIENT_ID", "logchef")
+	t.Setenv("LOGCHEF_OIDC__REDIRECT_URL", "http://localhost/callback")
+}
+
+func TestLoad_MissingFileFailsEvenWithCompleteEnvironment(t *testing.T) {
+	setRequiredEnv(t)
+	missing := filepath.Join(t.TempDir(), "typo.toml")
+	_, err := Load(missing)
+	if err == nil {
+		t.Fatal("expected an error for a config file that does not exist")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the missing file %q", err, missing)
+	}
+}
+
+func TestLoad_MalformedFileFails(t *testing.T) {
+	setRequiredEnv(t)
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[server\nport = 1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error for a config file that does not parse")
+	}
+}
+
+func TestLoad_EmptyPathUsesEnvironmentOnly(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("LOGCHEF_SERVER__PORT", "9100")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Port != 9100 {
+		t.Errorf("server.port = %d, want 9100", cfg.Server.Port)
+	}
+	if cfg.Tail.MaxGlobal != defaultTailMaxGlobal {
+		t.Errorf("tail.max_global = %d, want default %d", cfg.Tail.MaxGlobal, defaultTailMaxGlobal)
+	}
+}
+
+func TestLoad_CapitalizedSectionWithEnvironmentOverride(t *testing.T) {
+	clearLogchefEnv(t)
+	t.Setenv("LOGCHEF_AI__MAX_TOKENS", "512")
+	cfg, err := Load(writeConfig(t, "\n[AI]\nModel = \"gpt-4.1\"\nMax_Tokens = 2048\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AI.Model != "gpt-4.1" {
+		t.Errorf("ai.model = %q, want gpt-4.1", cfg.AI.Model)
+	}
+	if cfg.AI.MaxTokens != 512 {
+		t.Errorf("ai.max_tokens = %d, want 512", cfg.AI.MaxTokens)
+	}
+}
+
+func TestLoad_RejectsCaseCollisions(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		key   string
+	}{
+		{"keys", "\n[server]\nPort = 9000\nport = 9001\n", "server.port"},
+		{"sections", "\n[server]\nport = 9000\n[Server]\nhost = \"localhost\"\n", "server"},
+		{"nested sections", "\n[auth.Local]\nenabled = true\n[auth.local]\nadmin_email = \"admin@example.com\"\n", "auth.local"},
+		{"array tables", "\n[[auth.oauth.clients]]\nID = \"client-a\"\nid = \"client-b\"\n", "auth.oauth.clients[0].id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearLogchefEnv(t)
+			path := writeConfig(t, tt.extra)
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("expected an error for config keys that differ only in case")
+			}
+			for _, want := range []string{path, "case collision", tt.key} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLoad_CapitalizedArrayTables(t *testing.T) {
+	clearLogchefEnv(t)
+	cfg, err := Load(writeConfig(t, `
+[[auth.OAuth.Clients]]
+ID = "client-a"
+Name = "Example client"
+Redirect_URIs = ["https://example.com/callback"]
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Auth.OAuth.Clients) != 1 {
+		t.Fatalf("auth.oauth.clients = %v, want one client", cfg.Auth.OAuth.Clients)
+	}
+	client := cfg.Auth.OAuth.Clients[0]
+	if client.ID != "client-a" || client.Name != "Example client" || len(client.RedirectURIs) != 1 || client.RedirectURIs[0] != "https://example.com/callback" {
+		t.Errorf("auth.oauth.clients[0] = %+v, want the configured client", client)
+	}
+}
+
+func TestLoad_PreservesProvisioningConnectionKeys(t *testing.T) {
+	tests := []struct {
+		name       string
+		connection string
+		payload    string
+	}{
+		{
+			name:       "options",
+			connection: "options = { CustomerID = \"tenant-a\" }",
+			payload:    `{"options":{"CustomerID":"tenant-a"}}`,
+		},
+		{
+			name:       "headers",
+			connection: "headers = { X-Api-Key = \"example-key\" }",
+			payload:    `{"headers":{"X-Api-Key":"example-key"}}`,
+		},
+		{
+			name:       "case-distinct options",
+			connection: "options = { CustomerID = \"tenant-a\", customerid = \"tenant-b\" }",
+			payload:    `{"options":{"CustomerID":"tenant-a","customerid":"tenant-b"}}`,
+		},
+		{
+			name:       "nested maps in arrays",
+			connection: "Options = [{ Tags = { CustomerID = \"tenant-a\" } }]",
+			payload:    `{"Options":[{"Tags":{"CustomerID":"tenant-a"}}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearLogchefEnv(t)
+			cfg, err := Load(writeConfig(t, `
+[[Provisioning.Sources]]
+Name = "example"
+[Provisioning.Sources.Connection]
+`+tt.connection))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if len(cfg.Provisioning.Sources) != 1 {
+				t.Fatalf("provisioning.sources = %v, want one source", cfg.Provisioning.Sources)
+			}
+			payload, err := cfg.Provisioning.Sources[0].ConnectionPayload()
+			if err != nil {
+				t.Fatalf("ConnectionPayload: %v", err)
+			}
+			if string(payload) != tt.payload {
+				t.Errorf("ConnectionPayload() = %s, want %s", payload, tt.payload)
+			}
+		})
+	}
+}
+
+func TestLoad_InlineAndSeparateProvisioningConnectionMatch(t *testing.T) {
+	clearLogchefEnv(t)
+	const block = `
+[[sources]]
+name = "example"
+[sources.connection.options]
+CustomerID = "tenant-a"
+[sources.connection.headers]
+X-Api-Key = "example-key"
+`
+	inlineBlock := strings.ReplaceAll(block, "[[sources]]", "[[provisioning.sources]]")
+	inlineBlock = strings.ReplaceAll(inlineBlock, "[sources.", "[provisioning.sources.")
+	inline, err := Load(writeConfig(t, inlineBlock))
+	if err != nil {
+		t.Fatalf("Load inline provisioning: %v", err)
+	}
+	provPath := filepath.Join(t.TempDir(), "provisioning.toml")
+	if err := os.WriteFile(provPath, []byte(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	separate, err := Load(writeConfig(t, fmt.Sprintf("\n[provisioning]\nfile = %q\n", provPath)))
+	if err != nil {
+		t.Fatalf("Load separate provisioning: %v", err)
+	}
+	if len(inline.Provisioning.Sources) != 1 || len(separate.Provisioning.Sources) != 1 {
+		t.Fatalf("want one source in both inline and separate provisioning")
+	}
+	inlinePayload, err := inline.Provisioning.Sources[0].ConnectionPayload()
+	if err != nil {
+		t.Fatalf("inline ConnectionPayload: %v", err)
+	}
+	separatePayload, err := separate.Provisioning.Sources[0].ConnectionPayload()
+	if err != nil {
+		t.Fatalf("separate ConnectionPayload: %v", err)
+	}
+	if string(inlinePayload) != string(separatePayload) {
+		t.Errorf("inline ConnectionPayload() = %s, separate = %s", inlinePayload, separatePayload)
 	}
 }

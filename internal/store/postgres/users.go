@@ -3,18 +3,11 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"strings"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
-
-// normalizeEmail lowercases and trims an email address so that storage and
-// lookup are case-insensitive (#95). Uses Go's Unicode-aware ToLower, matching
-// the normalization applied to existing rows by migration 000005.
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
 
 func userToModel(r sqlc.User) *models.User {
 	return &models.User{
@@ -38,7 +31,7 @@ func userToModel(r sqlc.User) *models.User {
 // CreateUser inserts a new user, defaulting status/account_type, and populates
 // the model's ID and timestamps on success.
 func (s *Store) CreateUser(ctx context.Context, user *models.User) error {
-	user.Email = normalizeEmail(user.Email)
+	user.Email = models.NormalizeEmail(user.Email)
 	if user.Status == "" {
 		user.Status = models.UserStatusActive
 	}
@@ -82,9 +75,21 @@ func (s *Store) GetUser(ctx context.Context, id models.UserID) (*models.User, er
 	return userToModel(row), nil
 }
 
+// GetUserForUpdate retrieves a user by ID and locks the row until the transaction ends.
+func (s *Store) GetUserForUpdate(ctx context.Context, id models.UserID) (*models.User, error) {
+	row, err := s.q.GetUserForUpdate(ctx, int64(id))
+	if err != nil {
+		if notFound(err) {
+			return nil, models.ErrUserNotFound
+		}
+		return nil, fmt.Errorf("getting user id %d for update: %w", id, err)
+	}
+	return userToModel(row), nil
+}
+
 // GetUserByEmail retrieves a user by email. Returns models.ErrUserNotFound if absent.
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
-	email = normalizeEmail(email)
+	email = models.NormalizeEmail(email)
 	row, err := s.q.GetUserByEmail(ctx, email)
 	if err != nil {
 		if notFound(err) {
@@ -113,6 +118,14 @@ func (s *Store) UpdateUser(ctx context.Context, user *models.User) error {
 		}
 		s.log.Error("failed to update user record in db", "error", err, "user_id", user.ID)
 		return fmt.Errorf("failed to update user: %w", err)
+	}
+	return nil
+}
+
+// UpdateUserLastLogin records a user's last login time.
+func (s *Store) UpdateUserLastLogin(ctx context.Context, id models.UserID, at time.Time) error {
+	if err := s.q.UpdateUserLastLogin(ctx, sqlc.UpdateUserLastLoginParams{ID: int64(id), LastLoginAt: ts(at)}); err != nil {
+		return fmt.Errorf("failed to update user last login: %w", err)
 	}
 	return nil
 }
@@ -158,6 +171,17 @@ func (s *Store) CountAdminUsers(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("failed to count admin users: %w", err)
 	}
 	return int(count), nil
+}
+
+// membershipWritesLockKey names the advisory lock for provisioning, cascading deletes, and admin removals.
+const membershipWritesLockKey int64 = 0x6c63_6164_6d69_6e01
+
+// LockMembershipWrites holds the membership advisory lock until the transaction ends.
+func (s *Store) LockMembershipWrites(ctx context.Context) error {
+	if err := s.q.LockMembershipWrites(ctx, membershipWritesLockKey); err != nil {
+		return fmt.Errorf("failed to lock membership writes: %w", err)
+	}
+	return nil
 }
 
 // DeleteUser removes a user by ID.

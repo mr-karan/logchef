@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -70,6 +71,9 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
+	if !alert.IsActive && !db.inTx {
+		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.UpdateAlert(ctx, alert) })
+	}
 
 	params, err := alertUpdateParams(alert)
 	if err != nil {
@@ -80,6 +84,11 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert: %w", err)
+	}
+	if !alert.IsActive {
+		if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: int64(alert.ID)}); err != nil {
+			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
+		}
 	}
 	return nil
 }
@@ -142,6 +151,14 @@ func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) er
 	return nil
 }
 
+// TouchAlertEvaluated records an evaluation without changing the alert state.
+func (db *DB) TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
+	if err := db.writeQueries.TouchAlertEvaluated(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to touch alert evaluated: %w", err)
+	}
+	return nil
+}
+
 // MarkAlertTriggered updates state when an alert fires.
 func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
 	if err := db.writeQueries.MarkAlertTriggered(ctx, int64(alertID)); err != nil {
@@ -194,16 +211,26 @@ func (db *DB) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, 
 	return alertHistoryFromSQLC(row)
 }
 
-// ResolveAlertHistory marks a history entry as resolved with an optional message.
+// ResolveAlertHistory resolves all firing history for the selected entry's alert.
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
-	if _, err := db.writeQueries.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{
-		Message: nullString(message),
-		ID:      historyID,
-	}); err != nil {
+	if !db.inTx {
+		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
+	}
+	alertID, err := db.writeQueries.GetTriggeredAlertHistoryAlertID(ctx, historyID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: alertID}); err != nil {
+		return fmt.Errorf("failed to interrupt legacy alert deliveries: %w", err)
+	}
+	if err := db.writeQueries.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: nullString(message)}); err != nil {
+		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
+	}
+	if err := db.writeQueries.MarkAlertResolved(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to mark alert resolved: %w", err)
 	}
 	return nil
 }
@@ -249,7 +276,7 @@ func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limi
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries for an alert.
+// PruneAlertHistory keeps the most recent N entries and the newest unresolved firing.
 func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -257,6 +284,7 @@ func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, kee
 	if err := db.writeQueries.PruneAlertHistory(ctx, sqlc.PruneAlertHistoryParams{
 		AlertID:   int64(alertID),
 		AlertID_2: int64(alertID),
+		AlertID_3: int64(alertID),
 		Limit:     int64(keep),
 	}); err != nil {
 		return fmt.Errorf("failed to prune alert history: %w", err)
@@ -437,4 +465,12 @@ func nullFloat64(value *float64) sql.NullFloat64 {
 		return sql.NullFloat64{}
 	}
 	return sql.NullFloat64{Float64: *value, Valid: true}
+}
+
+// RecoverAlertDeliveries finalizes delivery reservations left by a stopped manager.
+func (db *DB) RecoverAlertDeliveries(ctx context.Context) error {
+	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
+		return fmt.Errorf("failed to recover alert deliveries: %w", err)
+	}
+	return nil
 }

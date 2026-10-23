@@ -195,11 +195,16 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) er
 		if m.version <= current {
 			continue
 		}
-		if _, err := conn.Exec(ctx, m.sql); err != nil {
-			return fmt.Errorf("apply migration %d (%s): %w", m.version, m.name, err)
-		}
-		if _, err := conn.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", m.version); err != nil {
-			return fmt.Errorf("record migration %d: %w", m.version, err)
+		if err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, m.sql); err != nil {
+				return fmt.Errorf("apply migration %d (%s): %w", m.version, m.name, err)
+			}
+			if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", m.version); err != nil {
+				return fmt.Errorf("record migration %d: %w", m.version, err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		log.Info("applied postgres migration", "version", m.version, "name", m.name)
 		applied++

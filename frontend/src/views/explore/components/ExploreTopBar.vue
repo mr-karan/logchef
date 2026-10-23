@@ -2,6 +2,8 @@
 import { useI18n } from "vue-i18n";
 
 import { computed, ref } from 'vue'
+import { useContextStore } from '@/stores/context'
+import type { ExploreLocation } from '@/lib/exploreLocation'
 import { useExploreStore } from '@/stores/explore'
 import { useAskChefStore } from '@/stores/askChef'
 import { useMetaStore } from '@/stores/meta'
@@ -44,11 +46,13 @@ import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/query
 import TeamSourceSelector from './TeamSourceSelector.vue'
 import type { Source } from '@/api/sources'
 import type { TeamWithMemberCount, UserTeamMembership } from '@/api/teams'
+import type { TimeWindow } from '@/utils/timeWindow'
 
 const { t } = useI18n();
 
 const { toast } = useToast()
 const exploreStore = useExploreStore()
+const contextStore = useContextStore()
 const askChef = useAskChefStore()
 const metaStore = useMetaStore()
 const preferencesStore = usePreferencesStore()
@@ -56,8 +60,7 @@ const preferencesStore = usePreferencesStore()
 type TeamOption = UserTeamMembership | TeamWithMemberCount
 
 interface Props {
-  currentTeamId: number | null
-  currentSourceId: number | null
+  selection: Pick<ExploreLocation, 'teamId' | 'sourceId'>
   availableTeams: TeamOption[]
   availableSources: Source[]
   selectedSource: Source | null
@@ -68,6 +71,8 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:team', teamId: number): void
   (e: 'update:source', sourceId: number): void
+  (e: 'update:window', window: TimeWindow): void
+  (e: 'update:limit', limit: number): void
 }>()
 
 const { limitOptions } = useLimitOptions()
@@ -80,6 +85,8 @@ const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null)
 
 // Limit options
 const currentLimit = computed(() => exploreStore.limit)
+// The picker shows the editor's window, resolved when it changes.
+const resolved = computed(() => exploreStore.resolveNow())
 
 // ClickHouse native SQL owns its own time/LIMIT clauses. VictoriaLogs native mode does not.
 const isNativeSqlMode = computed(() =>
@@ -114,10 +121,6 @@ function handleZonePreferenceChange(timezone: 'utc' | 'local') {
   void preferencesStore.updatePreferences({ timezone })
 }
 
-function handleLimitChange(limit: number) {
-  exploreStore.setLimit(limit)
-}
-
 function copyUrlToClipboard() {
   try {
     navigator.clipboard.writeText(window.location.href)
@@ -132,7 +135,8 @@ function copyUrlToClipboard() {
 }
 
 function copyCliCommand() {
-  if (!props.currentTeamId || !props.currentSourceId) {
+  const { teamId, sourceId } = contextStore
+  if (!teamId || !sourceId) {
     toast({
       get title() { return t('ui.cannotCopyCLICommand'); },
       get description() { return t('ui.teamAndSourceMustBeSelected'); },
@@ -143,15 +147,15 @@ function copyCliCommand() {
   }
 
   const command = generateCliCommand({
-    teamId: props.currentTeamId,
-    sourceId: props.currentSourceId,
+    teamId,
+    sourceId,
     language: exploreStore.activeMode === 'logchefql' ? 'logchefql' : getNativeQueryLanguageForSource(props.selectedSource),
     query:
       exploreStore.activeMode === 'logchefql'
         ? exploreStore.logchefqlCode
         : exploreStore.nativeQuery,
     window: exploreStore.window,
-    resolved: exploreStore.resolved,
+    resolved: exploreStore.resolveNow(),
     limit: exploreStore.limit,
     timeout: exploreStore.queryTimeout,
   })
@@ -185,8 +189,8 @@ defineExpose({
     <div class="flex items-center gap-3">
       <TeamSourceSelector
         variant="toolbar"
-        :current-team-id="currentTeamId"
-        :current-source-id="currentSourceId"
+        :current-team-id="selection.teamId"
+        :current-source-id="selection.sourceId"
         :available-teams="availableTeams"
         :available-sources="availableSources"
         @update:team="emit('update:team', $event)"
@@ -213,7 +217,7 @@ defineExpose({
               <DateTimePicker
                 ref="dateTimePickerRef"
                 :model-value="exploreStore.window"
-                :resolved="exploreStore.resolved"
+                :resolved="resolved"
                 :zone-preference="preferencesStore.preferences.timezone"
                 :disabled="true"
                 class="opacity-50 pointer-events-none"
@@ -229,9 +233,9 @@ defineExpose({
         v-else
         ref="dateTimePickerRef"
         :model-value="exploreStore.window"
-        :resolved="exploreStore.resolved"
+        :resolved="resolved"
         :zone-preference="preferencesStore.preferences.timezone"
-        @update:model-value="exploreStore.setWindow"
+        @update:model-value="emit('update:window', $event)"
         @update:zone-preference="handleZonePreferenceChange"
       />
 
@@ -262,7 +266,7 @@ defineExpose({
           <DropdownMenuItem 
             v-for="limit in limitOptions" 
             :key="limit"
-            @click="handleLimitChange(limit)" 
+            @click="emit('update:limit', limit)"
             :class="{ 'bg-muted': currentLimit === limit }"
           >
             {{ limit.toLocaleString() }} {{ t('ui.rows') }}
