@@ -137,13 +137,13 @@ export const useAuthStore = defineStore("auth", () => {
 
         clearState();
         useContextStore().clear();
-        router.push({ name: "Login" });
+        router.push({ name: "Login", query: { logged_out: "1" } });
 
         return result;
       } catch (error) {
         clearState();
         useContextStore().clear();
-        router.push({ name: "Login" });
+        router.push({ name: "Login", query: { logged_out: "1" } });
         return state.handleError(error as Error | APIErrorResponse, 'logout');
       }
     });

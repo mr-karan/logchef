@@ -83,6 +83,21 @@ async function handleLogin() {
   }
 }
 
+// With SSO as the only way in, skip the button. Not after a logout, where the
+// provider's session would sign the user straight back in, and not after a
+// failed callback, which would loop.
+const redirectsToSso = computed(() =>
+  metaStore.isInitialized &&
+  oidcEnabled.value &&
+  !localAuthEnabled.value &&
+  route.query.error === undefined &&
+  route.query.logged_out === undefined
+)
+
+watch(redirectsToSso, (redirects) => {
+  if (redirects) handleLogin()
+}, { immediate: true })
+
 async function handleLocalLogin() {
   if (!email.value.trim() || !password.value) {
     localError.value = t('pages.enterEmailPassword')
