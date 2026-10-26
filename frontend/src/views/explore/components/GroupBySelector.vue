@@ -72,7 +72,7 @@ const items = computed(() => {
         :max-visible-items="MAX_VISIBLE_FIELDS"
         :placeholder="t('ui.noGrouping')"
         :search-placeholder="t('ui.searchFields')"
-        trigger-class="h-8 text-xs border-dashed"
+        trigger-class="h-7 text-xs border-dashed"
       />
     </div>
   </div>

@@ -147,6 +147,7 @@ const values = computed(() => props.state?.values)
                     <TooltipTrigger asChild>
                       <button
                         class="h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover/value:opacity-100 hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
+                        :aria-label="`${t('ui.exclude')} ${field.name}!=&quot;${valueInfo.value}&quot;`"
                         @click="emit('add-filter', field.name, valueInfo.value, '!=')"
                       >
                         <Minus class="h-3 w-3" />

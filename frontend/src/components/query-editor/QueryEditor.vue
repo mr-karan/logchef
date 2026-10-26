@@ -1,7 +1,7 @@
 <template>
   <div :class="['query-editor', props.class]">
     <!-- Header Bar (Keep existing structure) -->
-    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-muted/40 px-3 py-1 border-b">
       <div class="flex min-w-0 max-w-full flex-wrap items-center gap-3">
         <!-- Fields Panel Toggle -->
         <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
@@ -16,17 +16,17 @@
         <Tabs :model-value="props.activeMode" activation-mode="manual"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), false)"
           class="w-auto">
-          <TabsList :class="['grid w-fit', supportsLogchefQL ? 'grid-cols-2' : 'grid-cols-1']">
+          <TabsList :class="['grid h-7 w-fit p-0.5', supportsLogchefQL ? 'grid-cols-2' : 'grid-cols-1']">
             <TabsTrigger v-if="supportsLogchefQL" value="logchefql">
               <div class="flex-fix">
-                <Search class="w-4 h-4" />
-                <span>{{ t('ui.search2') }}</span>
+                <Search class="w-3.5 h-3.5" />
+                <span class="text-xs">{{ t('ui.search2') }}</span>
               </div>
             </TabsTrigger>
             <TabsTrigger value="clickhouse-sql">
               <div class="flex-fix">
-                <Code2 class="w-4 h-4" />
-                <span>{{ nativeEditorLabel }}</span>
+                <Code2 class="w-3.5 h-3.5" />
+                <span class="text-xs">{{ nativeEditorLabel }}</span>
               </div>
             </TabsTrigger>
           </TabsList>
@@ -49,22 +49,6 @@
 
         <!-- Query History Button (server-backed, cross-device) -->
         <QueryHistoryPanel />
-
-        <!-- Table name indicator - hidden on small screens -->
-        <div class="text-xs text-muted-foreground ml-3 hidden md:block">
-          <template v-if="props.tableName">
-            <span class='mr-1'>{{ t('ui.table2') }}</span>
-            <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{
-              props.tableName
-            }}</code>
-          </template>
-          <template v-else-if="isVictoriaLogsSource">
-            <span class='mr-1'>{{ t('ui.datasource') }}</span>
-            <code class="bg-muted px-1.5 py-0.5 rounded text-xs">VictoriaLogs</code>
-          </template>
-          <span v-else class="italic text-orange-500">{{ t('ui.noTableSelected') }}</span>
-        </div>
-
       </div>
 
       <div class="ml-auto flex max-w-full flex-wrap items-center gap-2">
@@ -103,7 +87,7 @@
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedQuery) => $emit('select-saved-query', query)"
           @save="$emit('save-query')"
-          @save-as-new="$emit('save-query-as-new')" class="h-8" />
+          @save-as-new="$emit('save-query-as-new')" />
 
         <!-- Live Tail Toggle - gated by the live_tail capability -->
         <TooltipProvider v-if="props.showRunButton && liveTailSupported">
@@ -133,29 +117,6 @@
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
-
-        <Select
-          v-if="props.showRunButton && !isLive"
-          :model-value="selectedTimeout"
-          :disabled="props.isExecuting"
-          @update:model-value="handleTimeoutChange"
-        >
-          <SelectTrigger class="h-7 w-[92px] gap-1.5 text-xs">
-            <div class="flex items-center gap-1.5">
-              <Clock3 class="h-3.5 w-3.5 text-muted-foreground" />
-              <SelectValue />
-            </div>
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectItem
-              v-for="option in timeoutOptions"
-              :key="option.value"
-              :value="option.value.toString()"
-            >
-              {{ option.label }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
 
         <!-- Stop Live Tail Button - replaces Run while live -->
         <TooltipProvider v-if="props.showRunButton && isLive">
@@ -291,6 +252,9 @@
                   <em>{{ t('ui.timeRangeLimitAppliedIfNotSpecifiedUseStandardClickHouseSQL') }}</em>
                 </div>
               </div>
+              <div v-if="$slots.hint" class="border-t pt-2">
+                <slot name="hint" />
+              </div>
             </div>
           </HoverCardContent>
         </HoverCard>
@@ -411,7 +375,6 @@ import {
   EyeOff,
   Wand2,
   Play,
-  Clock3,
   Square,
   Radio,
 } from "lucide-vue-next";
@@ -434,21 +397,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
-import { useMetaStore } from "@/stores/meta";
 import { useVariableStore } from '@/stores/variables';
 import { extractVariablesWithOptional } from "@/composables/useVariables.ts";
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
 import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
-import type { AcceptableValue } from "reka-ui";
 
 const { t } = useI18n();
 
@@ -482,7 +436,6 @@ interface QueryEditorProps {
   isExecuting?: boolean
   canExecute?: boolean
   showRunButton?: boolean
-  queryTimeout?: number
 }
 
 const props = withDefaults(defineProps<QueryEditorProps>(), {
@@ -497,7 +450,6 @@ const props = withDefaults(defineProps<QueryEditorProps>(), {
   isExecuting: false,
   canExecute: true,
   showRunButton: true,
-  queryTimeout: 30,
 });
 
 const emit = defineEmits<{
@@ -514,13 +466,11 @@ const emit = defineEmits<{
   (e: "new-query"): void;
   // Cancel button
   (e: "cancel-query"): void;
-  (e: "update:query-timeout", value: number): void;
 }>();
 
 const themeStore = useThemeStore();
 const isDark = computed(() => themeStore.isDark);
 const exploreStore = useExploreStore();
-const metaStore = useMetaStore();
 const variableStore = useVariableStore();
 
 const editorContent = ref(props.value || "");
@@ -562,38 +512,6 @@ const isVictoriaLogsSource = computed(() => getNativeQueryLanguageForSource(sour
 const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDescriptor.value, "logchefql"));
 const supportsAiAssistant = computed(() => hasSourceCapability(sourceDescriptor.value, "ai_sql_generation"));
 const nativeEditorLabel = computed(() => (getNativeQueryLanguageForSource(sourceDescriptor.value) === "logsql" ? "LogsQL" : "SQL"));
-const baseTimeoutOptions = [
-  { label: "10s", value: 10 },
-  { label: "30s", value: 30 },
-  { label: "1m", value: 60 },
-  { label: "2m", value: 120 },
-  { label: "5m", value: 300 },
-];
-const maxQueryTimeoutSeconds = computed(() => metaStore.maxQueryTimeoutSeconds || 120);
-
-function formatTimeoutLabel(seconds: number): string {
-  if (seconds % 60 === 0) {
-    return `${seconds / 60}m`;
-  }
-  return `${seconds}s`;
-}
-
-const timeoutOptions = computed(() => {
-  const maxTimeout = Math.max(maxQueryTimeoutSeconds.value, 10);
-  const options = baseTimeoutOptions.filter((option) => option.value <= maxTimeout);
-
-  if (options.length === 0 || options[options.length - 1]?.value !== maxTimeout) {
-    options.push({ label: formatTimeoutLabel(maxTimeout), value: maxTimeout });
-  }
-
-  return options;
-});
-
-const selectedTimeout = computed(() => {
-  const requestedTimeout = props.queryTimeout || 30;
-  return String(Math.min(requestedTimeout, maxQueryTimeoutSeconds.value));
-});
-
 const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
@@ -609,31 +527,12 @@ const editorHeight = computed(() => {
   const lines = (content.match(/\n/g) || []).length + 1;
   const baseLineHeight = 20; // Must match Monaco lineHeight
   const padding = 16; // Monaco top+bottom padding (8+8)
-  const minHeight = props.activeMode === "logchefql" ? 56 : 90;
+  // Room for three lines, so a typical query and its placeholder read without scrolling.
+  const minHeight = props.activeMode === "logchefql" ? 80 : 90;
   const maxHeight = 300;
   const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
   return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
 });
-
-const handleTimeoutChange = (value: AcceptableValue) => {
-  const parsed = parseInt(String(value ?? ""), 10);
-  if (!Number.isNaN(parsed)) {
-    emit("update:query-timeout", parsed);
-  }
-};
-
-watch(
-  () => [props.queryTimeout, maxQueryTimeoutSeconds.value] as const,
-  ([queryTimeout, maxTimeout]) => {
-    const requestedTimeout = queryTimeout || 30;
-    const clampedTimeout = Math.min(requestedTimeout, maxTimeout);
-
-    if (requestedTimeout !== clampedTimeout) {
-      emit("update:query-timeout", clampedTimeout);
-    }
-  },
-  { immediate: true }
-);
 
 const handleEditorChange = (value: string | undefined) => {
   const currentQuery = value ?? "";
@@ -976,7 +875,7 @@ const handleAiInsert = () => {
   content: attr(data-placeholder);
   color: hsl(var(--muted-foreground) / 0.8);
   position: absolute;
-  top: 12px;
+  top: 10px;
   left: 16px;
   font-size: 13px;
   pointer-events: none;
@@ -985,6 +884,7 @@ const handleAiInsert = () => {
     "Liberation Mono", "Courier New", monospace;
 }
 
+/* Second placeholder line; an empty editor is already two lines tall. */
 /* Adjust placeholder position - keep it consistent in native query modes */
 .editor-container.is-empty[data-mode="clickhouse-sql"]::before,
 .editor-container.is-empty[data-mode="logsql"]::before {
@@ -1015,7 +915,7 @@ const handleAiInsert = () => {
 }
 
 :deep([role="tab"]) {
-  padding: 6px 12px !important;
+  padding: 2px 10px !important;
 }
 
 /* Styles for SQL preview when editor is hidden */

@@ -69,7 +69,7 @@ function clear() { store.selectedStreams = {}; }
 
 <template>
   <Popover v-if="enabled">
-    <PopoverTrigger as-child><Button size="sm" variant="outline">{{ t('sources.windowedStreamsSelected', { count: selectedCount }) }}</Button></PopoverTrigger>
+    <PopoverTrigger as-child><Button size="sm" variant="outline" class="h-7">{{ t('sources.windowedStreamsSelected', { count: selectedCount }) }}</Button></PopoverTrigger>
     <PopoverContent class="w-96" align="start">
       <div class="flex flex-col gap-3">
         <p class="text-sm text-muted-foreground">{{ t('sources.windowedStreamPickerDescription') }}</p>

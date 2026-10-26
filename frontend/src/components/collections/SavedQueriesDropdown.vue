@@ -155,13 +155,13 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
 <template>
   <DropdownMenu v-if="isUserAuthenticated" v-model:open="isOpen">
     <DropdownMenuTrigger as-child>
-      <Button variant="outline" class="max-w-[200px]">
-        <Save class="w-4 h-4 mr-2 flex-shrink-0" />
+      <Button variant="outline" size="sm" class="h-7 max-w-[200px] gap-1.5 text-xs">
+        <Save class="w-3.5 h-3.5 flex-shrink-0" />
         <span class="truncate">
           {{ activeSavedQueryName || t('common.collections') }}
           <span v-if="activeSavedQueryName && exploreStore.hasDivergedFromSavedQuery" class="text-muted-foreground">{{ t('ui.unsaved') }}</span>
         </span>
-        <ChevronDown class="w-4 h-4 ml-2 flex-shrink-0" />
+        <ChevronDown class="w-3.5 h-3.5 flex-shrink-0" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent class="w-64" align="end">

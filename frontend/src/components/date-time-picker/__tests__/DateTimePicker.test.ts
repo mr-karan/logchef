@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { createApp, nextTick } from "vue";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApp, h, nextTick, ref } from "vue";
 import { i18n } from "@/i18n";
 import { epochMs, formatWallClock, parseZoneId, resolveWindow, type ResolvedWindow, type TimeWindow, type ZoneId } from "@/utils/timeWindow";
 import DateTimePicker from "../DateTimePicker.vue";
@@ -93,11 +93,14 @@ describe("DateTimePicker", () => {
     expect(emitted).toEqual([{ kind: "relative", spec: "today" }]);
   });
 
-  it("toggles by the zone preference, even when the browser zone is UTC", async () => {
+  it("selects by the zone preference, even when the browser zone is UTC", async () => {
     const window: TimeWindow = { kind: "relative", spec: "15m" };
     const { zones } = await openPicker(window, resolveWindow(window, zone("UTC"), anchor), "local");
 
+    expect(button("Local").getAttribute("aria-pressed")).toBe("true");
     button("Local").click();
+    expect(zones).toEqual([]);
+    button("UTC").click();
     expect(zones).toEqual(["utc"]);
   });
 
@@ -131,5 +134,80 @@ describe("DateTimePicker", () => {
     const { emitted } = await openPicker({ kind: "relative", spec: "15m" });
     button("Last 6 hours").click();
     expect(emitted).toEqual([{ kind: "relative", spec: "6h" }]);
+  });
+
+  it("closes the open popover when it becomes disabled, and ignores its ranges", async () => {
+    const window: TimeWindow = { kind: "relative", spec: "15m" };
+    const emitted: TimeWindow[] = [];
+    const disabledReason = ref<string>();
+    const app = createApp({
+      render: () =>
+        h(DateTimePicker, {
+          modelValue: window,
+          resolved: resolveWindow(window, newYork, anchor),
+          zonePreference: "local",
+          disabledReason: disabledReason.value,
+          "onUpdate:modelValue": (next: TimeWindow) => emitted.push(next),
+        }),
+    });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    app.use(i18n).mount(host);
+    unmount = () => app.unmount();
+    host.querySelector("button")?.click();
+    await nextTick();
+    await nextTick();
+    expect(button("Last 6 hours")).toBeTruthy();
+
+    disabledReason.value = "Native SQL sets its own time range";
+    await new Promise((resolve) => setTimeout(resolve));
+    [...document.body.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Last 6 hours")?.click();
+
+    expect(emitted).toEqual([]);
+    expect(document.body.textContent).not.toContain("Last 6 hours");
+  });
+
+  it("ignores a range clicked while the popover plays its exit animation", async () => {
+    // jsdom has no CSS animations; reporting an animation name keeps the closing popover mounted like a browser does.
+    let animationName = "enter";
+    const realComputedStyle = globalThis.getComputedStyle.bind(globalThis);
+    const computedStyle = vi.spyOn(globalThis, "getComputedStyle").mockImplementation((element, pseudo) => {
+      const styles = realComputedStyle(element, pseudo);
+      return new Proxy(styles, {
+        get: (target, key) => (key === "animationName" ? animationName : Reflect.get(target, key)),
+      });
+    });
+    const window: TimeWindow = { kind: "relative", spec: "15m" };
+    const emitted: TimeWindow[] = [];
+    const disabledReason = ref<string>();
+    const app = createApp({
+      render: () =>
+        h(DateTimePicker, {
+          modelValue: window,
+          resolved: resolveWindow(window, newYork, anchor),
+          zonePreference: "local",
+          disabledReason: disabledReason.value,
+          "onUpdate:modelValue": (next: TimeWindow) => emitted.push(next),
+        }),
+    });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    app.use(i18n).mount(host);
+    unmount = () => {
+      app.unmount();
+      computedStyle.mockRestore();
+    };
+    host.querySelector("button")?.click();
+    await nextTick();
+    await nextTick();
+
+    animationName = "exit";
+    disabledReason.value = "Native SQL sets its own time range";
+    await new Promise((resolve) => setTimeout(resolve));
+    const closing = [...document.body.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Last 6 hours");
+    expect(closing).toBeTruthy();
+    closing?.click();
+
+    expect(emitted).toEqual([]);
   });
 });

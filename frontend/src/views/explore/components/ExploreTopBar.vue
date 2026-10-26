@@ -1,26 +1,30 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useContextStore } from '@/stores/context'
 import type { ExploreLocation } from '@/lib/exploreLocation'
 import { useExploreStore } from '@/stores/explore'
+import { useExploreRuns } from '@/stores/exploreRuns'
 import { useAskChefStore } from '@/stores/askChef'
 import { useMetaStore } from '@/stores/meta'
 import { usePreferencesStore } from '@/stores/preferences'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DateTimePicker } from '@/components/date-time-picker'
-import { Share2, Settings, Clock, Terminal } from 'lucide-vue-next'
+import { ChevronDown, Link, Share2, Timer, Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useLimitOptions } from '@/composables/useLimitOptions'
 import { TOAST_DURATION } from '@/lib/constants'
+import { copyText } from '../copyText'
 import { generateCliCommand } from '@/utils/cliCommand'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -30,18 +34,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/queryMetadata'
 import TeamSourceSelector from './TeamSourceSelector.vue'
 import type { Source } from '@/api/sources'
@@ -52,6 +44,7 @@ const { t } = useI18n();
 
 const { toast } = useToast()
 const exploreStore = useExploreStore()
+const runs = useExploreRuns()
 const contextStore = useContextStore()
 const askChef = useAskChefStore()
 const metaStore = useMetaStore()
@@ -73,6 +66,7 @@ const emit = defineEmits<{
   (e: 'update:source', sourceId: number): void
   (e: 'update:window', window: TimeWindow): void
   (e: 'update:limit', limit: number): void
+  (e: 'share'): void
 }>()
 
 const { limitOptions } = useLimitOptions()
@@ -103,28 +97,53 @@ const limitControlsDisabledReason = computed(() =>
   isLive.value ? t('ui.pausedDuringLiveTail') : t('ui.limitIsControlledByLIMITClauseInYourSQLQuery')
 )
 
-// Query timeout
-const timeoutOptions = [
+const baseTimeoutOptions = [
   { label: '10s', value: 10 },
   { label: '30s', value: 30 },
   { label: '1m', value: 60 },
   { label: '2m', value: 120 },
   { label: '5m', value: 300 },
 ]
+const maxQueryTimeoutSeconds = computed(() => metaStore.maxQueryTimeoutSeconds || 120)
 
-const selectedTimeout = computed({
-  get: () => (exploreStore.queryTimeout || 30).toString(),
-  set: (value: string) => exploreStore.setQueryTimeout(parseInt(value, 10))
+function formatTimeoutLabel(seconds: number): string {
+  return seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`
+}
+
+const timeoutOptions = computed(() => {
+  const maxTimeout = Math.max(maxQueryTimeoutSeconds.value, 10)
+  const options = baseTimeoutOptions.filter((option) => option.value <= maxTimeout)
+  if (options.length === 0 || options[options.length - 1]?.value !== maxTimeout) {
+    options.push({ label: formatTimeoutLabel(maxTimeout), value: maxTimeout })
+  }
+  return options
 })
+
+const selectedTimeout = computed(() => Math.min(exploreStore.queryTimeout || 30, maxQueryTimeoutSeconds.value))
+
+watch(
+  () => [exploreStore.queryTimeout, maxQueryTimeoutSeconds.value] as const,
+  ([queryTimeout, maxTimeout]) => {
+    const requestedTimeout = queryTimeout || 30
+    if (requestedTimeout > maxTimeout) {
+      exploreStore.setQueryTimeout(maxTimeout)
+    }
+  },
+  { immediate: true }
+)
 
 function handleZonePreferenceChange(timezone: 'utc' | 'local') {
   void preferencesStore.updatePreferences({ timezone })
 }
 
-function copyUrlToClipboard() {
+async function copyPageLink() {
   try {
-    navigator.clipboard.writeText(window.location.href)
-  } catch (error) {
+    await copyText(window.location.href)
+    toast({
+      get title() { return t('ui.linkCopied'); },
+      duration: TOAST_DURATION.SUCCESS
+    })
+  } catch {
     toast({
       get title() { return t('ui.copyFailed'); },
       get description() { return t('ui.failedToCopyURL'); },
@@ -134,7 +153,7 @@ function copyUrlToClipboard() {
   }
 }
 
-function copyCliCommand() {
+async function copyCliCommand() {
   const { teamId, sourceId } = contextStore
   if (!teamId || !sourceId) {
     toast({
@@ -161,7 +180,7 @@ function copyCliCommand() {
   })
 
   try {
-    navigator.clipboard.writeText(command)
+    await copyText(command)
     toast({
       get title() { return t('ui.cLICommandCopied2'); },
       get description() { return t('ui.pasteInYourTerminalToRunTheSameQuery'); },
@@ -208,33 +227,13 @@ defineExpose({
       <!-- Divider -->
       <div class="h-5 w-px bg-border" />
 
-      <!-- Date/Time Picker -->
-      <!-- Disabled for ClickHouse native SQL mode and during live tail -->
-      <TooltipProvider v-if="timeControlsDisabled">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div class="cursor-not-allowed">
-              <DateTimePicker
-                ref="dateTimePickerRef"
-                :model-value="exploreStore.window"
-                :resolved="resolved"
-                :zone-preference="preferencesStore.preferences.timezone"
-                :disabled="true"
-                class="opacity-50 pointer-events-none"
-              />
-            </div>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class="text-xs">{{ timeControlsDisabledReason }}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <!-- The time range is locked for ClickHouse native SQL mode and during live tail -->
       <DateTimePicker
-        v-else
         ref="dateTimePickerRef"
         :model-value="exploreStore.window"
         :resolved="resolved"
         :zone-preference="preferencesStore.preferences.timezone"
+        :disabled-reason="timeControlsDisabled ? timeControlsDisabledReason : undefined"
         @update:model-value="emit('update:window', $event)"
         @update:zone-preference="handleZonePreferenceChange"
       />
@@ -258,19 +257,47 @@ defineExpose({
         <DropdownMenuTrigger asChild>
           <Button variant='ghost' size="sm" class='h-7 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal' :title="t('ui.resultLimit')">
             {{ currentLimit.toLocaleString() }} {{ t('ui.rows') }}
+            <ChevronDown class="h-3 w-3 ml-0.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" class="w-36">
+          <DropdownMenuLabel class='text-xs'>{{ t('ui.resultsLimit') }}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuRadioGroup :model-value="currentLimit">
+            <DropdownMenuRadioItem
+              v-for="limit in limitOptions"
+              :key="limit"
+              :value="limit"
+              @select="emit('update:limit', limit)"
+            >
+              {{ limit.toLocaleString() }} {{ t('ui.rows') }}
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <!-- Live tail streams without a query timeout -->
+      <DropdownMenu v-if="!isLive">
+        <DropdownMenuTrigger asChild>
+          <Button variant='ghost' size="sm" class='h-7 gap-1 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal' :title="t('ui.queryTimeout')" :disabled="runs.isRunning">
+            <Timer class="h-3.5 w-3.5" />
+            {{ t('explore.timeoutChip', { value: formatTimeoutLabel(selectedTimeout) }) }}
+            <ChevronDown class="h-3 w-3 ml-0.5" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="w-32">
-          <DropdownMenuLabel class='text-xs'>{{ t('ui.resultsLimit') }}</DropdownMenuLabel>
+          <DropdownMenuLabel class='text-xs'>{{ t('ui.queryTimeout') }}</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem 
-            v-for="limit in limitOptions" 
-            :key="limit"
-            @click="emit('update:limit', limit)"
-            :class="{ 'bg-muted': currentLimit === limit }"
-          >
-            {{ limit.toLocaleString() }} {{ t('ui.rows') }}
-          </DropdownMenuItem>
+          <DropdownMenuRadioGroup :model-value="selectedTimeout">
+            <DropdownMenuRadioItem
+              v-for="option in timeoutOptions"
+              :key="option.value"
+              :value="option.value"
+              @select="exploreStore.setQueryTimeout(option.value)"
+            >
+              {{ option.label }}
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -295,7 +322,7 @@ defineExpose({
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyCliCommand">
+            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :aria-label="t('ui.copyCLICommand')" @click="copyCliCommand">
               <Terminal class="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
@@ -305,48 +332,24 @@ defineExpose({
         </Tooltip>
       </TooltipProvider>
 
-      <!-- Share Button -->
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="copyUrlToClipboard">
-              <Share2 class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class='text-xs'>{{ t('ui.copyShareableLink') }}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      <!-- Settings Dropdown -->
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="sm" class="h-7 w-7 p-0">
-            <Settings class="h-3.5 w-3.5" />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="t('explore.share')" :aria-label="t('explore.share')">
+            <Share2 class="h-3.5 w-3.5" />
           </Button>
-        </PopoverTrigger>
-        <PopoverContent class="w-48 p-2" align="end">
-          <div class="space-y-3">
-            <div class="space-y-1.5">
-              <label class='text-xs font-medium text-muted-foreground'>{{ t('ui.queryTimeout') }}</label>
-              <Select v-model="selectedTimeout">
-                <SelectTrigger class="h-8 text-xs">
-                  <div class="flex items-center gap-1.5">
-                    <Clock class="h-3 w-3" />
-                    <SelectValue />
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="option in timeoutOptions" :key="option.value" :value="option.value.toString()">
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-52">
+          <DropdownMenuItem class="text-xs" @click="copyPageLink">
+            <Link class="h-3.5 w-3.5" />
+            {{ t('ui.copyShareableLink') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem class="text-xs" :disabled="runs.isRunning" @click="emit('share')">
+            <Share2 class="h-3.5 w-3.5" />
+            {{ t('ui.shareQuery') }}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
     </div>
 
   </div>

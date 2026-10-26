@@ -2,7 +2,6 @@
 import { useI18n } from "vue-i18n";
 
 import { computed } from 'vue'
-import { storeToRefs } from 'pinia'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Search, FilterX } from 'lucide-vue-next'
@@ -10,7 +9,6 @@ import DataTablePagination from './data-table-pagination.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import type { Table } from './tableFeatures'
 import type { QueryStats } from '@/api/explore'
-import { usePreferencesStore } from '@/stores/preferences'
 
 const { t } = useI18n();
 
@@ -22,7 +20,6 @@ interface Props {
   showResetColumns?: boolean
   showPagination?: boolean
   showSearch?: boolean
-  showTimezoneToggle?: boolean
   showStats?: boolean
 }
 
@@ -33,27 +30,13 @@ const props = withDefaults(defineProps<Props>(), {
   showResetColumns: false,
   showPagination: true,
   showSearch: true,
-  showTimezoneToggle: true,
   showStats: true
 })
 
 const emit = defineEmits<{
-  'update:timezone': [value: 'local' | 'utc']
   'update:globalFilter': [value: string]
   'reset-columns': []
 }>()
-
-const preferencesStore = usePreferencesStore()
-const { preferences } = storeToRefs(preferencesStore)
-
-// Local state
-const displayTimezone = computed({
-  get: () => preferences.value.timezone,
-  set: (value: 'local' | 'utc') => {
-    preferencesStore.updatePreferences({ timezone: value })
-    emit('update:timezone', value)
-  }
-})
 
 const globalFilter = computed({
   get: () => props.table.atoms.globalFilter.get() ?? '',
@@ -62,16 +45,6 @@ const globalFilter = computed({
     emit('update:globalFilter', value)
   }
 })
-
-// Save timezone preference handled via preferences store
-
-// Helper function to format execution time
-function formatExecutionTime(ms: number): string {
-  if (ms >= 1000) {
-    return `${(ms / 1000).toFixed(2)}s`
-  }
-  return `${Math.round(ms)}ms`
-}
 
 // Check if table has rows
 const hasRows = computed(() => props.table && props.table.getRowModel().rows?.length > 0)
@@ -88,16 +61,12 @@ function clearColumnFilters() {
 </script>
 
 <template>
-  <div class="flex items-center justify-between p-2 border-b flex-shrink-0">
+  <div class="flex items-center justify-between h-8 px-2 border-b flex-shrink-0">
     <!-- Left zone: compact query stats -->
     <div class="flex items-center gap-2 text-xs text-muted-foreground">
       <RefreshCw v-if="isLoading" class="h-3.5 w-3.5 text-primary animate-spin" />
       <span v-if="isLoading" class='text-primary animate-pulse hidden sm:inline'>{{ t('ui.loading2') }}</span>
       <template v-else-if="showStats && stats">
-        <span v-if="stats.execution_time_ms !== undefined" :title="t('pages.queryTimeTooltip', { duration: formatExecutionTime(stats.execution_time_ms) })">
-          {{ formatExecutionTime(stats.execution_time_ms) }}
-        </span>
-        <span v-if="stats.execution_time_ms !== undefined && stats.rows_read !== undefined" class="text-muted-foreground/40">·</span>
         <span v-if="stats.rows_read !== undefined" :title="t('pages.rowsReadTooltip', { count: stats.rows_read.toLocaleString() })">
           {{ stats.rows_read.toLocaleString() }} {{ t('ui.rows') }}
         </span>
@@ -127,30 +96,6 @@ function clearColumnFilters() {
 
     <!-- Right zone: 3 clusters separated by subtle dividers -->
     <div class="flex items-center gap-2">
-      <!-- Timezone segmented control -->
-      <div v-if="showTimezoneToggle" class="flex items-center bg-muted rounded-md p-0.5">
-        <button
-          type="button"
-          class="h-6 px-2 rounded text-xs transition-colors"
-          :class="displayTimezone === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-          @click="displayTimezone = 'local'"
-          :title="t('ui.localTime')"
-        >
-          {{ t('ui.local') }}
-        </button>
-        <button
-          type="button"
-          class="h-6 px-2 rounded text-xs transition-colors"
-          :class="displayTimezone === 'utc' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-          @click="displayTimezone = 'utc'"
-          title="UTC"
-        >
-          UTC
-        </button>
-      </div>
-
-      <div v-if="showTimezoneToggle" class="h-5 w-px bg-border" />
-
       <!-- Pagination + Columns -->
       <DataTablePagination v-if="showPagination && hasRows" :table="table" />
       <DataTableColumnSelector
@@ -164,12 +109,12 @@ function clearColumnFilters() {
 
       <!-- Search -->
       <div v-if="showSearch" class="relative hidden md:block w-48 lg:w-64">
-        <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Search class="absolute left-2 top-1.5 h-4 w-4 text-muted-foreground" />
         <Input
           :placeholder="t('ui.search')"
           :aria-label="t('ui.searchInAllColumns')"
           v-model="globalFilter"
-          class="pl-8 h-8 text-sm"
+          class="pl-8 h-7 text-sm"
         />
       </div>
     </div>

@@ -16,12 +16,6 @@ import {
   ChevronRight,
   ChevronsRight,
 } from 'lucide-vue-next'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 
 const { t } = useI18n();
 
@@ -36,27 +30,17 @@ const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
 
 <template>
   <div class="flex items-center gap-2">
-    <!-- Rows per page - more compact -->
-    <TooltipProvider>
-      <Tooltip :delayDuration="200">
-        <TooltipTrigger>
-          <Select :model-value="`${table.atoms.pagination.get().pageSize}`"
-            @update:model-value="(value) => table.setPageSize(Number(value))">
-            <SelectTrigger class="h-7 w-[70px] text-xs">
-              <SelectValue :placeholder="`${table.atoms.pagination.get().pageSize}`" />
-            </SelectTrigger>
-            <SelectContent side="top">
-              <SelectItem v-for="size in pageSizes" :key="size" :value="`${size}`" class="text-xs">
-                {{ size }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </TooltipTrigger>
-        <TooltipContent :sideOffset="4" side="top" align="center" class="text-xs">
-          <p>{{ t('ui.rowsPerPage') }}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Select :model-value="`${table.atoms.pagination.get().pageSize}`"
+      @update:model-value="(value) => table.setPageSize(Number(value))">
+      <SelectTrigger size="sm" class="data-[size=sm]:h-7 w-[70px] text-xs" :aria-label="t('ui.rowsPerPage')" :title="t('ui.rowsPerPage')">
+        <SelectValue :placeholder="`${table.atoms.pagination.get().pageSize}`" />
+      </SelectTrigger>
+      <SelectContent side="top">
+        <SelectItem v-for="size in pageSizes" :key="size" :value="`${size}`" class="text-xs">
+          {{ size }}
+        </SelectItem>
+      </SelectContent>
+    </Select>
 
     <!-- Page navigation - more compact -->
     <div class="flex items-center gap-1">

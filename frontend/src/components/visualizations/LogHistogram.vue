@@ -35,7 +35,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   isLoading: false,
-  height: "180px",
+  height: "90px",
   groupBy: null,
 });
 
@@ -60,7 +60,7 @@ const currentGranularity = computed(
   () => windowed.value?.granularity ?? histogram.histogramGranularity ?? undefined,
 );
 
-const chartHeight = computed(() => Number.parseInt(props.height, 10) || 180);
+const chartHeight = computed(() => Number.parseInt(props.height, 10) || 90);
 
 // Extra vertical room for the legend row rendered below the plot. Without this,
 // the legend is laid out inside a box sized to exactly `chartHeight`, so it gets
@@ -75,7 +75,7 @@ const chartBoxHeight = computed(
 );
 
 // Must match the VisXYContainer margin prop below
-const CHART_MARGIN = { top: 12, right: 12, bottom: 24, left: 8 };
+const CHART_MARGIN = { top: 14, right: 12, bottom: 0, left: 8 };
 
 const chartModel = computed(() =>
   buildHistogramChartModel(
@@ -233,7 +233,7 @@ const formatXAxisTick = computed(() => {
 </script>
 
 <template>
-  <div class="log-histogram" :style="{ minHeight: props.height }">
+  <div class="log-histogram" :style="{ minHeight: `${chartBoxHeight}px` }">
     <div class="log-histogram__header" v-if="chartSubtitle || histogramNotice">
       <p v-if="chartSubtitle" class="log-histogram__subtitle">{{ chartSubtitle }}</p>
       <p v-if="histogramNotice" class="log-histogram__notice" role="status">{{ histogramNotice }}</p>
@@ -271,7 +271,6 @@ const formatXAxisTick = computed(() => {
     <ChartContainer
       v-else
       :config="chartModel.chartConfig"
-      class="log-histogram__chart"
       :style="{ height: `${chartBoxHeight}px` }"
     >
       <!-- Chart wrapper: pointer events go here for both Unovis tooltip AND brush drag -->
@@ -291,7 +290,7 @@ const formatXAxisTick = computed(() => {
           :data="chartModel.rows"
           :height="chartHeight"
           :margin="CHART_MARGIN"
-          :padding="{ top: 8, right: 4, bottom: 0, left: 0 }"
+          :padding="{ top: 2, right: 4, bottom: 0, left: 0 }"
         >
           <VisAxis
             type="x"
@@ -300,6 +299,7 @@ const formatXAxisTick = computed(() => {
             :domain-line="false"
             :grid-line="false"
             :tick-format="formatXAxisTick"
+            :tick-padding="2"
             :tick-text-hide-overlapping="true"
             :num-ticks="8"
           />
@@ -309,7 +309,7 @@ const formatXAxisTick = computed(() => {
             :domain-line="false"
             :grid-line="true"
             :tick-format="formatYAxisTick"
-            :num-ticks="5"
+            :num-ticks="2"
           />
           <VisStackedBar
             :x="(row: HistogramChartRow) => row?.ts"
@@ -355,34 +355,31 @@ const formatXAxisTick = computed(() => {
 .log-histogram {
   position: relative;
   width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid var(--border);
-  background-color: var(--card);
-  box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
   overflow: hidden;
-  margin-bottom: 1rem;
 }
 
+/* Sits in the empty band above the bars so the caption costs no height. */
 .log-histogram__header {
+  position: absolute;
+  top: 0;
+  right: 0.75rem;
+  z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.75rem 1rem 0;
+  pointer-events: none;
 }
 
 .log-histogram__subtitle {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
 }
 
 .log-histogram__notice {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-.log-histogram__chart {
-  padding: 0.5rem 0.5rem 0.5rem;
+  font-size: 0.6875rem;
+  line-height: 1rem;
 }
 
 /* Histogram contrast overrides — bars slightly desaturated, grid visible, axis readable */
@@ -451,7 +448,7 @@ const formatXAxisTick = computed(() => {
 }
 
 .histogram-empty-state {
-  min-height: 180px;
+  min-height: 90px;
   display: flex;
   flex-direction: column;
   align-items: center;

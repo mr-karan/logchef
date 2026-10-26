@@ -11,10 +11,12 @@ import {
 import { storeToRefs } from "pinia";
 import { useRouter, onBeforeRouteLeave } from "vue-router";
 import { Button } from "@/components/ui/button";
+import { Info } from "lucide-vue-next";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useExploreStore } from "@/stores/explore";
 import { useExploreRuns } from "@/stores/exploreRuns";
+import { unfilteredSortKeys } from "./sortKeyHint";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
@@ -28,7 +30,7 @@ import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
 import { useQuery } from "@/composables/useQuery";
-import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
+import { supportsQueryLanguage, hasSourceCapability } from "@/lib/queryMetadata";
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
@@ -36,7 +38,7 @@ import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
-import { generateCliCommand } from "@/utils/cliCommand";
+import { copyText } from "./copyText";
 import { epochMs } from "@/utils/timeWindow";
 
 // Type alias for backwards compatibility
@@ -548,82 +550,12 @@ onBeforeRouteLeave(() => {
   exploreStore.stopLiveTail();
 });
 
-const copyTextWithFallback = async (text: string) => {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch (error) {
-      console.warn("Clipboard API failed, falling back to execCommand:", error);
-    }
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
-
-  if (!copied) {
-    throw new Error("Failed to copy share link");
-  }
-};
-
-const handleCopyCliCommand = async () => {
-  if (!currentTeamId.value || !currentSourceId.value) {
-    toast({
-      get title() { return t('ui.cannotCopyCLICommand'); },
-      get description() { return t('ui.teamAndSourceMustBeSelected'); },
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-    return;
-  }
-
-  try {
-    const command = generateCliCommand({
-      teamId: currentTeamId.value,
-      sourceId: currentSourceId.value,
-      language: exploreStore.activeMode === "logchefql" ? "logchefql" : getNativeQueryLanguageForSource(sourceDetails.value),
-      query:
-        exploreStore.activeMode === "logchefql"
-          ? exploreStore.logchefqlCode
-          : exploreStore.nativeQuery,
-      window: exploreStore.window,
-      resolved: exploreStore.resolveNow(),
-      limit: exploreStore.limit,
-      timeout: exploreStore.queryTimeout,
-    });
-
-    await copyTextWithFallback(command);
-    toast({
-      get title() { return t('ui.cLICommandCopied'); },
-      get description() { return t('ui.pasteInYourTerminalToRunTheSameQuery'); },
-      duration: TOAST_DURATION.SUCCESS,
-    });
-  } catch (error: any) {
-    toast({
-      get title() { return t('ui.copyFailed'); },
-      description: error?.message || "Failed to copy CLI command.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
-};
-
 const handleShare = async () => {
   try {
     const share = await nav.recordAfter(() => exploreStore.createQueryShare(), exploreStore.markShare);
     if (!share?.share_url) return;
 
-    await copyTextWithFallback(share.share_url);
+    await copyText(share.share_url);
 
     // An unedited saved query keeps its id in the URL.
     const recorded = router.currentRoute.value.query.share === share.token;
@@ -667,12 +599,29 @@ const getSortKeyExampleQuery = (): string => {
   return relevantKeys.map((key) => `${key}="example"`).join(" and ");
 };
 
+// After a run, nudge toward the sort keys only while the query filters on none of them.
+const missingSortKeyFilters = computed(() => {
+  if (!runs.results || !sourceDetails.value?.sort_keys?.length) return [];
+  const mode = activeMode.value === "logchefql" ? "logchefql" : "native";
+  const query = (mode === "logchefql" ? logchefQuery.value : sqlQuery.value) ?? "";
+  return unfilteredSortKeys(query, mode, sourceDetails.value.sort_keys, sourceDetails.value._meta_ts_field);
+});
+
+const addSortKeyFilter = (field: string) => {
+  if (activeMode.value !== "logchefql") return;
+  appendLogchefqlCondition(`${field}="example"`);
+};
+
 // Function to add sort key example to the query editor
 const addSortKeyExample = () => {
   if (activeMode.value !== "logchefql") return;
 
   const exampleQuery = getSortKeyExampleQuery();
   if (!exampleQuery) return;
+  appendLogchefqlCondition(exampleQuery);
+};
+
+const appendLogchefqlCondition = (exampleQuery: string) => {
 
   // Get current query
   let currentQuery = logchefQuery.value?.trim() || "";
@@ -1009,6 +958,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
 
       <!-- Main Explorer View -->
       <div v-else class="flex flex-col h-screen overflow-hidden">
+        <h1 class="sr-only">{{ t('routes.logExplorer') }}</h1>
         <!-- Streamlined Top Bar -->
         <ExploreTopBar
           ref="topBarRef"
@@ -1020,6 +970,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
           @update:source="nav.selectSource"
           @update:window="nav.setWindow"
           @update:limit="nav.setLimit"
+          @share="handleShare"
         />
 
         <!-- Main Content Area -->
@@ -1037,12 +988,12 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
           <ResizablePanelGroup direction="horizontal" auto-save-id="explore-ask-chef" class="min-w-0 flex-1">
           <ResizablePanel id="explore-main" :order="1" class="flex flex-col h-full min-w-0 overflow-hidden">
             <!-- Query Editor Section -->
-            <div class="px-4 py-3">
+            <div>
               <!-- Query Editor -->
               <template v-if="
                 currentSourceId && hasValidSource && exploreStore.hasWindow
               ">
-                <div class="bg-card shadow-sm rounded-md overflow-hidden">
+                <div class="bg-card border-b">
                   <QueryEditor 
                     ref="queryEditorRef" 
                     :sourceId="currentSourceId" 
@@ -1059,14 +1010,12 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :isExecuting="isExecutingQuery"
                     :canExecute="canExecuteQuery"
                     :showRunButton="true"
-                    :queryTimeout="exploreStore.queryTimeout"
                     @change="(event) => event.mode === 'logchefql'
                       ? updateLogchefqlValue(event.query, event.isUserInput)
                       : updateSqlValue(event.query, event.isUserInput)"
                     @execute="nav.run"
                     @new-query="nav.newQuery"
                     @cancel-query="nav.cancel()"
-                    @update:query-timeout="exploreStore.setQueryTimeout($event)"
                     @update:activeMode="(mode, isModeSwitchOnly) =>
                       changeMode(mode === 'logchefql' ? 'logchefql' : 'native', isModeSwitchOnly)"
                     @toggle-fields="showFieldsPanel = !showFieldsPanel" 
@@ -1074,40 +1023,32 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     @save-query="handleSaveOrUpdateClick" 
                     @save-query-as-new="handleRequestSaveAsNew"
                     @generate-ai-sql="handleGenerateAISQL" 
-                    class="border-0" />
-
-                  <!-- Sort Key Optimization Hint - Inline Version -->
-                  <div v-if="
-                    sourceDetails?.sort_keys &&
-                    (sourceDetails.sort_keys.length > 1 ||
-                      (sourceDetails.sort_keys.length === 1 &&
-                        sourceDetails.sort_keys[0] !== sourceDetails?._meta_ts_field))
-                  " class="flex items-center gap-2 px-3 py-1.5 text-xs bg-blue-50/50 dark:bg-blue-900/20 border-t">
-                    <svg class="h-3 w-3 text-blue-600 dark:text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="16" x2="12" y2="12"></line>
-                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                    </svg>
-                    <span class="text-blue-700 dark:text-blue-300">
-                      <span class="font-medium">{{ t('ui.tip') }}</span>
-                      <i18n-t keypath="explore.filterHint" scope="global">
-                        <template #fields>
-                          <span v-for="(key, idx) in filteredSortKeys" :key="key">
-                            <code class="px-1 bg-blue-100 dark:bg-blue-900/40 rounded text-blue-800 dark:text-blue-200">{{ key }}</code>
-                            <span v-if="idx < filteredSortKeys.length - 1">, </span>
-                          </span>
-                        </template>
-                      </i18n-t>
-                    </span>
-                    <button 
-                      v-if="activeMode === 'logchefql'" 
-                      @click="addSortKeyExample"
-                      class="ml-auto px-2 py-0.5 text-xs bg-blue-600/10 hover:bg-blue-600/20 rounded transition-colors text-blue-700 dark:text-blue-300"
-                    >
-                      {{ t('ui.addExample') }}
-                    </button>
-                  </div>
+                    class="border-0">
+                    <template v-if="sourceDetails?.sort_keys?.some((key) => key !== sourceDetails?._meta_ts_field)" #hint>
+                      <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Info class="h-3 w-3 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span>
+                          <span class="font-medium text-blue-700 dark:text-blue-300">{{ t('ui.tip') }}</span>
+                          {{ ' ' }}
+                          <i18n-t keypath="explore.filterHint" scope="global">
+                            <template #fields>
+                              <span v-for="(key, idx) in filteredSortKeys" :key="key">
+                                <code class="px-1 bg-muted rounded text-foreground/80">{{ key }}</code>
+                                <span v-if="idx < filteredSortKeys.length - 1">, </span>
+                              </span>
+                            </template>
+                          </i18n-t>
+                        </span>
+                        <button
+                          v-if="activeMode === 'logchefql'"
+                          @click="addSortKeyExample"
+                          class="pointer-events-auto flex-shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded font-medium text-blue-700 hover:bg-blue-600/10 dark:text-blue-300 transition-colors"
+                        >
+                          {{ t('ui.addExample') }}
+                        </button>
+                      </div>
+                    </template>
+                  </QueryEditor>
                 </div>
               </template>
 
@@ -1136,7 +1077,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
 
               <!-- Loading fallback - for any other state -->
               <template v-else>
-                <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
+                <div class="flex items-center justify-center p-6 m-3 border rounded-md bg-card shadow-sm">
                   <div class="text-center">
                     <p class="text-sm text-muted-foreground">
                       {{ t('ui.loadingExplorer2') }}
@@ -1165,15 +1106,16 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 :isLoading="isExecutingQuery || isInitialQueryPending"
                 :isExporting="isExporting"
                 :canExport="supportsExports"
+                :fastFilterFields="missingSortKeyFilters"
+                :canAddFastFilter="activeMode === 'logchefql'"
+                @add-fast-filter="addSortKeyFilter"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"
-                @share="handleShare"
-                @copy-cli="handleCopyCliCommand"
               />
 
               <!-- Histogram visualization - paused during live tail -->
-              <div v-if="isHistogramVisible && !exploreStore.isLive" class="px-4 py-2 border-b">
+              <div v-if="isHistogramVisible && !exploreStore.isLive" class="px-3 py-0.5 border-b">
                 <HistogramVisualization @zoom-time-range="onHistogramTimeRangeZoom" />
               </div>
             </div>

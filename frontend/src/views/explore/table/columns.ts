@@ -46,6 +46,11 @@ const COLUMN_WIDTH_CONFIG: Record<string, { minWidth: number, defaultWidth: numb
   }
 };
 
+// About 7.5px per character of the 14px header font, plus padding and the sort arrow.
+function headerFitWidth(name: string): number {
+  return Math.ceil(name.length * 7.5) + 32;
+}
+
 // Helper function to determine column type based on name or position
 function getColumnType(
   columnName: string,
@@ -172,7 +177,7 @@ export function createColumns(
       },
       // Column sizing configuration
       enableResizing: true,
-      size: widthConfig.defaultWidth,
+      size: Math.max(widthConfig.defaultWidth, headerFitWidth(col.name || id)),
       minSize: widthConfig.minWidth,
       maxSize: widthConfig.maxWidth,
       sortFn: columnType === 'timestamp'
