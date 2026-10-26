@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CalendarIcon, Clock, ChevronDown, Search } from "lucide-vue-next";
 import { today, type DateValue } from "@internationalized/date";
 import { cn } from "@/lib/utils";
@@ -31,12 +32,12 @@ interface Props {
   resolved: ResolvedWindow;
   zonePreference: "utc" | "local";
   class?: string;
-  disabled?: boolean;
+  /** Locks the time range and says why. The zone switch stays usable. */
+  disabledReason?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   class: "",
-  disabled: false,
 });
 
 const emit = defineEmits<{
@@ -175,11 +176,13 @@ function parseInput(input: string, nowMs: number): EpochMs | null {
 }
 
 function applyQuickRange(range: QuickRange) {
+  if (props.disabledReason) return;
   emit("update:modelValue", { kind: "relative", spec: range });
   showDatePicker.value = false;
 }
 
 function applyAbsoluteRange() {
+  if (props.disabledReason) return;
   normalizeDraftInput("from");
   normalizeDraftInput("to");
 
@@ -203,6 +206,7 @@ function applyAbsoluteRange() {
 }
 
 function applyRecentRange(range: RecentRange) {
+  if (props.disabledReason) return;
   rememberRange(range.start, range.end);
   emit("update:modelValue", { kind: "absolute", start: range.start, end: range.end });
   showDatePicker.value = false;
@@ -234,11 +238,22 @@ const triggerDisplayText = computed(() => {
   return `${formatWallClock(start, zone)} - ${formatWallClock(end, zone)}`;
 });
 
+watch(
+  () => props.disabledReason,
+  (reason) => {
+    if (!reason) return;
+    showDatePicker.value = false;
+    showFromCalendar.value = false;
+    showToCalendar.value = false;
+  }
+);
+
 // Function to open the date picker programmatically
 function openDatePicker() {
-  showDatePicker.value = true;
+  if (!props.disabledReason) showDatePicker.value = true;
 }
 
+const zoneOptions: ReadonlyArray<"local" | "utc"> = ["local", "utc"];
 const isUtc = computed(() => props.zonePreference === "utc");
 const timezoneDisplay = computed(() => (isUtc.value ? "UTC" : t("time.browser", { zone: props.resolved.zone })));
 
@@ -255,23 +270,31 @@ defineExpose({
 <template>
   <div :class="cn('flex items-center gap-1', props.class)">
     <Popover v-model:open="showDatePicker">
-      <PopoverTrigger as-child>
-        <Button
-          variant="ghost"
-          :class="[
-            'h-7 px-2.5 gap-1.5 font-normal text-sm border border-transparent hover:border-border hover:bg-muted/50',
-            props.disabled ? 'opacity-50 cursor-not-allowed' : '',
-          ]"
-          :disabled="props.disabled"
-        >
-          <Clock class="h-3.5 w-3.5 text-muted-foreground" />
-          <span>{{ triggerDisplayText }}</span>
-          <ChevronDown class="h-3 w-3 text-muted-foreground ml-0.5" />
-        </Button>
-      </PopoverTrigger>
+      <TooltipProvider>
+        <Tooltip :disabled="!props.disabledReason">
+          <TooltipTrigger as-child>
+            <!-- A disabled button gets no pointer events, so the wrapper carries the tooltip. -->
+            <span class="inline-flex" :class="{ 'cursor-not-allowed': props.disabledReason }">
+              <PopoverTrigger as-child>
+                <Button
+                  variant="ghost"
+                  :class="cn('h-7 px-2.5 gap-1.5 font-normal text-sm border border-transparent', props.disabledReason ? 'pointer-events-none opacity-50' : 'hover:border-border hover:bg-muted/50')"
+                  :disabled="!!props.disabledReason"
+                >
+                  <Clock class="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>{{ triggerDisplayText }}</span>
+                  <ChevronDown class="h-3 w-3 text-muted-foreground ml-0.5" />
+                </Button>
+              </PopoverTrigger>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p class="text-xs">{{ props.disabledReason }}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       
       <PopoverContent
-        v-if="!props.disabled"
         class="w-[580px] p-0"
         align="start"
         side="bottom"
@@ -423,15 +446,18 @@ defineExpose({
       </PopoverContent>
     </Popover>
     
-    <!-- Timezone indicator -->
-    <Button
-      variant="ghost"
-      size="sm"
-      class="h-7 px-2 text-xs bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal"
-      @click="toggleZonePreference"
-       :title="t('pages.toggleTimezone')"
-    >
-      {{ isUtc ? "UTC" : t('ui.local') }}
-    </Button>
+    <div class="inline-flex h-7 items-center rounded-md bg-muted/60 p-0.5 text-xs" role="group" :title="t('pages.toggleTimezone')">
+      <button
+        v-for="zone in zoneOptions"
+        :key="zone"
+        type="button"
+        class="h-6 rounded px-2 font-normal transition-colors"
+        :class="zonePreference === zone ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+        :aria-pressed="zonePreference === zone"
+        @click="zonePreference !== zone && emit('update:zonePreference', zone)"
+      >
+        {{ zone === "utc" ? "UTC" : t("ui.local") }}
+      </button>
+    </div>
   </div>
 </template>

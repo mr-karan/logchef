@@ -42,8 +42,9 @@ function clearFilter() {
         class="relative z-20 flex items-center justify-center flex-shrink-0 h-5 w-5 rounded transition-colors"
         :class="isActive
           ? 'text-primary bg-primary/10'
-          : 'text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted'"
-        :title="isActive ? t('explore.filteredValue', { value: filterValue }) : t('ui.filterThisColumn')"
+          : 'text-muted-foreground/50 opacity-0 group-hover:opacity-100 group-hover:bg-muted hover:text-foreground'"
+        :title="isActive ? t('explore.filteredValue', { value: filterValue }) : t('explore.filterColumn', { column: column.id })"
+        :aria-label="t('explore.filterColumn', { column: column.id })"
         @mousedown.stop
         @dragstart.stop.prevent
         @click.stop

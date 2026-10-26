@@ -14,7 +14,7 @@ const displayError = computed(() => runs.error ?? exploreStore.error?.message)
 </script>
 
 <template>
-  <div v-if="displayError" class="mt-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
+  <div v-if="displayError" class="mx-3 my-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
     <div class='font-medium'>{{ t('ui.queryError') }}</div>
     <div>{{ displayError }}</div>
     <div v-if="displayError.includes('Missing boolean operator')"

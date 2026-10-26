@@ -49,7 +49,7 @@ const toggleAll = (checked: boolean | 'indeterminate') => {
 <template>
   <Popover>
     <PopoverTrigger as-child>
-      <Button variant='outline' size="sm" class='h-8 px-2 lg:w-[130px]' :title="t('ui.selectColumns')">
+      <Button variant='outline' size="sm" class='h-7 px-2 lg:w-[130px]' :title="t('ui.selectColumns')">
         <Columns3 class="h-4 w-4" />
         <span class="hidden lg:inline ml-1.5">{{ t('ui.columns') }}</span>
         <span class="text-xs text-muted-foreground ml-1">({{ visibleColumns.length }})</span>
