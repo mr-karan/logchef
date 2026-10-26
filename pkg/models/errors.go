@@ -39,6 +39,9 @@ const (
 
 	// ManagedResourceErrorType indicates a mutation attempted on a config-managed resource
 	ManagedResourceErrorType ErrorType = "ManagedResourceError"
+
+	// ActivityUnsupportedErrorType indicates a source cannot report recent activity
+	ActivityUnsupportedErrorType ErrorType = "ActivityUnsupported"
 )
 
 // ErrorResponse represents a standardized error response

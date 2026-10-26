@@ -752,5 +752,15 @@
   "explore.timeoutChip": "Timeout {value}",
   "explore.fastFilterLead": "Schneller mit einem Filter auf",
   "explore.fastFilterTooltip": "Die Tabelle ist nach diesen Feldern sortiert, daher liest ein Filter darauf deutlich weniger Daten.",
-  "explore.addFastFilter": "Filter für {field} hinzufügen"
+  "explore.addFastFilter": "Filter für {field} hinzufügen",
+  "inspection.engine": "Engine",
+  "inspection.parts": "Teile",
+  "inspection.storageScope": "Speichersummen",
+  "inspection.localReplica": "Nur das verbundene lokale Replikat, nicht der gesamte Cluster",
+  "inspection.months": "{count} Monat | {count} Monate",
+  "inspection.days": "{count} Tag | {count} Tage",
+  "inspection.fieldCount": "{count} Feld | {count} Felder",
+  "inspection.activitySortKey": "Die letzten Aktivitäten sind nicht verfügbar, da der Sortierschlüssel nicht mit dem Zeitstempelfeld beginnt. Die Abfrage würde einen vollständigen Tabellenscan erfordern.",
+  "inspection.copyQuery": "CREATE TABLE kopieren",
+  "inspection.noRecentEvents": "Keine Ereignisse in den letzten 24 Stunden."
 }

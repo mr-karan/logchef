@@ -173,11 +173,6 @@ export interface SourceSchemaField {
   is_primary_key?: boolean;
   default_expression?: string;
   comment?: string;
-  compressed?: string;
-  uncompressed?: string;
-  compression_ratio?: number;
-  avg_row_size?: number;
-  row_count?: number;
 }
 
 export interface SourceSchemaInspection {

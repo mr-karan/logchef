@@ -752,5 +752,15 @@
   "explore.timeoutChip": "Timeout {value}",
   "explore.fastFilterLead": "Più veloce con un filtro su",
   "explore.fastFilterTooltip": "La tabella è ordinata per questi campi, quindi filtrarli legge molti meno dati.",
-  "explore.addFastFilter": "Aggiungi un filtro su {field}"
+  "explore.addFastFilter": "Aggiungi un filtro su {field}",
+  "inspection.engine": "Motore",
+  "inspection.parts": "Parti",
+  "inspection.storageScope": "Totali di archiviazione",
+  "inspection.localReplica": "Solo la replica locale connessa, non l’intero cluster",
+  "inspection.months": "{count} mese | {count} mesi",
+  "inspection.days": "{count} giorno | {count} giorni",
+  "inspection.fieldCount": "{count} campo | {count} campi",
+  "inspection.activitySortKey": "L’attività recente non è disponibile perché la chiave di ordinamento non inizia con il campo temporale. La ricerca delle righe recenti richiederebbe una scansione completa della tabella.",
+  "inspection.copyQuery": "Copia CREATE TABLE",
+  "inspection.noRecentEvents": "Nessun evento nelle ultime 24 ore."
 }

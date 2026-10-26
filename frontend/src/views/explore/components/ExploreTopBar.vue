@@ -16,7 +16,7 @@ import { ChevronDown, Link, Share2, Timer, Terminal } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useLimitOptions } from '@/composables/useLimitOptions'
 import { TOAST_DURATION } from '@/lib/constants'
-import { copyText } from '../copyText'
+import { copyText } from '@/utils/clipboard'
 import { generateCliCommand } from '@/utils/cliCommand'
 import {
   DropdownMenu,
