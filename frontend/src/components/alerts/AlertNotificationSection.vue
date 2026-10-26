@@ -85,7 +85,7 @@ const newWebhookUrl = defineModel<string>("newWebhookUrl", { required: true });
       <Label class='text-xs font-medium'>{{ t('ui.webhookURLs') }} <span class='font-normal text-muted-foreground ml-1'>{{ t('ui.sendJSONPayload') }}</span></Label>
       <div class="flex gap-2">
         <Input v-model="newWebhookUrl" placeholder="https://api.example.com/hooks/..." @keydown.enter.prevent="onAddWebhook" />
-        <Button type="button" variant="secondary" @click="onAddWebhook">
+        <Button type="button" variant="secondary" :aria-label="t('alerts.addWebhook')" @click="onAddWebhook">
           <Plus class="h-4 w-4" />
         </Button>
       </div>

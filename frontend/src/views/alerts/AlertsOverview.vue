@@ -279,7 +279,7 @@ onMounted(async () => {
           <RefreshCcw class="-ml-1 mr-2 h-4 w-4" />
           {{ t('ui.refresh') }}
         </Button>
-        <Button @click="openCreateForm" :disabled="!currentTeamId || !currentSourceId">
+        <Button :variant="alerts.length ? 'default' : 'outline'" @click="openCreateForm" :disabled="!currentTeamId || !currentSourceId">
           <Plus class="-ml-1 mr-2 h-4 w-4" />
           {{ t('ui.newAlert') }}
         </Button>

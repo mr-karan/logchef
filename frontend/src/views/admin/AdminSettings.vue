@@ -248,6 +248,7 @@ onMounted(() => {
                           variant="ghost"
                           size="icon"
                           class="h-6 w-6"
+                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
                           @click="toggleShowValue(setting.key)"
                         >
                           <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
@@ -299,6 +300,7 @@ onMounted(() => {
                           variant="ghost"
                           size="icon"
                           class="h-6 w-6"
+                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
                           @click="toggleShowValue(setting.key)"
                         >
                           <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
@@ -350,6 +352,7 @@ onMounted(() => {
                           variant="ghost"
                           size="icon"
                           class="h-6 w-6"
+                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
                           @click="toggleShowValue(setting.key)"
                         >
                           <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
@@ -401,6 +404,7 @@ onMounted(() => {
                           variant="ghost"
                           size="icon"
                           class="h-6 w-6"
+                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
                           @click="toggleShowValue(setting.key)"
                         >
                           <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />

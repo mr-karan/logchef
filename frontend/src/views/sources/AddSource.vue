@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader, LoadingState } from "@/components/layout";
+import { ArrowLeft } from "lucide-vue-next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -79,7 +81,8 @@ const hasConnectionChanges = computed(() => currentConnectionSnapshot.value !== 
 
 const pageTitle = computed(() => {
   if (isEditMode.value) {
-    return t("sources.editTitle");
+    const source = sourcesStore.sources.find((source) => source.id === editingSourceId.value);
+    return source ? t("sourceForm.editTitle", { name: source.name }) : t("sources.editTitle");
   }
   if (duplicateFromId.value) {
     return t("sources.duplicateTitle");
@@ -389,153 +392,146 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="container mx-auto max-w-4xl px-4 py-8">
-    <Card>
-      <CardHeader>
-        <CardTitle>{{ pageTitle }}</CardTitle>
-        <CardDescription>{{ pageDescription }}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div v-if="isLoadingSource" class="flex items-center justify-center py-12">
-          <div class="flex items-center gap-3">
-            <svg class="h-5 w-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+  <div class="space-y-6">
+    <PageHeader :title="pageTitle" :description="pageDescription">
+      <template #actions>
+        <Button variant="outline" size="sm" @click="router.push({ name: 'Sources' })">
+          <ArrowLeft class="mr-2 h-4 w-4" />
+          {{ t("sourceForm.backToSources") }}
+        </Button>
+      </template>
+    </PageHeader>
+
+    <LoadingState v-if="isLoadingSource" :label="t('sources.loadingSource')" class="max-w-4xl" />
+
+    <form v-else class="max-w-4xl space-y-6" @submit.prevent="submitForm">
+      <div class="space-y-6">
+        <section class="space-y-4">
+          <div class="space-y-1">
+            <h2 class="text-base font-medium">{{ t("sources.basicInformation") }}</h2>
+            <div class="text-sm text-muted-foreground">
+              {{ t("sources.identityDescription") }}
+            </div>
+          </div>
+
+          <div v-if="!isEditMode" class="space-y-3">
+            <Label class="required">{{ t("sources.datasourceType") }}</Label>
+            <RadioGroup
+              :aria-label="t('sources.datasourceType')"
+              :model-value="sourceType"
+              class="grid gap-3 md:grid-cols-2"
+              @update:model-value="handleSourceTypeChange"
+            >
+              <Card
+                :class="{ 'border-primary shadow-sm': sourceType === 'clickhouse', 'border-muted-foreground/20': sourceType !== 'clickhouse' }"
+                class="cursor-pointer gap-0 rounded-md py-0 transition-colors hover:border-primary/70"
+                @click="sourceType = 'clickhouse'"
+              >
+                <CardContent class="flex items-start gap-3 p-4">
+                  <RadioGroupItem value="clickhouse" id="source_type_clickhouse" />
+                  <div class="space-y-1">
+                    <Label for="source_type_clickhouse" class="cursor-pointer font-medium">ClickHouse</Label>
+                    <p class="text-sm text-muted-foreground">
+                      {{ t("sources.clickHouseDescription") }}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card
+                :class="{ 'border-primary shadow-sm': sourceType === 'victorialogs', 'border-muted-foreground/20': sourceType !== 'victorialogs' }"
+                class="cursor-pointer gap-0 rounded-md py-0 transition-colors hover:border-primary/70"
+                @click="sourceType = 'victorialogs'"
+              >
+                <CardContent class="flex items-start gap-3 p-4">
+                  <RadioGroupItem value="victorialogs" id="source_type_victorialogs" />
+                  <div class="space-y-1">
+                    <Label for="source_type_victorialogs" class="cursor-pointer font-medium">VictoriaLogs</Label>
+                    <p class="text-sm text-muted-foreground">
+                      {{ t("sources.victoriaLogsDescription") }}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </RadioGroup>
+          </div>
+
+          <div v-else class="grid gap-2 md:max-w-sm">
+            <Label for="source_type">{{ t("sources.datasourceType") }}</Label>
+            <Input id="source_type" :model-value="sourceType === 'clickhouse' ? 'ClickHouse' : 'VictoriaLogs'" disabled />
+          </div>
+
+          <div class="grid gap-2">
+            <Label for="source_name" class="required">{{ t("sources.sourceName") }}</Label>
+            <Input
+              id="source_name"
+              v-model="sourceName"
+              :placeholder="t('sources.sourceNamePlaceholder')"
+              maxlength="50"
+            />
+          </div>
+
+          <div class="grid gap-2">
+            <Label for="description">{{ t("ui.description") }}</Label>
+            <Textarea
+              id="description"
+              v-model="description"
+              rows="2"
+              maxlength="500"
+              :placeholder="t('sources.descriptionPlaceholder')"
+            />
+          </div>
+        </section>
+
+        <ClickHouseSourceForm
+          v-if="sourceType === 'clickhouse'"
+          v-model="clickHouseForm"
+          :is-edit-mode="isEditMode"
+          :is-validating="isValidating"
+          :is-validated="isValidated"
+          :validation-message="validationMessage"
+          :validation-error="validationError"
+          @validate="handleValidateConnection"
+        />
+
+        <VictoriaLogsSourceForm
+          v-else
+          v-model="victoriaLogsForm"
+          :is-edit-mode="isEditMode"
+          :is-validating="isValidating"
+          :is-validated="isValidated"
+          :validation-message="validationMessage"
+          :validation-error="validationError"
+          @validate="handleValidateConnection"
+        />
+      </div>
+
+      <div
+        v-if="formError"
+        class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
+      >
+        {{ formError }}
+      </div>
+
+      <div class="flex flex-wrap justify-end gap-3 border-t pt-6">
+        <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
+          {{ t("ui.cancel") }}
+        </Button>
+        <Button
+          type="submit"
+          :disabled="isSubmitting || !isValid || (!isEditMode && sourceType === 'clickhouse' && clickHouseForm.tableMode === 'connect' && !isValidated)"
+          :class="{ 'opacity-50': !isValid || (!isEditMode && sourceType === 'clickhouse' && clickHouseForm.tableMode === 'connect' && !isValidated) }"
+        >
+          <span v-if="isSubmitting" class="mr-2">
+            <svg class="h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span class="text-muted-foreground">{{ t("sources.loadingSource") }}</span>
-          </div>
-        </div>
-
-        <form v-else class="space-y-6" @submit.prevent="submitForm">
-          <div class="space-y-6">
-            <div class="space-y-4">
-              <div class="flex items-center justify-between">
-                <h3 class="text-lg font-medium">{{ t("sources.basicInformation") }}</h3>
-                <div class="text-sm text-muted-foreground">
-                  {{ t("sources.identityDescription") }}
-                </div>
-              </div>
-
-              <div v-if="!isEditMode" class="space-y-3">
-                <Label class="required">{{ t("sources.datasourceType") }}</Label>
-                <RadioGroup
-                  :model-value="sourceType"
-                  class="grid gap-3 md:grid-cols-2"
-                  @update:model-value="handleSourceTypeChange"
-                >
-                  <Card
-                    :class="{ 'border-primary shadow-sm': sourceType === 'clickhouse', 'border-muted-foreground/20': sourceType !== 'clickhouse' }"
-                    class="cursor-pointer transition-all hover:border-primary/70"
-                    @click="sourceType = 'clickhouse'"
-                  >
-                    <CardContent class="flex items-start gap-3 p-5">
-                      <RadioGroupItem value="clickhouse" id="source_type_clickhouse" />
-                      <div class="space-y-1">
-                        <Label for="source_type_clickhouse" class="cursor-pointer font-medium">ClickHouse</Label>
-                        <p class="text-sm text-muted-foreground">
-                          {{ t("sources.clickHouseDescription") }}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card
-                    :class="{ 'border-primary shadow-sm': sourceType === 'victorialogs', 'border-muted-foreground/20': sourceType !== 'victorialogs' }"
-                    class="cursor-pointer transition-all hover:border-primary/70"
-                    @click="sourceType = 'victorialogs'"
-                  >
-                    <CardContent class="flex items-start gap-3 p-5">
-                      <RadioGroupItem value="victorialogs" id="source_type_victorialogs" />
-                      <div class="space-y-1">
-                        <Label for="source_type_victorialogs" class="cursor-pointer font-medium">VictoriaLogs</Label>
-                        <p class="text-sm text-muted-foreground">
-                          {{ t("sources.victoriaLogsDescription") }}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </RadioGroup>
-              </div>
-
-              <div v-else class="grid gap-2 md:max-w-sm">
-                <Label>{{ t("sources.datasourceType") }}</Label>
-                <Input :model-value="sourceType === 'clickhouse' ? 'ClickHouse' : 'VictoriaLogs'" disabled />
-              </div>
-
-              <div class="grid gap-2">
-                <Label for="source_name" class="required">{{ t("sources.sourceName") }}</Label>
-                <Input
-                  id="source_name"
-                  v-model="sourceName"
-                  :placeholder="t('sources.sourceNamePlaceholder')"
-                  maxlength="50"
-                />
-              </div>
-
-              <div class="grid gap-2">
-                <Label for="description">{{ t("ui.description") }}</Label>
-                <Textarea
-                  id="description"
-                  v-model="description"
-                  rows="2"
-                  maxlength="500"
-                  :placeholder="t('sources.descriptionPlaceholder')"
-                />
-              </div>
-            </div>
-
-            <ClickHouseSourceForm
-              v-if="sourceType === 'clickhouse'"
-              v-model="clickHouseForm"
-              :is-edit-mode="isEditMode"
-              :is-validating="isValidating"
-              :is-validated="isValidated"
-              :validation-message="validationMessage"
-              :validation-error="validationError"
-              @validate="handleValidateConnection"
-            />
-
-            <VictoriaLogsSourceForm
-              v-else
-              v-model="victoriaLogsForm"
-              :is-edit-mode="isEditMode"
-              :is-validating="isValidating"
-              :is-validated="isValidated"
-              :validation-message="validationMessage"
-              :validation-error="validationError"
-              @validate="handleValidateConnection"
-            />
-          </div>
-
-          <div
-            v-if="formError"
-            class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {{ formError }}
-          </div>
-
-          <div class="mt-6 flex justify-end space-x-4 border-t pt-6">
-            <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
-              {{ t("ui.cancel") }}
-            </Button>
-            <Button
-              type="submit"
-              size="lg"
-              :disabled="isSubmitting || !isValid || (!isEditMode && sourceType === 'clickhouse' && clickHouseForm.tableMode === 'connect' && !isValidated)"
-              :class="{ 'opacity-50': !isValid || (!isEditMode && sourceType === 'clickhouse' && clickHouseForm.tableMode === 'connect' && !isValidated) }"
-            >
-              <span v-if="isSubmitting" class="mr-2">
-                <svg class="h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              </span>
-              {{ submitButtonText }}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          </span>
+          {{ submitButtonText }}
+        </Button>
+      </div>
+    </form>
   </div>
 </template>
 

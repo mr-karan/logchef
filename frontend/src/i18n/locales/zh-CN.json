@@ -1028,7 +1028,6 @@
   "access.noTeamsMatch": "没有符合搜索条件的团队。",
   "access.members": "成员",
   "access.createdAt": "创建时间",
-  "access.noDescription": "无描述",
   "access.editTeamSettings": "编辑团队设置",
   "access.deleteTeam": "删除团队",
   "access.deleteTeamTitle": "删除团队？",
@@ -1066,8 +1065,6 @@
   "access.backToTeams": "返回团队列表",
   "access.manageTeamDescription": "管理团队设置和成员",
   "access.settings": "设置",
-  "access.teamMembers": "团队成员",
-  "access.manageTeamMembersDescription": "管理团队成员及其角色",
   "access.addMember": "添加成员",
   "access.addTeamMember": "添加团队成员",
   "access.addTeamMemberDescription": "向团队添加普通用户或服务账户",
@@ -1410,6 +1407,8 @@
   "library.queryUpdated": "查询已更新",
   "library.queryDeleted": "查询已删除",
   "common.copyName": "{name}（副本）",
+  "sourceForm.editTitle": "编辑 {name}",
+  "sourceForm.backToSources": "返回数据源列表",
   "ui.gridView": "网格视图",
   "ui.listView": "列表视图",
   "dashboards.panels": "面板",
@@ -1492,5 +1491,10 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "投递中断",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
+  "ui.activateUser": "启用{name}",
+  "ui.deactivateUser": "停用{name}",
+  "alerts.addWebhook": "添加 Webhook",
+  "ui.showSettingValue": "显示{key}的值",
+  "ui.hideSettingValue": "隐藏{key}的值"
 }
