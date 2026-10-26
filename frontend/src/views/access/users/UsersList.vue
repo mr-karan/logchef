@@ -204,6 +204,7 @@ onMounted(() => {
                             <TableCell>
                                 <div class="flex items-center space-x-2">
                                     <Switch :model-value="user.status === 'active'"
+                                        :aria-label="t(user.status === 'active' ? 'ui.deactivateUser' : 'ui.activateUser', { name: user.full_name || user.email })"
                                         @update:model-value="toggleUserStatus(user)" />
                                     <span>{{ user.status === 'active' ? t('access.statusActive') : t('access.statusInactive') }}</span>
                                 </div>

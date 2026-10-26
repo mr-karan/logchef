@@ -684,6 +684,8 @@
   "alerts.templates.errorMessages": "錯誤訊息",
   "alerts.templates.errorMessagesHelp": "符合包含「error」的訊息。",
   "common.copyName": "{name}（副本）",
+  "sourceForm.editTitle": "編輯 {name}",
+  "sourceForm.backToSources": "返回資料來源清單",
   "ui.gridView": "格狀檢視",
   "ui.listView": "清單檢視",
   "dashboards.panels": "面板",
@@ -745,5 +747,10 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "傳送中斷",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
+  "ui.activateUser": "啟用{name}",
+  "ui.deactivateUser": "停用{name}",
+  "alerts.addWebhook": "新增 Webhook",
+  "ui.showSettingValue": "顯示{key}的值",
+  "ui.hideSettingValue": "隱藏{key}的值"
 }

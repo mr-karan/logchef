@@ -130,21 +130,21 @@ const fieldsPanelOpen = computed({
         <Label class='text-sm font-medium'>{{ t('ui.theme') }}</Label>
         <RadioGroup v-model="themePreference" class="grid gap-3 md:grid-cols-3">
           <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-            <RadioGroupItem value="light" class="mt-1" />
+            <RadioGroupItem :aria-label="t('ui.light')" value="light" class="mt-1" />
             <div>
               <p class='text-sm font-medium'>{{ t('ui.light') }}</p>
               <p class='text-xs text-muted-foreground'>{{ t('ui.brightWorkspaceWithCrispContrast') }}</p>
             </div>
           </Label>
           <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-            <RadioGroupItem value="dark" class="mt-1" />
+            <RadioGroupItem :aria-label="t('ui.dark')" value="dark" class="mt-1" />
             <div>
               <p class='text-sm font-medium'>{{ t('ui.dark') }}</p>
               <p class='text-xs text-muted-foreground'>{{ t('ui.reduceGlareForLongAnalysisSessions') }}</p>
             </div>
           </Label>
           <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-            <RadioGroupItem value="auto" class="mt-1" />
+            <RadioGroupItem :aria-label="t('ui.system')" value="auto" class="mt-1" />
             <div>
               <p class='text-sm font-medium'>{{ t('ui.system') }}</p>
               <p class='text-xs text-muted-foreground'>{{ t('ui.matchYourOperatingSystemPreference') }}</p>
@@ -177,21 +177,21 @@ const fieldsPanelOpen = computed({
         <Label class='text-sm font-medium'>{{ t('ui.defaultViewMode') }}</Label>
         <RadioGroup v-model="displayModePreference" class="grid gap-3 md:grid-cols-3">
           <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-            <RadioGroupItem value="table" class="mt-1" />
+            <RadioGroupItem :aria-label="t('ui.table')" value="table" class="mt-1" />
             <div>
               <p class='text-sm font-medium'>{{ t('ui.table') }}</p>
               <p class='text-xs text-muted-foreground'>{{ t('ui.columnarLayoutWithFullFieldVisibility') }}</p>
             </div>
           </Label>
           <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-            <RadioGroupItem value="compact" class="mt-1" />
+            <RadioGroupItem :aria-label="t('ui.compact')" value="compact" class="mt-1" />
             <div>
               <p class='text-sm font-medium'>{{ t('ui.compact') }}</p>
               <p class='text-xs text-muted-foreground'>{{ t('ui.denseStreamingStyleLogsForQuickScans') }}</p>
             </div>
           </Label>
           <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-            <RadioGroupItem value="json" class="mt-1" />
+            <RadioGroupItem :aria-label="t('explore.jsonView')" value="json" class="mt-1" />
             <div>
               <p class="text-sm font-medium">JSON</p>
               <p class='text-xs text-muted-foreground'>{{ t('ui.inspectRawStructuredEventsWithoutTableFormatting') }}</p>
@@ -209,7 +209,7 @@ const fieldsPanelOpen = computed({
             {{ t('ui.keepTheFieldsAndFiltersPanelOpenWhenExploringLogs') }}
           </p>
         </div>
-        <Switch v-model="fieldsPanelOpen" />
+        <Switch :aria-label="t('ui.showFieldsPanelByDefault')" v-model="fieldsPanelOpen" />
       </div>
     </PageSection>
   </div>

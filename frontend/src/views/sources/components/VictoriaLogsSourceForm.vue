@@ -42,11 +42,12 @@ function updateAuthMode(value: unknown) {
 
 <template>
   <div class="space-y-6">
-    <fieldset class="flex flex-col gap-4 rounded-md border p-4">
-      <legend class="px-1 text-sm font-medium">{{ t('sources.windowedSearch') }}</legend>
+    <section class="space-y-4 border-t pt-6">
+      <h2 class="text-base font-medium">{{ t('sources.windowedSearch') }}</h2>
       <div class="flex items-center gap-3">
         <Switch
           id="windowed_search"
+          :aria-label="t('sources.enableWindowedSearch')"
           :model-value="modelValue.windowedEnabled"
           @update:model-value="value => updateForm({ windowedEnabled: value })"
         />
@@ -106,16 +107,16 @@ function updateAuthMode(value: unknown) {
         </div>
         <div class="flex items-center gap-3">
           <Switch
-            id="window_histogram" :model-value="modelValue.histogramEnabled"
+            id="window_histogram" :aria-label="t('sources.windowHistogram')" :model-value="modelValue.histogramEnabled"
             @update:model-value="value => updateForm({ histogramEnabled: value })"
           />
           <Label for="window_histogram">{{ t('sources.windowHistogram') }}</Label>
         </div>
       </template>
-    </fieldset>
-    <div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">{{ t("sources.victoriaLogsConnection") }}</h3>
+    </section>
+    <section class="space-y-4 border-t pt-6">
+      <div class="space-y-1">
+        <h2 class="text-base font-medium">{{ t("sources.victoriaLogsConnection") }}</h2>
         <div class="text-sm text-muted-foreground">
           {{ t("sources.victoriaLogsConnectionDescription") }}
         </div>
@@ -190,11 +191,11 @@ function updateAuthMode(value: unknown) {
           {{ t("sources.keepToken") }}
         </p>
       </div>
-    </div>
+    </section>
 
-    <div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">{{ t("sources.tenantScope") }}</h3>
+    <section class="space-y-4 border-t pt-6">
+      <div class="space-y-1">
+        <h2 class="text-base font-medium">{{ t("sources.tenantScope") }}</h2>
         <div class="text-sm text-muted-foreground">
           {{ t("sources.tenantScopeDescription") }}
         </div>
@@ -238,11 +239,11 @@ function updateAuthMode(value: unknown) {
           {{ t("sources.scopeAppliedToQueries") }} <code>{app="payments"}</code> {{ t("sources.or") }} <code>kubernetes.namespace:="prod"</code>.
         </p>
       </div>
-    </div>
+    </section>
 
-    <div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">{{ t("sources.fieldMapping") }}</h3>
+    <section class="space-y-4 border-t pt-6">
+      <div class="space-y-1">
+        <h2 class="text-base font-medium">{{ t("sources.fieldMapping") }}</h2>
         <div class="text-sm text-muted-foreground">
           {{ t("sources.fieldMappingDescription") }}
         </div>
@@ -269,10 +270,10 @@ function updateAuthMode(value: unknown) {
           />
         </div>
       </div>
-    </div>
+    </section>
 
     <div v-if="!isEditMode" class="space-y-4 border-t pt-4">
-      <div class="flex items-center justify-between">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="text-sm font-medium">{{ t("sources.validateConnection") }}</div>
         <Button
           type="button"
@@ -294,14 +295,14 @@ function updateAuthMode(value: unknown) {
 
       <div
         v-if="validationMessage"
-        class="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+        class="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
       >
         {{ validationMessage }}
       </div>
 
       <div
         v-if="validationError"
-        class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+        class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
       >
         {{ validationError }}
       </div>

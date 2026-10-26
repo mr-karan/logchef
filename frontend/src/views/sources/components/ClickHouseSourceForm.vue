@@ -105,9 +105,9 @@ function resetSchema() {
 
 <template>
   <div class="space-y-6">
-    <div class="space-y-4">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">{{ t("sources.clickHouseConnection") }}</h3>
+    <section class="space-y-4 border-t pt-6">
+      <div class="space-y-1">
+        <h2 class="text-base font-medium">{{ t("sources.clickHouseConnection") }}</h2>
         <div class="text-sm text-muted-foreground">
           {{ t("sources.clickHouseConnectionDescription") }}
         </div>
@@ -126,7 +126,7 @@ function resetSchema() {
         </p>
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid gap-4 sm:grid-cols-2">
         <div class="grid gap-2">
           <Label for="database" class="required">{{ t("sources.database") }}</Label>
           <Input
@@ -154,12 +154,14 @@ function resetSchema() {
       <div class="space-y-4">
         <div class="flex items-center justify-between rounded-md bg-muted/50 p-3">
           <div class="space-y-0.5">
-            <Label class="text-base">{{ t("sources.authentication") }}</Label>
+            <Label for="clickhouse_auth" class="text-base">{{ t("sources.authentication") }}</Label>
             <p class="text-sm text-muted-foreground">
               {{ t("sources.clickHouseAuthenticationDescription") }}
             </p>
           </div>
           <Switch
+            id="clickhouse_auth"
+            :aria-label="t('sources.authentication')"
             :model-value="modelValue.enableAuth"
             @update:model-value="(checked: boolean) => updateForm({ enableAuth: checked })"
           />
@@ -191,7 +193,7 @@ function resetSchema() {
           </div>
         </div>
       </div>
-    </div>
+    </section>
 
     <Accordion type="single" collapsible class="w-full">
       <AccordionItem value="advanced-query-settings" class="border rounded-md px-4">
@@ -309,31 +311,32 @@ function resetSchema() {
       </AccordionItem>
     </Accordion>
 
-    <div v-if="!isEditMode" class="space-y-4">
-      <div class="flex items-center justify-between">
-          <h3 class="text-lg font-medium">{{ t("sources.tableConfiguration") }}</h3>
+    <section v-if="!isEditMode" class="space-y-4 border-t pt-6">
+      <div class="space-y-1">
+        <h2 class="text-base font-medium">{{ t("sources.tableConfiguration") }}</h2>
         <div class="text-sm text-muted-foreground">
           {{ t("sources.tableConfigurationDescription") }}
         </div>
       </div>
 
       <RadioGroup
+        :aria-label="t('sources.tableConfiguration')"
         :model-value="modelValue.tableMode"
-        class="grid grid-cols-[1fr_auto_1fr] items-start gap-4"
+        class="grid items-start gap-3 sm:grid-cols-[1fr_auto_1fr]"
         @update:model-value="updateTableMode"
       >
         <Card
           :class="{ 'border-primary shadow-sm': modelValue.tableMode === 'create', 'border-muted-foreground/20': modelValue.tableMode !== 'create' }"
-          class="cursor-pointer transition-all hover:border-primary/70"
+          class="cursor-pointer gap-4 rounded-md py-4 transition-colors hover:border-primary/70"
           @click="updateForm({ tableMode: 'create' })"
         >
-          <CardHeader>
+          <CardHeader class="px-4">
             <div class="flex items-center gap-2">
               <RadioGroupItem value="create" id="create" />
               <Label for="create" class="cursor-pointer font-medium">{{ t("sources.createNewTable") }}</Label>
             </div>
           </CardHeader>
-          <CardContent class="space-y-4">
+          <CardContent class="space-y-4 px-4">
             <div class="flex items-start gap-4">
               <Plus class="mt-1 h-5 w-5 text-muted-foreground" />
               <div class="space-y-1">
@@ -377,7 +380,7 @@ function resetSchema() {
                 </DialogHeader>
 
                 <div class="space-y-4 py-4">
-                  <div class="flex items-center justify-between">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
                     <div class="space-y-1">
                       <h4 class="text-sm font-medium leading-none">{{ t("sources.schemaDefinition") }}</h4>
                       <p class="text-sm text-muted-foreground">
@@ -409,7 +412,7 @@ function resetSchema() {
           </CardContent>
         </Card>
 
-        <div class="flex h-full flex-col items-center justify-center">
+        <div class="hidden h-full flex-col items-center justify-center sm:flex">
           <div class="flex flex-col items-center gap-2">
             <Separator orientation="vertical" class="h-8" />
             <span class="px-4 text-sm text-muted-foreground">{{ t("sources.or") }}</span>
@@ -419,16 +422,16 @@ function resetSchema() {
 
         <Card
           :class="{ 'border-primary shadow-sm': modelValue.tableMode === 'connect', 'border-muted-foreground/20': modelValue.tableMode !== 'connect' }"
-          class="cursor-pointer transition-all hover:border-primary/70"
+          class="cursor-pointer gap-4 rounded-md py-4 transition-colors hover:border-primary/70"
           @click="updateForm({ tableMode: 'connect' })"
         >
-          <CardHeader>
+          <CardHeader class="px-4">
             <div class="flex items-center gap-2">
               <RadioGroupItem value="connect" id="connect" />
               <Label for="connect" class="cursor-pointer font-medium">{{ t("sources.connectExistingTable") }}</Label>
             </div>
           </CardHeader>
-          <CardContent class="space-y-4">
+          <CardContent class="space-y-4 px-4">
             <div class="flex items-start gap-4">
               <Database class="mt-1 h-5 w-5 text-muted-foreground" />
               <div class="space-y-1">
@@ -463,11 +466,11 @@ function resetSchema() {
           </CardContent>
         </Card>
       </RadioGroup>
-    </div>
+    </section>
 
-    <div v-if="isEditMode" class="space-y-4">
-      <div class="flex items-center justify-between">
-          <h3 class="text-lg font-medium">{{ t("sources.dataRetention") }}</h3>
+    <section v-if="isEditMode" class="space-y-4 border-t pt-6">
+      <div class="space-y-1">
+        <h2 class="text-base font-medium">{{ t("sources.dataRetention") }}</h2>
         <div class="text-sm text-muted-foreground">
           {{ t("sources.dataRetentionDescription") }}
         </div>
@@ -483,10 +486,10 @@ function resetSchema() {
           @update:model-value="(value) => updateForm({ ttlDays: String(value) })"
         />
       </div>
-    </div>
+    </section>
 
     <div v-if="!isEditMode && modelValue.tableMode === 'connect'" class="space-y-4 border-t pt-4">
-      <div class="flex items-center justify-between">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="text-sm font-medium">{{ t("sources.validateConnection") }}</div>
         <Button
           type="button"
@@ -508,14 +511,14 @@ function resetSchema() {
 
       <div
         v-if="validationMessage"
-        class="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+        class="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
       >
         {{ validationMessage }}
       </div>
 
       <div
         v-if="validationError"
-        class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+        class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
       >
         {{ validationError }}
       </div>
