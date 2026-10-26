@@ -1,4 +1,5 @@
-import * as monaco from "monaco-editor";
+import * as monaco from "monaco-editor/editor/editor.api.js";
+import "monaco-editor/features/register.all.js";
 import { loader } from "@guolao/vue-monaco-editor";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import {

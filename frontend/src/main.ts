@@ -10,6 +10,9 @@ import router from "./router";
 import { useAuthStore } from "@/stores/auth";
 import { usePreferencesStore } from "@/stores/preferences";
 import { i18n, setLocale } from "@/i18n";
+import { reloadOnStaleChunk } from "@/utils/staleChunkReload";
+
+window.addEventListener("vite:preloadError", reloadOnStaleChunk(router, window.location));
 
 async function initializeApp() {
   try {
@@ -34,6 +37,8 @@ async function initializeApp() {
     await authStore.initialize();
 
     app.use(i18n);
+    // The first navigation loads its route while preferences load. Mounting still waits for them.
+    app.use(router);
     const preferencesStore = usePreferencesStore(pinia);
     await preferencesStore.loadPreferences();
     try {
@@ -50,9 +55,6 @@ async function initializeApp() {
     watch(() => authStore.user?.id, () => {
       void preferencesStore.loadPreferences(true);
     });
-
-    // Use router after auth is initialized
-    app.use(router);
 
     // Mount app
     app.mount("#app");

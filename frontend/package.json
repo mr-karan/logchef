@@ -10,6 +10,7 @@
     "build:analyze": "vite build --mode analyze",
     "analyze": "bun scripts/analyze-bundle.js",
     "preview": "vite preview",
+    "check:bundle": "node scripts/check-editor-bundle.mjs ../cmd/server/ui",
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
     "test:watch": "vitest --watch"
