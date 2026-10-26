@@ -22,12 +22,26 @@ type SourceActivityRequestResult = {
   error?: APIErrorResponse;
 };
 
+// "unsupported" has its own explanation; "permanent" errors fail the same way on every retry.
+export type SourceActivityError = { message: string; kind: "unsupported" | "permanent" | "transient" };
+
+const PERMANENT_SOURCE_ERRORS = new Set(["NotFoundError", "ValidationError"]);
+
+export function isRetryableSourceError(errorType: string | undefined): boolean {
+  return errorType === undefined || !PERMANENT_SOURCE_ERRORS.has(errorType);
+}
+
+function activityErrorKind(errorType: string): SourceActivityError["kind"] {
+  if (errorType === "ActivityUnsupported") return "unsupported";
+  return isRetryableSourceError(errorType) ? "transient" : "permanent";
+}
+
 interface SourcesState {
   sources: Source[];
   sourceQueries: Record<string, any>;
   sourceInspections: Record<string, SourceInspection>;
   sourceActivities: Record<string, SourceActivity>;
-  sourceActivityErrors: Record<string, string>;
+  sourceActivityErrors: Record<string, SourceActivityError>;
   // The context's team sources and source details only. Keyed, so a value
   // never shows under another team or source while the context switches.
   sourcesByTeam: Record<number, Source[]>;
@@ -345,7 +359,10 @@ export const useSourcesStore = defineStore("sources", () => {
         onError: (error) => {
           state.data.value.sourceActivityErrors = {
             ...state.data.value.sourceActivityErrors,
-            [key]: error.message ?? "Recent activity unavailable",
+            [key]: {
+              message: error.message ?? i18n.global.t("sources.activityUnavailable"),
+              kind: activityErrorKind(error.error_type),
+            },
           };
         },
       })

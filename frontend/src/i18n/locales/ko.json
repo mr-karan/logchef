@@ -752,5 +752,15 @@
   "explore.timeoutChip": "시간 제한 {value}",
   "explore.fastFilterLead": "다음 필드로 필터하면 더 빠름",
   "explore.fastFilterTooltip": "이 테이블은 이 필드로 정렬되어 있어 필터하면 읽는 데이터가 크게 줄어듭니다.",
-  "explore.addFastFilter": "{field} 필터 추가"
+  "explore.addFastFilter": "{field} 필터 추가",
+  "inspection.engine": "엔진",
+  "inspection.parts": "파트",
+  "inspection.storageScope": "저장 공간 합계",
+  "inspection.localReplica": "연결된 로컬 복제본만 포함하며 전체 클러스터는 제외됩니다",
+  "inspection.months": "{count}개월",
+  "inspection.days": "{count}일",
+  "inspection.fieldCount": "필드 {count}개",
+  "inspection.activitySortKey": "정렬 키가 타임스탬프 필드로 시작하지 않아 최근 활동을 조회할 수 없습니다. 최근 행을 조회하려면 전체 테이블을 스캔해야 합니다.",
+  "inspection.copyQuery": "CREATE TABLE 복사",
+  "inspection.noRecentEvents": "지난 24시간 동안 이벤트가 없습니다."
 }

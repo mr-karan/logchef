@@ -38,7 +38,7 @@ import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
-import { copyText } from "./copyText";
+import { copyText } from "@/utils/clipboard";
 import { epochMs } from "@/utils/timeWindow";
 
 // Type alias for backwards compatibility

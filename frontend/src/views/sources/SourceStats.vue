@@ -2,13 +2,12 @@
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useToast } from '@/composables/useToast'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
+import { RefreshCw } from 'lucide-vue-next'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
-import { useSourcesStore } from '@/stores/sources'
+import { isRetryableSourceError, useSourcesStore } from '@/stores/sources'
 import { getSourceTypeLabel } from '@/lib/queryMetadata'
 import SourceInspectionOverview from './components/SourceInspectionOverview.vue'
 import SourceInspectionActivity from './components/SourceInspectionActivity.vue'
@@ -18,16 +17,25 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const sourcesStore = useSourcesStore()
-const { toast } = useToast()
 
 const selectedSourceId = ref<string>('')
-const failedInspectionSourceId = ref<string | null>(null)
+const failedInspection = ref<{ sourceId: string; retryable: boolean } | null>(null)
 
 const selectedSource = computed(() => {
   if (!selectedSourceId.value) {
     return null
   }
   return sourcesStore.visibleSources.find(source => source.id === Number(selectedSourceId.value)) ?? null
+})
+
+const sourceDescription = computed(() => {
+  const source = selectedSource.value
+  if (!source) return t('sources.inspectionDescription')
+  const connection = source.connection
+  const location = 'database' in connection && 'table_name' in connection
+    ? `${connection.database}.${connection.table_name}`
+    : 'base_url' in connection ? connection.base_url : ''
+  return [getSourceTypeLabel(source), location].filter(Boolean).join(' · ')
 })
 
 const inspection = computed(() => {
@@ -46,24 +54,24 @@ const activityError = computed(() => selectedSourceId.value ? sourcesStore.getSo
 const isLoadingActivity = computed(() => sourcesStore.isLoadingOperation(`getSourceActivity-${selectedSourceId.value}`))
 
 const inspectionError = computed(() => {
-  if (isLoadingInspection.value || inspection.value || failedInspectionSourceId.value !== selectedSourceId.value) {
+  if (isLoadingInspection.value || inspection.value || failedInspection.value?.sourceId !== selectedSourceId.value) {
     return null
   }
   return t('sources.inspectionLoadFailed')
 })
 
 async function loadSourceInspection(sourceId: string, refresh: boolean) {
-  failedInspectionSourceId.value = null
+  failedInspection.value = null
   const result = await sourcesStore.getSourceInspection(Number(sourceId), refresh)
   if (!result.success && sourceId === selectedSourceId.value) {
-    failedInspectionSourceId.value = sourceId
+    failedInspection.value = { sourceId, retryable: isRetryableSourceError(result.error?.error_type) }
   }
 }
 
 async function fetchSourceData(refresh = false) {
   if (!selectedSourceId.value) return
   await Promise.allSettled([
-    loadSourceInspection(selectedSourceId.value, false),
+    loadSourceInspection(selectedSourceId.value, refresh),
     sourcesStore.getSourceActivity(Number(selectedSourceId.value), refresh),
   ])
 }
@@ -73,14 +81,7 @@ async function fetchSourceActivity() {
 }
 
 async function fetchSourceInspection() {
-  if (!selectedSourceId.value) {
-    toast({
-      title: t('ui.error'),
-      description: t('sources.selectSourceFirst'),
-      variant: 'destructive',
-    })
-    return
-  }
+  if (!selectedSourceId.value) return
 
   await loadSourceInspection(selectedSourceId.value, true)
 }
@@ -136,69 +137,32 @@ watch(
 
 <template>
   <div class="space-y-6">
-    <Card>
-      <CardHeader>
-        <CardTitle>{{ t('sources.sourceInspection') }}</CardTitle>
-        <CardDescription>
-          {{ t('sources.inspectionDescription') }}
-        </CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-6">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-end">
-          <div class="space-y-2 flex-1">
-            <label for="source" class="block text-sm font-medium">{{ t('sources.selectSource') }}</label>
-            <Select v-model="selectedSourceId">
-              <SelectTrigger class="w-full">
-                <SelectValue :placeholder="t('sources.selectSource')" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="source in sourcesStore.visibleSources"
-                  :key="source.id"
-                  :value="String(source.id)"
-                >
-                  {{ source.name }} - {{ getSourceTypeLabel(source) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="flex items-center gap-2">
-            <Badge v-if="selectedSource" variant="outline">
-              {{ getSourceTypeLabel(selectedSource) }}
-            </Badge>
-            <Button @click="fetchSourceInspection" :disabled="isLoadingInspection">
-              <span v-if="isLoadingInspection">{{ t('sources.refreshing') }}</span>
-              <span v-else>{{ t('sources.refreshMetadata') }}</span>
-            </Button>
-          </div>
-        </div>
+    <PageHeader :title="selectedSource?.name || t('sources.sourceInspection')" :description="sourceDescription">
+      <template #actions>
+        <Select v-model="selectedSourceId">
+          <SelectTrigger class="w-52" :aria-label="t('sources.selectSource')">
+            <SelectValue :placeholder="t('sources.selectSource')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="source in sourcesStore.visibleSources" :key="source.id" :value="String(source.id)">
+              {{ source.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <Button variant="outline" :disabled="!selectedSourceId || isLoadingInspection || isLoadingActivity" @click="fetchSourceData(true)">
+          <RefreshCw class="size-4" :class="{ 'animate-spin': isLoadingInspection || isLoadingActivity }" />
+          {{ isLoadingInspection || isLoadingActivity ? t('sources.refreshing') : t('ui.refresh') }}
+        </Button>
+      </template>
+    </PageHeader>
 
-        <ErrorAlert
-          v-if="inspectionError"
-          :error="inspectionError"
-          :title="t('sources.inspectionLoadFailedTitle')"
-          @retry="fetchSourceInspection"
-        />
+    <ErrorAlert v-if="inspectionError" :error="inspectionError" :title="t('sources.inspectionLoadFailedTitle')" :retryable="failedInspection?.retryable ?? true" @retry="fetchSourceInspection" />
+    <LoadingState v-else-if="!inspection && isLoadingInspection" :label="t('ui.loading')" />
+    <EmptyState v-else-if="!inspection" :description="t('sources.selectSourceForInspection')" />
 
-        <div
-          v-else-if="!inspection && !isLoadingInspection"
-          class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
-        >
-          {{ t('sources.selectSourceForInspection') }}
-        </div>
-
-        <template v-else-if="inspection">
-          <SourceInspectionOverview
-            :details="inspection.details"
-            :storage="inspection.storage"
-          />
-          <SourceInspectionSchema
-            :source="selectedSource"
-            :schema="inspection.schema"
-          />
-        </template>
-        <SourceInspectionActivity v-if="selectedSourceId" :activity="activity" :loading="isLoadingActivity" :error="activityError" @retry="fetchSourceActivity" />
-      </CardContent>
-    </Card>
+    <SourceInspectionOverview v-if="selectedSourceId" :details="inspection?.details" :storage="inspection?.storage" :schema="inspection?.schema" :activity="activityError ? null : activity">
+      <SourceInspectionActivity :source="selectedSource" :activity="activity" :loading="isLoadingActivity" :error="activityError" @retry="fetchSourceActivity" />
+    </SourceInspectionOverview>
+    <SourceInspectionSchema v-if="inspection" :source="selectedSource" :schema="inspection.schema" />
   </div>
 </template>

@@ -752,5 +752,15 @@
   "explore.timeoutChip": "टाइमआउट {value}",
   "explore.fastFilterLead": "इन पर फ़िल्टर से तेज़",
   "explore.fastFilterTooltip": "यह टेबल इन फ़ील्ड से क्रमबद्ध है, इसलिए इन पर फ़िल्टर करने से बहुत कम डेटा पढ़ा जाता है।",
-  "explore.addFastFilter": "{field} फ़िल्टर जोड़ें"
+  "explore.addFastFilter": "{field} फ़िल्टर जोड़ें",
+  "inspection.engine": "इंजन",
+  "inspection.parts": "भाग",
+  "inspection.storageScope": "कुल संग्रहण",
+  "inspection.localReplica": "केवल जुड़े हुए स्थानीय रेप्लिका के आँकड़े, पूरे क्लस्टर के नहीं",
+  "inspection.months": "{count} महीना | {count} महीने",
+  "inspection.days": "{count} दिन | {count} दिन",
+  "inspection.fieldCount": "{count} फ़ील्ड | {count} फ़ील्ड",
+  "inspection.activitySortKey": "हाल की गतिविधि उपलब्ध नहीं है क्योंकि सॉर्ट कुंजी टाइमस्टैम्प फ़ील्ड से शुरू नहीं होती। हाल की पंक्तियों को खोजने के लिए पूरी तालिका स्कैन करनी पड़ेगी।",
+  "inspection.copyQuery": "CREATE TABLE कॉपी करें",
+  "inspection.noRecentEvents": "पिछले 24 घंटों में कोई इवेंट नहीं आया।"
 }
