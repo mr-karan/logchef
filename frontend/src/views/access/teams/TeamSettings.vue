@@ -366,7 +366,79 @@ watch(teamId, async (id, _previousId, onCleanup) => {
             </template>
         </EmptyState>
         <template v-else>
-            <PageHeader :title="team.name" :description="t('access.manageTeamDescription')" />
+            <PageHeader :title="team.name" :description="t('access.manageTeamDescription')">
+                <template v-if="activeTab === 'members'" #actions>
+                    <Dialog v-model:open="showAddMemberDialog">
+                        <DialogTrigger asChild>
+                            <Button>
+                                <UserPlus class="mr-2 h-4 w-4" />
+                                {{ t('access.addMember') }}
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>{{ t('access.addTeamMember') }}</DialogTitle>
+                                <DialogDescription>
+                                    {{ t('access.addTeamMemberDescription') }}
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div class="space-y-4 py-4">
+                                <div class="space-y-2">
+                                    <Label>{{ t('access.accountType') }}</Label>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <Button type="button" size="sm"
+                                            :variant="newMemberType === 'human' ? 'default' : 'outline'"
+                                            class="gap-2 justify-start"
+                                            @click="newMemberType = 'human'">
+                                            <User class="h-4 w-4" />
+                                            {{ t('access.humanUser') }}
+                                        </Button>
+                                        <Button type="button" size="sm"
+                                            :variant="newMemberType === 'service' ? 'default' : 'outline'"
+                                            class="gap-2 justify-start"
+                                            @click="newMemberType = 'service'">
+                                            <Bot class="h-4 w-4" />
+                                            {{ t('access.serviceAccount') }}
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div class="space-y-2">
+                                    <Label>{{ newMemberType === 'service' ? t('access.serviceAccount') : t('access.user') }}</Label>
+                                    <SearchableSelect
+                                        v-model="selectedUserId"
+                                        :items="userItems"
+                                        :placeholder="newMemberType === 'service' ? t('access.selectServiceAccount') : t('access.selectUser')"
+                                        :search-placeholder="newMemberType === 'service' ? t('access.searchServiceAccounts') : t('access.searchUsers')"
+                                        :empty-text="newMemberType === 'service' ? t('access.noServiceAccountsAvailable') : t('access.noUsersAvailable')" />
+                                </div>
+                                <div class="space-y-2">
+                                    <Label>{{ t('ui.role') }}</Label>
+                                    <Select v-model="newMemberRole">
+                                        <SelectTrigger>
+                                            <SelectValue :placeholder="t('access.selectRole')" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
+                                            <SelectItem value="editor">{{ t('access.roleEditor') }}</SelectItem>
+                                            <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" @click="showAddMemberDialog = false">
+                                    {{ t('ui.cancel') }}
+                                </Button>
+                                <Button :disabled="isSaving" @click="handleAddMember">
+                                    <Loader2 v-if="isSaving" class="mr-2 h-4 w-4 animate-spin" />
+                                    <Plus v-else class="mr-2 h-4 w-4" />
+                                    {{ t('access.addMember') }}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                </template>
+            </PageHeader>
 
             <!-- Tabs -->
             <Tabs v-model="activeTab" class="space-y-6">
@@ -377,155 +449,72 @@ watch(teamId, async (id, _previousId, onCleanup) => {
                 </TabsList>
 
                 <!-- Members Tab -->
-                <TabsContent value="members">
-                    <Card>
-                        <CardHeader>
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <CardTitle>{{ t('access.teamMembers') }}</CardTitle>
-                                    <CardDescription>
-                                        {{ t('access.manageTeamMembersDescription') }}
-                                    </CardDescription>
-                                </div>
-                                <Dialog v-model:open="showAddMemberDialog">
-                                    <DialogTrigger asChild>
-                                        <Button>
-                                            <UserPlus class="mr-2 h-4 w-4" />
-                                            {{ t('access.addMember') }}
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent>
-                                        <DialogHeader>
-                                            <DialogTitle>{{ t('access.addTeamMember') }}</DialogTitle>
-                                            <DialogDescription>
-                                                {{ t('access.addTeamMemberDescription') }}
-                                            </DialogDescription>
-                                        </DialogHeader>
-                                        <div class="space-y-4 py-4">
-                                            <div class="space-y-2">
-                                                <Label>{{ t('access.accountType') }}</Label>
-                                                <div class="grid grid-cols-2 gap-2">
-                                                    <Button type="button" size="sm"
-                                                        :variant="newMemberType === 'human' ? 'default' : 'outline'"
-                                                        class="gap-2 justify-start"
-                                                        @click="newMemberType = 'human'">
-                                                        <User class="h-4 w-4" />
-                                                        {{ t('access.humanUser') }}
-                                                    </Button>
-                                                    <Button type="button" size="sm"
-                                                        :variant="newMemberType === 'service' ? 'default' : 'outline'"
-                                                        class="gap-2 justify-start"
-                                                        @click="newMemberType = 'service'">
-                                                        <Bot class="h-4 w-4" />
-                                                        {{ t('access.serviceAccount') }}
-                                                    </Button>
-                                                </div>
+                <TabsContent value="members" class="space-y-4">
+                    <LoadingState v-if="teamsStore.isLoadingTeamMembers(teamId)" :label="t('access.loadingMembers')" />
+                    <EmptyState
+                        v-else-if="members.length === 0"
+                        :icon="Users"
+                        :title="t('access.noMembersFound')"
+                    />
+                    <div v-else class="space-y-3">
+                        <SearchInput v-model="memberSearch" :placeholder="t('access.searchMembers')" />
+                        <EmptyState
+                            v-if="sortedMembers.length === 0"
+                            :icon="Search"
+                            :title="t('access.noResults')"
+                            :description="t('access.noMembersMatch')"
+                        />
+                        <Table v-else>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>
+                                        <SortHeader column="name" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
+                                            {{ t('ui.email') }}
+                                        </SortHeader>
+                                    </TableHead>
+                                    <TableHead>
+                                        <SortHeader column="role" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
+                                            {{ t('ui.role') }}
+                                        </SortHeader>
+                                    </TableHead>
+                                    <TableHead>
+                                        <SortHeader column="added" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
+                                            {{ t('access.added') }}
+                                        </SortHeader>
+                                    </TableHead>
+                                    <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                <TableRow v-for="member in sortedMembers" :key="member.user_id">
+                                    <TableCell>
+                                        <div class="flex flex-col gap-1">
+                                            <div class="flex items-center gap-2">
+                                                <Bot v-if="member.account_type === 'service'" class="h-4 w-4 text-muted-foreground" />
+                                                <span class="font-medium">{{ member.full_name || member.email }}</span>
+                                                <Badge v-if="member.account_type === 'service'" variant="secondary" class="text-xs">
+                                                     {{ t('access.serviceAccount') }}
+                                                </Badge>
                                             </div>
-                                            <div class="space-y-2">
-                                                <Label>{{ newMemberType === 'service' ? t('access.serviceAccount') : t('access.user') }}</Label>
-                                                <SearchableSelect
-                                                    v-model="selectedUserId"
-                                                    :items="userItems"
-                                                    :placeholder="newMemberType === 'service' ? t('access.selectServiceAccount') : t('access.selectUser')"
-                                                    :search-placeholder="newMemberType === 'service' ? t('access.searchServiceAccounts') : t('access.searchUsers')"
-                                                    :empty-text="newMemberType === 'service' ? t('access.noServiceAccountsAvailable') : t('access.noUsersAvailable')" />
-                                            </div>
-                                            <div class="space-y-2">
-                                                <Label>{{ t('ui.role') }}</Label>
-                                                <Select v-model="newMemberRole">
-                                                    <SelectTrigger>
-                                                        <SelectValue :placeholder="t('access.selectRole')" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
-                                                        <SelectItem value="editor">{{ t('access.roleEditor') }}</SelectItem>
-                                                        <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
+                                            <span v-if="member.account_type !== 'service' && member.full_name"
+                                                class="text-sm text-muted-foreground">{{ member.email }}</span>
                                         </div>
-                                        <DialogFooter>
-                                            <Button variant="outline" @click="showAddMemberDialog = false">
-                                                {{ t('ui.cancel') }}
-                                            </Button>
-                                            <Button :disabled="isSaving" @click="handleAddMember">
-                                                <Loader2 v-if="isSaving" class="mr-2 h-4 w-4 animate-spin" />
-                                                <Plus v-else class="mr-2 h-4 w-4" />
-                                                {{ t('access.addMember') }}
-                                            </Button>
-                                        </DialogFooter>
-                                    </DialogContent>
-                                </Dialog>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            <LoadingState v-if="teamsStore.isLoadingTeamMembers(teamId)" :label="t('access.loadingMembers')" />
-                            <EmptyState
-                                v-else-if="members.length === 0"
-                                :icon="Users"
-                                :title="t('access.noMembersFound')"
-                            />
-                            <div v-else class="space-y-3">
-                                <SearchInput v-model="memberSearch" :placeholder="t('access.searchMembers')" />
-                            <EmptyState
-                                v-if="sortedMembers.length === 0"
-                                :icon="Search"
-                                :title="t('access.noResults')"
-                                :description="t('access.noMembersMatch')"
-                            />
-                            <Table v-else>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>
-                                            <SortHeader column="name" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
-                                                {{ t('ui.email') }}
-                                            </SortHeader>
-                                        </TableHead>
-                                        <TableHead>
-                                            <SortHeader column="role" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
-                                                {{ t('ui.role') }}
-                                            </SortHeader>
-                                        </TableHead>
-                                        <TableHead>
-                                            <SortHeader column="added" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
-                                                {{ t('access.added') }}
-                                            </SortHeader>
-                                        </TableHead>
-                                        <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    <TableRow v-for="member in sortedMembers" :key="member.user_id">
-                                        <TableCell>
-                                            <div class="flex flex-col gap-1">
-                                                <div class="flex items-center gap-2">
-                                                    <Bot v-if="member.account_type === 'service'" class="h-4 w-4 text-muted-foreground" />
-                                                    <span class="font-medium">{{ member.full_name || member.email }}</span>
-                                                    <Badge v-if="member.account_type === 'service'" variant="secondary" class="text-xs">
-                                                         {{ t('access.serviceAccount') }}
-                                                    </Badge>
-                                                </div>
-                                                <span v-if="member.account_type !== 'service' && member.full_name"
-                                                    class="text-sm text-muted-foreground">{{ member.email }}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell>{{ translateRole(member.role) }}</TableCell>
-                                        <TableCell>{{ formatDate(member.created_at) }}</TableCell>
-                                        <TableCell class="text-right">
-                                            <Button variant="ghost" size="icon"
-                                                class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                                :title="t('access.removeMember')" :disabled="isSaving"
-                                                @click="askRemoveMember(member)">
-                                                <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" />
-                                                <Trash2 v-else class="h-4 w-4" />
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                </TableBody>
-                            </Table>
-                            </div>
-                        </CardContent>
-                    </Card>
+                                    </TableCell>
+                                    <TableCell>{{ translateRole(member.role) }}</TableCell>
+                                    <TableCell>{{ formatDate(member.created_at) }}</TableCell>
+                                    <TableCell class="text-right">
+                                        <Button variant="ghost" size="icon"
+                                            class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                            :title="t('access.removeMember')" :disabled="isSaving"
+                                            @click="askRemoveMember(member)">
+                                            <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" />
+                                            <Trash2 v-else class="h-4 w-4" />
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
+                            </TableBody>
+                        </Table>
+                    </div>
                 </TabsContent>
 
                 <!-- Sources Tab -->

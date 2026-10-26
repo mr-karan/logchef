@@ -684,6 +684,8 @@
   "alerts.templates.errorMessages": "त्रुटि संदेश",
   "alerts.templates.errorMessagesHelp": "'error' वाले संदेश मिलाएँ।",
   "common.copyName": "{name} (कॉपी)",
+  "sourceForm.editTitle": "{name} संपादित करें",
+  "sourceForm.backToSources": "स्रोतों पर वापस जाएँ",
   "ui.gridView": "ग्रिड व्यू",
   "ui.listView": "लिस्ट व्यू",
   "dashboards.panels": "पैनल",
@@ -745,5 +747,10 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "डिलीवरी बाधित हुई",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
+  "ui.activateUser": "{name} को सक्रिय करें",
+  "ui.deactivateUser": "{name} को निष्क्रिय करें",
+  "alerts.addWebhook": "वेबहुक जोड़ें",
+  "ui.showSettingValue": "{key} का मान दिखाएँ",
+  "ui.hideSettingValue": "{key} का मान छिपाएँ"
 }

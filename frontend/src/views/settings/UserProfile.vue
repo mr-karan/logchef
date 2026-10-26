@@ -201,7 +201,7 @@ const closeTokenDisplay = () => {
             <template #actions>
                 <Dialog v-model:open="showCreateTokenDialog">
                             <DialogTrigger asChild>
-                                <Button class="flex items-center gap-2">
+                                <Button variant="outline" class="flex items-center gap-2">
                                     <Plus class="h-4 w-4" />
                                     {{ t('ui.generateToken') }}
                                 </Button>

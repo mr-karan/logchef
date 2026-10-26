@@ -684,6 +684,8 @@
   "alerts.templates.errorMessages": "エラーメッセージ",
   "alerts.templates.errorMessagesHelp": "「error」を含むメッセージに一致します。",
   "common.copyName": "{name}（コピー）",
+  "sourceForm.editTitle": "{name} を編集",
+  "sourceForm.backToSources": "ソース一覧に戻る",
   "ui.gridView": "グリッド表示",
   "ui.listView": "リスト表示",
   "dashboards.panels": "パネル",
@@ -745,5 +747,10 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "配信が中断されました",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
+  "ui.activateUser": "{name}を有効にする",
+  "ui.deactivateUser": "{name}を無効にする",
+  "alerts.addWebhook": "Webhookを追加",
+  "ui.showSettingValue": "{key}の値を表示",
+  "ui.hideSettingValue": "{key}の値を非表示"
 }

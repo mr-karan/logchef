@@ -684,6 +684,8 @@
   "alerts.templates.errorMessages": "Fehlermeldungen",
   "alerts.templates.errorMessagesHelp": "Nachrichten mit 'error' finden.",
   "common.copyName": "{name} (Kopie)",
+  "sourceForm.editTitle": "{name} bearbeiten",
+  "sourceForm.backToSources": "Zurück zu den Datenquellen",
   "ui.gridView": "Rasteransicht",
   "ui.listView": "Listenansicht",
   "dashboards.panels": "Panels",
@@ -745,5 +747,10 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "Zustellung unterbrochen",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
+  "ui.activateUser": "{name} aktivieren",
+  "ui.deactivateUser": "{name} deaktivieren",
+  "alerts.addWebhook": "Webhook hinzufügen",
+  "ui.showSettingValue": "Wert für {key} anzeigen",
+  "ui.hideSettingValue": "Wert für {key} ausblenden"
 }

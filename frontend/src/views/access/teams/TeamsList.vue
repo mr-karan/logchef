@@ -187,7 +187,8 @@ onMounted(() => {
                                 </router-link>
                             </TableCell>
                             <TableCell>
-                                <span class="line-clamp-1">{{ team.description || t('access.noDescription') }}</span>
+                                <span v-if="team.description" class="line-clamp-1">{{ team.description }}</span>
+                                <span v-else class="text-muted-foreground">–</span>
                             </TableCell>
                             <TableCell>{{ team.memberCount }}</TableCell>
                             <TableCell>{{ formatDate(team.created_at) }}</TableCell>

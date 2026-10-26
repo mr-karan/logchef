@@ -684,6 +684,8 @@
   "alerts.templates.errorMessages": "오류 메시지",
   "alerts.templates.errorMessagesHelp": "'error'가 포함된 메시지를 찾습니다.",
   "common.copyName": "{name} (사본)",
+  "sourceForm.editTitle": "{name} 편집",
+  "sourceForm.backToSources": "소스 목록으로 돌아가기",
   "ui.gridView": "그리드 보기",
   "ui.listView": "목록 보기",
   "dashboards.panels": "패널",
@@ -745,5 +747,10 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "전송 중단",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
+  "ui.activateUser": "{name} 활성화",
+  "ui.deactivateUser": "{name} 비활성화",
+  "alerts.addWebhook": "웹훅 추가",
+  "ui.showSettingValue": "{key} 값 표시",
+  "ui.hideSettingValue": "{key} 값 숨기기"
 }

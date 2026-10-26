@@ -144,7 +144,7 @@ function handleClose() {
                 {{ form.is_active ? t('ui.thisAlertWillEvaluateOnSchedule') : t('ui.disabledAlertsAreSkippedUntilReEnabled') }}
               </p>
             </div>
-            <Switch :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
+            <Switch :aria-label="form.is_active ? t('ui.disableAlert') : t('ui.enableAlert')" :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
           </div>
         </section>
 
@@ -212,7 +212,7 @@ function handleClose() {
             {{ form.is_active ? t('ui.thisAlertWillEvaluateOnSchedule') : t('ui.disabledAlertsAreSkippedUntilReEnabled') }}
           </p>
         </div>
-        <Switch :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
+        <Switch :aria-label="form.is_active ? t('ui.disableAlert') : t('ui.enableAlert')" :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
       </div>
     </section>
 
