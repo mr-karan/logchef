@@ -1,126 +1,85 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { refAutoReset } from '@vueuse/core'
+import { ChevronDown, Copy, Check } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { PageSection } from '@/components/layout'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { Source, SourceSchemaInspection } from '@/api/sources'
-import { buildSourceFieldGroups, classifySourceField } from '@/lib/sourceFields'
+import { classifySourceField } from '@/lib/sourceFields'
+import { useToast } from '@/composables/useToast'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps<{
   source?: Pick<Source, 'source_type' | '_meta_ts_field' | '_meta_severity_field'> | null
   schema?: SourceSchemaInspection | null
 }>()
-
-const schemaFields = computed(() => props.schema?.fields ?? [])
 const { t } = useI18n()
-
-const groupedFields = computed(() => buildSourceFieldGroups(schemaFields.value, props.source))
-
-const groupLabelById = computed(() => {
-  return new Map(groupedFields.value.map(group => [group.id, group.label]))
-})
-
-const sortKeys = computed(() => props.schema?.sort_keys ?? [])
-
-const hasFieldStorageMetrics = computed(() =>
-  schemaFields.value.some(field =>
-    !!field.compressed ||
-    !!field.uncompressed ||
-    field.compression_ratio !== undefined ||
-    field.avg_row_size !== undefined ||
-    field.row_count !== undefined,
-  ),
-)
+const { toast } = useToast()
+const schemaFields = computed(() => props.schema?.fields ?? [])
+const hasDefaults = computed(() => schemaFields.value.some(field => field.default_expression))
+const hasComments = computed(() => schemaFields.value.some(field => field.comment))
+const copied = refAutoReset(false, 1500)
+async function copyCreateQuery() {
+  if (!props.schema?.create_query) return
+  try {
+    await copyText(props.schema.create_query)
+    copied.value = true
+  } catch {
+    toast({ title: t('pages.copyFailed'), variant: 'destructive' })
+  }
+}
 </script>
 
 <template>
-  <Card v-if="props.schema && schemaFields.length > 0">
-    <CardHeader>
-      <CardTitle>{{ t('sources.schema') }}</CardTitle>
-      <CardDescription>
-        {{ t('sources.schemaDescription') }}
-      </CardDescription>
-    </CardHeader>
-    <CardContent class="space-y-6">
-      <div class="flex flex-wrap gap-2">
-        <Badge
-          v-for="group in groupedFields"
-          :key="group.id"
-          variant="secondary"
-          class="gap-1 px-2 py-1"
-        >
-          <span>{{ group.label }}</span>
-          <span class="text-xs text-muted-foreground">{{ group.fields.length }}</span>
-        </Badge>
-      </div>
-
-        <div v-if="sortKeys.length > 0 || props.schema.ttl" class="grid gap-3 lg:grid-cols-2">
-        <div v-if="sortKeys.length > 0" class="rounded-md border bg-muted/30 p-3">
-          <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('sources.sortKeys') }}</div>
-          <div class="mt-1 font-mono text-sm break-all">
-            {{ sortKeys.join(', ') }}
-          </div>
-        </div>
-        <div v-if="props.schema.ttl" class="rounded-md border bg-muted/30 p-3">
-          <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('sources.ttl') }}</div>
-          <div class="mt-1 font-mono text-sm break-all">
-            {{ props.schema.ttl }}
-          </div>
-        </div>
-      </div>
-
-      <div v-if="props.schema.create_query" class="rounded-md border bg-muted/30 p-3">
-        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('sources.createQuery') }}</div>
-        <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs">{{ props.schema.create_query }}</pre>
-      </div>
-
+  <div v-if="schema" class="space-y-6">
+    <PageSection v-if="schemaFields.length" :title="t('sources.schema')" flush>
+      <template #actions>
+        <span class="text-sm text-muted-foreground">{{ t('inspection.fieldCount', { count: schemaFields.length }, schemaFields.length) }}</span>
+      </template>
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>{{ t('sources.field') }}</TableHead>
             <TableHead>{{ t('sources.type') }}</TableHead>
             <TableHead>{{ t('ui.role') }}</TableHead>
-            <TableHead>{{ t('sources.nullable') }}</TableHead>
-            <TableHead>{{ t('sources.primaryKey') }}</TableHead>
-            <TableHead>{{ t('sources.default') }}</TableHead>
-            <TableHead>{{ t('sources.comment') }}</TableHead>
-            <template v-if="hasFieldStorageMetrics">
-              <TableHead>{{ t('sources.rows') }}</TableHead>
-              <TableHead>{{ t('sources.compressed') }}</TableHead>
-              <TableHead>{{ t('sources.uncompressed') }}</TableHead>
-              <TableHead>{{ t('sources.ratio') }}</TableHead>
-              <TableHead>{{ t('sources.averageRowSize') }}</TableHead>
-            </template>
+            <TableHead v-if="hasDefaults">{{ t('sources.default') }}</TableHead>
+            <TableHead v-if="hasComments">{{ t('sources.comment') }}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow v-for="field in schemaFields" :key="field.name">
-            <TableCell class="font-medium">{{ field.name }}</TableCell>
-            <TableCell class="font-mono text-xs">{{ field.type }}</TableCell>
             <TableCell>
-              <Badge variant="outline">
-                {{ groupLabelById.get(classifySourceField(props.source, field)) }}
-              </Badge>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-mono text-xs font-medium">{{ field.name }}</span>
+                <Badge v-if="field.is_primary_key" variant="secondary" class="text-[10px]">{{ t('sources.primaryKey') }}</Badge>
+                <Badge v-if="field.is_nullable" variant="outline" class="text-[10px]">{{ t('sources.nullable') }}</Badge>
+              </div>
             </TableCell>
-            <TableCell>{{ field.is_nullable === undefined ? '–' : field.is_nullable ? t('sources.yes') : t('sources.no') }}</TableCell>
-            <TableCell>{{ field.is_primary_key === undefined ? '–' : field.is_primary_key ? t('sources.yes') : t('sources.no') }}</TableCell>
-            <TableCell class="text-xs">{{ field.default_expression || '–' }}</TableCell>
-            <TableCell class="text-xs">{{ field.comment || '–' }}</TableCell>
-            <template v-if="hasFieldStorageMetrics">
-              <TableCell class="text-xs">{{ field.row_count === undefined ? '–' : field.row_count.toLocaleString() }}</TableCell>
-              <TableCell class="text-xs">{{ field.compressed || '–' }}</TableCell>
-              <TableCell class="text-xs">{{ field.uncompressed || '–' }}</TableCell>
-              <TableCell class="text-xs">
-                {{ field.compression_ratio === undefined ? '–' : `${field.compression_ratio.toFixed(2)}x` }}
-              </TableCell>
-              <TableCell class="text-xs">
-                {{ field.avg_row_size === undefined ? '–' : `${field.avg_row_size.toFixed(2)} bytes` }}
-              </TableCell>
-            </template>
+            <TableCell class="font-mono text-xs">{{ field.type }}</TableCell>
+            <TableCell class="text-xs text-muted-foreground">{{ t(`fields.${classifySourceField(source, field)}.label`) }}</TableCell>
+            <TableCell v-if="hasDefaults" class="font-mono text-xs">{{ field.default_expression }}</TableCell>
+            <TableCell v-if="hasComments" class="text-xs">{{ field.comment }}</TableCell>
           </TableRow>
         </TableBody>
       </Table>
-    </CardContent>
-  </Card>
+    </PageSection>
+    <details v-if="schema.create_query" class="group rounded-md border">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        {{ t('sources.createQuery') }}
+        <ChevronDown class="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="space-y-2 border-t bg-muted/30 p-4">
+        <div class="flex justify-end">
+          <Button variant="outline" size="sm" :aria-label="t('inspection.copyQuery')" @click="copyCreateQuery">
+            <Check v-if="copied" class="size-3.5" /><Copy v-else class="size-3.5" />
+            {{ copied ? t('pages.copied') : t('pages.copy') }}
+          </Button>
+        </div>
+        <pre class="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs leading-relaxed">{{ schema.create_query }}</pre>
+      </div>
+    </details>
+  </div>
 </template>

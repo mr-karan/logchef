@@ -752,5 +752,15 @@
   "explore.timeoutChip": "Tiempo límite {value}",
   "explore.fastFilterLead": "Más rápido con un filtro en",
   "explore.fastFilterTooltip": "La tabla está ordenada por estos campos, así que filtrar por ellos lee muchos menos datos.",
-  "explore.addFastFilter": "Añadir un filtro de {field}"
+  "explore.addFastFilter": "Añadir un filtro de {field}",
+  "inspection.engine": "Motor",
+  "inspection.parts": "Partes",
+  "inspection.storageScope": "Totales de almacenamiento",
+  "inspection.localReplica": "Solo la réplica local conectada, no todo el clúster",
+  "inspection.months": "{count} mes | {count} meses",
+  "inspection.days": "{count} día | {count} días",
+  "inspection.fieldCount": "{count} campo | {count} campos",
+  "inspection.activitySortKey": "La actividad reciente no está disponible porque la clave de ordenación no empieza por el campo de fecha y hora. Consultar las filas recientes requeriría un recorrido completo de la tabla.",
+  "inspection.copyQuery": "Copiar CREATE TABLE",
+  "inspection.noRecentEvents": "No hay eventos en las últimas 24 horas."
 }

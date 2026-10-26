@@ -177,17 +177,21 @@ func (s *Server) handleGetSourceStats(c fiber.Ctx) error {
 		inspection, err = core.InspectSource(c.Context(), s.datasources, sourceID)
 	}
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendError(c, fiber.StatusNotFound, "Source not found when getting inspection")
-		}
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Source inspection is not supported for this source type yet", models.ValidationErrorType)
-		}
-		s.log.Error("failed to get source inspection", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error getting source inspection", models.ExternalServiceErrorType)
+		return s.sendSourceInspectionError(c, sourceID, err)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, inspection)
+}
+
+func (s *Server) sendSourceInspectionError(c fiber.Ctx, sourceID models.SourceID, err error) error {
+	if errors.Is(err, core.ErrSourceNotFound) {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found when getting inspection", models.NotFoundErrorType)
+	}
+	if errors.Is(err, datasource.ErrOperationNotSupported) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Source inspection is not supported for this source type yet", models.ValidationErrorType)
+	}
+	s.log.Error("failed to get source inspection", "error", err, "source_id", sourceID)
+	return SendErrorWithType(c, fiber.StatusInternalServerError, "Error getting source inspection", models.ExternalServiceErrorType)
 }
 
 func (s *Server) handleGetSourceActivity(c fiber.Ctx) error {
@@ -220,13 +224,13 @@ func (s *Server) sendSourceActivity(c fiber.Ctx, sourceID models.SourceID, activ
 		return SendSuccess(c, fiber.StatusOK, activity)
 	}
 	if errors.Is(err, core.ErrSourceNotFound) {
-		return SendError(c, fiber.StatusNotFound, "Source not found")
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return SendError(c, fiber.StatusGatewayTimeout, "Recent activity timed out")
 	}
 	if errors.Is(err, datasource.ErrSourceActivityUnavailable) || errors.Is(err, datasource.ErrOperationNotSupported) {
-		return SendError(c, fiber.StatusServiceUnavailable, "Recent activity unavailable")
+		return SendErrorWithType(c, fiber.StatusServiceUnavailable, "Recent activity unavailable", models.ActivityUnsupportedErrorType)
 	}
 	s.log.Error("failed to get source activity", "error", err, "source_id", sourceID)
 	return SendError(c, fiber.StatusInternalServerError, "Error getting recent activity")

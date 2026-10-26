@@ -6,10 +6,6 @@ vi.mock("@/components/visualizations/SourceSparkline.vue", () => ({
   default: { template: "<div class='sparkline-stub' />" },
 }));
 
-vi.mock("@/utils/format", () => ({
-  formatDate: () => "Formatted timestamp",
-}));
-
 import SourceInspectionActivity from "@/views/sources/components/SourceInspectionActivity.vue";
 
 let host: HTMLDivElement | null = null;
@@ -44,18 +40,18 @@ describe("SourceInspectionActivity", () => {
   });
 
   it("renders explicit timeout and unavailable errors", async () => {
-    const timeoutRoot = await render({ error: "Activity request timed out" });
+    const timeoutRoot = await render({ error: { message: "Activity request timed out", kind: "transient" } });
     expect(timeoutRoot.textContent).toContain("Activity request timed out");
 
     unmount?.();
     timeoutRoot.remove();
-    const unavailableRoot = await render({ error: "Recent activity unavailable" });
+    const unavailableRoot = await render({ error: { message: "Recent activity unavailable", kind: "transient" } });
     expect(unavailableRoot.textContent).toContain("Recent activity unavailable");
   });
 
   it("emits retry when an error retry button is clicked", async () => {
     let retries = 0;
-    const root = await render({ error: "Activity request timed out" }, () => {
+    const root = await render({ error: { message: "Activity request timed out", kind: "transient" } }, () => {
       retries++;
     });
 
@@ -63,7 +59,7 @@ describe("SourceInspectionActivity", () => {
     expect(retries).toBe(1);
   });
 
-  it("renders successful activity values and refreshes", async () => {
+  it("renders the full-width activity chart with the day total", async () => {
     let retries = 0;
     const root = await render(
       {
@@ -79,13 +75,34 @@ describe("SourceInspectionActivity", () => {
       },
     );
 
-    expect(root.textContent).toContain("1,234");
     expect(root.textContent).toContain("5,678");
-    expect(root.textContent).toContain("Formatted timestamp");
     expect(root.querySelector(".sparkline-stub")).not.toBeNull();
+    expect(root.querySelector("button")).toBeNull();
+    expect(retries).toBe(0);
+  });
 
-    const title = i18n.global.t("sources.refreshRecentActivity");
-    root.querySelector<HTMLButtonElement>(`button[title='${title}']`)?.click();
-    expect(retries).toBe(1);
+  it("explains an empty day instead of rendering a blank chart", async () => {
+    const root = await render({ activity: { rows_1h: 0, rows_24h: 0, latest_ts: null, hourly_buckets: [] } });
+    expect(root.textContent).toContain(i18n.global.t("inspection.noRecentEvents"));
+    expect(root.querySelector(".sparkline-stub")).toBeNull();
+  });
+
+  it("keeps Retry for a ClickHouse failure the backend did not mark unsupported", async () => {
+    const root = await render({ source: { source_type: "clickhouse" }, error: { message: "Service Unavailable", kind: "transient" } });
+    expect(root.textContent).not.toContain("sort key");
+    expect(buttonWithText(root, "Retry")).toBeDefined();
+  });
+
+  it("shows a permanent failure without Retry", async () => {
+    const root = await render({ error: { message: "Source not found", kind: "permanent" } });
+    expect(root.textContent).toContain("Source not found");
+    expect(buttonWithText(root, "Retry")).toBeUndefined();
+  });
+
+  it("does not offer Retry or a ClickHouse explanation for an unsupported VictoriaLogs source", async () => {
+    const root = await render({ source: { source_type: "victorialogs" }, error: { message: "Recent activity unavailable", kind: "unsupported" } });
+    expect(root.textContent).toContain(i18n.global.t("sources.activityUnavailable"));
+    expect(root.textContent).not.toContain("sort key");
+    expect(buttonWithText(root, "Retry")).toBeUndefined();
   });
 });

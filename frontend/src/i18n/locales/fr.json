@@ -752,5 +752,15 @@
   "explore.timeoutChip": "Délai {value}",
   "explore.fastFilterLead": "Plus rapide avec un filtre sur",
   "explore.fastFilterTooltip": "La table est triée par ces champs : filtrer dessus lit beaucoup moins de données.",
-  "explore.addFastFilter": "Ajouter un filtre sur {field}"
+  "explore.addFastFilter": "Ajouter un filtre sur {field}",
+  "inspection.engine": "Moteur",
+  "inspection.parts": "Parties",
+  "inspection.storageScope": "Totaux du stockage",
+  "inspection.localReplica": "Uniquement la réplique locale connectée, pas tout le cluster",
+  "inspection.months": "{count} mois | {count} mois",
+  "inspection.days": "{count} jour | {count} jours",
+  "inspection.fieldCount": "{count} champ | {count} champs",
+  "inspection.activitySortKey": "L’activité récente est indisponible car la clé de tri ne commence pas par le champ d’horodatage. La requête nécessiterait de parcourir toute la table.",
+  "inspection.copyQuery": "Copier CREATE TABLE",
+  "inspection.noRecentEvents": "Aucun événement au cours des dernières 24 heures."
 }

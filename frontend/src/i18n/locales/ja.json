@@ -752,5 +752,15 @@
   "explore.timeoutChip": "タイムアウト {value}",
   "explore.fastFilterLead": "次のフィルターで高速化",
   "explore.fastFilterTooltip": "このテーブルはこれらのフィールドでソートされているため、絞り込むと読み取るデータが大幅に減ります。",
-  "explore.addFastFilter": "{field} のフィルターを追加"
+  "explore.addFastFilter": "{field} のフィルターを追加",
+  "inspection.engine": "エンジン",
+  "inspection.parts": "パーツ",
+  "inspection.storageScope": "ストレージ合計",
+  "inspection.localReplica": "接続先のローカルレプリカのみ。クラスター全体ではありません",
+  "inspection.months": "{count}か月",
+  "inspection.days": "{count}日",
+  "inspection.fieldCount": "{count}フィールド",
+  "inspection.activitySortKey": "ソートキーがタイムスタンプフィールドで始まらないため、最近のアクティビティは取得できません。最近の行を取得するには、テーブル全体のスキャンが必要です。",
+  "inspection.copyQuery": "CREATE TABLE をコピー",
+  "inspection.noRecentEvents": "過去24時間にイベントはありません。"
 }

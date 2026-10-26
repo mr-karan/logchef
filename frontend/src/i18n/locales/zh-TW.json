@@ -752,5 +752,15 @@
   "explore.timeoutChip": "逾時 {value}",
   "explore.fastFilterLead": "依以下欄位篩選更快",
   "explore.fastFilterTooltip": "此資料表依這些欄位排序，依它們篩選可大幅減少讀取的資料。",
-  "explore.addFastFilter": "新增 {field} 篩選條件"
+  "explore.addFastFilter": "新增 {field} 篩選條件",
+  "inspection.engine": "引擎",
+  "inspection.parts": "資料分片",
+  "inspection.storageScope": "儲存總量",
+  "inspection.localReplica": "僅統計已連線的本機副本，不代表整個叢集",
+  "inspection.months": "{count} 個月",
+  "inspection.days": "{count} 天",
+  "inspection.fieldCount": "{count} 個欄位",
+  "inspection.activitySortKey": "排序鍵並非以時間戳記欄位開頭，因此無法取得近期活動。查詢最近的資料需要掃描整張資料表。",
+  "inspection.copyQuery": "複製 CREATE TABLE",
+  "inspection.noRecentEvents": "過去 24 小時內沒有事件。"
 }
