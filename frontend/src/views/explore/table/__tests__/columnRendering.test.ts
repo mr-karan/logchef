@@ -3,6 +3,7 @@ import { i18n } from '@/i18n'
 import { createPinia } from 'pinia'
 import { expect, it } from 'vitest'
 import DataTable from '../data-table.vue'
+import { createColumns } from '../columns'
 
 it('updates literal highlights and query markers without changing columns', async () => {
   const state = reactive<{
@@ -50,4 +51,12 @@ it('updates literal highlights and query markers without changing columns', asyn
     app.unmount()
     host.remove()
   }
+})
+
+it('defaults every column wide enough to show its name', () => {
+  const names = ['timestamp', 'severity_text', 'host', 'kubernetes_namespace_name']
+  const columns = createColumns(names.map(name => ({ name, type: 'String' })), 'timestamp', 'utc', 'severity_text')
+  // 14px header text runs about 7px per character, plus 8px padding on each side.
+  expect(columns.map(column => [column.id, (column.size ?? 0) >= (column.id ?? '').length * 7 + 16]))
+    .toEqual(names.map(name => [name, true]))
 })

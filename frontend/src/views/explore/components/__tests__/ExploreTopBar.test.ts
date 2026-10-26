@@ -1,9 +1,10 @@
-import { createApp } from "vue";
+import { createApp, nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import { sourcesApi, type Source } from "@/api/sources";
 import { useExploreStore } from "@/stores/explore";
+import { usePreferencesStore } from "@/stores/preferences";
 import ExploreTopBar from "../ExploreTopBar.vue";
 
 const shownSource: Source = {
@@ -50,5 +51,59 @@ it.each([
     host.remove();
     if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
     else Reflect.deleteProperty(navigator, "clipboard");
+  }
+});
+
+it("switches the timezone while native SQL owns the time range", async () => {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  useExploreStore().open({ teamId: 1, sourceId: 3, content: {
+    kind: "query", mode: "native", text: "SELECT 1", window: { kind: "relative", spec: "1h" }, limit: 100,
+  } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const app = createApp(ExploreTopBar, {
+    selection: { teamId: 1, sourceId: 3 },
+    availableTeams: [], availableSources: [], selectedSource: shownSource,
+  }).use(pinia).use(i18n);
+  app.mount(host);
+  try {
+    const buttons = [...host.querySelectorAll("button")];
+    expect(buttons.find(b => b.querySelector("svg.lucide-clock"))?.disabled).toBe(true);
+    buttons.find(b => b.textContent?.trim() === "UTC")?.click();
+    await nextTick();
+    expect(usePreferencesStore().preferences.timezone).toBe("utc");
+  } finally {
+    app.unmount();
+    host.remove();
+  }
+});
+
+it.each([
+  { trigger: "ui.resultLimit", selected: "100 rows" },
+  { trigger: "ui.queryTimeout", selected: "30s" },
+])("announces the selected value in the $trigger menu", async ({ trigger, selected }) => {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  useExploreStore().open({ teamId: 1, sourceId: 3, content: {
+    kind: "query", mode: "logchefql", text: "", window: { kind: "relative", spec: "1h" }, limit: 100,
+  } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const app = createApp(ExploreTopBar, {
+    selection: { teamId: 1, sourceId: 3 },
+    availableTeams: [], availableSources: [], selectedSource: shownSource,
+  }).use(pinia).use(i18n);
+  app.mount(host);
+  try {
+    const button = host.querySelector<HTMLButtonElement>(`button[title="${i18n.global.t(trigger)}"]`);
+    expect(button).toBeTruthy();
+    button?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[role=menu]")).not.toBeNull());
+    const checked = [...document.querySelectorAll("[role=menuitemradio][aria-checked=true]")].map(item => item.textContent?.trim());
+    expect(checked).toEqual([selected]);
+  } finally {
+    app.unmount();
+    host.remove();
   }
 });

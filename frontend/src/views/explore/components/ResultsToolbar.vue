@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n";
 
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Braces, Share2 } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Rows4, TerminalSquare, Download, Braces, Zap } from 'lucide-vue-next'
 import { useExploreRuns } from '@/stores/exploreRuns'
 import GroupBySelector from './GroupBySelector.vue'
 import StreamPicker from './StreamPicker.vue'
@@ -32,16 +32,17 @@ interface Props {
   isLoading?: boolean
   isExporting?: boolean
   canExport?: boolean
+  fastFilterFields?: string[]
+  canAddFastFilter?: boolean
 }
 
-defineProps<Props>()
+withDefaults(defineProps<Props>(), { fastFilterFields: () => [], canAddFastFilter: false })
 
 const emit = defineEmits<{
   (e: 'toggle-histogram'): void
   (e: 'update:displayMode', mode: 'table' | 'compact' | 'json'): void
   (e: 'export'): void
-  (e: 'share'): void
-  (e: 'copy-cli'): void
+  (e: 'add-fast-filter', field: string): void
 }>()
 
 const runs = useExploreRuns()
@@ -72,7 +73,7 @@ const warningText = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-center justify-between h-9 px-3 bg-muted/30 border-b text-xs">
+  <div class="flex items-center justify-between h-8 px-3 bg-muted/30 border-b text-xs">
     <!-- Left: Histogram toggle + Stats -->
     <div class="flex items-center gap-3">
       <StreamPicker />
@@ -98,11 +99,29 @@ const warningText = computed(() => {
           <span>{{ t('ui.logs') }}</span>
           <template v-if="formattedQueryTime">
             <span class="text-muted-foreground/50">•</span>
-            <span>{{ formattedQueryTime }}</span>
+            <span :title="t('pages.queryTimeTooltip', { duration: formattedQueryTime })">{{ formattedQueryTime }}</span>
           </template>
           <template v-if="warningText">
             <span class="text-muted-foreground/50">•</span>
             <span class="text-amber-600 dark:text-amber-400">{{ warningText }}</span>
+          </template>
+          <template v-if="fastFilterFields.length">
+            <span class="text-muted-foreground/50">•</span>
+            <span class="inline-flex items-center gap-1 text-muted-foreground" :title="t('explore.fastFilterTooltip')">
+              <Zap class="h-3 w-3 text-amber-500" aria-hidden="true" />
+              <span>{{ t('explore.fastFilterLead') }}</span>
+              <template v-for="(field, idx) in fastFilterFields" :key="field">
+                <button
+                  v-if="canAddFastFilter"
+                  type="button"
+                  class="rounded bg-muted px-1 font-mono text-foreground/80 hover:bg-primary/10 hover:text-primary"
+                  :aria-label="t('explore.addFastFilter', { field })"
+                  @click="emit('add-fast-filter', field)"
+                >{{ field }}</button>
+                <code v-else class="rounded bg-muted px-1 text-foreground/80">{{ field }}</code>
+                <span v-if="idx < fastFilterFields.length - 1">,</span>
+              </template>
+            </span>
           </template>
         </template>
       </div>
@@ -114,48 +133,8 @@ const warningText = computed(() => {
     </div>
     <div v-else />
 
-    <!-- Right: Share + Export + View Toggles -->
+    <!-- Right: Export + View Toggles -->
     <div class="flex items-center gap-1">
-      <!-- Share Button -->
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-7 w-7 p-0"
-              @click="emit('share')"
-              :disabled="isLoading"
-            >
-              <Share2 class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class='text-xs'>{{ t('ui.shareQuery') }}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      <!-- CLI Button -->
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-7 w-7 p-0"
-              @click="emit('copy-cli')"
-              :disabled="isLoading"
-            >
-              <Terminal class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p class='text-xs'>{{ t('ui.copyCLICommand') }}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
       <!-- Download Button (only for sources advertising the exports capability) -->
       <TooltipProvider v-if="canExport">
         <Tooltip>
@@ -164,6 +143,7 @@ const warningText = computed(() => {
               variant="ghost"
               size="sm"
               class="h-7 w-7 p-0"
+              :aria-label="isExporting ? t('ui.preparingDownload') : t('ui.downloadResults')"
               @click="emit('export')"
               :disabled="logsCount === 0 || isLoading || isExporting"
             >

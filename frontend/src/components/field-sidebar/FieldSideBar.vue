@@ -251,6 +251,7 @@ onUnmounted(() => {
                     variant="ghost"
                     size="sm"
                     class="h-6 w-6 p-0"
+                    :aria-label="t('ui.refreshFieldValues')"
                     :disabled="isAnyLoading"
                     @click="resetFieldValues"
                   >

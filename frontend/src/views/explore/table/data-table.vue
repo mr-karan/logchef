@@ -92,12 +92,7 @@ const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const preferencesStore = usePreferencesStore()
 const { preferences } = storeToRefs(preferencesStore)
-const displayTimezone = computed({
-    get: () => preferences.value.timezone,
-    set: (value: 'local' | 'utc') => {
-        preferencesStore.updatePreferences({ timezone: value })
-    }
-})
+const displayTimezone = computed(() => preferences.value.timezone)
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
 const defaultColumn = {
@@ -618,7 +613,6 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             :stats="stats"
             :is-loading="isLoading"
             :show-reset-columns="true"
-            @update:timezone="displayTimezone = $event"
             @update:globalFilter="globalFilter = $event"
             @reset-columns="resetTableStateToDefaults"
         />
@@ -641,7 +635,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                 <!-- Expand indicator column header -->
                                 <th class="w-6 bg-muted/30 border-r border-muted/30"></th>
                                 <th v-for="header in table.getHeaderGroups()[0].headers" :key="header.id" scope="col"
-                                    class="group relative h-9 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30 p-0"
+                                    class="group relative h-7 text-sm font-medium text-left align-middle bg-muted/30 whitespace-nowrap sticky top-0 z-20 overflow-hidden border-r border-muted/30 p-0"
                                     :class="[
                                         getColumnType(header.column) === 'timestamp' ? 'font-semibold' : '',
                                         getColumnType(header.column) === 'severity' ? 'font-semibold' : '',
@@ -659,11 +653,11 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                     @dragleave="onDragLeave($event, header.column.id)"
                                     @drop="onDrop($event, header.column.id)" @dragend="onDragEnd">
                                     <div class="flex items-center h-full px-3">
-                                        <!-- Drag Handle -->
+                                        <!-- Hover-only affordances sit out of flow so the column name keeps the width. -->
                                         <span v-if="header.column.id !== timestampFieldName"
-                                            class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                                            class="absolute left-0 top-0 flex items-center justify-center w-3 h-full cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             :title="t('ui.dragToReorderColumn')">
-                                            <GripVertical class="h-4 w-4" />
+                                            <GripVertical class="h-3.5 w-3.5" />
                                         </span>
 
                                         <!-- Column Header Content (Title + Sort button from columns.ts) -->
@@ -674,11 +668,10 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                         </div>
 
                                         <!-- Column Filter (client-side, filters the currently loaded page only) -->
-                                        <ColumnFilterButton
-                                            v-if="header.column.getCanFilter()"
-                                            :column="header.column"
-                                            class="mr-1"
-                                        />
+                                        <span v-if="header.column.getCanFilter()"
+                                            :class="header.column.getIsFiltered() ? 'ml-1 flex-shrink-0' : 'absolute right-5 top-1/2 -translate-y-1/2'">
+                                            <ColumnFilterButton :column="header.column" />
+                                        </span>
 
                                         <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
                                         <div v-if="header.column.getCanResize()"
@@ -714,7 +707,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                             @focusin="onCellFocusIn"
                             @focusout="onCellFocusOut">
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
-                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30 h-8" :class="[
+                                <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30 h-7" :class="[
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
                                 ]" @click="handleRowClick(row)($event)">
                                     <!-- Expand/collapse indicator - first pseudo-cell -->
@@ -728,7 +721,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                     <td v-for="cell in renderedCells(row)" :key="cell.id"
                                         :data-cell-id="cell.id"
                                         tabindex="0"
-                                        class="px-3 py-1.5 align-middle font-mono text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
+                                        class="px-3 py-1 align-middle font-mono text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                             copiedCellId === cell.id ? 'bg-emerald-500/10' : '',
@@ -930,8 +923,8 @@ const isLastVisibleColumn = (columnId: string): boolean => {
 
 /* Compact single-line rows for log stream feel */
 .table-fixed tbody tr {
-    height: 32px;
-    max-height: 32px;
+    height: 28px;
+    max-height: 28px;
 }
 
 /* Allow expanded JSON rows to grow naturally */

@@ -5,8 +5,11 @@ import { computed, nextTick, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import { Radio, Pause, ArrowUp, AlertTriangle, RotateCw } from "lucide-vue-next";
 import type { LiveTailStatus } from "@/stores/explore";
+import { usePreferencesStore } from "@/stores/preferences";
+import { formatTimestamp } from "@/lib/utils";
 
 const { t } = useI18n();
+const preferencesStore = usePreferencesStore();
 
 const props = defineProps<{
   rows: Record<string, unknown>[];
@@ -108,7 +111,8 @@ function formatValue(value: unknown): string {
 
 function timestampOf(row: Record<string, unknown>): string {
   if (!props.timestampField) return "";
-  return formatValue(row[props.timestampField]);
+  const value = row[props.timestampField];
+  return typeof value === "string" ? formatTimestamp(value, preferencesStore.preferences.timezone) : formatValue(value);
 }
 </script>
 
