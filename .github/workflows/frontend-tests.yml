@@ -40,3 +40,7 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: bun run build
+
+      - name: Check bundle budget
+        working-directory: frontend
+        run: bun run check:bundle

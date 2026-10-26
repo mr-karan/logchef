@@ -155,3 +155,17 @@ describe('session expiration ownership', () => {
     } finally { router.currentRoute.value.name = 'Home' }
   })
 })
+
+describe('request dispatch', () => {
+  it('hands the request to the adapter before apiClient.get returns', async () => {
+    const originalAdapter = api.defaults.adapter
+    const adapter = vi.fn<AxiosAdapter>(async (config) => ({ data: {}, status: 200, statusText: 'OK', headers: {}, config }))
+    api.defaults.adapter = adapter
+    try {
+      const request = apiClient.get('/meta')
+      // An await before the send, in apiRequest or a request interceptor, would defer it past Vue's next render.
+      expect(adapter).toHaveBeenCalledOnce()
+      await request
+    } finally { api.defaults.adapter = originalAdapter }
+  })
+})

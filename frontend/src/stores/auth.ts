@@ -41,11 +41,9 @@ export const useAuthStore = defineStore("auth", () => {
       try {
         state.data.value.isInitializing = true;
 
-        // Load server meta information first (it's a public endpoint)
-        const metaStore = useMetaStore();
-        await metaStore.loadMeta();
-
-        const result = await state.callApi({
+        // The session check does not need meta, so both load at once.
+        const meta = useMetaStore().loadMeta();
+        const session = state.callApi({
           apiCall: () => authApi.getSession(),
           showToast: false,
           onSuccess: (response: SessionResponse | null) => {
@@ -62,6 +60,7 @@ export const useAuthStore = defineStore("auth", () => {
             // Log error for diagnostic purposes but don't show to user for initial load
           },
         });
+        const [, result] = await Promise.all([meta, session]);
 
         state.data.value.isInitialized = true;
         return result;

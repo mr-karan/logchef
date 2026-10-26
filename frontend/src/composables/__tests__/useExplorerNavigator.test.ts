@@ -455,13 +455,48 @@ describe("Explorer history navigation", () => {
   });
 
   it("shows the teams load failure for an explicit team instead of denying access", async () => {
-    const { nav, query } = await mountExplorer({ team: "14", source: "140" }, () => {
+    const network = controlledApi(config => config.url?.startsWith("/teams/14/sources") === true);
+    const opening = mountExplorer({ team: "14", source: "140" }, () => {
       vi.mocked(teamsApi.listUserTeams).mockRejectedValue({ status: "error", message: "Unavailable", error_type: "ServerError" });
+      vi.mocked(sourcesApi.listTeamSources).mockRestore();
+      vi.mocked(sourcesApi.getTeamSource).mockRestore();
     });
-    expect(nav.status.value).toBe("error");
-    expect(nav.error.value).toBe(i18n.global.t("access.loadTeamsFailed"));
-    expect(query).not.toHaveBeenCalled();
-    expect(sourcesApi.listTeamSources).not.toHaveBeenCalled();
+    try {
+      const { router, nav, query, forbidden } = await opening;
+      for (const request of network.requests) request.respond(403, { status: "error", message: "Membership required", error_type: "AuthorizationError" });
+      await settle();
+
+      expect(forbidden).not.toHaveBeenCalled();
+      expect(router.currentRoute.value.path).toBe("/logs/explore");
+      expect(nav.status.value).toBe("error");
+      expect(nav.error.value).toBe(i18n.global.t("access.loadTeamsFailed"));
+      expect(query).not.toHaveBeenCalled();
+    } finally {
+      await opening;
+      network.restore();
+      setForbiddenHandler(() => {});
+    }
+  });
+
+  it("loads a linked team's sources and source details while the teams load", async () => {
+    const teamsLoaded = deferred();
+    const opening = mountExplorer({ team: "1", source: "3" }, () => {
+      vi.mocked(teamsApi.listUserTeams).mockImplementation(async () => {
+        await teamsLoaded.done;
+        return { status: "success", data: [team, otherTeam] } as never;
+      });
+    });
+    await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, source.id, expect.anything()));
+    expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(team.id, expect.anything());
+    expect(useExploreRuns().current).toBeNull();
+    teamsLoaded.release();
+    const { nav, query } = await opening;
+    await settle();
+
+    expect(nav.status.value).toBe("ready");
+    expect(sourcesApi.listTeamSources).toHaveBeenCalledTimes(1);
+    expect(sourcesApi.getTeamSource).toHaveBeenCalledTimes(1);
+    expect(query.mock.lastCall?.slice(0, 2)).toEqual([team.id, source.id]);
   });
 
   it("opens a newly granted team even while the memberships list is stale", async () => {

@@ -59,12 +59,12 @@ const emit = defineEmits<{
   (e: "focus-change", focused: boolean): void;
 }>();
 
-type MonacoModule = typeof import("monaco-editor");
+type MonacoModule = typeof import("monaco-editor/editor/editor.api.js");
 type MonacoUtilsModule = typeof import("@/utils/monaco");
-type MonacoEditor = import("monaco-editor").editor.IStandaloneCodeEditor;
-type MonacoDisposable = import("monaco-editor").IDisposable;
-type MonacoCompletionItem = import("monaco-editor").languages.CompletionItem;
-type MonacoRange = import("monaco-editor").IRange;
+type MonacoEditor = import("monaco-editor/editor/editor.api.js").editor.IStandaloneCodeEditor;
+type MonacoDisposable = import("monaco-editor/editor/editor.api.js").IDisposable;
+type MonacoCompletionItem = import("monaco-editor/editor/editor.api.js").languages.CompletionItem;
+type MonacoRange = import("monaco-editor/editor/editor.api.js").IRange;
 
 const editorRef = shallowRef<MonacoEditor | null>(null);
 const editorValue = ref(props.value || "");
@@ -677,7 +677,7 @@ async function loadRuntimeDependencies(force = false) {
   try {
     const [editorModule, monaco, monacoUtils] = await Promise.all([
       import("@guolao/vue-monaco-editor"),
-      import("monaco-editor"),
+      import("monaco-editor/editor/editor.api.js"),
       import("@/utils/monaco"),
     ]);
 

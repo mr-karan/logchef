@@ -18,14 +18,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   const plugins: Plugin[] = [
     tailwindcss() as any,
     vue() as any,
-    {
-      name: "strip-monaco-entry-preloads",
-      transformIndexHtml(html) {
-        return html
-          .replace(/\n\s*<link rel="modulepreload" crossorigin href="\/assets\/monaco[^"]+\.js">/g, "")
-          .replace(/\n\s*<link rel="stylesheet" crossorigin href="\/assets\/monaco[^"]+\.css">/g, "");
-      },
-    } as Plugin,
   ];
 
   if (isAnalyze) {
@@ -90,33 +82,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
       cssMinify: "esbuild",
       rollupOptions: {
         output: {
-          // Improved chunk splitting strategy
-          manualChunks: (id: string) => {
-            // Monaco editor - largest dependency, separate chunk
-            if (id.includes("monaco-editor")) {
-              return "monaco-editor";
-            }
-            // Vue ecosystem - changes less frequently
-            if (id.includes("node_modules/vue") || 
-                id.includes("node_modules/@vue") ||
-                id.includes("node_modules/pinia") ||
-                id.includes("node_modules/vue-router")) {
-              return "vue-vendor";
-            }
-            // UI libraries - reka, etc.
-            if (id.includes("reka-ui") ||
-                id.includes("vaul-vue")) {
-              return "ui-vendor";
-            }
-            // Date utilities
-            if (id.includes("date-fns") || id.includes("@internationalized/date")) {
-              return "date-utils";
-            }
-            // Other vendor libs
-            if (id.includes("node_modules")) {
-              return "vendor";
-            }
-          },
           entryFileNames: "assets/[name]-[hash].js",
           chunkFileNames: "assets/[name]-[hash].js",
           assetFileNames: "assets/[name]-[hash][extname]",

@@ -29,6 +29,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/compress"
+	"github.com/gofiber/fiber/v3/middleware/etag"
 	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/static"
 	"github.com/google/uuid"
@@ -550,22 +551,35 @@ func (s *Server) setupRoutes() {
 	s.app.Use(MCPPath, notFound)
 	// Embedded files have no modification time. Drop the zero Last-Modified
 	// header so browsers do not revalidate against year 1 and get 304 forever.
-	dropLastModified := func(c fiber.Ctx) error {
-		c.Response().Header.Del(fiber.HeaderLastModified)
-		return nil
+	cacheFor := func(cacheControl string) fiber.Handler {
+		return func(c fiber.Ctx) error {
+			c.Response().Header.Del(fiber.HeaderLastModified)
+			c.Set(fiber.HeaderCacheControl, cacheControl)
+			return nil
+		}
+	}
+	// Vite names every file here after its content hash. A missing one is a
+	// 404, not index.html, so a tab from before a deploy can detect the stale chunk.
+	// The 404 is never cached: during a rolling deploy another replica may have the file.
+	assetNotFound := func(c fiber.Ctx) error {
+		c.Set(fiber.HeaderCacheControl, "no-store")
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 	s.app.Use("/assets", static.New("assets", static.Config{
-		FS:             httpFSAdapter{s.fs},
-		Browse:         false,
-		MaxAge:         86400,
-		ModifyResponse: dropLastModified,
+		FS:              httpFSAdapter{s.fs},
+		Browse:          false,
+		ModifyResponse:  cacheFor("public, max-age=31536000, immutable"),
+		NotFoundHandler: assetNotFound,
 	}))
+	// Everything below is unhashed and revalidates. Weak, so the compress
+	// middleware keeps the tag of the uncompressed body.
+	s.app.Use("/", etag.New(etag.Config{Weak: true}))
 	// Files at the UI root (logo.svg, ...). "/" and "/index.html" skip this so
 	// they get the rendered index.html from handleIndex.
 	s.app.Use("/", static.New("", static.Config{
 		FS:             httpFSAdapter{s.fs},
 		Browse:         false,
-		ModifyResponse: dropLastModified,
+		ModifyResponse: cacheFor("no-cache"),
 		Next: func(c fiber.Ctx) bool {
 			return c.Path() == "/" || c.Path() == "/index.html"
 		},

@@ -1,79 +1,32 @@
-<template>
-  <div class="component-load-error">
-    <h2>{{ t('pages.componentLoadFailed') }}</h2>
-    <p>{{ t('pages.componentLoadDescription') }}</p>
-    <ul>
-      <li>{{ t('pages.networkIssues') }}</li>
-      <li>{{ t('pages.componentBuildIssues') }}</li>
-      <li>{{ t('pages.serverConfigurationIssues') }}</li>
-    </ul>
-    <div class="actions">
-      <button @click="goBack" class="back-button">{{ t('pages.goBack') }}</button>
-      <button @click="reload" class="reload-button">{{ t('pages.reloadPage') }}</button>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
-import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { CloudOff } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
 
-const router = useRouter();
-const { t } = useI18n();
-
-function goBack() {
-  router.back();
-}
+const router = useRouter()
+const { t } = useI18n()
 
 function reload() {
-  window.location.reload();
+  window.location.reload()
 }
 </script>
 
-<style scoped>
-.component-load-error {
-  max-width: 600px;
-  margin: 40px auto;
-  padding: 20px;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-
-h2 {
-  color: #dc3545;
-  margin-bottom: 16px;
-}
-
-ul {
-  margin-bottom: 24px;
-  padding-left: 20px;
-}
-
-li {
-  margin-bottom: 8px;
-}
-
-.actions {
-  display: flex;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-button {
-  padding: 8px 16px;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-}
-
-.back-button {
-  background-color: #6c757d;
-  color: white;
-}
-
-.reload-button {
-  background-color: #007bff;
-  color: white;
-}
-</style>
+<template>
+  <div class="flex min-h-[400px] flex-col items-center justify-center space-y-4 p-6">
+    <div class="max-w-md space-y-2 text-center">
+      <CloudOff class="mx-auto h-12 w-12 text-muted-foreground" />
+      <h1 class="text-xl font-semibold">{{ t('pages.componentLoadFailed') }}</h1>
+      <p class="text-muted-foreground">{{ t('pages.componentLoadDescription') }}</p>
+      <ul class="list-inside list-disc text-left text-sm text-muted-foreground">
+        <li>{{ t('pages.networkIssues') }}</li>
+        <li>{{ t('pages.componentBuildIssues') }}</li>
+        <li>{{ t('pages.serverConfigurationIssues') }}</li>
+      </ul>
+    </div>
+    <div class="flex space-x-4">
+      <Button variant="outline" @click="router.back()">{{ t('pages.goBack') }}</Button>
+      <Button @click="reload">{{ t('pages.reloadPage') }}</Button>
+    </div>
+  </div>
+</template>

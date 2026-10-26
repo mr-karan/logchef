@@ -38,7 +38,7 @@ export const api = axios.create({
   timeout: 10000, // 10 second timeout
 });
 
-// Add request interceptor for security headers
+// Synchronous, so a request is sent before Vue's queued render runs instead of after it.
 api.interceptors.request.use((config) => {
   // Only apply no-cache headers to authentication endpoints
   if (config.url?.startsWith("/auth/")) {
@@ -48,7 +48,7 @@ api.interceptors.request.use((config) => {
   }
 
   return config;
-});
+}, undefined, { synchronous: true });
 
 // Add response interceptor for handling auth errors
 api.interceptors.response.use(
