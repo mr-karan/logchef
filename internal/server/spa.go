@@ -56,5 +56,6 @@ func (s *Server) handleIndex(c fiber.Ctx) error {
 	}
 	c.Status(fiber.StatusOK)
 	c.Type("html", "utf-8")
+	c.Set(fiber.HeaderCacheControl, "no-cache")
 	return c.Send(s.indexHTML)
 }

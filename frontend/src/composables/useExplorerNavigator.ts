@@ -164,6 +164,8 @@ export function useExplorerNavigator() {
 
   /** Loads everything the location needs and resolves its team and source. */
   async function resolve({ teamId, sourceId, target }: ExploreLocation, id: number, refresh = false): Promise<(OpenedLocation & { list: Source[]; details: Source | null; generation: number; sourceNotice: string | null }) | null> {
+    // A link that names its team and source loads them while the teams load.
+    const early = teamId === null || target.kind === 'share' || target.kind === 'saved' ? null : loadNamedSources(teamId, sourceId, refresh)
     if (teams.teams.length === 0) {
       const loaded = await teams.loadTeams(false, false)
       if (id !== navId) return null
@@ -194,8 +196,8 @@ export function useExplorerNavigator() {
     if (id !== navId) return null
     const team = teamId ?? pickTeam(teams.teams.map((t) => t.id), null)
     if (team === null) throw new Error(noTeamsMessage(teams.error))
-    const generation = sources.getMetadataGeneration()
-    const list = await sources.loadTeamSources(team, refresh, navigationRequest).catch(error => { throw navigationError(error, 'team') })
+    const generation = early?.generation ?? sources.getMetadataGeneration()
+    const list = await (early?.list ?? sources.loadTeamSources(team, refresh, navigationRequest)).catch(error => { throw navigationError(error, 'team') })
     if (id !== navId || generation !== sources.getMetadataGeneration()) return null
     if (!teams.getTeamById(team)) {
       const confirmed = await teamsApi.getTeam(team, navigationRequest).catch(error => { throw navigationError(error, 'team') })
@@ -203,11 +205,25 @@ export function useExplorerNavigator() {
     }
     if (id !== navId || generation !== sources.getMetadataGeneration()) return null
     const source = pickSource(team, list, sourceId)
-    const details = source === null ? null : await sources.loadSourceDetails(team, source, refresh || (team === context.teamId && source === context.sourceId && sources.currentSourceDetails?.is_connected === false), navigationRequest).catch(error => { throw navigationError(error, 'source') })
+    const details = source === null ? null : await (source === sourceId && early?.details ? early.details : loadDetails(team, source, refresh)).catch(error => { throw navigationError(error, 'source') })
     const sourceNotice = sourceId !== null && sourceId !== source && details
       ? i18n.global.t('explore.sourceUnavailableFallback', { sourceId, sourceName: details.name })
       : null
     return { teamId: team, sourceId: source, content, list, details, generation, sourceNotice }
+  }
+
+  function loadDetails(team: number, source: number, refresh: boolean) {
+    return sources.loadSourceDetails(team, source, refresh || (team === context.teamId && source === context.sourceId && sources.currentSourceDetails?.is_connected === false), navigationRequest)
+  }
+
+  /** Starts loading a team's sources and a source's details. resolve reports their errors only if it uses them. */
+  function loadNamedSources(teamId: number, sourceId: number | null, refresh: boolean) {
+    const generation = sources.getMetadataGeneration()
+    const list = sources.loadTeamSources(teamId, refresh, navigationRequest)
+    const details = sourceId === null ? null : loadDetails(teamId, sourceId, refresh)
+    list.catch(() => undefined)
+    details?.catch(() => undefined)
+    return { generation, list, details }
   }
 
   // Runs what last ran here, or the opened query, and records it. The URL
