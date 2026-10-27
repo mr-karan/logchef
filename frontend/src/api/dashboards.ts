@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { HistogramResponse, QuerySuccessResponse } from "./explore";
 import type { QueryResponse as LogchefqlQueryResponse, TranslateResponse } from "./logchefql";
 
@@ -108,7 +108,7 @@ export interface UpdateDashboardRequest {
 
 /** CRUD over the dashboards resource. */
 export const dashboardsApi = {
-  list: () => apiClient.get<Dashboard[]>("/dashboards"),
+  list: (options?: RequestOptions) => apiClient.get<Dashboard[]>("/dashboards", options),
   get: (id: number) => apiClient.get<Dashboard>(`/dashboards/${id}`),
   create: (req: CreateDashboardRequest) => apiClient.post<Dashboard>("/dashboards", req),
   update: (id: number, req: UpdateDashboardRequest) => apiClient.put<Dashboard>(`/dashboards/${id}`, req),

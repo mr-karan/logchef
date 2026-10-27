@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, defineComponent, h, KeepAlive, type VNode } from "vue";
+import { createApp, defineComponent, h, KeepAlive, nextTick, type VNode } from "vue";
 import { createPinia, disposePinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { teamsApi, type UserTeamMembership } from "@/api/teams";
 import { authApi } from "@/api/auth";
 import { metaApi } from "@/api/meta";
+import { alertsApi, type Alert, type AlertHistoryEntry } from "@/api/alerts";
+import { dashboardsApi } from "@/api/dashboards";
+import { collectionsApi } from "@/api/collections";
+import { usePaletteHost } from "@/components/command-palette/usePaletteHost";
 import { useAuthStore } from "@/stores/auth";
 import { sourcesApi, type Source } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
@@ -13,6 +17,8 @@ import { savedQueriesApi, type ResolvedSavedQuery } from "@/api/savedQueries";
 import { streamWindowedQuery, type WindowedEvent, type WindowedRequest } from "@/api/windowed";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
+import { useAskChefStore } from "@/stores/askChef";
+import { useMetaStore } from "@/stores/meta";
 import { useExploreStore } from "@/stores/explore";
 import { useExploreRuns } from "@/stores/exploreRuns";
 import { useSourcesStore } from "@/stores/sources";
@@ -28,6 +34,9 @@ import { toast } from "vue-sonner";
 import FieldSideBar from "@/components/field-sidebar/FieldSideBar.vue";
 import WindowedSearchPanel from "@/views/explore/components/WindowedSearchPanel.vue";
 
+import { buildPaletteView } from "@/components/command-palette/palette";
+import { navigateFromPalette } from "@/lib/exploreHandoff";
+import { readRecentSources } from "@/lib/recentSources";
 import { useExplorerNavigator } from "../useExplorerNavigator";
 import { useQuery } from "../useQuery";
 import { useSavedQueries } from "../useSavedQueries";
@@ -118,11 +127,19 @@ const evidenceOther = exploreWindowQuery({ teamId: 1, sourceId: 4, start: Date.U
 
 describe("Explorer history navigation", () => {
   let unmount: (() => void) | undefined;
+  let scrollDescriptor: PropertyDescriptor | undefined;
+  let addedScrollShim = false;
 
   afterEach(() => {
     unmount?.();
     unmount = undefined;
+    if (addedScrollShim) {
+      if (scrollDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', scrollDescriptor);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+      addedScrollShim = false;
+    }
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     localStorage.clear();
     i18n.global.locale.value = "en";
   });
@@ -176,18 +193,23 @@ describe("Explorer history navigation", () => {
     const Logs = defineComponent({
       render: () => h(RouterView, null, { default: ({ Component }: { Component?: VNode }) => h(KeepAlive, null, { default: () => Component }) }),
     });
-    const routes = [{ path: "/forbidden", name: "Forbidden", component: { render: () => null } }, { path: "/logs", component: Logs, children: [{ path: "explore", component: Explorer }, { path: "library", component: { render: () => null } }] }];
+    const routes = [{ path: "/admin", component: { render: () => null } }, { path: "/forbidden", name: "Forbidden", component: { render: () => null } }, { path: "/logs", component: Logs, children: [{ path: "explore", name: "LogExplorer", component: Explorer }, { path: "library", component: { render: () => null } }] }];
     const router = createRouter({ history: createMemoryHistory(), routes });
     const forbidden = vi.fn(() => { void router.push({ name: "Forbidden" }); });
     setForbiddenHandler(forbidden);
     router.beforeEach(contextRouterGuard);
     await router.push(typeof location === 'string' ? location : { path: "/logs/explore", query: location });
-    const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router);
+    let host: ReturnType<typeof usePaletteHost> | undefined;
+    const app = createApp({ setup() {
+      const palette = usePaletteHost();
+      host = palette;
+      return () => h('div', [h(RouterView), palette.component.value ? h(palette.component.value, { open: palette.state.value.kind === 'open', cancellation: palette.cancellation.value, onClose: () => palette.close() }) : null]);
+    } }).use(pinia).use(router).use(i18n);
     app.mount(document.createElement("div"));
     unmount = () => { app.unmount(); disposePinia(pinia); };
     const opened = nav;
     const shownEditor = editor;
-    if (!opened || !saved || !shownEditor) throw new Error("explorer did not mount");
+    if (!opened || !saved || !shownEditor || !host) throw new Error("explorer did not mount");
     await vi.waitFor(() => expect(opened.status.value !== "loading" || router.currentRoute.value.name === "Forbidden").toBe(true));
     // What Explorer's query error banner shows.
     const banner = () => runs.error ?? store.error?.message ?? null;
@@ -195,7 +217,7 @@ describe("Explorer history navigation", () => {
     const isRunning = () => runs.isRunning;
     // The rows the results table shows.
     const rows = () => runs.results?.rows ?? [];
-    return { router, store, query, forbidden, toastError, nav: opened, saved, editor: shownEditor, banner, isRunning, rows, pinia };
+    return { router, store, query, forbidden, toastError, nav: opened, saved, editor: shownEditor, banner, isRunning, rows, pinia, host };
   }
 
   // Lets late responses and validations land.
@@ -205,6 +227,342 @@ describe("Explorer history navigation", () => {
     await vi.waitFor(() => expect(useExploreRuns().isRunning).toBe(false));
     await flush();
   }
+
+  async function enablePalette() {
+    scrollDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true });
+    addedScrollShim = true;
+    useMetaStore().clearState();
+    vi.mocked(metaApi.getMeta).mockResolvedValue({ status: 'success', data: { version: 'test', http_server_timeout: '5s', max_query_limit: 100, ask_chef_enabled: true, alerts_enabled: true } });
+    await useMetaStore().loadMeta();
+    vi.spyOn(savedQueriesApi, 'list').mockResolvedValue({ status: 'success', data: [] });
+    vi.spyOn(dashboardsApi, 'list').mockResolvedValue({ status: 'success', data: [] });
+    vi.spyOn(collectionsApi, 'list').mockResolvedValue({ status: 'success', data: [] });
+    vi.spyOn(teamsApi, 'listTeamSources').mockImplementation(teamId => ok(sourcesOfTeam(teamId)));
+    vi.spyOn(alertsApi, 'list').mockResolvedValue({ status: 'success', data: [] });
+  }
+
+  async function paletteInput(text: string): Promise<HTMLInputElement> {
+    await vi.waitFor(() => expect(document.querySelector('[role="combobox"]')).not.toBeNull());
+    const input = document.querySelector<HTMLInputElement>('[role="combobox"]');
+    if (!input) throw new Error('palette input missing');
+    input.value = text;
+    input.setSelectionRange(text.length, text.length);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+    return input;
+  }
+
+  function captureChefTurns(): unknown[] {
+    const sent: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return Promise.resolve(new Response('event: done\ndata: {"stop_reason":"end","tool_calls":0,"input_tokens":0,"output_tokens":0,"duration_ms":1}\n\n'));
+    }));
+    return sent;
+  }
+
+  it('leaves the current results, URL and limit intact when opening Ask', async () => {
+    const { router, host, query } = await mountExplorer({ team: '1', source: '3', q: 'status=500', t: '7d', limit: '250' });
+    await settle();
+    await enablePalette();
+    const sent = captureChefTurns();
+    const before = router.currentRoute.value.fullPath;
+    const count = query.mock.calls.length;
+    await host.open();
+    const input = await paletteInput('? explain these errors');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: explain these errors'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(router.currentRoute.value.fullPath).toBe(before);
+    expect(query.mock.calls).toHaveLength(count);
+  });
+
+  it('cancels a scoped Ask with Escape while a router guard is pending', async () => {
+    const { router, host } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const waiting = deferred();
+    const started = deferred();
+    router.beforeEach(async to => { if (to.path === '/logs/explore') { started.release(); await waiting.done; } });
+    const sent = captureChefTurns();
+    await host.open();
+    const input = await paletteInput('@search/search-logs ? explain these errors');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: explain these errors'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await started.done;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    waiting.release();
+    await vi.waitFor(() => expect(router.currentRoute.value.query.source).toBe('7'));
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it('keeps the newer Ask busy when a superseded navigation finishes', async () => {
+    const { router, host } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const first = deferred();
+    const second = deferred();
+    const firstStarted = deferred();
+    const secondStarted = deferred();
+    router.beforeEach(async to => {
+      if (to.path !== '/logs/explore') return;
+      if (to.query.source === '3') { firstStarted.release(); await first.done; }
+      if (to.query.source === '7') { secondStarted.release(); await second.done; }
+    });
+    const sent = captureChefTurns();
+    await host.open();
+    const input = await paletteInput('@payments/checkout-logs ? first question');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: first question'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await firstStarted.done;
+    await paletteInput('@search/search-logs ? second question');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: second question'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await secondStarted.done;
+    first.release();
+    await flush();
+    await nextTick();
+    const opening = document.querySelector('[role="status"]')?.textContent;
+    second.release();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(opening).toContain(i18n.global.t('palette.ask.opening'));
+    expect(sent[0]).toMatchObject({ source_id: 7, message: 'second question' });
+  });
+
+  it('cancels a pending Ask with Escape after navigation has closed the palette', async () => {
+    const { router, host, store } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const waiting = deferred();
+    const started = deferred();
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async () => { started.release(); await waiting.done; return ok(otherTeamSource); });
+    const sent = captureChefTurns();
+    await host.open();
+    const input = await paletteInput('@search/search-logs ? explain these errors');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: explain these errors'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await started.done;
+    await vi.waitFor(() => expect(host.state.value.kind).toBe('closed'));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    waiting.release();
+    await vi.waitFor(() => expect(store.sourceId).toBe(7));
+    await settle();
+    expect(sent).toEqual([]);
+  });
+
+  it.each([false, true])('does not leave the new page when an abandoned alert lookup finishes (reopen=%s)', async reopen => {
+    const { router, host } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const alert: Alert = { id: 5, source_id: 3, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', condition_json: 'status>=500', lookback_seconds: 3600, threshold_operator: 'gt', threshold_value: 0, frequency_seconds: 60, severity: 'warning', recipient_user_ids: [], webhook_urls: [], is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
+    const entry: AlertHistoryEntry = { id: 9, alert_id: 5, status: 'triggered', triggered_at: '2026-10-20T00:00:00Z', created_at: '' };
+    vi.mocked(alertsApi.list).mockResolvedValue({ status: 'success', data: [alert] });
+    const waiting = deferred();
+    const started = deferred();
+    vi.spyOn(alertsApi, 'get').mockImplementation(async () => { started.release(); await waiting.done; return ok(alert); });
+    vi.spyOn(alertsApi, 'history').mockResolvedValue({ status: 'success', data: [entry] });
+    const sent = captureChefTurns();
+    await host.open();
+    await paletteInput('error rate');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Investigate with Ask Chef'));
+    const secondary = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(row => row.textContent?.includes('Investigate with Ask Chef'));
+    if (!secondary) throw new Error('missing alert action');
+    secondary.click();
+    await started.done;
+    await router.push('/logs/library');
+    if (reopen) {
+      await host.open();
+      await nextTick();
+    }
+    waiting.release();
+    await flush();
+    await settle();
+    expect(router.currentRoute.value.path).toBe('/logs/library');
+    expect(sent).toEqual([]);
+  });
+
+  it('completes a tagged admin Ask after the real host closes the palette on navigation', async () => {
+    const { router, host } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const sent = captureChefTurns();
+    await host.open();
+    const input = await paletteInput('@payments/checkout-logs ? why did errors spike last:1h');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: why did errors spike'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(host.state.value.kind).toBe('closed');
+    expect(router.currentRoute.value.path).toBe('/logs/explore');
+    expect(sent[0]).toMatchObject({ team_id: 1, source_id: 3, message: 'why did errors spike', context: { kind: 'explorer' } });
+    await settle();
+    expect(useAskChefStore().transcript).toHaveLength(2);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('completes an alert investigation after the real host closes the palette on navigation', async () => {
+    const { router, host } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const alert: Alert = { id: 5, source_id: 3, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', condition_json: 'status>=500', lookback_seconds: 300, threshold_operator: 'gt', threshold_value: 5, frequency_seconds: 60, severity: 'warning', recipient_user_ids: [], webhook_urls: [], is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
+    const entry: AlertHistoryEntry = { id: 9, alert_id: 5, status: 'triggered', triggered_at: '2026-10-20T00:00:00Z', created_at: '' };
+    vi.mocked(alertsApi.list).mockResolvedValue({ status: 'success', data: [alert] });
+    vi.spyOn(alertsApi, 'get').mockResolvedValue({ status: 'success', data: alert });
+    vi.spyOn(alertsApi, 'history').mockResolvedValue({ status: 'success', data: [entry] });
+    const sent = captureChefTurns();
+    await host.open();
+    await paletteInput('error rate');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Investigate with Ask Chef'));
+    const secondary = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(row => row.textContent?.includes('Investigate with Ask Chef'));
+    if (!secondary) throw new Error('missing alert action');
+    secondary.click();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(host.state.value.kind).toBe('closed');
+    expect(router.currentRoute.value.path).toBe('/logs/explore');
+    expect(sent[0]).toMatchObject({ team_id: 1, source_id: 3, context: { kind: 'alert', alert_id: 5, alert_history_id: 9 } });
+    await settle();
+    expect(sent).toHaveLength(1);
+  });
+
+  it('cancels an accepted Ask when the signed-in user changes while its source loads', async () => {
+    const { router, host, store } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const sent = captureChefTurns();
+    await host.open();
+    const input = await paletteInput('@search/search-logs ? why did errors spike');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: why did errors spike'));
+    const waiting = deferred();
+    const started = deferred();
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async () => { started.release(); await waiting.done; return ok(otherTeamSource); });
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await started.done;
+    useAuthStore().clearState();
+    waiting.release();
+    await vi.waitFor(() => expect(store.sourceId).toBe(7));
+    await flush();
+    expect(sent).toEqual([]);
+    expect(useAskChefStore().transcript).toEqual([]);
+  });
+
+  it('reports a failed admin Ask landing without sending a turn after the palette closes', async () => {
+    const { router, host, toastError } = await mountExplorer();
+    await settle();
+    await router.push('/admin');
+    await enablePalette();
+    const sent = captureChefTurns();
+    await host.open();
+    const input = await paletteInput('@search/search-logs ? why did errors spike');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('Ask Chef: why did errors spike'));
+    vi.mocked(sourcesApi.getTeamSource).mockRejectedValue(new Error('source unavailable'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }));
+    await vi.waitFor(() => expect(toastError.mock.calls.some(call => call[0] === i18n.global.t('palette.ask.landingFailed'))).toBe(true));
+    expect(host.state.value.kind).toBe('closed');
+    expect(sent).toEqual([]);
+    expect(useAskChefStore().transcript).toEqual([]);
+  });
+
+  it("acknowledges the applied palette source before sending the captured question", async () => {
+    const { router, store } = await mountExplorer();
+    await settle();
+    vi.mocked(metaApi.getMeta).mockResolvedValue({ status: "success", data: { version: "test", http_server_timeout: "5s", max_query_limit: 100, ask_chef_enabled: true } });
+    useMetaStore().clearState();
+    await useMetaStore().loadMeta();
+    expect(useMetaStore().askChefEnabled).toBe(true);
+    const chef = useAskChefStore();
+    const zone = parseZoneId('UTC');
+    if (!zone) throw new Error('invalid zone');
+    const captured = { subject: { kind: 'explorer' }, teamId: 2, sourceId: 7, start: Date.UTC(2026, 9, 20), end: Date.UTC(2026, 9, 21), zone, mode: 'logchefql', query: 'status>=500' } satisfies Parameters<typeof chef.openFromPalette>[0];
+    const sent: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return Promise.resolve(new Response('event: done\ndata: {"stop_reason":"end","tool_calls":0,"input_tokens":0,"output_tokens":0,"duration_ms":1}\n\n'));
+    }));
+    const landed = await navigateFromPalette(router, { path: '/logs/explore', query: exploreWindowQuery(captured) }, true);
+    expect(landed).toBe(true);
+    expect(useContextStore().teamId).toBe(2);
+    expect(store.sourceId).toBe(7);
+    await chef.openFromPalette(captured, 'why?');
+    await settle();
+    expect(chef.transcript).toHaveLength(2);
+    expect(sent).toEqual([expect.objectContaining({ team_id: 2, source_id: 7, message: 'why?', context: { kind: 'explorer', start: captured.start, end: captured.end, query: captured.query, mode: captured.mode } })]);
+  });
+
+  it("rejects a fallback source and failed source application in the Ask handoff", async () => {
+    const { router } = await mountExplorer();
+    await settle();
+    const missing = await navigateFromPalette(router, { path: '/logs/explore', query: { team: '1', source: '999', q: 'status=500', t: '1h' } }, true);
+    expect(missing).toBe(false);
+    await settle();
+    vi.mocked(sourcesApi.getTeamSource).mockRejectedValue(new Error('source unavailable'));
+    const failed = await navigateFromPalette(router, { path: '/logs/explore', query: { team: '1', source: '4', q: 'status=500', t: '1h' } }, true);
+    expect(failed).toBe(false);
+  });
+
+  it("ignores previous-source shown results when capturing the Explorer window", async () => {
+    const { store } = await mountExplorer({ team: '1', source: '3', q: 'level=error', t: '7d' });
+    await settle();
+    const chef = useAskChefStore();
+    const shown = useExploreRuns().shown;
+    expect(shown?.source.id).toBe(3);
+    expect(chef.explorerContext()).toMatchObject({ start: shown?.resolved.start, end: shown?.resolved.end });
+    useContextStore().selectSource(4);
+    store.setWindow({ kind: 'absolute', start: epochMs(1000), end: epochMs(2000) });
+    expect(chef.explorerContext()).toMatchObject({ sourceId: 4, start: 1000, end: 2000 });
+    useContextStore().selectTeam(2);
+    useContextStore().selectSource(3);
+    expect(chef.explorerContext()).toMatchObject({ teamId: 2, sourceId: 3, start: 1000, end: 2000 });
+  });
+
+  it("reruns the palette's generated URL without padding Back history", async () => {
+    const { router, query } = await mountExplorer();
+    await settle();
+    await router.push('/logs/library');
+    const text = '@payments/checkout-logs level="error" last:15m';
+    const zone = parseZoneId('UTC');
+    if (!zone) throw new Error('invalid zone');
+    const result = buildPaletteView(text, { start: text.length, end: text.length }, {
+      schemaFields: new Set(), askChefEnabled: false, explorer: null, viewer: { isAdmin: false, isAnyTeamAdmin: false, alertsEnabled: false, oauthEnabled: false },
+      routeName: null, current: null, recents: [], theme: 'light', timezone: 'utc', zone, now: epochMs(0), locale: 'en', pages: [],
+      t: (key, named) => i18n.global.t(key, named ?? {}),
+    }, {
+      teams: { state: 'ready', value: [{ id: 1, name: 'payments', slug: 'payments' }], at: epochMs(0) },
+      sourcesByTeam: new Map([[1, { state: 'ready', value: [{ id: 3, teamId: 1, name: 'checkout-logs', slug: 'checkout-logs', typeLabel: 'ClickHouse', connected: true, logchefql: true }], at: epochMs(0) }]]),
+      savedQueries: { state: 'idle' }, dashboards: { state: 'idle' }, alerts: { state: 'idle' }, collections: { state: 'idle' },
+    });
+    const effect = result.modEnter;
+    if (effect?.kind !== 'navigate') throw new Error('palette did not build a URL');
+    await navigateFromPalette(router, effect.to); await settle();
+    const fullPath = router.currentRoute.value.fullPath;
+    expect(router.currentRoute.value.query.limit).toBe('100');
+    const before = query.mock.calls.length;
+    for (const expected of [before + 1, before + 2]) {
+      const pushes = vi.spyOn(router, 'push');
+      await navigateFromPalette(router, effect.to);
+      await vi.waitFor(() => expect(query.mock.calls.length).toBe(expected)); await settle();
+      expect(router.currentRoute.value.fullPath).toBe(fullPath);
+      expect(pushes).not.toHaveBeenCalled(); pushes.mockRestore();
+    }
+    router.back();
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/logs/library'));
+  });
+
+  it("records confirmed normal source visits for the signed-in user", async () => {
+    const { router } = await mountExplorer();
+    await settle();
+    expect(readRecentSources("1")[0]).toMatchObject({ teamId: 1, sourceId: 3 });
+    await router.push({ path: "/logs/explore", query: { team: "1", source: "4" } });
+    await settle();
+    expect(readRecentSources("1").map(recent => recent.sourceId)).toEqual([4, 3]);
+  });
 
   function expectOpen(
     router: ReturnType<typeof createRouter>,
