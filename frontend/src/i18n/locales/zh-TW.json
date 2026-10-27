@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "未知欄位「{field}」",
+  "queryEditor.syntaxError": "LogchefQL 語法無效：{message}",
+  "queryEditor.invalidSyntax": "LogchefQL 語法無效",
+  "queryEditor.distinctCount": "{count} 個相異值",
+  "queryEditor.topValues": "最常見的值",
   "ui.connecting": "正在連線…",
   "ui.idle": "閒置",
   "variables.selectedCount": "已選取 {count} 項",

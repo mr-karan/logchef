@@ -7,7 +7,7 @@
  * results.
  */
 
-import { apiClient } from './apiUtils';
+import { apiClient, type RequestOptions } from './apiUtils';
 import type { QueryLanguage } from '@/lib/queryMetadata';
 
 // Types matching backend response structures
@@ -108,10 +108,11 @@ export const logchefqlApi = {
    * Validate a LogchefQL query
    * Lightweight endpoint for real-time validation in the editor
    */
-  validate: (teamId: number, sourceId: number, query: string) =>
+  validate: (teamId: number, sourceId: number, query: string, options?: RequestOptions) =>
     apiClient.post<ValidateResponse>(
       `/teams/${teamId}/sources/${sourceId}/logchefql/validate`,
-      { query }
+      { query },
+      options
     ),
 
   /**

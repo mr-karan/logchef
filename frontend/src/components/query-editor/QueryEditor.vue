@@ -292,6 +292,7 @@
           :schema="props.schema"
           :team-id="props.teamId"
           :source-id="props.sourceId"
+          :field-values-window="props.fieldValuesWindow"
           :table-name="props.tableName"
           :is-executing="props.isExecuting"
           :visible="isEditorVisible"
@@ -399,6 +400,7 @@ import {
 } from "@/components/ui/tooltip";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
+import type { CompletionValuesWindowGetter } from "@/composables/useCompletionFieldValues";
 import { useVariableStore } from '@/stores/variables';
 import { extractVariablesWithOptional } from "@/composables/useVariables.ts";
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
@@ -436,6 +438,7 @@ interface QueryEditorProps {
   isExecuting?: boolean
   canExecute?: boolean
   showRunButton?: boolean
+  fieldValuesWindow?: CompletionValuesWindowGetter
 }
 
 const props = withDefaults(defineProps<QueryEditorProps>(), {

@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "알 수 없는 필드 \"{field}\"",
+  "queryEditor.syntaxError": "잘못된 LogchefQL 구문: {message}",
+  "queryEditor.invalidSyntax": "잘못된 LogchefQL 구문",
+  "queryEditor.distinctCount": "고유 값 {count}개",
+  "queryEditor.topValues": "가장 빈번한 값",
   "ui.connecting": "연결 중…",
   "ui.idle": "대기 중",
   "variables.selectedCount": "{count}개 선택됨",

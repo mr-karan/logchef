@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "Unbekanntes Feld „{field}“",
+  "queryEditor.syntaxError": "Ungültige LogchefQL-Syntax: {message}",
+  "queryEditor.invalidSyntax": "Ungültige LogchefQL-Syntax",
+  "queryEditor.distinctCount": "{count} unterschiedliche Werte",
+  "queryEditor.topValues": "Häufigste Werte",
   "ui.connecting": "Verbindung wird hergestellt…",
   "ui.idle": "Inaktiv",
   "variables.selectedCount": "{count} ausgewählt",

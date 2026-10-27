@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "未知字段“{field}”",
+  "queryEditor.syntaxError": "LogchefQL 语法无效：{message}",
+  "queryEditor.invalidSyntax": "LogchefQL 语法无效",
+  "queryEditor.distinctCount": "{count} 个不同值",
+  "queryEditor.topValues": "最常见的值",
   "ui.connecting": "正在连接…",
   "ui.idle": "空闲",
   "variables.selectedCount": "已选择 {count} 项",

@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "अज्ञात फ़ील्ड \"{field}\"",
+  "queryEditor.syntaxError": "अमान्य LogchefQL सिंटैक्स: {message}",
+  "queryEditor.invalidSyntax": "अमान्य LogchefQL सिंटैक्स",
+  "queryEditor.distinctCount": "{count} अलग-अलग मान",
+  "queryEditor.topValues": "सबसे सामान्य मान",
   "ui.connecting": "कनेक्ट हो रहा है…",
   "ui.idle": "निष्क्रिय",
   "variables.selectedCount": "{count} चयनित",
