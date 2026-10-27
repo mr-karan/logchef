@@ -76,6 +76,47 @@ export function buildValueInsertText(
   return `"${escaped}"`
 }
 
+export function buildValueCompletionEdit(
+  rawValue: string,
+  fieldType: string,
+  quote: '"' | "'" | null,
+  textAfterCursor: string,
+): { insertText: string; replaceAfter: number; retrigger: boolean } {
+  return {
+    insertText: buildValueInsertText(rawValue, fieldType, quote),
+    replaceAfter: valueRestLength(textAfterCursor, quote),
+    // A bare number still parses as a partial value, so reopening would list values again.
+    retrigger: !isNumericFieldType(fieldType),
+  }
+}
+
+// A quote glued to more text opens the next value, unless that text is and/or.
+function valueRestLength(textAfterCursor: string, quote: '"' | "'" | null): number {
+  if (!quote) return /^[^\s()"'|=!~<>]*/.exec(textAfterCursor)?.[0].length ?? 0
+  for (let i = 0; i < textAfterCursor.length; i++) {
+    if (textAfterCursor[i] === '\\') i++
+    else if (textAfterCursor[i] === quote) return /^(?:$|[\s)|]|(?:and|or)(?![\w.]))/i.test(textAfterCursor.slice(i + 1)) ? i + 1 : 0
+  }
+  return 0
+}
+
+export function buildBooleanInsertText(
+  keyword: 'and' | 'or',
+  textBeforeCursor: string,
+  partial: string,
+): string {
+  const beforeKeyword = textBeforeCursor.slice(0, textBeforeCursor.length - partial.length)
+  return `${/\s$/.test(beforeKeyword) ? '' : ' '}${keyword} `
+}
+
+type LogchefQLOperator = '=' | '!=' | '~' | '!~' | '>' | '<' | '>=' | '<='
+
+export function getLogchefQLOperators(fieldType: string): LogchefQLOperator[] {
+  return isNumericFieldType(fieldType)
+    ? ['=', '>=', '>', '<=', '<', '!=']
+    : ['=', '!=', '~', '!~', '>', '<', '>=', '<=']
+}
+
 function escapeForQuote(value: string, quoteChar: '"' | "'"): string {
   // Escape backslashes first, then the quote delimiter
   return value.replace(/\\/g, '\\\\').replace(new RegExp(escapeRegex(quoteChar), 'g'), `\\${quoteChar}`)
@@ -104,14 +145,15 @@ export function filterValuesByPartial(
 // Regex building blocks
 const FIELD_CHARS = "[\\w][\\w.-]*"
 const OP_PATTERN = "!=|!~|>=|<=|[=~><]"
-const QUOTED_STR = '(?:"[^"]*"|' + "'[^']*'" + ')'
+const QUOTED_STR = String.raw`(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')`
 
 // Pre-compiled regexes (avoid recompilation on every keystroke)
 const BOOL_TAIL_RE = /\b(?:and|or)\s+$/i
+const BOOL_PARTIAL_RE = /\s+(a|an|and|o|or)$/i
 const FIELD_OP_RE = new RegExp(`(${FIELD_CHARS})\\s*(${OP_PATTERN})\\s*$`)
 const FIELD_OP_VALUE_RE = new RegExp(`(${FIELD_CHARS})\\s*(${OP_PATTERN})\\s*([^"'\\s]*)$`)
 const COMPLETE_COND_RE = new RegExp(
-  `(${FIELD_CHARS})\\s*(?:${OP_PATTERN})\\s*(?:${QUOTED_STR}|\\S+)\\s*$`
+  `(${FIELD_CHARS})\\s*(?:${OP_PATTERN})\\s*(?:${QUOTED_STR}|[^"'\\s=~><!()]+)(?:\\s*\\))*\\s*$`
 )
 const TRAILING_WORD_RE = new RegExp(`(${FIELD_CHARS})$`)
 
@@ -151,6 +193,18 @@ export function parseLogchefQLContext(text: string, fields: string[]): LogchefQL
     return { suggest: "fields", partial: "" }
   }
 
+  if (trimmed.endsWith('(')) return { suggest: "fields", partial: "" }
+
+  const booleanPartial = text.match(BOOL_PARTIAL_RE)
+  if (booleanPartial && COMPLETE_COND_RE.test(text.slice(0, booleanPartial.index).trimEnd())) {
+    return { suggest: "boolean", partial: booleanPartial[1] }
+  }
+
+  const completeCondition = COMPLETE_COND_RE.test(trimmed)
+  if (completeCondition && (/\s$/.test(text) || /["')]$/.test(trimmed))) {
+    return { suggest: "boolean", partial: "" }
+  }
+
   const fieldOpValueMatch = trimmed.match(FIELD_OP_VALUE_RE)
   if (fieldOpValueMatch) {
     const [, fieldName, operator, partial] = fieldOpValueMatch
@@ -166,15 +220,7 @@ export function parseLogchefQLContext(text: string, fields: string[]): LogchefQL
     }
   }
 
-  if (COMPLETE_COND_RE.test(trimmed)) {
-    const lastChar = trimmed[trimmed.length - 1]
-    if (lastChar === '"' || lastChar === "'" || /\s$/.test(text)) {
-      return { suggest: "boolean", partial: "" }
-    }
-    // Still typing an unquoted value — this is a value context
-    // (already handled in Step 3)
-    return { suggest: "none" }
-  }
+  if (completeCondition) return { suggest: "none" }
 
   const trailingMatch = trimmed.match(TRAILING_WORD_RE)
   if (trailingMatch) {
@@ -183,13 +229,6 @@ export function parseLogchefQLContext(text: string, fields: string[]): LogchefQL
     // Is it a known field? → suggest operators
     if (fields.includes(word)) {
       return { suggest: "operators", key: word }
-    }
-
-    // Is it a partial "and"/"or"?
-    if (/^(a|an|and|o|or)$/i.test(word)) {
-      // Could be typing a boolean or a field name — suggest both contexts
-      // but prefer fields since they're more actionable
-      return { suggest: "fields", partial: word }
     }
 
     return { suggest: "fields", partial: word }

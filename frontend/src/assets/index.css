@@ -44,7 +44,9 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-:root {
+/* .light lets a probe read light tokens while the page is dark. */
+:root,
+.light {
   --radius: 0.25rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);

@@ -39,7 +39,8 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
-import { epochMs } from "@/utils/timeWindow";
+import { epochMs, toRfc3339 } from "@/utils/timeWindow";
+import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
 
 // Type alias for backwards compatibility
 type QueryCondition = FilterCondition;
@@ -62,6 +63,11 @@ const { t } = useI18n();
 // Router and stores
 const router = useRouter();
 const exploreStore = useExploreStore();
+function getEditorValuesWindow(): CompletionValuesWindow | null {
+  if (!exploreStore.hasWindow) return null;
+  const { start, end, zone } = exploreStore.resolveNow();
+  return { key: `${JSON.stringify(exploreStore.window)}|${zone}`, startTime: toRfc3339(start), endTime: toRfc3339(end) };
+}
 const runs = useExploreRuns();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
@@ -1010,6 +1016,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :isExecuting="isExecutingQuery"
                     :canExecute="canExecuteQuery"
                     :showRunButton="true"
+                    :fieldValuesWindow="getEditorValuesWindow"
                     @change="(event) => event.mode === 'logchefql'
                       ? updateLogchefqlValue(event.query, event.isUserInput)
                       : updateSqlValue(event.query, event.isUserInput)"
