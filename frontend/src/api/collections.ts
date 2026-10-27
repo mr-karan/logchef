@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { SavedQuery } from "./savedQueries";
 
 export type CollectionRole = "owner" | "editor" | "member";
@@ -70,7 +70,7 @@ export interface AddCollectionItemRequest {
 }
 
 export const collectionsApi = {
-  list: () => apiClient.get<Collection[]>("/collections"),
+  list: (options?: RequestOptions) => apiClient.get<Collection[]>("/collections", options),
   get: (id: number) => apiClient.get<Collection>(`/collections/${id}`),
   create: (payload: CreateCollectionRequest) =>
     apiClient.post<Collection>("/collections", payload),

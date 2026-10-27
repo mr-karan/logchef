@@ -58,8 +58,8 @@ export interface TeamWithMemberCount extends Team {
 }
 
 export const teamsApi = {
-  listUserTeams: (options?: { signal?: AbortSignal }) => apiClient.get<UserTeamMembership[]>("/me/teams", options),
-  listAllTeams: (options?: { signal?: AbortSignal }) => apiClient.get<TeamWithMemberCount[]>("/admin/teams", options),
+  listUserTeams: (options?: RequestOptions) => apiClient.get<UserTeamMembership[]>("/me/teams", options),
+  listAllTeams: (options?: RequestOptions) => apiClient.get<TeamWithMemberCount[]>("/admin/teams", options),
   getTeam: (id: number, options?: RequestOptions) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`, options),
   createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>
@@ -76,7 +76,7 @@ export const teamsApi = {
     apiClient.delete<{ message: string }>(`/teams/${teamId}/members/${userId}`),
 
   // Team sources
-  listTeamSources: (teamId: number, options?: { signal?: AbortSignal }) =>
+  listTeamSources: (teamId: number, options?: RequestOptions) =>
     apiClient.get<Source[]>(`/teams/${teamId}/sources`, options),
   addTeamSource: (teamId: number, sourceId: number) =>
     apiClient.post<Source>(`/teams/${teamId}/sources`, { source_id: sourceId }),

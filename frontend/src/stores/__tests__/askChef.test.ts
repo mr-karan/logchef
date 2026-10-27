@@ -2,6 +2,8 @@ import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { metaApi } from "@/api/meta";
+import { useMetaStore } from "../meta";
 import type { Alert, AlertHistoryEntry } from "@/api/alerts";
 import { authApi } from "@/api/auth";
 import type { EvidenceRecord } from "@/api/askChef";
@@ -394,6 +396,24 @@ describe("useAskChefStore and the Explorer", () => {
 
     expect(store.transcript).toEqual([]);
     expect(store.context).toMatchObject({ sourceId: 4 });
+  });
+
+  it("opens current results instead of keeping a prior pinned alert", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(done()));
+    vi.stubGlobal("fetch", fetchMock);
+    const meta = vi.spyOn(metaApi, "getMeta").mockResolvedValue({ status: "success", data: { version: "test", http_server_timeout: "5s", max_query_limit: 100, ask_chef_enabled: true } });
+    await useMetaStore().loadMeta();
+    meta.mockRestore();
+    const store = useAskChefStore();
+    store.investigateAlert(alert, entry, 1);
+    await vi.waitFor(() => expect(store.status.kind).toBe('idle'));
+    const current = store.explorerContext();
+    if (!current) throw new Error('missing Explorer context');
+    await store.openFromPalette(current, null);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(store.context).toMatchObject({ subject: { kind: 'explorer' }, sourceId: 3 });
+    expect(store.transcript).toEqual([]);
+    expect(store.open).toBe(true);
   });
 
   it("keeps an alert investigation on the alert's window", async () => {

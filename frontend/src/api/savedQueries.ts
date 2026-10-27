@@ -63,7 +63,7 @@ export interface ResolvedSavedQuery extends SavedQuery {
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  list: (sourceId?: number, options?: { signal?: AbortSignal }) => {
+  list: (sourceId?: number, options?: RequestOptions) => {
     const url =
       sourceId !== undefined && sourceId !== null
         ? `/saved-queries?source_id=${sourceId}`
