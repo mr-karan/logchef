@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "Champ inconnu « {field} »",
+  "queryEditor.syntaxError": "Syntaxe LogchefQL invalide : {message}",
+  "queryEditor.invalidSyntax": "Syntaxe LogchefQL invalide",
+  "queryEditor.distinctCount": "{count} valeurs distinctes",
+  "queryEditor.topValues": "Valeurs les plus fréquentes",
   "ui.connecting": "Connexion…",
   "ui.idle": "Inactif",
   "variables.selectedCount": "{count} sélectionnés",

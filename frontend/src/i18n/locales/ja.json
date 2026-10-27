@@ -1,4 +1,9 @@
 {
+  "queryEditor.unknownField": "不明なフィールド「{field}」",
+  "queryEditor.syntaxError": "LogchefQL の構文が無効です: {message}",
+  "queryEditor.invalidSyntax": "LogchefQL の構文が無効です",
+  "queryEditor.distinctCount": "{count} 個の異なる値",
+  "queryEditor.topValues": "出現頻度の高い値",
   "ui.connecting": "接続中…",
   "ui.idle": "待機中",
   "variables.selectedCount": "{count} 件選択済み",

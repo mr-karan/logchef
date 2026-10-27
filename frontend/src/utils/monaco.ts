@@ -2,6 +2,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import "monaco-editor/features/register.all.js";
 import { loader } from "@guolao/vue-monaco-editor";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
+import { getMonacoThemeColors, type MonacoThemeName } from "./monaco-theme";
 import {
   SQL_KEYWORDS,
   CLICKHOUSE_FUNCTIONS,
@@ -31,6 +32,8 @@ const MAX_CACHED_MODELS = 20;
 export function getDefaultMonacoOptions(): monaco.editor.IStandaloneEditorConstructionOptions {
   return {
     readOnly: false,
+    suggestFontSize: 13,
+    suggestLineHeight: 28,
     fontSize: 13, // Adjusted for a slightly more compact look
     lineHeight: 20, // Adjusted for new font size
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
@@ -104,12 +107,39 @@ function initMonacoSetup() {
   // Mark as initialized
   setupComplete = true;
 
-  // Define themes - Simplified to avoid styling issues
-  monaco.editor.defineTheme("logchef-light", {
-    base: "vs",
+  // The editor component calls setTheme before any later definition, and Monaco falls back to "vs" for unknown names.
+  defineMonacoTheme("logchef-light");
+  defineMonacoTheme("logchef-dark");
+
+  // Register languages (ensure this runs only once)
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
+    registerLogchefQL();
+  }
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
+    registerClickhouseSQL();
+  }
+}
+
+function defineMonacoTheme(theme: MonacoThemeName) {
+  const isDark = theme === "logchef-dark";
+  monaco.editor.defineTheme(theme, {
+    base: isDark ? "vs-dark" : "vs",
     inherit: true,
-    colors: {}, // Use default VS colors
-    rules: [
+    colors: getMonacoThemeColors(isDark ? "dark" : "light"),
+    rules: isDark ? [
+      { token: "logchefqlKey", foreground: "9cdcfe" },
+      { token: "logchefqlOperator", foreground: "d4d4d4" },
+      { token: "number", foreground: "b5cea8" },
+      { token: "string", foreground: "ce9178" },
+      { token: "punctuation", foreground: "d4d4d4" },
+      // ClickHouse specific (or general SQL)
+      { token: "keyword", foreground: "569cd6" },
+      { token: "identifier", foreground: "9cdcfe" },
+      { token: "operator", foreground: "d4d4d4" },
+      { token: "comment", foreground: "6a9955" },
+      { token: "function", foreground: "dcdcaa" },
+      { token: "type", foreground: "4ec9b0" },
+    ] : [
       { token: "logchefqlKey", foreground: "0451a5" },
       { token: "logchefqlOperator", foreground: "000000" },
       { token: "number", foreground: "098658" },
@@ -124,46 +154,6 @@ function initMonacoSetup() {
       { token: "type", foreground: "267f99" },
     ],
   });
-
-  monaco.editor.defineTheme("logchef-dark", {
-    base: "vs-dark",
-    inherit: true,
-    colors: {
-      // Match the bluish-dark theme
-      'editor.background': '#0c0e14', // Matches --card/--background (222.2 84% 4.9%)
-      'editor.foreground': '#f0f6fc', // Matches --foreground (210 40% 98%)
-      'editorCursor.foreground': '#78aeff', // Accent color based on --primary
-      'editor.selectionBackground': '#1c2536', // Slightly lighter than background
-      'editor.lineHighlightBackground': '#111522', // Subtle highlight
-      'editorLineNumber.foreground': '#495167', // Muted color for line numbers
-      'editorIndentGuide.background': '#1d2536', // Subtle indent guides
-      'editorWidget.background': '#111522', // Dropdown backgrounds
-      'dropdown.background': '#111522',
-      'list.hoverBackground': '#1c2536',
-    },
-    rules: [
-      { token: "logchefqlKey", foreground: "9cdcfe" },
-      { token: "logchefqlOperator", foreground: "d4d4d4" },
-      { token: "number", foreground: "b5cea8" },
-      { token: "string", foreground: "ce9178" },
-      { token: "punctuation", foreground: "d4d4d4" },
-      // ClickHouse specific (or general SQL)
-      { token: "keyword", foreground: "569cd6" },
-      { token: "identifier", foreground: "9cdcfe" },
-      { token: "operator", foreground: "d4d4d4" },
-      { token: "comment", foreground: "6a9955" },
-      { token: "function", foreground: "dcdcaa" },
-      { token: "type", foreground: "4ec9b0" },
-    ],
-  });
-
-  // Register languages (ensure this runs only once)
-  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logchefql')) {
-    registerLogchefQL();
-  }
-  if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
-    registerClickhouseSQL();
-  }
 }
 
 export function ensureMonacoSetup(): Promise<void> {
@@ -541,56 +531,6 @@ function registerClickhouseSQL() {
       { open: "'", close: "'" },
       { open: '`', close: '`' },
     ],
-  });
-
-  // Define completions for SQL keywords, functions, etc.
-  monaco.languages.registerCompletionItemProvider(LANGUAGE_ID, {
-    provideCompletionItems: (model, position, _context, _token) => {
-      const wordInfo = model.getWordUntilPosition(position);
-      const wordRange = new monaco.Range(
-        position.lineNumber,
-        wordInfo.startColumn,
-        position.lineNumber,
-        wordInfo.endColumn
-      );
-
-      // Create completion items for keywords
-      const keywordItems = SQL_KEYWORDS.map((keyword: string) => ({
-        label: keyword.toUpperCase(),
-        kind: monaco.languages.CompletionItemKind.Keyword,
-        insertText: keyword.toUpperCase(),
-        detail: 'Keyword',
-        range: wordRange
-      }));
-
-      // Create completion items for functions
-      const functionItems = CLICKHOUSE_FUNCTIONS.map((func: string) => ({
-        label: func,
-        kind: monaco.languages.CompletionItemKind.Function,
-        insertText: func,
-        detail: 'Function',
-        documentation: `ClickHouse function: ${func}()`,
-        range: wordRange
-      }));
-
-      // Create completion items for data types
-      const typeItems = SQL_TYPES.map((type: string) => ({
-        label: type,
-        kind: monaco.languages.CompletionItemKind.TypeParameter,
-        insertText: type,
-        detail: 'Data Type',
-        range: wordRange
-      }));
-
-      // Combine all items
-      return {
-        suggestions: [
-          ...keywordItems,
-          ...functionItems,
-          ...typeItems,
-        ]
-      };
-    }
   });
 
   // Register basic hover provider

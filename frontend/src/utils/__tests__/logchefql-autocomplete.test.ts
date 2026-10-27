@@ -5,6 +5,9 @@ import {
   isNumericFieldType,
   formatCountShort,
   buildValueInsertText,
+  buildValueCompletionEdit,
+  buildBooleanInsertText,
+  getLogchefQLOperators,
   filterValuesByPartial,
   formatFieldDetail,
 } from '../logchefql-autocomplete'
@@ -178,15 +181,42 @@ describe('parseLogchefQLContext', () => {
       })
     })
 
-    it('suggests values (not boolean) for unquoted value with trailing space because trimEnd collapses it', () => {
-      // The parser trims trailing space, so "method=GET " becomes "method=GET"
-      // which matches Step 3 (field+op+partial) since method is a known field.
-      const result = parseLogchefQLContext('method=GET ', FIELDS)
-      expect(result).toMatchObject({
-        suggest: 'values',
-        key: 'method',
-        operator: '=',
-        partial: 'GET',
+    it.each([
+      'method=GET ', 'status>=400 ', '(method="GET")', '(status>=400) ',
+      '((method="GET" ) )', 'method="escaped \\"quote\\""', "method='escaped \\'quote\\''",
+    ])(
+      'suggests boolean after a completed value or group in %s', (text) => {
+        expect(parseLogchefQLContext(text, FIELDS)).toEqual({ suggest: 'boolean', partial: '' })
+      },
+    )
+
+    it.each(['a', 'an', 'and', 'o', 'or', 'OR'])(
+      'completes the boolean prefix %s after a condition', (partial) => {
+        expect(parseLogchefQLContext(`method="GET" ${partial}`, FIELDS)).toEqual({
+          suggest: 'boolean', partial,
+        })
+      },
+    )
+
+    it('keeps a boolean prefix in a value as a value', () => {
+      expect(parseLogchefQLContext('method=or', FIELDS)).toMatchObject({
+        suggest: 'values', key: 'method', partial: 'or',
+      })
+    })
+
+    it.each(['(', '((', 'method="GET" and (', '(method="GET" or ('])(
+      'offers fields at the start of a group in %s', (text) => {
+        expect(parseLogchefQLContext(text, FIELDS)).toEqual({ suggest: 'fields', partial: '' })
+      },
+    )
+
+    it('offers operators for a field inside a group', () => {
+      expect(parseLogchefQLContext('(method', FIELDS)).toEqual({ suggest: 'operators', key: 'method' })
+    })
+
+    it('does not finish an empty numeric value on whitespace', () => {
+      expect(parseLogchefQLContext('status>= ', FIELDS)).toMatchObject({
+        suggest: 'values', key: 'status', partial: '',
       })
     })
   })
@@ -220,9 +250,15 @@ describe('parseLogchefQLContext', () => {
       })
     })
 
-    it('treats partial "an" as partial field', () => {
+    it('treats partial "an" after a condition as a boolean', () => {
       const result = parseLogchefQLContext('method=GET an', FIELDS)
-      expect(result).toEqual({ suggest: 'fields', partial: 'an' })
+      expect(result).toEqual({ suggest: 'boolean', partial: 'an' })
+    })
+
+    it('keeps a partial field after a boolean in field context', () => {
+      expect(parseLogchefQLContext('method=GET and an', FIELDS)).toEqual({
+        suggest: 'fields', partial: 'an',
+      })
     })
   })
 
@@ -425,6 +461,88 @@ describe('buildValueInsertText', () => {
     it('handles Float64 as numeric', () => {
       expect(buildValueInsertText('3.14', 'Float64', null)).toBe('3.14')
     })
+  })
+})
+
+describe('buildValueCompletionEdit', () => {
+  it.each([
+    { quote: '"', suffix: '") and host="api"' },
+    { quote: "'", suffix: "')" },
+  ] satisfies Array<{ quote: '"' | "'"; suffix: string }>)(
+    'replaces the existing $quote without changing the suffix', ({ quote, suffix }) => {
+      const prefix = `method=${quote}`
+      const edit = buildValueCompletionEdit('GET', 'String', quote, suffix)
+      const result = prefix + edit.insertText + suffix.slice(edit.replaceAfter)
+      expect(result).toBe(`${prefix}GET${suffix}`)
+      expect(prefix.length + edit.insertText.length).toBe('method="GET"'.length)
+    },
+  )
+
+  it('closes an open quote when there is no existing quote', () => {
+    expect(buildValueCompletionEdit('GET', 'String', '"', ')')).toEqual({
+      insertText: 'GET"', replaceAfter: 0, retrigger: true,
+    })
+  })
+
+  it('preserves parentheses when no quote was typed', () => {
+    expect(buildValueCompletionEdit('GET', 'String', null, ')')).toEqual({
+      insertText: '"GET"', replaceAfter: 0, retrigger: true,
+    })
+  })
+
+  it('preserves the following clause for numeric values', () => {
+    expect(buildValueCompletionEdit('400', 'UInt16', null, ' and host="api"')).toEqual({
+      insertText: '400', replaceAfter: 0, retrigger: false,
+    })
+  })
+
+  it.each([
+    { before: 'method="G', after: 'ET" and status=200', quote: '"', expected: 'method="GET" and status=200' },
+    { before: 'method="G', after: 'ET"and host="api"', quote: '"', expected: 'method="GET"and host="api"' },
+    { before: 'method="G', after: 'ET"OR host="api"', quote: '"', expected: 'method="GET"OR host="api"' },
+    { before: "method='G", after: "ET')", quote: "'", expected: "method='GET')" },
+    { before: 'method="G', after: 'E\\"T" and status=200', quote: '"', expected: 'method="GET" and status=200' },
+    { before: 'method="G', after: 'ET" and host="api"', quote: '"', expected: 'method="GET" and host="api"' },
+    { before: 'method="', after: ' and host="api"', quote: '"', expected: 'method="GET" and host="api"' },
+    { before: 'method="', after: ' and host="api" and path="/x"', quote: '"', expected: 'method="GET" and host="api" and path="/x"' },
+    { before: 'method=G', after: 'ET and status=200', quote: null, expected: 'method="GET" and status=200' },
+    { before: 'method="G', after: 'ET" and host="', quote: '"', expected: 'method="GET" and host="' },
+    { before: 'method="G', after: 'ET" and msg="say \\"hi', quote: '"', expected: 'method="GET" and msg="say \\"hi' },
+    { before: 'method=G', after: 'ET|method', quote: null, expected: 'method="GET"|method' },
+    { before: 'method=G', after: 'ET!=x', quote: null, expected: 'method="GET"!=x' },
+  ] satisfies Array<{ before: string; after: string; quote: '"' | "'" | null; expected: string }>)(
+    'replaces the rest of the value in $before|$after', ({ before, after, quote, expected }) => {
+      const partial = quote ? before.slice(before.indexOf(quote) + 1) : before.slice(before.indexOf('=') + 1)
+      const edit = buildValueCompletionEdit('GET', 'String', quote, after)
+      expect(before.slice(0, before.length - partial.length) + edit.insertText + after.slice(edit.replaceAfter)).toBe(expected)
+    },
+  )
+
+  it('replaces the rest of a bare number', () => {
+    const edit = buildValueCompletionEdit('200', 'UInt16', null, '00 and host="api"')
+    expect('status=' + edit.insertText + '00 and host="api"'.slice(edit.replaceAfter)).toBe('status=200 and host="api"')
+  })
+})
+
+describe('buildBooleanInsertText', () => {
+  it.each(['and', 'or'] satisfies Array<'and' | 'or'>)('inserts only the selected %s keyword', (keyword) => {
+    expect(buildBooleanInsertText(keyword, 'method="GET"', '')).toBe(` ${keyword} `)
+    expect(buildBooleanInsertText(keyword, 'method="GET" ', '')).toBe(`${keyword} `)
+    expect(buildBooleanInsertText(keyword, '(method="GET")', '')).toBe(` ${keyword} `)
+    expect(buildBooleanInsertText(keyword, 'status>=400 ', '')).toBe(`${keyword} `)
+    expect(buildBooleanInsertText(keyword, 'method="GET" a', 'a')).toBe(`${keyword} `)
+  })
+})
+
+describe('getLogchefQLOperators', () => {
+  it.each(['UInt16', 'Nullable(Float64)', 'LowCardinality(Int32)'])(
+    'prioritizes numeric comparisons and excludes regex for %s', (type) => {
+      expect(getLogchefQLOperators(type)).toEqual(['=', '>=', '>', '<=', '<', '!='])
+    },
+  )
+
+  it('keeps equality and regex ahead of string comparisons', () => {
+    expect(getLogchefQLOperators('String')).toEqual(['=', '!=', '~', '!~', '>', '<', '>=', '<='])
   })
 })
 

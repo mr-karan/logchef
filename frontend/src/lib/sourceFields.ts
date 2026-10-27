@@ -86,7 +86,7 @@ export function isPrimaryMessageField(name: string): boolean {
   );
 }
 
-function unwrapFieldType(type: string): string {
+export function unwrapFieldType(type: string): string {
   return type
     .replace(/LowCardinality\(([^)]+)\)/gi, "$1")
     .replace(/Nullable\(([^)]+)\)/gi, "$1");
