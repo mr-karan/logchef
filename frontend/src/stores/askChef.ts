@@ -16,6 +16,7 @@ import { i18n } from "@/i18n";
 import router from "@/router";
 import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/utils/alertExplore";
 import type { ZoneId } from "@/utils/timeWindow";
+import { useMetaStore } from "./meta";
 import { useAuthStore } from "./auth";
 import { useExploreStore } from "./explore";
 import { useExploreRuns } from "./exploreRuns";
@@ -42,6 +43,8 @@ export type AskChefSubject =
 
 // `zone` is the zone the context's times are shown in.
 export type AskChefContext = ExploreWindow & { subject: AskChefSubject; zone: ZoneId };
+
+export type ExplorerAskContext = Readonly<AskChefContext & { subject: { readonly kind: "explorer" } }>;
 
 export type ToolStep = { callId: string; tool: string } & (
   | { status: "running" }
@@ -175,19 +178,22 @@ export const useAskChefStore = defineStore("askChef", () => {
   const session = ref<AskChefSession>(newSession());
   const activeEvidenceId = ref<EvidenceId | null>(null);
   let controller: AbortController | null = null;
+  let conversationSource: string | null = null;
 
   const status = computed(() => session.value.status);
   const transcript = computed(() => session.value.transcript);
   const evidence = computed(() => session.value.evidence);
 
-  function explorerContext(): AskChefContext | null {
+  function explorerContext(): ExplorerAskContext | null {
     const explore = useExploreStore();
     const teamId = useTeamsStore().currentTeamId;
     if (!teamId || !explore.sourceId || !explore.hasWindow) return null;
     const mode = explore.activeMode;
     const query = (mode === "native" ? explore.nativeQuery : explore.logchefqlCode).trim();
     // The window of the results Explorer shows, or the editor's window before anything ran.
-    const { start, end, zone } = useExploreRuns().shown?.resolved ?? explore.resolveNow();
+    const shown = useExploreRuns().shown;
+    const matching = shown?.teamId === teamId && shown.source.id === explore.sourceId ? shown : null;
+    const { start, end, zone } = matching?.resolved ?? explore.resolveNow();
     return {
       subject: { kind: "explorer" },
       teamId,
@@ -209,6 +215,7 @@ export const useAskChefStore = defineStore("askChef", () => {
     abortTurn();
     session.value = newSession();
     activeEvidenceId.value = null;
+    conversationSource = null;
   }
 
   // Resumes the current conversation, or starts one from what the Explorer shows.
@@ -221,10 +228,26 @@ export const useAskChefStore = defineStore("askChef", () => {
     open.value = false;
   }
 
+  async function openFromPalette(captured: ExplorerAskContext, question: string | null): Promise<void> {
+    if (!useMetaStore().askChefEnabled) return;
+    const source = `${captured.teamId}:${captured.sourceId}`;
+    if (pinned.value || conversationSource !== source) reset();
+    else if (question !== null) stop();
+    conversationSource = source;
+    open.value = true;
+    if (question !== null) await sendWithContext(question, captured);
+  }
+
   async function send(text: string): Promise<void> {
-    const message = text.trim().slice(0, MAX_MESSAGE_LENGTH);
     const turnContext = pinned.value ?? explorerContext();
-    if (!message || !turnContext || session.value.status.kind === "streaming") return;
+    if (!turnContext) return;
+    await sendWithContext(text, turnContext);
+  }
+
+  async function sendWithContext(text: string, turnContext: AskChefContext): Promise<void> {
+    const message = text.trim().slice(0, MAX_MESSAGE_LENGTH);
+    if (!message || session.value.status.kind === "streaming") return;
+    conversationSource = `${turnContext.teamId}:${turnContext.sourceId}`;
 
     const request = buildTurnRequest(turnContext, session.value, message);
     session.value.transcript.push({ role: "user", text: message }, { role: "assistant", steps: [], text: "", evidenceIds: [], done: null });
@@ -279,10 +302,6 @@ export const useAskChefStore = defineStore("askChef", () => {
     pinned.value = null;
   }
 
-  // Evidence cites one source, so a conversation ends when the Explorer moves
-  // to another team or source. A team switch clears the source first, so
-  // compare with the last source that was set.
-  let lastSource: string | null = null;
   watch(
     () => {
       const explore = useExploreStore();
@@ -290,11 +309,8 @@ export const useAskChefStore = defineStore("askChef", () => {
       return teamId && explore.sourceId ? `${teamId}:${explore.sourceId}` : null;
     },
     (next) => {
-      if (!next) return;
-      if (!pinned.value && lastSource && next !== lastSource) clearConversation();
-      lastSource = next;
-    },
-    { immediate: true }
+      if (next && !pinned.value && conversationSource && next !== conversationSource) clearConversation();
+    }
   );
 
   // A conversation belongs to the user who had it, so logout or a new login ends it.
@@ -323,6 +339,8 @@ export const useAskChefStore = defineStore("askChef", () => {
     evidence,
     activeEvidenceId,
     openForExplorer,
+    openFromPalette,
+    explorerContext,
     close,
     send,
     investigateAlert,

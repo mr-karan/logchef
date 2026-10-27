@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { AlertEditorMode, QueryLanguage } from "@/lib/queryMetadata";
 
 export type AlertThresholdOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
@@ -108,15 +108,15 @@ export interface TestAlertQueryResponse {
 }
 
 export const alertsApi = {
-  list: (sourceId?: number, options?: { signal?: AbortSignal }) => {
+  list: (sourceId?: number, options?: RequestOptions) => {
     const url =
       sourceId !== undefined && sourceId !== null
         ? `/alerts?source_id=${sourceId}`
         : "/alerts";
     return apiClient.get<Alert[]>(url, options);
   },
-  get: (alertId: number) =>
-    apiClient.get<Alert>(`/alerts/${alertId}`),
+  get: (alertId: number, options?: RequestOptions) =>
+    apiClient.get<Alert>(`/alerts/${alertId}`, options),
   create: (payload: CreateAlertRequest) =>
     apiClient.post<Alert>("/alerts", payload),
   update: (alertId: number, payload: UpdateAlertRequest) =>
@@ -125,7 +125,7 @@ export const alertsApi = {
     apiClient.delete<{ message: string }>(`/alerts/${alertId}`),
   resolve: (alertId: number, payload: ResolveAlertRequest) =>
     apiClient.post<{ message: string }>(`/alerts/${alertId}/resolve`, payload),
-  history: (alertId: number, limit?: number, options?: { signal?: AbortSignal }) => {
+  history: (alertId: number, limit?: number, options?: RequestOptions) => {
     const search = limit ? `?limit=${encodeURIComponent(limit)}` : "";
     return apiClient.get<AlertHistoryEntry[]>(`/alerts/${alertId}/history${search}`, options);
   },

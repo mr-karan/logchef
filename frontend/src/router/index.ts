@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useMetaStore } from "@/stores/meta";
 import { basePath } from "@/utils/basePath";
 import { error } from "@/utils/debug";
+import { meetsRequirements, routeRequirements, type RouteRequirement, type Viewer } from "./access";
 import { contextRouterGuard } from "./contextGuard";
 import { usePendingNavigation } from "./navigation";
 import ComponentLoadError from "@/views/error/ComponentLoadError.vue";
@@ -75,13 +76,13 @@ const routes: RouteRecordRaw[] = [
         path: "explore",
         name: "LogExplorer",
         component: lazy("LogExplorer", () => import("@/views/explore/LogExplorer.vue")),
-        meta: { title: "routes.logExplorer" },
+        meta: { title: "routes.logExplorer", palette: { icon: "explore", contextual: true } },
       },
       {
         path: "library",
         name: "Library",
         component: lazy("LibraryView", () => import("@/views/library/LibraryView.vue")),
-        meta: { title: "routes.library" },
+        meta: { title: "routes.library", palette: { icon: "library" } },
       },
       {
         path: "library/:collectionID",
@@ -93,13 +94,13 @@ const routes: RouteRecordRaw[] = [
         path: "alerts",
         name: "AlertsOverview",
         component: lazy("AlertsOverview", () => import("@/views/alerts/AlertsOverview.vue")),
-        meta: { title: "routes.alerts" },
+        meta: { title: "routes.alerts", palette: { icon: "alerts", contextual: true } },
       },
       {
         path: "alerts/new",
         name: "AlertCreate",
         component: lazy("AlertCreate", () => import("@/views/alerts/AlertCreate.vue")),
-        meta: { title: "routes.createAlert" },
+        meta: { title: "routes.createAlert", palette: { icon: "newAlert" } },
       },
       {
         path: "alerts/:alertID",
@@ -129,7 +130,7 @@ const routes: RouteRecordRaw[] = [
         path: "",
         name: "Dashboards",
         component: lazy("DashboardsList", () => import("@/views/dashboards/DashboardsList.vue")),
-        meta: { title: "routes.dashboards" },
+        meta: { title: "routes.dashboards", palette: { icon: "dashboards" } },
       },
       {
         path: ":id",
@@ -158,19 +159,19 @@ const routes: RouteRecordRaw[] = [
         path: "users",
         name: "ManageUsers",
         component: lazy("UsersList", () => import("@/views/access/users/UsersList.vue")),
-        meta: { title: "routes.users", requiresAdmin: true },
+        meta: { title: "routes.users", requiresAdmin: true, palette: { icon: "users" } },
       },
       {
         path: "service-tokens",
         name: "ServiceTokens",
         component: lazy("ServiceTokens", () => import("@/views/access/service-accounts/ServiceTokens.vue")),
-        meta: { title: "routes.serviceTokens", requiresAdmin: true },
+        meta: { title: "routes.serviceTokens", requiresAdmin: true, palette: { icon: "serviceTokens" } },
       },
       {
         path: "teams",
         name: "Teams",
         component: lazy("TeamsList", () => import("@/views/access/teams/TeamsList.vue")),
-        meta: { title: "routes.teams", requiresAnyTeamAdmin: true },
+        meta: { title: "routes.teams", requiresAnyTeamAdmin: true, palette: { icon: "teams" } },
       },
       {
         path: "teams/:id",
@@ -182,13 +183,13 @@ const routes: RouteRecordRaw[] = [
         path: "sources",
         name: "Sources",
         component: lazy("ManageSources", () => import("@/views/sources/ManageSources.vue")),
-        meta: { title: "routes.sources", requiresAdmin: true },
+        meta: { title: "routes.sources", requiresAdmin: true, palette: { icon: "sources" } },
       },
       {
         path: "sources/new",
         name: "NewSource",
         component: lazy("AddSource", () => import("@/views/sources/AddSource.vue")),
-        meta: { title: "routes.newSource", requiresAdmin: true },
+        meta: { title: "routes.newSource", requiresAdmin: true, palette: { icon: "newSource" } },
       },
       {
         path: "sources/:sourceId/edit",
@@ -200,19 +201,19 @@ const routes: RouteRecordRaw[] = [
         path: "sources/stats",
         name: "SourceInspection",
         component: lazy("SourceInspection", () => import("@/views/sources/SourceStats.vue")),
-        meta: { title: "routes.sourceInspection", requiresAdmin: true },
+        meta: { title: "routes.sourceInspection", requiresAdmin: true, palette: { icon: "inspectSource" } },
       },
       {
         path: "settings",
         name: "AdminSettings",
         component: lazy("AdminSettings", () => import("@/views/admin/AdminSettings.vue")),
-        meta: { title: "routes.systemSettings", requiresAdmin: true },
+        meta: { title: "routes.systemSettings", requiresAdmin: true, palette: { icon: "systemSettings" } },
       },
       {
         path: "query-activity",
         name: "AdminQueryActivity",
         component: lazy("AdminQueryActivity", () => import("@/views/admin/QueryActivity.vue")),
-        meta: { title: "routes.queryActivity", requiresAdmin: true },
+        meta: { title: "routes.queryActivity", requiresAdmin: true, palette: { icon: "queryActivity" } },
       },
     ],
   },
@@ -233,19 +234,19 @@ const routes: RouteRecordRaw[] = [
         path: "profile",
         name: "Profile",
         component: lazy("UserProfile", () => import("@/views/settings/UserProfile.vue")),
-        meta: { title: "routes.profile" },
+        meta: { title: "routes.profile", palette: { icon: "profile" } },
       },
       {
         path: "preferences",
         name: "Preferences",
         component: lazy("UserPreferences", () => import("@/views/settings/UserPreferences.vue")),
-        meta: { title: "routes.preferences" },
+        meta: { title: "routes.preferences", palette: { icon: "preferences" } },
       },
       {
         path: "connected-apps",
         name: "ConnectedApps",
         component: lazy("ConnectedApps", () => import("@/views/settings/ConnectedApps.vue")),
-        meta: { title: "routes.connectedApps", requiresOAuth: true },
+        meta: { title: "routes.connectedApps", requiresOAuth: true, palette: { icon: "connectedApps" } },
       },
     ],
   },
@@ -294,20 +295,34 @@ const router = createRouter({
 
 usePendingNavigation(router);
 
-router.beforeEach(async (to) => {
+async function guardViewer(requirements: readonly RouteRequirement[]): Promise<Viewer> {
+  const metaStore = useMetaStore();
   // OAuth pages exist only when the server runs Logchef OAuth. Meta may not
   // be loaded yet on a cold visit, so load it before deciding.
-  if (to.matched.some((record) => record.meta.requiresOAuth)) {
-    const metaStore = useMetaStore();
-    await metaStore.loadMeta();
-    if (!metaStore.oauthIssuer) {
-      return { name: "NotFound", params: { pathMatch: to.path.slice(1).split("/") } };
-    }
+  if (requirements.includes("oauth")) await metaStore.loadMeta();
+  const authStore = useAuthStore();
+  const isAdmin = authStore.user?.role === "admin";
+  let isAnyTeamAdmin = false;
+  if (requirements.includes("anyTeamAdmin") && authStore.isAuthenticated && !isAdmin) {
+    // Lazy-import to avoid a circular store dependency at module init.
+    const { useTeamsStore } = await import("@/stores/teams");
+    isAnyTeamAdmin = useTeamsStore().isAnyTeamAdmin;
+  }
+  return { isAdmin, isAnyTeamAdmin, alertsEnabled: metaStore.alertsEnabled, oauthEnabled: metaStore.oauthIssuer !== null };
+}
+
+router.beforeEach(async (to) => {
+  const requirements = routeRequirements(to.matched);
+  const viewer = await guardViewer(requirements);
+  const unmet = (requirement: RouteRequirement) =>
+    requirements.includes(requirement) && !meetsRequirements([requirement], viewer);
+
+  if (unmet("oauth")) {
+    return { name: "NotFound", params: { pathMatch: to.path.slice(1).split("/") } };
   }
 
   const authStore = useAuthStore();
   const isAuthenticated = authStore.isAuthenticated;
-  const isAdmin = authStore.user?.role === "admin";
   const isPublic = to.matched.some((record) => record.meta.public);
 
   if (!isAuthenticated && !isPublic) {
@@ -333,24 +348,12 @@ router.beforeEach(async (to) => {
     };
   }
 
-  // If the server has alerting disabled, redirect any /logs/alerts* deep link
-  // to the explorer. The layered defenses in each alert view and the alert
-  // stores handle bookmarked URLs that arrive before meta has loaded.
-  const metaStore = useMetaStore();
-  if (!metaStore.alertsEnabled && to.path.startsWith("/logs/alerts")) {
+  if (unmet("alerts")) {
     return { path: "/logs/explore" };
   }
 
-  if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {
+  if (unmet("admin") || unmet("anyTeamAdmin")) {
     return { name: "Forbidden" };
-  }
-
-  if (to.matched.some((record) => record.meta.requiresAnyTeamAdmin) && !isAdmin) {
-    // Lazy-import to avoid a circular store dependency at module init.
-    const { useTeamsStore } = await import("@/stores/teams");
-    if (!useTeamsStore().isAnyTeamAdmin) {
-      return { name: "Forbidden" };
-    }
   }
 
   if (isAuthenticated && !isPublic) {

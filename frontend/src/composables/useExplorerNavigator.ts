@@ -1,5 +1,8 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { recordRecentSource } from '@/lib/recentSources'
+import { exploreReopen, reportExploreLanding } from '@/lib/exploreHandoff'
 import { exploreApi } from '@/api/explore'
 import type { Source } from '@/api/sources'
 import { savedQueriesApi, type SavedQuery, type SavedQueryContent } from '@/api/savedQueries'
@@ -49,6 +52,7 @@ function navigationError(error: unknown, resource: 'team' | 'source'): unknown {
  * navigating to it.
  */
 export function useExplorerNavigator() {
+  const auth = useAuthStore()
   const route = useRoute()
   const router = useRouter()
   const explore = useExploreStore()
@@ -73,6 +77,12 @@ export function useExplorerNavigator() {
   let unrecorded: Execution | null = null
 
   watch(() => route.fullPath, () => openRoute(), { immediate: true })
+  watch(exploreReopen, request => {
+    if (request && route.fullPath === request.fullPath && route.path === EXPLORE_PATH) {
+      exploreReopen.value = null
+      void openRoute(true)
+    }
+  })
   // Nothing loading or running may record once Explorer is gone.
   onScopeDispose(() => {
     navId++
@@ -97,10 +107,12 @@ export function useExplorerNavigator() {
   /** Opens the route's location unless Explorer already shows it. */
   async function openRoute(reopen = false) {
     if (!reopen && isHere()) {
+      if (context.teamId !== null) reportExploreLanding(route.fullPath, { teamId: context.teamId, sourceId: context.sourceId })
       recordDeferred()
       return
     }
     const id = ++navId
+    const requestedPath = route.fullPath
     chosen = {}
     pending.value = null
     if (route.path !== EXPLORE_PATH) {
@@ -109,6 +121,7 @@ export function useExplorerNavigator() {
     }
     if (!reopen && isShown()) {
       status.value = 'ready'
+      if (context.teamId !== null) reportExploreLanding(route.fullPath, { teamId: context.teamId, sourceId: context.sourceId })
       recordDeferred()
       return
     }
@@ -127,6 +140,8 @@ export function useExplorerNavigator() {
           const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location)
           applyChoice()
           status.value = 'ready'
+          reportExploreLanding(requestedPath, location)
+          if (auth.user && location.sourceId !== null) recordRecentSource(String(auth.user.id), location.teamId, location.sourceId, Date.now())
           runs.enter(shouldRun && !sourceNotice ? editorAsk() : null)
           if (sourceNotice) toast({ title: i18n.global.t('explore.linkOpenFailed'), description: sourceNotice, variant: 'destructive', duration: TOAST_DURATION.ERROR })
           if (sourceNotice) void record('replace', { team: String(location.teamId), ...(location.sourceId === null ? {} : { source: String(location.sourceId) }) })
@@ -140,6 +155,7 @@ export function useExplorerNavigator() {
       throw new Error(i18n.global.t('explore.sourcesChanged'))
     } catch (err) {
       if (id !== navId) return
+      reportExploreLanding(requestedPath, null)
       console.error('error opening explorer location', err)
       chosen = {}
       const message = getErrorMessage(err)

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { platformModifier } from "@/lib/platformModifier";
+import { usePaletteHost } from "@/components/command-palette/usePaletteHost";
+import type { Component } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -33,6 +36,7 @@ import {
   LogOut,
   Users,
   Search,
+  Command,
   Database,
   UserCircle2,
   UsersRound,
@@ -60,6 +64,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
 
 const { t } = useI18n();
+const palette = usePaletteHost();
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
@@ -133,7 +138,7 @@ function getUserInitials(name: string | undefined): string {
 // Define navigation item type
 interface NavItem {
   title: string;
-  icon: any;
+  icon: Component;
   url: string;
   adminOnly?: boolean;
 }
@@ -243,6 +248,18 @@ const navItems = [
         </SidebarHeader>
 
         <SidebarContent>
+          <SidebarGroup>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton :tooltip="`${t('palette.title')} (${platformModifier} K)`" :aria-label="t('palette.title')" aria-keyshortcuts="Control+k Meta+k" :aria-busy="palette.state.value.kind === 'loading'" @click="palette.open">
+                  <Command class="size-4" />
+                  <span>{{ t('palette.title') }}</span>
+                  <kbd v-if="sidebarOpen" class="ml-auto text-[10px] text-muted-foreground">{{ platformModifier }} K</kbd>
+                </SidebarMenuButton>
+                <p v-if="palette.error.value" role="alert" class="px-2 text-xs text-destructive">{{ t('palette.openFailed') }}</p>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
           <!-- Main Navigation -->
           <SidebarGroup>
             <SidebarGroupLabel v-if="sidebarOpen">{{ t('ui.main') }}</SidebarGroupLabel>
@@ -406,5 +423,6 @@ const navItems = [
         </main>
       </SidebarInset>
     </SidebarProvider>
+    <component :is="palette.component.value" v-if="palette.component.value" :open="palette.state.value.kind === 'open'" :cancellation="palette.cancellation.value" @close="palette.close" />
   </div>
 </template>
