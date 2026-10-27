@@ -23,6 +23,9 @@ import type { ColumnInfo, QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
+import { getDefaultColumnOrder } from './defaultColumnOrder'
+import { createContentMeasurer, waitForContentFonts } from './contentSizing'
+import type { ColumnSizingState } from '@tanstack/vue-table'
 import { getVisibleColumnRange } from './columnVirtualization'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
@@ -113,12 +116,12 @@ const tableColumns = computed<CustomColumnDef[]>(() => props.columns.length ? cr
 
 const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults } = useColumnState({
     columns: tableColumns,
+    defaultOrder: () => props.data.length ? getDefaultColumnOrder(tableColumns.value, props.data) : null,
     teamId: () => props.teamId,
     sourceId: () => props.sourceId,
     source: () => props.source,
     timestampField: timestampFieldName,
     severityField: severityFieldName,
-    defaultSize: defaultColumn.size,
 })
 
 // Reset column filters whenever a new query runs. A new query replaces
@@ -141,50 +144,22 @@ function getColumnType(column: any): string | undefined {
     return column?.columnDef?.meta?.columnType;
 }
 
-// Auto-fit column width based on content (double-click feature)
-function autoFitColumn(header: any) {
-    const columnId = header.column.id;
-    const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
-    
-    // Get all cells for this column
-    const rows = table.getRowModel().rows;
-    
-    // Create a temporary element to measure text width
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    // Use the same font as the table cells
-    ctx.font = '13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
-    
-    // Measure header text width
-    let maxWidth = ctx.measureText(columnId).width + 80; // Extra padding for header icons
-    
-    // Measure each cell's content width
-    rows.forEach(row => {
-        const value = row.getValue(columnId);
-        let text = '';
-        if (value === null || value === undefined) {
-            text = '-';
-        } else if (typeof value === 'object') {
-            text = JSON.stringify(value);
-        } else {
-            text = String(value);
-        }
-        const textWidth = ctx.measureText(text).width + 60; // Padding for cell + action buttons
-        maxWidth = Math.max(maxWidth, textWidth);
-    });
-    
-    // Clamp to reasonable bounds
-    const newSize = Math.max(minSize, Math.min(800, maxWidth));
-    
-    // Update column size
-    const newSizing = {
-        ...columnSizing.value,
-        [columnId]: newSize
-    };
-    columnSizing.value = newSizing;
-    table.setColumnSizing(newSizing);
+const measuredColumnSizing = ref<ColumnSizingState>({})
+const effectiveColumnSizing = computed(() => ({ ...measuredColumnSizing.value, ...columnSizing.value }))
+let measureContent: ReturnType<typeof createContentMeasurer> = null
+
+function measureColumn(columnId: string): number | undefined {
+    const column = props.columns.find(column => column.name === columnId)
+    const definition = tableColumns.value.find(column => column.id === columnId)
+    if (!column || !measureContent) return
+    const columnType = definition?.meta?.columnType
+    return measureContent(column, table.getRowModel().rows.map(row => row.original), typeof columnType === 'string' ? columnType : undefined,
+        displayTimezone.value, severityFieldName.value, 'explicit')
+}
+
+function autoFitColumn(columnId: string) {
+    const width = measureColumn(columnId)
+    if (width !== undefined) columnSizing.value = { ...columnSizing.value, [columnId]: width }
 }
 
 let stopResize: (() => void) | null = null
@@ -225,9 +200,6 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
 
         // Apply the new sizing
         columnSizing.value = newSizing;
-
-        // Apply directly to the table
-        table.setColumnSizing(newSizing);
     };
 
     const onTouchMove = (moveEvent: TouchEvent) => {
@@ -248,9 +220,6 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
 
         // Apply the new sizing
         columnSizing.value = newSizing;
-
-        // Apply directly to the table
-        table.setColumnSizing(newSizing);
     };
 
     const onEnd = () => {
@@ -308,7 +277,7 @@ const table = useTable({
             return columnFilters.value
         },
         get columnSizing() {
-            return columnSizing.value
+            return effectiveColumnSizing.value
         },
         get columnOrder() {
             // Important: Let the table read the order directly from the state ref
@@ -377,6 +346,38 @@ const onCellFocusOut = () => {
 // per row, not the whole schema.
 const EXPANDER_CELL_WIDTH = 24
 const scrollContainer = ref<HTMLElement | null>(null)
+let sizingFrame = 0
+const sizingInputs = [() => props.data, tableColumns, displayTimezone, scrollContainer]
+watch(sizingInputs, () => {
+    measuredColumnSizing.value = {}
+    measureContent = null
+}, { flush: 'post' })
+watch([...sizingInputs, () => Object.entries(columnVisibility.value)], async (_value, _previous, onCleanup) => {
+    let cancelled = false
+    onCleanup(() => {
+        cancelled = true
+        if (sizingFrame) cancelAnimationFrame(sizingFrame)
+        sizingFrame = 0
+    })
+    if (!scrollContainer.value || !props.data.length) return
+    await waitForContentFonts()
+    if (cancelled) return
+    sizingFrame = requestAnimationFrame(() => {
+        sizingFrame = 0
+        const root = scrollContainer.value?.closest<HTMLElement>('[data-logchef-table]')
+        if (!root) return
+        measureContent ??= createContentMeasurer(root)
+        if (!measureContent) return
+        const columnTypes = new Map(tableColumns.value.map(column => [column.id, column.meta?.columnType]))
+        const sizes = { ...measuredColumnSizing.value }
+        for (const column of props.columns) {
+            if (columnVisibility.value[column.name] === false || sizes[column.name] !== undefined) continue
+            sizes[column.name] = measureContent(column, props.data, columnTypes.get(column.name),
+                displayTimezone.value, severityFieldName.value)
+        }
+        measuredColumnSizing.value = sizes
+    })
+}, { flush: 'post' })
 const scrollLeft = ref(0)
 const viewportWidth = ref(0)
 let scrollFrame = 0
@@ -412,6 +413,7 @@ onBeforeUnmount(() => {
     stopResize?.()
     viewportObserver?.disconnect()
     if (scrollFrame) cancelAnimationFrame(scrollFrame)
+    if (sizingFrame) cancelAnimationFrame(sizingFrame)
 })
 
 const visibleLeafColumns = computed(() => {
@@ -419,7 +421,7 @@ const visibleLeafColumns = computed(() => {
     // and sizing changes even when TanStack serves a memoized column list.
     void columnVisibility.value
     void columnOrder.value
-    void columnSizing.value
+    void effectiveColumnSizing.value
     void tableColumns.value
     return table.getVisibleLeafColumns()
 })
@@ -502,6 +504,7 @@ onMounted(() => {
 // Add type for column meta
 interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
     className?: string;
+    columnType?: string;
 }
 
 // Add type for column definition with custom meta
@@ -678,7 +681,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             class="absolute right-0 top-0 h-full w-5 cursor-col-resize select-none touch-none flex items-center justify-center hover:bg-muted/40 transition-colors z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                                             @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
-                                            @dblclick.stop="autoFitColumn(header)"
+                                            @dblclick.stop="autoFitColumn(header.column.id)"
                                             @click.stop :title="t('ui.dragToResizeDoubleClickToAutoFit')">
                                             <!-- Resize Grip Visual -->
                                             <div class="h-full w-4 flex flex-col items-center justify-center">
@@ -721,7 +724,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                     <td v-for="cell in renderedCells(row)" :key="cell.id"
                                         :data-cell-id="cell.id"
                                         tabindex="0"
-                                        class="px-3 py-1 align-middle font-mono text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
+                                        class="px-3 py-1 align-middle text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                             copiedCellId === cell.id ? 'bg-emerald-500/10' : '',
@@ -989,6 +992,23 @@ td .cell-content-wrapper :deep(.flex-render-content) {
 td .cell-content-wrapper :deep(span) {
     white-space: nowrap !important;
     display: inline !important;
+}
+
+td .cell-content-wrapper :deep(.table-identifier) {
+    width: 100%;
+}
+
+/* Inline blocks keep selected identifiers free of flex-item line breaks. */
+td .cell-content-wrapper :deep(.table-identifier-head),
+td .cell-content-wrapper :deep(.table-identifier-tail) {
+    display: inline-block !important;
+    vertical-align: middle;
+}
+
+td .cell-content-wrapper :deep(.table-identifier-head) {
+    max-width: calc(100% - 8ch);
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Timestamp specific - ensure no line breaks */

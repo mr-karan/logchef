@@ -2,67 +2,45 @@ import { h } from "vue";
 import "./badges.css";
 import { ArrowDown, ArrowUp } from "lucide-vue-next";
 import type { Column, ColumnDef, Row } from "./tableFeatures";
-import { formatTimestamp, formatLogContent } from "@/lib/utils";
-import { getSeverityClasses } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
+import { getStandardSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';
 import { columnFilterFn } from './columnFilter';
 import { compareTimestamps } from './timestampSort';
+import { getOutcomeTone, type OutcomeTone } from './outcomeTone';
+import { classifyCellValue, type CellValueKind } from './cellTypography';
 
-// Width configurations for each column type
-// maxWidth is set very high to allow free resizing - users should be able to expand columns as needed
-const COLUMN_WIDTH_CONFIG: Record<string, { minWidth: number, defaultWidth: number, maxWidth: number }> = {
-  timestamp: {
-    minWidth: 180,
-    defaultWidth: 220,
-    maxWidth: 2000, // Allow very wide for full timestamp visibility
-  },
-  severity: {
-    minWidth: 70,
-    defaultWidth: 100,
-    maxWidth: 2000,
-  },
-  status: {
-    minWidth: 60,
-    defaultWidth: 90,
-    maxWidth: 2000,
-  },
-  // Default widths - generous for log data
-  default: {
-    minWidth: 80,
-    defaultWidth: 180,
-    maxWidth: 2000, // No practical limit - let users resize freely
-  },
-  // Wider defaults for longer column names
-  wide: {
-    minWidth: 100,
-    defaultWidth: 220,
-    maxWidth: 2000,
-  },
-  // Extra width for very long column names
-  extraWide: {
-    minWidth: 120,
-    defaultWidth: 280,
-    maxWidth: 2000,
-  }
+const CELL_VALUE_CLASSES: Record<CellValueKind, string> = {
+  text: 'tabular-nums',
+  identifier: 'font-mono tabular-nums text-muted-foreground',
+  number: 'tabular-nums',
+  structured: 'font-mono',
 };
 
-// About 7.5px per character of the 14px header font, plus padding and the sort arrow.
-function headerFitWidth(name: string): number {
-  return Math.ceil(name.length * 7.5) + 32;
-}
+const OUTCOME_CLASSES: Record<OutcomeTone, string> = {
+  failure: 'outcome-badge px-1 py-px rounded ring-1 ring-inset text-red-700 bg-red-100 ring-red-300 dark:text-red-200 dark:bg-red-950 dark:ring-red-800',
+  pending: 'outcome-badge px-1 py-px rounded ring-1 ring-inset text-amber-800 bg-amber-100 ring-amber-300 dark:text-amber-200 dark:bg-amber-950 dark:ring-amber-800',
+  success: '',
+};
 
 // Helper function to determine column type based on name or position
 function getColumnType(
   columnName: string,
+  schemaType: string,
   timestampField: string,
   severityField: string
 ): string {
+  if (/^(?:Nullable\()?Date(?:32)?\b/i.test(schemaType)) return 'date';
+
   // Keep exact match checks
   if (columnName === timestampField) {
     return "timestamp";
   }
   if (columnName === severityField) {
     return "severity";
+  }
+  if (/^(Nullable\()?Date(Time)?(32|64)?\b/i.test(schemaType)) {
+    return "timestamp";
   }
 
   // Keep pattern checks for common log formats
@@ -78,22 +56,37 @@ function getColumnType(
     return "severity";
   }
 
-  // Instead of hard-coding specific column patterns like 'flags',
-  // use a more generic approach based on column name length
-  const nameLength = columnName.length;
-
-  // For very long column names, use extra wide defaults
-  if (nameLength > 20) {
-    return "extraWide";
-  }
-
-  // For longer column names, use wider defaults
-  if (nameLength > 12) {
-    return "wide";
-  }
-
-  // Default column type
   return "default";
+}
+
+export function calendarDate(value: unknown): string {
+  const text = String(value);
+  return /^\d{4}-\d{2}-\d{2}(?=$|[T ])/.exec(text)?.[0] ?? text;
+}
+
+export function timestampPrecision(schemaType: string): number | null {
+  const fractionalType = /\bDateTime64\(\s*([0-9])\s*[,)]/i.exec(schemaType);
+  if (fractionalType) return Number(fractionalType[1]);
+  return /\bDateTime\b/i.test(schemaType) ? 0 : null;
+}
+
+export function timestampCell(value: unknown, timezone: 'local' | 'utc', precision: number | null) {
+  const rawValue = String(value);
+  const input = typeof value === 'number' ? new Date(value).toJSON() ?? rawValue : rawValue;
+  const formatted = /^\d{4}-\d{2}-\d{2}$/.test(input) ? input : formatTimestamp(input, timezone);
+  const parts = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+(?:Z|[+-]\d{2}:\d{2})$/.exec(formatted);
+  // Read fractions before Date conversion, which discards digits beyond milliseconds.
+  const fraction = /[T ]\d{2}:\d{2}:\d{2}\.(\d+)/.exec(input)?.[1] ?? '';
+  const digits = precision === null ? fraction : fraction.padEnd(precision, '0').slice(0, precision);
+  const content = parts ? [
+    h('span', { class: 'table-timestamp-date text-muted-foreground' }, parts[1]),
+    ' ',
+    h('span', { class: 'table-timestamp-time text-foreground font-medium' }, parts[2] + (digits ? `.${digits}` : '')),
+  ] : rawValue;
+  return h('span', {
+    class: 'flex-render-content font-mono tabular-nums text-[13px]',
+    title: rawValue,
+  }, content);
 }
 
 // Function to generate column definitions based on source schema
@@ -128,8 +121,8 @@ export function createColumns(
     if (col.name === timestampField) return true;
 
     // Check if column should be treated as a timestamp
-    const columnType = getColumnType(col.name, timestampField, severityField);
-    if (columnType === 'timestamp') {
+    const columnType = getColumnType(col.name, col.type, timestampField, severityField);
+    if (columnType === 'timestamp' || columnType === 'date') {
       timestampColumns.push(col);
       return false; // Remove from original array
     }
@@ -149,8 +142,8 @@ export function createColumns(
   }
 
   return sortedColumns.map((col) => {
-    const columnType = getColumnType(col.name, timestampField, severityField);
-    const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
+    const columnType = getColumnType(col.name, col.type, timestampField, severityField);
+    const precision = timestampPrecision(col.type);
     const isFieldInQuery = queryFields.includes(col.name);
     const hasRegexHighlight = !!regexHighlights[col.name];
     const highlightInfo = regexHighlights[col.name];
@@ -166,8 +159,6 @@ export function createColumns(
       // Store column type in meta for easy access
       meta: {
         columnType,
-        // Store width config in meta for reference
-        widthConfig,
         // Flag if this column is used in the query
         isFieldInQuery,
         // Flag if this column has a regex highlight pattern
@@ -177,9 +168,9 @@ export function createColumns(
       },
       // Column sizing configuration
       enableResizing: true,
-      size: Math.max(widthConfig.defaultWidth, headerFitWidth(col.name || id)),
-      minSize: widthConfig.minWidth,
-      maxSize: widthConfig.maxWidth,
+      size: Math.max(180, Math.ceil(col.name.length * 7.5) + 32),
+      minSize: 50,
+      maxSize: 2000,
       sortFn: columnType === 'timestamp'
         ? (left, right, columnId) => compareTimestamps(left.getValue(columnId), right.getValue(columnId))
         : 'auto',
@@ -241,47 +232,29 @@ export function createColumns(
           );
         }
 
-        // Special handling for timestamp column
-        if (id === timestampField || col.name === timestampField || columnType === 'timestamp') {
-          const formattedTime = formatTimestamp(value as string, timezone);
-          return h(
-            "span",
-            {
-              class: "flex-render-content font-mono tabular-nums text-[13px]", // Base class
-              title: value as string // Keep the original value as title
-            },
-            formatLogContent(formattedTime, false)
-          );
+        if (columnType === 'date') {
+          return h('span', { class: 'flex-render-content font-mono tabular-nums text-[13px]', title: String(value) }, calendarDate(value));
         }
 
-        // Check if the value looks like a timestamp regardless of column type
-        // This is to catch timestamp values in columns that aren't explicitly identified as timestamps
-        if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/)) {
-          const formattedTime = formatTimestamp(value, timezone);
-          return h(
-            "span",
-            {
-              class: "flex-render-content font-mono tabular-nums text-[13px]", // Base class
-              title: value // Keep the original value as title
-            },
-            formatLogContent(formattedTime, false)
-          );
+        if (columnType === 'timestamp' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/.test(value))) {
+          return timestampCell(value, timezone, precision);
         }
 
         // Special handling for severity column
-        if (id === severityField || col.name === severityField) {
+        const severityClasses = id === severityField && typeof value === 'string'
+          ? getStandardSeverityClasses(value)
+            ?? (getOutcomeTone(value, id, severityField) ? undefined : getStandardSeverityClasses('debug'))
+          : undefined;
+        if (severityClasses) {
           const severityValue = String(value);
           return h(
             "span",
             {
-              class: `flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm ${getSeverityClasses(severityValue, id || col.name)}`
+              class: `flex-render-content font-mono text-[13px] px-1.5 py-0.5 rounded-sm ${severityClasses}`
             },
             severityValue
           );
         }
-
-        // Define base classes once for consistency
-        const baseClasses = "flex-render-content font-mono text-[13px]";
 
         // Check if this is a status column for better status code detection
         const isStatusColumn = columnType === 'status';
@@ -300,8 +273,9 @@ export function createColumns(
           textValue = String(value);
         }
 
-        // Determine final classes (add JSON specific if needed)
-        const finalClasses = `${baseClasses} ${isJsonObject ? 'json-content' : ''}`;
+        const valueKind = classifyCellValue(value);
+        const typography = isJsonObject ? 'font-mono json-content' : CELL_VALUE_CLASSES[valueKind];
+        const finalClasses = `flex-render-content text-[13px] ${typography}`;
 
         // Check if the content contains HTTP methods or is a status column
         const hasHttpMethod = /\b(GET|POST|PUT|DELETE|HEAD|PATCH|OPTIONS)\b/i.test(textValue);
@@ -330,22 +304,32 @@ export function createColumns(
         }
 
         // --- Column-specific Highlighting Logic ---
-        let highlightedContent = null;
+        const highlightRange = (start = 0, end = textValue.length) => {
+          if (!highlightRegex || isJsonObject) return textValue.slice(start, end);
+          let offset = 0;
+          return textValue.split(highlightRegex).map((part, index) => {
+            const text = part.slice(Math.max(0, start - offset), Math.max(0, end - offset));
+            offset += part.length;
+            return text && index % 2 === 1 ? h('span', { class: 'search-highlight' }, text) : text;
+          });
+        };
 
-        if (highlightRegex && !isJsonObject) {
-          const parts = textValue.split(highlightRegex);
-          if (parts.length > 1) {
-            highlightedContent = parts.map((part, index) =>
-              index % 2 === 1 ? h('span', { class: 'search-highlight' }, part) : part
-            );
-          }
+        if (valueKind === 'identifier') {
+          const tailStart = Math.max(0, textValue.length - 8);
+          return h('span', { class: `${finalClasses} table-identifier`, title: textValue }, [
+            h('span', { class: 'table-identifier-head' }, highlightRange(0, tailStart)),
+            h('span', { class: 'table-identifier-tail' }, highlightRange(tailStart)),
+          ]);
         }
+
+        const outcomeTone = !isJsonObject ? getOutcomeTone(textValue, col.name, severityField) : undefined;
+        const outcomeClasses = outcomeTone ? ` outcome-${outcomeTone} ${OUTCOME_CLASSES[outcomeTone]}` : '';
 
         // Return the cell with or without highlighting
         return h(
           "span",
-          { class: finalClasses, title: textValue },
-          highlightedContent || textValue
+          { class: finalClasses + outcomeClasses, title: textValue },
+          highlightRange()
         );
       },
 
