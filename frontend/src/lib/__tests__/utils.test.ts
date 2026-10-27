@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isVNode, ref } from "vue";
-import { formatLogContent, getSeverityClasses, valueUpdater } from "@/lib/utils";
+import { formatLogContent, getStandardSeverityClasses, valueUpdater } from "@/lib/utils";
 
 describe("log formatting", () => {
   it("preserves plain and empty content", () => {
@@ -18,10 +18,9 @@ describe("log formatting", () => {
     expect(isVNode(status) && status.props?.class).toBe("status-code status-success");
   });
 
-  it("only styles severity values in recognized columns", () => {
-    expect(getSeverityClasses("ERROR", "level")).toBe(getSeverityClasses("error", "LEVEL"));
-    expect(getSeverityClasses("error", "custom_level")).toBeNull();
-    expect(getSeverityClasses(500, "level")).toBeNull();
+  it("matches standard severity names without case sensitivity", () => {
+    expect(getStandardSeverityClasses("ERROR")).toBe(getStandardSeverityClasses("error"));
+    expect(getStandardSeverityClasses("unknown")).toBeUndefined();
   });
 });
 

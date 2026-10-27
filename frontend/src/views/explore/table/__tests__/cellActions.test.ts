@@ -1,7 +1,7 @@
 import { createApp, nextTick } from 'vue'
 import { i18n } from '@/i18n'
 import { createPinia } from 'pinia'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import DataTable from '../data-table.vue'
 
 it('mounts cell actions only for the hovered or focused cell', async () => {
@@ -57,5 +57,40 @@ it('mounts cell actions only for the hovered or focused cell', async () => {
   } finally {
     app.unmount()
     host.remove()
+  }
+})
+
+it('copies the raw identifier from its middle-truncated cell', async () => {
+  const value = '0123456789abcdef0123456789abcdef'
+  const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp(DataTable, {
+    columns: [{ name: 'timestamp', type: 'DateTime' }, { name: 'value', type: 'String' }],
+    data: [{ timestamp: '2026-01-01T00:00:00Z', value }],
+    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 32 },
+    sourceId: 'identifier-copy-test', teamId: null,
+  })
+  app.use(createPinia())
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await nextTick()
+    const cell = host.querySelector('.table-identifier')?.closest('td')
+    if (!cell) throw new Error('Identifier cell was not rendered')
+    cell.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await nextTick()
+    const copy = cell.querySelector<HTMLButtonElement>('.cell-actions button')
+    if (!copy) throw new Error('Copy action was not rendered')
+    copy.click()
+    await nextTick()
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(value)
+  } finally {
+    app.unmount()
+    host.remove()
+    if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard)
+    else Reflect.deleteProperty(navigator, 'clipboard')
   }
 })

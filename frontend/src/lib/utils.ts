@@ -106,40 +106,15 @@ const severityColorMap = new Map([
   ],
 ]);
 
-// Default fallback style for unknown severity levels
-const defaultSeverityStyle = `${BADGE_BASE_STYLES} text-gray-800 bg-gray-300 ring-gray-400 dark:text-gray-200 dark:bg-gray-700 dark:ring-gray-600`;
-
-// Common severity column names for O(1) lookup
-const severityColumnNames = new Set([
-  "severity",
-  "severity_text",
-  "severity_level",
-  "level",
-  "log_level",
-  "lvl",
-  "loglevel",
+const severityAliases = new Map([
+  ['notice', 'info'], ['verbose', 'debug'], ['err', 'error'],
+  ['crit', 'critical'], ['alert', 'critical'], ['emerg', 'critical'],
+  ['emergency', 'critical'],
 ]);
 
-// Function to get severity badge classes
-export function getSeverityClasses(
-  value: unknown,
-  columnName: string
-): string | null {
-  if (
-    !severityColumnNames.has(columnName.toLowerCase()) ||
-    typeof value !== "string"
-  ) {
-    return null;
-  }
-
-  // Normalize the value
-  const normalizedValue = value.toLowerCase().trim();
-
-  // Get color classes from map
-  return (
-    severityColorMap.get(normalizedValue) ||
-    defaultSeverityStyle
-  );
+export function getStandardSeverityClasses(value: string): string | undefined {
+  const level = value.toLowerCase().trim();
+  return severityColorMap.get(severityAliases.get(level) ?? level);
 }
 
 
