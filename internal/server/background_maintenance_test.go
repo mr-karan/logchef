@@ -24,6 +24,7 @@ import (
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -33,7 +34,7 @@ func backgroundTestStore(t *testing.T, backend string) (store.Store, *sql.DB) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	var db store.Store
 	var err error
-	driver, address := "sqlite", filepath.Join(t.TempDir(), "background.db")
+	driver, address := "sqlite", sqlitetest.Path(t)
 	if backend == "postgres" {
 		driver, address = "pgx", os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")
 		if address == "" {
