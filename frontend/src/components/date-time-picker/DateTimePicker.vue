@@ -270,22 +270,21 @@ defineExpose({
 <template>
   <div :class="cn('flex items-center gap-1', props.class)">
     <Popover v-model:open="showDatePicker">
-      <TooltipProvider>
-        <Tooltip :disabled="!props.disabledReason">
+      <!-- The tooltip has its own popper anchor, so it must not wrap the popover trigger. -->
+      <TooltipProvider v-if="props.disabledReason">
+        <Tooltip>
           <TooltipTrigger as-child>
             <!-- A disabled button gets no pointer events, so the wrapper carries the tooltip. -->
-            <span class="inline-flex" :class="{ 'cursor-not-allowed': props.disabledReason }">
-              <PopoverTrigger as-child>
-                <Button
-                  variant="ghost"
-                  :class="cn('h-7 px-2.5 gap-1.5 font-normal text-sm border border-transparent', props.disabledReason ? 'pointer-events-none opacity-50' : 'hover:border-border hover:bg-muted/50')"
-                  :disabled="!!props.disabledReason"
-                >
-                  <Clock class="h-3.5 w-3.5 text-muted-foreground" />
-                  <span>{{ triggerDisplayText }}</span>
-                  <ChevronDown class="h-3 w-3 text-muted-foreground ml-0.5" />
-                </Button>
-              </PopoverTrigger>
+            <span class="inline-flex cursor-not-allowed">
+              <Button
+                variant="ghost"
+                class="h-7 px-2.5 gap-1.5 font-normal text-sm border border-transparent pointer-events-none opacity-50"
+                disabled
+              >
+                <Clock class="h-3.5 w-3.5 text-muted-foreground" />
+                <span>{{ triggerDisplayText }}</span>
+                <ChevronDown class="h-3 w-3 text-muted-foreground ml-0.5" />
+              </Button>
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom">
@@ -293,7 +292,17 @@ defineExpose({
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
-      
+      <PopoverTrigger v-else as-child>
+        <Button
+          variant="ghost"
+          class="h-7 px-2.5 gap-1.5 font-normal text-sm border border-transparent hover:border-border hover:bg-muted/50"
+        >
+          <Clock class="h-3.5 w-3.5 text-muted-foreground" />
+          <span>{{ triggerDisplayText }}</span>
+          <ChevronDown class="h-3 w-3 text-muted-foreground ml-0.5" />
+        </Button>
+      </PopoverTrigger>
+
       <PopoverContent
         class="w-[580px] p-0"
         align="start"
