@@ -2,12 +2,12 @@ package auth
 
 import (
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 )
 
 func TestCallbackUserFailureIncludesEmail(t *testing.T) {
@@ -21,7 +21,7 @@ func TestCallbackUserFailureIncludesEmail(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(t.TempDir(), "user-failure.db")
+			path := sqlitetest.Path(t)
 			db, err := sqlite.New(t.Context(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: path}})
 			if err != nil {
 				t.Fatal(err)

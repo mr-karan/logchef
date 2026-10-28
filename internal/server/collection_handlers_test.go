@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -16,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -32,7 +32,7 @@ func newCollectionRouteEnv(t *testing.T) *collectionRouteEnv {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: logger,
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "collections.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)

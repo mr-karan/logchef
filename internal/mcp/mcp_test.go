@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -28,6 +27,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -88,7 +88,7 @@ func newWorld(t *testing.T) *world {
 	log := discardLogger()
 	db, err := sqlite.New(ctx, sqlite.Options{
 		Logger: log,
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "mcp.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)

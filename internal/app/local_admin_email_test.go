@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -27,7 +27,7 @@ func TestLocalAdminEmailLength(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			log := slog.New(slog.NewTextHandler(io.Discard, nil))
-			db, err := sqlite.New(t.Context(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "local-admin.db")}})
+			db, err := sqlite.New(t.Context(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 			if err != nil {
 				t.Fatal(err)
 			}

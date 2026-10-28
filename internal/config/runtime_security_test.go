@@ -4,17 +4,17 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 )
 
 func TestRuntimeConfigRejectsNonPositiveDurations(t *testing.T) {
 	ctx := context.Background()
-	db, err := sqlite.New(ctx, sqlite.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "runtime.db")}})
+	db, err := sqlite.New(ctx, sqlite.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 	if err != nil {
 		t.Fatal(err)
 	}

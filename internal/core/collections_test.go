@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -20,7 +20,7 @@ import (
 // The file lives in t.TempDir() so go test cleans up automatically.
 func newTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "test.db")
+	dbPath := sqlitetest.Path(t)
 	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Config: config.SQLiteConfig{Path: dbPath},
@@ -864,7 +864,7 @@ func TestCollectionCreationRollback(t *testing.T) {
 	for _, personal := range []bool{true, false} {
 		t.Run(fmt.Sprintf("personal=%t", personal), func(t *testing.T) {
 			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "collections.db")
+			path := sqlitetest.Path(t)
 			db, err := sqlite.New(ctx, sqlite.Options{Logger: discardLogger(), Config: config.SQLiteConfig{Path: path}})
 			if err != nil {
 				t.Fatal(err)

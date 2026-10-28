@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -97,7 +97,7 @@ func issueToken(t *testing.T, s *Server, scopes []models.TokenScope, resource st
 // rejected by both.
 func TestLegacyCFBTokensRejected(t *testing.T) {
 	t.Parallel()
-	s := newTestServer(t, openDB(t, filepath.Join(t.TempDir(), "o.db")))
+	s := newTestServer(t, openDB(t, sqlitetest.Path(t)))
 	token, plain := issueToken(t, s, []models.TokenScope{models.TokenScopeLogsRead}, s.mcpResource)
 	if _, err := s.AuthenticateAccessToken(context.Background(), token, ResourceMCP); err != nil {
 		t.Fatalf("GCM token rejected: %v", err)
@@ -126,7 +126,7 @@ func TestLegacyCFBTokensRejected(t *testing.T) {
 // A different secret does not.
 func TestKeysDeriveFromSecret(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "o.db")
+	path := sqlitetest.Path(t)
 	first := newTestServer(t, openDB(t, path))
 	token, _ := issueToken(t, first, []models.TokenScope{models.TokenScopeLogsRead}, first.apiResource)
 	second := newTestServer(t, openDB(t, path))
@@ -153,7 +153,7 @@ func TestKeysDeriveFromSecret(t *testing.T) {
 // HMAC: changing them makes the token unknown.
 func TestAccessTokenIDTamperRejected(t *testing.T) {
 	t.Parallel()
-	s := newTestServer(t, openDB(t, filepath.Join(t.TempDir(), "o.db")))
+	s := newTestServer(t, openDB(t, sqlitetest.Path(t)))
 	_, plain := issueToken(t, s, []models.TokenScope{models.TokenScopeProfileRead, models.TokenScopeLogsRead}, s.apiResource)
 	tokenID, subject, _ := strings.Cut(plain, ":")
 	parts := strings.Split(tokenID, ".")
