@@ -180,6 +180,7 @@ Key areas of the docs:
           label: "Querying Logs",
           items: [
             { label: "Query Interface", link: "/user-guide/query-interface" },
+            { label: "Command Palette", link: "/features/command-palette" },
             { label: "LogchefQL Syntax", link: "/guide/search-syntax" },
             { label: "SQL Examples", link: "/guide/examples" },
             { label: "LogsQL Queries", link: "/guide/logsql-queries" },

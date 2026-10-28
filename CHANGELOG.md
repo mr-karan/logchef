@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release makes the Explorer faster to read and to drive. A command palette
+opens anywhere with Cmd/Ctrl+K, the query editor completes and checks queries
+as you type, and the results table stays readable on wide sources. There are no
+database migrations and no config changes.
+
+### Upgrade notes
+- A request for a missing file under `/assets/` now returns 404 instead of
+  `index.html`. Hashed assets are served with
+  `Cache-Control: public, max-age=31536000, immutable`, and `index.html` with
+  `no-cache` and an ETag. A tab left open across an upgrade reloads once when
+  it requests an asset that no longer exists.
+
+### Added
+- Command palette (Cmd/Ctrl+K) on every page, including inside the query
+  editor. Go to any page you can open, Add Source, sources across teams,
+  saved queries, dashboards, alerts and collections, and run actions such as
+  theme, timezone, copy link and sign out.
+- Scoped searches from the palette: `@team/source status>=500 last:1h` gets
+  team, source and range completion, shows the scope with concrete times,
+  and Enter opens the Explorer with the query running. On the Explorer, a
+  complete filter over the current source's fields (`status>=500`) needs no
+  `@` and runs in the current window. Other text searches the logs as a
+  literal (Cmd/Ctrl+Enter).
+- Ask Chef from the palette: type a question (or start with `?`) and press
+  Cmd/Ctrl+Shift+Enter. The Explorer opens on the scope, and the question goes
+  to the Ask Chef drawer as the first turn. The same scope continues the
+  conversation. Alert rows can start an investigation. Hidden when Ask Chef
+  is disabled.
+- Query editor checks LogchefQL as you type: errors are underlined, unknown
+  fields get a warning, and hovering a field shows its type and top values.
+- Value suggestions for every field, with counts. Low-cardinality fields
+  load while you type; other fields load on Ctrl+Space. Lookups are cached,
+  bounded and cancelled after 1.5 seconds.
+- Failed and pending values in outcome-like columns (`status`,
+  `delivery_state`) get a red or amber badge. Success stays plain.
+
+### Changed
+- The Explorer shows more rows: 13 instead of 3 at 1280x720, and 19 instead
+  of 8 at 1440x900. The query controls fit on one row, and the histogram is
+  shorter.
+- The timezone is a visible Local / UTC switch that also works in SQL mode
+  and live tail. The time range picker locks, with a reason, while SQL or
+  live tail controls the range.
+- A tip to filter on the table's sort-key fields appears beside the query
+  time, only while the query filters on none of them.
+- SQL completion has one provider, so keywords no longer appear twice.
+  Columns come first after `SELECT` and `WHERE`, and values are suggested
+  inside string literals.
+- Results table: timestamps show in full at the column's precision without
+  the offset, `Date` values show the calendar date with no timezone shift,
+  column widths follow the displayed content, readable fields come before
+  opaque identifiers, and identifiers truncate in the middle so both ends
+  stay visible.
+- Source inspection leads with recent activity and storage totals, then the
+  details, schema and a collapsed `CREATE TABLE`.
+- Admin and account pages, and the source forms, use one page layout with
+  one primary action each.
+- Pages without a query editor no longer download the editor bundle: the
+  Teams page loads 742 KB of JavaScript instead of 5,732 KB, and the build
+  output is 7.5 MB instead of 19 MB. The Explorer starts its first query
+  sooner.
+
+### Fixed
+- The timezone switch had no effect in SQL mode and live tail.
+- The time range picker could change the range while SQL or live tail owned
+  it.
+- Copying `CREATE TABLE` failed on plain-HTTP deployments.
+- Source activity offered a Retry that could not succeed when the sort key
+  does not start with the timestamp.
+- Column headers truncated short column names, and several icon buttons had
+  no accessible name.
+
 ## [2.5.0] - 2026-10-23
 
 This release fixes Explorer navigation, hardens security and makes alerts and
