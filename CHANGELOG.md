@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-28
+
 This release makes the Explorer faster to read and to drive. A command palette
 opens anywhere with Cmd/Ctrl+K, the query editor completes and checks queries
 as you type, and the results table stays readable on wide sources. There are no
@@ -1674,7 +1676,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/mr-karan/logchef/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/mr-karan/logchef/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/mr-karan/logchef/compare/v2.3.2...v2.4.0
 [2.3.2]: https://github.com/mr-karan/logchef/compare/v2.3.1...v2.3.2
