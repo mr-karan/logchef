@@ -503,6 +503,27 @@ func TestTurnQuotesPriorEvidence(t *testing.T) {
 	}
 }
 
+// The Explorer window can be old, so the model counts relative ranges from
+// the time the turn runs.
+func TestTurnPromptGivesTheCurrentTime(t *testing.T) {
+	w := newWorld(t)
+	chat := &scriptedChat{}
+	before := time.Now().Truncate(time.Second)
+	w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+	after := time.Now()
+
+	system := chat.request(0).System
+	_, rest, ok := strings.Cut(system, "The current time is ")
+	if !ok {
+		t.Fatalf("system prompt does not give the current time:\n%s", system)
+	}
+	stamp, _, _ := strings.Cut(rest, ".")
+	now, err := time.Parse(time.RFC3339, stamp)
+	if err != nil || now.Before(before) || now.After(after) {
+		t.Fatalf("current time %q is not the time of the turn (%v to %v): %v", stamp, before, after, err)
+	}
+}
+
 // Evidence over a field limit would fail the next turn's request, so the
 // server drops it and the model cannot cite the call.
 func TestTurnDropsEvidenceOverItsLimits(t *testing.T) {
