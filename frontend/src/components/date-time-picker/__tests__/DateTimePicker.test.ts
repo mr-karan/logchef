@@ -54,6 +54,17 @@ function button(text: string): HTMLButtonElement {
 }
 
 describe("DateTimePicker", () => {
+  it("anchors the open popover to its trigger so it is placed on screen", async () => {
+    await openPicker({ kind: "relative", spec: "15m" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTick();
+
+    const wrapper = document.body.querySelector<HTMLElement>("[data-reka-popper-content-wrapper]");
+    expect(wrapper).not.toBeNull();
+    // Reka parks an unanchored popover at translate(0, -200%), off screen.
+    expect(wrapper?.style.transform).not.toContain("-200%");
+  });
+
   it("emits the instants it received when applied unchanged, even in a DST fold", async () => {
     // Starts at the second 01:30 of the New York fall-back day, with milliseconds.
     const window: TimeWindow = { kind: "absolute", start: epochMs(Date.parse("2026-11-01T06:30:00.250Z")), end: epochMs(Date.parse("2026-11-01T07:15:00.999Z")) };
