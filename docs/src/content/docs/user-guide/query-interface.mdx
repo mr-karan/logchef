@@ -30,6 +30,27 @@ LogchefQL compiles to the backend's native query language before execution:
 
 See [Search Syntax](/guide/search-syntax) for the full reference.
 
+### Editor help
+
+The editor checks and completes queries as you type:
+
+- **Errors**: about 400 ms after you stop typing, LogchefQL syntax errors are
+  underlined in red and unknown field names get a warning. Hover the
+  underline to read the message. Nothing runs until you press **Run**.
+- **Field details**: hover a field to see its type and, when the Fields
+  sidebar has loaded it, its top values.
+- **Values**: after `field=`, the editor suggests values with their counts.
+  Low-cardinality fields load as you type. Other fields load when you press
+  **Ctrl+Space**. Accepting a value closes the quote and offers `and` / `or`.
+- **SQL**: in SQL mode, columns come first after `SELECT`, `WHERE` and
+  operators, the table after `FROM`, and values inside string literals
+  (`method = '`). Functions insert with the cursor inside the parentheses.
+
+![LogchefQL value suggestions for the service field, with counts](/screenshots/editor-values-light.png)
+
+To jump to another source or run a query there without leaving the page, use
+the [command palette](/features/command-palette) (**Cmd/Ctrl+K**).
+
 ## Native Mode
 
 ### ClickHouse SQL
@@ -64,9 +85,11 @@ If you are running VictoriaLogs specifically, see [Using VictoriaLogs with Logch
 - **Quick ranges**: Last 5m, 15m, 1h, 24h, 7d, etc.
 - **Absolute range**: Type dates directly or pick from the calendar
 - **Relative syntax**: `now-1h`, `now-7d` in the input fields
-- **Timezone**: Toggle between browser local and UTC
+- **Timezone**: The **Local / UTC** switch sets how timestamps display, in every mode including live tail
 
 In LogchefQL mode, the time range is applied automatically.
+
+While SQL or live tail controls the time range, the picker is locked and says why.
 
 In native mode:
 
@@ -98,6 +121,14 @@ same row. A stream also ends automatically after a fixed session lifetime; reope
 
 ### Table View
 
+- Timestamps show the date and time at the column's precision, without the
+  offset. The date is muted so the time stands out. `Date` columns show the
+  calendar date.
+- Column widths follow the displayed content. Readable fields come before
+  opaque identifiers (hashes, UUIDs), which are muted and truncate in the
+  middle so both ends stay visible.
+- In outcome-like columns such as `status`, failed values get a red badge and
+  pending values an amber one.
 - Click any cell to copy its value
 - Double-click a column header divider to auto-fit width
 - Expand rows with the chevron to see full log details
