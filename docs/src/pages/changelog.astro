@@ -1,5 +1,12 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+
+const unreleasedShots = [
+  { name: 'palette-scoped', width: 1040, height: 560, alt: 'The Logchef command palette turning @shop/storefront service="payments" and status>=500 last:1h into a Run in Explore row with its team, source and time range', caption: 'Cmd/Ctrl+K, then <code>@team/source</code>: team, source and range completion, with the parsed scope shown before you run it.' },
+  { name: 'ask-chef', width: 1160, height: 760, alt: 'Ask Chef answering why payments started failing, next to the error spike in the histogram', caption: 'Ask from the palette: the Explorer opens on the scope and Ask Chef answers with evidence you can run, and says what it could not establish.' },
+  { name: 'editor-values', width: 1000, height: 420, alt: 'LogchefQL value suggestions for the service field, each with its count', caption: 'Value suggestions for every field, with counts, as you type.' },
+  { name: 'table', width: 1160, height: 422, alt: 'Payment events in the results table with FAILED in red and PENDING in amber', caption: 'Failed and pending outcomes stand out; successful ones stay plain.' },
+];
 ---
 
 <BaseLayout title="Changelog — Logchef" description="Logchef release notes and version history: VictoriaLogs, dashboards, live tail, the CLI, and every change, version by version." activeNav="changelog">
@@ -89,6 +96,21 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       background: var(--color-bg);
       color: var(--color-text-secondary); font-size: 0.9rem; line-height: 1.65;
     }
+    .release-shot { margin: 0 0 1.75rem; }
+    .release-shot picture { display: block; }
+    .release-shot img {
+      display: block; width: 100%; height: auto;
+      border: 1px solid var(--color-border); border-radius: 10px;
+    }
+    .release-shot .shot-dark { display: none; }
+    :root[data-theme='dark'] .release-shot .shot-light { display: none; }
+    :root[data-theme='dark'] .release-shot .shot-dark { display: block; }
+    .release-shot figcaption { margin-top: 0.6rem; color: var(--color-text-muted); font-size: 0.875rem; line-height: 1.6; }
+    .release-shot figcaption code {
+      font-family: var(--font-mono); font-size: 0.8125rem;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--color-accent-soft);
+    }
     .upgrade-note strong { color: var(--color-text); }
     .upgrade-note code {
       font-family: var(--font-mono); font-size: 0.8125rem;
@@ -140,6 +162,79 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <h1>Changelog</h1>
       <p>What's new in Logchef.</p>
     </header>
+
+    <article class="version" id="unreleased">
+      <div class="version-header">
+        <a class="version-tag unreleased" href="#unreleased">Unreleased</a>
+      </div>
+
+      <p class="release-kicker">Faster to read, faster to drive</p>
+      <p class="release-intro">
+        <strong>A command palette opens anywhere with Cmd/Ctrl+K</strong>, the query editor completes and checks queries as you type, and the results table stays readable on wide sources. There are no database migrations and no config changes.
+      </p>
+
+      <ul class="release-highlights">
+        <li><strong>Go anywhere, query anything</strong>Pages, sources across teams, saved queries, dashboards and alerts in one list. <code>@team/source status&gt;=500 last:1h</code> runs a search in any source.</li>
+        <li><strong>Ask Chef from the palette</strong>Type a question and press Cmd/Ctrl+Shift+Enter. The Explorer opens on the scope and the answer arrives in the drawer.</li>
+        <li><strong>An editor that helps</strong>LogchefQL errors are underlined as you type, and every field suggests values with counts.</li>
+        <li><strong>More rows on screen</strong>13 rows instead of 3 on a 1280x720 laptop, with full timestamps and red or amber badges on failed and pending outcomes.</li>
+      </ul>
+
+      {unreleasedShots.map(shot => (
+        <figure class="release-shot">
+          <picture class="shot-light">
+            <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+            <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+            <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+          </picture>
+          <picture class="shot-dark">
+            <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+            <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+            <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+          </picture>
+          <figcaption set:html={shot.caption} />
+        </figure>
+      ))}
+
+      <aside class="upgrade-note">
+        <strong>Before upgrading:</strong> there are no database migrations. A request for a missing file under <code>/assets/</code> now returns 404 instead of <code>index.html</code>. Hashed assets are cached for a year and <code>index.html</code> revalidates on every load, so an open tab reloads once after an upgrade.
+      </aside>
+
+      <div class="change-section">
+        <div class="change-type added">Added</div>
+        <ul class="change-list">
+          <li><strong>Command palette</strong>: Cmd/Ctrl+K on every page, including inside the query editor. Go to any page you can open, Add Source, sources across teams, saved queries, dashboards, alerts and collections, and run actions such as theme, timezone, copy link and sign out.</li>
+          <li><strong>Scoped searches</strong>: <code>@team/source status&gt;=500 last:1h</code> gets team, source and range completion and opens the Explorer with the query running. On the Explorer, a complete filter over the current source's fields needs no <code>@</code>. Other text searches the logs as a literal (Cmd/Ctrl+Enter).</li>
+          <li><strong>Ask Chef from the palette</strong>: Type a question, or start with <code>?</code>, and press Cmd/Ctrl+Shift+Enter. The same scope continues the conversation, and alert rows can start an investigation. Hidden when Ask Chef is disabled.</li>
+          <li><strong>Checks as you type</strong>: LogchefQL errors are underlined, unknown fields get a warning, and hovering a field shows its type and top values.</li>
+          <li><strong>Value suggestions for every field</strong>, with counts. Low-cardinality fields load while you type, others on Ctrl+Space. Lookups are cached, bounded and cancelled after 1.5 seconds.</li>
+          <li><strong>Outcome badges</strong>: Failed and pending values in outcome-like columns get a red or amber badge. Success stays plain.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">Changed</div>
+        <ul class="change-list">
+          <li><strong>More rows</strong>: 13 instead of 3 at 1280x720, and 19 instead of 8 at 1440x900. The query controls fit on one row and the histogram is shorter.</li>
+          <li><strong>Time controls</strong>: The timezone is a visible Local / UTC switch that also works in SQL mode and live tail. The time range picker locks, with a reason, while SQL or live tail controls the range.</li>
+          <li><strong>Sort-key tip</strong>: It appears beside the query time, only while the query filters on none of the table's sort-key fields.</li>
+          <li><strong>SQL completion</strong>: One provider, so keywords no longer appear twice. Columns come first after <code>SELECT</code> and <code>WHERE</code>, and values are suggested inside string literals.</li>
+          <li><strong>Results table</strong>: Full timestamps at the column's precision, <code>Date</code> values without a timezone shift, widths that follow the content, readable fields before opaque identifiers, and identifiers that truncate in the middle.</li>
+          <li><strong>Source inspection</strong> leads with recent activity and storage totals.</li>
+          <li><strong>Admin pages and source forms</strong> share one layout with one primary action each.</li>
+          <li><strong>Smaller pages</strong>: Pages without a query editor no longer download the editor bundle. The Teams page loads 742 KB of JavaScript instead of 5,732 KB, and the build output is 7.5 MB instead of 19 MB.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>The timezone switch had no effect in SQL mode and live tail, and the time range picker could change the range while SQL or live tail owned it.</li>
+          <li>Copying <code>CREATE TABLE</code> failed on plain-HTTP deployments, and source activity offered a Retry that could not succeed when the sort key does not start with the timestamp.</li>
+          <li>Column headers truncated short column names, and several icon buttons had no accessible name.</li>
+        </ul>
+      </div>
+    </article>
 
     <article class="version" id="v2.5.0">
       <div class="version-header">
