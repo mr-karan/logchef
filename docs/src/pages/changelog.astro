@@ -163,11 +163,31 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
+    <article class="version" id="v2.6.1">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.6.1">v2.6.1</a>
+        <span class="version-date">Oct 29, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.6.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p class="release-intro">
+        This patch fixes the Explorer time range picker and makes Ask Chef count relative times from now. There are no database migrations and no config changes.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>The time range picker in the Explorer opens again. In 2.6.0, a click on the range did nothing.</li>
+          <li>Ask Chef counts relative times such as "the last 20 minutes" from the current server time. Before, it counted them from the end of the loaded Explorer window, which can be old, so answers named old times as recent.</li>
+        </ul>
+      </div>
+    </article>
+
     <article class="version" id="v2.6.0">
       <div class="version-header">
         <a class="version-tag" href="#v2.6.0">v2.6.0</a>
         <span class="version-date">Oct 28, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.6.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
