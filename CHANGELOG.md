@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-10-29
+
+This patch fixes the Explorer time range picker and makes Ask Chef count
+relative times from now. There are no database migrations and no config
+changes.
+
+### Fixed
+- The time range picker in the Explorer opens again. In 2.6.0, a click on
+  the range did nothing.
+- Ask Chef counts relative times such as "the last 20 minutes" from the
+  current server time. Before, it counted them from the end of the loaded
+  Explorer window, which can be old, so answers named old times as recent.
+
 ## [2.6.0] - 2026-10-28
 
 This release makes the Explorer faster to read and to drive. A command palette
@@ -1676,7 +1689,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/mr-karan/logchef/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/mr-karan/logchef/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/mr-karan/logchef/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/mr-karan/logchef/compare/v2.3.2...v2.4.0
