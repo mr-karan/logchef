@@ -125,10 +125,15 @@ func New(opts ServerOptions) *Server {
 
 	// Initialize Fiber app with custom error handler.
 	app := fiber.New(fiber.Config{
-		AppName:      "Logchef API v1",
-		ReadTimeout:  opts.Config.Server.HTTPServerTimeout,
-		WriteTimeout: opts.Config.Server.HTTPServerTimeout,
-		IdleTimeout:  30 * time.Second, // Free idle keep-alive connection buffers quickly
+		AppName: "Logchef API v1",
+		// Explorer links carry SQL/LogchefQL in the query string; browsers also
+		// send that URL as Referer on API calls. The default 4 KiB buffer rejects
+		// these before routing with 431. Keep a finite budget for the request
+		// line, cookies and reverse-proxy headers together.
+		ReadBufferSize: 64 * 1024,
+		ReadTimeout:    opts.Config.Server.HTTPServerTimeout,
+		WriteTimeout:   opts.Config.Server.HTTPServerTimeout,
+		IdleTimeout:    30 * time.Second, // Free idle keep-alive connection buffers quickly
 		// Request bodies here are queries and small JSON payloads, never bulk
 		// data, so a few MB is generous. This is a coarse transport-level
 		// backstop; the LogchefQL parser additionally enforces its own
