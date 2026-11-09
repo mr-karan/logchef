@@ -14,6 +14,17 @@ cd logchef
 
 For detailed setup instructions, see our [Development Setup Guide](https://logchef.app/contributing/setup).
 
+### Nix (optional)
+
+`flake.nix` provides a dev shell with Go, Bun, the Rust toolchain from
+`rust-toolchain.toml`, and the sqlc and golangci-lint versions CI pins.
+Docker still runs the dev infrastructure.
+
+```bash
+nix develop          # or `direnv allow` to load it on cd
+nix flake check      # fails if the shell's sqlc/golangci-lint drift from CI
+```
+
 ### Quick Start
 
 ```bash

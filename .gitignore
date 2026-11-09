@@ -63,3 +63,7 @@ dist/*
 .claude/
 .plans/
 docs/marketing/
+
+# Nix
+.direnv/
+result
