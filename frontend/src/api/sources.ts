@@ -18,14 +18,22 @@ export interface ClickHouseQuerySettings {
   result_overflow_mode?: string;
 }
 
+export interface ClickHouseActivityConfig {
+  allow_view?: boolean;
+  max_rows_to_read?: number;
+  max_bytes_to_read?: number;
+}
+
 export interface ClickHouseConnectionInfo {
   host: string;
   username?: string;
   password?: string;
+  has_password?: boolean;
   database: string;
   table_name: string;
   tls_enable?: boolean;
   settings?: ClickHouseQuerySettings;
+  activity?: ClickHouseActivityConfig;
 }
 
 export interface VictoriaLogsConnectionInfo {

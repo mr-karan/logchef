@@ -52,6 +52,9 @@ const isLoadingInspection = computed(() =>
 const activity = computed(() => selectedSourceId.value ? sourcesStore.getSourceActivityById(Number(selectedSourceId.value)) : null)
 const activityError = computed(() => selectedSourceId.value ? sourcesStore.getSourceActivityErrorById(Number(selectedSourceId.value)) : null)
 const isLoadingActivity = computed(() => sourcesStore.isLoadingOperation(`getSourceActivity-${selectedSourceId.value}`))
+const sourceEngine = computed(() =>
+  selectedSource.value?.engine ?? inspection.value?.details?.find((detail) => detail.key === 'engine')?.value ?? null
+)
 
 const inspectionError = computed(() => {
   if (isLoadingInspection.value || inspection.value || failedInspection.value?.sourceId !== selectedSourceId.value) {
@@ -161,7 +164,7 @@ watch(
     <EmptyState v-else-if="!inspection" :description="t('sources.selectSourceForInspection')" />
 
     <SourceInspectionOverview v-if="selectedSourceId" :details="inspection?.details" :storage="inspection?.storage" :schema="inspection?.schema" :activity="activityError ? null : activity">
-      <SourceInspectionActivity :source="selectedSource" :activity="activity" :loading="isLoadingActivity" :error="activityError" @retry="fetchSourceActivity" />
+      <SourceInspectionActivity :source="selectedSource" :engine="sourceEngine" :activity="activity" :loading="isLoadingActivity" :error="activityError" @retry="fetchSourceActivity" />
     </SourceInspectionOverview>
     <SourceInspectionSchema v-if="inspection" :source="selectedSource" :schema="inspection.schema" />
   </div>

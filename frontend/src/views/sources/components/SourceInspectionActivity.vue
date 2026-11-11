@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Info } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -7,21 +8,33 @@ import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
 import type { Source, SourceActivity } from '@/api/sources'
 import type { SourceActivityError } from '@/stores/sources'
 
-defineProps<{
-  source?: Pick<Source, 'source_type'> | null
+const props = defineProps<{
+  source?: Pick<Source, 'source_type' | 'engine'> | null
+  engine?: string | null
   activity?: SourceActivity | null
   loading?: boolean
   error?: SourceActivityError | null
 }>()
 const emit = defineEmits<{ retry: [] }>()
 const { t, n } = useI18n()
+
+const unsupportedMessageKey = computed(() => {
+  if (props.source?.source_type !== 'clickhouse') {
+    return 'sources.activityUnavailable'
+  }
+  const resolvedEngine = props.engine ?? props.source?.engine
+  if (resolvedEngine === 'View') {
+    return 'sources.activityViewDisabled'
+  }
+  return 'inspection.activitySortKey'
+})
 </script>
 
 <template>
   <LoadingState v-if="loading && !activity" :label="t('sources.loadingRecentActivity')" />
   <p v-else-if="error?.kind === 'unsupported'" class="flex items-start gap-2 text-sm text-muted-foreground">
     <Info class="mt-0.5 size-4 shrink-0" />
-    {{ t(source?.source_type === 'clickhouse' ? 'inspection.activitySortKey' : 'sources.activityUnavailable') }}
+    {{ t(unsupportedMessageKey) }}
   </p>
   <div v-else-if="error" class="flex flex-wrap items-center gap-3 text-sm" role="status">
     <p class="text-muted-foreground">{{ error.message }}</p>

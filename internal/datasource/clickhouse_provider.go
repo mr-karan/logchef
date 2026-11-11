@@ -550,10 +550,14 @@ func (p *ClickHouseProvider) InspectSource(ctx context.Context, source *models.S
 		return nil, fmt.Errorf("inspect table metadata: %w", err)
 	}
 	ttlExpr := extractTTLFromTableInfo(ctx, client, tableInfo)
-	statsDB, statsTable := getStatsTableLocation(source, tableInfo)
-	tableStats, statsErr := client.TableStats(ctx, statsDB, statsTable)
-	if statsErr != nil {
-		p.log.Warn("failed to inspect table storage", "source_id", source.ID, "error", statsErr)
+	var tableStats *clickhouse.TableStat
+	if tableInfo == nil || tableInfo.Engine != "View" {
+		statsDB, statsTable := getStatsTableLocation(source, tableInfo)
+		var statsErr error
+		tableStats, statsErr = client.TableStats(ctx, statsDB, statsTable)
+		if statsErr != nil {
+			p.log.Warn("failed to inspect table storage", "source_id", source.ID, "error", statsErr)
+		}
 	}
 	return &SourceInspection{
 		Details: buildClickHouseInspectionDetails(source, tableInfo),
@@ -574,15 +578,40 @@ func (p *ClickHouseProvider) InspectSourceActivity(ctx context.Context, source *
 	if err != nil {
 		return nil, fmt.Errorf("inspect activity table metadata: %w", err)
 	}
-	if !hasLeadingTimestampSortKey(info, source.MetaTSField) {
+	allow, enforceScanLimits := canInspectSourceActivity(source, info)
+	if !allow {
 		return nil, ErrSourceActivityUnavailable
 	}
 	database, table := getStatsTableLocation(source, info)
-	stats, err := client.IngestionStats(ctx, database, table, source.MetaTSField)
+	var opts clickhouse.IngestionStatsOptions
+	if enforceScanLimits {
+		opts.EnforceScanLimits = true
+		if source.Connection.Activity != nil {
+			opts.MaxRowsToRead = source.Connection.Activity.MaxRowsToRead
+			opts.MaxBytesToRead = source.Connection.Activity.MaxBytesToRead
+		}
+	}
+	stats, err := client.IngestionStatsWithOptions(ctx, database, table, source.MetaTSField, opts)
 	if err != nil {
+		if clickhouse.IsReadLimitExceededError(err) {
+			return nil, fmt.Errorf("%w: %w", ErrSourceActivityLimitExceeded, err)
+		}
 		return nil, err
 	}
 	return mapActivityStats(stats), nil
+}
+
+func canInspectSourceActivity(source *models.Source, info *clickhouse.TableInfo) (allow, enforceScanLimits bool) {
+	if source == nil || info == nil {
+		return false, false
+	}
+	if hasLeadingTimestampSortKey(info, source.MetaTSField) {
+		return true, false
+	}
+	if info.Engine == "View" && source.Connection.Activity != nil && source.Connection.Activity.AllowView {
+		return true, true
+	}
+	return false, false
 }
 
 func hasLeadingTimestampSortKey(info *clickhouse.TableInfo, timestamp string) bool {
@@ -684,6 +713,10 @@ func (p *ClickHouseProvider) connectionFromConfig(raw json.RawMessage) (models.C
 	if err := conn.Settings.Validate(); err != nil {
 		return conn, &ValidationError{Field: "connection.settings", Message: err.Error()}
 	}
+	if err := conn.Activity.Validate(); err != nil {
+		return conn, &ValidationError{Field: "connection.activity", Message: err.Error()}
+	}
+	conn.Activity = conn.Activity.Normalized()
 	return conn, nil
 }
 

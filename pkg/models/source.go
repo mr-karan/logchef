@@ -48,6 +48,49 @@ type ConnectionInfo struct {
 	// every query executed against this source. Nil means "no per-source
 	// settings" and is omitted from the persisted connection_config JSON.
 	Settings *ClickHouseQuerySettings `json:"settings,omitempty"`
+	// Activity carries optional per-source Recent activity controls (such as
+	// opting in ClickHouse View sources and bounding activity scan limits).
+	Activity *ClickHouseActivityConfig `json:"activity,omitempty"`
+}
+
+// ClickHouseActivityConfig holds optional per-source controls for the Recent
+// activity inspection query on ClickHouse sources. Ordinary ClickHouse views
+// report Engine="View" with an empty sorting_key in system.tables, so Recent
+// activity is disabled on views unless AllowView is explicitly enabled.
+type ClickHouseActivityConfig struct {
+	// AllowView opts in to running Recent activity queries through a ClickHouse
+	// View (Engine == "View") when its underlying query plan is suitable.
+	AllowView bool `json:"allow_view,omitempty"`
+	// MaxRowsToRead caps max_rows_to_read for opted-in view activity queries.
+	// Must be positive when set; nil uses Logchef's finite default cap.
+	MaxRowsToRead *int64 `json:"max_rows_to_read,omitempty"`
+	// MaxBytesToRead caps max_bytes_to_read for opted-in view activity queries.
+	// Must be positive when set; nil uses Logchef's finite default cap.
+	MaxBytesToRead *int64 `json:"max_bytes_to_read,omitempty"`
+}
+
+// Normalized returns nil when no activity option is set so omitempty omits an
+// all-default block from persisted connection_config JSON.
+func (a *ClickHouseActivityConfig) Normalized() *ClickHouseActivityConfig {
+	if a == nil || (!a.AllowView && a.MaxRowsToRead == nil && a.MaxBytesToRead == nil) {
+		return nil
+	}
+	return a
+}
+
+// Validate checks that any configured scan bounds are strictly positive
+// (0 in ClickHouse disables the cap). A nil receiver is valid.
+func (a *ClickHouseActivityConfig) Validate() error {
+	if a == nil {
+		return nil
+	}
+	if a.MaxRowsToRead != nil && *a.MaxRowsToRead <= 0 {
+		return fmt.Errorf("max_rows_to_read must be positive")
+	}
+	if a.MaxBytesToRead != nil && *a.MaxBytesToRead <= 0 {
+		return fmt.Errorf("max_bytes_to_read must be positive")
+	}
+	return nil
 }
 
 // ClickHouseQuerySettings holds optional ClickHouse query settings configured per
@@ -319,6 +362,7 @@ func (s *Source) SyncConnectionConfig() error {
 
 	switch s.SourceType {
 	case SourceTypeClickHouse:
+		s.Connection.Activity = s.Connection.Activity.Normalized()
 		payload, err := json.Marshal(s.Connection) //nolint:gosec // internal round-trip into the source's stored connection_config JSON, never logged or returned to a client.
 		if err != nil {
 			return fmt.Errorf("marshal clickhouse connection config: %w", err)
@@ -422,9 +466,10 @@ func (s *Source) RedactedConnectionConfig() json.RawMessage {
 			TableName:   s.Connection.TableName,
 			TLSEnable:   s.Connection.TLSEnable,
 			HasPassword: s.Connection.Password != "",
-			// Settings aren't secrets: return them so the UI can display and
-			// round-trip them on edit (unlike the password, which is redacted).
+			// Settings and activity controls aren't secrets: return them so the UI
+			// can display and round-trip them on edit (unlike the password, which is redacted).
 			Settings: s.Connection.Settings,
+			Activity: s.Connection.Activity.Normalized(),
 		})
 		if err != nil {
 			return json.RawMessage(`{}`)
@@ -575,11 +620,12 @@ type ConnectionValidationResult struct {
 // Credentials are never serialized; HasPassword lets the UI show whether one
 // is set (edit forms treat a blank password as "keep existing").
 type ConnectionInfoResponse struct {
-	Host        string                   `json:"host"`
-	Username    string                   `json:"username,omitempty"`
-	Database    string                   `json:"database"`
-	TableName   string                   `json:"table_name"`
-	TLSEnable   bool                     `json:"tls_enable"`
-	HasPassword bool                     `json:"has_password,omitempty"`
-	Settings    *ClickHouseQuerySettings `json:"settings,omitempty"`
+	Host        string                    `json:"host"`
+	Username    string                    `json:"username,omitempty"`
+	Database    string                    `json:"database"`
+	TableName   string                    `json:"table_name"`
+	TLSEnable   bool                      `json:"tls_enable"`
+	HasPassword bool                      `json:"has_password,omitempty"`
+	Settings    *ClickHouseQuerySettings  `json:"settings,omitempty"`
+	Activity    *ClickHouseActivityConfig `json:"activity,omitempty"`
 }

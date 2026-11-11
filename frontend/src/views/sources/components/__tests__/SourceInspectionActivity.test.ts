@@ -105,4 +105,15 @@ describe("SourceInspectionActivity", () => {
     expect(root.textContent).not.toContain("sort key");
     expect(buttonWithText(root, "Retry")).toBeUndefined();
   });
+
+  it("explains how to enable Recent activity on an un-opted ClickHouse View", async () => {
+    const root = await render({
+      source: { source_type: "clickhouse" },
+      engine: "View",
+      error: { message: "Recent activity unavailable", kind: "unsupported" },
+    });
+    expect(root.textContent).toContain(i18n.global.t("sources.activityViewDisabled"));
+    expect(root.textContent).not.toContain(i18n.global.t("inspection.activitySortKey"));
+    expect(buttonWithText(root, "Retry")).toBeUndefined();
+  });
 });

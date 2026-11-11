@@ -81,13 +81,16 @@ func (c *Client) resultQuerySettings(ctx context.Context, opts QueryOptions) (cl
 // ownQuerySettings returns every setting one of Logchef's own queries sends,
 // such as a table's metadata or stats. Logchef reads all of that result, so
 // no result cap applies, the source's included.
-func (c *Client) ownQuerySettings(ctx context.Context, timeoutSeconds int) (clickhouse.Settings, error) {
+func (c *Client) ownQuerySettings(ctx context.Context, timeoutSeconds int, extra ...clickhouse.Settings) (clickhouse.Settings, error) {
 	modes, err := c.throwModes.get(ctx)
 	if err != nil {
 		return nil, err
 	}
 	settings := clickhouse.Settings{}
 	maps.Copy(settings, c.querySettings)
+	for _, overrides := range extra {
+		maps.Copy(settings, overrides)
+	}
 	maps.Copy(settings, neutralSettings())
 	return c.guarded(settings, modes, &timeoutSeconds), nil
 }

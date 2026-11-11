@@ -232,6 +232,9 @@ func (s *Server) sendSourceActivity(c fiber.Ctx, sourceID models.SourceID, activ
 	if errors.Is(err, datasource.ErrSourceActivityUnavailable) || errors.Is(err, datasource.ErrOperationNotSupported) {
 		return SendErrorWithType(c, fiber.StatusServiceUnavailable, "Recent activity unavailable", models.ActivityUnsupportedErrorType)
 	}
+	if errors.Is(err, datasource.ErrSourceActivityLimitExceeded) {
+		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, "Recent activity exceeded scan limits", models.ActivityLimitExceededErrorType)
+	}
 	s.log.Error("failed to get source activity", "error", err, "source_id", sourceID)
 	return SendError(c, fiber.StatusInternalServerError, "Error getting recent activity")
 }
