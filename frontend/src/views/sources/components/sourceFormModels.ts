@@ -1,4 +1,5 @@
 import type {
+  ClickHouseActivityConfig,
   ClickHouseConnectionInfo,
   ClickHouseQuerySettings,
   Source,
@@ -24,6 +25,12 @@ export interface ClickHouseSettingsFormState {
   resultOverflowMode: string;
 }
 
+export interface ClickHouseActivityFormState {
+  allowView: boolean;
+  maxRowsToRead: string;
+  maxBytesToRead: string;
+}
+
 export interface ClickHouseSourceFormState {
   host: string;
   tlsEnable: boolean;
@@ -38,6 +45,7 @@ export interface ClickHouseSourceFormState {
   metaSeverityField: string;
   schema: string;
   settings: ClickHouseSettingsFormState;
+  activity: ClickHouseActivityFormState;
 }
 
 export interface VictoriaLogsSourceFormState {
@@ -98,6 +106,14 @@ function createDefaultClickHouseSettingsState(): ClickHouseSettingsFormState {
   };
 }
 
+function createDefaultClickHouseActivityState(): ClickHouseActivityFormState {
+  return {
+    allowView: false,
+    maxRowsToRead: "",
+    maxBytesToRead: "",
+  };
+}
+
 export function createDefaultClickHouseFormState(): ClickHouseSourceFormState {
   return {
     host: "",
@@ -113,6 +129,7 @@ export function createDefaultClickHouseFormState(): ClickHouseSourceFormState {
     metaSeverityField: "severity_text",
     schema: "",
     settings: createDefaultClickHouseSettingsState(),
+    activity: createDefaultClickHouseActivityState(),
   };
 }
 
@@ -211,6 +228,38 @@ function buildClickHouseSettings(
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
+function parsePositiveIntegerSetting(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+function buildClickHouseActivity(
+  state: ClickHouseActivityFormState
+): ClickHouseActivityConfig | undefined {
+  if (!state.allowView) {
+    return undefined;
+  }
+  const activity: ClickHouseActivityConfig = {
+    allow_view: true,
+  };
+  const maxRowsToRead = parsePositiveIntegerSetting(state.maxRowsToRead);
+  if (maxRowsToRead !== undefined) {
+    activity.max_rows_to_read = maxRowsToRead;
+  }
+  const maxBytesToRead = parsePositiveIntegerSetting(state.maxBytesToRead);
+  if (maxBytesToRead !== undefined) {
+    activity.max_bytes_to_read = maxBytesToRead;
+  }
+  return activity;
+}
+
 export function buildClickHouseConnection(state: ClickHouseSourceFormState): ClickHouseConnectionInfo {
   const connection: ClickHouseConnectionInfo = {
     host: state.host.trim(),
@@ -219,10 +268,18 @@ export function buildClickHouseConnection(state: ClickHouseSourceFormState): Cli
     database: state.database.trim(),
     table_name: state.tableName.trim(),
   };
+  if (state.tlsEnable) {
+    connection.tls_enable = true;
+  }
 
   const settings = buildClickHouseSettings(state.settings);
   if (settings) {
     connection.settings = settings;
+  }
+
+  const activity = buildClickHouseActivity(state.activity);
+  if (activity) {
+    connection.activity = activity;
   }
 
   return connection;
@@ -331,6 +388,23 @@ function clickHouseSettingsStateFromConnection(
   return state;
 }
 
+function clickHouseActivityStateFromConnection(
+  activity: ClickHouseActivityConfig | undefined
+): ClickHouseActivityFormState {
+  const state = createDefaultClickHouseActivityState();
+  if (!activity) {
+    return state;
+  }
+  state.allowView = Boolean(activity.allow_view);
+  if (activity.max_rows_to_read !== undefined && activity.max_rows_to_read !== null) {
+    state.maxRowsToRead = String(activity.max_rows_to_read);
+  }
+  if (activity.max_bytes_to_read !== undefined && activity.max_bytes_to_read !== null) {
+    state.maxBytesToRead = String(activity.max_bytes_to_read);
+  }
+  return state;
+}
+
 export function clickHouseFormStateFromSource(source: Source): ClickHouseSourceFormState {
   const connection = (source.connection || {}) as Partial<ClickHouseConnectionInfo>;
   const enableAuth = Boolean(connection.username);
@@ -349,6 +423,7 @@ export function clickHouseFormStateFromSource(source: Source): ClickHouseSourceF
     metaSeverityField: source._meta_severity_field || "",
     schema: source.schema || "",
     settings: clickHouseSettingsStateFromConnection(connection.settings),
+    activity: clickHouseActivityStateFromConnection(connection.activity),
   };
 }
 

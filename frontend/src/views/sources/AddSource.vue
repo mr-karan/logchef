@@ -63,6 +63,7 @@ const validationMessage = ref<string | null>(null);
 const validationError = ref<string | null>(null);
 const isValidated = ref(false);
 const originalConnectionSnapshot = ref("");
+const hasStoredClickHousePassword = ref(false);
 
 const currentConnectionSnapshot = computed(() =>
   sourceType.value === "clickhouse"
@@ -129,7 +130,7 @@ const isValid = computed(() => {
     if (state.enableAuth && !state.username.trim()) {
       return false;
     }
-    if (state.enableAuth && (!isEditMode.value || hasConnectionChanges.value) && !state.password) {
+    if (state.enableAuth && (!isEditMode.value || !hasStoredClickHousePassword.value) && !state.password) {
       return false;
     }
     if (state.tableMode === "connect" && !state.metaTSField.trim()) {
@@ -195,9 +196,11 @@ function prefillFormFromSource(source: Source, isCopy = false) {
 
   if (sourceType.value === "clickhouse") {
     clickHouseForm.value = clickHouseFormStateFromSource(source);
+    hasStoredClickHousePassword.value = !isCopy && Boolean((source.connection as { has_password?: boolean } | undefined)?.has_password);
     victoriaLogsForm.value = createDefaultVictoriaLogsFormState();
     victoriaLogsTTLDays.value = "0";
   } else {
+    hasStoredClickHousePassword.value = false;
     victoriaLogsForm.value = victoriaLogsFormStateFromSource(source);
     victoriaLogsTTLDays.value = String(source.ttl_days ?? 0);
     clickHouseForm.value = createDefaultClickHouseFormState();

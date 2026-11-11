@@ -117,6 +117,29 @@ database = "logs"
 table_name = "otel_logs"
 ```
 
+When a ClickHouse source targets an ordinary `View` (`ENGINE = View`) backed by timestamp-ordered `MergeTree` tables, you can opt in to **Recent activity** inspection via `[sources.connection.activity]`:
+
+```toml
+[[sources]]
+name = "Visible Logs View"
+source_type = "clickhouse"
+meta_ts_field = "timestamp"
+secret_ref = "LOGCHEF_CH_PROD_PASSWORD"
+
+[sources.connection]
+host = "clickhouse.internal:9000"
+username = "logchef"
+database = "logs"
+table_name = "logs_visible"
+
+[sources.connection.activity]
+allow_view = true
+max_rows_to_read = 50000000     # optional positive cap; defaults to 50,000,000
+max_bytes_to_read = 1073741824  # optional positive cap; defaults to 1 GiB
+```
+
+Opted-in view activity queries run through the view itself with `max_execution_time` capped at 3 seconds and ClickHouse overflow modes forced to `throw`, so exceeding an execution or scan cap fails explicitly rather than returning partial counts.
+
 For **VictoriaLogs**, use the native API connection shape:
 
 ```toml

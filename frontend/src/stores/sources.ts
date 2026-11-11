@@ -25,7 +25,7 @@ type SourceActivityRequestResult = {
 // "unsupported" has its own explanation; "permanent" errors fail the same way on every retry.
 export type SourceActivityError = { message: string; kind: "unsupported" | "permanent" | "transient" };
 
-const PERMANENT_SOURCE_ERRORS = new Set(["NotFoundError", "ValidationError"]);
+const PERMANENT_SOURCE_ERRORS = new Set(["NotFoundError", "ValidationError", "ActivityLimitExceeded"]);
 
 export function isRetryableSourceError(errorType: string | undefined): boolean {
   return errorType === undefined || !PERMANENT_SOURCE_ERRORS.has(errorType);

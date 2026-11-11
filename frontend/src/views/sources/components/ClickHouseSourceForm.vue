@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Code, ChevronsUpDown, Database, Plus } from "lucide-vue-next";
 import type {
+  ClickHouseActivityFormState,
   ClickHouseSettingsFormState,
   ClickHouseSourceFormState,
 } from "./sourceFormModels";
@@ -63,6 +64,10 @@ function updateSettings(patch: Partial<ClickHouseSettingsFormState>) {
   updateForm({ settings: { ...props.modelValue.settings, ...patch } });
 }
 
+function updateActivity(patch: Partial<ClickHouseActivityFormState>) {
+  updateForm({ activity: { ...props.modelValue.activity, ...patch } });
+}
+
 // Sanitize a number input so blanks stay blank (unset) and negatives are
 // clamped to "" rather than sending a negative value to the backend.
 function sanitizeNonNegative(value: unknown): string {
@@ -72,6 +77,18 @@ function sanitizeNonNegative(value: unknown): string {
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
+    return "";
+  }
+  return raw;
+}
+
+function sanitizePositiveInteger(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (raw === "") {
+    return "";
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
     return "";
   }
   return raw;
@@ -195,7 +212,7 @@ function resetSchema() {
       </div>
     </section>
 
-    <Accordion type="single" collapsible class="w-full">
+    <Accordion type="multiple" class="w-full space-y-3">
       <AccordionItem value="advanced-query-settings" class="border rounded-md px-4">
         <AccordionTrigger class="text-base font-medium">
           {{ t("sources.advancedQuerySettings") }}
@@ -306,6 +323,66 @@ function resetSchema() {
                 {{ t("sources.readOnlyDescription") }}
               </p>
             </div>
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+
+      <AccordionItem
+        v-if="isEditMode || modelValue.tableMode === 'connect'"
+        value="view-activity-settings"
+        class="border rounded-md px-4"
+      >
+        <AccordionTrigger class="text-base font-medium">
+          {{ t("sources.viewActivitySettings") }}
+        </AccordionTrigger>
+        <AccordionContent class="space-y-4 pt-2">
+          <div class="flex items-center justify-between rounded-md bg-muted/50 p-3">
+            <div class="space-y-0.5 pr-4">
+              <Label for="clickhouse_allow_view_activity" class="text-base">{{ t("sources.allowViewActivity") }}</Label>
+              <p class="text-sm text-muted-foreground">
+                {{ t("sources.allowViewActivityDescription") }}
+              </p>
+            </div>
+            <Switch
+              id="clickhouse_allow_view_activity"
+              :aria-label="t('sources.allowViewActivity')"
+              :model-value="modelValue.activity.allowView"
+              @update:model-value="(checked: boolean) => updateActivity({ allowView: checked })"
+            />
+          </div>
+
+          <div
+            v-show="modelValue.activity.allowView"
+            class="space-y-3 border-l-2 border-primary/20 pl-3"
+          >
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="grid gap-2">
+                <Label for="ch_activity_max_rows_to_read">{{ t("sources.activityMaxRowsToRead") }}</Label>
+                <Input
+                  id="ch_activity_max_rows_to_read"
+                  :model-value="modelValue.activity.maxRowsToRead"
+                  type="number"
+                  min="1"
+                  placeholder="50000000"
+                  @update:model-value="(value) => updateActivity({ maxRowsToRead: sanitizePositiveInteger(value) })"
+                />
+              </div>
+
+              <div class="grid gap-2">
+                <Label for="ch_activity_max_bytes_to_read">{{ t("sources.activityMaxBytesToRead") }}</Label>
+                <Input
+                  id="ch_activity_max_bytes_to_read"
+                  :model-value="modelValue.activity.maxBytesToRead"
+                  type="number"
+                  min="1"
+                  placeholder="1073741824"
+                  @update:model-value="(value) => updateActivity({ maxBytesToRead: sanitizePositiveInteger(value) })"
+                />
+              </div>
+            </div>
+            <p class="text-sm text-muted-foreground">
+              {{ t("sources.viewActivityLimitsDescription") }}
+            </p>
           </div>
         </AccordionContent>
       </AccordionItem>

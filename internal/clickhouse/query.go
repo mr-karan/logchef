@@ -347,12 +347,25 @@ func resetNullableScanTargets(ptrs []reflect.Value) {
 }
 
 // ClickHouse exception codes (see clickhouse-go's lib/proto.Exception.Code)
-// that indicate the query was aborted due to a timeout rather than some
-// other server-side failure.
+// that indicate the query was aborted due to a timeout or scan/result cap.
 const (
+	chExceptionTooManyRows     int32 = 158 // TOO_MANY_ROWS: max_rows_to_read or max_result_rows exceeded.
 	chExceptionTimeoutExceeded int32 = 159 // TIMEOUT_EXCEEDED: max_execution_time exceeded server-side.
 	chExceptionSocketTimeout   int32 = 209 // SOCKET_TIMEOUT: the connection's socket timed out mid-query.
+	chExceptionTooManyBytes    int32 = 307 // TOO_MANY_BYTES: max_bytes_to_read or max_result_bytes exceeded.
 )
+
+// IsReadLimitExceededError reports whether ClickHouse aborted a query because
+// a row or byte read/result cap was exceeded (TOO_MANY_ROWS / TOO_MANY_BYTES).
+func IsReadLimitExceededError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if exception, ok := errors.AsType[*clickhouse.Exception](err); ok {
+		return exception.Code == chExceptionTooManyRows || exception.Code == chExceptionTooManyBytes
+	}
+	return false
+}
 
 // IsQueryTimeoutError reports query deadlines separately from transport timeouts.
 func IsQueryTimeoutError(err error) bool {

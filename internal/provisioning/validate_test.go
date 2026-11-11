@@ -178,6 +178,41 @@ func TestValidateConfig_ClickHouseQuerySettings(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_ClickHouseActivitySettings(t *testing.T) {
+	withActivity := func(activity map[string]any) config.ProvisionSource {
+		return config.ProvisionSource{
+			Name:       "s",
+			SourceType: "clickhouse",
+			Connection: map[string]any{
+				"host":       "h:9000",
+				"database":   "db",
+				"table_name": "logs_view",
+				"password":   "p",
+				"activity":   activity,
+			},
+		}
+	}
+	cases := []struct {
+		name     string
+		activity map[string]any
+		wantErr  bool
+	}{
+		{"allow_view with default caps accepted", map[string]any{"allow_view": true}, false},
+		{"allow_view with positive caps accepted", map[string]any{"allow_view": true, "max_rows_to_read": 5000000, "max_bytes_to_read": 104857600}, false},
+		{"zero max_rows_to_read rejected", map[string]any{"allow_view": true, "max_rows_to_read": 0}, true},
+		{"negative max_bytes_to_read rejected", map[string]any{"allow_view": true, "max_bytes_to_read": -10}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{withActivity(tc.activity)}}
+			err := ValidateConfig(cfg)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateConfig() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,

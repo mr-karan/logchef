@@ -7,6 +7,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
+
 	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
@@ -14,7 +16,21 @@ const (
 	// Keep stats queries fast so one slow sub-query doesn't block the whole response.
 	tableStatsTimeoutSeconds     = 2
 	ingestionStatsTimeoutSeconds = 3
+
+	// DefaultViewActivityMaxRowsToRead bounds rows scanned when computing Recent
+	// activity through an opted-in ClickHouse View unless overridden per source.
+	DefaultViewActivityMaxRowsToRead int64 = 50_000_000
+	// DefaultViewActivityMaxBytesToRead bounds uncompressed bytes scanned (1 GiB)
+	// when computing Recent activity through an opted-in ClickHouse View.
+	DefaultViewActivityMaxBytesToRead int64 = 1 << 30
 )
+
+// IngestionStatsOptions configures scan caps for opted-in View activity.
+type IngestionStatsOptions struct {
+	EnforceScanLimits bool
+	MaxRowsToRead     *int64
+	MaxBytesToRead    *int64
+}
 
 // TableStat represents overall statistics for a ClickHouse table,
 // typically retrieved from system.parts.
@@ -158,21 +174,69 @@ func accumulateIngestionActivity(rows []ingestionActivityRow) *IngestionStats {
 }
 
 func activityError(queryCtx context.Context, operation string, err error) error {
-	if errors.Is(queryCtx.Err(), context.DeadlineExceeded) || IsTimeoutError(err) {
+	if errors.Is(context.Cause(queryCtx), context.DeadlineExceeded) || errors.Is(queryCtx.Err(), context.DeadlineExceeded) || IsTimeoutError(err) {
 		return fmt.Errorf("%s: %w", operation, context.DeadlineExceeded)
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }
 
+func positiveInt64Setting(settings clickhouse.Settings, key string) (int64, bool) {
+	if settings == nil {
+		return 0, false
+	}
+	switch v := settings[key].(type) {
+	case int:
+		return int64(v), v > 0
+	case int64:
+		return v, v > 0
+	case uint64:
+		if v > 0 && v <= math.MaxInt64 {
+			return int64(v), true
+		}
+	}
+	return 0, false
+}
+
+func buildIngestionStatsSettings(source clickhouse.Settings, opts IngestionStatsOptions) clickhouse.Settings {
+	if !opts.EnforceScanLimits {
+		return nil
+	}
+	settings := clickhouse.Settings{}
+	rowsCap := DefaultViewActivityMaxRowsToRead
+	if opts.MaxRowsToRead != nil && *opts.MaxRowsToRead > 0 {
+		rowsCap = *opts.MaxRowsToRead
+	}
+	if srcRows, ok := positiveInt64Setting(source, "max_rows_to_read"); ok && srcRows < rowsCap {
+		rowsCap = srcRows
+	}
+	settings["max_rows_to_read"] = rowsCap
+	bytesCap := DefaultViewActivityMaxBytesToRead
+	if opts.MaxBytesToRead != nil && *opts.MaxBytesToRead > 0 {
+		bytesCap = *opts.MaxBytesToRead
+	}
+	if srcBytes, ok := positiveInt64Setting(source, "max_bytes_to_read"); ok && srcBytes < bytesCap {
+		bytesCap = srcBytes
+	}
+	settings["max_bytes_to_read"] = bytesCap
+	return settings
+}
+
 // IngestionStats retrieves bounded, recent ingestion activity in one query.
 func (c *Client) IngestionStats(ctx context.Context, database, table, timestampField string) (*IngestionStats, error) {
+	return c.IngestionStatsWithOptions(ctx, database, table, timestampField, IngestionStatsOptions{})
+}
+
+// IngestionStatsWithOptions retrieves bounded, recent ingestion activity in one
+// query with optional scan caps and overflow enforcement.
+func (c *Client) IngestionStatsWithOptions(ctx context.Context, database, table, timestampField string, opts IngestionStatsOptions) (*IngestionStats, error) {
 	query, err := ingestionActivityQuery(database, table, timestampField)
 	if err != nil {
 		return nil, err
 	}
-	queryCtx, cancel := context.WithTimeout(ctx, ingestionStatsTimeoutSeconds*time.Second)
+	settings := buildIngestionStatsSettings(c.querySettings, opts)
+	queryCtx, cancel := withQueryTimeout(ctx, c.queryTimeout(new(ingestionStatsTimeoutSeconds)))
 	defer cancel()
-	rows, err := c.queryOwn(queryCtx, ingestionStatsTimeoutSeconds, query)
+	rows, err := c.queryOwnWithSettings(queryCtx, ingestionStatsTimeoutSeconds, settings, query)
 	if err != nil {
 		return nil, activityError(queryCtx, "error executing ingestion activity query", err)
 	}

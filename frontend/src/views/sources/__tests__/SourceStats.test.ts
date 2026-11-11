@@ -146,6 +146,7 @@ describe("SourceStats", () => {
   it.each([
     ["NotFoundError", "Source not found"],
     ["ValidationError", "Invalid source ID"],
+    ["ActivityLimitExceeded", "Recent activity exceeded scan limits"],
   ])("shows a %s without a Retry that cannot succeed", async (errorType, message) => {
     server.inspectionFails = false;
     server.activityError = { status: "error", message, error_type: errorType };

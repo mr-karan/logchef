@@ -1,9 +1,12 @@
 package clickhouse
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 func TestIngestionActivityQueryIsBoundedToOneDay(t *testing.T) {
@@ -43,5 +46,39 @@ func TestAccumulateIngestionActivity(t *testing.T) {
 	}
 	if len(stats.HourlyBuckets) != 2 || stats.HourlyBuckets[0].Rows != 4 || !stats.HourlyBuckets[1].Bucket.Equal(first.Add(time.Hour)) {
 		t.Fatalf("unexpected hourly aggregation: %#v", stats.HourlyBuckets)
+	}
+}
+
+func TestBuildIngestionStatsSettings(t *testing.T) {
+	source := clickhouse.Settings{"max_execution_time": 120, "read_overflow_mode": "break", "max_rows_to_read": int64(500_000_000)}
+	if got := buildIngestionStatsSettings(source, IngestionStatsOptions{}); len(got) != 0 {
+		t.Fatalf("non-view overrides = %v, want none", got)
+	}
+	got := buildIngestionStatsSettings(source, IngestionStatsOptions{EnforceScanLimits: true})
+	if len(got) != 2 || got["max_rows_to_read"] != DefaultViewActivityMaxRowsToRead || got["max_bytes_to_read"] != DefaultViewActivityMaxBytesToRead {
+		t.Fatalf("view caps = %v", got)
+	}
+	rows, bytes := int64(250_000), int64(64<<20)
+	got = buildIngestionStatsSettings(clickhouse.Settings{"max_rows_to_read": int64(100_000)}, IngestionStatsOptions{EnforceScanLimits: true, MaxRowsToRead: &rows, MaxBytesToRead: &bytes})
+	if got["max_rows_to_read"] != int64(100_000) || got["max_bytes_to_read"] != bytes {
+		t.Fatalf("stricter caps = %v", got)
+	}
+}
+
+func TestIsReadLimitExceededError(t *testing.T) {
+	t.Parallel()
+
+	if IsReadLimitExceededError(nil) {
+		t.Fatal("nil error reported as read limit exceeded")
+	}
+	for _, code := range []int32{chExceptionTooManyRows, chExceptionTooManyBytes} {
+		err := fmt.Errorf("activity failed: %w", publicQueryError(&clickhouse.Exception{Code: code, Message: "limit exceeded"}))
+		if !IsReadLimitExceededError(err) {
+			t.Fatalf("code %d not classified as read limit exceeded", code)
+		}
+	}
+	timeoutErr := &clickhouse.Exception{Code: chExceptionTimeoutExceeded, Message: "timeout"}
+	if IsReadLimitExceededError(timeoutErr) {
+		t.Fatal("timeout exception classified as read limit exceeded")
 	}
 }

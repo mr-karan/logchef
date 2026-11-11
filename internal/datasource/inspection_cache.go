@@ -36,6 +36,14 @@ type sourceActivityUnavailableError struct{}
 
 func (*sourceActivityUnavailableError) Error() string { return "source activity unavailable" }
 
+// ErrSourceActivityLimitExceeded means an activity query aborted because a
+// ClickHouse row or byte read cap was exceeded rather than returning partial totals.
+var ErrSourceActivityLimitExceeded = &sourceActivityLimitExceededError{}
+
+type sourceActivityLimitExceededError struct{}
+
+func (*sourceActivityLimitExceededError) Error() string { return "source activity scan limit exceeded" }
+
 func (s *Service) inspectionForSource(ctx context.Context, source *models.Source, provider Provider, refresh bool) (*SourceInspection, error) {
 	if !refresh {
 		s.inspectionMu.Lock()

@@ -131,6 +131,9 @@ func validateClickHouseSource(prefix string, src config.ProvisionSource) (errs [
 	if err := conn.Settings.Validate(); err != nil {
 		errs = append(errs, fmt.Sprintf("%s: connection.settings: %v", prefix, err))
 	}
+	if err := conn.Activity.Validate(); err != nil {
+		errs = append(errs, fmt.Sprintf("%s: connection.activity: %v", prefix, err))
+	}
 	return errs, true
 }
 
