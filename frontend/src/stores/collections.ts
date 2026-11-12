@@ -11,6 +11,9 @@ import {
   type AddCollectionMemberRequest,
   type AddCollectionTeamRequest,
   type AddCollectionItemRequest,
+  type CollectionItemLink,
+  type CollectionLinkReportRow,
+  type UpdateCollectionItemRequest,
 } from "@/api/collections";
 import { useBaseStore } from "./base";
 import { i18n } from "@/i18n";
@@ -20,6 +23,7 @@ interface CollectionsState {
   members: Record<number, CollectionMember[]>;
   teams: Record<number, CollectionTeam[]>;
   items: Record<number, CollectionItem[]>;
+  linkReport: CollectionLinkReportRow[];
 }
 
 export const useCollectionsStore = defineStore("collections", () => {
@@ -28,6 +32,7 @@ export const useCollectionsStore = defineStore("collections", () => {
     members: {},
     teams: {},
     items: {},
+    linkReport: [],
   });
 
   const collections = computed(() => state.data.value.collections);
@@ -174,7 +179,7 @@ export const useCollectionsStore = defineStore("collections", () => {
   }
 
   async function addItem(id: number, payload: AddCollectionItemRequest, { notify = true } = {}) {
-    return await state.callApi<{ message: string }>({
+    return await state.callApi<CollectionItemLink>({
       apiCall: () => collectionsApi.addItem(id, payload),
       operationKey: `addItem-${id}`,
       successMessage: notify ? i18n.global.t("library.queryAdded") : undefined,
@@ -182,6 +187,29 @@ export const useCollectionsStore = defineStore("collections", () => {
         await fetchItems(id);
         await fetchCollections();
       },
+    });
+  }
+
+  async function updateItem(id: number, queryId: number, payload: UpdateCollectionItemRequest, { notify = true } = {}) {
+    return await state.callApi<CollectionItemLink>({
+      apiCall: () => collectionsApi.updateItem(id, queryId, payload),
+      operationKey: `updateItem-${id}-${queryId}`,
+      successMessage: notify ? i18n.global.t("library.linkConverted") : undefined,
+      onSuccess: async () => {
+        await fetchItems(id);
+      },
+    });
+  }
+
+  async function fetchLinkReport() {
+    return await state.callApi<CollectionLinkReportRow[]>({
+      apiCall: () => collectionsApi.linkReport(),
+      operationKey: "linkReport",
+      onSuccess: (data) => {
+        state.data.value.linkReport = data ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
@@ -219,6 +247,8 @@ export const useCollectionsStore = defineStore("collections", () => {
     removeTeam,
     fetchItems,
     addItem,
+    updateItem,
     removeItem,
+    fetchLinkReport,
   };
 });

@@ -16,6 +16,8 @@ import {
   Users,
   Plus,
   FolderInput,
+  Pin,
+  ShieldCheck,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import {
@@ -68,6 +70,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect, type SearchableItem } from "@/components/ui/searchable-select";
+import { Checkbox } from "@/components/ui/checkbox";
+import type { CollectionItem } from "@/api/collections";
+import { canManageLink, canRemoveLink, linkKindForAdd, linkKindForMove, showsLinkToggle } from "@/utils/collectionLinks";
 
 // The selected collection is supplied by the Library shell so this pane can be
 // swapped in place as the rail selection changes — no full-page navigation.
@@ -135,6 +140,24 @@ const isOwner = computed(() => canManageCollection(collection.value));
 // Curating the query list (pin/unpin/move) is open to any participant
 // (owner/editor/member), not just owners. Membership is implied by caller_role.
 const canCurate = computed(() => isGlobalAdmin.value || !!collection.value?.caller_role);
+// Owner authority over a link's query: its creator or a global admin. Only
+// they create, convert or remove a managed link.
+function canManageItemLink(item: CollectionItem): boolean {
+  return canManageLink(item.query, authStore.user);
+}
+function canRemoveItem(item: CollectionItem): boolean {
+  return canRemoveLink(item, authStore.user, canCurate.value);
+}
+function canMoveItem(item: CollectionItem): boolean {
+  return item.runnable && moveTargets.value.length > 0 && canRemoveItem(item);
+}
+const showsLinkKinds = computed(() => !!collection.value && !collection.value.is_personal);
+function canConvertItem(item: CollectionItem): boolean {
+  return showsLinkKinds.value && canManageItemLink(item);
+}
+function hasItemActions(item: CollectionItem): boolean {
+  return canCurate.value && (canMoveItem(item) || canConvertItem(item) || canRemoveItem(item));
+}
 // Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
 // invite UI from owners who lack that role since the dropdown can't be
 // populated without it.
@@ -309,6 +332,13 @@ async function confirmItemRemoval() {
   await store.removeItem(collectionID.value, queryId);
 }
 
+// Switch a link between a pin and a managed link. The server refuses anyone
+// without owner authority over the query.
+async function handleConvertItem(item: CollectionItem) {
+  const kind = item.kind === "managed" ? "pin" : "managed";
+  await store.updateItem(collectionID.value, item.query.id, { kind });
+}
+
 function openQuery(queryId: number) {
   router.push(`/logs/saved/${queryId}`);
 }
@@ -333,8 +363,17 @@ watch(showAddQuery, async (isOpen) => {
   }
 });
 
-async function handleAddQuery(queryId: number) {
-  await store.addItem(collectionID.value, { saved_query_id: queryId });
+// Creators and admins add a managed link to a shared collection by default,
+// which delegates edit to its owners and editors. Everyone else adds a pin.
+const editorsCanEdit = ref(true);
+const showsAddToggle = computed(() =>
+  !!collection.value && unpinnedQueries.value.some((sq) => showsLinkToggle(collection.value!, sq, authStore.user)),
+);
+
+async function handleAddQuery(sq: { id: number; created_by?: number | null }) {
+  if (!collection.value) return;
+  const kind = linkKindForAdd(collection.value, sq, authStore.user, editorsCanEdit.value);
+  await store.addItem(collectionID.value, { saved_query_id: sq.id, kind });
 }
 
 // --- Move a query to a different collection (fix 1) ---
@@ -357,10 +396,14 @@ function openMove(queryId: number) {
 async function handleMove() {
   const queryId = pendingMoveQueryId.value;
   const target = Number(moveTargetId.value);
-  if (queryId == null || !target) return;
-  // Move = pin to the target, then unpin from the current collection. If the add
-  // fails we keep it where it is rather than orphan it.
-  const added = await store.addItem(target, { saved_query_id: queryId }, { notify: false });
+  const item = items.value.find((i) => i.query.id === queryId);
+  const targetCollection = moveTargets.value.find((c) => c.id === target);
+  if (queryId == null || !target || !item || !targetCollection) return;
+  // Move = link into the target with the source link's kind, then unlink from
+  // the current collection. If the add fails we keep it where it is rather
+  // than orphan it.
+  const kind = linkKindForMove(item.kind, targetCollection);
+  const added = await store.addItem(target, { saved_query_id: queryId, kind }, { notify: false });
   if (!added.success) return;
   await store.removeItem(collectionID.value, queryId, { notify: false });
   pendingMoveQueryId.value = null;
@@ -524,6 +567,17 @@ async function handleDeleteCollection() {
                   >
                     {{ item.query.name }}
                   </button>
+                  <Badge
+                    v-if="showsLinkKinds"
+                    variant="outline"
+                    class="ml-2 inline-flex items-center gap-1 align-middle font-normal"
+                    :title="item.kind === 'managed' ? t('library.linkManagedHint') : t('library.linkPinHint')"
+                    :data-link-kind="item.kind"
+                  >
+                    <ShieldCheck v-if="item.kind === 'managed'" class="h-3 w-3" />
+                    <Pin v-else class="h-3 w-3" />
+                    {{ item.kind === 'managed' ? t('library.linkManaged') : t('library.linkPin') }}
+                  </Badge>
                   <p v-if="item.query.description" class="text-xs text-muted-foreground mt-0.5 truncate max-w-[400px]">
                     {{ item.query.description }}
                   </p>
@@ -548,14 +602,19 @@ async function handleDeleteCollection() {
                 </TableCell>
                 <TableCell class="px-4 py-3 text-right">
                   <RowActionsMenu
-                    v-if="canCurate"
+                    v-if="hasItemActions(item)"
                     :delete-label="t('library.remove')"
-                    @delete="handleRemoveItem(item.query.id)"
+                    :on-delete="canRemoveItem(item) ? () => handleRemoveItem(item.query.id) : undefined"
                   >
-                    <template v-if="moveTargets.length && item.runnable" #default>
-                      <DropdownMenuItem @click="openMove(item.query.id)">
+                    <template v-if="canMoveItem(item) || canConvertItem(item)" #default>
+                      <DropdownMenuItem v-if="canMoveItem(item)" @click="openMove(item.query.id)">
                         <FolderInput class="mr-2 h-4 w-4" />
                         {{ t('library.move') }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="canConvertItem(item)" @click="handleConvertItem(item)">
+                        <Pin v-if="item.kind === 'managed'" class="mr-2 h-4 w-4" />
+                        <ShieldCheck v-else class="mr-2 h-4 w-4" />
+                        {{ item.kind === 'managed' ? t('library.revokeDelegation') : t('library.delegateEdit') }}
                       </DropdownMenuItem>
                     </template>
                   </RowActionsMenu>
@@ -750,6 +809,13 @@ async function handleDeleteCollection() {
         </DialogHeader>
         <div class="space-y-3 min-w-0">
           <SearchInput v-model="addQuerySearch" :placeholder="t('library.searchQueries')" class="max-w-none" />
+          <div v-if="showsAddToggle" class="flex items-start space-x-3 rounded-md border p-3">
+            <Checkbox id="add_editors_can_edit" :model-value="editorsCanEdit" @update:model-value="(value) => (editorsCanEdit = value === true)" />
+            <div class="space-y-1 leading-none">
+              <Label for="add_editors_can_edit" class="cursor-pointer">{{ t('library.editorsCanEdit') }}</Label>
+              <p class="text-xs text-muted-foreground">{{ t('library.editorsCanEditDescription') }} {{ t('library.editorsCanEditAddHint') }}</p>
+            </div>
+          </div>
           <LoadingState v-if="savedQueriesStore.isLoading" />
           <EmptyState
             v-else-if="addableQueries.length === 0"
@@ -764,7 +830,7 @@ async function handleDeleteCollection() {
                   {{ sq.source_name || `source ${sq.source_id}` }}
                 </p>
               </div>
-              <Button size="sm" variant="outline" @click="handleAddQuery(sq.id)">{{ t('ui.add') }}</Button>
+              <Button size="sm" variant="outline" @click="handleAddQuery(sq)">{{ t('ui.add') }}</Button>
             </li>
           </ul>
         </div>
