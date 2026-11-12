@@ -119,9 +119,31 @@ type CollectionStore interface {
 	// UserHasCollectionTeamAccess reports whether the user currently belongs to
 	// any team the collection is shared with.
 	UserHasCollectionTeamAccess(ctx context.Context, collectionID int, userID models.UserID) (bool, error)
-	AddCollectionItem(ctx context.Context, collectionID, savedQueryID, sortOrder int, addedBy *models.UserID) error
-	RemoveCollectionItem(ctx context.Context, collectionID, savedQueryID int) error
+	// LockCollection holds the collection row until WithTx ends, so that the
+	// authorization, the mutation and the response selection of a link,
+	// member or share write see one state. It returns models.ErrNotFound when
+	// the collection does not exist. Outside WithTx it only checks existence.
+	LockCollection(ctx context.Context, collectionID int) error
+	// AddCollectionItem inserts a link and reports whether a row was inserted.
+	// An existing link of any kind is left as it is.
+	AddCollectionItem(ctx context.Context, collectionID, savedQueryID, sortOrder int, kind models.CollectionLinkKind, addedBy *models.UserID) (bool, error)
+	// GetCollectionItemLink returns models.ErrNotFound when no link exists.
+	GetCollectionItemLink(ctx context.Context, collectionID, savedQueryID int) (*models.CollectionItemLink, error)
+	// SetCollectionItemKind converts a link and reports whether a row changed.
+	// A link already of that kind, or no link, changes nothing.
+	SetCollectionItemKind(ctx context.Context, collectionID, savedQueryID int, kind models.CollectionLinkKind) (bool, error)
+	// RemoveCollectionItem deletes a link of either kind and reports whether
+	// a row was deleted.
+	RemoveCollectionItem(ctx context.Context, collectionID, savedQueryID int) (bool, error)
+	// RemoveCollectionPin deletes a link only when it is a pin and reports
+	// whether a row was deleted. A managed link is left as it is.
+	RemoveCollectionPin(ctx context.Context, collectionID, savedQueryID int) (bool, error)
 	ListCollectionItems(ctx context.Context, collectionID int) ([]*models.CollectionItem, error)
+	// ListSharedCollectionPins lists every pin in a shared collection, oldest
+	// first, without the collection's editors.
+	ListSharedCollectionPins(ctx context.Context) ([]*models.CollectionLinkReportRow, error)
+	// UserCanEditSavedQueryViaSharedCollection reports whether the user owns
+	// or edits a shared collection that manages the query.
 	UserCanEditSavedQueryViaSharedCollection(ctx context.Context, userID models.UserID, queryID int) (bool, error)
 }
 

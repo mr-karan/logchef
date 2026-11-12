@@ -67,7 +67,15 @@ var (
 	ErrUserNotFound = fmt.Errorf("%w: user", ErrNotFound)
 	// ErrTeamNotFound is a not-found specialized for teams; it wraps ErrNotFound.
 	ErrTeamNotFound = fmt.Errorf("%w: team", ErrNotFound)
+	// ErrDatabaseBusy is returned when the database could not serialize a
+	// transaction: SQLite stayed busy past its timeout, or Postgres reported a
+	// serialization failure or deadlock. Nothing was written. The caller
+	// retries the whole transaction.
+	ErrDatabaseBusy = errors.New("database busy")
 )
+
+// IsDatabaseBusy reports whether err is (or wraps) ErrDatabaseBusy.
+func IsDatabaseBusy(err error) bool { return errors.Is(err, ErrDatabaseBusy) }
 
 // IsNotFound reports whether err is (or wraps) ErrNotFound. Use this instead of
 // importing a backend package: every store translates its driver's no-rows

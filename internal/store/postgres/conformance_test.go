@@ -32,6 +32,13 @@ func TestOAuthConformance(t *testing.T) {
 	storetest.RunOAuth(t, opener(dsn))
 }
 
+// TestCollectionLinkRaces runs the link races with two pools, so the second
+// writer waits on the collection row lock.
+func TestCollectionLinkRaces(t *testing.T) {
+	dsn := resetSchema(t)
+	storetest.RunCollectionLinkRaces(t, opener(dsn))
+}
+
 // resetSchema returns the test DSN after dropping and recreating the public
 // schema, so New() migrates from scratch and fixed test keys don't collide
 // with a previous run.

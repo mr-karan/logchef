@@ -33,6 +33,20 @@ func mapCollectionError(c fiber.Ctx, err error) (handled bool, sendErr error) {
 		return true, SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ValidationErrorType)
 	case errors.Is(err, core.ErrQueryNotFound):
 		return true, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
+	case errors.Is(err, core.ErrCollectionNotParticipant):
+		return true, SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+	case errors.Is(err, core.ErrInvalidCollectionLinkKind), errors.Is(err, core.ErrManagedLinkInPersonalCollection):
+		return true, SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	case errors.Is(err, core.ErrCollectionLinkAuthority), errors.Is(err, core.ErrSourceAccessDenied):
+		return true, SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+	case errors.Is(err, core.ErrCollectionLinkNotFound):
+		return true, SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
+	case errors.Is(err, core.ErrCollectionLinkKindConflict):
+		return true, SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
+	case models.IsDatabaseBusy(err):
+		// Nothing was written. The caller retries the whole request.
+		c.Set(fiber.HeaderRetryAfter, "1")
+		return true, SendErrorWithType(c, fiber.StatusServiceUnavailable, "The database is busy, retry the request", models.DatabaseErrorType)
 	}
 	return false, nil
 }
@@ -266,7 +280,18 @@ func (s *Server) handleListCollectionItems(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, items)
 }
 
-// handleAddCollectionItem links a saved query.
+// parseQueryIDParam reads the :queryID route parameter.
+func parseQueryIDParam(c fiber.Ctx) (int, error) {
+	id, err := strconv.Atoi(c.Params("queryID"))
+	if err != nil || id <= 0 {
+		return 0, errors.New("invalid query id")
+	}
+	return id, nil
+}
+
+// handleAddCollectionItem links a saved query. An omitted kind is a pin. 201
+// carries a new link, 200 the stored link on a repeated POST of the same
+// kind, and 409 means a link of the other kind exists.
 func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
 	user := currentUser(c)
 	id, err := parseCollectionID(c)
@@ -277,32 +302,80 @@ func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	if err := core.AddCollectionItem(c.Context(), s.store, s.log, id, user.ID, req.SavedQueryID, req.SortOrder); err != nil {
+	if req.Kind == "" {
+		req.Kind = models.CollectionLinkPin
+	}
+	link, created, err := core.AddCollectionItem(c.Context(), s.store, s.log, id, user, req.SavedQueryID, req.SortOrder, req.Kind)
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		s.log.Error("failed to add collection item", "error", err, "collection_id", id, "saved_query_id", req.SavedQueryID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to add item", models.GeneralErrorType)
 	}
-	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Item added"})
+	status := fiber.StatusOK
+	if created {
+		status = fiber.StatusCreated
+	}
+	return SendSuccess(c, status, link)
 }
 
-// handleRemoveCollectionItem unlinks a saved query.
+// handleUpdateCollectionItem converts a link between pin and managed. The
+// body must carry the kind.
+func (s *Server) handleUpdateCollectionItem(c fiber.Ctx) error {
+	user := currentUser(c)
+	id, err := parseCollectionID(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	queryID, err := parseQueryIDParam(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid query id", models.ValidationErrorType)
+	}
+	var req models.UpdateCollectionItemRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+	link, err := core.UpdateCollectionItem(c.Context(), s.store, s.log, id, user, queryID, req.Kind)
+	if err != nil {
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
+		}
+		s.log.Error("failed to update collection item", "error", err, "collection_id", id, "saved_query_id", queryID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update item", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusOK, link)
+}
+
+// handleRemoveCollectionItem unlinks a saved query. 404 means no link, 403 a
+// managed link the caller may not remove.
 func (s *Server) handleRemoveCollectionItem(c fiber.Ctx) error {
 	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	queryIDStr := c.Params("queryID")
-	queryIDNum, err := strconv.Atoi(queryIDStr)
-	if err != nil || queryIDNum <= 0 {
+	queryID, err := parseQueryIDParam(c)
+	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid query id", models.ValidationErrorType)
 	}
-	if err := core.RemoveCollectionItem(c.Context(), s.store, s.log, id, user.ID, queryIDNum); err != nil {
+	if err := core.RemoveCollectionItem(c.Context(), s.store, s.log, id, user, queryID); err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		s.log.Error("failed to remove collection item", "error", err, "collection_id", id, "saved_query_id", queryID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to remove item", models.GeneralErrorType)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Item removed"})
+}
+
+// handleCollectionLinkReport lists the pins in shared collections, with the
+// owners and editors who would get edit when a pin is converted. Admin
+// authorization is enforced at the route.
+func (s *Server) handleCollectionLinkReport(c fiber.Ctx) error {
+	rows, err := core.ListDemotedCollectionLinks(c.Context(), s.store, s.log)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list collection links", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusOK, rows)
 }

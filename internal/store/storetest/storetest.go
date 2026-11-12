@@ -34,6 +34,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
+	t.Run("CollectionLinks", func(t *testing.T) { testCollectionLinks(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
 	t.Run("DashboardRevisions", func(t *testing.T) { testDashboardRevisions(t, ctx, s) })
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
@@ -417,8 +418,8 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 		t.Fatalf("GetPersonalCollection: %v / %+v", err, got)
 	}
 
-	if err := s.AddCollectionItem(ctx, pc.ID, sq.ID, 0, &owner.ID); err != nil {
-		t.Fatalf("AddCollectionItem: %v", err)
+	if inserted, err := s.AddCollectionItem(ctx, pc.ID, sq.ID, 0, models.CollectionLinkPin, &owner.ID); err != nil || !inserted {
+		t.Fatalf("AddCollectionItem = %v / %v, want inserted", inserted, err)
 	}
 	items, err := s.ListCollectionItems(ctx, pc.ID)
 	if err != nil || len(items) != 1 {

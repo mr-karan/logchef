@@ -25,6 +25,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 //go:embed migrations/*.sql
@@ -113,7 +114,7 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (e
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return fmt.Errorf("begin transaction: %w", translateTransientConflict(err))
 	}
 
 	txStore := &Store{q: sqlc.New(tx), log: s.log} // pool nil: no Close/nested tx
@@ -129,11 +130,11 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (e
 		if rbErr := tx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
 			s.log.Error("failed to roll back transaction", "error", rbErr, "cause", err)
 		}
-		return err
+		return translateTransientConflict(err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return fmt.Errorf("commit transaction: %w", translateTransientConflict(err))
 	}
 	return nil
 }
@@ -149,6 +150,26 @@ func notFound(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// transientConflict reports whether err is a serialization failure (40001) or
+// a deadlock (40P01). Neither wrote anything; the transaction can be retried
+// as a whole.
+func transientConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "40001" || pgErr.Code == "40P01"
+}
+
+// translateTransientConflict wraps a transient conflict in
+// models.ErrDatabaseBusy and leaves every other error as it is.
+func translateTransientConflict(err error) error {
+	if transientConflict(err) {
+		return fmt.Errorf("%w: %w", models.ErrDatabaseBusy, err)
+	}
+	return err
 }
 
 // --- migrations --------------------------------------------------------------

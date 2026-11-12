@@ -116,3 +116,45 @@ func TestWithTx_RollbackOnPanic(t *testing.T) {
 		t.Fatalf("user should not exist after panic rollback, got err: %v", err)
 	}
 }
+
+// A writer that cannot get SQLite's lock within busy_timeout gets
+// models.ErrDatabaseBusy, so the request can answer 503 and be retried.
+func TestWithTx_BusyMapsToErrDatabaseBusy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.db")
+	open := func() *DB {
+		db, err := New(context.Background(), Options{
+			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Config: config.SQLiteConfig{Path: path},
+		})
+		if err != nil {
+			t.Fatalf("sqlite.New: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		return db
+	}
+	holder, waiter := open(), open()
+	ctx := context.Background()
+	// The waiter's single write connection gives up after 50ms instead of the
+	// 5s every real connection waits.
+	if _, err := waiter.writeDB.ExecContext(ctx, "PRAGMA busy_timeout = 50"); err != nil {
+		t.Fatalf("set busy_timeout: %v", err)
+	}
+	err := holder.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.CreateUser(ctx, makeUser("holder@example.com")); err != nil {
+			return err
+		}
+		err := waiter.WithTx(ctx, func(tx store.StoreOps) error {
+			return tx.CreateUser(ctx, makeUser("waiter@example.com"))
+		})
+		if !models.IsDatabaseBusy(err) {
+			t.Errorf("waiter WithTx = %v, want ErrDatabaseBusy", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("holder WithTx: %v", err)
+	}
+	if _, err := waiter.GetUserByEmail(ctx, "waiter@example.com"); !models.IsNotFound(err) {
+		t.Fatalf("busy transaction wrote a row: %v", err)
+	}
+}

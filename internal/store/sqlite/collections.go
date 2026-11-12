@@ -258,32 +258,128 @@ func (db *DB) UserHasCollectionTeamAccess(ctx context.Context, collectionID int,
 	return n > 0, nil
 }
 
-// AddCollectionItem links a saved query to a collection (idempotent).
-func (db *DB) AddCollectionItem(ctx context.Context, collectionID, savedQueryID, sortOrder int, addedBy *models.UserID) error {
-	params := sqlc.AddCollectionItemParams{
-		CollectionID: int64(collectionID),
-		SavedQueryID: int64(savedQueryID),
-		SortOrder:    int64(sortOrder),
-	}
-	if addedBy != nil {
-		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
-	}
-	if err := db.writeQueries.AddCollectionItem(ctx, params); err != nil {
-		// SQL uses ON CONFLICT DO NOTHING, so duplicate inserts are a no-op.
-		return fmt.Errorf("error adding collection item: %w", err)
+// LockCollection checks that the collection exists. The write transaction
+// that WithTx begins with BEGIN IMMEDIATE already excludes other writers, so
+// no row lock is needed.
+func (db *DB) LockCollection(ctx context.Context, collectionID int) error {
+	if _, err := db.writeQueries.LockCollection(ctx, int64(collectionID)); err != nil {
+		return fmt.Errorf("locking collection %d: %w", collectionID, translateNotFound(err))
 	}
 	return nil
 }
 
-// RemoveCollectionItem unlinks a saved query from a collection.
-func (db *DB) RemoveCollectionItem(ctx context.Context, collectionID, savedQueryID int) error {
-	if err := db.writeQueries.RemoveCollectionItem(ctx, sqlc.RemoveCollectionItemParams{
+// AddCollectionItem links a saved query to a collection and reports whether a
+// row was inserted. An existing link of any kind is left as it is.
+func (db *DB) AddCollectionItem(ctx context.Context, collectionID, savedQueryID, sortOrder int, kind models.CollectionLinkKind, addedBy *models.UserID) (bool, error) {
+	params := sqlc.AddCollectionItemParams{
 		CollectionID: int64(collectionID),
 		SavedQueryID: int64(savedQueryID),
-	}); err != nil {
-		return fmt.Errorf("error removing collection item: %w", err)
+		SortOrder:    int64(sortOrder),
+		Kind:         string(kind),
 	}
-	return nil
+	if addedBy != nil {
+		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
+	}
+	n, err := db.writeQueries.AddCollectionItem(ctx, params)
+	if err != nil {
+		return false, fmt.Errorf("error adding collection item: %w", err)
+	}
+	return n > 0, nil
+}
+
+// GetCollectionItemLink returns one link row, or models.ErrNotFound.
+func (db *DB) GetCollectionItemLink(ctx context.Context, collectionID, savedQueryID int) (*models.CollectionItemLink, error) {
+	row, err := db.readQueries.GetCollectionItemLink(ctx, sqlc.GetCollectionItemLinkParams{
+		CollectionID: int64(collectionID),
+		SavedQueryID: int64(savedQueryID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getting collection %d link %d: %w", collectionID, savedQueryID, translateNotFound(err))
+	}
+	link := &models.CollectionItemLink{
+		CollectionID: int(row.CollectionID),
+		SavedQueryID: int(row.SavedQueryID),
+		Kind:         models.CollectionLinkKind(row.Kind),
+		SortOrder:    int(row.SortOrder),
+		CreatedAt:    row.CreatedAt,
+	}
+	if row.AddedBy.Valid {
+		uid := models.UserID(row.AddedBy.Int64)
+		link.AddedBy = &uid
+	}
+	return link, nil
+}
+
+// SetCollectionItemKind converts a link and reports whether a row changed.
+func (db *DB) SetCollectionItemKind(ctx context.Context, collectionID, savedQueryID int, kind models.CollectionLinkKind) (bool, error) {
+	n, err := db.writeQueries.SetCollectionItemKind(ctx, sqlc.SetCollectionItemKindParams{
+		Kind:         string(kind),
+		CollectionID: int64(collectionID),
+		SavedQueryID: int64(savedQueryID),
+	})
+	if err != nil {
+		return false, fmt.Errorf("error converting collection item: %w", err)
+	}
+	return n > 0, nil
+}
+
+// RemoveCollectionItem unlinks a saved query of either kind and reports
+// whether a row was deleted.
+func (db *DB) RemoveCollectionItem(ctx context.Context, collectionID, savedQueryID int) (bool, error) {
+	n, err := db.writeQueries.RemoveCollectionItem(ctx, sqlc.RemoveCollectionItemParams{
+		CollectionID: int64(collectionID),
+		SavedQueryID: int64(savedQueryID),
+	})
+	if err != nil {
+		return false, fmt.Errorf("error removing collection item: %w", err)
+	}
+	return n > 0, nil
+}
+
+// RemoveCollectionPin unlinks a saved query only when the link is a pin and
+// reports whether a row was deleted.
+func (db *DB) RemoveCollectionPin(ctx context.Context, collectionID, savedQueryID int) (bool, error) {
+	n, err := db.writeQueries.RemoveCollectionPin(ctx, sqlc.RemoveCollectionPinParams{
+		CollectionID: int64(collectionID),
+		SavedQueryID: int64(savedQueryID),
+	})
+	if err != nil {
+		return false, fmt.Errorf("error removing collection pin: %w", err)
+	}
+	return n > 0, nil
+}
+
+// ListSharedCollectionPins lists every pin in a shared collection, oldest
+// first. Editors are left empty; core fills them per collection.
+func (db *DB) ListSharedCollectionPins(ctx context.Context) ([]*models.CollectionLinkReportRow, error) {
+	rows, err := db.readQueries.ListSharedCollectionPins(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing shared collection pins: %w", err)
+	}
+	out := make([]*models.CollectionLinkReportRow, 0, len(rows))
+	for i := range rows {
+		r := &rows[i]
+		row := &models.CollectionLinkReportRow{
+			CollectionID:      int(r.CollectionID),
+			CollectionName:    r.CollectionName,
+			SavedQueryID:      int(r.SavedQueryID),
+			SavedQueryName:    r.SavedQueryName,
+			QueryCreatorEmail: r.QueryCreatorEmail.String,
+			AddedByEmail:      r.AddedByEmail.String,
+			CreatedAt:         r.CreatedAt,
+			Editors:           []models.CollectionMember{},
+		}
+		if r.QueryCreatedBy.Valid {
+			uid := models.UserID(r.QueryCreatedBy.Int64)
+			row.QueryCreatedBy = &uid
+		}
+		if r.AddedBy.Valid {
+			uid := models.UserID(r.AddedBy.Int64)
+			row.AddedBy = &uid
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 // ListCollectionItems returns items joined with their saved-query details.
@@ -317,6 +413,7 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 		query.CreatedByEmail = r.QueryCreatedByEmail.String
 		item := &models.CollectionItem{
 			CollectionID: int(r.CollectionID),
+			Kind:         models.CollectionLinkKind(r.Kind),
 			SortOrder:    int(r.SortOrder),
 			ItemAddedAt:  r.ItemAddedAt,
 			Query:        query,
@@ -347,8 +444,8 @@ func collectionToModel(row sqlc.Collection) *models.Collection {
 }
 
 // UserCanEditSavedQueryViaSharedCollection reports whether the user is an owner
-// or editor of any shared (non-personal) collection that contains the saved
-// query — i.e. has delegated edit rights on it via collection membership.
+// or editor of any shared (non-personal) collection that manages the saved
+// query. A pin grants nothing.
 func (db *DB) UserCanEditSavedQueryViaSharedCollection(ctx context.Context, userID models.UserID, queryID int) (bool, error) {
 	n, err := db.readQueries.CountSharedCollectionEditAccess(ctx, sqlc.CountSharedCollectionEditAccessParams{
 		SavedQueryID: int64(queryID),
