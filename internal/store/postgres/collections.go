@@ -192,6 +192,31 @@ func (s *Store) ListCollectionMembers(ctx context.Context, collectionID int) ([]
 	return out, nil
 }
 
+func (s *Store) ListCollectionEditors(ctx context.Context, collectionIDs []int) ([]*models.CollectionMember, error) {
+	ids := make([]int64, len(collectionIDs))
+	for i, id := range collectionIDs {
+		ids[i] = int64(id)
+	}
+
+	rows, err := s.q.ListCollectionEditors(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("error listing collection members: %w", err)
+	}
+	out := make([]*models.CollectionMember, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &models.CollectionMember{
+			CollectionID: int(r.CollectionID),
+			UserID:       models.UserID(r.UserID),
+			Role:         models.CollectionRole(r.Role),
+			AddedBy:      userIDPtr(r.AddedBy),
+			CreatedAt:    r.CreatedAt.Time,
+			Email:        r.Email,
+			FullName:     r.FullName,
+		})
+	}
+	return out, nil
+}
+
 // RemoveCollectionMember drops a member from a collection.
 func (s *Store) RemoveCollectionMember(ctx context.Context, collectionID int, userID models.UserID) error {
 	if err := s.q.RemoveCollectionMember(ctx, sqlc.RemoveCollectionMemberParams{

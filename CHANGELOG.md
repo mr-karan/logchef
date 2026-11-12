@@ -41,10 +41,10 @@ and 000014).
   FROM collection_items ci
   JOIN collections c ON c.id = ci.collection_id
   WHERE c.is_personal = 0
-    AND (ci.added_by IS NULL
-         OR (ci.added_by <> (SELECT q.created_by FROM saved_queries q
-                             WHERE q.id = ci.saved_query_id)
-             AND ci.added_by NOT IN (SELECT id FROM users WHERE role = 'admin')));
+    AND NOT EXISTS (SELECT 1 FROM saved_queries q
+                    WHERE q.id = ci.saved_query_id AND q.created_by = ci.added_by)
+    AND NOT EXISTS (SELECT 1 FROM users u
+                    WHERE u.id = ci.added_by AND u.role = 'admin');
   ```
 
   After the upgrade, global admins see the same links under **Library → All

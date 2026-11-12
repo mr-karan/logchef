@@ -291,6 +291,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllSavedQueriesStmt, err = db.PrepareContext(ctx, listAllSavedQueries); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllSavedQueries: %w", err)
 	}
+	if q.listCollectionEditorsStmt, err = db.PrepareContext(ctx, listCollectionEditors); err != nil {
+		return nil, fmt.Errorf("error preparing query ListCollectionEditors: %w", err)
+	}
 	if q.listCollectionItemsStmt, err = db.PrepareContext(ctx, listCollectionItems); err != nil {
 		return nil, fmt.Errorf("error preparing query ListCollectionItems: %w", err)
 	}
@@ -966,6 +969,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllSavedQueriesStmt: %w", cerr)
 		}
 	}
+	if q.listCollectionEditorsStmt != nil {
+		if cerr := q.listCollectionEditorsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listCollectionEditorsStmt: %w", cerr)
+		}
+	}
 	if q.listCollectionItemsStmt != nil {
 		if cerr := q.listCollectionItemsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listCollectionItemsStmt: %w", cerr)
@@ -1469,6 +1477,7 @@ type Queries struct {
 	listAlertsBySourceStmt                *sql.Stmt
 	listAlertsForUserStmt                 *sql.Stmt
 	listAllSavedQueriesStmt               *sql.Stmt
+	listCollectionEditorsStmt             *sql.Stmt
 	listCollectionItemsStmt               *sql.Stmt
 	listCollectionMembersStmt             *sql.Stmt
 	listCollectionTeamsStmt               *sql.Stmt
@@ -1639,6 +1648,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAlertsBySourceStmt:                q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:                 q.listAlertsForUserStmt,
 		listAllSavedQueriesStmt:               q.listAllSavedQueriesStmt,
+		listCollectionEditorsStmt:             q.listCollectionEditorsStmt,
 		listCollectionItemsStmt:               q.listCollectionItemsStmt,
 		listCollectionMembersStmt:             q.listCollectionMembersStmt,
 		listCollectionTeamsStmt:               q.listCollectionTeamsStmt,

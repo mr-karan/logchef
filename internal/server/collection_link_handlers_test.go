@@ -118,6 +118,8 @@ func TestCollectionItemPost(t *testing.T) {
 		{"missing collection wins over an invalid kind", e.memberTok, "/api/v1/collections/999999/items", postBody(e.query.ID, "bogus"), http.StatusNotFound},
 		{"no participation wins over an invalid kind", e.outsiderTok, e.items, postBody(e.query.ID, "bogus"), http.StatusForbidden},
 		{"a non-participating admin is refused", e.adminTok, e.items, postBody(e.query.ID, "pin"), http.StatusForbidden},
+		{"empty kind", e.memberTok, e.items, fmt.Sprintf(`{"saved_query_id":%d,"kind":""}`, e.query.ID), http.StatusBadRequest},
+		{"empty kind without participation", e.outsiderTok, e.items, `{"kind":""}`, http.StatusForbidden},
 		{"invalid kind", e.memberTok, e.items, postBody(e.query.ID, "bookmark"), http.StatusBadRequest},
 		{"managed in a personal collection", e.creatorTok, fmt.Sprintf("/api/v1/collections/%d/items", e.personal.ID), postBody(e.query.ID, "managed"), http.StatusBadRequest},
 		{"missing query wins over managed authority", e.memberTok, e.items, postBody(999999, "managed"), http.StatusNotFound},
@@ -322,5 +324,53 @@ func TestCollectionItemRoutesBusy(t *testing.T) {
 		if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" {
 			t.Errorf("%s %s = %d Retry-After %q, want 503 and 1", rt.method, rt.path, resp.StatusCode, resp.Header.Get("Retry-After"))
 		}
+	}
+}
+
+type demotingLinkStore struct {
+	store.Store
+	user *models.User
+}
+
+func (s demotingLinkStore) WithTx(ctx context.Context, fn func(store.StoreOps) error) error {
+	user := *s.user
+	user.Role = models.UserRoleMember
+	if err := s.UpdateUser(ctx, &user); err != nil {
+		return err
+	}
+	return s.Store.WithTx(ctx, fn)
+}
+
+func TestCollectionLinkDemotedAdmin(t *testing.T) {
+	for _, method := range []string{http.MethodPut, http.MethodPost, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			e := newLinkRouteEnv(t)
+			ctx := context.Background()
+			if err := core.AddCollectionMember(ctx, e.s.store, e.s.log, e.coll.ID, e.creator.ID, e.admin.ID, models.CollectionRoleMember); err != nil {
+				t.Fatal(err)
+			}
+			wantKind := models.CollectionLinkPin
+			if method == http.MethodDelete {
+				wantKind = models.CollectionLinkManaged
+			}
+			if method != http.MethodPost {
+				e.expect(e.creatorTok, http.MethodPost, e.items, postBody(e.query.ID, string(wantKind)), http.StatusCreated)
+			} else {
+				wantKind = ""
+			}
+			e.s.store = demotingLinkStore{Store: e.s.store, user: e.admin}
+			path, body := e.item(e.query.ID), `{"kind":"managed"}`
+			if method == http.MethodPost {
+				path, body = e.items, postBody(e.query.ID, "managed")
+			}
+			if method == http.MethodDelete {
+				body = ""
+			}
+			e.expect(e.adminTok, method, path, body, http.StatusForbidden)
+			if got := e.storedKind(t); got != wantKind {
+				t.Fatalf("stored kind = %q, want %q", got, wantKind)
+			}
+			t.Logf("%s demoted admin returned 403; stored kind %q", method, wantKind)
+		})
 	}
 }
