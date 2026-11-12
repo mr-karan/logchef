@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release makes dashboard saves atomic and closes a hole in collection
+links: pinning someone else's saved query into a collection no longer gives the
+collection's owners and editors the right to edit it. Startup runs two database
+migrations on each metadata store (SQLite 000039 and 000040, Postgres 000013
+and 000014).
+
 ### Upgrade notes
 - After upgrading, reload any Logchef tab that was already open. Save dashboard
   edits before the upgrade: an old tab's save is refused with 428 and its draft
@@ -20,6 +26,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With several replicas on Postgres, a rolling deploy can show the reload banner
   twice: a reload during the rollout can reach a replica still on the old
   version. Reload again once the deploy finishes.
+- Back up the metadata database. The migration adds `kind` to
+  `collection_items` and sets it for every existing link. A link keeps
+  delegation (`managed`) only when a shared collection holds it and the user
+  who added it is the query's creator or a global admin at upgrade time. Every
+  other link, including one whose adder was deleted, becomes a `pin`, and the
+  owners and editors of that collection lose edit on that query until the link
+  is converted. To list the links that will lose delegation before upgrading,
+  run this read-only query on SQLite (on Postgres compare `is_personal` with
+  `false`):
+
+  ```sql
+  SELECT ci.collection_id, ci.saved_query_id, ci.added_by, ci.created_at
+  FROM collection_items ci
+  JOIN collections c ON c.id = ci.collection_id
+  WHERE c.is_personal = 0
+    AND (ci.added_by IS NULL
+         OR (ci.added_by <> (SELECT q.created_by FROM saved_queries q
+                             WHERE q.id = ci.saved_query_id)
+             AND ci.added_by NOT IN (SELECT id FROM users WHERE role = 'admin')));
+  ```
+
+  After the upgrade, global admins see the same links under **Library → All
+  queries → Links that lost delegation** and can convert each one. The report
+  is also at `GET /api/v1/admin/collection-links/report`.
+- `POST /api/v1/collections/:id/items` now answers with the link
+  (`collection_id`, `saved_query_id`, `kind`, `added_by`, `sort_order`,
+  `created_at`) instead of `{"message": "Item added"}`. It returns 201 for a
+  new link, 200 for a repeated request of the same kind, and 409 when a link
+  of the other kind exists. It never changes an existing link.
+- On the item routes, a caller who takes no part in the collection now gets
+  403 instead of 404, and a request from a user without access to the query's
+  source gets 403 instead of 400. `DELETE` of a link that does not exist now
+  answers 404 instead of 200.
+
+### Security
+- Collection links have a kind. A `pin` is a bookmark and grants nothing. A
+  `managed` link delegates edit on the saved query to the collection's owners
+  and editors. Only the query's creator or a global admin creates, converts or
+  removes a managed link; any participant pins and unpins. Before this change
+  any participant could create a shared collection, pin a query they could
+  only view, and edit it.
 
 ### Added
 - A banner asks you to reload when the server version differs from the version
@@ -29,6 +76,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When someone else saved a dashboard while you were editing it, Save opens a
   dialog with three choices: save your version as a copy, overwrite theirs after
   seeing when it was saved, or discard yours and load theirs.
+- `PUT /api/v1/collections/:id/items/:queryID` with `{"kind": "pin" |
+  "managed"}` converts a link. A global admin needs no part in the collection,
+  so a link whose creator's account is gone can still be converted. Every
+  conversion writes a log line.
+- `GET /api/v1/admin/collection-links/report` lists the pins in shared
+  collections with the owners and editors a conversion would delegate to.
+- The save dialog and the collection view show **Collection editors can edit**
+  when the query's creator or an admin adds a query to a shared collection, on
+  by default. The collection view shows each link's kind and lets the creator
+  or an admin switch it.
+
+### Changed
+- Every link, member and team-share write runs in one transaction under the
+  collection's lock. A write the database cannot serialize answers 503 with
+  `Retry-After: 1`; nothing is written and the client retries.
 
 ### Fixed
 - Dashboard saves use an atomic revision check so two edits from the same
