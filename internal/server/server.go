@@ -367,6 +367,11 @@ func (s *Server) setupRoutes() {
 	// source-access-gated and is untouched.
 	admin.Get("/saved-queries", s.requireTokenScope(models.TokenScopeSavedQueriesRead), s.handleAdminListSavedQueries)
 
+	// Pins in shared collections, with the editors a conversion would delegate
+	// to. Right after the link-kind migration it lists the links that lost
+	// delegation.
+	admin.Get("/collection-links/report", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleCollectionLinkReport)
+
 	// Global Team Management
 	admin.Get("/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeams)
 	admin.Post("/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleCreateTeam)
@@ -437,6 +442,7 @@ func (s *Server) setupRoutes() {
 	collections.Post("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionTeam)
 	collections.Delete("/:collectionID/teams/:teamID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionTeam)
 	collections.Post("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionItem)
+	collections.Put("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollectionItem)
 	collections.Delete("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionItem)
 
 	// Saved Queries (cross-team, source-scoped). Visibility: any user with source

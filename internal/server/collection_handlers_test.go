@@ -159,7 +159,7 @@ func TestCollectionTeamRoutesSharingFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCollection: %v", err)
 	}
-	if err := core.AddCollectionItem(ctx, db, e.s.log, coll.ID, owner.ID, sq.ID, 0); err != nil {
+	if _, _, err := core.AddCollectionItem(ctx, db, e.s.log, coll.ID, owner, sq.ID, 0, models.CollectionLinkManaged); err != nil {
 		t.Fatalf("AddCollectionItem: %v", err)
 	}
 

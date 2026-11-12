@@ -885,21 +885,46 @@ ORDER BY cm.role DESC, u.email ASC;
 -- Remove a member from a collection
 DELETE FROM collection_members WHERE collection_id = $1 AND user_id = $2;
 
--- name: AddCollectionItem :exec
--- Add a saved query to a collection; idempotent on (collection_id, saved_query_id).
-INSERT INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
-VALUES ($1, $2, $3, $4)
+-- name: LockCollection :one
+-- Lock the collection row until the transaction ends, so a link, member or
+-- share write authorizes, mutates and selects its response against one state.
+SELECT id FROM collections WHERE id = $1 FOR UPDATE;
+
+-- name: AddCollectionItem :execrows
+-- Link a saved query to a collection. An existing link of any kind is left as
+-- it is; the row count tells the caller whether the insert happened.
+INSERT INTO collection_items (collection_id, saved_query_id, sort_order, kind, added_by)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT(collection_id, saved_query_id) DO NOTHING;
 
--- name: RemoveCollectionItem :exec
--- Remove an item from a collection
+-- name: GetCollectionItemLink :one
+-- Read one link row
+SELECT collection_id, saved_query_id, kind, added_by, sort_order, created_at
+FROM collection_items
+WHERE collection_id = $1 AND saved_query_id = $2;
+
+-- name: SetCollectionItemKind :execrows
+-- Convert a link to the given kind. One changed row means the link had the
+-- other kind.
+UPDATE collection_items
+SET kind = $1
+WHERE collection_id = $2 AND saved_query_id = $3 AND kind <> $1;
+
+-- name: RemoveCollectionItem :execrows
+-- Remove a link of either kind
 DELETE FROM collection_items WHERE collection_id = $1 AND saved_query_id = $2;
+
+-- name: RemoveCollectionPin :execrows
+-- Remove a link only when it is a pin. A managed link is left as it is.
+DELETE FROM collection_items
+WHERE collection_id = $1 AND saved_query_id = $2 AND kind = 'pin';
 
 -- name: ListCollectionItems :many
 -- List items in a collection with saved-query details
 SELECT
     ci.collection_id,
     ci.saved_query_id,
+    ci.kind,
     ci.sort_order,
     ci.added_by,
     ci.created_at AS item_added_at,
@@ -947,17 +972,39 @@ JOIN team_members tm ON tm.team_id = ct.team_id
 WHERE ct.collection_id = $1 AND tm.user_id = $2;
 
 -- name: CountSharedCollectionEditAccess :one
--- Count shared (non-personal) collections that contain the given saved query and
--- in which the user is an owner or editor. A non-zero count means the user has
--- delegated edit rights on that query via collection membership.
+-- Count shared (non-personal) collections that manage the given saved query
+-- and in which the user is an owner or editor. A non-zero count means the
+-- user has delegated edit rights on that query. A pin grants nothing.
 SELECT COUNT(*)
 FROM collection_items ci
 JOIN collections c ON c.id = ci.collection_id
 JOIN collection_members cm ON cm.collection_id = ci.collection_id
 WHERE ci.saved_query_id = $1
+  AND ci.kind = 'managed'
   AND cm.user_id = $2
   AND c.is_personal = false
   AND cm.role IN ('owner', 'editor');
+
+-- name: ListSharedCollectionPins :many
+-- Every pin in a shared collection, oldest first, with the query's creator and
+-- the user who added the link. Backs the admin report of demoted links.
+SELECT
+    ci.collection_id,
+    c.name AS collection_name,
+    ci.saved_query_id,
+    sq.name AS saved_query_name,
+    sq.created_by AS query_created_by,
+    cu.email AS query_creator_email,
+    ci.added_by,
+    au.email AS added_by_email,
+    ci.created_at
+FROM collection_items ci
+JOIN collections c ON c.id = ci.collection_id
+JOIN saved_queries sq ON sq.id = ci.saved_query_id
+LEFT JOIN users cu ON cu.id = sq.created_by
+LEFT JOIN users au ON au.id = ci.added_by
+WHERE ci.kind = 'pin' AND c.is_personal = false
+ORDER BY ci.created_at ASC, ci.collection_id ASC, ci.saved_query_id ASC;
 
 -- Dashboards -----------------------------------------------------------------
 

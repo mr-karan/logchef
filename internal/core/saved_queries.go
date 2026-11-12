@@ -336,13 +336,18 @@ func userIsCreatorOrAdmin(query *models.SavedQuery, user *models.User) bool {
 	if user.Role == models.UserRoleAdmin {
 		return true
 	}
-	return query.CreatedBy != nil && *query.CreatedBy == user.ID
+	return userIsCreator(query, user)
+}
+
+func userIsCreator(query *models.SavedQuery, user *models.User) bool {
+	return user != nil && query != nil && query.CreatedBy != nil && *query.CreatedBy == user.ID
 }
 
 // UserCanEditSavedQuery reports whether the user may edit the query: the creator,
-// a global admin, or an owner/editor of a shared collection that contains the
-// query (delegated edit). Source access is enforced separately by the caller
-// (loadSavedQueryWithVisibility), so this only decides edit authority.
+// a global admin, or an owner/editor of a shared collection that manages the
+// query through a managed link (delegated edit). A pin grants nothing. Source
+// access is enforced separately by the caller (loadSavedQueryWithVisibility),
+// so this only decides edit authority.
 func UserCanEditSavedQuery(ctx context.Context, db store.StoreOps, query *models.SavedQuery, user *models.User) (bool, error) {
 	if userIsCreatorOrAdmin(query, user) {
 		return true, nil

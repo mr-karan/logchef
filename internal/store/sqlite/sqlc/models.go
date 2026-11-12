@@ -78,6 +78,7 @@ type CollectionItem struct {
 	SortOrder    int64         `json:"sort_order"`
 	AddedBy      sql.NullInt64 `json:"added_by"`
 	CreatedAt    time.Time     `json:"created_at"`
+	Kind         string        `json:"kind"`
 }
 
 type CollectionMember struct {

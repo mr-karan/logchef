@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-const addCollectionItem = `-- name: AddCollectionItem :exec
-INSERT INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
-VALUES (?, ?, ?, ?)
+const addCollectionItem = `-- name: AddCollectionItem :execrows
+INSERT INTO collection_items (collection_id, saved_query_id, sort_order, kind, added_by)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(collection_id, saved_query_id) DO NOTHING
 `
 
@@ -22,18 +22,24 @@ type AddCollectionItemParams struct {
 	CollectionID int64         `json:"collection_id"`
 	SavedQueryID int64         `json:"saved_query_id"`
 	SortOrder    int64         `json:"sort_order"`
+	Kind         string        `json:"kind"`
 	AddedBy      sql.NullInt64 `json:"added_by"`
 }
 
-// Add a saved query to a collection; idempotent on (collection_id, saved_query_id).
-func (q *Queries) AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) error {
-	_, err := q.exec(ctx, q.addCollectionItemStmt, addCollectionItem,
+// Link a saved query to a collection. An existing link of any kind is left as
+// it is; the row count tells the caller whether the insert happened.
+func (q *Queries) AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) (int64, error) {
+	result, err := q.exec(ctx, q.addCollectionItemStmt, addCollectionItem,
 		arg.CollectionID,
 		arg.SavedQueryID,
 		arg.SortOrder,
+		arg.Kind,
 		arg.AddedBy,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const addCollectionMember = `-- name: AddCollectionMember :exec
@@ -370,6 +376,7 @@ FROM collection_items ci
 JOIN collections c ON c.id = ci.collection_id
 JOIN collection_members cm ON cm.collection_id = ci.collection_id
 WHERE ci.saved_query_id = ?
+  AND ci.kind = 'managed'
   AND cm.user_id = ?
   AND c.is_personal = 0
   AND cm.role IN ('owner', 'editor')
@@ -380,9 +387,9 @@ type CountSharedCollectionEditAccessParams struct {
 	UserID       int64 `json:"user_id"`
 }
 
-// Count shared (non-personal) collections that contain the given saved query and
-// in which the user is an owner or editor. A non-zero count means the user has
-// delegated edit rights on that query via collection membership.
+// Count shared (non-personal) collections that manage the given saved query
+// and in which the user is an owner or editor. A non-zero count means the
+// user has delegated edit rights on that query. A pin grants nothing.
 func (q *Queries) CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error) {
 	row := q.queryRow(ctx, q.countSharedCollectionEditAccessStmt, countSharedCollectionEditAccess, arg.SavedQueryID, arg.UserID)
 	var count int64
@@ -1317,6 +1324,41 @@ func (q *Queries) GetCollection(ctx context.Context, id int64) (GetCollectionRow
 		&i.MemberCount,
 		&i.TeamCount,
 		&i.ItemCount,
+	)
+	return i, err
+}
+
+const getCollectionItemLink = `-- name: GetCollectionItemLink :one
+SELECT collection_id, saved_query_id, kind, added_by, sort_order, created_at
+FROM collection_items
+WHERE collection_id = ? AND saved_query_id = ?
+`
+
+type GetCollectionItemLinkParams struct {
+	CollectionID int64 `json:"collection_id"`
+	SavedQueryID int64 `json:"saved_query_id"`
+}
+
+type GetCollectionItemLinkRow struct {
+	CollectionID int64         `json:"collection_id"`
+	SavedQueryID int64         `json:"saved_query_id"`
+	Kind         string        `json:"kind"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+	SortOrder    int64         `json:"sort_order"`
+	CreatedAt    time.Time     `json:"created_at"`
+}
+
+// Read one link row
+func (q *Queries) GetCollectionItemLink(ctx context.Context, arg GetCollectionItemLinkParams) (GetCollectionItemLinkRow, error) {
+	row := q.queryRow(ctx, q.getCollectionItemLinkStmt, getCollectionItemLink, arg.CollectionID, arg.SavedQueryID)
+	var i GetCollectionItemLinkRow
+	err := row.Scan(
+		&i.CollectionID,
+		&i.SavedQueryID,
+		&i.Kind,
+		&i.AddedBy,
+		&i.SortOrder,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -2478,6 +2520,7 @@ const listCollectionItems = `-- name: ListCollectionItems :many
 SELECT
     ci.collection_id,
     ci.saved_query_id,
+    ci.kind,
     ci.sort_order,
     ci.added_by,
     ci.created_at AS item_added_at,
@@ -2505,6 +2548,7 @@ ORDER BY ci.sort_order ASC, ci.created_at ASC
 type ListCollectionItemsRow struct {
 	CollectionID        int64          `json:"collection_id"`
 	SavedQueryID        int64          `json:"saved_query_id"`
+	Kind                string         `json:"kind"`
 	SortOrder           int64          `json:"sort_order"`
 	AddedBy             sql.NullInt64  `json:"added_by"`
 	ItemAddedAt         time.Time      `json:"item_added_at"`
@@ -2536,6 +2580,7 @@ func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) (
 		if err := rows.Scan(
 			&i.CollectionID,
 			&i.SavedQueryID,
+			&i.Kind,
 			&i.SortOrder,
 			&i.AddedBy,
 			&i.ItemAddedAt,
@@ -3323,6 +3368,73 @@ func (q *Queries) ListServiceAccounts(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listSharedCollectionPins = `-- name: ListSharedCollectionPins :many
+SELECT
+    ci.collection_id,
+    c.name AS collection_name,
+    ci.saved_query_id,
+    sq.name AS saved_query_name,
+    sq.created_by AS query_created_by,
+    cu.email AS query_creator_email,
+    ci.added_by,
+    au.email AS added_by_email,
+    ci.created_at
+FROM collection_items ci
+JOIN collections c ON c.id = ci.collection_id
+JOIN saved_queries sq ON sq.id = ci.saved_query_id
+LEFT JOIN users cu ON cu.id = sq.created_by
+LEFT JOIN users au ON au.id = ci.added_by
+WHERE ci.kind = 'pin' AND c.is_personal = 0
+ORDER BY ci.created_at ASC, ci.collection_id ASC, ci.saved_query_id ASC
+`
+
+type ListSharedCollectionPinsRow struct {
+	CollectionID      int64          `json:"collection_id"`
+	CollectionName    string         `json:"collection_name"`
+	SavedQueryID      int64          `json:"saved_query_id"`
+	SavedQueryName    string         `json:"saved_query_name"`
+	QueryCreatedBy    sql.NullInt64  `json:"query_created_by"`
+	QueryCreatorEmail sql.NullString `json:"query_creator_email"`
+	AddedBy           sql.NullInt64  `json:"added_by"`
+	AddedByEmail      sql.NullString `json:"added_by_email"`
+	CreatedAt         time.Time      `json:"created_at"`
+}
+
+// Every pin in a shared collection, oldest first, with the query's creator and
+// the user who added the link. Backs the admin report of demoted links.
+func (q *Queries) ListSharedCollectionPins(ctx context.Context) ([]ListSharedCollectionPinsRow, error) {
+	rows, err := q.query(ctx, q.listSharedCollectionPinsStmt, listSharedCollectionPins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSharedCollectionPinsRow{}
+	for rows.Next() {
+		var i ListSharedCollectionPinsRow
+		if err := rows.Scan(
+			&i.CollectionID,
+			&i.CollectionName,
+			&i.SavedQueryID,
+			&i.SavedQueryName,
+			&i.QueryCreatedBy,
+			&i.QueryCreatorEmail,
+			&i.AddedBy,
+			&i.AddedByEmail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSourceTeams = `-- name: ListSourceTeams :many
 SELECT t.id, t.name, t.description, t.created_at, t.updated_at, t.managed
 FROM teams t
@@ -3865,6 +3977,19 @@ func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string)
 	return items, nil
 }
 
+const lockCollection = `-- name: LockCollection :one
+SELECT id FROM collections WHERE id = ?
+`
+
+// Check that a collection exists. The write transaction that WithTx begins
+// with BEGIN IMMEDIATE already excludes every other writer.
+func (q *Queries) LockCollection(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.lockCollectionStmt, lockCollection, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
@@ -4040,7 +4165,7 @@ func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, idsJson string)
 	return items, nil
 }
 
-const removeCollectionItem = `-- name: RemoveCollectionItem :exec
+const removeCollectionItem = `-- name: RemoveCollectionItem :execrows
 DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id = ?
 `
 
@@ -4049,10 +4174,13 @@ type RemoveCollectionItemParams struct {
 	SavedQueryID int64 `json:"saved_query_id"`
 }
 
-// Remove an item from a collection
-func (q *Queries) RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error {
-	_, err := q.exec(ctx, q.removeCollectionItemStmt, removeCollectionItem, arg.CollectionID, arg.SavedQueryID)
-	return err
+// Remove a link of either kind
+func (q *Queries) RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) (int64, error) {
+	result, err := q.exec(ctx, q.removeCollectionItemStmt, removeCollectionItem, arg.CollectionID, arg.SavedQueryID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const removeCollectionMember = `-- name: RemoveCollectionMember :exec
@@ -4068,6 +4196,25 @@ type RemoveCollectionMemberParams struct {
 func (q *Queries) RemoveCollectionMember(ctx context.Context, arg RemoveCollectionMemberParams) error {
 	_, err := q.exec(ctx, q.removeCollectionMemberStmt, removeCollectionMember, arg.CollectionID, arg.UserID)
 	return err
+}
+
+const removeCollectionPin = `-- name: RemoveCollectionPin :execrows
+DELETE FROM collection_items
+WHERE collection_id = ? AND saved_query_id = ? AND kind = 'pin'
+`
+
+type RemoveCollectionPinParams struct {
+	CollectionID int64 `json:"collection_id"`
+	SavedQueryID int64 `json:"saved_query_id"`
+}
+
+// Remove a link only when it is a pin. A managed link is left as it is.
+func (q *Queries) RemoveCollectionPin(ctx context.Context, arg RemoveCollectionPinParams) (int64, error) {
+	result, err := q.exec(ctx, q.removeCollectionPinStmt, removeCollectionPin, arg.CollectionID, arg.SavedQueryID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const removeCollectionTeam = `-- name: RemoveCollectionTeam :exec
@@ -4226,6 +4373,30 @@ type SaveOAuthAuthCodeParams struct {
 // Attach the code to an approved request. A request carries at most one code.
 func (q *Queries) SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error) {
 	result, err := q.exec(ctx, q.saveOAuthAuthCodeStmt, saveOAuthAuthCode, arg.CodeHash, arg.CodeExpiresAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setCollectionItemKind = `-- name: SetCollectionItemKind :execrows
+UPDATE collection_items
+SET kind = ?1
+WHERE collection_id = ?2
+  AND saved_query_id = ?3
+  AND kind <> ?1
+`
+
+type SetCollectionItemKindParams struct {
+	Kind         string `json:"kind"`
+	CollectionID int64  `json:"collection_id"`
+	SavedQueryID int64  `json:"saved_query_id"`
+}
+
+// Convert a link to the given kind. One changed row means the link had the
+// other kind.
+func (q *Queries) SetCollectionItemKind(ctx context.Context, arg SetCollectionItemKindParams) (int64, error) {
+	result, err := q.exec(ctx, q.setCollectionItemKindStmt, setCollectionItemKind, arg.Kind, arg.CollectionID, arg.SavedQueryID)
 	if err != nil {
 		return 0, err
 	}

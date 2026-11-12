@@ -77,6 +77,7 @@ type CollectionItem struct {
 	SortOrder    int64              `json:"sort_order"`
 	AddedBy      pgtype.Int8        `json:"added_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Kind         string             `json:"kind"`
 }
 
 type CollectionMember struct {

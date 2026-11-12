@@ -11,8 +11,9 @@ import (
 )
 
 type Querier interface {
-	// Add a saved query to a collection; idempotent on (collection_id, saved_query_id).
-	AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) error
+	// Link a saved query to a collection. An existing link of any kind is left as
+	// it is; the row count tells the caller whether the insert happened.
+	AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) (int64, error)
 	// Add a member; idempotent on (collection_id, user_id).
 	AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error
 	// Share a collection with a team; idempotent on (collection_id, team_id).
@@ -38,9 +39,9 @@ type Querier interface {
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.
 	CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error)
-	// Count shared (non-personal) collections that contain the given saved query and
-	// in which the user is an owner or editor. A non-zero count means the user has
-	// delegated edit rights on that query via collection membership.
+	// Count shared (non-personal) collections that manage the given saved query
+	// and in which the user is an owner or editor. A non-zero count means the
+	// user has delegated edit rights on that query. A pin grants nothing.
 	CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error)
 	// Count active sessions for a user
 	CountUserSessions(ctx context.Context, arg CountUserSessionsParams) (int64, error)
@@ -124,6 +125,8 @@ type Querier interface {
 	GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryEntryParams) (AlertHistory, error)
 	// Look up a collection by id with direct member, shared team, and item counts
 	GetCollection(ctx context.Context, id int64) (GetCollectionRow, error)
+	// Read one link row
+	GetCollectionItemLink(ctx context.Context, arg GetCollectionItemLinkParams) (GetCollectionItemLinkRow, error)
 	// Look up a single membership row
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
 	// Look up one dashboard by id, with creator identity like ListDashboards.
@@ -233,6 +236,9 @@ type Querier interface {
 	ListSavedQueriesForUserBySource(ctx context.Context, arg ListSavedQueriesForUserBySourceParams) ([]ListSavedQueriesForUserBySourceRow, error)
 	// List service principals
 	ListServiceAccounts(ctx context.Context) ([]User, error)
+	// Every pin in a shared collection, oldest first, with the query's creator and
+	// the user who added the link. Backs the admin report of demoted links.
+	ListSharedCollectionPins(ctx context.Context) ([]ListSharedCollectionPinsRow, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date
@@ -254,6 +260,9 @@ type Querier interface {
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
+	// Lock the collection row until the transaction ends, so a link, member or
+	// share write authorizes, mutates and selects its response against one state.
+	LockCollection(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock
 	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
@@ -268,10 +277,12 @@ type Querier interface {
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error)
-	// Remove an item from a collection
-	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
+	// Remove a link of either kind
+	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) (int64, error)
 	// Remove a member from a collection
 	RemoveCollectionMember(ctx context.Context, arg RemoveCollectionMemberParams) error
+	// Remove a link only when it is a pin. A managed link is left as it is.
+	RemoveCollectionPin(ctx context.Context, arg RemoveCollectionPinParams) (int64, error)
 	// Remove a team share. Direct memberships and other team shares are untouched.
 	RemoveCollectionTeam(ctx context.Context, arg RemoveCollectionTeamParams) error
 	// Remove a member from a team
@@ -286,6 +297,9 @@ type Querier interface {
 	RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error)
 	// Attach the code to an approved request. A request carries at most one code.
 	SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error)
+	// Convert a link to the given kind. One changed row means the link had the
+	// other kind.
+	SetCollectionItemKind(ctx context.Context, arg SetCollectionItemKindParams) (int64, error)
 	SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error

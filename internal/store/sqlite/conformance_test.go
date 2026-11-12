@@ -25,6 +25,12 @@ func TestOAuthConformance(t *testing.T) {
 	storetest.RunOAuth(t, opener(sqlitetest.Path(t)))
 }
 
+// TestCollectionLinkRaces runs the link races with two store instances on
+// one file, so the second writer waits on SQLite's lock, not on Go.
+func TestCollectionLinkRaces(t *testing.T) {
+	storetest.RunCollectionLinkRaces(t, opener(sqlitetest.Path(t)))
+}
+
 func opener(path string) storetest.Opener {
 	return func(t *testing.T) store.Store {
 		t.Helper()

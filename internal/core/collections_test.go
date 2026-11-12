@@ -230,10 +230,10 @@ func TestAddCollectionItemSourceAccessGate(t *testing.T) {
 		t.Fatalf("EnsurePersonalCollection failed: %v", err)
 	}
 
-	// Without source access, adding the saved-query as an item should fail.
-	err = AddCollectionItem(context.Background(), db, log, personal.ID, owner.ID, savedQuery.ID, 0)
-	if err == nil {
-		t.Error("expected AddCollectionItem to fail without source access, got nil")
+	// Without source access, adding the saved-query as an item is denied.
+	_, _, err = AddCollectionItem(context.Background(), db, log, personal.ID, owner, savedQuery.ID, 0, models.CollectionLinkPin)
+	if !errors.Is(err, ErrSourceAccessDenied) {
+		t.Errorf("AddCollectionItem without source access = %v, want ErrSourceAccessDenied", err)
 	}
 }
 
@@ -266,13 +266,13 @@ func TestCollectionItemParticipationAndRosterVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSavedQuery: %v", err)
 	}
-	if err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, &owner.ID); err != nil {
+	if _, err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, models.CollectionLinkPin, &owner.ID); err != nil {
 		t.Fatalf("seed item: %v", err)
 	}
 
-	// A plain member can remove an item (participation, not ownership).
-	if err := RemoveCollectionItem(ctx, db, log, coll.ID, member.ID, sq.ID); err != nil {
-		t.Errorf("member should be able to remove a collection item, got %v", err)
+	// A plain member can remove a pin (participation, not ownership).
+	if err := RemoveCollectionItem(ctx, db, log, coll.ID, member, sq.ID); err != nil {
+		t.Errorf("member should be able to remove a pin, got %v", err)
 	}
 
 	// The member roster is forbidden to a non-owner member, allowed to the owner.
@@ -621,7 +621,7 @@ func TestCollectionTeamShareSourceSeparation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCollection: %v", err)
 	}
-	if err := AddCollectionItem(ctx, db, log, coll.ID, owner.ID, sq.ID, 0); err != nil {
+	if _, _, err := AddCollectionItem(ctx, db, log, coll.ID, owner, sq.ID, 0, models.CollectionLinkManaged); err != nil {
 		t.Fatalf("AddCollectionItem(owner): %v", err)
 	}
 	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), shared.ID); err != nil {
@@ -646,18 +646,29 @@ func TestCollectionTeamShareSourceSeparation(t *testing.T) {
 		t.Errorf("collection share granted source access: %v / %v", has, err)
 	}
 
-	// Pinning: allowed with source access, denied without it.
-	if err := RemoveCollectionItem(ctx, db, log, coll.ID, infraMember.ID, sq.ID); err != nil {
-		t.Errorf("team-derived member should unpin, got %v", err)
+	// Pinning: a participant may not remove the creator's managed link, the
+	// creator may; pinning is allowed with source access and denied without.
+	if err := RemoveCollectionItem(ctx, db, log, coll.ID, infraMember, sq.ID); !errors.Is(err, ErrCollectionLinkAuthority) {
+		t.Errorf("team-derived member removing a managed link = %v, want ErrCollectionLinkAuthority", err)
 	}
-	if err := AddCollectionItem(ctx, db, log, coll.ID, infraMember.ID, sq.ID, 0); err != nil {
+	if err := RemoveCollectionItem(ctx, db, log, coll.ID, owner, sq.ID); err != nil {
+		t.Errorf("creator should remove the managed link, got %v", err)
+	}
+	if _, _, err := AddCollectionItem(ctx, db, log, coll.ID, infraMember, sq.ID, 0, models.CollectionLinkPin); err != nil {
 		t.Errorf("team-derived member with source access should pin, got %v", err)
 	}
-	if err := AddCollectionItem(ctx, db, log, coll.ID, plainMember.ID, sq.ID, 0); err == nil {
-		t.Error("team-derived member without source access pinned a query, want error")
+	if err := RemoveCollectionItem(ctx, db, log, coll.ID, infraMember, sq.ID); err != nil {
+		t.Errorf("team-derived member should unpin, got %v", err)
+	}
+	if _, _, err := AddCollectionItem(ctx, db, log, coll.ID, plainMember, sq.ID, 0, models.CollectionLinkPin); !errors.Is(err, ErrSourceAccessDenied) {
+		t.Errorf("team-derived member without source access pinning = %v, want ErrSourceAccessDenied", err)
 	}
 
-	// Editing: a team share (even from a team admin) does not delegate edit rights.
+	// Editing: a team share (even from a team admin) does not delegate edit
+	// rights, nor does a pin. Only a managed link does.
+	if _, _, err := AddCollectionItem(ctx, db, log, coll.ID, infraMember, sq.ID, 0, models.CollectionLinkPin); err != nil {
+		t.Fatalf("AddCollectionItem(pin): %v", err)
+	}
 	canEdit, err := UserCanEditSavedQuery(ctx, db, sq, infraMember)
 	if err != nil || canEdit {
 		t.Errorf("UserCanEditSavedQuery(team-derived) = %v / %v, want false", canEdit, err)
@@ -666,8 +677,15 @@ func TestCollectionTeamShareSourceSeparation(t *testing.T) {
 		t.Fatalf("AddCollectionMember(editor): %v", err)
 	}
 	canEdit, err = UserCanEditSavedQuery(ctx, db, sq, infraMember)
+	if err != nil || canEdit {
+		t.Errorf("UserCanEditSavedQuery(direct editor, pin) = %v / %v, want false", canEdit, err)
+	}
+	if _, err := UpdateCollectionItem(ctx, db, log, coll.ID, owner, sq.ID, models.CollectionLinkManaged); err != nil {
+		t.Fatalf("UpdateCollectionItem(managed): %v", err)
+	}
+	canEdit, err = UserCanEditSavedQuery(ctx, db, sq, infraMember)
 	if err != nil || !canEdit {
-		t.Errorf("UserCanEditSavedQuery(direct editor) = %v / %v, want true", canEdit, err)
+		t.Errorf("UserCanEditSavedQuery(direct editor, managed) = %v / %v, want true", canEdit, err)
 	}
 }
 

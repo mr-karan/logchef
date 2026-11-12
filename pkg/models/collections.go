@@ -56,17 +56,72 @@ type CollectionTeam struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// CollectionLinkKind is what a link between a collection and a saved query
+// grants. Authority over a saved query belongs to its creator and to global
+// admins; only they create, convert or remove a managed link.
+type CollectionLinkKind string
+
+const (
+	// CollectionLinkPin is a bookmark. It lists the query for participants who
+	// can already see it and grants nothing.
+	CollectionLinkPin CollectionLinkKind = "pin"
+	// CollectionLinkManaged delegates edit on the saved query to the owners
+	// and editors of a shared collection.
+	CollectionLinkManaged CollectionLinkKind = "managed"
+)
+
+// Valid reports whether k is one of the two link kinds.
+func (k CollectionLinkKind) Valid() bool {
+	return k == CollectionLinkPin || k == CollectionLinkManaged
+}
+
+// Other returns the kind a link of kind k does not have.
+func (k CollectionLinkKind) Other() CollectionLinkKind {
+	if k == CollectionLinkManaged {
+		return CollectionLinkPin
+	}
+	return CollectionLinkManaged
+}
+
+// CollectionItemLink is one link row, as the item routes return it.
+type CollectionItemLink struct {
+	CollectionID int                `json:"collection_id"`
+	SavedQueryID int                `json:"saved_query_id"`
+	Kind         CollectionLinkKind `json:"kind"`
+	AddedBy      *UserID            `json:"added_by"`
+	SortOrder    int                `json:"sort_order"`
+	CreatedAt    time.Time          `json:"created_at"`
+}
+
 // CollectionItem is a saved query included in a collection. Runnable indicates
 // whether the requesting user has source access to actually run it; non-runnable
 // items still surface in listings (with a lock icon on the UI side) so members
 // can see the curated list even if some queries are out of reach.
 type CollectionItem struct {
-	CollectionID int        `json:"collection_id"`
-	SortOrder    int        `json:"sort_order"`
-	AddedBy      *UserID    `json:"added_by,omitempty"`
-	ItemAddedAt  time.Time  `json:"item_added_at"`
-	Query        SavedQuery `json:"query"`
-	Runnable     bool       `json:"runnable"`
+	CollectionID int                `json:"collection_id"`
+	Kind         CollectionLinkKind `json:"kind"`
+	SortOrder    int                `json:"sort_order"`
+	AddedBy      *UserID            `json:"added_by,omitempty"`
+	ItemAddedAt  time.Time          `json:"item_added_at"`
+	Query        SavedQuery         `json:"query"`
+	Runnable     bool               `json:"runnable"`
+}
+
+// CollectionLinkReportRow is one pin in a shared collection. Right after the
+// kind migration, the report is exactly the links that lost delegation.
+// Editors are the owners and editors of the collection, who get edit on the
+// query when the link is converted.
+type CollectionLinkReportRow struct {
+	CollectionID      int                `json:"collection_id"`
+	CollectionName    string             `json:"collection_name"`
+	SavedQueryID      int                `json:"saved_query_id"`
+	SavedQueryName    string             `json:"saved_query_name"`
+	QueryCreatedBy    *UserID            `json:"query_created_by"`
+	QueryCreatorEmail string             `json:"query_creator_email,omitempty"`
+	AddedBy           *UserID            `json:"added_by"`
+	AddedByEmail      string             `json:"added_by_email,omitempty"`
+	CreatedAt         time.Time          `json:"created_at"`
+	Editors           []CollectionMember `json:"editors"`
 }
 
 // CreateCollectionRequest is the JSON body for POST /api/v1/collections.
@@ -93,7 +148,16 @@ type AddCollectionTeamRequest struct {
 }
 
 // AddCollectionItemRequest is the JSON body for POST /api/v1/collections/:id/items.
+// An omitted Kind means a pin, so a client from before link kinds cannot
+// create a delegation by accident.
 type AddCollectionItemRequest struct {
-	SavedQueryID int `json:"saved_query_id" validate:"required"`
-	SortOrder    int `json:"sort_order"`
+	SavedQueryID int                `json:"saved_query_id" validate:"required"`
+	SortOrder    int                `json:"sort_order"`
+	Kind         CollectionLinkKind `json:"kind"`
+}
+
+// UpdateCollectionItemRequest is the JSON body for
+// PUT /api/v1/collections/:id/items/:queryID. Kind is required.
+type UpdateCollectionItemRequest struct {
+	Kind CollectionLinkKind `json:"kind"`
 }

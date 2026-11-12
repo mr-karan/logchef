@@ -7,7 +7,36 @@ import (
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/pkg/models"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
+
+// busy reports whether err is SQLite's answer to a writer that could not get
+// the lock within busy_timeout. Callers map it to models.ErrDatabaseBusy, so
+// the request can be retried as a whole. The extended result code keeps the
+// primary code in its low byte.
+func busy(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() & 0xff {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return true
+	}
+	return false
+}
+
+// translateBusy wraps a busy driver error in models.ErrDatabaseBusy and
+// leaves every other error as it is.
+func translateBusy(err error) error {
+	if busy(err) {
+		return fmt.Errorf("%w: %w", models.ErrDatabaseBusy, err)
+	}
+	return err
+}
 
 // WithTx runs fn inside a single write transaction and satisfies
 // store.TxRunner. The store.StoreOps handed to fn routes every read and write
@@ -26,7 +55,7 @@ func (db *DB) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (err
 
 	tx, err := db.writeDB.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return fmt.Errorf("begin transaction: %w", translateBusy(err))
 	}
 
 	// Point both queriers at the transaction connection. SQLite uses a separate
@@ -51,11 +80,11 @@ func (db *DB) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (err
 		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 			db.log.Error("failed to roll back transaction", "error", rbErr, "cause", err)
 		}
-		return err
+		return translateBusy(err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+		return fmt.Errorf("commit transaction: %w", translateBusy(err))
 	}
 	return nil
 }

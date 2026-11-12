@@ -96,11 +96,12 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 }
 
 // TestUserCanEditSavedQueryDelegation pins the delegated-edit contract: an
-// owner/editor of a shared (non-personal) collection that contains the query
-// may edit it even though they didn't create it; a plain member of that same
-// collection may not (curating != editing); membership in a *personal*
-// collection never grants delegated edit (personal collections are
-// single-user by construction, but the gate is explicit in the store query).
+// owner/editor of a shared (non-personal) collection that manages the query
+// through a managed link may edit it even though they didn't create it; a
+// plain member of that same collection may not (curating != editing); a pin
+// delegates nothing; membership in a *personal* collection never grants
+// delegated edit (personal collections are single-user by construction, but
+// the gate is explicit in the store query).
 func TestUserCanEditSavedQueryDelegation(t *testing.T) {
 	t.Parallel()
 	db := newTestDB(t)
@@ -120,7 +121,7 @@ func TestUserCanEditSavedQueryDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCollection: %v", err)
 	}
-	if err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, &collOwner.ID); err != nil {
+	if _, err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, models.CollectionLinkManaged, &creator.ID); err != nil {
 		t.Fatalf("AddCollectionItem: %v", err)
 	}
 	if err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, editor.ID, models.CollectionRoleEditor); err != nil {
@@ -156,6 +157,16 @@ func TestUserCanEditSavedQueryDelegation(t *testing.T) {
 	creatorUser := &models.User{ID: creator.ID, Role: models.UserRoleMember}
 	if got, err := UserCanEditSavedQuery(ctx, db, sq, creatorUser); err != nil || !got {
 		t.Errorf("creator UserCanEditSavedQuery = %v / %v, want true/nil", got, err)
+	}
+
+	// Demoting the link to a pin ends the delegation for the owner and editor.
+	if _, err := db.SetCollectionItemKind(ctx, coll.ID, sq.ID, models.CollectionLinkPin); err != nil {
+		t.Fatalf("SetCollectionItemKind(pin): %v", err)
+	}
+	for _, id := range []models.UserID{collOwner.ID, editor.ID} {
+		if got, err := UserCanEditSavedQuery(ctx, db, sq, &models.User{ID: id, Role: models.UserRoleMember}); err != nil || got {
+			t.Errorf("UserCanEditSavedQuery(user=%d) over a pin = %v / %v, want false", id, got, err)
+		}
 	}
 }
 
