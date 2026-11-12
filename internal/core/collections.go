@@ -455,6 +455,7 @@ func RemoveCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger,
 // it touches the row: the collection, whether the caller takes part in it,
 // and the saved query the link points at.
 type linkWrite struct {
+	caller       *models.User
 	collection   *models.Collection
 	participates bool
 	query        *models.SavedQuery
@@ -467,6 +468,10 @@ func beginLinkWrite(ctx context.Context, tx store.StoreOps, log *slog.Logger, co
 	if err := lockCollection(ctx, tx, collectionID); err != nil {
 		return nil, err
 	}
+	caller, err := tx.GetUser(ctx, caller.ID)
+	if err != nil {
+		return nil, err
+	}
 	collection, _, participates, err := collectionParticipation(ctx, tx, log, collectionID, caller.ID)
 	if err != nil {
 		return nil, err
@@ -475,7 +480,7 @@ func beginLinkWrite(ctx context.Context, tx store.StoreOps, log *slog.Logger, co
 	if err != nil && !models.IsNotFound(err) {
 		return nil, err
 	}
-	return &linkWrite{collection: collection, participates: participates, query: query}, nil
+	return &linkWrite{caller: caller, collection: collection, participates: participates, query: query}, nil
 }
 
 // validateLinkKind rejects a kind outside pin and managed, and a managed link
@@ -512,7 +517,7 @@ func AddCollectionItem(ctx context.Context, db store.Store, log *slog.Logger, co
 		if w.query == nil {
 			return ErrQueryNotFound
 		}
-		if kind == models.CollectionLinkManaged && !userIsCreatorOrAdmin(w.query, caller) {
+		if kind == models.CollectionLinkManaged && !userIsCreatorOrAdmin(w.query, w.caller) {
 			return ErrCollectionLinkAuthority
 		}
 		hasAccess, err := tx.UserHasSourceAccess(ctx, caller.ID, w.query.SourceID)
@@ -553,7 +558,7 @@ func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 		if err != nil {
 			return err
 		}
-		admin := caller.Role == models.UserRoleAdmin
+		admin := w.caller.Role == models.UserRoleAdmin
 		if !w.participates && !admin {
 			return ErrCollectionNotParticipant
 		}
@@ -563,7 +568,7 @@ func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 		if w.query == nil {
 			return ErrCollectionLinkNotFound
 		}
-		if !userIsCreatorOrAdmin(w.query, caller) {
+		if !userIsCreatorOrAdmin(w.query, w.caller) {
 			return ErrCollectionLinkAuthority
 		}
 		changed, err := tx.SetCollectionItemKind(ctx, collectionID, savedQueryID, kind)
@@ -581,7 +586,7 @@ func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 			log.Info("collection link kind changed",
 				"collection_id", collectionID, "saved_query_id", savedQueryID,
 				"old_kind", kind.Other(), "new_kind", kind,
-				"user_id", caller.ID, "user_role", caller.Role)
+				"user_id", caller.ID, "user_role", w.caller.Role)
 		}
 		return nil
 	})
@@ -609,7 +614,7 @@ func RemoveCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 			return ErrCollectionLinkNotFound
 		}
 		var removed bool
-		if userIsCreatorOrAdmin(w.query, caller) {
+		if userIsCreatorOrAdmin(w.query, w.caller) {
 			removed, err = tx.RemoveCollectionItem(ctx, collectionID, savedQueryID)
 		} else {
 			removed, err = tx.RemoveCollectionPin(ctx, collectionID, savedQueryID)
@@ -640,23 +645,29 @@ func ListDemotedCollectionLinks(ctx context.Context, db store.StoreOps, log *slo
 		log.Error("failed to list shared collection pins", "error", err)
 		return nil, err
 	}
-	editorsByCollection := make(map[int][]models.CollectionMember)
+	collectionIDs := make([]int, 0, len(rows))
+	seen := make(map[int]bool)
 	for _, row := range rows {
-		editors, ok := editorsByCollection[row.CollectionID]
-		if !ok {
-			members, err := db.ListCollectionMembers(ctx, row.CollectionID)
-			if err != nil {
-				return nil, err
-			}
-			editors = make([]models.CollectionMember, 0, len(members))
-			for _, m := range members {
-				if m.Role == models.CollectionRoleOwner || m.Role == models.CollectionRoleEditor {
-					editors = append(editors, *m)
-				}
-			}
-			editorsByCollection[row.CollectionID] = editors
+		if !seen[row.CollectionID] {
+			collectionIDs = append(collectionIDs, row.CollectionID)
+			seen[row.CollectionID] = true
 		}
-		row.Editors = editors
+	}
+	editorsByCollection := make(map[int][]models.CollectionMember)
+	if len(collectionIDs) > 0 {
+		members, err := db.ListCollectionEditors(ctx, collectionIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range members {
+			editorsByCollection[m.CollectionID] = append(editorsByCollection[m.CollectionID], *m)
+		}
+	}
+	for _, row := range rows {
+		row.Editors = editorsByCollection[row.CollectionID]
+		if row.Editors == nil {
+			row.Editors = []models.CollectionMember{}
+		}
 	}
 	return rows, nil
 }

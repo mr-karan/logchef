@@ -298,12 +298,9 @@ func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	var req models.AddCollectionItemRequest
+	req := models.AddCollectionItemRequest{Kind: models.CollectionLinkPin}
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-	if req.Kind == "" {
-		req.Kind = models.CollectionLinkPin
 	}
 	link, created, err := core.AddCollectionItem(c.Context(), s.store, s.log, id, user, req.SavedQueryID, req.SortOrder, req.Kind)
 	if err != nil {

@@ -2516,6 +2516,66 @@ func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQuerie
 	return items, nil
 }
 
+const listCollectionEditors = `-- name: ListCollectionEditors :many
+SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
+       u.email, u.full_name
+FROM collection_members cm
+JOIN users u ON u.id = cm.user_id
+WHERE cm.collection_id IN (/*SLICE:collection_ids*/?) AND cm.role IN ('owner', 'editor')
+ORDER BY cm.role DESC, u.email ASC
+`
+
+type ListCollectionEditorsRow struct {
+	CollectionID int64         `json:"collection_id"`
+	UserID       int64         `json:"user_id"`
+	Role         string        `json:"role"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+	CreatedAt    time.Time     `json:"created_at"`
+	Email        string        `json:"email"`
+	FullName     string        `json:"full_name"`
+}
+
+func (q *Queries) ListCollectionEditors(ctx context.Context, collectionIds []int64) ([]ListCollectionEditorsRow, error) {
+	query := listCollectionEditors
+	var queryParams []interface{}
+	if len(collectionIds) > 0 {
+		for _, v := range collectionIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:collection_ids*/?", strings.Repeat(",?", len(collectionIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:collection_ids*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionEditorsRow{}
+	for rows.Next() {
+		var i ListCollectionEditorsRow
+		if err := rows.Scan(
+			&i.CollectionID,
+			&i.UserID,
+			&i.Role,
+			&i.AddedBy,
+			&i.CreatedAt,
+			&i.Email,
+			&i.FullName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollectionItems = `-- name: ListCollectionItems :many
 SELECT
     ci.collection_id,

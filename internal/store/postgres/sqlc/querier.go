@@ -201,6 +201,7 @@ type Querier interface {
 	// List every saved query without a source-access gate. This is only for the
 	// global-admin browse surface; callers must authorize before invoking it.
 	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
+	ListCollectionEditors(ctx context.Context, collectionIds []int64) ([]ListCollectionEditorsRow, error)
 	// List items in a collection with saved-query details
 	ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error)
 	// List members of a collection with user details

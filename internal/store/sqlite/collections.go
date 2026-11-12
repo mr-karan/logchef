@@ -184,6 +184,35 @@ func (db *DB) ListCollectionMembers(ctx context.Context, collectionID int) ([]*m
 	return out, nil
 }
 
+func (db *DB) ListCollectionEditors(ctx context.Context, collectionIDs []int) ([]*models.CollectionMember, error) {
+	ids := make([]int64, len(collectionIDs))
+	for i, id := range collectionIDs {
+		ids[i] = int64(id)
+	}
+
+	rows, err := db.readQueries.ListCollectionEditors(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("error listing collection members: %w", err)
+	}
+	out := make([]*models.CollectionMember, 0, len(rows))
+	for _, r := range rows {
+		m := &models.CollectionMember{
+			CollectionID: int(r.CollectionID),
+			UserID:       models.UserID(r.UserID),
+			Role:         models.CollectionRole(r.Role),
+			CreatedAt:    r.CreatedAt,
+			Email:        r.Email,
+			FullName:     r.FullName,
+		}
+		if r.AddedBy.Valid {
+			uid := models.UserID(r.AddedBy.Int64)
+			m.AddedBy = &uid
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 // RemoveCollectionMember drops a member from a collection.
 func (db *DB) RemoveCollectionMember(ctx context.Context, collectionID int, userID models.UserID) error {
 	if err := db.writeQueries.RemoveCollectionMember(ctx, sqlc.RemoveCollectionMemberParams{

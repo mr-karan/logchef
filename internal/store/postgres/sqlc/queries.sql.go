@@ -2511,6 +2511,53 @@ func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQuerie
 	return items, nil
 }
 
+const listCollectionEditors = `-- name: ListCollectionEditors :many
+SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
+       u.email, u.full_name
+FROM collection_members cm
+JOIN users u ON u.id = cm.user_id
+WHERE cm.collection_id = ANY($1::bigint[]) AND cm.role IN ('owner', 'editor')
+ORDER BY cm.role DESC, u.email ASC
+`
+
+type ListCollectionEditorsRow struct {
+	CollectionID int64              `json:"collection_id"`
+	UserID       int64              `json:"user_id"`
+	Role         string             `json:"role"`
+	AddedBy      pgtype.Int8        `json:"added_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Email        string             `json:"email"`
+	FullName     string             `json:"full_name"`
+}
+
+func (q *Queries) ListCollectionEditors(ctx context.Context, collectionIds []int64) ([]ListCollectionEditorsRow, error) {
+	rows, err := q.db.Query(ctx, listCollectionEditors, collectionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionEditorsRow{}
+	for rows.Next() {
+		var i ListCollectionEditorsRow
+		if err := rows.Scan(
+			&i.CollectionID,
+			&i.UserID,
+			&i.Role,
+			&i.AddedBy,
+			&i.CreatedAt,
+			&i.Email,
+			&i.FullName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollectionItems = `-- name: ListCollectionItems :many
 SELECT
     ci.collection_id,

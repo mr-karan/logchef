@@ -199,6 +199,7 @@ type Querier interface {
 	// surface only. The handler MUST authorize the caller as a global admin before
 	// calling this. Rows the caller cannot run are marked non-runnable in Go.
 	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
+	ListCollectionEditors(ctx context.Context, collectionIds []int64) ([]ListCollectionEditorsRow, error)
 	// List items in a collection with saved-query details
 	ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error)
 	// List members of a collection with user details

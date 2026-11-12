@@ -148,6 +148,38 @@ func verifyLinkConversion(t *testing.T, ctx context.Context, s store.Store, f li
 // only, with the creator and the adder, and that it follows conversions.
 func verifyLinkReport(t *testing.T, ctx context.Context, s store.Store, f linkFixture) {
 	t.Helper()
+	second := seedLinks(t, ctx, s, "batch-editors")
+	if err := s.AddCollectionMember(ctx, second.coll.ID, f.other.ID, models.CollectionRoleMember, &second.creator.ID); err != nil {
+		t.Fatal(err)
+	}
+	members, err := s.ListCollectionEditors(ctx, []int{f.coll.ID, second.coll.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[[2]int]models.CollectionRole{
+		{f.coll.ID, int(f.creator.ID)}:           models.CollectionRoleOwner,
+		{f.coll.ID, int(f.other.ID)}:             models.CollectionRoleEditor,
+		{second.coll.ID, int(second.creator.ID)}: models.CollectionRoleOwner,
+		{second.coll.ID, int(second.other.ID)}:   models.CollectionRoleEditor,
+	}
+	if len(members) != len(want) {
+		t.Fatalf("batch editors = %+v, want four owners/editors", members)
+	}
+	for _, m := range members {
+		key := [2]int{m.CollectionID, int(m.UserID)}
+		if want[key] != m.Role || m.Email == "" || m.CreatedAt.IsZero() {
+			t.Errorf("unexpected batch editor %+v", m)
+		}
+		delete(want, key)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing batch editors %v", want)
+	}
+	members, err = s.ListCollectionEditors(ctx, nil)
+	if err != nil || len(members) != 0 {
+		t.Fatalf("empty batch = %+v / %v", members, err)
+	}
+
 	if inserted, err := s.AddCollectionItem(ctx, f.personal.ID, f.query.ID, 0, models.CollectionLinkPin, &f.other.ID); err != nil || !inserted {
 		t.Fatalf("AddCollectionItem(personal pin) = %v / %v", inserted, err)
 	}

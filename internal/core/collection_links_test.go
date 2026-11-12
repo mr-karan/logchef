@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -440,5 +441,51 @@ func TestListDemotedCollectionLinks(t *testing.T) {
 	}
 	if len(editors) != 2 || editors[e.creator.ID] != models.CollectionRoleOwner || editors[e.editor.ID] != models.CollectionRoleEditor {
 		t.Errorf("report editors = %+v, want the owner and the editor only", row.Editors)
+	}
+}
+
+type reportBatchStore struct {
+	store.StoreOps
+	calls int
+	ids   []int
+}
+
+func (s *reportBatchStore) ListCollectionMembers(context.Context, int) ([]*models.CollectionMember, error) {
+	panic("report must batch editors")
+}
+func (s *reportBatchStore) ListCollectionEditors(ctx context.Context, ids []int) ([]*models.CollectionMember, error) {
+	s.calls++
+	s.ids = ids
+	return s.StoreOps.ListCollectionEditors(ctx, ids)
+}
+func TestCollectionLinkReportBatchesEditors(t *testing.T) {
+	e := newLinkEnv(t)
+	e.setKind(t, models.CollectionLinkPin)
+	ctx := context.Background()
+	second, err := CreateCollection(ctx, e.db, e.log, "Second", "", e.creator.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []*models.SavedQuery{e.query, e.lockedQuery} {
+		if _, _, err := e.add(e.creator, second.ID, q.ID, models.CollectionLinkPin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := &reportBatchStore{StoreOps: e.db}
+	rows, err := ListDemotedCollectionLinks(ctx, db, e.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || db.calls != 1 || len(db.ids) != 2 {
+		t.Fatalf("rows=%d batch calls=%d ids=%v", len(rows), db.calls, db.ids)
+	}
+	for _, row := range rows {
+		want := 1
+		if row.CollectionID == e.coll.ID {
+			want = 2
+		}
+		if len(row.Editors) != want {
+			t.Errorf("collection %d editors=%+v", row.CollectionID, row.Editors)
+		}
 	}
 }

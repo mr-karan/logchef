@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,7 +46,8 @@ func TestCollectionItemKindMigration(t *testing.T) {
 			(3, 1, 'by other', 'logchefql', 'builder', '{}', 1),
 			(4, 1, 'by deleted user', 'logchefql', 'builder', '{}', 1),
 			(5, 1, 'in personal', 'logchefql', 'builder', '{}', 1),
-			(6, 1, 'creator gone', 'logchefql', 'builder', '{}', NULL)`,
+			(6, 1, 'creator gone', 'logchefql', 'builder', '{}', NULL),
+			(7, 1, 'creator gone member pin', 'logchefql', 'builder', '{}', NULL)`,
 		`INSERT INTO collections (id, name, is_personal, created_by) VALUES
 			(1, 'Shared', false, 1),
 			(2, 'My Collection', true, 1)`,
@@ -55,7 +57,8 @@ func TestCollectionItemKindMigration(t *testing.T) {
 			(1, 3, 3),
 			(1, 4, NULL),
 			(2, 5, 1),
-			(1, 6, 2)`,
+			(1, 6, 2),
+			(1, 7, 3)`,
 	}
 	for _, q := range seed {
 		if _, err := conn.Exec(ctx, q); err != nil {
@@ -63,6 +66,42 @@ func TestCollectionItemKindMigration(t *testing.T) {
 		}
 	}
 
+	notes, err := os.ReadFile("../../../CHANGELOG.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, block, ok := strings.Cut(string(notes), "```sql\n")
+	if !ok {
+		t.Fatal("upgrade inventory SQL not found")
+	}
+	inventory, _, ok := strings.Cut(block, "```")
+	if !ok {
+		t.Fatal("upgrade inventory SQL has no closing fence")
+	}
+	inventory = strings.ReplaceAll(inventory, "c.is_personal = 0", "c.is_personal = false")
+	inventoryRows, err := conn.Query(ctx, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inventoryRows.Close()
+	var inventoryIDs []int
+	for inventoryRows.Next() {
+		var collectionID, queryID int
+		var addedBy *int64
+		var createdAt any
+		if err := inventoryRows.Scan(&collectionID, &queryID, &addedBy, &createdAt); err != nil {
+			t.Fatal(err)
+		}
+		inventoryIDs = append(inventoryIDs, queryID)
+	}
+	if err := inventoryRows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	inventoryRows.Close()
+	sort.Ints(inventoryIDs)
+	if !reflect.DeepEqual(inventoryIDs, []int{3, 4, 7}) {
+		t.Fatalf("inventory = %v, want [3 4 7]", inventoryIDs)
+	}
 	up := readMigration(t, "000014_add_collection_item_kind.up.sql")
 	if _, err := conn.Exec(ctx, up); err != nil {
 		t.Fatalf("up migration: %v", err)
@@ -76,8 +115,8 @@ func TestCollectionItemKindMigration(t *testing.T) {
 		t.Fatalf("kind column still present after down migration")
 	}
 	var links int
-	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM collection_items`).Scan(&links); err != nil || links != 6 {
-		t.Fatalf("collection_items after down = %d / %v, want 6", links, err)
+	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM collection_items`).Scan(&links); err != nil || links != 7 {
+		t.Fatalf("collection_items after down = %d / %v, want 7", links, err)
 	}
 	if _, err := conn.Exec(ctx, up); err != nil {
 		t.Fatalf("up migration again: %v", err)
@@ -93,6 +132,7 @@ func assertPostgresLinkKinds(t *testing.T, ctx context.Context, conn *pgx.Conn) 
 		{1, 3}: "pin",     // another member added it
 		{1, 4}: "pin",     // the adder was deleted
 		{2, 5}: "pin",     // a personal collection
+		{1, 7}: "pin",
 		{1, 6}: "managed", // an admin added a query whose creator is gone
 	}
 	for key, kind := range want {

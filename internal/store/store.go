@@ -111,6 +111,7 @@ type CollectionStore interface {
 	ListCollectionsForUser(ctx context.Context, userID models.UserID) ([]*models.Collection, error)
 	AddCollectionMember(ctx context.Context, collectionID int, userID models.UserID, role models.CollectionRole, addedBy *models.UserID) error
 	GetCollectionMember(ctx context.Context, collectionID int, userID models.UserID) (*models.CollectionMember, error)
+	ListCollectionEditors(ctx context.Context, collectionIDs []int) ([]*models.CollectionMember, error)
 	ListCollectionMembers(ctx context.Context, collectionID int) ([]*models.CollectionMember, error)
 	RemoveCollectionMember(ctx context.Context, collectionID int, userID models.UserID) error
 	AddCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID, addedBy *models.UserID) error

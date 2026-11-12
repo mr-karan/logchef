@@ -881,6 +881,14 @@ JOIN users u ON u.id = cm.user_id
 WHERE cm.collection_id = $1
 ORDER BY cm.role DESC, u.email ASC;
 
+-- name: ListCollectionEditors :many
+SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
+       u.email, u.full_name
+FROM collection_members cm
+JOIN users u ON u.id = cm.user_id
+WHERE cm.collection_id = ANY(sqlc.arg(collection_ids)::bigint[]) AND cm.role IN ('owner', 'editor')
+ORDER BY cm.role DESC, u.email ASC;
+
 -- name: RemoveCollectionMember :exec
 -- Remove a member from a collection
 DELETE FROM collection_members WHERE collection_id = $1 AND user_id = $2;
