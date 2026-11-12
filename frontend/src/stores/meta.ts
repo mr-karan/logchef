@@ -87,12 +87,20 @@ export const useMetaStore = defineStore("meta", () => {
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
-  // Load server metadata
+  let inFlight: ReturnType<typeof fetchMeta> | null = null;
+
+  // Load server metadata. Concurrent callers share one request.
   async function loadMeta({ force = false }: { force?: boolean } = {}) {
     if (isInitialized.value && !force) {
       return { success: true, message: "Meta already loaded" };
     }
+    inFlight ??= fetchMeta().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  }
 
+  async function fetchMeta() {
     try {
       const result = await state.callApi({
         apiCall: () => metaApi.getMeta(),

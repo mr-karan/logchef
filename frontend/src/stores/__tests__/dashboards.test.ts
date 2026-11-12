@@ -104,7 +104,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("enterEdit snapshots the loaded blob and starts clean", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     expect(store.isEditing).toBe(true);
     expect(store.isDirty).toBe(false);
     expect(store.editDraft).not.toBeNull();
@@ -112,14 +112,14 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("refuses to enter edit mode when can_edit is false", async () => {
     const store = await loadEditableDashboard(makeDashboard({ can_edit: false }));
-    store.enterEdit();
+    await store.enterEdit();
     expect(store.isEditing).toBe(false);
     expect(store.editDraft).toBeNull();
   });
 
   it("adding a panel marks the draft dirty and packs it into the layout", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel());
     expect(store.isDirty).toBe(true);
     expect(store.editDraft?.panels).toHaveLength(1);
@@ -129,11 +129,11 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("cancelEdit discards the draft and reverts to the last-loaded state", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel());
     expect(store.isDirty).toBe(true);
 
-    store.cancelEdit();
+    await store.cancelEdit();
     expect(store.isEditing).toBe(false);
     expect(store.editDraft).toBeNull();
     expect(store.isDirty).toBe(false);
@@ -143,7 +143,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("removing a panel returns the draft to a clean state matching the snapshot", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel());
     expect(store.isDirty).toBe(true);
     store.removeDraftPanel("p1");
@@ -153,7 +153,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("duplicateDraftPanel inserts a same-size copy after the original", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel("p1"));
     store.upsertDraftPanel(tablePanel("p2"));
     store.resizeDraftPanel("p1", 4, 3);
@@ -171,7 +171,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("duplicateDraftPanel reuses a finished result and runs the copy otherwise", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel("p1"));
 
     // The original's query is still in flight: the copy must run its own.
@@ -190,7 +190,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("a refresh in edit mode runs the draft panels, including a duplicate", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel("p1"));
     const copyId = store.duplicateDraftPanel("p1", "copy") ?? "";
     await store.refreshAllPanels();
@@ -214,7 +214,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("setDraftDefaultTimeRange saves the default, applies it, and can clear it", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.setDraftDefaultTimeRange("7d");
     expect(store.editDraft?.default_time_range).toBe("7d");
     expect(store.window).toEqual({ kind: "relative", spec: "7d" });
@@ -229,7 +229,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("duplicateDraftPanel refuses to go past the panel limit", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     for (let i = 0; i < 24; i++) store.upsertDraftPanel(tablePanel(`p${i}`));
     expect(store.duplicateDraftPanel("p0", "over")).toBeNull();
     expect(store.editDraft?.panels).toHaveLength(24);
@@ -237,7 +237,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("saveEdit PUTs the draft, adopts the response, and exits edit mode", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel());
 
     const saved = makeDashboard({
@@ -262,7 +262,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("saveEdit surfaces a friendly client-side validation error before the round-trip", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     // A panel missing its source mirrors a server rule; save should not PUT.
     store.upsertDraftPanel({ ...tablePanel(), source_id: 0 });
 
@@ -277,7 +277,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("renaming marks the draft dirty and saveEdit sends the trimmed name and description (#127)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     expect(store.editName).toBe("HTTP errors");
     expect(store.editDescription).toBe("desc");
 
@@ -300,7 +300,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("restoring the original name clears the dirty flag (#127)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.setDraftName("Other");
     expect(store.isDirty).toBe(true);
     store.setDraftName("HTTP errors ");
@@ -309,7 +309,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("saveEdit rejects a blank name without a round-trip (#127)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.setDraftName("   ");
 
     const result = await store.saveEdit();
@@ -345,7 +345,7 @@ describe("dashboards store — panel time params", () => {
     const store = await loadEditableDashboard();
     usePreferencesStore().preferences.timezone = "utc";
     store.setWindow(window);
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel("logchefql-table"));
     store.upsertDraftPanel({ ...tablePanel("sql-table"), query_language: "clickhouse-sql" });
     store.upsertDraftPanel({ ...tablePanel("logchefql-series"), type: "timeseries", options: {} });
@@ -429,7 +429,7 @@ describe("dashboards store — #119/#120 hardening", () => {
   // --- A1: cross-dashboard save corruption --------------------------------
   it("saveEdit refuses to write a draft onto a different dashboard id (#119 A1)", async () => {
     const store = await loadEditableDashboard(makeDashboard({ id: 1 }));
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel(tablePanel());
     expect(store.isDirty).toBe(true);
     // Simulate a param-nav that did NOT clear the draft: current switches to #2
@@ -443,7 +443,7 @@ describe("dashboards store — #119/#120 hardening", () => {
 
   it("sends the revision captured at edit start despite a later read, then adopts the saved revision", async () => {
     const store = await loadEditableDashboard(makeDashboard({ revision: 7 }));
-    store.enterEdit();
+    await store.enterEdit();
     store.setDraftName("My edit");
     mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 8 }) });
     await store.loadDashboard(3);
@@ -452,17 +452,90 @@ describe("dashboards store — #119/#120 hardening", () => {
     expect(mocks.update.mock.calls[0][1].revision).toBe(7);
     expect(mocks.update.mock.calls[0][1]).not.toHaveProperty("updated_at");
     expect(store.current?.revision).toBe(9);
-    store.enterEdit();
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 9 }) });
+    await store.enterEdit();
     await store.saveEdit();
     expect(mocks.update.mock.calls[1][1].revision).toBe(9);
   });
 
+  it("starts an edit from the latest saved version, not the one on screen", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ revision: 1, name: "Old name" }));
+    mocks.get.mockResolvedValue({
+      status: "success",
+      data: makeDashboard({ revision: 2, name: "New name", panels: { version: 1, layout: [], panels: [tablePanel()] } }),
+    });
+    await store.enterEdit();
+    expect(store.current?.revision).toBe(2);
+    expect(store.editName).toBe("New name");
+    expect(store.editDraft?.panels.map((p) => p.id)).toEqual(["p1"]);
+    expect(store.isDirty).toBe(false);
+    store.setDraftName("Mine");
+    mocks.update.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 3, name: "Mine" }) });
+    await store.saveEdit();
+    expect(mocks.update.mock.calls[0][1].revision).toBe(2);
+  });
+
+  it("stays out of edit mode when the fresh read fails", async () => {
+    const store = await loadEditableDashboard();
+    mocks.get.mockRejectedValue({ status: "error", error_type: "NotFoundError", message: "Dashboard not found" });
+    await store.enterEdit();
+    expect(store.isEditing).toBe(false);
+    expect(store.editDraft).toBeNull();
+  });
+
+  it("after a refused save, overwrites with the latest revision or discards and reloads the latest", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ revision: 1 }));
+    await store.enterEdit();
+    store.setDraftName("Mine");
+    mocks.update.mockRejectedValue({ status: "error", error_type: "ConflictError", message: "modified" });
+    expect((await store.saveEdit()).error?.error_type).toBe("ConflictError");
+
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 2, name: "Theirs" }) });
+    const latest = await store.fetchLatest();
+    expect(latest.data?.revision).toBe(2);
+    expect(store.current?.revision).toBe(1);
+    expect(store.editName).toBe("Mine");
+
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 3, name: "Theirs again" }) });
+    expect((await store.saveEdit({ revision: 2 })).success).toBe(false);
+    expect(mocks.update.mock.calls[1][1]).toMatchObject({ revision: 2, name: "Mine" });
+    expect(store.isEditing).toBe(true);
+
+    await store.cancelEdit();
+    expect(store.isEditing).toBe(false);
+    expect(store.current).toMatchObject({ revision: 3, name: "Theirs again" });
+  });
+
+  it("does not reread the dashboard when discarding an edit that never conflicted", async () => {
+    const store = await loadEditableDashboard();
+    await store.enterEdit();
+    store.setDraftName("Mine");
+    mocks.get.mockClear();
+    await store.cancelEdit();
+    expect(mocks.get).not.toHaveBeenCalled();
+  });
+
+  it("saves the draft as a new dashboard and leaves edit mode", async () => {
+    const store = await loadEditableDashboard();
+    await store.enterEdit();
+    store.upsertDraftPanel(tablePanel());
+    store.setDraftDescription("  my notes ");
+    mocks.create.mockResolvedValue({ status: "success", data: makeDashboard({ id: 9, name: "HTTP errors (copy)" }) });
+    const result = await store.saveDraftAsCopy("HTTP errors (copy)");
+    expect(result.data?.id).toBe(9);
+    const body = mocks.create.mock.calls[0][0];
+    expect(body).toMatchObject({ name: "HTTP errors (copy)", description: "my notes" });
+    expect(body.panels.panels.map((p: DashboardPanel) => p.id)).toEqual(["p1"]);
+    expect(store.isEditing).toBe(false);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ["ConflictError", "modified", /changed by someone else/i],
+    ["ConflictError", "Dashboard was modified by someone else; reload and reapply your changes", /modified by someone else/],
     ["ValidationError", "This save does not say which revision of the dashboard it changes. Reload the page and apply your changes again.", /Reload the page/],
   ])("preserves edits and explains a refused save (%s)", async (error_type, message, expected) => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.setDraftName("Unsaved edit");
     mocks.update.mockRejectedValue({ status: "error", error_type, message });
     const result = await store.saveEdit();
@@ -478,7 +551,7 @@ describe("dashboards store — #119/#120 hardening", () => {
   // --- A4: native LogsQL dispatch -----------------------------------------
   it("runs a native logsql table panel through logs/query, not logchefql (#119 A4)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel({ ...tablePanel("lp"), query: "level:error", query_language: "logsql" });
     await vi.waitFor(() => expect(mocks.logsQuery).toHaveBeenCalledTimes(1));
     expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
@@ -490,7 +563,7 @@ describe("dashboards store — #119/#120 hardening", () => {
 
   it("runs a native logsql timeseries panel through histogram without translate (#119 A4)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel({
       id: "lt", title: "t", type: "timeseries", team_id: 1, source_id: 1,
       query: "*", query_language: "logsql", options: {},
@@ -505,7 +578,7 @@ describe("dashboards store — #119/#120 hardening", () => {
   // --- A11: invalidate panelStates on draft type change --------------------
   it("invalidates panelStates[id] when a draft panel's type changes (#120 A11)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     // clickhouse-sql skips the translate step so the stat result is deterministic.
     store.upsertDraftPanel({
       id: "p1", title: "count", type: "stat", team_id: 1, source_id: 1,
@@ -523,7 +596,7 @@ describe("dashboards store — #119/#120 hardening", () => {
   // --- A13: table limit clamp ---------------------------------------------
   it("clamps an oversized table limit down to the max (#120 A13)", async () => {
     const store = await loadEditableDashboard();
-    store.enterEdit();
+    await store.enterEdit();
     store.upsertDraftPanel({
       ...tablePanel("big"), query: "SELECT 1", query_language: "clickhouse-sql", options: { limit: 100000 },
     });

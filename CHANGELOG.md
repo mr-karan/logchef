@@ -8,22 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Upgrade notes
-- Dashboard updates now require the `revision` returned by GET, create, or the
-  previous successful save. Scripts must send that integer in each PUT body.
-  Missing revisions return 428 with a reload message. Stale revisions return
-  409 without changing the dashboard. The server ignores `updated_at` in PUT
-  bodies. Reload browser tabs left open before upgrading.
+- After upgrading, reload any Logchef tab that was already open. Save dashboard
+  edits before the upgrade: an old tab's save is refused with 428 and its draft
+  cannot be saved.
+- **Breaking:** dashboard updates now require the `revision` returned by GET,
+  create, or the previous successful save. Scripts must send that integer in
+  each PUT body. A PUT without it returns 428. A stale revision returns 409
+  without changing the dashboard. The server ignores `updated_at` in PUT bodies.
 - Startup migrations add the revision counter to existing dashboards, starting
   at 1, on both SQLite and Postgres.
+- With several replicas on Postgres, a rolling deploy can show the reload banner
+  twice: a reload during the rollout can reach a replica still on the old
+  version. Reload again once the deploy finishes.
+
+### Added
+- A banner asks you to reload when the server version differs from the version
+  that served the page. The check runs on load and on window focus, at most
+  every 30 seconds. The banner itself never reloads the page. Its Reload button
+  asks first when a dashboard has unsaved edits.
+- When someone else saved a dashboard while you were editing it, Save opens a
+  dialog with three choices: save your version as a copy, overwrite theirs after
+  seeing when it was saved, or discard yours and load theirs.
 
 ### Fixed
 - Dashboard saves use an atomic revision check so two edits from the same
   revision cannot overwrite each other, including saves within one second.
-
-### Added
-- A banner asks you to reload when the server version differs from the version
-  that served the page. The check runs on load and window focus. It preserves
-  unsaved edits and never reloads automatically.
+- Editing a dashboard starts from the latest saved version, and leaving the
+  page with unsaved edits asks first on reload and tab close too.
 
 ## [2.6.1] - 2026-10-29
 

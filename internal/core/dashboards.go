@@ -342,23 +342,9 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 		return nil
 	})
 	if err != nil {
-		if !isDashboardClientError(err) {
-			log.Error("failed to update dashboard", "dashboard_id", id, "error", err)
-		}
 		return nil, err
 	}
 	return updated, nil
-}
-
-// isDashboardClientError reports whether err is one the caller caused, so the
-// update path logs only server-side failures.
-func isDashboardClientError(err error) bool {
-	for _, sentinel := range []error{ErrDashboardNotFound, ErrDashboardForbidden, ErrDashboardConflict, ErrInvalidDashboard} {
-		if errors.Is(err, sentinel) {
-			return true
-		}
-	}
-	return false
 }
 
 // DeleteDashboard removes a dashboard by id.

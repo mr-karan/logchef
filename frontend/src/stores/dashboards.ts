@@ -28,7 +28,7 @@ import {
   type TimeWindow,
 } from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
-import { unwrap } from "@/api/types";
+import { unwrap, type APIErrorResponse } from "@/api/types";
 import { stableStringify } from "@/utils/stableStringify";
 import { isAbortError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
@@ -125,6 +125,12 @@ function newPanelId(): string {
     : `p-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+type DashboardResult = { success: boolean; data?: Dashboard | null; error?: APIErrorResponse };
+
+function refused(message: string): DashboardResult {
+  return { success: false, error: { status: "error", error_type: "ValidationError", message } };
+}
+
 /** Deep clone a JSON-serializable panel blob (breaks all reactive references). */
 function cloneBlob(blob: DashboardPanels): DashboardPanels {
   return JSON.parse(JSON.stringify(blob));
@@ -167,6 +173,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // Capture the edited row and revision before a background read can replace current.
   let editDashboardId: number | null = null;
   let editBaseRevision: number | null = null;
+  // Set when a save from this draft was refused as stale, so discarding reloads the latest.
+  let editConflicted = false;
 
   const dashboards = computed(() => state.data.value.dashboards);
   const current = computed(() => state.data.value.current);
@@ -560,9 +568,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     });
   }
 
-  function enterEdit() {
-    const dashboard = state.data.value.current;
-    if (!dashboard || dashboard.can_edit !== true) return;
+  // Edit starts from a fresh read, so the draft and its revision are the latest saved version.
+  async function enterEdit() {
+    const shown = state.data.value.current;
+    if (!shown || shown.can_edit !== true || state.data.value.isEditing) return;
+    const token = ++loadToken;
+    const result = await state.callApi<Dashboard>({
+      apiCall: () => dashboardsApi.get(shown.id),
+      operationKey: "enterEdit",
+    });
+    if (token !== loadToken || !result.success || !result.data) return;
+    const dashboard = result.data;
+    state.data.value.current = dashboard;
+    if (dashboard.can_edit !== true) return;
     const blob: DashboardPanels = dashboard.panels ?? { version: 1, layout: [], panels: [] };
     // Snapshot the loaded blob; the draft is an independent clone we mutate.
     state.data.value.editSnapshotJson = stableStringify(blob);
@@ -575,6 +593,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // for the save-time identity guard (#119 A1) and concurrency check (A3).
     editDashboardId = dashboard.id;
     editBaseRevision = dashboard.revision;
+    if (dashboard.revision !== shown.revision) {
+      state.data.value.panelStates = {};
+      await refreshAllPanels();
+    }
   }
 
   // Leaves edit mode and drops the draft and its identity/concurrency baselines.
@@ -585,14 +607,43 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     state.data.value.previewState = null;
     editDashboardId = null;
     editBaseRevision = null;
+    editConflicted = false;
   }
 
-  function cancelEdit() {
-    // The live dashboard (current.panels) was never mutated, so simply dropping
-    // the draft reverts to the last-loaded state.
+  // Drops the draft. current.panels was never mutated, so the view reverts to the
+  // last-loaded state, unless a refused save showed that state is stale.
+  async function cancelEdit() {
+    const reloadId = editConflicted ? editDashboardId : null;
     abortPreview();
     abortSinglePanels();
     resetEdit();
+    if (reloadId !== null) await loadDashboard(reloadId);
+  }
+
+  // Reads the dashboard being edited without touching current or the draft.
+  async function fetchLatest(): Promise<DashboardResult> {
+    const id = editDashboardId ?? state.data.value.current?.id;
+    if (id === undefined) return refused("Nothing to save");
+    return await state.callApi<Dashboard>({
+      apiCall: () => dashboardsApi.get(id),
+      operationKey: "fetchLatestDashboard",
+    });
+  }
+
+  async function saveDraftAsCopy(name: string): Promise<DashboardResult> {
+    const draft = state.data.value.editDraft;
+    if (!draft) return refused("Nothing to save");
+    const result = await createDashboard({
+      name,
+      description: state.data.value.editDescription.trim(),
+      panels: draft,
+    });
+    if (result.success) {
+      abortPreview();
+      abortSinglePanels();
+      resetEdit();
+    }
+    return result;
   }
 
   function setDraft(next: DashboardPanels) {
@@ -763,45 +814,42 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     setDraft(reflowPanels({ ...draft, panels: reordered }));
   }
 
-  async function saveEdit() {
+  // `revision` overrides the edit baseline when the user chooses to overwrite a newer save.
+  async function saveEdit({ revision }: { revision?: number } = {}): Promise<DashboardResult> {
     const dashboard = state.data.value.current;
     const draft = state.data.value.editDraft;
     if (!dashboard || !draft || editBaseRevision === null) {
-      return { success: false, error: { message: "Nothing to save" } };
+      return refused("Nothing to save");
     }
     // Identity guard (#119 A1): the draft belongs to whichever dashboard was
     // open when edit started. If `current` has since switched (e.g. a param
     // navigation that didn't clear the draft), refuse rather than PUT one
     // dashboard's panels onto another's id.
     if (editDashboardId !== null && dashboard.id !== editDashboardId) {
-      return {
-        success: false,
-        error: {
-          message:
-            "The dashboard changed while you were editing. Your unsaved changes were not saved — re-open the original dashboard to edit it.",
-        },
-      };
+      return refused(
+        "The dashboard changed while you were editing. Your unsaved changes were not saved — re-open the original dashboard to edit it.",
+      );
     }
     // Mirror the server-side validation with a friendly, inline message; the
     // server 400 remains the authoritative backstop.
     const name = state.data.value.editName.trim();
     if (!name) {
-      return { success: false, error: { message: "Dashboard name is required" } };
+      return refused("Dashboard name is required");
     }
     const validationError = validatePanelsBlob(draft);
     if (validationError) {
-      return { success: false, error: { message: validationError } };
+      return refused(validationError);
     }
     const body: UpdateDashboardRequest = {
       name,
       description: state.data.value.editDescription.trim(),
       panels: draft,
-      revision: editBaseRevision,
+      revision: revision ?? editBaseRevision,
     };
     const result = await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.update(dashboard.id, body),
       operationKey: "saveDashboard",
-      successMessage: i18n.global.t("dashboards.dashboardSaved"),
+      showToast: false,
       onSuccess: (data) => {
         // Adopt the saved blob as the live dashboard and re-render.
         if (data) {
@@ -822,18 +870,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (result.success) {
       state.data.value.panelStates = {};
       await refreshAllPanels();
-      return result;
-    }
-    // Surface a concurrent-edit conflict with actionable guidance instead of the
-    // raw backend message. The draft is kept so the user can copy their work.
-    if (result.error?.error_type === "ConflictError") {
-      return {
-        success: false,
-        error: {
-          message:
-            "This dashboard was changed by someone else since you started editing. Reload the page to get the latest version, then re-apply your changes.",
-        },
-      };
+    } else if (result.error?.error_type === "ConflictError") {
+      editConflicted = true;
     }
     return result;
   }
@@ -931,6 +969,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     enterEdit,
     cancelEdit,
     saveEdit,
+    fetchLatest,
+    saveDraftAsCopy,
     setDraftName,
     setDraftDescription,
     upsertDraftPanel,

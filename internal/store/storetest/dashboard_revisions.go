@@ -61,9 +61,15 @@ func testDashboardRevisions(t *testing.T, ctx context.Context, s store.Store) {
 			if err := s.UpdateDashboard(ctx, &second); err != nil {
 				t.Fatal(err)
 			}
+			stale := *before
+			stale.Name = "stale fast save"
+			staleErr := s.UpdateDashboard(ctx, &stale)
 			after := loadDashboard(t, ctx, s, d.ID)
-			if after.Revision != before.Revision+1 {
-				t.Fatalf("revision did not advance: %+v", after)
+			if after.Revision != before.Revision+1 || after.Name != second.Name {
+				t.Fatalf("stored row after two saves from one revision = %+v; want revision %d named %q", after, before.Revision+1, second.Name)
+			}
+			if !errors.Is(staleErr, models.ErrConflict) {
+				t.Fatalf("second save from revision %d: err = %v, want ErrConflict", before.Revision, staleErr)
 			}
 			if before.UpdatedAt.Truncate(time.Second).Equal(after.UpdatedAt.Truncate(time.Second)) {
 				return

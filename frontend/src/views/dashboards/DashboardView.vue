@@ -27,6 +27,11 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
+import DashboardConflictDialog from "./components/DashboardConflictDialog.vue";
+import { useEventListener } from "@vueuse/core";
+import { useToast } from "@/composables/useToast";
+import { showErrorToast } from "@/api/error-handler";
+import { TOAST_DURATION } from "@/lib/constants";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
@@ -48,7 +53,7 @@ import {
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
-import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
+import type { Dashboard, DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
 import { QUICK_RANGES } from "@/lib/quickRanges";
 import { epochMs, formatInZone, windowLabel } from "@/utils/timeWindow";
 
@@ -68,6 +73,7 @@ const ROW_STRIDE = ROW_HEIGHT_PX + GRID_GAP_PX;
 const dashboardId = computed(() => Number(route.params.id));
 const isLoading = computed(() => store.isLoadingOperation("loadDashboard"));
 const isSaving = computed(() => store.isLoadingOperation("saveDashboard"));
+const isEnteringEdit = computed(() => store.isLoadingOperation("enterEdit"));
 const dashboard = computed(() => store.current);
 const notFound = ref(false);
 
@@ -378,17 +384,72 @@ function cancelEdit() {
   discardEdit();
 }
 
-function discardEdit() {
+function closeEditor() {
   editorOpen.value = false;
   editingPanelId.value = null;
   pendingNewPanelId.value = null;
-  store.cancelEdit();
 }
-async function saveEdit() {
-  const result = await store.saveEdit();
-  if (!result.success && result.error?.message) {
-    window.alert(result.error.message);
+
+async function discardEdit() {
+  closeEditor();
+  await store.cancelEdit();
+}
+
+// A refused save opens the conflict dialog: `latest` is set once the user asks to overwrite it.
+const conflict = ref<{ latest: Dashboard | null } | null>(null);
+const conflictBusy = ref(false);
+const { toast } = useToast();
+
+async function runConflictAction(action: () => Promise<void>) {
+  conflictBusy.value = true;
+  try {
+    await action();
+  } finally {
+    conflictBusy.value = false;
   }
+}
+
+async function saveEdit(revision?: number) {
+  const result = await store.saveEdit({ revision });
+  if (result.success) {
+    conflict.value = null;
+    toast({ title: t("dashboards.dashboardSaved"), duration: TOAST_DURATION.SUCCESS });
+  } else if (result.error?.error_type === "ConflictError") {
+    conflict.value = { latest: null };
+  } else if (result.error) {
+    showErrorToast(result.error);
+  }
+}
+
+function saveConflictAsCopy() {
+  return runConflictAction(async () => {
+    const name = t("common.copyName", { name: store.editName.trim() || store.current?.name || t("ui.dashboard") });
+    closeEditor();
+    const result = await store.saveDraftAsCopy(name);
+    if (!result.success || !result.data) return;
+    conflict.value = null;
+    await router.push(`/dashboards/${result.data.id}`);
+  });
+}
+
+function reviewOverwrite() {
+  return runConflictAction(async () => {
+    const result = await store.fetchLatest();
+    if (result.success && result.data && conflict.value) conflict.value = { latest: result.data };
+  });
+}
+
+function confirmOverwrite() {
+  const latest = conflict.value?.latest;
+  if (!latest) return;
+  return runConflictAction(() => saveEdit(latest.revision));
+}
+
+function discardForLatest() {
+  return runConflictAction(async () => {
+    await discardEdit();
+    conflict.value = null;
+  });
 }
 
 function goBack() {
@@ -402,9 +463,21 @@ function goBack() {
 function confirmDiscard() {
   const action = pendingDiscard.value;
   pendingDiscard.value = null;
-  discardEdit();
-  if (action === 'leave') router.push("/dashboards");
+  if (action === 'leave') {
+    closeEditor();
+    void store.cancelEdit();
+    router.push("/dashboards");
+    return;
+  }
+  void discardEdit();
 }
+
+// Covers reloads (including the version banner's Reload button) and tab close.
+useEventListener(window, "beforeunload", (event: BeforeUnloadEvent) => {
+  if (!store.isEditing || !store.isDirty) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 function panelOuterHeight(rowSpan: number): number {
   return rowSpan * ROW_HEIGHT_PX + (rowSpan - 1) * GRID_GAP_PX;
@@ -525,6 +598,17 @@ onBeforeRouteUpdate((to, from) => {
       destructive
       @confirm="confirmDiscard"
     />
+    <DashboardConflictDialog
+      :open="conflict !== null"
+      :latest="conflict?.latest ?? null"
+      :busy="conflictBusy"
+      @keep-editing="conflict = null"
+      @save-copy="saveConflictAsCopy"
+      @review-overwrite="reviewOverwrite"
+      @confirm-overwrite="confirmOverwrite"
+      @back="conflict = { latest: null }"
+      @discard="discardForLatest"
+    />
     <!-- Header -->
     <div class="mb-4 flex items-start justify-between gap-4 flex-wrap">
       <div class="min-w-0">
@@ -573,7 +657,7 @@ onBeforeRouteUpdate((to, from) => {
       <div class="flex items-center gap-2 flex-wrap">
         <DashboardToolbar v-if="dashboard && !isEditing" />
         <template v-if="dashboard && !isEditing && canEdit">
-          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="store.enterEdit()">
+          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" :disabled="isEnteringEdit" @click="store.enterEdit()">
             <Pencil class="h-3.5 w-3.5" />
             {{ t('ui.edit') }}
           </Button>
@@ -644,7 +728,7 @@ onBeforeRouteUpdate((to, from) => {
             size="sm"
             class="h-8 gap-1.5 text-xs"
             :disabled="isSaving || !store.isDirty || !store.editName.trim()"
-            @click="saveEdit"
+            @click="saveEdit()"
           >
             <Save class="h-3.5 w-3.5" />
             {{ isSaving ? t('ui.saving') : t('ui.save') }}
@@ -760,7 +844,7 @@ onBeforeRouteUpdate((to, from) => {
           {{ t('ui.addAPanelToStartVisualizingLogsPickASourceWriteA') }}
         </p>
       </div>
-      <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" @click="store.enterEdit()">
+      <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" :disabled="isEnteringEdit" @click="store.enterEdit()">
         <Plus class="h-4 w-4" />
         {{ t('ui.addYourFirstPanel') }}
       </Button>

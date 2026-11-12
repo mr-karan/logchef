@@ -7,7 +7,7 @@ import { i18n } from "@/i18n";
 vi.mock("@/api/apiUtils", () => ({
   apiClient: {
     get: async () => ({ status: "success", data: {
-      id: 1, name: "My dashboard", description: "", created_at: "", updated_at: "", can_edit: true,
+      id: 1, revision: 1, name: "My dashboard", description: "", created_at: "", updated_at: "", can_edit: true,
       panels: { version: 1, panels: [], layout: [] },
     } }),
   },
@@ -44,7 +44,7 @@ describe("DashboardView discard confirmation", () => {
     app.use(createPinia()).use(i18n).use(router).mount(host);
     await settle();
     button("Edit").click();
-    await nextTick();
+    await settle();
     const name = host.querySelector<HTMLInputElement>('input[aria-label="Name"]');
     if (!name) throw new Error("dashboard name was not rendered");
     name.value = "My edited dashboard";
@@ -84,6 +84,24 @@ describe("DashboardView discard confirmation", () => {
     dialogButton("Discard changes").click();
     await settle();
     expect(host.querySelector("h1")?.textContent).toContain("My dashboard");
+  });
+
+  it("blocks reload while dirty and removes the guard after discard or navigation", async () => {
+    const reload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(reload);
+    expect(reload.defaultPrevented).toBe(true);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Name"]')?.value).toBe("My edited dashboard");
+    button("Cancel").click();
+    await settle();
+    dialogButton("Discard changes").click();
+    await settle();
+    const cleanReload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanReload);
+    expect(cleanReload.defaultPrevented).toBe(false);
+    await router.push("/dashboards");
+    const afterLeaving = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(afterLeaving);
+    expect(afterLeaving.defaultPrevented).toBe(false);
   });
 
   it("confirms in-app Back once before leaving the dashboard", async () => {

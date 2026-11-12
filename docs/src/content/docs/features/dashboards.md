@@ -132,6 +132,11 @@ Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
 Changes stay local until you **Save**; **Cancel** discards them. Leaving with unsaved
 edits prompts first.
 
+If someone else saves the dashboard while you edit it, **Save** keeps your changes
+and asks what to do: **Save as copy** creates a new dashboard from your version,
+**Overwrite with mine** shows when the newer version was saved and replaces it after
+you confirm, and **Discard and load latest** drops your changes and shows theirs.
+
 A dashboard can contain up to 24 panels.
 
 ## Who can edit
