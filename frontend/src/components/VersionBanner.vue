@@ -5,19 +5,29 @@ import { useI18n } from "vue-i18n";
 import { useMetaStore } from "@/stores/meta";
 import { Button } from "@/components/ui/button";
 
+const RECHECK_INTERVAL_MS = 30_000;
+
 const meta = useMetaStore();
 const { t } = useI18n();
 const pageVersion = document.querySelector<HTMLMetaElement>('meta[name="logchef-version"]')?.content;
 const needsReload = ref(false);
+let lastCheckAt = 0;
+
+function checkVersion(force: boolean) {
+  if (needsReload.value || Date.now() - lastCheckAt < RECHECK_INTERVAL_MS) return;
+  lastCheckAt = Date.now();
+  void meta.loadMeta({ force });
+}
 
 if (pageVersion) {
   watch(() => meta.version, (version) => {
     if (version && version !== pageVersion) needsReload.value = true;
   }, { immediate: true });
-  onMounted(() => { void meta.loadMeta(); });
-  useEventListener(window, "focus", () => { void meta.loadMeta({ force: true }); });
+  onMounted(() => checkVersion(false));
+  useEventListener(window, "focus", () => checkVersion(true));
 }
 
+// A page with unsaved work registers a beforeunload guard, which this reload triggers.
 function reload() {
   window.location.reload();
 }

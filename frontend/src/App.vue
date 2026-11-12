@@ -3,7 +3,6 @@ import { Toaster } from '@/components/ui/sonner'
 import 'vue-sonner/style.css'
 import OuterApp from '@/layouts/OuterApp.vue'
 import InnerApp from '@/layouts/InnerApp.vue'
-import VersionBanner from '@/components/VersionBanner.vue'
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTitle } from '@vueuse/core'
@@ -42,10 +41,7 @@ const layout = computed(() => {
     richColors
     :visibleToasts="5"
   />
-  <div class="flex h-screen flex-col">
-    <VersionBanner />
-    <component :is="layout" class="min-h-0 flex-1">
-      <router-view />
-    </component>
-  </div>
+  <component :is="layout">
+    <router-view />
+  </component>
 </template>

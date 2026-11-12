@@ -59,6 +59,7 @@ import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
+import VersionBanner from "@/components/VersionBanner.vue";
 import { ref, watch, onMounted, computed } from "vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
@@ -226,10 +227,10 @@ const navItems = [
 </script>
 
 <template>
-  <div class="h-full w-screen flex overflow-hidden">
+  <div class="h-screen w-screen flex overflow-hidden">
     <SidebarProvider v-model:open="sidebarOpen" :defaultOpen="sidebarOpen">
       <Sidebar collapsible="icon"
-        class="flex-none z-50 h-full"
+        class="flex-none z-50 h-screen"
         :class="{ 'w-64': sidebarOpen, 'w-[72px]': !sidebarOpen }">
         <SidebarHeader>
           <SidebarMenu>
@@ -395,7 +396,8 @@ const navItems = [
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-full">
+      <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-screen">
+        <VersionBanner />
         <div
           v-if="metaStore.demoReadOnly"
           role="status"

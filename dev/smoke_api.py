@@ -204,21 +204,41 @@ if dash_id:
     names = [d["name"] for d in (r.get("data") or [])]
     check("dashboard list includes created", code == 200 and DASH_NAME in names, str(names)[:200])
 
-    # get round-trips the panel blob
+    # get round-trips the panel blob and its revision
     code, r = call("GET", f"/dashboards/{dash_id}")
     d = r.get("data", {})
     ok = code == 200 and d.get("panels", {}).get("version") == 1 and len(d["panels"]["panels"]) == 1
     check("dashboard get round-trip", ok, str(r)[:300])
+    revision = d.get("revision")
+    check("dashboard get returns an integer revision", isinstance(revision, int), str(d)[:200])
 
-    # update: rename + add a second (stat) panel
+    two_panels = {"version": 1,
+                  "layout": [layout("p1"), layout("p2", y=2, w=3, h=1)],
+                  "panels": [panel("p1", "timeseries", "5xx over time"), panel("p2", "stat", "5xx count")]}
+
+    # update: rename + add a second (stat) panel, from the revision just read
     code, r = call("PUT", f"/dashboards/{dash_id}", {
-        "name": DASH_NAME, "description": "updated by smoke",
-        "panels": {"version": 1,
-                   "layout": [layout("p1"), layout("p2", y=2, w=3, h=1)],
-                   "panels": [panel("p1", "timeseries", "5xx over time"), panel("p2", "stat", "5xx count")]},
+        "name": DASH_NAME, "description": "updated by smoke", "panels": two_panels, "revision": revision,
     })
-    ok = code == 200 and len(r.get("data", {}).get("panels", {}).get("panels", [])) == 2
-    check("dashboard update (rename + add panel)", ok, str(r)[:300])
+    saved = r.get("data", {})
+    ok = code == 200 and len(saved.get("panels", {}).get("panels", [])) == 2 and saved.get("revision") == revision + 1
+    check("dashboard update (rename + add panel) advances revision", ok, str(r)[:300])
+
+    # a PUT without a revision is refused: 428
+    code, r = call("PUT", f"/dashboards/{dash_id}", {
+        "name": DASH_NAME, "description": "no revision", "panels": two_panels,
+    })
+    check("dashboard update without revision rejected (428)", code == 428, f"code={code} {str(r)[:200]}")
+
+    # a PUT from the revision the first update replaced is stale: 409, row unchanged
+    code, r = call("PUT", f"/dashboards/{dash_id}", {
+        "name": DASH_NAME, "description": "stale", "panels": two_panels, "revision": revision,
+    })
+    check("dashboard update from stale revision rejected (409)", code == 409, f"code={code} {str(r)[:200]}")
+    code, r = call("GET", f"/dashboards/{dash_id}")
+    d = r.get("data", {})
+    ok = code == 200 and d.get("revision") == revision + 1 and d.get("description") == "updated by smoke"
+    check("dashboard unchanged after refused saves", ok, str(d)[:300])
 
     # invalid: 25 panels exceeds the max of 24 → 400
     many_panels = [panel(f"p{i}") for i in range(25)]
@@ -226,6 +246,7 @@ if dash_id:
     code, r = call("PUT", f"/dashboards/{dash_id}", {
         "name": DASH_NAME, "description": "too many",
         "panels": {"version": 1, "layout": many_layout, "panels": many_panels},
+        "revision": revision + 1,
     })
     check("dashboard 25-panel blob rejected (400)", code == 400, f"code={code} {str(r)[:200]}")
 
