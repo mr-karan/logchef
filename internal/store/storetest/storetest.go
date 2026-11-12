@@ -35,6 +35,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
+	t.Run("DashboardRevisions", func(t *testing.T) { testDashboardRevisions(t, ctx, s) })
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
@@ -595,6 +596,9 @@ func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
 	if d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
 		t.Fatalf("CreateDashboard did not populate timestamps: %+v", d)
 	}
+	if d.Revision != 1 {
+		t.Fatalf("CreateDashboard revision = %d, want 1", d.Revision)
+	}
 
 	got := verifyDashboardGetAndList(t, ctx, s, d, owner, panels)
 	verifyDashboardUpdateAndDelete(t, ctx, s, d.ID, got)
@@ -648,7 +652,10 @@ func verifyDashboardUpdateAndDelete(t *testing.T, ctx context.Context, s store.S
 	if err := s.UpdateDashboard(ctx, got); err != nil {
 		t.Fatalf("UpdateDashboard: %v", err)
 	}
-	if after, _ := s.GetDashboard(ctx, id); after.Name != "Ops v2" || string(after.PanelsJSON) != string(newPanels) {
+	if got.Revision != 2 {
+		t.Errorf("UpdateDashboard left revision %d on the model, want 2", got.Revision)
+	}
+	if after, _ := s.GetDashboard(ctx, id); after.Name != "Ops v2" || string(after.PanelsJSON) != string(newPanels) || after.Revision != 2 {
 		t.Errorf("after update = %+v", after)
 	}
 

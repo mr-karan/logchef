@@ -20,9 +20,12 @@ var (
 	// ErrDashboardForbidden indicates the caller is not authorized to view or
 	// mutate the dashboard (or a team/source its panels reference).
 	ErrDashboardForbidden = errors.New("not authorized for this dashboard")
-	// ErrDashboardConflict indicates an optimistic-concurrency precondition
-	// failed: the stored dashboard changed since the client loaded it (A3).
+	// ErrDashboardConflict means another save moved the dashboard past the
+	// revision the client loaded, so this save was not applied.
 	ErrDashboardConflict = errors.New("dashboard was modified by someone else")
+	// ErrDashboardRevisionRequired means the update body carries no revision,
+	// so the server cannot tell which copy the client edited.
+	ErrDashboardRevisionRequired = errors.New("dashboard revision is required")
 )
 
 // CreateDashboard validates and persists a new dashboard owned by the caller.
@@ -285,18 +288,13 @@ func UserCanViewDashboard(ctx context.Context, db store.StoreOps, user *models.U
 	return false, nil
 }
 
-// UpdateDashboard validates and persists changes to an existing dashboard.
-// Authorization mirrors the create path plus an edit gate and an
-// optimistic-concurrency precondition:
-//
-//   - only the creator or a global admin may edit (existing behavior);
-//   - A3: if req.UpdatedAt is set and the stored row has advanced past it, the
-//     update is rejected with ErrDashboardConflict;
-//   - B2/B4: the new panels are re-checked for team/source existence and, for
-//     non-admins, team membership.
-func UpdateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, id int, user *models.User, req *models.UpdateDashboardRequest) (*models.Dashboard, error) {
+// UpdateDashboard authorizes and saves against the client revision in one transaction.
+func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id int, user *models.User, req *models.UpdateDashboardRequest) (*models.Dashboard, error) {
 	if req == nil || user == nil {
 		return nil, ErrInvalidDashboard
+	}
+	if req.Revision == nil {
+		return nil, ErrDashboardRevisionRequired
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -306,48 +304,61 @@ func UpdateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, i
 		return nil, fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
 	}
 
-	existing, err := db.GetDashboard(ctx, id)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return nil, ErrDashboardNotFound
+	var updated *models.Dashboard
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		existing, err := tx.GetDashboard(ctx, id)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrDashboardNotFound
+			}
+			return fmt.Errorf("failed to load dashboard: %w", err)
 		}
-		log.Error("failed to load dashboard for update", "dashboard_id", id, "error", err)
-		return nil, fmt.Errorf("failed to load dashboard: %w", err)
-	}
+		if !UserCanEditDashboard(existing, user) {
+			return ErrDashboardForbidden
+		}
+		if err := verifyDashboardPanelRefs(ctx, tx, user, req.Panels); err != nil {
+			return err
+		}
 
-	if !UserCanEditDashboard(existing, user) {
-		return nil, ErrDashboardForbidden
-	}
+		existing.Name = name
+		existing.Description = strings.TrimSpace(req.Description)
+		existing.PanelsJSON = req.Panels
+		existing.Revision = *req.Revision
+		if err := tx.UpdateDashboard(ctx, existing); err != nil {
+			switch {
+			case models.IsConflict(err):
+				return ErrDashboardConflict
+			case models.IsNotFound(err):
+				return ErrDashboardNotFound
+			default:
+				return fmt.Errorf("failed to update dashboard: %w", err)
+			}
+		}
 
-	// A3: reject a stale write. Only enforced when the client supplies a
-	// precondition, so pre-A3 clients keep working (last-writer-wins).
-	if !req.UpdatedAt.IsZero() && existing.UpdatedAt.After(req.UpdatedAt) {
-		return nil, ErrDashboardConflict
-	}
-
-	if err := verifyDashboardPanelRefs(ctx, db, user, req.Panels); err != nil {
+		updated, err = tx.GetDashboard(ctx, id)
+		if err != nil {
+			return fmt.Errorf("failed to reload dashboard: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		if !isDashboardClientError(err) {
+			log.Error("failed to update dashboard", "dashboard_id", id, "error", err)
+		}
 		return nil, err
 	}
-
-	existing.Name = name
-	existing.Description = strings.TrimSpace(req.Description)
-	existing.PanelsJSON = req.Panels
-	if err := db.UpdateDashboard(ctx, existing); err != nil {
-		if models.IsNotFound(err) {
-			return nil, ErrDashboardNotFound
-		}
-		log.Error("failed to update dashboard", "dashboard_id", id, "error", err)
-		return nil, fmt.Errorf("failed to update dashboard: %w", err)
-	}
-
-	updated, err := db.GetDashboard(ctx, id)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return nil, ErrDashboardNotFound
-		}
-		return nil, fmt.Errorf("failed to reload dashboard: %w", err)
-	}
 	return updated, nil
+}
+
+// isDashboardClientError reports whether err is one the caller caused, so the
+// update path logs only server-side failures.
+func isDashboardClientError(err error) bool {
+	for _, sentinel := range []error{ErrDashboardNotFound, ErrDashboardForbidden, ErrDashboardConflict, ErrInvalidDashboard} {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteDashboard removes a dashboard by id.

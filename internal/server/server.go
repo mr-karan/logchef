@@ -220,7 +220,7 @@ func New(opts ServerOptions) *Server {
 		s.localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 	}
 
-	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())
+	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath(), opts.Version)
 	if err != nil {
 		log.Warn("web UI unavailable", "error", err)
 	}

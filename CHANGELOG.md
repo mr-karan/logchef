@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+- Dashboard updates now require the `revision` returned by GET, create, or the
+  previous successful save. Scripts must send that integer in each PUT body.
+  Missing revisions return 428 with a reload message. Stale revisions return
+  409 without changing the dashboard. The server ignores `updated_at` in PUT
+  bodies. Reload browser tabs left open before upgrading.
+- Startup migrations add the revision counter to existing dashboards, starting
+  at 1, on both SQLite and Postgres.
+
+### Fixed
+- Dashboard saves use an atomic revision check so two edits from the same
+  revision cannot overwrite each other, including saves within one second.
+
+### Added
+- A banner asks you to reload when the server version differs from the version
+  that served the page. The check runs on load and window focus. It preserves
+  unsaved edits and never reloads automatically.
+
 ## [2.6.1] - 2026-10-29
 
 This patch fixes the Explorer time range picker and makes Ask Chef count

@@ -60,6 +60,7 @@ function makeDashboard(overrides: Partial<Dashboard> = {}): Dashboard {
     panels: emptyPanels(),
     created_at: "2026-07-08T00:00:00Z",
     updated_at: "2026-07-08T00:00:00Z",
+    revision: 1,
     can_edit: true,
     ...overrides,
   };
@@ -440,25 +441,38 @@ describe("dashboards store — #119/#120 hardening", () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  // --- A3: optimistic-concurrency precondition ----------------------------
-  it("saveEdit sends the branched-from updated_at as a precondition (#119 A3)", async () => {
-    const store = await loadEditableDashboard(makeDashboard({ id: 1, updated_at: "2026-07-08T00:00:00Z" }));
+  it("sends the revision captured at edit start despite a later read, then adopts the saved revision", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ revision: 7 }));
     store.enterEdit();
-    store.upsertDraftPanel(tablePanel());
-    mocks.update.mockResolvedValue({ status: "success", data: makeDashboard({ id: 1, updated_at: "2026-07-08T02:00:00Z" }) });
+    store.setDraftName("My edit");
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 8 }) });
+    await store.loadDashboard(3);
+    mocks.update.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 9 }) });
     await store.saveEdit();
-    const [, body] = mocks.update.mock.calls[0];
-    expect(body.updated_at).toBe("2026-07-08T00:00:00Z");
+    expect(mocks.update.mock.calls[0][1].revision).toBe(7);
+    expect(mocks.update.mock.calls[0][1]).not.toHaveProperty("updated_at");
+    expect(store.current?.revision).toBe(9);
+    store.enterEdit();
+    await store.saveEdit();
+    expect(mocks.update.mock.calls[1][1].revision).toBe(9);
   });
 
-  it("saveEdit surfaces a friendly conflict message on a 409 ConflictError (#119 A3)", async () => {
-    const store = await loadEditableDashboard(makeDashboard({ id: 1 }));
+  it.each([
+    ["ConflictError", "modified", /changed by someone else/i],
+    ["ValidationError", "This save does not say which revision of the dashboard it changes. Reload the page and apply your changes again.", /Reload the page/],
+  ])("preserves edits and explains a refused save (%s)", async (error_type, message, expected) => {
+    const store = await loadEditableDashboard();
     store.enterEdit();
-    store.upsertDraftPanel(tablePanel());
-    mocks.update.mockResolvedValue({ status: "error", error_type: "ConflictError", message: "modified" });
+    store.setDraftName("Unsaved edit");
+    mocks.update.mockRejectedValue({ status: "error", error_type, message });
     const result = await store.saveEdit();
     expect(result.success).toBe(false);
-    expect(result.error?.message).toMatch(/changed by someone else/i);
+    expect(result.error?.message).toMatch(expected);
+    expect(store.isEditing).toBe(true);
+    expect(store.editName).toBe("Unsaved edit");
+    expect(store.current?.revision).toBe(1);
+    await store.saveEdit();
+    expect(mocks.update.mock.calls[1][1].revision).toBe(1);
   });
 
   // --- A4: native LogsQL dispatch -----------------------------------------

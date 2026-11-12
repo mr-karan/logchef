@@ -312,7 +312,7 @@ type Querier interface {
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
-	// Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+	// Compare-and-swap on the client revision; no row means missing or stale.
 	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)

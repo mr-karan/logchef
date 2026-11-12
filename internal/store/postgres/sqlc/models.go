@@ -102,6 +102,7 @@ type Dashboard struct {
 	CreatedBy   pgtype.Int8        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Revision    int64              `json:"revision"`
 }
 
 type ExportJob struct {

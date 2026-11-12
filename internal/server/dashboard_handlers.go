@@ -106,9 +106,9 @@ func (s *Server) handleGetDashboard(c fiber.Ctx) error {
 
 // handleUpdateDashboard updates a dashboard. Editing is allowed only for the
 // creator or a global admin; the new panels are additionally checked for
-// team/source existence and (for non-admins) team membership (B2/B4). When the
-// client sends the updated_at it loaded, a stale write is rejected with 409
-// (A3).
+// team/source existence and (for non-admins) team membership (B2/B4). The body
+// must carry the revision the client loaded: without it the answer is 428,
+// and when another save already moved the revision it is 409.
 func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 	user := currentUser(c)
 
@@ -129,6 +129,8 @@ func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusBadRequest, updateErr.Error(), models.ValidationErrorType)
 		case errors.Is(updateErr, core.ErrDashboardForbidden):
 			return SendErrorWithType(c, fiber.StatusForbidden, updateErr.Error(), models.AuthorizationErrorType)
+		case errors.Is(updateErr, core.ErrDashboardRevisionRequired):
+			return SendErrorWithType(c, fiber.StatusPreconditionRequired, "This save does not say which revision of the dashboard it changes. Reload the page and apply your changes again.", models.ValidationErrorType)
 		case errors.Is(updateErr, core.ErrDashboardConflict):
 			return SendErrorWithType(c, fiber.StatusConflict, "Dashboard was modified by someone else; reload and reapply your changes", models.ConflictErrorType)
 		case errors.Is(updateErr, core.ErrDashboardNotFound):

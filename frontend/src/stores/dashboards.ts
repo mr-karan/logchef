@@ -164,12 +164,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // if its token is still current; clearCurrent/unmount and newer loads bump it
   // so a slow/late GET can't repopulate the store for a dashboard we left.
   let loadToken = 0;
-  // Non-reactive: identity + optimistic-concurrency baseline captured on
-  // entering edit. `editDashboardId` guards saveEdit from ever PUTting one
-  // dashboard's draft onto another id; `editBaseUpdatedAt` is the precondition
-  // sent to the server for last-writer-wins conflict detection.
+  // Capture the edited row and revision before a background read can replace current.
   let editDashboardId: number | null = null;
-  let editBaseUpdatedAt: string | null = null;
+  let editBaseRevision: number | null = null;
 
   const dashboards = computed(() => state.data.value.dashboards);
   const current = computed(() => state.data.value.current);
@@ -577,7 +574,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Pin the dashboard this draft belongs to, and the version we branched from,
     // for the save-time identity guard (#119 A1) and concurrency check (A3).
     editDashboardId = dashboard.id;
-    editBaseUpdatedAt = dashboard.updated_at ?? null;
+    editBaseRevision = dashboard.revision;
   }
 
   // Leaves edit mode and drops the draft and its identity/concurrency baselines.
@@ -587,7 +584,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     state.data.value.editSnapshotJson = null;
     state.data.value.previewState = null;
     editDashboardId = null;
-    editBaseUpdatedAt = null;
+    editBaseRevision = null;
   }
 
   function cancelEdit() {
@@ -769,7 +766,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   async function saveEdit() {
     const dashboard = state.data.value.current;
     const draft = state.data.value.editDraft;
-    if (!dashboard || !draft) {
+    if (!dashboard || !draft || editBaseRevision === null) {
       return { success: false, error: { message: "Nothing to save" } };
     }
     // Identity guard (#119 A1): the draft belongs to whichever dashboard was
@@ -795,16 +792,12 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (validationError) {
       return { success: false, error: { message: validationError } };
     }
-    // Optimistic-concurrency precondition (#119 A3): send the updated_at we
-    // branched from so the server can reject a last-writer-wins clobber with a
-    // 409. Sent as an extension field so it works whether or not the shared
-    // request type has adopted it yet; older servers ignore the unknown field.
-    const body: UpdateDashboardRequest & { updated_at?: string | null } = {
+    const body: UpdateDashboardRequest = {
       name,
       description: state.data.value.editDescription.trim(),
       panels: draft,
+      revision: editBaseRevision,
     };
-    if (editBaseUpdatedAt) body.updated_at = editBaseUpdatedAt;
     const result = await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.update(dashboard.id, body),
       operationKey: "saveDashboard",

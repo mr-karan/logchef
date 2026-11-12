@@ -103,6 +103,7 @@ type Dashboard struct {
 	CreatedBy   sql.NullInt64  `json:"created_by"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
+	Revision    int64          `json:"revision"`
 }
 
 type ExportJob struct {
