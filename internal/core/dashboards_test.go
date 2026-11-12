@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
@@ -225,7 +224,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	}
 
 	// Editing to point at team-b (a foreign team) must be forbidden.
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID)})
+	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
 	if !errors.Is(err, ErrDashboardForbidden) {
 		t.Fatalf("update to foreign team: err = %v, want ErrDashboardForbidden", err)
 	}
@@ -236,7 +235,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	if err := db.UpdateUser(ctx, admin); err != nil {
 		t.Fatalf("UpdateUser(admin): %v", err)
 	}
-	if _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID)}); err != nil {
+	if _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
 		t.Fatalf("admin update to team-b: %v", err)
 	}
 }
@@ -440,9 +439,10 @@ func TestRedactDashboardPanelsForViewer(t *testing.T) {
 	}
 }
 
-// TestUpdateDashboardConflict covers A3: a stale updated_at precondition is
-// rejected with ErrDashboardConflict, while a matching or absent one proceeds.
-func TestUpdateDashboardConflict(t *testing.T) {
+// TestUpdateDashboardRevisions covers the save contract: a body without a
+// revision is refused, the loaded revision wins once and moves the row on, and
+// a second save from that same revision is a conflict that writes nothing.
+func TestUpdateDashboardRevisions(t *testing.T) {
 	db := newTestDB(t)
 	log := discardLogger()
 	ctx := context.Background()
@@ -453,32 +453,40 @@ func TestUpdateDashboardConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDashboard: %v", err)
 	}
-
-	// A precondition older than the stored row is a stale write -> conflict.
-	stale := dash.UpdatedAt.Add(-time.Minute)
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
-		Name: "d2", Panels: panelBlob(team.ID, src.ID), UpdatedAt: stale,
-	})
-	if !errors.Is(err, ErrDashboardConflict) {
-		t.Fatalf("stale update: err = %v, want ErrDashboardConflict", err)
+	if dash.Revision != 1 {
+		t.Fatalf("new dashboard revision = %d, want 1", dash.Revision)
 	}
 
-	// The matching precondition proceeds and returns a fresh updated_at.
+	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
+		Name: "d2", Panels: panelBlob(team.ID, src.ID),
+	})
+	if !errors.Is(err, ErrDashboardRevisionRequired) {
+		t.Fatalf("update without a revision: err = %v, want ErrDashboardRevisionRequired", err)
+	}
+
+	loaded := dash.Revision
 	updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
-		Name: "d3", Panels: panelBlob(team.ID, src.ID), UpdatedAt: dash.UpdatedAt,
+		Name: "d3", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if err != nil {
-		t.Fatalf("matching-precondition update: %v", err)
+		t.Fatalf("update from the loaded revision: %v", err)
 	}
-	if updated.Name != "d3" {
-		t.Fatalf("update did not apply: name = %q", updated.Name)
+	if updated.Name != "d3" || updated.Revision != 2 {
+		t.Fatalf("update returned name %q revision %d, want d3 at revision 2", updated.Name, updated.Revision)
 	}
 
-	// A zero precondition disables the check (pre-A3 client) and still works.
-	if _, err := UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
-		Name: "d4", Panels: panelBlob(team.ID, src.ID),
-	}); err != nil {
-		t.Fatalf("no-precondition update: %v", err)
+	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
+		Name: "d4", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
+	})
+	if !errors.Is(err, ErrDashboardConflict) {
+		t.Fatalf("second update from the same revision: err = %v, want ErrDashboardConflict", err)
+	}
+	stored, err := db.GetDashboard(ctx, dash.ID)
+	if err != nil {
+		t.Fatalf("GetDashboard: %v", err)
+	}
+	if stored.Name != "d3" || stored.Revision != 2 {
+		t.Fatalf("stored row after the refused update: name %q revision %d, want d3 at revision 2", stored.Name, stored.Revision)
 	}
 }
 

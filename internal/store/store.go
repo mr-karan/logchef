@@ -133,6 +133,11 @@ type DashboardStore interface {
 	CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error
 	GetDashboard(ctx context.Context, id int) (*models.Dashboard, error)
 	ListDashboards(ctx context.Context) ([]*models.Dashboard, error)
+	// UpdateDashboard writes name, description and panels with a
+	// compare-and-swap on dashboard.Revision, the revision the caller loaded.
+	// On success dashboard.Revision is the new revision. When the stored
+	// revision differs (another save won) it returns models.ErrConflict and
+	// writes nothing.
 	UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) error
 	DeleteDashboard(ctx context.Context, id int) error
 }

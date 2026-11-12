@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -157,7 +156,7 @@ func TestHandleUpdateDashboardAuthz(t *testing.T) {
 	}
 
 	path := "/dashboards/" + strconv.Itoa(dash.ID)
-	body := `{"name":"Ops v2","panels":{"version":1,"layout":[],"panels":[]}}`
+	body := `{"name":"Ops v2","revision":1,"panels":{"version":1,"layout":[],"panels":[]}}`
 
 	// Stranger (non-creator, non-admin) is forbidden from updating and deleting.
 	for _, m := range []struct {
@@ -205,13 +204,15 @@ func TestHandleUpdateDashboardAuthz(t *testing.T) {
 	}
 }
 
-// panelBody returns a valid create/update body whose single panel targets the
+// updateBody returns a valid update body whose single panel targets the
 // given team/source.
-func panelBody(name string, teamID models.TeamID, sourceID models.SourceID) string {
-	return fmt.Sprintf(
-		`{"name":%q,"panels":{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"stat","team_id":%d,"source_id":%d,"query":"x","query_language":"logchefql"}]}}`,
-		name, int(teamID), int(sourceID),
-	)
+func updateBody(t *testing.T, name string, revision *int, teamID models.TeamID, sourceID models.SourceID) string {
+	t.Helper()
+	body, err := json.Marshal(models.UpdateDashboardRequest{Name: name, Panels: panelBlobJSON(teamID, sourceID), Revision: revision})
+	if err != nil {
+		t.Fatalf("marshal update body: %v", err)
+	}
+	return string(body)
 }
 
 // TestHandleGetDashboardForbidden verifies the B1 visibility gate: a user who is
@@ -365,9 +366,11 @@ func TestHandleGetDashboardRedaction(t *testing.T) {
 	}
 }
 
-// TestHandleUpdateDashboardConflict verifies A3: a stale updated_at precondition
-// yields 409.
-func TestHandleUpdateDashboardConflict(t *testing.T) {
+// TestHandleUpdateDashboardRevision verifies the save contract over HTTP: no
+// revision is 428 with the reload message, the loaded revision saves once and
+// the response carries the new one, and a second save from the same revision
+// is 409 with the conflict error type. A refused save leaves the row as it was.
+func TestHandleUpdateDashboardRevision(t *testing.T) {
 	s := newDashboardTestServer(t)
 	creator := mkTestUser(t, s.store, "owner@test.dev", models.UserRoleMember)
 	team, src := mkTestTeam(t, s.store, "team", creator)
@@ -380,34 +383,61 @@ func TestHandleUpdateDashboardConflict(t *testing.T) {
 	app := fiber.New()
 	withUser(app, http.MethodPut, "/dashboards/:dashboardID", creator, s.handleUpdateDashboard)
 	path := "/dashboards/" + strconv.Itoa(dash.ID)
+	put := func(body string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("app.Test: %v", err)
+		}
+		defer resp.Body.Close()
+		var decoded map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp.StatusCode, decoded
+	}
+	stored := func() *models.Dashboard {
+		t.Helper()
+		d, err := s.store.GetDashboard(context.Background(), dash.ID)
+		if err != nil {
+			t.Fatalf("GetDashboard: %v", err)
+		}
+		return d
+	}
 
-	// Stale precondition (a minute before the stored row) -> 409.
-	stale := dash.UpdatedAt.Add(-time.Minute).UTC().Format(time.RFC3339)
-	staleBody := fmt.Sprintf(
-		`{"name":"Ops v2","updated_at":%q,"panels":{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"stat","team_id":%d,"source_id":%d,"query":"x","query_language":"logchefql"}]}}`,
-		stale, int(team.ID), int(src.ID),
-	)
-	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader(staleBody))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := app.Test(req)
-	if err != nil {
-		t.Fatalf("app.Test: %v", err)
+	for _, name := range []string{"stale body one", "stale body two"} {
+		status, resp := put(updateBody(t, name, nil, team.ID, src.ID))
+		if status != http.StatusPreconditionRequired || !strings.Contains(fmt.Sprint(resp["message"]), "Reload the page") {
+			t.Fatalf("update without a revision: status %d body %v", status, resp)
+		}
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("stale update: status = %d, want 409", resp.StatusCode)
+	status, resp := put(updateBody(t, "Ops v2", nil, team.ID, src.ID))
+	if status != http.StatusPreconditionRequired || !strings.Contains(fmt.Sprint(resp["message"]), "Reload the page") {
+		t.Fatalf("update without a revision: status %d body %v, want 428 and the reload message", status, resp)
+	}
+	if d := stored(); d.Name != "Ops" || d.Revision != 1 {
+		t.Fatalf("row changed after a 428: name %q revision %d", d.Name, d.Revision)
 	}
 
-	// No precondition -> succeeds (pre-A3 client contract preserved).
-	req = httptest.NewRequest(http.MethodPut, path, strings.NewReader(panelBody("Ops v3", team.ID, src.ID)))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = app.Test(req)
-	if err != nil {
-		t.Fatalf("app.Test: %v", err)
+	loaded := 1
+	body := updateBody(t, "Ops v2", &loaded, team.ID, src.ID)
+	body = body[:len(body)-1] + `,"updated_at":"2000-01-01T00:00:00Z"}`
+	status, resp = put(body)
+	if status != http.StatusOK {
+		t.Fatalf("update from the loaded revision: status %d body %v, want 200", status, resp)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("no-precondition update: status = %d, want 200", resp.StatusCode)
+	if data, _ := resp["data"].(map[string]any); data["revision"] != float64(2) {
+		t.Fatalf("response revision = %v, want 2", data["revision"])
+	}
+
+	status, resp = put(updateBody(t, "Ops v3", &loaded, team.ID, src.ID))
+	if status != http.StatusConflict || resp["error_type"] != string(models.ConflictErrorType) {
+		t.Fatalf("second update from the same revision: status %d body %v, want 409 ConflictError", status, resp)
+	}
+	if d := stored(); d.Name != "Ops v2" || d.Revision != 2 {
+		t.Fatalf("row after a 409: name %q revision %d, want Ops v2 at revision 2", d.Name, d.Revision)
 	}
 }
 

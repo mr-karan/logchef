@@ -1343,6 +1343,7 @@ SELECT
     d.created_by,
     d.created_at,
     d.updated_at,
+    d.revision,
     u.email AS created_by_email,
     u.full_name AS created_by_name
 FROM dashboards d
@@ -1358,6 +1359,7 @@ type GetDashboardRow struct {
 	CreatedBy      pgtype.Int8        `json:"created_by"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Revision       int64              `json:"revision"`
 	CreatedByEmail pgtype.Text        `json:"created_by_email"`
 	CreatedByName  pgtype.Text        `json:"created_by_name"`
 }
@@ -1374,6 +1376,7 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 		&i.CreatedByEmail,
 		&i.CreatedByName,
 	)
@@ -2723,6 +2726,7 @@ SELECT
     d.created_by,
     d.created_at,
     d.updated_at,
+    d.revision,
     u.email AS created_by_email,
     u.full_name AS created_by_name
 FROM dashboards d
@@ -2738,6 +2742,7 @@ type ListDashboardsRow struct {
 	CreatedBy      pgtype.Int8        `json:"created_by"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Revision       int64              `json:"revision"`
 	CreatedByEmail pgtype.Text        `json:"created_by_email"`
 	CreatedByName  pgtype.Text        `json:"created_by_name"`
 }
@@ -2761,6 +2766,7 @@ func (q *Queries) ListDashboards(ctx context.Context) ([]ListDashboardsRow, erro
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Revision,
 			&i.CreatedByEmail,
 			&i.CreatedByName,
 		); err != nil {
@@ -4470,9 +4476,10 @@ UPDATE dashboards
 SET name = $1,
     description = $2,
     panels_json = $3,
+    revision = revision + 1,
     updated_at = now()
-WHERE id = $4
-RETURNING id
+WHERE id = $4 AND revision = $5
+RETURNING revision
 `
 
 type UpdateDashboardParams struct {
@@ -4480,19 +4487,21 @@ type UpdateDashboardParams struct {
 	Description pgtype.Text `json:"description"`
 	PanelsJson  string      `json:"panels_json"`
 	ID          int64       `json:"id"`
+	Revision    int64       `json:"revision"`
 }
 
-// Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+// Compare-and-swap on the client revision; no row means missing or stale.
 func (q *Queries) UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error) {
 	row := q.db.QueryRow(ctx, updateDashboard,
 		arg.Name,
 		arg.Description,
 		arg.PanelsJson,
 		arg.ID,
+		arg.Revision,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
 }
 
 const updateExportJobRunning = `-- name: UpdateExportJobRunning :one

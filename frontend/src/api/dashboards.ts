@@ -89,6 +89,7 @@ export interface Dashboard {
   created_by_email?: string;
   created_at: string;
   updated_at: string;
+  revision: number;
   can_edit?: boolean;
   /** Set on list when the stored panel blob is unreadable; `panels` is then empty. */
   panels_corrupt?: boolean;
@@ -101,6 +102,7 @@ export interface CreateDashboardRequest {
 }
 
 export interface UpdateDashboardRequest {
+  revision: number;
   name: string;
   description: string;
   panels: DashboardPanels;

@@ -226,10 +226,10 @@ const navItems = [
 </script>
 
 <template>
-  <div class="h-screen w-screen flex overflow-hidden">
+  <div class="h-full w-screen flex overflow-hidden">
     <SidebarProvider v-model:open="sidebarOpen" :defaultOpen="sidebarOpen">
       <Sidebar collapsible="icon"
-        class="flex-none z-50 h-screen"
+        class="flex-none z-50 h-full"
         :class="{ 'w-64': sidebarOpen, 'w-[72px]': !sidebarOpen }">
         <SidebarHeader>
           <SidebarMenu>
@@ -395,7 +395,7 @@ const navItems = [
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-screen">
+      <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-full">
         <div
           v-if="metaStore.demoReadOnly"
           role="status"

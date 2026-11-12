@@ -33,10 +33,11 @@ func newSPATestServer(t *testing.T, frontendURL string) *Server {
 		"assets/app.js": {Data: []byte("console.log(1)")},
 	}
 	s := New(ServerOptions{
-		Config: &config.Config{Server: config.ServerConfig{FrontendURL: frontendURL}},
-		SQLite: store,
-		FS:     http.FS(ui),
-		Logger: logger,
+		Version: `v2.7.0-"<test>`,
+		Config:  &config.Config{Server: config.ServerConfig{FrontendURL: frontendURL}},
+		SQLite:  store,
+		FS:      http.FS(ui),
+		Logger:  logger,
 	})
 	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 	return s
@@ -73,6 +74,9 @@ func TestSPAServesIndexWithConfiguredBaseHref(t *testing.T) {
 			status, body := getSPA(t, s, path)
 			if status != http.StatusOK {
 				t.Errorf("frontend_url=%q GET %s: status %d, want 200", tc.frontendURL, path, status)
+			}
+			if !strings.Contains(body, `<meta name="logchef-version" content="v2.7.0-&#34;&lt;test&gt;" />`) {
+				t.Errorf("GET %s lacks escaped version stamp: %s", path, body)
 			}
 			if !strings.Contains(body, tc.wantBase) {
 				t.Errorf("frontend_url=%q GET %s: body %q lacks %s", tc.frontendURL, path, body, tc.wantBase)

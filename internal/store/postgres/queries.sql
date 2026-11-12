@@ -977,6 +977,7 @@ SELECT
     d.created_by,
     d.created_at,
     d.updated_at,
+    d.revision,
     u.email AS created_by_email,
     u.full_name AS created_by_name
 FROM dashboards d
@@ -994,6 +995,7 @@ SELECT
     d.created_by,
     d.created_at,
     d.updated_at,
+    d.revision,
     u.email AS created_by_email,
     u.full_name AS created_by_name
 FROM dashboards d
@@ -1001,14 +1003,15 @@ LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC;
 
 -- name: UpdateDashboard :one
--- Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+-- Compare-and-swap on the client revision; no row means missing or stale.
 UPDATE dashboards
 SET name = $1,
     description = $2,
     panels_json = $3,
+    revision = revision + 1,
     updated_at = now()
-WHERE id = $4
-RETURNING id;
+WHERE id = $4 AND revision = $5
+RETURNING revision;
 
 -- name: DeleteDashboard :one
 -- Delete a dashboard; RETURNING lets callers detect not-found.

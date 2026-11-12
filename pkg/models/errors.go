@@ -59,7 +59,8 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrConflict is returned when a write violates a uniqueness or other
 	// constraint (e.g. a duplicate key, or the one-personal-collection-per-user
-	// partial index).
+	// partial index), or when a compare-and-swap finds that another write
+	// already moved the row.
 	ErrConflict = errors.New("conflict")
 	// ErrUserNotFound is a not-found specialized for users; it wraps ErrNotFound
 	// so errors.Is(err, ErrNotFound) holds.

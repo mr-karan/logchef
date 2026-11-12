@@ -1,4 +1,5 @@
 {
+  "ui.serverUpdated": "Logchef se ha actualizado. Recarga la página para continuar.",
   "queryEditor.unknownField": "Campo desconocido «{field}»",
   "queryEditor.syntaxError": "Sintaxis de LogchefQL no válida: {message}",
   "queryEditor.invalidSyntax": "Sintaxis de LogchefQL no válida",

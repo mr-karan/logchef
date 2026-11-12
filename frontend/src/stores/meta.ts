@@ -88,8 +88,8 @@ export const useMetaStore = defineStore("meta", () => {
   const error = computed(() => state.error.value);
 
   // Load server metadata
-  async function loadMeta() {
-    if (isInitialized.value) {
+  async function loadMeta({ force = false }: { force?: boolean } = {}) {
+    if (isInitialized.value && !force) {
       return { success: true, message: "Meta already loaded" };
     }
 

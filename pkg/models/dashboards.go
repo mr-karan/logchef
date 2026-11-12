@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // Dashboard is a saved grid of visualization panels. The full panel layout,
@@ -17,6 +16,9 @@ type Dashboard struct {
 	Description string          `json:"description" db:"description"`
 	PanelsJSON  json.RawMessage `json:"panels" db:"panels_json"`
 	CreatedBy   *UserID         `json:"created_by,omitempty" db:"created_by"`
+	// Revision counts saves, from 1. Every update is a compare-and-swap on the
+	// revision the client loaded, so two saves from one revision cannot both win.
+	Revision int `json:"revision" db:"revision"`
 	Timestamps
 	// CreatedByName / CreatedByEmail identify the dashboard's creator for
 	// display. Populated on list (LEFT JOIN users); empty for dashboards whose
@@ -52,11 +54,10 @@ type UpdateDashboardRequest struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Panels      json.RawMessage `json:"panels"`
-	// UpdatedAt is an optimistic-concurrency precondition (finding A3): the
-	// updated_at the client loaded. When present, the update is rejected with a
-	// conflict if the stored row has advanced past it. Zero value disables the
-	// check (last-writer-wins), preserving the pre-A3 contract for older clients.
-	UpdatedAt time.Time `json:"updated_at"`
+	// Revision is the dashboard revision the client loaded. It is required: a
+	// body without it is refused, and a revision that no longer matches the
+	// stored row is a conflict. The server ignores updated_at in the body.
+	Revision *int `json:"revision"`
 }
 
 // Dashboard panel-blob limits and allowed values, per the approved #56 design.

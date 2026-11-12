@@ -1,4 +1,5 @@
 {
+  "ui.serverUpdated": "Logchef अपडेट हो गया है। जारी रखने के लिए पेज फिर से लोड करें।",
   "queryEditor.unknownField": "अज्ञात फ़ील्ड \"{field}\"",
   "queryEditor.syntaxError": "अमान्य LogchefQL सिंटैक्स: {message}",
   "queryEditor.invalidSyntax": "अमान्य LogchefQL सिंटैक्स",

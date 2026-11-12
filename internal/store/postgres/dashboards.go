@@ -53,6 +53,7 @@ func (s *Store) GetDashboard(ctx context.Context, id int) (*models.Dashboard, er
 		Description: textStr(row.Description),
 		PanelsJSON:  json.RawMessage(row.PanelsJson),
 		CreatedBy:   userIDPtr(row.CreatedBy),
+		Revision:    int(row.Revision),
 		Timestamps: models.Timestamps{
 			CreatedAt: row.CreatedAt.Time,
 			UpdatedAt: row.UpdatedAt.Time,
@@ -79,6 +80,7 @@ func (s *Store) ListDashboards(ctx context.Context) ([]*models.Dashboard, error)
 			Description: textStr(r.Description),
 			PanelsJSON:  json.RawMessage(r.PanelsJson),
 			CreatedBy:   userIDPtr(r.CreatedBy),
+			Revision:    int(r.Revision),
 			Timestamps: models.Timestamps{
 				CreatedAt: r.CreatedAt.Time,
 				UpdatedAt: r.UpdatedAt.Time,
@@ -90,25 +92,32 @@ func (s *Store) ListDashboards(ctx context.Context) ([]*models.Dashboard, error)
 	return dashboards, nil
 }
 
-// UpdateDashboard overwrites a dashboard's mutable fields. Returns
+// UpdateDashboard overwrites a dashboard's mutable fields when the stored
+// revision still equals dashboard.Revision, and advances dashboard.Revision.
+// Returns models.ErrConflict when another save already moved the revision and
 // models.ErrNotFound when the id does not exist.
 func (s *Store) UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) error {
 	if dashboard == nil {
 		return fmt.Errorf("dashboard payload is required")
 	}
-	_, err := s.q.UpdateDashboard(ctx, sqlc.UpdateDashboardParams{
+	revision, err := s.q.UpdateDashboard(ctx, sqlc.UpdateDashboardParams{
 		Name:        dashboard.Name,
 		Description: text(dashboard.Description),
 		PanelsJson:  string(dashboard.PanelsJSON),
 		ID:          int64(dashboard.ID),
+		Revision:    int64(dashboard.Revision),
 	})
-	if err != nil {
-		if notFound(err) {
-			return models.ErrNotFound
+	if notFound(err) {
+		if _, getErr := s.GetDashboard(ctx, dashboard.ID); getErr != nil {
+			return getErr
 		}
+		return fmt.Errorf("error updating dashboard %d at revision %d: %w", dashboard.ID, dashboard.Revision, models.ErrConflict)
+	}
+	if err != nil {
 		s.log.Error("failed to update dashboard", "error", err, "dashboard_id", dashboard.ID)
 		return fmt.Errorf("error updating dashboard: %w", err)
 	}
+	dashboard.Revision = int(revision)
 	return nil
 }
 

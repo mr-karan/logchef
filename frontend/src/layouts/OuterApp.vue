@@ -40,7 +40,7 @@ const tooltipText = computed(() => {
 </script>
 
 <template>
-  <div class="min-h-screen relative">
+  <div class="min-h-full relative">
     <!-- Theme Switcher -->
     <div class="absolute top-4 right-4">
       <TooltipProvider>
