@@ -4,8 +4,8 @@ description: Save queries to your Library and share them with teammates through 
 ---
 
 Your **Library** holds saved queries; **collections** are shared playlists for organizing
-them. Members run queries, editors change the shared query, and owners manage the
-collection, but a collection never grants access to log data.
+them. Members run queries, editors change the queries the collection manages, and owners
+manage the collection, but a collection never grants access to log data.
 
 Open the Library from the sidebar. Collections sit in the left rail; selecting one shows its
 queries, members, and shared teams on the right.
@@ -40,16 +40,40 @@ Create a collection with **New** in the Library rail, then **Invite** teammates 
 
 Shared collections have three roles:
 
-| Role | Read &amp; run | Add/remove items | Edit the queries | Manage members and teams | Delete collection |
-|------|:----------:|:----------------:|:----------------:|:------------------------:|:-----------------:|
+| Role | Read &amp; run | Pin and unpin | Edit managed queries | Manage members and teams | Delete collection |
+|------|:----------:|:-------------:|:--------------------:|:------------------------:|:-----------------:|
 | **Member** | ✓ | ✓ | — | — | — |
 | **Editor** | ✓ | ✓ | ✓ | — | — |
 | **Owner**  | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Running, pinning, and editing always also require **source access**: a role in a collection
 never grants access to the underlying logs. A query you can't run shows with a lock icon.
-Removing an item from a collection needs no source access, so participants can unpin a
+Removing a pin from a collection needs no source access, so participants can unpin a
 locked query.
+
+## Pins and managed links
+
+A query sits in a collection through a link, and a link has one of two kinds.
+
+- A **pin** is a bookmark. It lists the query for the collection's participants and grants
+  nothing. Any participant with source access can pin a query, and any participant can
+  unpin it.
+- A **managed** link hands the query over to the collection. The collection's owners and
+  editors can edit the query. Only the query's **creator** or a **global admin** can create
+  a managed link, turn a pin into one, turn one back into a pin, or remove it. The creator
+  must take part in the collection; an admin needs no part in it to change a link's kind.
+
+When you save a query into a shared collection, or add one you created, the dialog shows
+**Collection editors can edit**, on by default. Leave it on for a managed link; switch it
+off for a pin. Queries you did not create are always pinned. Personal collections take
+pins only. The collection view shows the kind next to each query, and the creator or an
+admin can switch it from the row menu. Moving a query to another collection keeps the
+link's kind, except into a personal collection, where it becomes a pin.
+
+A managed link hands the list of editors to the collection's owners: they can appoint more
+editors later without asking the creator. Removing the link ends that delegation for
+everyone, which is why it needs the same authority that created it. An owner who wants a
+managed query gone asks its creator or an admin, or deletes the collection.
 
 ## Share with a team
 
@@ -87,7 +111,8 @@ A saved query can be edited by:
 
 1. its **creator**,
 2. a **global admin**, or
-3. an **owner or editor** of a shared collection that contains it (still requiring source access).
+3. an **owner or editor** of a shared collection that holds it through a **managed** link
+   (still requiring source access). A pin grants nothing.
 
 Because a saved query is a single shared row, **editing it changes it everywhere it
 appears**, in every collection and for every viewer. To make a variant instead of changing
@@ -107,8 +132,17 @@ can delete it, since deletion removes it from every collection at once.
 
 **Hand a query to a teammate to maintain**
 
-Add them to a shared collection containing the query as an **Editor**. They can now open it,
-change it, and re-save without needing global-admin rights.
+Add your query to a shared collection with **Collection editors can edit** on, and add the
+teammate to that collection as an **Editor**. They can now open it, change it, and re-save
+without needing global-admin rights.
+
+**Find links that lost delegation after an upgrade**
+
+The upgrade that introduced link kinds kept delegation only on links that the query's
+creator or a global admin added into a shared collection. Every other link became a pin,
+and an editor who relied on one lost edit on that query. Global admins see those pins in
+the Library under **All queries** → **Links that lost delegation**, with the owners and
+editors who get edit back, and can convert each one with a click.
 
 ## Next steps
 
