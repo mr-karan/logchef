@@ -82,11 +82,19 @@ function onToggleSaveTimestamp(value: boolean | 'indeterminate') {
 const selectedCollectionId = ref<string>('');
 const collectionOptions = computed(() => {
   const personal = collectionsStore.personalCollection;
-  // Adding an item is owner-only on the backend, so only offer collections the
-  // caller actually owns — otherwise the save succeeds but the pin 403s silently.
-  const shared = collectionsStore.sharedCollections.filter((c) => c.caller_role === "owner");
+  // The store holds only collections the caller takes part in, and any
+  // participant may pin.
+  const shared = collectionsStore.sharedCollections;
   return personal ? [personal, ...shared] : shared;
 });
+const selectedCollection = computed(() =>
+  collectionsStore.collections.find((c) => String(c.id) === selectedCollectionId.value) ?? null,
+);
+// The saver is the query's creator, so a shared collection may get a managed
+// link, which delegates edit to the collection's owners and editors. On by
+// default; a personal collection takes pins only and shows no toggle.
+const editorsCanEdit = ref(true);
+const showsEditorsToggle = computed(() => !isEditing.value && !!selectedCollection.value && !selectedCollection.value.is_personal);
 const isSubmitting = ref(false);
 const isEditing = computed(() => !!props.editData);
 const queryId = ref('');
@@ -385,6 +393,7 @@ async function handleSubmit(event: Event) {
         save_timestamp: saveTimestamp.value,
         // Pin new queries to the chosen collection in one step. Omitted on edit.
         collection_id: !isEditing.value && selectedCollectionId.value ? Number(selectedCollectionId.value) : null,
+        collection_kind: showsEditorsToggle.value && editorsCanEdit.value ? 'managed' : 'pin',
       };
 
 
@@ -492,6 +501,13 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
           <p class="text-sm text-muted-foreground">
             {{ t('ui.savesTheQueryAndAddsItToThisCollectionInOneStep') }}
           </p>
+          <div v-if="showsEditorsToggle" class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
+            <Checkbox id="editors_can_edit" :model-value="editorsCanEdit" @update:model-value="(value) => (editorsCanEdit = value === true)" />
+            <div class="space-y-1 leading-none">
+              <Label for="editors_can_edit" class="cursor-pointer">{{ t('library.editorsCanEdit') }}</Label>
+              <p class="text-sm text-muted-foreground">{{ t('library.editorsCanEditDescription') }}</p>
+            </div>
+          </div>
         </div>
 
         <!-- Save Timestamp Checkbox -->

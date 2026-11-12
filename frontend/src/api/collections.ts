@@ -36,13 +36,49 @@ export interface CollectionTeam {
   created_at: string;
 }
 
+/**
+ * What a link between a collection and a saved query grants. A pin is a
+ * bookmark and grants nothing. A managed link delegates edit on the query to
+ * the collection's owners and editors; only the query's creator or a global
+ * admin creates, converts or removes one.
+ */
+export type CollectionLinkKind = "pin" | "managed";
+
 export interface CollectionItem {
   collection_id: number;
+  kind: CollectionLinkKind;
   sort_order: number;
   added_by?: number | null;
   item_added_at: string;
   query: SavedQuery;
   runnable: boolean;
+}
+
+/** One link row, as POST and PUT on the item routes return it. */
+export interface CollectionItemLink {
+  collection_id: number;
+  saved_query_id: number;
+  kind: CollectionLinkKind;
+  added_by: number | null;
+  sort_order: number;
+  created_at: string;
+}
+
+/**
+ * One pin in a shared collection, for the admin report. Right after the
+ * link-kind upgrade these are exactly the links that lost delegation.
+ */
+export interface CollectionLinkReportRow {
+  collection_id: number;
+  collection_name: string;
+  saved_query_id: number;
+  saved_query_name: string;
+  query_created_by: number | null;
+  query_creator_email?: string;
+  added_by: number | null;
+  added_by_email?: string;
+  created_at: string;
+  editors: CollectionMember[];
 }
 
 export interface CreateCollectionRequest {
@@ -67,6 +103,12 @@ export interface AddCollectionTeamRequest {
 export interface AddCollectionItemRequest {
   saved_query_id: number;
   sort_order?: number;
+  /** Omitted means a pin. */
+  kind?: CollectionLinkKind;
+}
+
+export interface UpdateCollectionItemRequest {
+  kind: CollectionLinkKind;
 }
 
 export const collectionsApi = {
@@ -96,7 +138,13 @@ export const collectionsApi = {
   listItems: (id: number) =>
     apiClient.get<CollectionItem[]>(`/collections/${id}/items`),
   addItem: (id: number, payload: AddCollectionItemRequest) =>
-    apiClient.post<{ message: string }>(`/collections/${id}/items`, payload),
+    apiClient.post<CollectionItemLink>(`/collections/${id}/items`, payload),
+  updateItem: (id: number, queryId: number, payload: UpdateCollectionItemRequest) =>
+    apiClient.put<CollectionItemLink>(`/collections/${id}/items/${queryId}`, payload),
   removeItem: (id: number, queryId: number) =>
     apiClient.delete<{ message: string }>(`/collections/${id}/items/${queryId}`),
+
+  /** Global admins only. */
+  linkReport: () =>
+    apiClient.get<CollectionLinkReportRow[]>("/admin/collection-links/report"),
 };

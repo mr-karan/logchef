@@ -191,7 +191,11 @@ export function useSavedQueries() {
         // Best-effort: the query is already saved, so a pin failure shouldn't
         // surface as a save failure — addItem shows its own error toast.
         if (formData.collection_id && response.data?.id) {
-          await collectionsStore.addItem(formData.collection_id, { saved_query_id: response.data.id }, { notify: false });
+          await collectionsStore.addItem(
+            formData.collection_id,
+            { saved_query_id: response.data.id, kind: formData.collection_kind ?? "pin" },
+            { notify: false },
+          );
         }
         return response.data ?? null;
       } else if (response) {

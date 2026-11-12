@@ -1,3 +1,4 @@
+import type { CollectionLinkKind } from "@/api/collections";
 // Field information for auto-completion and sidebar
 export interface FieldInfo {
   name: string;
@@ -17,6 +18,8 @@ export interface SaveQueryFormData {
   query_content: string;
   // Optional collection to pin the query to on save (new queries only).
   collection_id?: number | null;
+  // The link kind for that collection. Omitted or null means a pin.
+  collection_kind?: CollectionLinkKind | null;
 }
 
 // Editor modes
