@@ -120,7 +120,7 @@ fn variables_and_calendar_ranges_reach_both_commands_and_dialects() {
             for relative in ["15m", "today", "yesterday"] {
                 for (extra, value) in [
                     (vec![], json!("prod")),
-                    (vec!["--var", "env="], json!("")),
+                    (vec!["--var", "env="], json!([])),
                     (vec!["--var", "env=stage"], json!("stage")),
                     (vec!["--var", "env=a", "--var", "env=b"], json!(["a", "b"])),
                 ] {
@@ -339,11 +339,11 @@ fn since_across_fallback(command: &str, victorialogs: bool) {
     assert_eq!(body["timezone"], "America/New_York");
     if command == "sql" && !victorialogs {
         let sql = body["query_text"].as_str().unwrap();
-        assert!(sql.contains("fromUnixTimestamp64Milli("), "{sql}");
+        assert!(sql.contains("fromUnixTimestamp64Milli(toInt64("), "{sql}");
         let instants: Vec<i64> = sql
-            .split("fromUnixTimestamp64Milli(")
+            .split("fromUnixTimestamp64Milli(toInt64(")
             .skip(1)
-            .map(|value| value.split(',').next().unwrap().parse().unwrap())
+            .map(|value| value.split(')').next().unwrap().parse().unwrap())
             .collect();
         assert_eq!(instants.len(), 2, "{sql}");
         assert!(instants[0] >= (before - chrono::Duration::minutes(minutes)).timestamp_millis());

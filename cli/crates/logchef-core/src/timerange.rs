@@ -51,11 +51,6 @@ pub enum TimeInput<'a> {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     },
-    /// Instants formatted as wall-clock strings in the effective timezone.
-    Instant {
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
-    },
 }
 
 /// Query bounds with the effective timezone used for wall-clock values.
@@ -74,13 +69,6 @@ pub fn resolve_time_range(input: TimeInput<'_>, configured_tz: Option<&str>) -> 
             end.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
         ),
         TimeInput::WallClock { start, end } => (start.to_string(), end.to_string()),
-        TimeInput::Instant { start, end } => (
-            start
-                .with_timezone(&tz)
-                .format(WALL_CLOCK_FORMAT)
-                .to_string(),
-            end.with_timezone(&tz).format(WALL_CLOCK_FORMAT).to_string(),
-        ),
     };
     ResolvedTimeRange {
         start,
@@ -115,50 +103,6 @@ mod tests {
 
     fn kolkata() -> Tz {
         "Asia/Kolkata".parse().unwrap()
-    }
-
-    /// The formatted wall-clock strings, parsed back in the timezone they
-    /// were labeled with, must represent the same instants as the UTC
-    /// inputs.
-    #[test]
-    fn instant_formats_wall_clock_that_round_trips_to_same_epoch() {
-        let start = Utc.with_ymd_and_hms(2026, 7, 14, 4, 58, 42).unwrap();
-        let end = Utc.with_ymd_and_hms(2026, 7, 14, 5, 58, 42).unwrap();
-
-        let range = resolve_time_range(TimeInput::Instant { start, end }, Some("Asia/Kolkata"));
-
-        assert_eq!(range.timezone, "Asia/Kolkata");
-
-        let tz = kolkata();
-        let parsed_start = chrono::NaiveDateTime::parse_from_str(&range.start, WALL_CLOCK_FORMAT)
-            .expect("start should parse")
-            .and_local_timezone(tz)
-            .single()
-            .expect("unambiguous local time");
-        let parsed_end = chrono::NaiveDateTime::parse_from_str(&range.end, WALL_CLOCK_FORMAT)
-            .expect("end should parse")
-            .and_local_timezone(tz)
-            .single()
-            .expect("unambiguous local time");
-
-        assert_eq!(parsed_start.with_timezone(&Utc), start);
-        assert_eq!(parsed_end.with_timezone(&Utc), end);
-
-        // Sanity check the historical bug: the formatted wall-clock string
-        // must NOT equal the naive UTC formatting (IST is UTC+5:30).
-        assert_ne!(range.start, start.format(WALL_CLOCK_FORMAT).to_string());
-    }
-
-    #[test]
-    fn instant_with_utc_zone_is_unchanged_from_naive_utc_formatting() {
-        let start = Utc.with_ymd_and_hms(2026, 7, 14, 4, 58, 42).unwrap();
-        let end = Utc.with_ymd_and_hms(2026, 7, 14, 5, 58, 42).unwrap();
-
-        let range = resolve_time_range(TimeInput::Instant { start, end }, Some("UTC"));
-
-        assert_eq!(range.timezone, "UTC");
-        assert_eq!(range.start, start.format(WALL_CLOCK_FORMAT).to_string());
-        assert_eq!(range.end, end.format(WALL_CLOCK_FORMAT).to_string());
     }
 
     #[test]
