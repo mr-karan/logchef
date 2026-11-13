@@ -101,7 +101,7 @@ func TestValidateDashboardPanels_Violations(t *testing.T) {
 		{"empty payload", json.RawMessage(``), "required"},
 		{"not json", json.RawMessage(`{nope`), "not valid JSON"},
 		{"oversize", oversize, "exceeds"},
-		{"wrong version", json.RawMessage(`{"version":2,"panels":[]}`), "version"},
+		{"wrong version", json.RawMessage(`{"version":3,"panels":[]}`), "version"},
 		{"too many panels", tooMany, "exceeds the max"},
 		{"empty panel id", json.RawMessage(`{"version":1,"panels":[{"id":"","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}]}`), "empty id"},
 		{"duplicate panel id", json.RawMessage(`{"version":1,"panels":[{"id":"p1","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"},{"id":"p1","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}]}`), "duplicate panel id"},
