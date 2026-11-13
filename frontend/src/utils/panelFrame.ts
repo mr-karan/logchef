@@ -1,0 +1,191 @@
+import type { ColumnKind, ConfirmedColumn, StatReduce } from "@/api/dashboards";
+import type { HistogramDataPoint, QueryStats, Truncation, LimitSource } from "@/api/explore";
+import { addExact, averageExact, compareExact, exactString, isExact, parseExact, type FrameNumber } from "./exactNumber";
+
+export interface FrameColumn {
+  name: string;
+  backendType: string | null;
+  kind: ColumnKind;
+  confidence: "declared" | "confirmed" | "guessed";
+  repr: "int" | "bigint" | "decimal" | "float" | null;
+}
+export type SeriesKey = { kind: "value"; value: string } | { kind: "null" } | { kind: "other" };
+export interface PanelFrame {
+  columns: FrameColumn[];
+  rows: Record<string, unknown>[];
+  rawRows: Record<string, unknown>[];
+  interval: string | null;
+  limit: { source: LimitSource; rows: number } | null;
+  truncation: Truncation;
+  notices: string[];
+}
+
+export function declaredColumn(name: string, backendType: string | null): FrameColumn {
+  const type = (backendType ?? "").replace(/(?:Nullable|LowCardinality)\(/g, "").replace(/\)+$/, "");
+  let kind: ColumnKind = "category";
+  let repr: FrameColumn["repr"] = null;
+  if (/^Date(?:32)?$/.test(type)) kind = "date";
+  else if (/^DateTime/.test(type)) kind = "time";
+  else if (/^(?:U?Int)(?:8|16|32)$/.test(type)) { kind = "number"; repr = "int"; }
+  else if (/^U?Int(?:64|128|256)$/.test(type)) { kind = "number"; repr = "bigint"; }
+  else if (/^Decimal/.test(type)) { kind = "number"; repr = "decimal"; }
+  else if (/^Float/.test(type)) { kind = "number"; repr = "float"; }
+  else if (type === "Bool") kind = "bool";
+  else if (/^(Array|Map|Tuple|JSON|Object|Nested)/.test(type)) kind = "other";
+  return { name, backendType, kind, repr, confidence: "declared" };
+}
+
+export function resultFrame(input: {
+  columns: { name: string; type: string }[];
+  rows: Record<string, unknown>[];
+  untyped?: boolean;
+  stats?: QueryStats;
+}): PanelFrame {
+  const names = new Set(input.columns.map((c) => c.name));
+  const columns = input.columns.map((c) => declaredColumn(c.name, input.untyped ? null : c.type));
+  for (const row of input.rows) for (const name of Object.keys(row)) {
+    if (!names.has(name)) { names.add(name); columns.push(declaredColumn(name, null)); }
+  }
+  const frame: PanelFrame = {
+    columns, rawRows: input.rows, rows: [], interval: null,
+    limit: input.stats?.limit_applied !== undefined && input.stats.limit_source ? { source: input.stats.limit_source, rows: input.stats.limit_applied } : null,
+    truncation: input.stats?.truncation ?? "none", notices: [],
+  };
+  return frameWithKinds(frame);
+}
+
+export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null): PanelFrame {
+  const rows = buckets.map((b) => ({
+    time: b.bucket, count: b.log_count,
+    ...(grouped ? { series: b.is_other ? { kind: "other" } : b.is_null ? { kind: "null" } : { kind: "value", value: b.group_value ?? "" } } : {}),
+  }));
+  const frame = resultFrame({ columns: [{ name: "time", type: "DateTime64" }, { name: "count", type: "UInt64" }, ...(grouped ? [{ name: "series", type: "String" }] : [])], rows });
+  return { ...frame, interval, notices: notice ? [notice] : [] };
+}
+
+const rfc3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+function validDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+}
+function readCell(value: unknown, column: FrameColumn): unknown {
+  if (value === null || value === undefined) return null;
+  if (column.kind === "category" || column.kind === "other") return value;
+  if (value === "") return null;
+  if (column.kind === "number") {
+    if (column.repr === "float") return typeof value === "number" && Number.isFinite(value) ? value : null;
+    return parseExact(value);
+  }
+  if (column.kind === "bool") return value === true || value === "true" ? true : value === false || value === "false" ? false : null;
+  if (typeof value !== "string") return null;
+  if (column.kind === "date") return validDate(value.slice(0, column.backendType ? 10 : value.length)) ? value.slice(0, 10) : null;
+  const timestamp = column.backendType ? value.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(value) ? "" : "Z") : value;
+  return rfc3339.test(timestamp) && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+}
+
+export function frameWithKinds(frame: PanelFrame, overrides: Record<string, ConfirmedColumn> = {}): PanelFrame {
+  const columns = frame.columns.map((c): FrameColumn => {
+    const declared = declaredColumn(c.name, c.backendType);
+    const confirmed = overrides[c.name];
+    return confirmed ? { ...declared, kind: confirmed.kind, confidence: "confirmed", repr: confirmed.kind === "number" ? declared.repr ?? "decimal" : null } : declared;
+  });
+  const notices: string[] = [];
+  for (const name of Object.keys(overrides)) if (!columns.some((c) => c.name === name)) notices.push(`Column "${name}" is missing from the result.`);
+  const invalid = new Map<string, number>();
+  const rows = frame.rawRows.map((raw) => {
+    const row: Record<string, unknown> = {};
+    for (const c of columns) {
+      const value = readCell(raw[c.name], c);
+      row[c.name] = value;
+      if (value === null && raw[c.name] !== null && raw[c.name] !== undefined && raw[c.name] !== "") invalid.set(c.name, (invalid.get(c.name) ?? 0) + 1);
+    }
+    return row;
+  });
+  for (const [name, count] of invalid) notices.push(`${count} invalid cell(s) in "${name}" shown as NULL.`);
+  return { ...frame, columns, rows, notices: [...frame.notices.filter((n) => !n.includes("invalid cell(s)") && !n.startsWith("Column \"")), ...notices] };
+}
+
+export function suggestKind(values: unknown[]): ColumnKind {
+  const cells = values.filter((v) => v !== "" && v !== null && v !== undefined);
+  if (!cells.length) return "category";
+  if (cells.every((v) => typeof v === "string" && rfc3339.test(v) && Number.isFinite(Date.parse(v)))) return "time";
+  if (cells.every((v) => typeof v === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(v) && (v.replace(/[^\d]/g, "").replace(/^0+/, "").length <= 15))) return "number";
+  return "category";
+}
+
+export function frameCellText(value: unknown, column?: FrameColumn): string {
+  if (value === null || value === undefined) return "";
+  if (isExact(value)) return exactString(value);
+  if (column?.kind === "time" && typeof value === "string") return new Date(value).toLocaleString(undefined, { hour12: false });
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+export interface ReducedStat {
+  value: FrameNumber | null;
+  rowLabel: string | null;
+  notices: string[];
+}
+function compareCells(a: unknown, b: unknown, column: FrameColumn): number {
+  if (isExact(a) && isExact(b)) return compareExact(a, b);
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (column.kind === "time") return Date.parse(String(a)) - Date.parse(String(b));
+  return String(a).localeCompare(String(b));
+}
+
+export function reduceStat(frame: PanelFrame, options: { value: string; reduce: StatReduce; orderBy?: string; count: boolean }): ReducedStat {
+  const column = frame.columns.find((c) => c.name === options.value);
+  if (!column) throw new Error(`Column "${options.value}" is missing from the result.`);
+  if (column.kind !== "number") throw new Error(`Column "${column.name}" must be a number (backend type ${column.backendType ?? "untyped"}).`);
+  const notices = [...frame.notices];
+  let rows = frame.rows;
+  let order: FrameColumn | undefined;
+  if (options.orderBy) {
+    order = frame.columns.find((c) => c.name === options.orderBy);
+    if (!order) throw new Error(`Column "${options.orderBy}" is missing from the result.`);
+  }
+  if (options.reduce === "first" || options.reduce === "last") {
+    if (order) {
+      const key = order;
+      rows = rows.filter((r) => r[key.name] !== null && r[key.name] !== undefined);
+      if (rows.length !== frame.rows.length) notices.push(`${frame.rows.length - rows.length} row(s) have no valid order value.`);
+      rows = [...rows].sort((a, b) => compareCells(a[key.name], b[key.name], key));
+    }
+    const selected = options.reduce === "first" ? rows[0] : rows.at(-1);
+    if (!order && rows.length > 1) notices.push("Multiple rows without order_by. Result order selects the value.");
+    if (order && selected) {
+      const tied = rows.filter((r) => compareCells(r[order.name], selected[order.name], order) === 0).length;
+      if (tied > 1) notices.push(`${tied} rows share the selected order value. Group the query by "${order.name}".`);
+    }
+    const value = selected?.[column.name];
+    return { value: isExact(value) || typeof value === "number" ? value : null, rowLabel: selected && order ? frameCellText(selected[order.name], order) : null, notices };
+  }
+  const values = rows.map((r) => r[column.name]).filter((v): v is FrameNumber => isExact(v) || typeof v === "number");
+  if (!values.length) return { value: options.count && !rows.length ? parseExact(0) : null, rowLabel: null, notices };
+  let value = values[0];
+  if (isExact(value)) {
+    let result = value;
+    for (const next of values.slice(1)) {
+      if (!isExact(next)) throw new Error("Mixed numeric representations in a frame column.");
+      if (options.reduce === "sum" || options.reduce === "avg") result = addExact(result, next);
+      else if ((options.reduce === "min" && compareExact(next, result) < 0) || (options.reduce === "max" && compareExact(next, result) > 0)) result = next;
+    }
+    value = options.reduce === "avg" ? averageExact(result, values.length) : result;
+  } else {
+    const floats = values.filter((v): v is number => typeof v === "number");
+    value = options.reduce === "min" ? Math.min(...floats) : options.reduce === "max" ? Math.max(...floats) : floats.reduce((a, b) => a + b, 0) / (options.reduce === "avg" ? floats.length : 1);
+  }
+  return { value, rowLabel: null, notices };
+}
+
+export function histogramBuckets(frame: PanelFrame): HistogramDataPoint[] {
+  return frame.rawRows.map((row) => {
+    const series = row.series;
+    const point: HistogramDataPoint = { bucket: String(row.time), log_count: typeof row.count === "number" ? row.count : 0 };
+    if (typeof series === "object" && series !== null && "kind" in series) {
+      if (series.kind === "null") point.is_null = true;
+      else if (series.kind === "other") point.is_other = true;
+      else if (series.kind === "value" && "value" in series && typeof series.value === "string") point.group_value = series.value;
+    }
+    return point;
+  });
+}
