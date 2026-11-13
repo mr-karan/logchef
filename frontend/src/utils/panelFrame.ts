@@ -83,6 +83,7 @@ function readCell(value: unknown, column: FrameColumn): unknown {
 }
 
 export function frameWithKinds(frame: PanelFrame, overrides: Record<string, ConfirmedColumn> = {}): PanelFrame {
+  if (frame.rows.length === frame.rawRows.length && Object.keys(overrides).every((name) => frame.columns.some((c) => c.name === name)) && frame.columns.every((c) => overrides[c.name] ? c.confidence === "confirmed" && c.kind === overrides[c.name].kind : c.confidence === "declared")) return frame;
   const columns = frame.columns.map((c): FrameColumn => {
     const declared = declaredColumn(c.name, c.backendType);
     const confirmed = overrides[c.name];
@@ -112,10 +113,10 @@ export function suggestKind(values: unknown[]): ColumnKind {
   return "category";
 }
 
-export function frameCellText(value: unknown, column?: FrameColumn): string {
+export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"): string {
   if (value === null || value === undefined) return "";
   if (isExact(value)) return exactString(value);
-  if (column?.kind === "time" && typeof value === "string") return new Date(value).toLocaleString(undefined, { hour12: false });
+  if (column?.kind === "time" && typeof value === "string") return new Date(value).toLocaleString(undefined, { hour12: false, timeZone: zone });
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
@@ -132,7 +133,7 @@ function compareCells(a: unknown, b: unknown, column: FrameColumn): number {
   return String(a).localeCompare(String(b));
 }
 
-export function reduceStat(frame: PanelFrame, options: { value: string; reduce: StatReduce; orderBy?: string; count: boolean }): ReducedStat {
+export function reduceStat(frame: PanelFrame, options: { value: string; reduce: StatReduce; orderBy?: string; count: boolean; zone?: string }): ReducedStat {
   const column = frame.columns.find((c) => c.name === options.value);
   if (!column) throw new Error(`Column "${options.value}" is missing from the result.`);
   if (column.kind !== "number") throw new Error(`Column "${column.name}" must be a number (backend type ${column.backendType ?? "untyped"}).`);
@@ -143,6 +144,7 @@ export function reduceStat(frame: PanelFrame, options: { value: string; reduce: 
     order = frame.columns.find((c) => c.name === options.orderBy);
     if (!order) throw new Error(`Column "${options.orderBy}" is missing from the result.`);
   }
+  if (!rows.length && options.count) return { value: parseExact(0), rowLabel: null, notices };
   if (options.reduce === "first" || options.reduce === "last") {
     if (order) {
       const key = order;
@@ -157,7 +159,7 @@ export function reduceStat(frame: PanelFrame, options: { value: string; reduce: 
       if (tied > 1) notices.push(`${tied} rows share the selected order value. Group the query by "${order.name}".`);
     }
     const value = selected?.[column.name];
-    return { value: isExact(value) || typeof value === "number" ? value : null, rowLabel: selected && order ? frameCellText(selected[order.name], order) : null, notices };
+    return { value: isExact(value) || typeof value === "number" ? value : null, rowLabel: selected && order ? frameCellText(selected[order.name], order, options.zone) : null, notices };
   }
   const values = rows.map((r) => r[column.name]).filter((v): v is FrameNumber => isExact(v) || typeof v === "number");
   if (!values.length) return { value: options.count && !rows.length ? parseExact(0) : null, rowLabel: null, notices };

@@ -20,13 +20,14 @@ import {
   type PanelQueryLanguage,
   type CacheDirective,
 } from "@/api/dashboards";
-import type { HistogramDataPoint, QueryStats } from "@/api/explore";
+import { useTeamsStore } from "@/stores/teams";
+import { countFrame, resultFrame, type PanelFrame } from "@/utils/panelFrame";
+import type { QueryStats } from "@/api/explore";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import {
   dashboardLayout,
   newQueryPanel,
   reflowPanels,
-  sumHistogramCounts,
   switchPanelKind,
   trimDashboardGroupBy,
   validatePanelsBlob,
@@ -76,37 +77,12 @@ const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
 export const DEFAULT_DASHBOARD_CACHE_TTL_SECONDS = 600;
 export type PanelStatus = "idle" | "loading" | "success" | "empty" | "error" | "locked" | "unsupported";
 
-export interface PanelColumn {
-  name: string;
-  type: string;
-}
-
 export interface PanelState {
   status: PanelStatus;
+  frame?: PanelFrame;
+  stats?: QueryStats;
   error?: string;
-  /** The window the shown result ran over; a queued panel keeps its old one. */
   range?: ResolvedWindow;
-  timeseries?: {
-    buckets: HistogramDataPoint[];
-    granularity: string | null;
-    groupBy: string | null;
-    notice: string | null;
-    range: ResolvedWindow;
-  };
-  stat?: {
-    value: number;
-  };
-  breakdown?: {
-    buckets: HistogramDataPoint[];
-    groupBy: string;
-    notice: string | null;
-  };
-  table?: {
-    columns: PanelColumn[];
-    rows: Record<string, any>[];
-    /** The result's limit and truncation state, from the query response. */
-    stats?: QueryStats;
-  };
 }
 
 
@@ -412,7 +388,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     return { query, language };
   }
 
-  async function fetchPanelData(
+  async function fetchPanelFrame(
     panel: DashboardQueryPanel,
     range: ResolvedWindow,
     signal: AbortSignal,
@@ -425,7 +401,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const viz = panel.viz.type;
 
     if (panel.query.mode === "count") {
-      const groupBy = viz === "stat" ? undefined : trimDashboardGroupBy(panel.query.group_by) || undefined;
+      const groupBy = trimDashboardGroupBy(panel.query.group_by) || undefined;
       if ((viz === "pie" || viz === "toplist") && !groupBy) {
         return { status: "error", error: "Breakdown panels require a group-by field." };
       }
@@ -449,28 +425,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const data = unwrap(resp);
       const buckets = data?.data ?? [];
 
-      if (viz === "stat") {
-        return { status: "success", stat: { value: sumHistogramCounts(buckets) } };
-      }
-      if ((viz === "pie" || viz === "toplist") && groupBy) {
-        return {
-          status: buckets.length ? "success" : "empty",
-          breakdown: { buckets, groupBy, notice: data?.notice ?? null },
-        };
-      }
-      return {
-        status: buckets.length ? "success" : "empty",
-        timeseries: {
-          buckets,
-          granularity: data?.granularity ?? null,
-          groupBy: groupBy ?? null,
-          notice: data?.notice ?? null,
-          range,
-        },
-      };
+      const frame = countFrame(buckets, data?.granularity ?? null, !!groupBy, data?.notice);
+      return { status: buckets.length || viz === "stat" ? "success" : "empty", frame };
     }
 
-    // result mode: a table
+    // Result queries share one frame, independent of the visualization.
     const limit = clampTableLimit(panel.query.limit);
     // Native queries (ClickHouse SQL, VictoriaLogs LogsQL) run verbatim through
     // the logs/query endpoint. Only LogchefQL takes the compile path below;
@@ -490,7 +449,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const rows = data?.data ?? data?.logs ?? [];
       return {
         status: rows.length ? "success" : "empty",
-        table: { columns: data?.columns ?? [], rows, stats: data?.stats },
+        frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: panel.query.language === "logsql", stats: data?.stats }),
+        stats: data?.stats,
       };
     }
 
@@ -511,7 +471,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const rows = data?.logs ?? [];
     return {
       status: rows.length ? "success" : "empty",
-      table: { columns: data?.columns ?? [], rows, stats: data?.stats },
+      frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: useTeamsStore().getTeamSourcesByTeamId(panel.team_id).some((s) => s.id === panel.source_id && s.source_type === "victorialogs"), stats: data?.stats }),
+      stats: data?.stats,
     };
   }
 
@@ -534,7 +495,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (signal.aborted) return;
     setPanelState(panel.id, { status: "loading" });
     try {
-      const result = await fetchPanelData(panel, range, signal, cache);
+      const result = await fetchPanelFrame(panel, range, signal, cache);
       if (signal.aborted) return;
       setPanelState(panel.id, { ...result, range });
     } catch (err) {
@@ -955,7 +916,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const signal = controller.signal;
     state.data.value.previewState = { status: "loading" };
     try {
-      const result = await fetchPanelData(panel, effectiveRange.value, signal);
+      const result = await fetchPanelFrame(panel, effectiveRange.value, signal);
       if (signal.aborted) return;
       state.data.value.previewState = result;
     } catch (err) {
