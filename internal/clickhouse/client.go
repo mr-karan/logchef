@@ -208,8 +208,8 @@ func (c *Client) Close() error {
 
 func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (driver.Rows, error) {
 	ctx = c.contextWithNativeJSON(ctx, opts)
-	// LogChef owns the progress callback for result queries. Other driver
-	// options and callbacks are inherited from the hook context.
-	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add))
+	// LogChef owns the progress and profile callbacks for result queries.
+	// Other driver options and callbacks are inherited from the hook context.
+	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
 	return c.conn.Query(ctx, query)
 }
