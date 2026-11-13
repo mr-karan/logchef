@@ -24,10 +24,10 @@ afterEach(() => {
   host = null;
 });
 
-async function render(state: PanelState, chrome = true) {
+async function render(state: PanelState, chrome = true, shownPanel: Panel = panel) {
   host = document.createElement("div");
   document.body.appendChild(host);
-  createApp(DashboardPanel, { panel, heightPx: 240, state, chrome }).use(createPinia()).use(i18n).mount(host);
+  createApp(DashboardPanel, { panel: shownPanel, heightPx: 240, state, chrome }).use(createPinia()).use(i18n).mount(host);
   await nextTick();
   return host;
 }
@@ -88,5 +88,16 @@ describe("DashboardPanel truncation chip", () => {
     expect(root.querySelector(".dash-panel__chip")).toBeNull();
     expect(root.textContent).toContain("Slow requests");
     expect(root.textContent).toContain("9007199254740993");
+  });
+});
+
+describe("empty stat frames", () => {
+  it("reports a missing value column even when the query returns no rows", async () => {
+    const root = await render({ status: "empty", frame: resultFrame({ columns: [], rows: [] }) }, true, { ...panel, viz: { type: "stat", value: "missing" } });
+    expect(root.textContent).toContain('Column "missing" is missing from the result.');
+  });
+  it("shows No data for an empty result with a valid value column", async () => {
+    const root = await render({ status: "empty", frame: resultFrame({ columns: [{ name: "n", type: "UInt64" }], rows: [] }) }, true, { ...panel, viz: { type: "stat", value: "n" } });
+    expect(root.querySelector(".panel-stat__value")?.textContent).toBe("No data");
   });
 });

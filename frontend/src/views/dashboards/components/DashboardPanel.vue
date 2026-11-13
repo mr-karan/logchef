@@ -171,7 +171,7 @@ const columnSubset = computed(() => {
       </div>
 
       <!-- Empty -->
-      <div v-else-if="panelState.status === 'empty' && !(vizType === 'stat' && !panel.locked && panel.query.mode === 'count' && panelState.frame)" class="dash-panel__message">
+      <div v-else-if="panelState.status === 'empty' && !(vizType === 'stat' && panelState.frame)" class="dash-panel__message">
         <span>{{ t('ui.noDataForThisTimeRange') }}</span>
       </div>
 
