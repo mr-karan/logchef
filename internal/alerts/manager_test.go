@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -62,7 +62,7 @@ func TestEvaluateAlertWithTimeoutIsolatesHungEvaluation(t *testing.T) {
 
 func newManagerTestAlert(t *testing.T) (*sqlite.DB, *models.Alert, *slog.Logger) {
 	t.Helper()
-	return newManagerTestAlertAtPath(t, filepath.Join(t.TempDir(), "alerts.db"))
+	return newManagerTestAlertAtPath(t, sqlitetest.Path(t))
 }
 
 func newManagerTestAlertAtPath(t *testing.T, path string) (*sqlite.DB, *models.Alert, *slog.Logger) {
@@ -285,7 +285,7 @@ func TestManagerReservationWriteFailureSendsNothing(t *testing.T) {
 		{name: "retry reservation", seed: true, event: "BEFORE UPDATE OF payload_json ON alert_history"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "alerts.db")
+			path := sqlitetest.Path(t)
 			db, alert, _ := newManagerTestAlertAtPath(t, path)
 			ctx := t.Context()
 			if tc.seed {
@@ -329,7 +329,7 @@ func TestManagerReservationWriteFailureSendsNothing(t *testing.T) {
 }
 
 func TestManagerOutcomeWriteFailureStopsAtMaxAttempts(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alerts.db")
+	path := sqlitetest.Path(t)
 	db, alert, _ := newManagerTestAlertAtPath(t, path)
 	ctx := t.Context()
 	failHistoryWrites(t, path, `BEFORE UPDATE OF payload_json ON alert_history
@@ -436,7 +436,7 @@ func TestCanceledEvaluationDoesNotRecordFailure(t *testing.T) {
 func TestStopCancelsActiveEvaluation(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "alerts.db")}})
+	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +512,7 @@ func createManagerTestAlert(t *testing.T, db store.Store) *models.Alert {
 }
 
 func TestManagerEvaluatesAfterStartupSweepFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alerts.db")
+	path := sqlitetest.Path(t)
 	db, alert, logger := newManagerTestAlertAtPath(t, path)
 	if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true}); err != nil {
 		t.Fatal(err)

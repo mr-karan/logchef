@@ -267,11 +267,12 @@ clean-all: clean
 # Clean and rebuild everything
 fresh: clean build run
 
-# Run tests with coverage
+# Run tests with coverage. checkptr is off inside the pure-Go SQLite driver: it
+# makes -race runs about 1.4x slower and checks none of our code.
 test:
     @echo "Running tests with coverage..."
     mkdir -p coverage
-    go test -v -race -coverprofile=coverage/coverage.out ./... && \
+    go test -v -race -gcflags='modernc.org/...=-d=checkptr=0' -coverprofile=coverage/coverage.out ./... && \
     go tool cover -html=coverage/coverage.out -o coverage/coverage.html
     @echo "Coverage report generated at coverage/coverage.html"
     @go tool cover -func=coverage/coverage.out | grep total | awk '{print "Total coverage: " $$3}'

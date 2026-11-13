@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -72,7 +72,7 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			db, err := sqlite.New(t.Context(), sqlite.Options{
 				Logger: logger,
-				Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "settings.db")},
+				Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -172,7 +172,7 @@ func TestHandleTestWebhookTransportErrors(t *testing.T) {
 				receiver.Close()
 			}
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-			db, err := sqlite.New(t.Context(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "settings.db")}})
+			db, err := sqlite.New(t.Context(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 			if err != nil {
 				t.Fatal(err)
 			}

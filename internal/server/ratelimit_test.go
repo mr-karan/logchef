@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 )
 
 func TestWindowLimiterAllowsUpToLimit(t *testing.T) {
@@ -54,7 +54,7 @@ func TestAuthRateLimitTrustsOnlyConfiguredProxy(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			db, err := sqlite.New(t.Context(), sqlite.Options{
 				Logger: logger,
-				Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "proxy.db")},
+				Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 			})
 			if err != nil {
 				t.Fatal(err)

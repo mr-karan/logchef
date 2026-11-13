@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -144,7 +144,7 @@ func newFixture(t *testing.T) fixture {
 	ctx := context.Background()
 	db, err := sqlite.New(ctx, sqlite.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "access.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)

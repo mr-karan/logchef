@@ -6,13 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 )
 
 func newSPATestServer(t *testing.T, frontendURL string) *Server {
@@ -20,7 +20,7 @@ func newSPATestServer(t *testing.T, frontendURL string) *Server {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	store, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: logger,
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "spa.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)

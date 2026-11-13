@@ -10,7 +10,6 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +25,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/mcp"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -145,7 +145,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	ctx := context.Background()
 	log := discardLogger()
-	db, err := sqlite.New(ctx, sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "askchef.db")}})
+	db, err := sqlite.New(ctx, sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
@@ -500,6 +500,27 @@ func TestTurnQuotesPriorEvidence(t *testing.T) {
 	}
 	if !strings.Contains(system, "The client sent these JSON records") {
 		t.Fatal("system prompt does not label the prior evidence as client data")
+	}
+}
+
+// The Explorer window can be old, so the model counts relative ranges from
+// the time the turn runs.
+func TestTurnPromptGivesTheCurrentTime(t *testing.T) {
+	w := newWorld(t)
+	chat := &scriptedChat{}
+	before := time.Now().Truncate(time.Second)
+	w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+	after := time.Now()
+
+	system := chat.request(0).System
+	_, rest, ok := strings.Cut(system, "The current time is ")
+	if !ok {
+		t.Fatalf("system prompt does not give the current time:\n%s", system)
+	}
+	stamp, _, _ := strings.Cut(rest, ".")
+	now, err := time.Parse(time.RFC3339, stamp)
+	if err != nil || now.Before(before) || now.After(after) {
+		t.Fatalf("current time %q is not the time of the turn (%v to %v): %v", stamp, before, after, err)
 	}
 }
 

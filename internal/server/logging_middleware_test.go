@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -25,7 +25,7 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: logger,
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "logging.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestAuthMiddlewareRedactsSessionCookies(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			db, err := sqlite.New(context.Background(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "sessions.db")}})
+			db, err := sqlite.New(context.Background(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 			if err != nil {
 				t.Fatal(err)
 			}

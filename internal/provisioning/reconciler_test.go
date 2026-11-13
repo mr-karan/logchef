@@ -4,13 +4,13 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -28,7 +28,7 @@ func newReconcileTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
 	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: quietLogger(),
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "prov.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)

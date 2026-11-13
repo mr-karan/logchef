@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -350,7 +350,7 @@ func TestMissingManagedResourcesReturnNotFound(t *testing.T) {
 
 func TestLegacySettingsRemainSensitive(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "legacy.db")
+	path := sqlitetest.Path(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db, err := sqlite.New(ctx, sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: path}})
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -18,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -35,7 +35,7 @@ func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
 	}))
 	defer remote.Close()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "shutdown.db")}})
+	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 	if err != nil {
 		t.Fatal(err)
 	}

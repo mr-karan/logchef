@@ -14,13 +14,24 @@ cd logchef
 
 For detailed setup instructions, see our [Development Setup Guide](https://logchef.app/contributing/setup).
 
+### Nix (optional)
+
+`flake.nix` provides a dev shell with Go, Bun, the Rust toolchain from
+`rust-toolchain.toml`, and the sqlc and golangci-lint versions CI pins.
+Docker still runs the dev infrastructure.
+
+```bash
+nix develop          # or `direnv allow` to load it on cd
+nix flake check      # fails if the shell's sqlc/golangci-lint drift from CI
+```
+
 ### Quick Start
 
 ```bash
 # Generate database code
 just sqlc-generate
 
-# Start development infrastructure (ClickHouse, Dex OIDC)
+# Start development infrastructure (ClickHouse, VictoriaLogs, Dex OIDC)
 just dev-docker
 
 # Build the application
@@ -65,10 +76,13 @@ just lint
 
 If your changes involve database modifications:
 
-1. Create migration files in `internal/store/sqlite/migrations/`
-2. Update queries in `internal/store/sqlite/queries.sql`
+1. Create a numbered migration pair in `internal/store/<store>/migrations/`
+2. Update queries in `internal/store/<store>/queries.sql`
 3. Regenerate SQLC code: `just sqlc-generate`
 4. Update models in `pkg/models/` if needed
+
+`sqlite` and `postgres` implement the same store interface, so mirror the change
+in both. Conformance tests in `internal/store/storetest/` run against each.
 
 ### Frontend Development
 
@@ -76,13 +90,16 @@ If your changes involve database modifications:
 cd frontend/
 
 # Development server
-pnpm dev
+bun run dev
 
 # Type checking
-pnpm typecheck
+bun run typecheck
+
+# Tests
+bun run test
 
 # Build
-pnpm build
+bun run build
 ```
 
 ## Contribution Guidelines
@@ -151,14 +168,17 @@ just test-short
 - `internal/app/` - Application bootstrap and dependency injection
 - `internal/server/` - HTTP handlers, middleware, routing
 - `internal/core/` - Business logic (users, teams, sources, logs)
+- `internal/datasource/` - Pluggable log backends (ClickHouse, VictoriaLogs)
 - `internal/clickhouse/` - ClickHouse client and connection management
-- `internal/store/sqlite/` - SQLite metadata storage with SQLC
+- `internal/victorialogs/` - VictoriaLogs client
+- `internal/logchefql/` - LogchefQL parser and query generators
+- `internal/store/sqlite/`, `internal/store/postgres/` - Metadata storage with SQLC
 - `internal/auth/` - OIDC authentication
 - `internal/config/` - Configuration management
 
 ### Frontend (Vue 3 + TypeScript)
 - `src/views/` - Page-level components
-- `src/components/` - Reusable UI components (Radix Vue + Tailwind)
+- `src/components/` - Reusable UI components (reka-ui + Tailwind)
 - `src/stores/` - Pinia state management
 - `src/api/` - API client functions
 - `src/services/` - Business logic and query processing

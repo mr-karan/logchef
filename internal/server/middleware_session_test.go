@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -23,7 +23,7 @@ func newServerTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
 	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "test.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)

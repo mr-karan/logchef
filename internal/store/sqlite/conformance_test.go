@@ -4,25 +4,25 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/internal/store/storetest"
 )
 
 // TestConformance runs the shared store.Store conformance suite against a fresh,
 // migrated SQLite database in a temp dir.
 func TestConformance(t *testing.T) {
-	storetest.Run(t, opener(filepath.Join(t.TempDir(), "conformance.db"))(t))
+	storetest.Run(t, opener(sqlitetest.Path(t))(t))
 }
 
 // TestOAuthConformance runs the OAuth suite. Each opened store has its own
 // read pool and write connection on the same file, like separate processes.
 func TestOAuthConformance(t *testing.T) {
-	storetest.RunOAuth(t, opener(filepath.Join(t.TempDir(), "oauth.db")))
+	storetest.RunOAuth(t, opener(sqlitetest.Path(t)))
 }
 
 func opener(path string) storetest.Opener {
@@ -46,7 +46,7 @@ func TestShareLogRedaction(t *testing.T) {
 		t.Helper()
 		s, err := sqlite.New(context.Background(), sqlite.Options{
 			Logger: logger,
-			Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "share-logs.db")},
+			Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 		})
 		if err != nil {
 			t.Fatalf("sqlite.New: %v", err)

@@ -128,7 +128,7 @@ func (a *Agent) Run(ctx context.Context, turn Turn, emit func(Event) bool) {
 		messages: conversation(turn.Request),
 		nextID:   nextEvidenceID(turn.Request.Evidence),
 	}
-	stop, err := run.converse(ctx, systemPrompt(turn.Request, turn.Alert))
+	stop, err := run.converse(ctx, systemPrompt(turn.Request, turn.Alert, started))
 	durationMS := time.Since(started).Milliseconds()
 	logAttrs := []any{"tool_calls", run.toolCalls, "duration_ms", durationMS,
 		"input_tokens", run.usage.InputTokens, "output_tokens", run.usage.OutputTokens}

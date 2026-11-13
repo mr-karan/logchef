@@ -54,7 +54,8 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test (SQLite + Postgres conformance)
-        run: go test -race -timeout 20m ./...
+        # checkptr inside the pure-Go SQLite driver slows -race runs and checks none of our code.
+        run: go test -race -gcflags='modernc.org/...=-d=checkptr=0' -timeout 20m ./...
 
   # Dedicated job for the VictoriaLogs provider integration tests. Kept separate
   # from the main `test` job so VL image/startup flakiness can never slow or

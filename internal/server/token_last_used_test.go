@@ -7,18 +7,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestTokenAuthenticationCoalescesBlockedWrites(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tokens.db")
+	path := sqlitetest.Path(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: path}})
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -27,7 +27,7 @@ func newDashboardTestServer(t *testing.T) *Server {
 	t.Helper()
 	s, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "dash.db")},
+		Config: config.SQLiteConfig{Path: sqlitetest.Path(t)},
 	})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
