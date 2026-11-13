@@ -123,7 +123,8 @@ describe("DashboardView discard confirmation", () => {
     expect(editor).not.toBeNull();
     const panelId = editor?.getAttribute("data-panel-id");
     if (!panelId) throw new Error("panel editor has no panel");
-    store.updateDraftPanel(panelId, { team_id: 1, source_id: 1, viz: { type: "table" } });
+    store.switchDraftPanelKind(panelId, "table");
+    store.updateDraftPanel(panelId, { team_id: 1, source_id: 1 });
     const draft = JSON.stringify(store.editDraft);
     await conflictOnSave();
     api.post.mockRejectedValue({ status: "error", message: "Copy unavailable" });
