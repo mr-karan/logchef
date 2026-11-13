@@ -149,6 +149,17 @@ func (a *App) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to bootstrap local auth admin: %w", err)
 	}
 
+	// Fill the derived dashboard list columns that a migration or an older
+	// binary left stale. Idempotent, and a failure blocks the start like a
+	// failed migration does.
+	repaired, err := core.BackfillDashboardSummaries(ctx, a.SQLite, a.Logger)
+	if err != nil {
+		return fmt.Errorf("failed to backfill dashboard summaries: %w", err)
+	}
+	if repaired > 0 {
+		a.Logger.Info("dashboard summaries backfilled", "rows", repaired)
+	}
+
 	// Run declarative provisioning reconciliation if configured.
 	if a.Config.Provisioning.Enabled() {
 		a.Logger.Info("running provisioning reconciliation",
