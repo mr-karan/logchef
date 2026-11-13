@@ -141,8 +141,14 @@ Full operator/value/nested-field detail: `references/logchefql.md`.
   - Times you write inside a `sql` query are not converted either. Prefer
     `--from` / `--to` (or `__START__` / `__END__` on ClickHouse); if you write
     a literal, give it an explicit zone or offset (see the `sql` references).
-- **Limit** `--limit` / `-l`: default `100` for `query`. For `sql`, prefer a
-  `LIMIT` in the query itself; `--limit` caps the preview.
+- **Limit** `--limit` / `-l`: default `100` for `query`. For `sql`, the
+  smallest of the query's own `LIMIT`, `--limit` and the server maximum wins,
+  so `... ORDER BY c DESC LIMIT 10` returns 10 rows whatever `--limit` says.
+  `OFFSET` is kept. With `--output json`, `stats.limit_source` names the bound
+  that applied (`statement`, `request`, `default`, `max`) and
+  `stats.truncation` says whether rows were cut: `none`, `rows` (a row past the
+  limit existed), `bytes` (the response size budget), or `unknown` (a
+  non-literal `LIMIT` filled the cap).
 
 ```bash
 logchef query 'level="error"' --from '2026-07-14 09:00:00' --to '2026-07-14 09:30:00'

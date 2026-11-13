@@ -35,7 +35,9 @@ explorer, they can see in a panel.
 - **Breakdown**: log counts by a required field over the selected range. Use
   horizontal bars (default) or a donut for a compact top-category view.
 - **Table**: the matching rows, like the explorer results grid. Set a row limit and
-  an optional column subset.
+  an optional column subset. A `LIMIT` in the query itself also applies, and the
+  smaller of the two wins. A panel whose rows were cut shows a chip: **First N
+  rows**, **Cut by size** or **May be incomplete**.
 
 Time series, stat, and breakdown panels all use the source's histogram endpoint.
 For native VictoriaLogs panels, write the filter portion of LogsQL: VictoriaLogs'
