@@ -13,13 +13,14 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	s := opener(dsn)(t)
 	monitor := connect(t, ctx, dsn)
 	a := createUser(t, ctx, s, "provision-a@test.dev", models.UserRoleAdmin)
@@ -81,7 +82,7 @@ func TestConcurrentEditCannotReactivateUser(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			dsn := resetSchema(t)
+			dsn := postgrestest.DSN(t)
 			s := opener(dsn)(t)
 			monitor := connect(t, ctx, dsn)
 			user := createUser(t, ctx, s, "reactivate@test.dev", models.UserRoleMember)
@@ -167,7 +168,7 @@ func discardLogger() *slog.Logger {
 func TestAdminTransitionUsesLockedState(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	s := opener(dsn)(t)
 	monitor := connect(t, ctx, dsn)
 	user := createUser(t, ctx, s, "admin-transition@test.dev", models.UserRoleAdmin)

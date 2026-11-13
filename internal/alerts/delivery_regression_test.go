@@ -15,11 +15,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -210,18 +209,7 @@ func TestDeliveryRecovery(t *testing.T) {
 				if backend == "sqlite" {
 					return newManagerTestAlert(t)
 				}
-				dsn := os.Getenv("LOGCHEF_TEST_ALERT_POSTGRES_DSN")
-				if dsn == "" {
-					t.Skip("LOGCHEF_TEST_ALERT_POSTGRES_DSN not set; run separately from store conformance")
-				}
-				conn, err := pgx.Connect(t.Context(), dsn)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer func() { _ = conn.Close(t.Context()) }()
-				if _, err := conn.Exec(t.Context(), "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
-					t.Fatal(err)
-				}
+				dsn := postgrestest.DSN(t)
 				logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 				db, err := postgres.New(t.Context(), postgres.Options{Logger: logger, Config: config.PostgresConfig{DSN: dsn}})
 				if err != nil {

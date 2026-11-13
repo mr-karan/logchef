@@ -25,6 +25,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -32,13 +33,11 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var db store.Store
+			var dsn string
 			if backend == "sqlite" {
 				db = newServerTestDB(t)
 			} else {
-				dsn := os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")
-				if dsn == "" {
-					t.Skip("LOGCHEF_TEST_POSTGRES_DSN not set")
-				}
+				dsn = postgrestest.DSN(t)
 				var err error
 				db, err = postgres.New(context.Background(), postgres.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Config: config.PostgresConfig{DSN: dsn}})
 				if err != nil {
@@ -78,7 +77,7 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 			replicaDB := db
 			if backend == "postgres" {
 				var err error
-				replicaDB, err = postgres.New(ctx, postgres.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Config: config.PostgresConfig{DSN: os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")}})
+				replicaDB, err = postgres.New(ctx, postgres.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Config: config.PostgresConfig{DSN: dsn}})
 				if err != nil {
 					t.Fatal(err)
 				}

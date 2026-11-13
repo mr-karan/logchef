@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,7 +20,7 @@ import (
 // collection stay managed, every other link becomes a pin. It then reverts
 // and re-applies the migration.
 func TestCollectionItemKindMigration(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {

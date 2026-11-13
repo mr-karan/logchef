@@ -6,13 +6,15 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 )
 
 // TestOAuthMigrationUpDown checks that 000008 applies on a migrated database,
 // that its down file drops only the OAuth tables, and that it re-applies. The
 // device table is dropped again by 000010, so the full chain ends with four.
 func TestOAuthMigrationUpDown(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	opener(dsn)(t)
 
 	ctx := context.Background()
@@ -28,7 +30,7 @@ func TestOAuthMigrationUpDown(t *testing.T) {
 	}
 	assertOAuthTables(t, ctx, conn, 0)
 	var users int
-	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users'`).Scan(&users); err != nil || users != 1 {
+	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'users'`).Scan(&users); err != nil || users != 1 {
 		t.Fatalf("users table after down = %d / %v", users, err)
 	}
 	if _, err := conn.Exec(ctx, readMigration(t, "000008_oauth.up.sql")); err != nil {
@@ -44,7 +46,7 @@ func TestOAuthMigrationUpDown(t *testing.T) {
 // TestDropDeviceAuthorizationsMigration checks that 000010 removes the device
 // table and its index, and that its down file restores both.
 func TestDropDeviceAuthorizationsMigration(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	opener(dsn)(t)
 
 	ctx := context.Background()
@@ -68,10 +70,10 @@ func TestDropDeviceAuthorizationsMigration(t *testing.T) {
 func assertDeviceSchema(t *testing.T, ctx context.Context, conn *pgx.Conn, want bool) {
 	t.Helper()
 	var tables, indexes int
-	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'oauth_device_authorizations'`).Scan(&tables); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'oauth_device_authorizations'`).Scan(&tables); err != nil {
 		t.Fatalf("count device table: %v", err)
 	}
-	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'idx_oauth_device_authorizations_expires'`).Scan(&indexes); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'idx_oauth_device_authorizations_expires'`).Scan(&indexes); err != nil {
 		t.Fatalf("count device index: %v", err)
 	}
 	if (tables == 1) != want || (indexes == 1) != want {
@@ -82,7 +84,7 @@ func assertDeviceSchema(t *testing.T, ctx context.Context, conn *pgx.Conn, want 
 func assertOAuthTables(t *testing.T, ctx context.Context, conn *pgx.Conn, want int) {
 	t.Helper()
 	var n int
-	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'oauth\_%'`).Scan(&n); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE 'oauth\_%'`).Scan(&n); err != nil {
 		t.Fatalf("count oauth tables: %v", err)
 	}
 	if n != want {

@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 )
 
 func TestDropRedundantIndexesMigration(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	opener(dsn)(t)
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
