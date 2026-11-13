@@ -152,88 +152,96 @@ func TestExportJobURLsAreRelativePaths(t *testing.T) {
 	}
 }
 
-func TestExportOptionalBlocksWithoutVariables(t *testing.T) {
+func TestExportQueriesClickHouse(t *testing.T) {
 	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
 	if addr == "" {
 		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
 	}
-	for _, operation := range []string{"stream", "job"} {
-		t.Run(operation, func(t *testing.T) {
-			s := newDashboardTestServer(t)
-			s.config = &config.Config{Export: config.ExportConfig{
-				MaxRows: 10, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
-				ArtifactTTL: time.Hour, Formats: []string{"ndjson"},
-			}}
-			s.clickhouse = clickhouse.NewManager(s.log)
-			t.Cleanup(func() { _ = s.clickhouse.Close() })
-			s.datasources = datasource.NewService(s.store, s.log)
-			s.datasources.Register(datasource.NewClickHouseProvider(s.clickhouse, s.log))
-			source := &models.Source{Name: "export", SourceType: models.SourceTypeClickHouse,
-				Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "one"}}
-			if err := s.store.CreateSource(t.Context(), source); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.clickhouse.AddSource(t.Context(), source); err != nil {
-				t.Fatal(err)
-			}
-			user, src := authorizeTestSource(t, s.store, source.ID)
-			handler := s.handleExportLogs
-			if operation == "job" {
-				handler = s.handleCreateExportJob
-			}
-			app := fiber.New()
-			withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
-			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID),
-				strings.NewReader(`{"query_text":"SELECT 1 AS value [[WHERE 1={{x}}]]","format":"ndjson"}`))
-			req.Header.Set("Content-Type", "application/json")
-			resp, err := app.Test(req, fiber.TestConfig{Timeout: 10 * time.Second})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer resp.Body.Close()
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if operation == "stream" {
-				if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"row":{"value":1}`) || strings.Contains(string(body), `"type":"error"`) {
-					t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	for _, tc := range []struct {
+		name, body, want string
+		settings         *models.ClickHouseQuerySettings
+	}{
+		{name: "optional block", body: `{"query_text":"SELECT 1 AS value [[WHERE 1={{x}}]]","format":"ndjson"}`, want: `"row":{"value":1}`},
+		{name: "silent byte cap", body: `{"query_text":"SELECT number FROM numbers(10000) SETTINGS max_block_size=10, max_threads=1","format":"ndjson"}`, want: `"truncation":"unknown"`, settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(100)), ResultOverflowMode: new("break")}},
+	} {
+		for _, operation := range []string{"stream", "job"} {
+			t.Run(tc.name+"/"+operation, func(t *testing.T) {
+				s := newDashboardTestServer(t)
+				s.config = &config.Config{Export: config.ExportConfig{
+					MaxRows: 100, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
+					ArtifactTTL: time.Hour, Formats: []string{"ndjson"},
+				}}
+				s.clickhouse = clickhouse.NewManager(s.log)
+				t.Cleanup(func() { _ = s.clickhouse.Close() })
+				s.datasources = datasource.NewService(s.store, s.log)
+				s.datasources.Register(datasource.NewClickHouseProvider(s.clickhouse, s.log))
+				source := &models.Source{Name: "export", SourceType: models.SourceTypeClickHouse,
+					Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "one", Settings: tc.settings}}
+				if err := s.store.CreateSource(t.Context(), source); err != nil {
+					t.Fatal(err)
 				}
-				return
-			}
-			if resp.StatusCode != http.StatusAccepted {
-				t.Fatalf("status=%d body=%s", resp.StatusCode, body)
-			}
-			var result struct {
-				Data models.ExportJobResponse `json:"data"`
-			}
-			if err := json.Unmarshal(body, &result); err != nil {
-				t.Fatal(err)
-			}
-			deadline := time.Now().Add(10 * time.Second)
-			for time.Now().Before(deadline) {
-				job, err := s.store.GetExportJob(t.Context(), result.Data.ID)
+				if err := s.clickhouse.AddSource(t.Context(), source); err != nil {
+					t.Fatal(err)
+				}
+				user, src := authorizeTestSource(t, s.store, source.ID)
+				handler := s.handleExportLogs
+				if operation == "job" {
+					handler = s.handleCreateExportJob
+				}
+				app := fiber.New()
+				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
+				req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID),
+					strings.NewReader(tc.body))
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := app.Test(req, fiber.TestConfig{Timeout: 10 * time.Second})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if job.Status == models.ExportJobStatusFailed {
-					t.Fatalf("export failed: %s", job.ErrorMessage)
+				defer resp.Body.Close()
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Fatal(err)
 				}
-				if job.Status == models.ExportJobStatusComplete {
-					t.Cleanup(func() { _ = os.Remove(job.FilePath) })
-					data, err := os.ReadFile(job.FilePath)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if !strings.Contains(string(data), `"row":{"value":1}`) || strings.Contains(string(data), `"type":"error"`) {
-						t.Fatalf("artifact=%s", data)
+				if operation == "stream" {
+					if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), tc.want) || strings.Contains(string(body), `"type":"error"`) {
+						t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 					}
 					return
 				}
-				time.Sleep(10 * time.Millisecond)
-			}
-			t.Fatal("export did not finish before deadline")
-		})
+				if resp.StatusCode != http.StatusAccepted {
+					t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+				}
+				var result struct {
+					Data models.ExportJobResponse `json:"data"`
+				}
+				if err := json.Unmarshal(body, &result); err != nil {
+					t.Fatal(err)
+				}
+				deadline := time.Now().Add(10 * time.Second)
+				for time.Now().Before(deadline) {
+					job, err := s.store.GetExportJob(t.Context(), result.Data.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if job.Status == models.ExportJobStatusFailed {
+						t.Fatalf("export failed: %s", job.ErrorMessage)
+					}
+					if job.Status == models.ExportJobStatusComplete {
+						t.Cleanup(func() { _ = os.Remove(job.FilePath) })
+						data, err := os.ReadFile(job.FilePath)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if !strings.Contains(string(data), tc.want) || strings.Contains(string(data), `"type":"error"`) {
+							t.Fatalf("artifact=%s", data)
+						}
+						return
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				t.Fatal("export did not finish before deadline")
+			})
+		}
 	}
 }
 
