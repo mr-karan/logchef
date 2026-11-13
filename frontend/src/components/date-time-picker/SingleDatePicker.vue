@@ -17,6 +17,7 @@ import {
   CalendarDateTime,
   type DateValue,
 } from "@internationalized/date";
+import { validateDay } from "@/utils/template";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -52,8 +53,8 @@ const timeValue = ref("00:00:00");
 function formatDateForDisplay(isoString: string | null): string {
   if (!isoString) return "";
   try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return isoString;
+    const date = !props.includeTime ? parseInputValue(isoString) : new Date(isoString);
+    if (!date || isNaN(date.getTime())) return isoString;
     
     if (props.includeTime) {
        return date.toLocaleString(locale.value, {
@@ -80,8 +81,8 @@ function formatDateForDisplay(isoString: string | null): string {
 function formatDateForInput(isoString: string | null): string {
   if (!isoString) return "";
   try {
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return "";
+    const date = !props.includeTime ? parseInputValue(isoString) : new Date(isoString);
+    if (!date || isNaN(date.getTime())) return "";
     
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -154,6 +155,17 @@ function parseInputValue(input: string): Date | null {
 }
 
 function applyValue() {
+  if (!props.includeTime) {
+    const value = draftValue.value;
+    try {
+      validateDay(value);
+    } catch {
+      return;
+    }
+    emit('update:modelValue', value);
+    showPicker.value = false;
+    return;
+  }
   const parsed = parseInputValue(draftValue.value);
   if (parsed) {
     // Emit local datetime string (YYYY-MM-DD HH:mm:ss) instead of UTC ISO8601

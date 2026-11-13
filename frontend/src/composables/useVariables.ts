@@ -1,7 +1,7 @@
 import {useVariableStore, type VariableState} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
 import type { TemplateVariable } from "@/api/logchefql";
-import { extractTemplateVariables, type TemplateDialect } from "@/utils/template";
+import { validateDay, extractTemplateVariables, type TemplateDialect } from "@/utils/template";
 export type { ExtractedVariable } from "@/utils/template";
 
 export const extractVariablesWithOptional = extractTemplateVariables;
@@ -41,6 +41,8 @@ export function useVariables() {
             let formattedValue: string;
             if (variable.type === 'number') {
                 formattedValue = String(value);
+            } else if (variable.type === 'day') {
+                formattedValue = `'${validateDay(value)}'`;
             } else if (variable.type === 'date') {
                 const dateStr = value ? new Date(value as string).toISOString() : '';
                 formattedValue = `'${escapeSqlString(dateStr)}'`;
@@ -69,7 +71,7 @@ export function useVariables() {
     const getVariablesForApi = (): TemplateVariable[] => {
         return allVariables.value.map(v => ({
             name: v.name,
-            type: v.type as 'text' | 'number' | 'date' | 'string',
+            type: v.type,
             value: resolveVariableValue(v)
         }));
     };

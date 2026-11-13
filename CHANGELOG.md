@@ -93,6 +93,9 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   only view, and edit it.
 
 ### Added
+- Query variables now support `day`, labelled "Date", with a date-only picker
+  and `YYYY-MM-DD` literals in SQL, LogsQL, and LogchefQL. The existing `date`
+  type is labelled "Date and time" and keeps its output unchanged.
 - A banner asks you to reload when the server version differs from the version
   that served the page. The check runs on load and on window focus, at most
   every 30 seconds. The banner itself never reloads the page. Its Reload button

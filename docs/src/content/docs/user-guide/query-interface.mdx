@@ -170,7 +170,16 @@ WHERE service = {{ service }}
 LIMIT {{ limit }}
 ```
 
-Variables support text, number, date, dropdown, and multi-select input types.
+Variables support text, number, date, dropdown, and multi-select inputs.
+**Date** uses the `day` variable type and accepts a calendar date in `YYYY-MM-DD`
+format. It renders `'2026-11-12'` in ClickHouse SQL and `"2026-11-12"` in LogsQL
+and LogchefQL. For example, `toDate(_timestamp) = {{d}}` needs no extra wrapper.
+Invalid dates and values that contain a time are rejected.
+
+**Date and time** uses the existing `date` type. Its output is unchanged, including
+the time part, such as `'2026-11-12 00:00:00'` in SQL. Existing saved queries keep
+their stored types and output. Both types use calendar fields without converting
+them to another timezone.
 A `[[ ... ]]` block is optional when its square brackets are balanced and it
 contains at least one `{{variable}}`, including variables inside quotes. Logchef
 removes the block if any variable used in it has no value. Variables in comments

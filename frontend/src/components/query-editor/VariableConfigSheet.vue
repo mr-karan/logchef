@@ -58,6 +58,7 @@ const updateVariableType = (variable: VariableState) => {
       variable.value = 0
       variable.inputType = 'input'
       break
+    case 'day':
     case 'date': {
       const now = new Date()
       const year = now.getFullYear()
@@ -66,7 +67,9 @@ const updateVariableType = (variable: VariableState) => {
       const hours = String(now.getHours()).padStart(2, '0')
       const minutes = String(now.getMinutes()).padStart(2, '0')
       const seconds = String(now.getSeconds()).padStart(2, '0')
-      variable.value = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+      variable.value = variable.type === 'day'
+        ? `${year}-${month}-${day}`
+        : `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
       variable.inputType = 'datepicker'
       break
     }
@@ -180,10 +183,13 @@ watch(
                         {{ t('ui.number') }}
                       </div>
                     </SelectItem>
+                    <SelectItem value="day">
+                      {{ t('ui.date') }}
+                    </SelectItem>
                     <SelectItem value="date">
                       <div class="flex items-center gap-2">
                         <div class="w-2 h-2 bg-purple-500 rounded-full"></div>
-                        {{ t('ui.date') }}
+                        {{ t('ui.dateAndTime') }}
                       </div>
                     </SelectItem>
                   </SelectContent>
@@ -199,31 +205,31 @@ watch(
                 <Select
                   v-model="variable.inputType"
                   @update:model-value="() => variableStore.upsertVariable(variable)"
-                  :disabled="variable.type === 'date'"
+                  :disabled="(variable.type === 'date' || variable.type === 'day')"
                 >
                   <SelectTrigger class="h-9">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem v-if="variable.type !== 'date'" value="input">
+                    <SelectItem v-if="variable.type !== 'date' && variable.type !== 'day'" value="input">
                       <div class="flex items-center gap-2">
                         <Type class="w-3.5 h-3.5 text-muted-foreground" />
                         {{ t('ui.textInput') }}
                       </div>
                     </SelectItem>
-                    <SelectItem v-if="variable.type === 'date'" value="datepicker">
+                    <SelectItem v-if="(variable.type === 'date' || variable.type === 'day')" value="datepicker">
                       <div class="flex items-center gap-2">
                         <CalendarIcon class="w-3.5 h-3.5 text-muted-foreground" />
                         {{ t('ui.datePicker') }}
                       </div>
                     </SelectItem>
-                    <SelectItem v-if="variable.type !== 'date'" value="dropdown">
+                    <SelectItem v-if="variable.type !== 'date' && variable.type !== 'day'" value="dropdown">
                       <div class="flex items-center gap-2">
                         <ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
                         {{ t('ui.dropdownList') }}
                       </div>
                     </SelectItem>
-                    <SelectItem v-if="variable.type !== 'date'" value="multiselect">
+                    <SelectItem v-if="variable.type !== 'date' && variable.type !== 'day'" value="multiselect">
                       <div class="flex items-center gap-2">
                         <List class="w-3.5 h-3.5 text-muted-foreground" />
                         {{ t('ui.multiSelect') }}
@@ -330,10 +336,10 @@ watch(
                 </Select>
                 <!-- Date picker default -->
                 <SingleDatePicker
-                  v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
+                  v-else-if="(variable.type === 'date' || variable.type === 'day') && variable.inputType === 'datepicker'"
                   :model-value="variable.defaultValue ? String(variable.defaultValue) : null"
                   @update:model-value="(val) => { variable.defaultValue = val ?? ''; variableStore.upsertVariable(variable); }"
-                  :include-time="true"
+                  :include-time="variable.type === 'date'"
                   :placeholder="t('ui.selectDefaultDate')"
                   class="w-full"
                 />

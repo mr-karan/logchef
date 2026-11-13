@@ -217,3 +217,17 @@ describe('quoted optional variable validation', () => {
     }
   })
 })
+
+describe('day variables', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+  it('preserves the date-only literal and API type, including default values', () => {
+    useVariableStore().setAllVariable([{ name: 'd', type: 'day', label: 'Date', inputType: 'datepicker', value: '', defaultValue: '2024-02-29' }])
+    const variables = useVariables()
+    expect(variables.convertVariables('toDate(ts) = {{d}}')).toBe("toDate(ts) = '2024-02-29'")
+    expect(variables.getVariablesForApi()).toEqual([{ name: 'd', type: 'day', value: '2024-02-29' }])
+  })
+  it.each(['2026-02-29', '2026-11-12 00:00:00', '2026-1-02', "2026-11-12' OR 1=1"])('rejects invalid day %s in previews', value => {
+    useVariableStore().setAllVariable([{ name: 'd', type: 'day', label: 'Date', inputType: 'datepicker', value }])
+    expect(() => useVariables().convertVariables('{{d}}')).toThrow('Invalid day')
+  })
+})

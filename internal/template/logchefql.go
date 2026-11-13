@@ -55,6 +55,12 @@ func formatLogchefQLValue(variable Variable, quoted bool) (string, error) {
 			return formatted, err
 		}
 		value = formatted
+	case TypeDay:
+		formatted, err := formatDay(variable.Value, LogchefQL)
+		if err != nil {
+			return "", err
+		}
+		value = formatted[1 : len(formatted)-1]
 	case TypeDate:
 		formatted, err := formatDate(variable.Value)
 		if err != nil {
