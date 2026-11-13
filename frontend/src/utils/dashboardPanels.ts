@@ -106,6 +106,7 @@ export function panelBuilderKind(viz: Pick<DashboardViz, "type">): PanelBuilderK
  */
 export function switchPanelKind(panel: DashboardQueryPanel, kind: PanelBuilderKind): DashboardQueryPanel {
   if (panelBuilderKind(panel.viz) === kind) return panel;
+  if (panel.query.language === "clickhouse-sql" && (kind === "chart" || kind === "breakdown")) return panel;
   const { language, text } = panel.query;
   const translate = language === "logchefql" && panel.query.translate_limit !== undefined
     ? { translate_limit: panel.query.translate_limit }

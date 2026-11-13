@@ -92,9 +92,9 @@ describe("DashboardPanel truncation chip", () => {
 });
 
 describe("empty stat frames", () => {
-  it("reports a missing value column even when the query returns no rows", async () => {
+  it("shows No data when an untyped query returns no rows or columns", async () => {
     const root = await render({ status: "empty", frame: resultFrame({ columns: [], rows: [] }) }, true, { ...panel, viz: { type: "stat", value: "missing" } });
-    expect(root.textContent).toContain('Column "missing" is missing from the result.');
+    expect(root.textContent).toContain("No data");
   });
   it("shows No data for an empty result with a valid value column", async () => {
     const root = await render({ status: "empty", frame: resultFrame({ columns: [{ name: "n", type: "UInt64" }], rows: [] }) }, true, { ...panel, viz: { type: "stat", value: "n" } });

@@ -206,3 +206,25 @@ export function sqlTimeCondition(tsField: string, window: ResolvedWindow): strin
   const field = quoteClickHouseIdentifier(tsField);
   return `${field} BETWEEN ${sqlBound(window.start, window.zone)} AND ${sqlBound(window.end, window.zone)}`;
 }
+
+export function histogramBucketBounds(range: ResolvedWindow, stepMs: number): { first: number; last: number; next: (ts: number) => number } {
+  const align = (ts: number) => {
+    const date = fromAbsolute(ts, range.zone);
+    const wall = toCalendarDateTime(date);
+    if (stepMs > 3_600_000) {
+      const hours = stepMs / 3_600_000;
+      return toZoned(wall.set({ hour: Math.floor(date.hour / hours) * hours, minute: 0, second: 0, millisecond: 0 }), range.zone).toDate().getTime();
+    }
+    return ts - (date.minute * 60_000 + date.second * 1000 + date.millisecond) % stepMs;
+  };
+  return {
+    first: align(range.start), last: align(range.end),
+    next: (ts) => {
+      if (stepMs <= 3_600_000) return ts + stepMs;
+      const wall = toCalendarDateTime(fromAbsolute(ts, range.zone));
+      const hours = stepMs / 3_600_000;
+      const next = wall.set({ minute: 0, second: 0, millisecond: 0 }).add({ hours: hours - wall.hour % hours });
+      return toZoned(next, range.zone).toDate().getTime();
+    },
+  };
+}

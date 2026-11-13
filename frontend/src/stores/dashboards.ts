@@ -36,6 +36,7 @@ import {
 } from "@/utils/dashboardPanels";
 import {
   epochMs,
+  parseZoneId,
   parseRelativeSpec,
   relativeWindow,
   resolveWindow,
@@ -424,7 +425,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const data = unwrap(resp);
       const buckets = data?.data ?? [];
 
-      const frame = countFrame(buckets, data?.granularity ?? null, !!groupBy, data?.notice);
+      const frame = countFrame(buckets, data?.granularity ?? window, !!groupBy, data?.notice, { ...range, zone: nativeLanguage === "logsql" ? parseZoneId("UTC")! : range.zone });
       return { status: buckets.length ? "success" : "empty", frame };
     }
 
@@ -915,9 +916,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const signal = controller.signal;
     state.data.value.previewState = { status: "loading" };
     try {
-      const result = await fetchPanelFrame(panel, effectiveRange.value, signal);
+      const range = effectiveRange.value;
+      const result = await fetchPanelFrame(panel, range, signal);
       if (signal.aborted) return;
-      state.data.value.previewState = result;
+      state.data.value.previewState = { ...result, range };
     } catch (err) {
       if (signal.aborted || isAbortError(err)) return;
       const { locked, message } = classifyPanelError(err);

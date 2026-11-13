@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { addExact, averageExact, compareExact, exactString, parseExact, roundExact } from "../exactNumber";
 import { countFrame, frameCellText, frameWithKinds, reduceStat, resultFrame, suggestKind } from "../panelFrame";
+import { epochMs, parseZoneId } from "../timeWindow";
 import { formatNumber } from "../numberFormat";
 
 function exact(value: string) {
@@ -53,9 +54,14 @@ describe("panel frames", () => {
     const frame = numericFrame([{ day: "2026-11-12", n: "2" }]);
     for (const zone of ["Etc/GMT+8", "Pacific/Apia"]) {
       const original = process.env.TZ;
-      process.env.TZ = zone;
-      expect(frameCellText(frame.rows[0].day, frame.columns[1])).toBe("2026-11-12");
-      process.env.TZ = original;
+      try {
+        process.env.TZ = zone;
+        const dated = numericFrame([{ day: "2026-11-12", n: "2" }]);
+        expect(frameCellText(dated.rows[0].day, dated.columns[1])).toBe("2026-11-12");
+      } finally {
+        if (original === undefined) delete process.env.TZ;
+        else process.env.TZ = original;
+      }
     }
     expect(frameWithKinds(frame, { missing: { kind: "number", confidence: "confirmed" } }).notices[0]).toContain("missing");
     expect(() => reduceStat(frame, { value: "missing", reduce: "last", count: false })).toThrow("missing");
@@ -101,4 +107,83 @@ describe("stat reducers", () => {
   it.each(["sum", "avg", "min", "max", "first", "last"] as const)("%s returns zero for an empty count", (reduce) => {
     expect(frameCellText(reduceStat(countFrame([], null, false), { value: "count", reduce, count: true }).value)).toBe("0");
   });
+});
+
+
+describe("review regressions", () => {
+  it.each(["constructor", "toString", "valueOf", "__proto__"])("keeps the numeric column %s", (name) => {
+    const frame = resultFrame({ columns: [{ name, type: "UInt64" }], rows: [{ [name]: "42" }] });
+    expect(frameCellText(frame.rows[0][name], frame.columns[0])).toBe("42");
+    expect(frame.columns[0].confidence).toBe("declared");
+  });
+  it("keeps decimal scale and timestamp fractional digits in table cells", () => {
+    const frame = resultFrame({ columns: [{ name: "n", type: "Nullable(Decimal(12,2))" }, { name: "at", type: "DateTime64(6)" }], rows: [{ n: "12.50", at: "2026-11-12T00:00:00.123456Z" }] });
+    expect(frameCellText(frame.rows[0].n, frame.columns[0])).toBe("12.50");
+    expect(frameCellText(frame.rows[0].at, frame.columns[1], "Asia/Kolkata")).toBe("2026-11-12 05:30:00.123456");
+  });
+  it("treats quiet untyped results and nonfinite strings as ordinary NULL", () => {
+    expect(reduceStat(resultFrame({ columns: [], rows: [], untyped: true }), { value: "n", reduce: "last", count: false }).value).toBeNull();
+    const frame = frameWithKinds(resultFrame({ columns: [], rows: ["NaN", "Inf", "+Inf", "-Inf"].map((n) => ({ n })), untyped: true }), { n: { kind: "number", confidence: "confirmed" } });
+    expect(frame.rows.map((r) => r.n)).toEqual([null, null, null, null]);
+    expect(frame.notices).toEqual([]);
+    expect(frameWithKinds(resultFrame({ columns: [], rows: [], untyped: true }), { n: { kind: "number", confidence: "confirmed" } }).notices).toEqual([]);
+    expect(() => reduceStat(resultFrame({ columns: [{ name: "other", type: "String" }], rows: [] }), { value: "n", reduce: "last", count: false })).toThrow("missing");
+  });
+  it("rejects trailing garbage and unzoned String time confirmations", () => {
+    const frame = resultFrame({ columns: [{ name: "at", type: "String" }], rows: ["2026-11-12junk", "2026-11-12 01:02:03", "2026-11-12T01:02:03Zjunk"].map((at) => ({ at })) });
+    for (const kind of ["time", "date"] as const) expect(frameWithKinds(frame, { at: { kind, confidence: "confirmed" } }).rows.map((r) => r.at)).toEqual([null, null, null]);
+  });
+  it("orders microsecond instants and text by code point", () => {
+    const frame = resultFrame({ columns: [{ name: "n", type: "UInt64" }, { name: "at", type: "DateTime64(6)" }], rows: [{ n: 2, at: "2026-11-12T00:00:00.000900Z" }, { n: 1, at: "2026-11-12T01:00:00.000100+01:00" }] });
+    const last = reduceStat(frame, { value: "n", reduce: "last", orderBy: "at", count: false });
+    expect(frameCellText(last.value)).toBe("2");
+    expect(last.notices).toEqual([]);
+    const text = resultFrame({ columns: [{ name: "n", type: "UInt64" }, { name: "at", type: "String" }], rows: [{ n: 2, at: "a" }, { n: 1, at: "Z" }] });
+    expect(frameCellText(reduceStat(text, { value: "n", reduce: "first", orderBy: "at", count: false }).value)).toBe("1");
+  });
+});
+
+
+describe("sparse count buckets", () => {
+  const range = { start: epochMs(Date.parse("2026-11-12T00:00:20Z")), end: epochMs(Date.parse("2026-11-12T00:04:00Z")), zone: parseZoneId("UTC")! };
+  const sparse = [{ bucket: "2026-11-12T00:02:00Z", log_count: 6 }, { bucket: "2026-11-12T00:00:00Z", log_count: 2 }];
+  const filled = [2, 0, 6, 0, 0].map((log_count, i) => ({ bucket: `2026-11-12T00:0${i}:00Z`, log_count }));
+  it.each([["min", "0"], ["max", "6"], ["avg", "1.6"], ["sum", "8"], ["first", "2"], ["last", "0"]] as const)("%s agrees on sparse ClickHouse and zero-filled VictoriaLogs", (reduce, expected) => {
+    for (const buckets of [sparse, filled]) {
+      const frame = countFrame(buckets, "1m", false, undefined, range);
+      const reduced = reduceStat(frame, { value: "count", reduce, count: true });
+      expect(frameCellText(reduced.value)).toBe(expected);
+      if (reduce === "last") expect(reduced.rowLabel).toBe("2026-11-12 00:04:00");
+      if (reduce === "first") expect(reduced.rowLabel).toBe("2026-11-12 00:00:00");
+    }
+  });
+  it("totals all groups per bucket before reducing", () => {
+    const frame = countFrame([...sparse.map((b) => ({ ...b, group_value: "a" })), { bucket: "2026-11-12T00:00:00Z", log_count: 3, is_other: true }], "1m", true, undefined, range);
+    expect(frameCellText(reduceStat(frame, { value: "count", reduce: "max", count: true }).value)).toBe("6");
+    expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe("2.2");
+    expect(frameCellText(reduceStat(frame, { value: "count", reduce: "first", count: true }).value)).toBe("5");
+  });
+});
+
+
+describe("count bucket boundaries", () => {
+  it("fills local daily buckets across daylight saving without inventing UTC buckets", () => {
+    const range = { start: epochMs(Date.parse("2026-03-07T17:00:00Z")), end: epochMs(Date.parse("2026-03-10T16:00:00Z")), zone: parseZoneId("America/New_York")! };
+    const frame = countFrame([{ bucket: "2026-03-08T05:00:00Z", log_count: 8 }], "24h", false, undefined, range);
+    expect(frame.rawRows.map((r) => r.time)).toEqual(["2026-03-07T05:00:00Z", "2026-03-08T05:00:00Z", "2026-03-09T04:00:00Z", "2026-03-10T04:00:00Z"]);
+    expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe("2");
+  });
+  it("does not invent a new grouped series while filling empty buckets", () => {
+    const range = { start: epochMs(Date.parse("2026-11-12T00:00:00Z")), end: epochMs(Date.parse("2026-11-12T00:02:00Z")), zone: parseZoneId("UTC")! };
+    const frame = countFrame([{ bucket: "2026-11-12T00:01:00Z", log_count: 3, is_other: true }], "1m", true, undefined, range);
+    expect(frame.rawRows.map((r) => r.series)).toEqual([{ kind: "other" }, { kind: "other" }, { kind: "other" }]);
+  });
+});
+
+
+it("keeps multi-hour count buckets aligned after a skipped DST hour", () => {
+  const range = { start: epochMs(Date.parse("2026-03-08T05:30:00Z")), end: epochMs(Date.parse("2026-03-08T10:30:00Z")), zone: parseZoneId("America/New_York")! };
+  const frame = countFrame([{ bucket: "2026-03-08T08:00:00Z", log_count: 8 }], "2h", false, undefined, range);
+  expect(frame.rawRows.map((r) => r.time)).toEqual(["2026-03-08T05:00:00Z", "2026-03-08T07:00:00Z", "2026-03-08T08:00:00Z", "2026-03-08T10:00:00Z"]);
+  expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe("2");
 });
