@@ -156,7 +156,7 @@ function parseInputValue(input: string): Date | null {
 
 function applyValue() {
   if (!props.includeTime) {
-    const value = draftValue.value;
+    const value = draftValue.value.trim();
     try {
       validateDay(value);
     } catch {
@@ -322,7 +322,7 @@ function clear() {
               class="flex-1 h-8"
               @click="setNow"
             >
-              {{ t('pages.now') }}
+              {{ includeTime ? t('pages.now') : t('palette.range.today') }}
             </Button>
             <Button 
               variant="outline"

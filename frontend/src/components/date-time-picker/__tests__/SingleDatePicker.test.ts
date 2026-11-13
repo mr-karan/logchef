@@ -45,3 +45,15 @@ it('keeps the datetime control and timestamp output', async () => {
   apply()
   expect(emitted).toEqual(['2026-11-12 12:34:56'])
 })
+
+it('trims date-only drafts and labels the shortcut Today', async () => {
+  const emitted = await open(false, '2026-11-12')
+  expect([...document.querySelectorAll('button')].some(b => b.textContent?.trim() === 'Today')).toBe(true)
+  const input = document.querySelector('input')
+  if (!input) throw new Error('date input missing')
+  input.value = '  2024-02-29  '
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await nextTick()
+  apply()
+  expect(emitted).toEqual(['2024-02-29'])
+})

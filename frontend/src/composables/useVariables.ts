@@ -1,7 +1,7 @@
 import {useVariableStore, type VariableState} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
 import type { TemplateVariable } from "@/api/logchefql";
-import { validateDay, extractTemplateVariables, type TemplateDialect } from "@/utils/template";
+import { extractTemplateVariables, type TemplateDialect } from "@/utils/template";
 export type { ExtractedVariable } from "@/utils/template";
 
 export const extractVariablesWithOptional = extractTemplateVariables;
@@ -27,40 +27,6 @@ export function useVariables() {
             return value;
         }
         return variable.defaultValue ?? value;
-    };
-
-    const escapeSqlString = (value: string): string => {
-        return value.replace(/'/g, "''");
-    };
-
-    const convertVariables = (sql: string): string => {
-        for (const variable of allVariables.value) {
-            const key = variable.name;
-            const value = resolveVariableValue(variable);
-
-            let formattedValue: string;
-            if (variable.type === 'number') {
-                formattedValue = String(value);
-            } else if (variable.type === 'day') {
-                formattedValue = `'${validateDay(value)}'`;
-            } else if (variable.type === 'date') {
-                const dateStr = value ? new Date(value as string).toISOString() : '';
-                formattedValue = `'${escapeSqlString(dateStr)}'`;
-            } else {
-                formattedValue = `'${escapeSqlString(String(value ?? ''))}'`;
-            }
-
-            // Fixed regex: use \\s for whitespace matching in template literals
-            const originalRegex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g');
-            const placeholderRegex = new RegExp(`'__VAR_${key}__'`, 'g');
-            const unquotedPlaceholderRegex = new RegExp(`__VAR_${key}__`, 'g');
-
-            sql = sql.replace(originalRegex, formattedValue);
-            sql = sql.replace(placeholderRegex, formattedValue);
-            sql = sql.replace(unquotedPlaceholderRegex, formattedValue);
-        }
-
-        return sql;
     };
 
     /**
@@ -131,7 +97,6 @@ export function useVariables() {
     };
 
     return {
-        convertVariables,
         getVariablesForApi,
         ensureVariablesFromSql,
         validateVariablesForSql,

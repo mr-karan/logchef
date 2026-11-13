@@ -140,6 +140,15 @@ Collections/saved queries can be either LogchefQL or native; the `TYPE` column
 in the list tells you which. Variables use `{{name}}` placeholders; override with
 `--var name=value`.
 
+Saved-query variable type `day` accepts `YYYY-MM-DD` calendar dates. It renders
+`'2026-11-12'` in ClickHouse SQL and `"2026-11-12"` in LogsQL and LogchefQL.
+The UI labels it "Date". Type `date`, labelled "Date and time", keeps its existing
+output with a time part. For `toDate(_timestamp) = {{d}}`, use `day` to avoid a
+`toDate({{d}})` wrapper. The CLI substitutes raw text without quoting or sending
+variable types. A date value must include its own quotes, for example
+`--var "d='2026-11-12'"` for SQL or `--var 'd="2026-11-12"'` for LogsQL and
+LogchefQL. Date-only values reject timestamps and impossible calendar dates.
+
 ## Handing off to the UI
 
 When the question is visual (time-series shape, drill-down, sharing), stop and
@@ -149,10 +158,3 @@ open the explorer:
 logchef open 'level="error" and service="payment-api"'   # open current source+query in browser
 logchef open --print                                     # just print the URL (for pasting)
 ```
-
-Saved-query variable type `day` accepts `YYYY-MM-DD` calendar dates. It renders
-`'2026-11-12'` in ClickHouse SQL and `"2026-11-12"` in LogsQL and LogchefQL.
-The UI labels it "Date". Type `date`, labelled "Date and time", keeps its existing
-output with a time part. For `toDate(_timestamp) = {{d}}`, use `day` to avoid a
-`toDate({{d}})` wrapper. CLI `--var d=2026-11-12` overrides the value and preserves
-the saved type. Date-only values reject timestamps and impossible calendar dates.
