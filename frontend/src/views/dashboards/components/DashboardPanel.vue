@@ -119,6 +119,11 @@ const columnSubset = computed(() => {
         :title="t('dashboards.openPanelInExplorer')"
       >{{ panel.title || "Untitled" }}</RouterLink>
       <span v-else class="dash-panel__title" :title="panel.title">{{ panel.title || "Untitled" }}</span>
+      <span
+        v-if="truncationText"
+        class="dash-panel__chip dash-panel__chip--header border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+        :title="truncationText"
+      >{{ truncationText }}</span>
       <Lock
         v-if="isLocked"
         class="dash-panel__lock"
@@ -127,9 +132,11 @@ const columnSubset = computed(() => {
     </div>
 
     <div class="dash-panel__body">
+      <!-- Without the header (edit mode, preview) the chip floats over the
+           body's top-right corner instead. -->
       <span
-        v-if="truncationText"
-        class="dash-panel__chip border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+        v-if="!chrome && truncationText"
+        class="dash-panel__chip dash-panel__chip--overlay border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
         :title="truncationText"
       >{{ truncationText }}</span>
       <!-- Locked: viewer lacks source access. Covers both the server-redacted
@@ -271,16 +278,25 @@ const columnSubset = computed(() => {
   height: 100%;
 }
 .dash-panel__chip {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.5rem;
-  z-index: 2;
   padding: 0.1rem 0.45rem;
   border-width: 1px;
   border-radius: 999px;
   font-size: 0.65rem;
   line-height: 1.2;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+.dash-panel__chip--header {
+  margin-left: auto;
+}
+.dash-panel__chip--header + .dash-panel__lock {
+  margin-left: 0;
+}
+.dash-panel__chip--overlay {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  z-index: 2;
 }
 .dash-panel__message {
   display: flex;

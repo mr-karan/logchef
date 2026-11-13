@@ -23,10 +23,10 @@ afterEach(() => {
   host = null;
 });
 
-async function render(state: PanelState) {
+async function render(state: PanelState, chrome = true) {
   host = document.createElement("div");
   document.body.appendChild(host);
-  createApp(DashboardPanel, { panel, heightPx: 240, state }).use(createPinia()).use(i18n).mount(host);
+  createApp(DashboardPanel, { panel, heightPx: 240, state, chrome }).use(createPinia()).use(i18n).mount(host);
   await nextTick();
   return host;
 }
@@ -43,9 +43,16 @@ function tableState(truncation: "none" | "rows" | "bytes" | "unknown"): PanelSta
 }
 
 describe("DashboardPanel truncation chip", () => {
-  it("says how many rows a cut result kept", async () => {
+  it("says how many rows a cut result kept, in the header", async () => {
     const root = await render(tableState("rows"));
-    expect(root.querySelector(".dash-panel__chip")?.textContent).toBe("First 1 row");
+    expect(root.querySelector(".dash-panel__header .dash-panel__chip")?.textContent).toBe("First 1 row");
+    expect(root.querySelectorAll(".dash-panel__chip")).toHaveLength(1);
+  });
+
+  it("floats the chip over the body when the panel has no header", async () => {
+    const root = await render(tableState("rows"), false);
+    expect(root.querySelector(".dash-panel__body .dash-panel__chip--overlay")?.textContent).toBe("First 1 row");
+    expect(root.querySelectorAll(".dash-panel__chip")).toHaveLength(1);
   });
 
   it("names an unproven cap", async () => {
