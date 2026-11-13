@@ -21,7 +21,9 @@ import (
 func newProvisioningPostgres(t *testing.T) (*postgres.Store, string, *pgx.Conn) {
 	t.Helper()
 	dsn := postgrestest.DSN(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Connecting and running every migration takes well under a second
+	// unloaded; a loaded CI runner needs more headroom than 10s.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {

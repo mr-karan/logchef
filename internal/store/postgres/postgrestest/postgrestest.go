@@ -29,7 +29,7 @@ func DSN(t testing.TB) string {
 	defer cancel()
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
-		t.Fatal("connect for test schema failed")
+		t.Fatalf("connect for test schema: %v", err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil {
@@ -40,7 +40,7 @@ func DSN(t testing.TB) string {
 		defer cancel()
 		conn, err := pgx.Connect(ctx, dsn)
 		if err != nil {
-			t.Error("connect for test schema cleanup failed")
+			t.Errorf("connect for test schema cleanup: %v", err)
 			return
 		}
 		defer func() { _ = conn.Close(ctx) }()
