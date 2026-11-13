@@ -517,6 +517,28 @@ describe("dashboards store — #119/#120 hardening", () => {
     expect(store.current).toMatchObject({ revision: 3, name: "Theirs again" });
   });
 
+  it("keeps draft panel runs alive when a conflicted discard fails to reload", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ revision: 1 }));
+    await store.enterEdit();
+    mocks.update.mockRejectedValue({ status: "error", error_type: "ConflictError", message: "modified" });
+    await store.saveEdit();
+
+    let release!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { release = resolve; });
+    mocks.logsQuery.mockReturnValue(pending);
+    mocks.logchefqlQuery.mockReturnValue(pending);
+    const preview = store.previewPanel(tablePanel());
+    expect(store.previewState?.status).toBe("loading");
+
+    mocks.get.mockRejectedValue({ status: "error", error_type: "NetworkError", message: "offline" });
+    expect((await store.cancelEdit()).success).toBe(false);
+    expect(store.isEditing).toBe(true);
+
+    release({ status: "success", data: { data: [{ a: 1 }], columns: [{ name: "a", type: "UInt8" }], logs: [{ a: 1 }] } });
+    await preview;
+    expect(store.previewState?.status).not.toBe("loading");
+  });
+
   it("does not reread the dashboard when discarding an edit that never conflicted", async () => {
     const store = await loadEditableDashboard();
     await store.enterEdit();

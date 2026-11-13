@@ -265,7 +265,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // refresh for a dashboard we're no longer viewing.
     if (token !== loadToken) return result;
     if (result.success) {
-      if (discardDraft) resetEdit();
+      if (discardDraft) {
+        // Stop draft-only runs only once the draft is really going away; a failed
+        // reload keeps the user editing with those panels intact.
+        abortPreview();
+        abortSinglePanels();
+        resetEdit();
+      }
       state.data.value.current = result.data ?? null;
       state.data.value.panelStates = {};
       // A dashboard with a saved default opens in that range; one without keeps
@@ -618,9 +624,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // last-loaded state, unless a refused save showed that state is stale.
   async function cancelEdit(): Promise<DashboardResult> {
     const reloadId = editConflicted ? editDashboardId : null;
+    if (reloadId !== null) return await loadDashboard(reloadId, { discardDraft: true });
     abortPreview();
     abortSinglePanels();
-    if (reloadId !== null) return await loadDashboard(reloadId, { discardDraft: true });
     resetEdit();
     return { success: true };
   }
