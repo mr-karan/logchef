@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mr-karan/logchef/internal/store"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/mr-karan/logchef/internal/store"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
