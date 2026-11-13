@@ -179,6 +179,7 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
                 )
             };
             let request = SqlQueryRequest {
+                variables: Vec::new(),
                 query_text: count_query,
                 limit: Some(1),
                 timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
@@ -414,6 +415,7 @@ async fn fetch_samples(
         // bake into sample-only-column SQL.
         let request_limit = if with_count { 3 } else { 1 };
         let request = SqlQueryRequest {
+            variables: Vec::new(),
             query_text: sql,
             limit: Some(request_limit),
             timezone: None,
@@ -523,6 +525,7 @@ async fn vl_fetch_samples(
         };
         let request_limit = if with_count { 3 } else { 1 };
         let request = SqlQueryRequest {
+            variables: Vec::new(),
             query_text: query,
             limit: Some(request_limit),
             timezone: None,

@@ -695,6 +695,11 @@ logchef saved-queries 14 --output msg
 logchef saved-queries 14 --show-sql
 ```
 
+Variable overrides keep the saved type. Pass plain values, such as
+`--var service=api --var d=2026-11-12` for a text and a `day` variable.
+The server quotes values for the query dialect and resolves optional `[[ ]]`
+blocks. Do not add SQL or LogsQL quotes to variable values.
+
 ### Collections
 
 The `collections` command lets you list and run saved collections (saved queries) from the Logchef web UI.

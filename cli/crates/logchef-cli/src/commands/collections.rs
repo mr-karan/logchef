@@ -322,24 +322,8 @@ async fn run_collection(
     let content: CollectionQueryContent =
         serde_json::from_str(&collection.query_content).context("Failed to parse query content")?;
 
-    let query_str = content.content.unwrap_or_default();
-
-    // Apply variable overrides
-    let mut final_query = query_str.clone();
-    let var_overrides = parse_variable_overrides(&args.variables);
-
-    // Replace variables from collection
-    if let Some(vars) = &content.variables {
-        for var in vars {
-            let value = var_overrides
-                .get(&var.name)
-                .cloned()
-                .or_else(|| var.value.as_ref().map(json_value_to_string))
-                .unwrap_or_default();
-            // Replace {{name}} with value
-            final_query = final_query.replace(&format!("{{{{{}}}}}", var.name), &value);
-        }
-    }
+    let variables = content.query_variables(&args.variables);
+    let final_query = content.content.clone().unwrap_or_default();
 
     // Determine time range: every branch below resolves to a concrete UTC
     // instant range, which resolve_time_range then formats as wall-clock in
@@ -389,6 +373,7 @@ async fn run_collection(
 
     let response = if collection.query_language == "logchefql" {
         let request = QueryRequest {
+            variables,
             query: final_query,
             start_time: time_range.start,
             end_time: time_range.end,
@@ -402,6 +387,7 @@ async fn run_collection(
             .context("Query failed")?
     } else {
         let request = SqlQueryRequest {
+            variables,
             query_text: final_query,
             limit: Some(limit),
             timezone: Some(time_range.timezone),
@@ -546,27 +532,6 @@ fn json_value_to_line(value: &serde_json::Value) -> String {
         serde_json::Value::Null => String::new(),
         _ => value.to_string(),
     }
-}
-
-fn json_value_to_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Null => String::new(),
-        _ => value.to_string(),
-    }
-}
-
-fn parse_variable_overrides(vars: &[String]) -> std::collections::HashMap<String, String> {
-    vars.iter()
-        .filter_map(|v| {
-            let parts: Vec<&str> = v.splitn(2, '=').collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
 }
 
 fn parse_duration(s: &str) -> Result<Duration> {

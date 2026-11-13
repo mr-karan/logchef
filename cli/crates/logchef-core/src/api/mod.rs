@@ -665,6 +665,7 @@ mod tests {
         );
         let client = Client::new(&server_url, 5).expect("create client");
         let request = QueryRequest {
+            variables: Vec::new(),
             query: "".to_owned(),
             start_time: "2026-08-08 10:00:00".to_owned(),
             end_time: "2026-08-08 10:15:00".to_owned(),

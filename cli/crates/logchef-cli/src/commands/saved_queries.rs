@@ -226,18 +226,8 @@ async fn run_saved_query(
     let content: CollectionQueryContent =
         serde_json::from_str(&query.query_content).context("Failed to parse query content")?;
 
-    let mut final_query = content.content.clone().unwrap_or_default();
-    let var_overrides = parse_variable_overrides(&args.variables);
-    if let Some(vars) = &content.variables {
-        for var in vars {
-            let value = var_overrides
-                .get(&var.name)
-                .cloned()
-                .or_else(|| var.value.as_ref().map(json_value_to_string))
-                .unwrap_or_default();
-            final_query = final_query.replace(&format!("{{{{{}}}}}", var.name), &value);
-        }
-    }
+    let variables = content.query_variables(&args.variables);
+    let final_query = content.content.clone().unwrap_or_default();
 
     let time_range = saved_query_time_range(&content, ctx.defaults.timezone.as_deref())?;
     let limit = args.limit.or(content.limit).unwrap_or(ctx.defaults.limit);
@@ -254,6 +244,7 @@ async fn run_saved_query(
 
     let response = if query.query_language != "logchefql" {
         let request = SqlQueryRequest {
+            variables,
             query_text: final_query,
             limit: args.limit,
             timezone: Some(time_range.timezone.clone()),
@@ -267,6 +258,7 @@ async fn run_saved_query(
             .context("SQL query failed")?
     } else {
         let request = QueryRequest {
+            variables,
             query: final_query,
             start_time: time_range.start,
             end_time: time_range.end,
@@ -722,27 +714,6 @@ fn parse_duration(s: &str) -> Result<Duration> {
         "d" => Ok(Duration::days(num)),
         "w" => Ok(Duration::weeks(num)),
         _ => Ok(Duration::minutes(num)),
-    }
-}
-
-fn parse_variable_overrides(vars: &[String]) -> std::collections::HashMap<String, String> {
-    vars.iter()
-        .filter_map(|v| {
-            let parts: Vec<&str> = v.splitn(2, '=').collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn json_value_to_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Null => String::new(),
-        _ => value.to_string(),
     }
 }
 
