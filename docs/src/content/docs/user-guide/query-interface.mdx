@@ -158,13 +158,14 @@ The time histogram shows log volume distribution. Click and drag to zoom into a 
 The toolbar's row limit and a `LIMIT` in your own SQL or LogsQL both apply, and
 the smaller one wins, together with the server's configured maximum. A query
 that ends in `ORDER BY duration DESC LIMIT 20` shows 20 rows whatever the
-toolbar says. `OFFSET` is kept, and a `LIMIT` inside a subquery or CTE is never
-changed.
+toolbar says. `OFFSET` is kept, and a `LIMIT` inside a subquery, a CTE or one
+branch of a `UNION` is never changed; the limit applies to the `UNION` as a
+whole.
 
 When rows were cut, the results bar says so: **First N rows** when a row past
 the limit existed, **Cut by size** when the response size budget stopped the
-result, and **May be incomplete** when a non-literal `LIMIT` filled the cap. A
-result that fits shows nothing.
+result, and **May be incomplete** when a non-literal `LIMIT` or the source's
+`max_result_rows` setting filled the cap. A result that fits shows nothing.
 
 ### Export
 

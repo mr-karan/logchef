@@ -166,14 +166,18 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   the statement's literal `LIMIT`, the request limit and the configured
   maximum, so `ORDER BY x DESC LIMIT 20` returns 20 rows where it returned the
   request limit before. A clamp keeps `OFFSET`, and a `LIMIT` inside a
-  subquery, a CTE or a `LIMIT n BY` clause is never changed. Scripts that
-  relied on the request limit overriding a smaller `LIMIT` must change the
-  query.
+  subquery, a CTE, a `LIMIT n BY` clause or one branch of a `UNION`,
+  `EXCEPT` or `INTERSECT` is never changed; the limit applies to the set
+  operation as a whole. Scripts that relied on the request limit overriding
+  a smaller `LIMIT` must change the query.
 - Query stats gain `limit_source` (`statement`, `request`, `default`, `max`)
   and `truncation` (`none`, `rows`, `bytes`, `unknown`). A capped query asks
-  for one extra row, so `rows` is a proven cut. The Explorer and dashboard
-  panels show the state as a chip and no longer print a limit warning when
-  nothing was cut. The older `truncated` and `truncated_reason` fields stay.
+  for one extra row, so `rows` is a proven cut. A source's `max_result_rows`
+  setting counts as the configured maximum, and the extra row never passes
+  it, so a result that fills it reports `unknown`. The Explorer and
+  dashboard panels show the state as a chip and no longer print a limit
+  warning when nothing was cut. The older `truncated` and `truncated_reason`
+  fields stay.
 - A LogchefQL run no longer bakes the request limit into the SQL it reports
   as `generated_sql`; the limit applies when the query runs. The Explorer's
   Download of a LogchefQL run therefore exports up to the export maximum

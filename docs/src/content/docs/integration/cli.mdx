@@ -349,7 +349,8 @@ logchef sql 'level:="error" | fields _time, _msg, service'
 The server returns at most the smallest of the query's own `LIMIT`, `--limit`
 and its configured maximum. `SELECT ... ORDER BY c DESC LIMIT 10` returns 10
 rows whatever `--limit` says, and `LIMIT 5000 OFFSET 200` under `--limit 100`
-returns rows 201 to 300. A `LIMIT` inside a subquery or CTE is never changed.
+returns rows 201 to 300. A `LIMIT` inside a subquery, a CTE or one branch of a
+`UNION` is never changed.
 With `--output json`, `stats.limit_source` names the bound that applied
 (`statement`, `request`, `default` or `max`) and `stats.truncation` says
 whether rows were cut: `none`, `rows`, `bytes` or `unknown`.
