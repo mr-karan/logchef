@@ -1693,5 +1693,15 @@
   "dashboardBuilder.Percent": "percent",
   "dashboardBuilder.Bytes": "bytes",
   "dashboardBuilder.DurationMs": "duration_ms",
-  "dashboardBuilder.DurationS": "duration_s"
+  "dashboardBuilder.DurationS": "duration_s",
+  "panelChart.inspect": "{mark} chart. Use arrow keys to inspect buckets.",
+  "panelChart.seriesLegend": "Series legend",
+  "panelChart.sliceLegend": "Slice legend",
+  "panelChart.toplist": "Top list",
+  "panelChart.labelsHidden": "Value labels hidden. Enlarge the chart or show fewer points.",
+  "panelChart.other": "Other",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(null)",
+  "panelChart.emptyCategory": "(empty)",
+  "panelChart.allZero": "All values are zero."
 }

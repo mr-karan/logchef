@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useElementSize } from "@vueuse/core";
-import { computed, markRaw, ref, watch } from "vue";
+import { computed, markRaw, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { VisAxis, VisStackedBar, VisGroupedBar, VisLine, VisArea, VisScatter, VisXYContainer, VisCrosshair, VisTooltip } from "@unovis/vue";
-import { Scale, StackedBar, GroupedBar } from "@unovis/ts";
+import { Scale, StackedBar, GroupedBar, Scatter, Direction, type Tooltip } from "@unovis/ts";
+import { getHexValue } from "@unovis/ts/utils/color";
+import { useThemeStore } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
-import { buildPanelChart, chartStacked, chartValue, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
+import { buildPanelChart, chartStacked, chartValue, chartLabelColor, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
 import { chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
 import { addExact, isExact, parseExact, type FrameNumber } from "@/utils/exactNumber";
 import { escapeHtml } from "@/lib/html";
@@ -15,6 +17,12 @@ import type { ResolvedWindow } from "@/utils/timeWindow";
 const props = withDefaults(defineProps<{ frame: PanelFrame; viz: ChartViz; count: boolean; height?: number; range?: ResolvedWindow }>(), { height: 200 });
 const { t } = useI18n();
 const preferences = usePreferencesStore();
+const theme = useThemeStore();
+watch(() => theme.isDark, async () => {
+  await nextTick();
+  const svg = plotHost.value?.querySelector('svg');
+  if (svg) barLabels(svg);
+});
 const result = computed(() => {
   try {
     const model = buildPanelChart(props.frame, props.viz, props.count, preferences.zone);
@@ -32,7 +40,7 @@ const x = (row: ChartRow) => row.x;
 const accessors = computed(() => model.value.series.map(s => (row: ChartRow) => row.values.get(s.key)?.coordinate ?? Number.NaN));
 const colors = computed(() => model.value.series.map(s => s.color));
 const plotHost = ref<HTMLElement | null>(null);
-const { height: plotHeight } = useElementSize(plotHost);
+const { height: plotHeight, width: plotWidth } = useElementSize(plotHost);
 const chartHeight = computed(() => Math.max(60, plotHeight.value || props.height - 30));
 const extent = computed(() => {
   let low = 0, high = 0;
@@ -59,12 +67,38 @@ const xDomain = computed<[number, number]>(() => {
 });
 const timeFormatter = computed(() => chartTimeFormatter(props.frame, props.viz, props.count, preferences.zone));
 const xScale = computed(() => model.value.time && !horizontal.value ? Scale.scaleUtc() : Scale.scaleLinear());
-const categoryTicks = computed(() => model.value.time ? undefined : model.value.rows.map(r => r.x));
+const plotWidthAvailable = computed(() => Math.max(0, (plotWidth.value || plotHost.value?.clientWidth || 0) - 80));
+const categoryTicks = computed(() => {
+  if (model.value.time) return undefined;
+  const step = Math.max(1, Math.ceil(model.value.rows.length / Math.max(1, Math.floor((horizontal.value ? chartHeight.value : plotWidthAvailable.value) / 20))));
+  return model.value.rows.filter((_, i) => i % step === 0).map(r => r.x);
+});
+const categoryAngle = computed(() => {
+  if (horizontal.value || model.value.time) return 0;
+  const space = plotWidthAvailable.value / Math.max(1, model.value.rows.length);
+  return model.value.rows.some(row => row.label().length * 6 > space) ? -45 : 0;
+});
+const labelsFit = computed(() => {
+  const rows = model.value.rows.length, series = model.value.series.length;
+  const slots = mark.value === "bar" && !stacked.value ? rows * series : rows;
+  const length = horizontal.value ? chartHeight.value : plotWidthAvailable.value;
+  const spacing = mark.value !== "bar" ? 40 : horizontal.value ? 20 : 32;
+  return rows * series <= 500 && slots <= length / spacing;
+});
+const pointLabels = computed(() => model.value.series.map(series => (row: ChartRow) => row.values.get(series.key)?.text ?? ""));
+const pointLabelSelector = `.${Scatter.selectors.point} > text`;
 function xTick(value: number | Date) {
-  return model.value.time ? timeFormatter.value.format(Number(value)).replaceAll(",", "") : model.value.rows[Number(value)]?.label ?? "";
+  return model.value.time ? timeFormatter.value.format(Number(value)).replaceAll(",", "") : model.value.rows[Number(value)]?.label() ?? "";
 }
 const yTick = (value: number | Date) => chartValue(Number(value), props.viz.format).text;
 const active = ref<number | null>(null);
+const sharedTooltip = ref<{ component?: Tooltip }>();
+watch(active, index => {
+  if (!horizontal.value) return;
+  const tooltipComponent = sharedTooltip.value?.component;
+  if (index === null) tooltipComponent?.hide();
+  else tooltipComponent?.show(tooltip(model.value.rows[index]), { x: plotWidthAvailable.value / 2, y: chartHeight.value * (index + 0.5) / model.value.rows.length });
+});
 watch(model, () => { active.value = null; });
 function keydown(event: KeyboardEvent) {
   if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Escape"].includes(event.key)) return;
@@ -85,33 +119,39 @@ function tooltip(row: ChartRow): string {
       if (typeof total === "number" && typeof raw === "number") total += raw;
       else { const a = isExact(total) ? total : parseExact(total), b = isExact(raw) ? raw : parseExact(raw); if (a && b) total = addExact(a, b); }
     }
-    return `<div class="panel-chart__tooltip-row"><span><i style="background:${s.color}"></i>${escapeHtml(s.label)}</span><strong>${escapeHtml(value?.exact ?? "NULL")}</strong></div>`;
+    return `<div class="panel-chart__tooltip-row"><span><i style="background:${s.color}"></i>${escapeHtml(s.label)}</span><strong>${escapeHtml(value?.exact ?? t("panelChart.null"))}</strong></div>`;
   }).join("");
-  return `<div role="tooltip" class="panel-chart__tooltip"><strong>${escapeHtml(row.label)}</strong>${lines}<div class="panel-chart__tooltip-row panel-chart__total"><span>${escapeHtml(t('common.total'))}</span><strong>${escapeHtml(chartValue(total, props.viz.format).exact)}</strong></div></div>`;
+  return `<div role="tooltip" class="panel-chart__tooltip"><strong>${escapeHtml(row.label())}</strong>${lines}<div class="panel-chart__tooltip-row panel-chart__total"><span>${escapeHtml(t('common.total'))}</span><strong>${escapeHtml(chartValue(total, props.viz.format).exact)}</strong></div></div>`;
 }
 const barTooltipTriggers = computed(() => horizontal.value ? { [StackedBar.selectors.barGroup]: tooltip, [GroupedBar.selectors.barGroup]: tooltip } : {});
-const tooltipTemplate = (_datum: unknown, _x: number | Date, data: ChartRow[], index?: number) => index === undefined || !data[index] ? "" : tooltip(data[index]);
-const keyboardTooltip = computed(() => active.value === null || !model.value.rows[active.value] ? "" : tooltip(model.value.rows[active.value]));
+const tooltipTemplate = (datum: ChartRow | undefined) => datum ? tooltip(datum) : "";
 function barLabels(svg: SVGSVGElement) {
+  svg.querySelectorAll(pointLabelSelector).forEach(e => e.classList.add('panel-chart__point-value'));
   svg.querySelectorAll('.panel-chart__value').forEach(e => e.remove());
-  if (!props.viz.show_values || mark.value !== "bar") return;
+  if (!props.viz.show_values || !labelsFit.value || mark.value !== "bar") return;
   const groups = svg.querySelectorAll(`.${StackedBar.selectors.barGroup}, .${GroupedBar.selectors.barGroup}`);
   groups.forEach((group, rowIndex) => {
     const row = model.value.rows[rowIndex];
     if (!row) return;
-    group.querySelectorAll<SVGPathElement>(`.${StackedBar.selectors.bar}, .${GroupedBar.selectors.bar}`).forEach((bar, seriesIndex) => {
+    group.querySelectorAll<SVGPathElement>(`.${StackedBar.selectors.bar}, .${GroupedBar.selectors.bar}`).forEach((bar) => {
+      // Unovis filters zero stacked segments, but preserves the original accessor index.
+      const seriesIndex = Number(bar.getAttribute('unovis-pattern-index'));
       const series = model.value.series[seriesIndex];
       const value = series && row.values.get(series.key);
-      if (!value) return;
+      if (!value || value.coordinate === 0) return;
       const box = bar.getBBox();
-      if (stacked.value && (horizontal.value ? box.width < 30 : box.height < 13)) return;
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('class', 'panel-chart__value');
       text.setAttribute('x', String(box.x + box.width / 2));
-      text.setAttribute('y', String(box.y + box.height / 2 + 3));
+      text.setAttribute('y', String(box.y + box.height / 2));
       text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'central');
       text.textContent = value.text;
       bar.parentNode?.append(text);
+      const fill = chartLabelColor(getHexValue(series.color, text));
+      text.style.fill = fill;
+      text.style.stroke = fill === '#ffffff' ? '#000000' : '#ffffff';
+      if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) text.remove();
     });
   });
 }
@@ -122,9 +162,9 @@ function barLabels(svg: SVGSVGElement) {
     <p v-if="result.error" role="alert" class="text-xs text-destructive">{{ result.error }}</p>
     <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <template v-else>
-      <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="`${mark} chart. Use arrow keys to inspect buckets.`" @keydown="keydown" @focus="active = 0" @blur="active = null">
-        <VisXYContainer :data="model.rows" :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :padding="{ left: 8, right: 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
-          <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="!horizontal && !model.time ? -45 : 0" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
+      <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark })" @keydown="keydown" @pointerdown="active = null" @blur="active = null">
+        <VisXYContainer :data="model.rows" :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
+          <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="categoryAngle" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
           <VisAxis :type="horizontal ? 'x' : 'y'" :tick-values="extent" tick-text-color="var(--muted-foreground)" :tick-format="yTick" :tick-line="false" :domain-line="false" />
           <VisStackedBar v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.2" :rounded-corners="2" />
           <VisGroupedBar v-else-if="mark === 'bar'" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :group-padding="0.2" :bar-padding="0.05" :bar-min-height="0" />
@@ -133,15 +173,15 @@ function barLabels(svg: SVGSVGElement) {
           <template v-else>
             <VisArea v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :color="colors[i]" :opacity="0.35" :line="true" />
           </template>
-          <template v-if="viz.show_values && mark !== 'bar'">
-            <VisScatter v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :size="0" :label="(row: ChartRow) => row.values.get(model.series[i].key)?.text ?? ''" label-color="var(--foreground)" label-position="top" />
+          <template v-if="viz.show_values && labelsFit && mark !== 'bar'">
+            <VisScatter v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />
           </template>
-          <VisTooltip :triggers="barTooltipTriggers" />
-          <VisCrosshair v-if="!horizontal" :x="x" :y="stacked ? undefined : accessors" :y-stacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hide-when-far-from-pointer="false" :force-show-at="active === null ? undefined : model.rows[active]?.x" />
+          <VisTooltip ref="sharedTooltip" :triggers="barTooltipTriggers" />
+          <VisCrosshair v-if="!horizontal" :duration="0" :x="x" :y="stacked ? undefined : accessors" :yStacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hideWhenFarFromPointer="false" :forceShowAt="active === null ? undefined : model.rows[active]?.x" />
         </VisXYContainer>
       </div>
-      <div v-if="keyboardTooltip" class="panel-chart__keyboard" aria-live="polite" v-html="keyboardTooltip" />
-      <div v-if="viz.legend !== false && model.series.length > 1" class="panel-chart__legend" aria-label="Series legend"><span v-for="series in model.series" :key="series.key"><i :style="{ background: series.color }" />{{ series.label }}</span></div>
+      <p v-if="viz.show_values && !labelsFit" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
+      <div v-if="viz.legend !== false && model.series.length > 1" class="panel-chart__legend" :aria-label="t('panelChart.seriesLegend')"><span v-for="series in model.series" :key="series.key"><i :style="{ background: series.color }" />{{ series.label }}</span></div>
       <p v-for="notice in model.notices" :key="notice" role="status" class="text-xs text-muted-foreground">{{ notice }}</p>
     </template>
   </div>
@@ -150,12 +190,11 @@ function barLabels(svg: SVGSVGElement) {
 <style>
 .panel-chart { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; --vis-tooltip-padding: 0px; --vis-tooltip-background-color: transparent; --vis-tooltip-border-color: transparent; --vis-tooltip-shadow-color: transparent; --vis-axis-tick-label-color: var(--muted-foreground); --vis-axis-grid-color: var(--border); --vis-crosshair-line-stroke-color: var(--muted-foreground); }
 .panel-chart__plot { flex: 1 1 0; min-height: 60px; min-width: 200px; overflow: hidden; }
-.panel-chart__value, .panel-chart .vis-scatter-label { fill: var(--foreground); stroke: var(--background); stroke-width: 3px; paint-order: stroke; font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.panel-chart__value, .panel-chart text.panel-chart__point-value { fill: var(--foreground); stroke: var(--background); stroke-width: 2px; stroke-linejoin: round; font-weight: 650; paint-order: stroke; font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
 .panel-chart__legend { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: 11px; }
 .panel-chart__legend span { display: inline-flex; align-items: center; gap: 4px; }
 .panel-chart__legend i, .panel-chart__tooltip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
 .panel-chart__tooltip { min-width: 160px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; }
 .panel-chart__tooltip-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 4px; }
 .panel-chart__total { border-top: 1px solid var(--border); padding-top: 4px; }
-.panel-chart__keyboard { position: absolute; top: 0; right: 0; z-index: 2; pointer-events: none; }
 </style>

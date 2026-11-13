@@ -953,5 +953,15 @@
   "dashboardBuilder.Percent": "प्रतिशत",
   "dashboardBuilder.Bytes": "बाइट",
   "dashboardBuilder.DurationMs": "अवधि (ms)",
-  "dashboardBuilder.DurationS": "अवधि (s)"
+  "dashboardBuilder.DurationS": "अवधि (s)",
+  "panelChart.inspect": "{mark} चार्ट। बकेट देखने के लिए तीर कुंजियों का उपयोग करें।",
+  "panelChart.seriesLegend": "श्रृंखला संकेत",
+  "panelChart.sliceLegend": "खंड संकेत",
+  "panelChart.toplist": "शीर्ष सूची",
+  "panelChart.labelsHidden": "मान लेबल छिपाए गए। चार्ट बड़ा करें या कम बिंदु दिखाएँ।",
+  "panelChart.other": "अन्य",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(शून्य)",
+  "panelChart.emptyCategory": "(खाली)",
+  "panelChart.allZero": "सभी मान शून्य हैं।"
 }

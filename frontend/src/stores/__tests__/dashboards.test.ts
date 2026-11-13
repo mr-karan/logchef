@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { isReactive } from "vue";
 import { setActivePinia, createPinia } from "pinia";
 import { resetLocalTimeZone, setLocalTimeZone } from "@internationalized/date";
 
@@ -138,6 +139,9 @@ describe("dashboards store — edit mode / dirty guard", () => {
     store.upsertDraftPanel({ ...tablePanel(), query: { mode: "result", language: "clickhouse-sql", text: "SELECT service, n" } });
     await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("success"));
     const frame = store.getPanelState("p1").frame;
+    expect(frame).toBeDefined();
+    expect(isReactive(frame)).toBe(false);
+    expect(isReactive(frame?.rows)).toBe(false);
     for (const kind of ["chart", "breakdown", "stat", "table"] as const) store.switchDraftPanelKind("p1", kind);
     store.updateDraftPanel("p1", { viz: { type: "chart", x: "service", y: ["n"], mark: "bar", show_values: true, x_scale: "category" } });
     expect(store.getPanelState("p1").frame).toBe(frame);
@@ -944,6 +948,7 @@ describe("VictoriaLogs fixed-offset count grids", () => {
       await store.previewPanel({ ...chartPanel("vl-count", { language, text: "*" }), viz: { type: "stat", reduce: "avg" } });
       expect(mocks.histogram.mock.lastCall?.[2].timezone).toBe(zone);
       const frame = store.previewState?.frame;
+      expect(isReactive(frame)).toBe(false);
       expect(frame?.rawRows.map((row) => row.time)).toEqual(times);
       if (!frame) throw new Error("Missing count frame");
       expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe(String(times.length + 1));

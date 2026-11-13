@@ -140,6 +140,8 @@ export function suggestKind(values: unknown[]): ColumnKind {
   return "category";
 }
 
+const timeFormats = new Map<string, Intl.DateTimeFormat>();
+
 export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"): string {
   if (value === null || value === undefined) return "";
   if (isExact(value)) {
@@ -147,7 +149,13 @@ export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"
     return exactString(value, scale === undefined ? undefined : Number(scale));
   }
   if (column?.kind === "time" && typeof value === "string") {
-    const parts = new Map(new Intl.DateTimeFormat("en", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(value)).map((p) => [p.type, p.value]));
+    let formatter = timeFormats.get(zone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat("en", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+      if (timeFormats.size >= 32) timeFormats.clear();
+      timeFormats.set(zone, formatter);
+    }
+    const parts = new Map(formatter.formatToParts(new Date(value)).map((p) => [p.type, p.value]));
     const fraction = value.match(/\.(\d+)/)?.[1];
     return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")} ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}${fraction ? "." + fraction : ""}`;
   }

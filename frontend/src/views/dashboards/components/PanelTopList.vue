@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { computed } from "vue";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
 import { buildPanelList, type ListViz } from "@/utils/panelCharts";
 
 const props = defineProps<{ frame: PanelFrame; viz: Extract<ListViz, { type: "toplist" }>; count: boolean }>();
+const { t } = useI18n();
 const preferences = usePreferencesStore();
 const result = computed(() => {
   try { return { ...buildPanelList(props.frame, props.viz, props.count, preferences.zone), error: null }; }
@@ -14,9 +16,9 @@ const maximum = computed(() => Math.max(0, ...result.value.items.map((i) => Math
 </script>
 
 <template>
-  <div class="panel-toplist" aria-label="Top list">
+  <div class="panel-toplist" :aria-label="t('panelChart.toplist')">
     <p v-if="result.error" role="alert" class="text-xs text-destructive">{{ result.error }}</p>
-    <p v-if="!result.error && !result.items.length" class="text-xs text-muted-foreground">No data</p>
+    <p v-if="!result.error && !result.items.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <div v-for="item in result.items" :key="item.key" class="panel-toplist__row" :title="`${item.label}: ${item.value.exact}`" tabindex="0">
       <span class="panel-toplist__label">{{ item.label }}</span>
       <div class="panel-toplist__track" aria-hidden="true"><div :style="{ width: `${maximum ? Math.abs(item.value.coordinate) / maximum * 100 : 0}%`, background: item.color }" /></div>

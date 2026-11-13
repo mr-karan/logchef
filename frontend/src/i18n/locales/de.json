@@ -953,5 +953,15 @@
   "dashboardBuilder.Percent": "Prozent",
   "dashboardBuilder.Bytes": "Bytes",
   "dashboardBuilder.DurationMs": "Dauer (ms)",
-  "dashboardBuilder.DurationS": "Dauer (s)"
+  "dashboardBuilder.DurationS": "Dauer (s)",
+  "panelChart.inspect": "{mark}-Diagramm. Pfeiltasten zum Prüfen der Intervalle verwenden.",
+  "panelChart.seriesLegend": "Reihenlegende",
+  "panelChart.sliceLegend": "Segmentlegende",
+  "panelChart.toplist": "Rangliste",
+  "panelChart.labelsHidden": "Wertbeschriftungen ausgeblendet. Diagramm vergrößern oder weniger Punkte anzeigen.",
+  "panelChart.other": "Andere",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(null)",
+  "panelChart.emptyCategory": "(leer)",
+  "panelChart.allZero": "Alle Werte sind null."
 }

@@ -97,6 +97,12 @@ describe("empty stat frames", () => {
 it("shows the empty count state without a phantom group or zero line", async () => {
   const root = await render({ status: "empty", frame: countFrame([], "1h", true) }, true, { ...panel, query: { mode: "count", language: "logchefql", text: "" }, viz: { type: "chart" } });
   expect(root.textContent).toContain("No data for this time range");
-  expect(root.querySelector("svg.panel-chart__plot")).toBeNull();
+  expect(root.querySelector(".panel-chart__plot")).toBeNull();
   expect(root.textContent).not.toContain("(empty)");
+});
+
+it('shows zero for a quiet count stat', async () => {
+  const root = await render({ status: 'empty', frame: countFrame([], '1h', false) }, true, { ...panel, query: { mode: 'count', language: 'logchefql', text: '' }, viz: { type: 'stat' } });
+  expect(root.querySelector('.panel-stat__value')?.textContent).toBe('0');
+  expect(root.textContent).not.toContain('No data');
 });
