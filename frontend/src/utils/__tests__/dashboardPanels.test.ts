@@ -515,6 +515,21 @@ describe("validatePanelsBlob", () => {
     expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "stat" } })))).toMatch(/value column/i);
   });
 
+  it("validates result chart roles, bounds and future options", () => {
+    for (const viz of [
+      { type: "chart", x: "day", y: ["a", "b"], x_scale: "category", show_values: true },
+      { type: "pie", label: "service", value: "n", min_slice_percent: 1 },
+      { type: "toplist", label: "service", value: "n", max_rows: 20 },
+    ] satisfies DashboardQueryPanel["viz"][]) {
+      expect(validatePanelsBlob(withPanel(panel("a", { viz })))).toBeNull();
+      expect(validatePanelsBlob(withPanel(panel("a", { viz: { ...viz, sparkline: true } as unknown as DashboardQueryPanel["viz"] })))).toMatch(/unsupported visualization option/);
+    }
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "chart", x: "day", y: [] } })))).toMatch(/x and y/);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "chart", x: "day", y: ["n", "n"] } })))).toMatch(/repeats/);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "pie", label: "service", value: "n", min_slice_percent: 100 } })))).toMatch(/percentage/);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "toplist", label: "service", value: "n", max_rows: 0 } })))).toMatch(/rows/);
+  });
+
   it("checks the group-by rules", () => {
     expect(validatePanelsBlob(withPanel(chart("a", { group_by: "  \u0085" })))).toMatch(/blank group-by/i);
     expect(validatePanelsBlob(withPanel(chart("a", { group_by: "\ufeff" })))).toBeNull();

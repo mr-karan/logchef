@@ -193,8 +193,10 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	team, src := mkTestTeam(t, s.store, "team", creator)
 	app := dashboardApp(s, creator)
 
-	// The current client stores a result stat with both phase 5 features.
-	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"reduce":"sum"`, `"reduce":"last","format":{"decimals":2}`, 1)
+	// The current client stores a result chart using every shipped feature.
+	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"type":"stat","reduce":"sum"`, `"type":"chart","x":"day","y":["n"],"show_values":true,"columns":{},"format":{"decimals":2}`, 1)
+	blob = strings.Replace(blob, `"mode":"count"`, `"mode":"result"`, 1)
+	blob = strings.Replace(blob, `,"interval":"auto"`, ``, 1)
 	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, schema2)
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v", status, resp)

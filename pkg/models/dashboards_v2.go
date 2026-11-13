@@ -101,6 +101,8 @@ var (
 	validDashboardColumnKinds       = map[string]struct{}{"time": {}, "date": {}, "number": {}, "category": {}, "bool": {}, "other": {}}
 	validDashboardColumnConfidences = map[string]struct{}{"confirmed": {}}
 	validDashboardNumberNotations   = map[string]struct{}{"auto": {}, "standard": {}, "compact": {}}
+	validDashboardXScales           = map[string]struct{}{"auto": {}, "time": {}, "category": {}}
+	validDashboardOrientations      = map[string]struct{}{"horizontal": {}, "vertical": {}}
 	validDashboardNumberUnits       = map[string]struct{}{"none": {}, "percent": {}, "bytes": {}, "duration_ms": {}, "duration_s": {}}
 )
 
@@ -145,16 +147,26 @@ type dashboardQueryV2 struct {
 }
 
 type dashboardVizV2 struct {
-	Value          *string                      `json:"value,omitempty"`
-	OrderBy        *string                      `json:"order_by,omitempty"`
-	Columns        map[string]dashboardColumnV2 `json:"columns,omitzero"`
-	Format         *dashboardNumberFormatV2     `json:"format,omitempty"`
-	Type           DashboardVizType             `json:"type"`
-	Mark           *DashboardChartMark          `json:"mark,omitempty"`
-	Stack          *DashboardChartStack         `json:"stack,omitempty"`
-	Reduce         *DashboardStatReduce         `json:"reduce,omitempty"`
-	Donut          *bool                        `json:"donut,omitempty"`
-	VisibleColumns []string                     `json:"visible_columns,omitempty"`
+	X               *string                      `json:"x,omitempty"`
+	Y               []string                     `json:"y,omitzero"`
+	Series          *string                      `json:"series,omitempty"`
+	Label           *string                      `json:"label,omitempty"`
+	XScale          *string                      `json:"x_scale,omitempty"`
+	Orientation     *string                      `json:"orientation,omitempty"`
+	ShowValues      *bool                        `json:"show_values,omitempty"`
+	Legend          *bool                        `json:"legend,omitempty"`
+	MinSlicePercent *float64                     `json:"min_slice_percent,omitempty"`
+	MaxRows         *int                         `json:"max_rows,omitempty"`
+	Value           *string                      `json:"value,omitempty"`
+	OrderBy         *string                      `json:"order_by,omitempty"`
+	Columns         map[string]dashboardColumnV2 `json:"columns,omitzero"`
+	Format          *dashboardNumberFormatV2     `json:"format,omitempty"`
+	Type            DashboardVizType             `json:"type"`
+	Mark            *DashboardChartMark          `json:"mark,omitempty"`
+	Stack           *DashboardChartStack         `json:"stack,omitempty"`
+	Reduce          *DashboardStatReduce         `json:"reduce,omitempty"`
+	Donut           *bool                        `json:"donut,omitempty"`
+	VisibleColumns  []string                     `json:"visible_columns,omitempty"`
 }
 
 type dashboardColumnV2 struct {
@@ -206,11 +218,31 @@ var dashboardFeatureRules = []struct {
 		}
 		return false
 	}},
+	{"result_charts", func(blob *dashboardPanelsV2) bool {
+		for _, p := range blob.Panels {
+			v := p.Viz
+			if v != nil && ((p.Query != nil && p.Query.Mode == DashboardQueryModeResult && (v.Type == DashboardVizChart || v.Type == DashboardVizPie || v.Type == DashboardVizToplist)) || v.XScale != nil || v.Orientation != nil || v.ShowValues != nil || v.Legend != nil || v.MinSlicePercent != nil || v.MaxRows != nil) {
+				return true
+			}
+		}
+		return false
+	}},
 }
 
 // dashboardSchema2FieldOrigins maps every JSON path of the schema 2 structs to
 // the feature that an older writer would drop, or the base mark.
 var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
+	"panels.viz.x":                 "result_charts",
+	"panels.viz.y":                 "result_charts",
+	"panels.viz.series":            "result_charts",
+	"panels.viz.label":             "result_charts",
+	"panels.viz.x_scale":           "result_charts",
+	"panels.viz.orientation":       "result_charts",
+	"panels.viz.show_values":       "result_charts",
+	"panels.viz.legend":            "result_charts",
+	"panels.viz.min_slice_percent": "result_charts",
+	"panels.viz.max_rows":          "result_charts",
+
 	"version":                       dashboardFeatureBase,
 	"features":                      dashboardFeatureBase,
 	"cache_ttl_seconds":             dashboardFeatureBase,
@@ -264,6 +296,8 @@ var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
 // dashboardSchema2EnumOrigins maps every accepted enum value, by field path, to
 // the feature that introduces it or the base mark.
 var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
+	"panels.viz.x_scale":            {"auto": "result_charts", "time": "result_charts", "category": "result_charts"},
+	"panels.viz.orientation":        {"horizontal": "result_charts", "vertical": "result_charts"},
 	"panels.kind":                   {string(DashboardPanelKindQuery): dashboardFeatureBase},
 	"panels.query.mode":             {string(DashboardQueryModeCount): dashboardFeatureBase, string(DashboardQueryModeResult): dashboardFeatureBase},
 	"panels.query.language":         {string(QueryLanguageLogchefQL): dashboardFeatureBase, string(QueryLanguageClickHouseSQL): dashboardFeatureBase, string(QueryLanguageLogsQL): dashboardFeatureBase},
@@ -609,25 +643,23 @@ func validateDashboardVizV2(panelID string, q *dashboardQueryV2, v *dashboardViz
 	if _, ok := validDashboardVizTypes[v.Type]; !ok {
 		return fmt.Errorf("panel %q has invalid viz.type %q (allowed: stat, chart, pie, toplist, table)", panelID, v.Type)
 	}
-	table := v.Type == DashboardVizTable
-	switch q.Mode {
-	case DashboardQueryModeCount:
-		if table {
+	if q.Mode == DashboardQueryModeCount {
+		if v.Type == DashboardVizTable {
 			return fmt.Errorf("panel %q is a table in count mode; a table needs result mode", panelID)
 		}
-	case DashboardQueryModeResult:
-		if !table && v.Type != DashboardVizStat {
-			return fmt.Errorf("panel %q is a %s in result mode; only tables and stats run in result mode in this release", panelID, v.Type)
+		if (v.Type == DashboardVizPie || v.Type == DashboardVizToplist) && q.GroupBy == nil {
+			return fmt.Errorf("panel %q is a %s and needs query.group_by", panelID, v.Type)
 		}
-		if v.Type == DashboardVizStat && v.Value == nil {
-			return fmt.Errorf("panel %q needs viz.value", panelID)
+		if v.Y != nil || v.Columns != nil {
+			return fmt.Errorf("panel %q has result roles or columns in count mode", panelID)
 		}
-	}
-	if (v.Type == DashboardVizPie || v.Type == DashboardVizToplist) && q.GroupBy == nil {
-		return fmt.Errorf("panel %q is a %s and needs query.group_by", panelID, v.Type)
-	}
-	if q.Mode == DashboardQueryModeCount && (v.Value != nil || v.OrderBy != nil || v.Columns != nil) {
-		return fmt.Errorf("panel %q has result roles or columns in count mode", panelID)
+		for _, role := range []*string{v.Value, v.OrderBy, v.X, v.Series, v.Label} {
+			if role != nil {
+				return fmt.Errorf("panel %q has result roles or columns in count mode", panelID)
+			}
+		}
+	} else if err := validateDashboardRequiredRoles(panelID, v); err != nil {
+		return err
 	}
 	if err := validateDashboardFrameViz(panelID, v); err != nil {
 		return err
@@ -635,15 +667,59 @@ func validateDashboardVizV2(panelID string, q *dashboardQueryV2, v *dashboardViz
 	return validateDashboardVizOptionsV2(panelID, v)
 }
 
+func validateDashboardRequiredRoles(id string, v *dashboardVizV2) error {
+	switch v.Type {
+	case DashboardVizStat:
+		if v.Value == nil {
+			return fmt.Errorf("panel %q needs viz.value", id)
+		}
+	case DashboardVizChart:
+		if v.X == nil || len(v.Y) == 0 {
+			return fmt.Errorf("panel %q needs viz.x and at least one viz.y", id)
+		}
+	case DashboardVizPie, DashboardVizToplist:
+		if v.Label == nil || v.Value == nil {
+			return fmt.Errorf("panel %q needs viz.label and viz.value", id)
+		}
+	case DashboardVizTable:
+	}
+	return nil
+}
+
+func validateDashboardRoleTypes(id string, v *dashboardVizV2) error {
+	for _, role := range []struct {
+		present bool
+		types   []DashboardVizType
+	}{
+		{v.Value != nil, []DashboardVizType{DashboardVizStat, DashboardVizPie, DashboardVizToplist}},
+		{v.OrderBy != nil, []DashboardVizType{DashboardVizStat}},
+		{v.X != nil, []DashboardVizType{DashboardVizChart}},
+		{v.Y != nil, []DashboardVizType{DashboardVizChart}},
+		{v.Series != nil, []DashboardVizType{DashboardVizChart}},
+		{v.Label != nil, []DashboardVizType{DashboardVizPie, DashboardVizToplist}},
+	} {
+		if role.present && !slices.Contains(role.types, v.Type) {
+			return fmt.Errorf("panel %q has a role its visualization does not use", id)
+		}
+	}
+	return nil
+}
+
 func validateDashboardFrameViz(id string, v *dashboardVizV2) error {
-	for _, role := range []*string{v.Value, v.OrderBy} {
-		if role == nil {
-			continue
+	if err := validateDashboardRoleTypes(id, v); err != nil {
+		return err
+	}
+	roles := []*string{v.Value, v.OrderBy, v.X, v.Series, v.Label}
+	seen := map[string]bool{}
+	for _, y := range v.Y {
+		if seen[y] {
+			return fmt.Errorf("panel %q repeats a viz.y column", id)
 		}
-		if v.Type != DashboardVizStat {
-			return fmt.Errorf("panel %q has a role only a stat uses", id)
-		}
-		if n := utf8.RuneCountInString(*role); n < 1 || n > 128 {
+		seen[y] = true
+		roles = append(roles, &y)
+	}
+	for _, role := range roles {
+		if role != nil && (utf8.RuneCountInString(*role) < 1 || utf8.RuneCountInString(*role) > 128) {
 			return fmt.Errorf("panel %q has an invalid role name", id)
 		}
 	}
@@ -668,8 +744,8 @@ func validateDashboardNumberFormat(id string, v *dashboardVizV2) error {
 	if f == nil {
 		return nil
 	}
-	if v.Type != DashboardVizStat {
-		return fmt.Errorf("panel %q has a format only a stat uses in this release", id)
+	if v.Type == DashboardVizTable {
+		return fmt.Errorf("panel %q has a format its visualization does not use", id)
 	}
 	if f.Notation != nil {
 		if _, ok := validDashboardNumberNotations[*f.Notation]; !ok {
@@ -695,9 +771,38 @@ func validateDashboardNumberFormat(id string, v *dashboardVizV2) error {
 	return nil
 }
 
+func dashboardEnumContains(values map[string]struct{}, value string) bool {
+	_, ok := values[value]
+	return ok
+}
+
+func validateDashboardChartOptions(panelID string, v *dashboardVizV2) error {
+	if v.XScale != nil && (v.Type != DashboardVizChart || !dashboardEnumContains(validDashboardXScales, *v.XScale)) {
+		return fmt.Errorf("panel %q has invalid viz.x_scale", panelID)
+	}
+	if v.Orientation != nil && (v.Type != DashboardVizChart || !dashboardEnumContains(validDashboardOrientations, *v.Orientation)) {
+		return fmt.Errorf("panel %q has invalid viz.orientation", panelID)
+	}
+	if (v.ShowValues != nil || v.Legend != nil) && v.Type != DashboardVizChart {
+		return fmt.Errorf("panel %q has chart-only options", panelID)
+	}
+	if v.MinSlicePercent != nil && (v.Type != DashboardVizPie || *v.MinSlicePercent <= 0 || *v.MinSlicePercent >= 100) {
+		return fmt.Errorf("panel %q has invalid viz.min_slice_percent", panelID)
+	}
+	if v.MaxRows != nil && (v.Type != DashboardVizToplist || *v.MaxRows < 1 || *v.MaxRows > MaxDashboardQueryLimit) {
+		return fmt.Errorf("panel %q has invalid viz.max_rows", panelID)
+	}
+
+	return nil
+}
+
 // validateDashboardVizOptionsV2 checks that each option sits on the one
 // visualization that uses it and holds an accepted value.
 func validateDashboardVizOptionsV2(panelID string, v *dashboardVizV2) error {
+	if err := validateDashboardChartOptions(panelID, v); err != nil {
+		return err
+	}
+
 	if v.Mark != nil {
 		if v.Type != DashboardVizChart {
 			return fmt.Errorf("panel %q has viz.mark, which only a chart uses", panelID)

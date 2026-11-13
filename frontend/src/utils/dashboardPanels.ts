@@ -382,12 +382,34 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
   if (!viz || !VALID_VIZ_TYPES.includes(viz.type)) {
     return `Panel "${label}" has an unsupported type.`;
   }
+  const vizKeys: Record<DashboardVizType, readonly string[]> = {
+    stat: ["type", "value", "order_by", "reduce", "columns", "format"],
+    chart: ["type", "x", "y", "series", "mark", "stack", "x_scale", "orientation", "show_values", "legend", "columns", "format"],
+    pie: ["type", "label", "value", "donut", "min_slice_percent", "columns", "format"],
+    toplist: ["type", "label", "value", "max_rows", "columns", "format"],
+    table: ["type", "visible_columns", "columns"],
+  };
+  if (Object.keys(viz).some((key) => !vizKeys[viz.type].includes(key))) return `Panel "${label}" has an unsupported visualization option.`;
+  if (viz.type === "chart" && viz.mark !== undefined && !["line", "area", "bar"].includes(viz.mark)) return `Panel "${label}" has an invalid chart mark.`;
+  if (viz.type === "chart" && viz.stack !== undefined && !["none", "stacked"].includes(viz.stack)) return `Panel "${label}" has an invalid chart stack.`;
   const count = query.mode === "count";
   if (count && viz.type === "table") {
     return `Table panel "${label}" needs result mode.`;
   }
-  if (!count && viz.type !== "table" && viz.type !== "stat") {
-    return `Panel "${label}" cannot run in result mode in this release.`;
+  if (!count && viz.type === "chart" && (!viz.x || !viz.y?.length)) return `Panel "${label}" needs x and y columns.`;
+  if (!count && (viz.type === "pie" || viz.type === "toplist") && (!viz.label || !viz.value)) return `Panel "${label}" needs label and value columns.`;
+  if (viz.type === "chart") {
+    if (count && (viz.x !== undefined || viz.y !== undefined || viz.series !== undefined)) return `Panel "${label}" cannot use result roles in count mode.`;
+    if (viz.y && new Set(viz.y).size !== viz.y.length) return `Panel "${label}" repeats a y column.`;
+    if ([viz.x, viz.series, ...(viz.y ?? [])].some((v) => v !== undefined && (!v || Array.from(v).length > 128))) return `Panel "${label}" has an invalid column role.`;
+    if (viz.x_scale !== undefined && !["auto", "time", "category"].includes(viz.x_scale)) return `Panel "${label}" has an invalid x scale.`;
+    if (viz.orientation !== undefined && !["horizontal", "vertical"].includes(viz.orientation)) return `Panel "${label}" has an invalid orientation.`;
+  }
+  if (viz.type === "pie" || viz.type === "toplist") {
+    if (count && (viz.label !== undefined || viz.value !== undefined)) return `Panel "${label}" cannot use result roles in count mode.`;
+    if ([viz.label, viz.value].some((v) => v !== undefined && (!v || Array.from(v).length > 128))) return `Panel "${label}" has an invalid column role.`;
+    if (viz.type === "pie" && viz.min_slice_percent !== undefined && (!Number.isFinite(viz.min_slice_percent) || viz.min_slice_percent <= 0 || viz.min_slice_percent >= 100)) return `Panel "${label}" needs a slice percentage above 0 and below 100.`;
+    if (viz.type === "toplist" && viz.max_rows !== undefined && (!Number.isInteger(viz.max_rows) || viz.max_rows < 1 || viz.max_rows > MAX_TABLE_LIMIT)) return `Panel "${label}" needs 1 to ${MAX_TABLE_LIMIT} rows.`;
   }
   if (viz.type === "stat") {
     if (!count && !viz.value) return `Panel "${label}" needs a value column.`;
@@ -396,6 +418,8 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
     for (const role of [viz.value, viz.order_by]) {
       if (role !== undefined && (Array.from(role).length < 1 || Array.from(role).length > 128)) return `Panel "${label}" has an invalid column role.`;
     }
+  }
+  if (viz.type !== "table") {
     const f = viz.format;
     if (f) {
       if (f.notation !== undefined && !["auto", "standard", "compact"].includes(f.notation)) return `Panel "${label}" has an invalid notation.`;
@@ -405,19 +429,17 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
       if ([f.prefix, f.suffix].some((v) => v !== undefined && Array.from(v).length > 16)) return `Panel "${label}" has a format affix longer than 16 characters.`;
     }
   }
-  if (viz.type === "stat" || viz.type === "table") {
-    if (count && viz.columns !== undefined) return `Panel "${label}" cannot set column kinds in count mode.`;
-    const columns = Object.entries(viz.columns ?? {});
-    if (columns.length > 100) return `Panel "${label}" has too many column kinds.`;
-    for (const [name, c] of columns) {
-      if (!name || Array.from(name).length > 128 || c.confidence !== "confirmed" || !["time", "date", "number", "category", "bool", "other"].includes(c.kind)) return `Panel "${label}" has an invalid confirmed column kind.`;
-    }
+  if (count && viz.columns !== undefined) return `Panel "${label}" cannot set column kinds in count mode.`;
+  const columns = Object.entries(viz.columns ?? {});
+  if (columns.length > 100) return `Panel "${label}" has too many column kinds.`;
+  for (const [name, c] of columns) {
+    if (!name || Array.from(name).length > 128 || c.confidence !== "confirmed" || !["time", "date", "number", "category", "bool", "other"].includes(c.kind)) return `Panel "${label}" has an invalid confirmed column kind.`;
   }
   if (query.group_by !== undefined) {
     if (!count) return `Panel "${label}" cannot group a result query.`;
     if (trimDashboardGroupBy(query.group_by) === "") return `Panel "${label}" has a blank group-by field.`;
   }
-  if ((viz.type === "pie" || viz.type === "toplist") && query.group_by === undefined) {
+  if ((viz.type === "pie" || viz.type === "toplist") && count && query.group_by === undefined) {
     return `Breakdown panel "${label}" requires a group-by field.`;
   }
   if (query.interval !== undefined && (!count || query.interval !== "auto")) {
