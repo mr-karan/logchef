@@ -1,14 +1,11 @@
 package clickhouse
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,77 +16,171 @@ import (
 )
 
 func TestTruncationState(t *testing.T) {
+	breakRows := func(rows int) queryEnd {
+		return queryEnd{settings: clickhouse.Settings{"max_result_rows": rows, "result_overflow_mode": "break"}}
+	}
+	probed := QueryOptions{MaxRows: 100, ResultRows: 101, LimitSource: models.LimitSourceRequest}
 	for _, tc := range []struct {
 		name   string
 		opts   QueryOptions
 		rows   int
 		reason string
+		end    queryEnd
 		want   models.Truncation
 	}{
-		{name: "a probe row proves the cut", opts: QueryOptions{MaxRows: 100, Probed: true, LimitSource: models.LimitSourceRequest}, rows: 100, reason: "row_limit", want: models.TruncationRows},
-		{name: "the byte budget is a proven cut", opts: QueryOptions{MaxRows: 100, Probed: true, LimitSource: models.LimitSourceRequest}, rows: 7, reason: "byte_limit", want: models.TruncationBytes},
-		{name: "a probed cap filled without the extra row is complete", opts: QueryOptions{MaxRows: 100, Probed: true, LimitSource: models.LimitSourceRequest}, rows: 100, want: models.TruncationNone},
-		{name: "fewer rows than the cap is complete", opts: QueryOptions{MaxRows: 100, LimitSource: models.LimitSourceRequest}, rows: 99, want: models.TruncationNone},
-		{name: "an unprobed cap filled may be incomplete", opts: QueryOptions{MaxRows: 100, LimitSource: models.LimitSourceRequest}, rows: 100, want: models.TruncationUnknown},
-		{name: "the statement's own limit filled is what the author asked", opts: QueryOptions{MaxRows: 20, LimitSource: models.LimitSourceStatement}, rows: 20, want: models.TruncationNone},
-		{name: "no cap is never a cut", opts: QueryOptions{}, rows: 5000, want: models.TruncationNone},
+		{name: "a probe row proves the cut", opts: probed, rows: 100, reason: "row_limit", end: breakRows(101), want: models.TruncationRows},
+		{name: "the byte budget is a proven cut", opts: probed, rows: 7, reason: "byte_limit", end: breakRows(101), want: models.TruncationBytes},
+		{name: "a probed cap filled without the extra row is complete", opts: probed, rows: 100, end: breakRows(101), want: models.TruncationNone},
+		{name: "fewer rows than the cap is complete", opts: QueryOptions{MaxRows: 100, ResultRows: 100, LimitSource: models.LimitSourceRequest}, rows: 99, end: breakRows(100), want: models.TruncationNone},
+		{name: "an unprobed cap filled may be incomplete", opts: QueryOptions{MaxRows: 100, ResultRows: 100, LimitSource: models.LimitSourceRequest}, rows: 100, end: breakRows(100), want: models.TruncationUnknown},
+		{name: "an unprobed cap filled in throw mode may be incomplete", opts: QueryOptions{MaxRows: 100, ResultRows: 100, LimitSource: models.LimitSourceRequest}, rows: 100,
+			end: queryEnd{settings: clickhouse.Settings{"max_result_rows": 100, "result_overflow_mode": "throw"}}, want: models.TruncationUnknown},
+		{name: "the statement's own limit filled is what the author asked", opts: QueryOptions{MaxRows: 20, ResultRows: 20, LimitSource: models.LimitSourceStatement}, rows: 20, end: breakRows(20), want: models.TruncationNone},
+		{name: "a reader cap without a server bound probes itself", opts: QueryOptions{MaxRows: 100}, rows: 100, end: breakRows(0), want: models.TruncationNone},
+		{name: "a source row limit below the reader cap that the result filled", opts: QueryOptions{MaxRows: 100}, rows: 50, end: breakRows(50), want: models.TruncationUnknown},
+		{name: "a source row limit below the reader cap in throw mode", opts: QueryOptions{MaxRows: 100}, rows: 50,
+			end: queryEnd{settings: clickhouse.Settings{"max_result_rows": int64(50), "result_overflow_mode": "throw"}}, want: models.TruncationNone},
+		{name: "a byte limit the result profile stayed under", opts: probed, rows: 30,
+			end: queryEnd{settings: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"}, profiled: true, resultBytes: 4104}, want: models.TruncationNone},
+		{name: "a byte limit the result profile reached", opts: probed, rows: 30,
+			end: queryEnd{settings: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"}, profiled: true, resultBytes: 1_000_000}, want: models.TruncationUnknown},
+		{name: "a byte limit without a result profile", opts: probed, rows: 30,
+			end: queryEnd{settings: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"}}, want: models.TruncationUnknown},
+		{name: "a byte limit that throws", opts: probed, rows: 30,
+			end: queryEnd{settings: clickhouse.Settings{"max_result_bytes": int64(100), "result_overflow_mode": "throw"}}, want: models.TruncationNone},
+		{name: "the query's own SETTINGS may cut", opts: probed, rows: 5, end: queryEnd{settings: breakRows(101).settings, ownSettingsMayCut: true}, want: models.TruncationUnknown},
+		{name: "a proven cut outranks the query's own SETTINGS", opts: probed, rows: 100, reason: "row_limit", end: queryEnd{ownSettingsMayCut: true}, want: models.TruncationRows},
+		{name: "no cap is never a cut", opts: QueryOptions{}, rows: 5000, end: breakRows(0), want: models.TruncationNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.opts.truncation(tc.rows, tc.reason, queryEnd{}); got != tc.want {
+			if got := tc.opts.truncation(tc.rows, tc.reason, tc.end); got != tc.want {
 				t.Fatalf("truncation(%d, %q) = %q, want %q", tc.rows, tc.reason, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestTruncationBreakLimits holds a short result to the limits that
-// ClickHouse ends silently: the query's settings override the server's
-// defaults, and a counter below a limit proves that the limit did not cut.
-func TestTruncationBreakLimits(t *testing.T) {
-	probed := QueryOptions{MaxRows: 100, Probed: true, LimitSource: models.LimitSourceRequest}
+func TestSettingsMayCut(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		defaults map[string]any
-		sent     clickhouse.Settings
-		end      queryEnd
-		want     models.Truncation
+		query string
+		want  bool
 	}{
-		{name: "a byte cap the result stayed under", sent: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"},
-			end: queryEnd{profiled: true, resultBytes: 4104}, want: models.TruncationNone},
-		{name: "a byte cap the result reached", sent: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"},
-			end: queryEnd{profiled: true, resultBytes: 1_000_000}, want: models.TruncationUnknown},
-		{name: "a byte cap without the result profile", sent: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"},
-			end: queryEnd{}, want: models.TruncationUnknown},
-		{name: "a byte cap that throws", sent: clickhouse.Settings{"max_result_bytes": int64(100), "result_overflow_mode": "throw"},
-			end: queryEnd{profiled: true, resultBytes: 1_000_000}, want: models.TruncationNone},
-		{name: "a profile byte cap under the break mode the query sends", defaults: map[string]any{"max_result_bytes": "100"}, sent: clickhouse.Settings{"result_overflow_mode": "break"},
-			end: queryEnd{profiled: true, resultBytes: 2704}, want: models.TruncationUnknown},
-		{name: "a source byte cap overrides the profile's", defaults: map[string]any{"max_result_bytes": "100"}, sent: clickhouse.Settings{"max_result_bytes": int64(0), "result_overflow_mode": "break"},
-			end: queryEnd{profiled: true, resultBytes: 2704}, want: models.TruncationNone},
-		{name: "a sent overflow mode overrides the profile's", defaults: map[string]any{"max_result_bytes": "100", "result_overflow_mode": "break"}, sent: clickhouse.Settings{"result_overflow_mode": "throw"},
-			end: queryEnd{profiled: true, resultBytes: 2704}, want: models.TruncationNone},
-		{name: "a profile row read cap the query reached", defaults: map[string]any{"max_rows_to_read": "100", "read_overflow_mode": "break"},
-			end: queryEnd{rowsRead: 100}, want: models.TruncationUnknown},
-		{name: "a profile row read cap the query stayed under", defaults: map[string]any{"max_rows_to_read": "100", "read_overflow_mode": "break"},
-			end: queryEnd{rowsRead: 99}, want: models.TruncationNone},
-		{name: "a byte read cap the query reached", defaults: map[string]any{"read_overflow_mode": "break"}, sent: clickhouse.Settings{"max_bytes_to_read": int64(800)},
-			end: queryEnd{bytesRead: 880}, want: models.TruncationUnknown},
-		{name: "a byte read cap the query stayed under", defaults: map[string]any{"read_overflow_mode": "break"}, sent: clickhouse.Settings{"max_bytes_to_read": int64(800)},
-			end: queryEnd{bytesRead: 400}, want: models.TruncationNone},
-		{name: "a read cap that throws", sent: clickhouse.Settings{"max_rows_to_read": int64(100)},
-			end: queryEnd{rowsRead: 5000}, want: models.TruncationNone},
-		{name: "a profile timeout in break mode the query ran into", defaults: map[string]any{"timeout_overflow_mode": "break"}, sent: clickhouse.Settings{"max_execution_time": 30},
-			end: queryEnd{elapsed: 30 * time.Second}, want: models.TruncationUnknown},
-		{name: "a profile timeout in break mode the query finished before", defaults: map[string]any{"timeout_overflow_mode": "break"}, sent: clickhouse.Settings{"max_execution_time": 30},
-			end: queryEnd{elapsed: 29 * time.Second}, want: models.TruncationNone},
+		{query: "SELECT 1", want: false},
+		{query: "SELECT name FROM system.settings", want: false},
+		{query: "SELECT 1 SETTINGS max_threads = 1, max_block_size = 10", want: false},
+		{query: "SELECT 1 SETTINGS max_rows_to_read = 10", want: false},
+		{query: "SELECT 1 SETTINGS `limit` = 5", want: false},
+		{query: "SELECT 1 SETTINGS limit = 5", want: true},
+		{query: "SELECT 1 SETTINGS sort_overflow_mode = 'throw'", want: false},
+		{query: "SELECT 1 SETTINGS max_result_rows = 5, result_overflow_mode = 'throw'", want: false},
+		{query: "SELECT 1 SETTINGS max_result_rows = 5", want: true},
+		{query: "SELECT 1 SETTINGS max_result_bytes = 100", want: true},
+		{query: "SELECT 1 SETTINGS MAX_RESULT_ROWS = 5", want: true},
+		{query: "SELECT 1 SETTINGS max_rows_to_sort = 10, sort_overflow_mode = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS group_by_overflow_mode = 'any'", want: true},
+		{query: "SELECT 1 SETTINGS result_overflow_mode = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS read_overflow_mode = concat('br', 'eak')", want: true},
+		{query: "SELECT x FROM (SELECT 1 AS x SETTINGS read_overflow_mode = 'break')", want: true},
+		{query: "WITH c AS (SELECT 1 AS x SETTINGS timeout_overflow_mode = 'break') SELECT x FROM c", want: true},
+		{query: "SELECT 1 UNION ALL SELECT 2 SETTINGS join_overflow_mode = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS max_result_rows = 5 SETTINGS", want: true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			end := tc.end
-			end.settings = overlaySettings(tc.defaults, tc.sent)
-			if got := probed.truncation(5, "", end); got != tc.want {
-				t.Fatalf("truncation = %q, want %q", got, tc.want)
+		t.Run(tc.query, func(t *testing.T) {
+			if got := SettingsMayCut(tc.query); got != tc.want {
+				t.Fatalf("SettingsMayCut() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestResultQuerySettings checks what a result query sends: Logchef's own
+// result limits under the source's caps, and throw modes and a timeout that
+// nothing overrides.
+func TestResultQuerySettings(t *testing.T) {
+	timeout := 30
+	for _, tc := range []struct {
+		name   string
+		source clickhouse.Settings
+		opts   QueryOptions
+		want   clickhouse.Settings
+	}{
+		{name: "no source settings", opts: QueryOptions{TimeoutSeconds: &timeout, ResultRows: 101},
+			want: clickhouse.Settings{"max_result_rows": 101, "max_result_bytes": 0, "result_overflow_mode": "break", "limit": 0, "offset": 0, "max_execution_time": 30, "sort_overflow_mode": "throw"}},
+		{name: "the source's result caps", source: clickhouse.Settings{"max_result_rows": int64(50), "max_result_bytes": int64(100), "result_overflow_mode": "throw", "readonly": 2},
+			opts: QueryOptions{TimeoutSeconds: &timeout, ResultRows: 101},
+			want: clickhouse.Settings{"max_result_rows": int64(50), "max_result_bytes": int64(100), "result_overflow_mode": "throw", "readonly": 2, "max_execution_time": 30}},
+		{name: "a source timeout caps the request", source: clickhouse.Settings{"max_execution_time": 7}, opts: QueryOptions{TimeoutSeconds: &timeout},
+			want: clickhouse.Settings{"max_execution_time": 7}},
+		{name: "a source timeout above the request", source: clickhouse.Settings{"max_execution_time": 120}, opts: QueryOptions{TimeoutSeconds: &timeout},
+			want: clickhouse.Settings{"max_execution_time": 30}},
+		{name: "a source timeout of zero", source: clickhouse.Settings{"max_execution_time": 0}, opts: QueryOptions{},
+			want: clickhouse.Settings{"max_execution_time": DefaultQueryTimeout}},
+		{name: "an overflow mode is never the source's", source: clickhouse.Settings{"sort_overflow_mode": "break"}, opts: QueryOptions{TimeoutSeconds: &timeout},
+			want: clickhouse.Settings{"sort_overflow_mode": "throw"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{querySettings: tc.source, throwModes: clickhouse.Settings{"sort_overflow_mode": "throw"}}
+			got, err := client.resultQuerySettings(t.Context(), tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, value := range tc.want {
+				if got[name] != value {
+					t.Errorf("%s = %#v, want %#v (all: %v)", name, got[name], value, got)
+				}
+			}
+		})
+	}
+}
+
+// TestThrowModesClickHouse sets every overflow mode the server knows to break
+// in the connection settings and reads back what a Logchef query got: throw
+// for every mode but the result mode, whose break Logchef owns.
+func TestThrowModesClickHouse(t *testing.T) {
+	addr := testClickHouseAddr(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	admin, err := NewClient(ClientOptions{Host: addr}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	rows, err := admin.conn.Query(ctx, "SELECT name FROM system.settings WHERE name LIKE '%\\_overflow\\_mode'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := clickhouse.Settings{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		defaults[name] = "break"
+	}
+	if err := rows.Close(); err != nil || len(defaults) < 9 {
+		t.Fatalf("found overflow modes %v (%v)", defaults, err)
+	}
+
+	client, err := NewClient(ClientOptions{Host: addr, Settings: defaults}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	result, err := client.QueryWithOptions(ctx, "SELECT name, value FROM system.settings WHERE name LIKE '%\\_overflow\\_mode'", QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Logs) != len(defaults) {
+		t.Fatalf("read %d overflow modes, want %d", len(result.Logs), len(defaults))
+	}
+	for _, row := range result.Logs {
+		want := "throw"
+		if row["name"] == "result_overflow_mode" {
+			want = "break"
+		}
+		if row["value"] != want {
+			t.Errorf("%s = %v, want %s", row["name"], row["value"], want)
+		}
 	}
 }
 
@@ -133,217 +224,19 @@ func TestLimitRuleSourceMaxResultRowsClickHouse(t *testing.T) {
 	}
 }
 
-func TestLimitRuleSilentBreakClickHouse(t *testing.T) {
-	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
-	if addr == "" {
-		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
-	}
-	for _, bound := range []struct{ name, mode string }{
-		{"max_result_bytes", "result_overflow_mode"},
-		{"max_rows_to_read", "read_overflow_mode"},
-		{"max_bytes_to_read", "read_overflow_mode"},
-	} {
-		for _, sourceSetting := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/source=%v", bound.name, sourceSetting), func(t *testing.T) {
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-				defer cancel()
-				settings := map[string]any{bound.name: int64(100), bound.mode: "break", "max_block_size": 10, "max_threads": 1}
-				clientOptions := ClientOptions{Host: addr}
-				if sourceSetting {
-					clientOptions.QuerySettings = settings
-				}
-				client, err := NewClient(clientOptions, slog.New(slog.NewTextHandler(io.Discard, nil)))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer client.Close()
-				built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy("SELECT number FROM numbers(10000)", 1000, 1000, 100000)
-				if err != nil {
-					t.Fatal(err)
-				}
-				opts := built.QueryOptions(10)
-				if !sourceSetting {
-					maps.Copy(opts.Settings, settings)
-				}
-				t.Run("buffered", func(t *testing.T) {
-					result, err := client.QueryWithOptions(ctx, built.SQL, opts)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if result.Stats.Truncation != models.TruncationUnknown {
-						t.Fatalf("%d rows, truncation %q, want unknown", len(result.Logs), result.Stats.Truncation)
-					}
-				})
-				t.Run("stream", func(t *testing.T) {
-					writer := &statsRowWriter{}
-					stats, err := client.QueryStream(ctx, built.SQL, opts, writer)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if stats.Truncation != models.TruncationUnknown || writer.stats.Truncation != models.TruncationUnknown {
-						t.Fatalf("%d rows, truncation %q, Finish %q, want unknown", stats.RowsReturned, stats.Truncation, writer.stats.Truncation)
-					}
-				})
-			})
-		}
-	}
-}
-
-// TestLimitRuleServerDefaultsClickHouse sets limits where Logchef does not
-// send them: in a ClickHouse user's settings profile, and as connection
-// settings for servers that do not allow creating users. A limit that the
-// query reached reports unknown, and one that it stayed under reports none.
-func TestLimitRuleServerDefaultsClickHouse(t *testing.T) {
-	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
-	if addr == "" {
-		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
-	}
-	const blocksOfTen = " SETTINGS max_block_size = 10, max_threads = 1"
-	for _, tc := range []struct {
-		name     string
-		defaults clickhouse.Settings
-		query    string
-		wantRows int
-		want     models.Truncation
-	}{
-		{name: "byte cap reached", defaults: clickhouse.Settings{"max_result_bytes": 100},
-			query: "SELECT number FROM numbers(10000)" + blocksOfTen, wantRows: 20, want: models.TruncationUnknown},
-		{name: "byte cap not reached", defaults: clickhouse.Settings{"max_result_bytes": 1_000_000},
-			query: "SELECT number FROM numbers(30)", wantRows: 30, want: models.TruncationNone},
-		{name: "read cap reached", defaults: clickhouse.Settings{"max_rows_to_read": 50, "read_overflow_mode": "break"},
-			query: "SELECT number FROM numbers(10000)" + blocksOfTen, wantRows: 50, want: models.TruncationUnknown},
-		{name: "read cap not reached", defaults: clickhouse.Settings{"max_rows_to_read": 50, "read_overflow_mode": "break"},
-			query: "SELECT number FROM numbers(30)", wantRows: 30, want: models.TruncationNone},
-		{name: "timeout in break mode not reached", defaults: clickhouse.Settings{"timeout_overflow_mode": "break"},
-			query: "SELECT number FROM numbers(30)", wantRows: 30, want: models.TruncationNone},
-		{name: "row cap below the probe row is overridden", defaults: clickhouse.Settings{"max_result_rows": 50},
-			query: "SELECT number FROM numbers(10000)", wantRows: 100, want: models.TruncationRows},
-	} {
-		for _, where := range []string{"profile", "connection"} {
-			t.Run(tc.name+"/"+where, func(t *testing.T) {
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-				defer cancel()
-				options := ClientOptions{Host: addr, Settings: tc.defaults}
-				if where == "profile" {
-					options = ClientOptions{Host: addr, Username: profileUser(t, addr, tc.defaults)}
-				}
-				client, err := NewClient(options, slog.New(slog.NewTextHandler(io.Discard, nil)))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer client.Close()
-				built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy(tc.query, 100, 1000, 100000)
-				if err != nil {
-					t.Fatal(err)
-				}
-				result, err := client.QueryWithOptions(ctx, built.SQL, built.QueryOptions(10))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(result.Logs) != tc.wantRows || result.Stats.Truncation != tc.want {
-					t.Fatalf("buffered: %d rows, truncation %q, want %d rows, %q", len(result.Logs), result.Stats.Truncation, tc.wantRows, tc.want)
-				}
-				writer := &statsRowWriter{}
-				stats, err := client.QueryStream(ctx, built.SQL, built.QueryOptions(10), writer)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if stats.RowsReturned != tc.wantRows || stats.Truncation != tc.want || writer.stats.Truncation != tc.want {
-					t.Fatalf("stream: %d rows, truncation %q, Finish %q, want %d rows, %q", stats.RowsReturned, stats.Truncation, writer.stats.Truncation, tc.wantRows, tc.want)
-				}
-			})
-		}
-	}
-}
-
-// profileUser creates a ClickHouse user whose settings profile holds
-// settings, and skips when the server does not allow creating users.
-func profileUser(t *testing.T, addr string, settings clickhouse.Settings) string {
-	t.Helper()
-	admin, err := NewClient(ClientOptions{Host: addr}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = admin.Close() })
-	clauses := make([]string, 0, len(settings))
-	for name, value := range settings {
-		if text, ok := value.(string); ok {
-			value = "'" + text + "'"
-		}
-		clauses = append(clauses, fmt.Sprintf("%s = %v", name, value))
-	}
-	name := fmt.Sprintf("logchef_test_%d", time.Now().UnixNano())
-	if err := admin.conn.Exec(t.Context(), fmt.Sprintf("CREATE USER %s IDENTIFIED WITH no_password SETTINGS %s", name, strings.Join(clauses, ", "))); err != nil {
-		t.Skipf("this ClickHouse server does not allow creating users: %v", err)
-	}
-	t.Cleanup(func() { _ = admin.conn.Exec(context.Background(), "DROP USER IF EXISTS "+name) })
-	return name
-}
-
-// TestLimitRuleServerDefaultsReadFailureClickHouse fails the read of the
-// server's defaults: results keep their settled state, the failure is logged
-// once, and the next query reads the defaults again.
-func TestLimitRuleServerDefaultsReadFailureClickHouse(t *testing.T) {
-	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
-	if addr == "" {
-		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	var logs bytes.Buffer
-	client, err := NewClient(ClientOptions{
-		Host:          addr,
-		Settings:      clickhouse.Settings{"max_rows_to_read": 50, "read_overflow_mode": "break"},
-		QuerySettings: map[string]any{"max_result_bytes": int64(1_000_000)},
-	}, slog.New(slog.NewTextHandler(&logs, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-	run := func(query string) models.Truncation {
-		t.Helper()
-		built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy(query, 100, 1000, 100000)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := client.QueryWithOptions(ctx, built.SQL, built.QueryOptions(10))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return result.Stats.Truncation
-	}
-
-	working := serverDefaultsQuery
-	serverDefaultsQuery = "SELECT name, value FROM system.logchef_missing_table"
-	t.Cleanup(func() { serverDefaultsQuery = working })
-	for range 2 {
-		if got := run("SELECT number FROM numbers(30)"); got != models.TruncationNone {
-			t.Fatalf("with the read failing, a result under every cap reports %q, want none", got)
-		}
-	}
-	if n := strings.Count(logs.String(), "reading the ClickHouse profile limits failed"); n != 1 {
-		t.Fatalf("logged the failed read %d times, want once:\n%s", n, logs.String())
-	}
-
-	serverDefaultsQuery = working
-	if got := run("SELECT number FROM numbers(10000) SETTINGS max_block_size = 10, max_threads = 1"); got != models.TruncationUnknown {
-		t.Fatalf("after the read recovers, a result that reached the connection's read cap reports %q, want unknown", got)
-	}
-}
-
-// TestCapabilityReadsAreTheirOwnQueriesClickHouse runs a client's first
-// query, which also probes for native JSON support and reads the server's
-// defaults. A profile callback in the caller's context hears none of them:
-// Logchef owns the result query's profile, and each read is its own query.
-func TestCapabilityReadsAreTheirOwnQueriesClickHouse(t *testing.T) {
+// TestCapabilityProbeIsItsOwnQueryClickHouse runs a client's first query,
+// which also probes for native JSON support. A profile callback in the
+// caller's context does not hear the probe: Logchef owns the result query's
+// profile, and the probe is its own query.
+func TestCapabilityProbeIsItsOwnQueryClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	var profiles atomic.Int64
 	ctx = clickhouse.Context(ctx, clickhouse.WithProfileInfo(func(*clickhouse.ProfileInfo) { profiles.Add(1) }))
 	if _, err := client.QueryWithOptions(ctx, "SELECT 1", QueryOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if client.serverDefaults(ctx) == nil {
-		t.Fatal("the first query did not read the server's defaults")
+	if client.flattenedJSON == nil {
+		t.Fatal("the first query did not probe for native JSON")
 	}
 	if n := profiles.Load(); n != 0 {
 		t.Fatalf("the caller's profile callback ran %d times, want 0", n)

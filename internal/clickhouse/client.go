@@ -53,10 +53,9 @@ type Client struct {
 	querySettings  clickhouse.Settings
 	capabilitiesMu sync.Mutex
 	flattenedJSON  *bool
-	// defaults are the break limits this client's queries get from the
-	// server unless they send them; nil until read.
-	defaults       map[string]any
-	defaultsFailed bool
+	// throwModes are the overflow modes this server knows, sent as throw;
+	// nil until read from the server's version.
+	throwModes clickhouse.Settings
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -210,10 +209,13 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (driver.Rows, error) {
-	ctx = c.contextWithNativeJSON(ctx, opts)
-	// LogChef owns the progress and profile callbacks for result queries.
-	// Other driver options and callbacks are inherited from the hook context.
-	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
+func (c *Client) queryResultRows(ctx context.Context, query string, settings clickhouse.Settings, progress *queryProgress) (driver.Rows, error) {
+	if c.flattensJSON(ctx) {
+		settings["output_format_native_use_flattened_dynamic_and_json_serialization"] = 1
+	}
+	// LogChef owns the settings and the progress and profile callbacks for
+	// result queries. Other driver options and callbacks are inherited from
+	// the hook context.
+	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(settings), clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
 	return c.conn.Query(ctx, query)
 }

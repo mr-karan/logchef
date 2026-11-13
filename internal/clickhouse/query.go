@@ -17,7 +17,6 @@ import (
 	"net"
 	"net/url"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,86 +34,15 @@ import (
 // QueryOptions controls ClickHouse execution and LogChef-side result handling.
 type QueryOptions struct {
 	TimeoutSeconds   *int
-	Settings         map[string]any
 	LimitApplied     int
 	MaxRows          int
 	MaxResponseBytes int
 	Warnings         []models.QueryWarning
 	LimitSource      models.LimitSource
-	// Probed reports that the query asked for one row past MaxRows, so a row
-	// beyond the cap proves the result was cut.
-	Probed bool
-}
-
-// truncation is the state of a result that stopped for reason after rows
-// rows. A result that fills the cap without a probe may be incomplete, unless
-// the statement's own LIMIT set the cap: then the author asked for that many.
-func (opts QueryOptions) truncation(rows int, reason string, end queryEnd) models.Truncation {
-	switch {
-	case reason == "byte_limit":
-		return models.TruncationBytes
-	case reason == "row_limit":
-		return models.TruncationRows
-	case end.mayHaveBroken():
-		return models.TruncationUnknown
-	case !opts.Probed && opts.MaxRows > 0 && rows >= opts.MaxRows && opts.LimitSource != models.LimitSourceStatement:
-		return models.TruncationUnknown
-	}
-	return models.TruncationNone
-}
-
-// queryEnd is what a query that ran to its end reported.
-type queryEnd struct {
-	// settings are the server's defaults overlaid with the settings the query sent.
-	settings map[string]any
-	// resultBytes sums the server's result profile, when profiled says one arrived.
-	resultBytes uint64
-	profiled    bool
-	rowsRead    uint64
-	bytesRead   uint64
-	elapsed     time.Duration
-}
-
-// breakLimits are the limits at which ClickHouse ends a query without an
-// error when their overflow mode is break. reached reports whether a query
-// could have hit the limit; a counter below it proves the limit did not stop
-// the query.
-var breakLimits = []struct {
-	limit, mode string
-	reached     func(end queryEnd, limit uint64) bool
-}{
-	// The result profile counts allocated bytes, never fewer than max_result_bytes counts.
-	{"max_result_bytes", "result_overflow_mode", func(end queryEnd, limit uint64) bool { return !end.profiled || end.resultBytes >= limit }},
-	{"max_rows_to_read", "read_overflow_mode", func(end queryEnd, limit uint64) bool { return end.rowsRead >= limit }},
-	{"max_bytes_to_read", "read_overflow_mode", func(end queryEnd, limit uint64) bool { return end.bytesRead >= limit }},
-	// The server starts its clock after the client sends the query.
-	{"max_execution_time", "timeout_overflow_mode", func(end queryEnd, limit uint64) bool { return end.elapsed.Seconds() >= float64(limit) }},
-}
-
-// mayHaveBroken reports whether a break limit could have ended the query, so
-// a short result cannot prove that it is complete.
-func (end queryEnd) mayHaveBroken() bool {
-	for _, bound := range breakLimits {
-		if end.settings[bound.mode] != "break" {
-			continue
-		}
-		limit, err := strconv.ParseUint(fmt.Sprint(end.settings[bound.limit]), 10, 64)
-		if err == nil && limit > 0 && bound.reached(end, limit) {
-			return true
-		}
-	}
-	return false
-}
-
-// overlaySettings applies the settings a query sends over the server's
-// defaults, the order in which ClickHouse applies them.
-func overlaySettings(defaults map[string]any, sent clickhouse.Settings) map[string]any {
-	settings := maps.Clone(defaults)
-	if settings == nil {
-		settings = make(map[string]any, len(sent))
-	}
-	maps.Copy(settings, sent)
-	return settings
+	// ResultRows is the row bound of the query's SQL LIMIT, sent as its
+	// max_result_rows, or 0 when Logchef bounds the result only in its reader.
+	// A bound past MaxRows lets a row beyond the cap prove a cut.
+	ResultRows int
 }
 
 // RowStreamWriter receives rows as they are read from ClickHouse.
@@ -162,10 +90,10 @@ func (p *queryProgress) profile(info *clickhouse.ProfileInfo) {
 	p.profiled = true
 }
 
-func (p *queryProgress) end(settings map[string]any, elapsed time.Duration) queryEnd {
+func (p *queryProgress) end(settings clickhouse.Settings, query string) queryEnd {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return queryEnd{settings: settings, resultBytes: p.resultBytes, profiled: p.profiled, rowsRead: p.rows, bytesRead: p.bytes, elapsed: elapsed}
+	return queryEnd{settings: settings, resultBytes: p.resultBytes, profiled: p.profiled, ownSettingsMayCut: SettingsMayCut(query)}
 }
 
 func (p *queryProgress) apply(stats *models.QueryStats) {
@@ -202,31 +130,23 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	queryStartTime := time.Now() // Separate timer for actual DB execution
 	var queryDuration time.Duration
 
-	// Ensure timeout is provided (should always be the case now)
-	if opts.TimeoutSeconds == nil {
-		defaultTimeout := DefaultQueryTimeout
-		opts.TimeoutSeconds = &defaultTimeout
-	}
-
-	opts.Settings = buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
-
+	timeout := c.queryTimeout(opts.TimeoutSeconds)
 	// Bound the Go context by the timeout too — max_execution_time only limits
 	// ClickHouse-side execution, not a stalled network read or driver hang.
-	requestCtx := ctx
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(*opts.TimeoutSeconds)*time.Second+queryTimeoutGrace)
+	ctx, cancel := withQueryTimeout(ctx, timeout)
 	defer cancel()
 
 	defer func() {
 		c.logger.Debug("query processing complete",
 			"duration_ms", time.Since(start).Milliseconds(),
 			"query", query,
-			"timeout_seconds", *opts.TimeoutSeconds,
+			"timeout_seconds", timeout,
 		)
 	}()
 
 	// Delegate DDL statements (CREATE, ALTER, DROP, etc.) to execDDL.
 	if isDDLStatement(query) {
-		return c.execDDLWithTimeout(ctx, query, opts.TimeoutSeconds)
+		return c.execDDLWithTimeout(ctx, query, &timeout)
 	}
 
 	var rows driver.Rows
@@ -235,15 +155,18 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	var bytesReturned int
 	truncatedReason := ""
 	var progress queryProgress
+	var settings clickhouse.Settings
 
 	// Execute the core query logic within the hook wrapper.
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		var queryErr error
 		queryStartTime = time.Now() // Reset timer before execution
 
-		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
-
-		rows, queryErr = c.queryResultRows(hookCtx, query, opts, &progress)
+		settings, queryErr = c.resultQuerySettings(hookCtx, opts)
+		if queryErr != nil {
+			return queryErr
+		}
+		rows, queryErr = c.queryResultRows(hookCtx, query, settings, &progress)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -302,7 +225,6 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	if err != nil {
 		return nil, fmt.Errorf("executing query or processing results: %w", err)
 	}
-	settings := overlaySettings(c.serverDefaults(requestCtx), opts.Settings)
 
 	// Construct the final result.
 	queryResult := &models.QueryResult{
@@ -316,7 +238,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			Truncated:       truncatedReason != "",
 			TruncatedReason: truncatedReason,
 			LimitSource:     opts.LimitSource,
-			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(settings, queryDuration)),
+			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(settings, query)),
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
@@ -329,18 +251,10 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 // retaining the full result set in memory.
 func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOptions, writer RowStreamWriter) (models.QueryStats, error) {
 	start := time.Now()
-	if opts.TimeoutSeconds == nil {
-		defaultTimeout := DefaultQueryTimeout
-		opts.TimeoutSeconds = &defaultTimeout
-	}
-
-	opts.Settings = buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
-
 	// Bound the Go context by the timeout (backstop for network/driver stalls
 	// beyond ClickHouse's max_execution_time). Safe to cancel on return: rows
 	// are fully consumed within this call.
-	requestCtx := ctx
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(*opts.TimeoutSeconds)*time.Second+queryTimeoutGrace)
+	ctx, cancel := withQueryTimeout(ctx, c.queryTimeout(opts.TimeoutSeconds))
 	defer cancel()
 
 	if isDDLStatement(query) {
@@ -351,9 +265,11 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	var rowsReturned int
 	var progress queryProgress
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
-
-		rows, err := c.queryResultRows(hookCtx, query, opts, &progress)
+		settings, err := c.resultQuerySettings(hookCtx, opts)
+		if err != nil {
+			return err
+		}
+		rows, err := c.queryResultRows(hookCtx, query, settings, &progress)
 		if err != nil {
 			return err
 		}
@@ -401,9 +317,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		stats.RowsReturned = rowsReturned
 		stats.LimitApplied = opts.LimitApplied
 		stats.LimitSource = opts.LimitSource
-		elapsed := time.Since(start)
-		settings := overlaySettings(c.serverDefaults(requestCtx), opts.Settings)
-		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(settings, elapsed))
+		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(settings, query))
 		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
 		return writer.Finish(stats)
 	})
@@ -416,7 +330,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 }
 
 func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions) context.Context {
-	settings := buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
+	settings := buildQuerySettings(*opts.TimeoutSeconds, nil, c.querySettings)
 	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
 }
 
@@ -434,98 +348,26 @@ func ownQuery(ctx context.Context, settings clickhouse.Settings) context.Context
 	)
 }
 
-// Detect support once per client; older servers must never receive this setting.
-func (c *Client) contextWithNativeJSON(ctx context.Context, opts QueryOptions) context.Context {
+// flattensJSON reports whether the server takes the flattened native JSON
+// format, probed once per client; older servers must never receive the setting.
+func (c *Client) flattensJSON(ctx context.Context) bool {
 	c.capabilitiesMu.Lock()
 	flattenedJSON := c.flattenedJSON
 	c.capabilitiesMu.Unlock()
-	if flattenedJSON == nil {
-		var supported uint64
-		probeCtx := ownQuery(ctx, clickhouse.Settings{"max_execution_time": 2})
-		err := c.conn.QueryRow(probeCtx, "SELECT count() FROM system.settings WHERE name = 'output_format_native_use_flattened_dynamic_and_json_serialization'").Scan(&supported)
-		if err != nil {
-			return ctx
-		}
-		enabled := supported > 0
-		flattenedJSON = &enabled
-		c.capabilitiesMu.Lock()
-		c.flattenedJSON = flattenedJSON
-		c.capabilitiesMu.Unlock()
+	if flattenedJSON != nil {
+		return *flattenedJSON
 	}
-	if *flattenedJSON {
-		settings := buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
-		settings["output_format_native_use_flattened_dynamic_and_json_serialization"] = 1
-		ctx = clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+	var supported uint64
+	probeCtx := ownQuery(ctx, clickhouse.Settings{"max_execution_time": 2})
+	err := c.conn.QueryRow(probeCtx, "SELECT count() FROM system.settings WHERE name = 'output_format_native_use_flattened_dynamic_and_json_serialization'").Scan(&supported)
+	if err != nil {
+		return false
 	}
-	return ctx
-}
-
-// serverDefaultsUnseen are the settings that the read of the server's
-// defaults sends itself: result_overflow_mode=break keeps a profile's result
-// cap from failing the read, and the driver sends max_execution_time from the
-// context deadline. The read cannot see their defaults, and every query that
-// the LIMIT rule builds sends both.
-var serverDefaultsUnseen = []string{"max_execution_time", "result_overflow_mode"}
-
-// serverDefaultsQuery reads the break limits that a query gets from the
-// user's settings profile and the connection unless it sends them.
-var serverDefaultsQuery = func() string {
-	var names []string
-	for _, bound := range breakLimits {
-		for _, name := range []string{bound.limit, bound.mode} {
-			if !slices.Contains(serverDefaultsUnseen, name) && !slices.Contains(names, name) {
-				names = append(names, name)
-			}
-		}
-	}
-	return "SELECT name, value FROM system.settings WHERE changed AND name IN ('" + strings.Join(names, "', '") + "')"
-}()
-
-// serverDefaults returns the break limits that this client's queries get from
-// the server unless they send them, read once per client after a query
-// succeeds. A failed read is logged once and tried again after the next
-// query; until it succeeds, results judge completeness by the settings they
-// send.
-func (c *Client) serverDefaults(ctx context.Context) map[string]any {
+	enabled := supported > 0
 	c.capabilitiesMu.Lock()
-	defaults := c.defaults
+	c.flattenedJSON = &enabled
 	c.capabilitiesMu.Unlock()
-	if defaults != nil {
-		return defaults
-	}
-
-	defaults, err := c.readServerDefaults(ctx)
-	c.capabilitiesMu.Lock()
-	defer c.capabilitiesMu.Unlock()
-	if err != nil {
-		if !c.defaultsFailed && ctx.Err() == nil {
-			c.defaultsFailed = true
-			c.logger.Warn("reading the ClickHouse profile limits failed; results report only the limits Logchef sends",
-				"source_id", c.sourceID, "error", err)
-		}
-		return nil
-	}
-	c.defaults = defaults
-	return defaults
-}
-
-func (c *Client) readServerDefaults(ctx context.Context) (map[string]any, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	rows, err := c.conn.Query(ownQuery(ctx, clickhouse.Settings{"result_overflow_mode": "break"}), serverDefaultsQuery)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	defaults := make(map[string]any)
-	for rows.Next() {
-		var name, value string
-		if err := rows.Scan(&name, &value); err != nil {
-			return nil, err
-		}
-		defaults[name] = value
-	}
-	return defaults, rows.Err()
+	return enabled
 }
 
 func resetNullableScanTargets(ptrs []reflect.Value) {

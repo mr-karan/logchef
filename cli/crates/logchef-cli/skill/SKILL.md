@@ -148,7 +148,9 @@ Full operator/value/nested-field detail: `references/logchefql.md`.
   that applied (`statement`, `request`, `default`, `max`) and
   `stats.truncation` says whether rows were cut: `none`, `rows` (a row past the
   limit existed), `bytes` (the response size budget), or `unknown` (a
-  non-literal `LIMIT` or the source's `max_result_rows` filled the cap).
+  non-literal `LIMIT` or the source's `max_result_rows` filled the cap, or the
+  query's own `SETTINGS` can stop it early). A query that reaches another
+  ClickHouse limit, such as `max_rows_to_read`, fails with an error naming it.
 
 ```bash
 logchef query 'level="error"' --from '2026-07-14 09:00:00' --to '2026-07-14 09:30:00'

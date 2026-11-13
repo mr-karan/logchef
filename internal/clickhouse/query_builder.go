@@ -61,15 +61,10 @@ type QueryBuildResult struct {
 func (r QueryBuildResult) QueryOptions(timeoutSeconds int) QueryOptions {
 	return QueryOptions{
 		TimeoutSeconds: &timeoutSeconds,
-		Settings: map[string]any{
-			"max_execution_time":   timeoutSeconds,
-			"max_result_rows":      r.FetchLimit,
-			"result_overflow_mode": "break",
-		},
-		LimitApplied: r.AppliedLimit,
-		MaxRows:      r.AppliedLimit,
-		LimitSource:  r.LimitSource,
-		Probed:       r.FetchLimit > r.AppliedLimit,
+		LimitApplied:   r.AppliedLimit,
+		MaxRows:        r.AppliedLimit,
+		LimitSource:    r.LimitSource,
+		ResultRows:     r.FetchLimit,
 	}
 }
 
