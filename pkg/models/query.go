@@ -96,7 +96,7 @@ type CacheDirective struct {
 // Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
 type TemplateVariable struct {
 	Name  string `json:"name"`  // Variable name (without braces)
-	Type  string `json:"type"`  // "string", "text", "number", or "date"
+	Type  string `json:"type"`  // "string", "text", "number", "date", or "day"
 	Value any    `json:"value"` // The value to substitute
 }
 

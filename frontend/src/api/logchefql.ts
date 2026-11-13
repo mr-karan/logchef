@@ -56,7 +56,7 @@ export interface ValidateResponse {
 
 export interface TemplateVariable {
   name: string;
-  type: 'text' | 'number' | 'date' | 'string';
+  type: 'text' | 'number' | 'date' | 'day' | 'string';
   value: string | number | string[];
 }
 

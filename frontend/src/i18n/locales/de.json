@@ -1,6 +1,7 @@
 {
   "ui.dashboardNeedsReload": "Dieses Dashboard ist schreibgeschützt. Lade die Seite neu, um seine neueren Funktionen zu nutzen.",
   "ui.panelNeedsReload": "Dieses Panel nutzt eine Funktion, die diese Version nicht anzeigen kann.",
+  "ui.dateAndTime": "Datum und Uhrzeit",
   "ui.serverUpdated": "Logchef wurde aktualisiert. Lade die Seite neu, um fortzufahren.",
   "dashboards.conflict.title": "Dieses Dashboard wurde während deiner Bearbeitung geändert",
   "dashboards.conflict.description": "Jemand hat eine neuere Version gespeichert, daher wurden deine Änderungen nicht gespeichert. Sie sind noch da. Wähle, wie du sie behalten möchtest.",

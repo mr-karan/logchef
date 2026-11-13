@@ -22,6 +22,7 @@ const (
 	TypeNumber VariableType = "number"
 	// TypeDate represents a date variable formatted as ClickHouse datetime.
 	TypeDate VariableType = "date"
+	TypeDay  VariableType = "day"
 )
 
 // Variable represents a template variable with its value.
@@ -197,6 +198,8 @@ func formatValue(v Variable, dialect Dialect) (string, error) {
 		return formatString(v.Value, dialect)
 	case TypeNumber:
 		return formatNumber(v.Value)
+	case TypeDay:
+		return formatDay(v.Value, dialect)
 	case TypeDate:
 		return formatDialectDate(v.Value, dialect)
 	default:
@@ -250,6 +253,8 @@ func formatSingleValue(value any, varType VariableType, dialect Dialect) (string
 		return formatString(value, dialect)
 	case TypeNumber:
 		return formatNumber(value)
+	case TypeDay:
+		return formatDay(value, dialect)
 	case TypeDate:
 		return formatDialectDate(value, dialect)
 	default:
@@ -359,4 +364,18 @@ func formatDialectDate(value any, dialect Dialect) (string, error) {
 		return strconv.Quote(formatted[1 : len(formatted)-1]), nil
 	}
 	return formatted, nil
+}
+
+func formatDay(value any, dialect Dialect) (string, error) {
+	day, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("unsupported day type: %T", value)
+	}
+	if len(day) != len(time.DateOnly) {
+		return "", fmt.Errorf("invalid day: %s (expected YYYY-MM-DD)", day)
+	}
+	if _, err := time.Parse(time.DateOnly, day); err != nil {
+		return "", fmt.Errorf("invalid day: %s (expected YYYY-MM-DD)", day)
+	}
+	return formatString(day, dialect)
 }

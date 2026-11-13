@@ -1,6 +1,7 @@
 {
   "ui.dashboardNeedsReload": "このダッシュボードは読み取り専用です。新しい機能を使用するには再読み込みしてください。",
   "ui.panelNeedsReload": "このパネルは、このバージョンでは表示できない機能を使用しています。",
+  "ui.dateAndTime": "日付と時刻",
   "ui.serverUpdated": "Logchef が更新されました。続行するにはページを再読み込みしてください。",
   "dashboards.conflict.title": "編集中にこのダッシュボードが変更されました",
   "dashboards.conflict.description": "他のユーザーが新しいバージョンを保存したため、変更は保存されていません。変更はまだ残っています。どのように残すか選んでください。",

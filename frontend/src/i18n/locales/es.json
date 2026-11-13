@@ -1,6 +1,7 @@
 {
   "ui.dashboardNeedsReload": "Este panel es de solo lectura. Vuelve a cargarlo para usar sus nuevas funciones.",
   "ui.panelNeedsReload": "Este panel usa una función que esta versión no puede mostrar.",
+  "ui.dateAndTime": "Fecha y hora",
   "ui.serverUpdated": "Logchef se ha actualizado. Recarga la página para continuar.",
   "dashboards.conflict.title": "Este dashboard cambió mientras lo editabas",
   "dashboards.conflict.description": "Alguien guardó una versión más reciente, así que tus cambios no se guardaron. Siguen aquí. Elige cómo conservarlos.",

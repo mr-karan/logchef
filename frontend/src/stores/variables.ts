@@ -8,7 +8,7 @@ export interface VariableOption {
 
 export interface VariableState {
     name: string;
-    type: 'text' | 'number' | 'date';
+    type: 'text' | 'number' | 'date' | 'day';
     label: string;
     inputType: 'input' | 'dropdown' | 'multiselect' | 'search' | 'datepicker';
     value: string | number | string[];

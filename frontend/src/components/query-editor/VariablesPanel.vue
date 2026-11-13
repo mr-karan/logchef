@@ -175,10 +175,10 @@ const clearMultiSelectValues = (variable: VariableState) => {
 
           <!-- Date picker input -->
           <SingleDatePicker
-            v-else-if="variable.type === 'date' && variable.inputType === 'datepicker'"
+            v-else-if="(variable.type === 'date' || variable.type === 'day') && variable.inputType === 'datepicker'"
             :model-value="variable.value ? String(variable.value) : null"
             @update:model-value="(val) => { variable.value = val ?? ''; variableStore.upsertVariable(variable); }"
-            :include-time="true"
+            :include-time="variable.type === 'date'"
             :placeholder="variable.isOptional ? t('ui.selectDateOptional') : t('ui.selectDate')"
             class="w-full"
           />

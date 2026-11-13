@@ -16,6 +16,8 @@ export function getPlaceholderForType(type: string): string {
   switch (type) {
     case 'number':
       return 'Enter a number...'
+    case 'day':
+      return '2026-01-28'
     case 'date':
       return '2026-01-28 14:30:00'
     case 'text':
@@ -41,6 +43,8 @@ export function formatVariableValue(variable: VariableState): string {
   switch (variable.type) {
     case 'number':
       return `Value: ${variable.value} `
+    case 'day':
+      return String(variable.value)
     case 'date': {
       const date = new Date(variable.value as string)
       if (isNaN(date.getTime())) {

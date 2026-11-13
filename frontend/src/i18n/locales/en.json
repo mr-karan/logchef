@@ -346,6 +346,7 @@
   "ui.text": "Text",
   "ui.number": "Number",
   "ui.date": "Date",
+  "ui.dateAndTime": "Date and time",
   "ui.inputWidget": "Input Widget",
   "ui.textInput": "Text Input",
   "ui.datePicker": "Date Picker",
