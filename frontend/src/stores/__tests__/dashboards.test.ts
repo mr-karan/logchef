@@ -778,6 +778,14 @@ describe("dashboards store — schema 2 request parity", () => {
     expect(store.getPanelState("sql").table?.stats).toMatchObject({ limit_source: "request", truncation: "rows" });
   });
 
+  it("keeps the truncation state of a table result that a byte cut left empty", async () => {
+    const stats = { execution_time_ms: 1, rows_read: 1, rows_returned: 0, limit_applied: 100, limit_source: "request", truncation: "bytes" };
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [], stats } });
+    const logsql: DashboardQueryPanel = { ...tablePanel("vl"), query: { mode: "result", language: "logsql", text: "*" } };
+    const store = await runPanels(logsql);
+    expect(store.getPanelState("vl")).toMatchObject({ status: "empty", table: { stats: { truncation: "bytes" } } });
+  });
+
   it("trims U+0085 around a group when building the request and keeps U+FEFF", async () => {
     await runPanels(chartPanel("nel", { group_by: "\u0085service\u0085" }), chartPanel("bom", { group_by: "\ufeff" }));
     const groups = mocks.histogram.mock.calls.map((call) => call[2].group_by);

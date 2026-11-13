@@ -60,6 +60,31 @@ describe("DashboardPanel truncation chip", () => {
     expect(root.querySelector(".dash-panel__chip")?.textContent).toBe("May be incomplete");
   });
 
+  it("names a byte cut that left the result empty", async () => {
+    const root = await render({
+      status: "empty",
+      table: {
+        columns: [],
+        rows: [],
+        stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 0, rows_returned: 0, limit_applied: 100, limit_source: "request", truncation: "bytes" },
+      },
+    });
+    expect(root.querySelector(".dash-panel__header .dash-panel__chip")?.textContent).toBe("Cut by size");
+    expect(root.textContent).toContain("No data for this time range");
+  });
+
+  it("shows no chip on an empty result that nothing cut", async () => {
+    const root = await render({
+      status: "empty",
+      table: {
+        columns: [],
+        rows: [],
+        stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0, rows_returned: 0, limit_applied: 100, limit_source: "request", truncation: "none" },
+      },
+    });
+    expect(root.querySelector(".dash-panel__chip")).toBeNull();
+  });
+
   it("shows no chip when nothing was cut", async () => {
     const root = await render(tableState("none"));
     expect(root.querySelector(".dash-panel__chip")).toBeNull();

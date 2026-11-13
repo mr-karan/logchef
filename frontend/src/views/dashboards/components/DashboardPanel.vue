@@ -67,9 +67,11 @@ const chartHeight = computed(() =>
 
 const vizType = computed(() => props.panel.viz?.type);
 
-// A cut result says so on every visualization. A cap that cut nothing is silent.
+// A cut result says so on every visualization, and so does an empty one: a
+// byte budget can stop the reader before its first row. A cap that cut
+// nothing is silent.
 const truncationText = computed(() => {
-  if (panelState.value.status !== "success") return null;
+  if (panelState.value.status !== "success" && panelState.value.status !== "empty") return null;
   const message = truncationMessage(panelState.value.table?.stats);
   return message ? t(message.key, { count: message.count }, message.count) : null;
 });
