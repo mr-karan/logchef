@@ -7,7 +7,11 @@ import {
   dashboardPanelApi,
   type Dashboard,
   type DashboardPanel,
+  type DashboardPanelQuery,
   type DashboardPanels,
+  type DashboardQueryPanel,
+  type DashboardSummary,
+  type DashboardViz,
   type CreateDashboardRequest,
   type UpdateDashboardRequest,
   type HistogramRequestBody,
@@ -17,7 +21,18 @@ import {
 } from "@/api/dashboards";
 import type { HistogramDataPoint } from "@/api/explore";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
-import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
+import {
+  dashboardLayout,
+  newQueryPanel,
+  reflowPanels,
+  sumHistogramCounts,
+  switchPanelKind,
+  trimDashboardGroupBy,
+  validatePanelsBlob,
+  withDashboardLayout,
+  MAX_DASHBOARD_PANELS,
+  type PanelBuilderKind,
+} from "@/utils/dashboardPanels";
 import {
   epochMs,
   parseRelativeSpec,
@@ -93,7 +108,7 @@ export interface PanelState {
 
 
 interface DashboardsState {
-  dashboards: Dashboard[];
+  dashboards: DashboardSummary[];
   current: Dashboard | null;
   panelStates: Record<string, PanelState>;
   window: TimeWindow;
@@ -118,6 +133,27 @@ interface DashboardsState {
 
 // Panel results that are final for the current query and time range.
 const FINISHED_PANEL_STATUSES: ReadonlySet<PanelStatus> = new Set(["success", "empty", "error", "locked"]);
+
+/**
+ * A patch for one draft panel. `query` merges into the panel's query and a
+ * key set to undefined is removed; `viz` replaces the visualization whole, so
+ * a type change never leaves another type's options behind.
+ */
+export interface DraftPanelPatch {
+  title?: string;
+  team_id?: number;
+  source_id?: number;
+  query?: Partial<DashboardPanelQuery>;
+  viz?: DashboardViz;
+}
+
+function withoutUndefined<T extends object>(value: T): T {
+  const out = { ...value } as Record<string, unknown>;
+  for (const key of Object.keys(out)) {
+    if (out[key] === undefined) delete out[key];
+  }
+  return out as T;
+}
 
 function newPanelId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -189,7 +225,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const editName = computed(() => state.data.value.editName);
   const editDescription = computed(() => state.data.value.editDescription);
   const previewState = computed(() => state.data.value.previewState);
-  const canEdit = computed(() => state.data.value.current?.can_edit === true);
+  // A corrupt dashboard has no panels to edit; its creator repairs it through the API.
+  const canEdit = computed(() => {
+    const current = state.data.value.current;
+    return current?.can_edit === true && !current.corrupt;
+  });
   // Dirty when the working draft diverges from the snapshot taken on entering edit.
   const isDirty = computed(() => {
     const { editDraft: draft, current, editName, editDescription } = state.data.value;
@@ -233,7 +273,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // ---- CRUD ---------------------------------------------------------------
 
   async function fetchDashboards() {
-    return await state.callApi<Dashboard[]>({
+    return await state.callApi<DashboardSummary[]>({
       apiCall: () => dashboardsApi.list(),
       operationKey: "fetchDashboards",
       showToast: false,
@@ -245,7 +285,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   function applyDefaultTimeRange(dashboard: Dashboard | null) {
-    const defaultRange = dashboard?.panels?.default_time_range;
+    const defaultRange = dashboard && !dashboard.corrupt ? dashboard.panels.default_time_range : undefined;
     const defaultWindow = defaultRange ? relativeWindow(defaultRange) : null;
     if (defaultWindow) state.data.value.window = defaultWindow;
   }
@@ -284,16 +324,12 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     return result;
   }
 
+  // The list page fetches summaries when it mounts, so a create never patches the list.
   async function createDashboard(req: CreateDashboardRequest) {
     return await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.create(req),
       operationKey: "createDashboard",
       successMessage: i18n.global.t("dashboards.dashboardCreated"),
-      onSuccess: (data) => {
-        if (data) {
-          state.data.value.dashboards = [data, ...state.data.value.dashboards];
-        }
-      },
     });
   }
 
@@ -342,22 +378,22 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // (A logsql panel used to fall through here and get compiled as LogchefQL,
   // silently breaking VictoriaLogs panels — see #119 A4.)
   async function resolveNativeQuery(
-    panel: DashboardPanel,
+    panel: DashboardQueryPanel,
     range: ResolvedWindow,
     signal: AbortSignal
   ): Promise<{ query: string; language: PanelQueryLanguage }> {
-    if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
-      return { query: panel.query, language: panel.query_language };
+    if (panel.query.language === "clickhouse-sql" || panel.query.language === "logsql") {
+      return { query: panel.query.text, language: panel.query.language };
     }
     const resp = await dashboardPanelApi.translate(
       panel.team_id,
       panel.source_id,
       {
-        query: panel.query,
+        query: panel.query.text,
         start_time: toRfc3339(range.start),
         end_time: toRfc3339(range.end),
         timezone: range.zone,
-        limit: panel.options?.limit,
+        limit: panel.query.translate_limit,
       },
       signal
     );
@@ -365,7 +401,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (translated.valid === false) {
       throw { error_type: "ValidationError", message: translated.error?.message || "Invalid query" };
     }
-    const query = translated.full_sql || translated.generated_query || translated.sql || panel.query;
+    const query = translated.full_sql || translated.generated_query || translated.sql || panel.query.text;
     // The compiler reports the language it produced (SQL for ClickHouse, LogsQL
     // for VictoriaLogs); default to clickhouse-sql for older server builds.
     const language = (translated.generated_query_language as PanelQueryLanguage) || "clickhouse-sql";
@@ -373,7 +409,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   async function fetchPanelData(
-    panel: DashboardPanel,
+    panel: DashboardQueryPanel,
     range: ResolvedWindow,
     signal: AbortSignal,
     // Result-cache directive attached to the (cacheable) panel request bodies.
@@ -382,10 +418,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   ): Promise<PanelState> {
     const startIso = toRfc3339(range.start);
     const endIso = toRfc3339(range.end);
+    const viz = panel.viz.type;
 
-    if (panel.type === "timeseries" || panel.type === "stat" || panel.type === "breakdown") {
-      const groupBy = panel.type === "timeseries" || panel.type === "breakdown" ? panel.options?.group_by?.trim() || undefined : undefined;
-      if (panel.type === "breakdown" && !groupBy) {
+    if (panel.query.mode === "count") {
+      const groupBy = viz === "stat" ? undefined : trimDashboardGroupBy(panel.query.group_by) || undefined;
+      if ((viz === "pie" || viz === "toplist") && !groupBy) {
         return { status: "error", error: "Breakdown panels require a group-by field." };
       }
       const { query: queryText, language: nativeLanguage } = await resolveNativeQuery(panel, range, signal);
@@ -408,10 +445,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const data = unwrap(resp);
       const buckets = data?.data ?? [];
 
-      if (panel.type === "stat") {
+      if (viz === "stat") {
         return { status: "success", stat: { value: sumHistogramCounts(buckets) } };
       }
-      if (panel.type === "breakdown" && groupBy) {
+      if ((viz === "pie" || viz === "toplist") && groupBy) {
         return {
           status: buckets.length ? "success" : "empty",
           breakdown: { buckets, groupBy, notice: data?.notice ?? null },
@@ -429,19 +466,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       };
     }
 
-    // table
-    const limit = clampTableLimit(panel.options?.limit);
+    // result mode: a table
+    const limit = clampTableLimit(panel.query.limit);
     // Native queries (ClickHouse SQL, VictoriaLogs LogsQL) run verbatim through
     // the logs/query endpoint. Only LogchefQL takes the compile path below;
     // routing a logsql panel there used to break VictoriaLogs tables (#119 A4).
-    if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
+    if (panel.query.language === "clickhouse-sql" || panel.query.language === "logsql") {
       const sqlBody: SqlQueryRequestBody = {
-        query_text: panel.query,
+        query_text: panel.query.text,
         limit,
         start_time: startIso,
         end_time: endIso,
         timezone: range.zone,
-        query_language: panel.query_language,
+        query_language: panel.query.language,
         ...(cache ? { cache } : {}),
       };
       const resp = await dashboardPanelApi.logsQuery(panel.team_id, panel.source_id, sqlBody, signal);
@@ -457,7 +494,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       panel.team_id,
       panel.source_id,
       {
-        query: panel.query,
+        query: panel.query.text,
         start_time: toRfc3339(range.start),
         end_time: toRfc3339(range.end),
         timezone: range.zone,
@@ -530,7 +567,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Resolve the dashboard's effective cache TTL once for the whole refresh,
     // combining the blob value with the server's advertised policy (fail-closed
     // to 0 when the server advertises no/disabled/malformed policy).
-    const effTtl = resolveEffectiveCacheTtl(dashboard.panels?.cache_ttl_seconds, metaStore.dashboardCachePolicy);
+    if (dashboard.corrupt) return;
+    const effTtl = resolveEffectiveCacheTtl(dashboard.panels.cache_ttl_seconds, metaStore.dashboardCachePolicy);
     // Send the directive ONLY when caching is actually on.
     const cache: CacheDirective | undefined =
       effTtl > 0 ? { scope: "dashboard", ttl_seconds: effTtl } : undefined;
@@ -555,7 +593,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const draft = state.data.value.editDraft;
     const panels = draft
       ? draft.panels.filter((p) => p.team_id > 0 && p.source_id > 0)
-      : (dashboard.panels?.panels ?? []);
+      : (dashboard.panels.panels ?? []);
     const tasks = panels.map((panel) => () => executePanel(panel, range, signal, cache));
     await runWithConcurrency(tasks, PANEL_FETCH_CONCURRENCY);
   }
@@ -564,7 +602,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // Execute a single panel into panelStates (used after add/edit so the panel
   // renders immediately without a full-dashboard refresh).
-  function executeSinglePanel(panel: DashboardPanel) {
+  function executeSinglePanel(panel: DashboardQueryPanel) {
     // Supersede any prior in-flight execution of the SAME panel (rapid edits)
     // and track the controller so teardown/refresh can cancel it.
     singlePanelAborts.get(panel.id)?.abort();
@@ -589,8 +627,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (token !== loadToken || !result.success || !result.data) return;
     const dashboard = result.data;
     state.data.value.current = dashboard;
-    if (dashboard.can_edit !== true) return;
-    const blob: DashboardPanels = dashboard.panels ?? { version: 1, layout: [], panels: [] };
+    if (dashboard.can_edit !== true || dashboard.corrupt) return;
+    const blob: DashboardPanels = dashboard.panels;
     // Snapshot the loaded blob; the draft is an independent clone we mutate.
     state.data.value.editSnapshotJson = stableStringify(blob);
     state.data.value.editDraft = cloneBlob(blob);
@@ -691,7 +729,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // Add or replace a panel in the draft (by id), then reflow the layout so the
   // grid stays top-left-first with no overlaps. A newly added panel has no layout
   // entry, so reflowPanels places it in the next free slot at the default size.
-  function upsertDraftPanel(panel: DashboardPanel) {
+  function upsertDraftPanel(panel: DashboardQueryPanel) {
     const draft = state.data.value.editDraft;
     if (!draft) return;
     const panels = [...draft.panels];
@@ -705,26 +743,40 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     executeSinglePanel(panel);
   }
 
-  // Patch-merge a partial update into one draft panel (by id), then reflow.
-  // `options` merges shallowly into the panel's existing options rather than
-  // replacing the whole object, so callers only need to pass the fields that
-  // changed. This is the ONLY way the panel builder drawer mutates a panel —
-  // there is no detached local copy of the panel config.
-  function updateDraftPanel(
-    id: string,
-    patch: Partial<Omit<DashboardPanel, "options">> & { options?: Partial<DashboardPanel["options"]> }
-  ) {
+  // Patch one draft panel (by id), then reflow. This is the ONLY way the panel
+  // builder drawer mutates a panel; there is no detached local copy.
+  function updateDraftPanel(id: string, patch: DraftPanelPatch) {
     const draft = state.data.value.editDraft;
     if (!draft) return;
     const idx = draft.panels.findIndex((p) => p.id === id);
     if (idx < 0) return;
-    const { options: optionsPatch, ...rest } = patch;
     const current = draft.panels[idx];
-    const merged: DashboardPanel = {
+    if (current.locked) return;
+    const { query: queryPatch, viz, ...rest } = patch;
+    const merged: DashboardQueryPanel = {
       ...current,
       ...rest,
-      options: optionsPatch ? { ...(current.options ?? {}), ...optionsPatch } : current.options,
+      query: queryPatch ? withoutUndefined({ ...current.query, ...queryPatch }) : current.query,
+      viz: viz ?? current.viz,
     };
+    replaceDraftPanel(idx, current, merged);
+  }
+
+  // Re-shape a draft panel for another builder kind (chart, stat, breakdown
+  // or table), dropping the fields the new kind does not use.
+  function switchDraftPanelKind(id: string, kind: PanelBuilderKind) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
+    const idx = draft.panels.findIndex((p) => p.id === id);
+    if (idx < 0) return;
+    const current = draft.panels[idx];
+    if (current.locked) return;
+    replaceDraftPanel(idx, current, switchPanelKind(current, kind));
+  }
+
+  function replaceDraftPanel(idx: number, current: DashboardQueryPanel, merged: DashboardQueryPanel) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
     const panels = [...draft.panels];
     panels[idx] = merged;
     setDraft(reflowPanels({ ...draft, panels }));
@@ -734,8 +786,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // is now stale — a stat value would render blank under a table view. Drop
     // it, then re-run the panel so the edit canvas reflects the new config.
     if (execSignature(current) !== execSignature(merged)) {
-      const { [id]: _stale, ...rest2 } = state.data.value.panelStates;
-      state.data.value.panelStates = rest2;
+      const { [merged.id]: _stale, ...rest } = state.data.value.panelStates;
+      state.data.value.panelStates = rest;
       if (merged.team_id > 0 && merged.source_id > 0) {
         executeSinglePanel(merged);
       }
@@ -751,17 +803,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const draft = state.data.value.editDraft;
     if (!draft) return null;
     const id = newPanelId();
-    const panel: DashboardPanel = {
-      id,
-      title: "New panel",
-      type: "timeseries",
-      team_id: 0,
-      source_id: 0,
-      query: "",
-      query_language: "logchefql",
-      options: {},
-    };
-    const panels = [...draft.panels, panel];
+    const panels = [...draft.panels, newQueryPanel(id, "New panel")];
     setDraft(reflowPanels({ ...draft, panels }));
     return id;
   }
@@ -774,13 +816,16 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (!draft || draft.panels.length >= MAX_DASHBOARD_PANELS) return null;
     const idx = draft.panels.findIndex((p) => p.id === id);
     if (idx < 0) return null;
+    const original = draft.panels[idx];
+    if (original.locked) return null;
     const copyId = newPanelId();
-    const copy: DashboardPanel = { ...JSON.parse(JSON.stringify(draft.panels[idx])), id: copyId, title };
+    const copy: DashboardQueryPanel = { ...JSON.parse(JSON.stringify(original)), id: copyId, title };
     const panels = [...draft.panels];
     panels.splice(idx + 1, 0, copy);
-    const size = draft.layout.find((l) => l.id === id);
-    const layout = size ? [...draft.layout, { id: copyId, x: 0, y: 0, w: size.w, h: size.h }] : draft.layout;
-    setDraft(reflowPanels({ ...draft, panels, layout }));
+    const layout = dashboardLayout(draft);
+    const size = layout.find((l) => l.id === id);
+    const next = size ? [...layout, { id: copyId, x: 0, y: 0, w: size.w, h: size.h }] : layout;
+    setDraft(reflowPanels(withDashboardLayout({ ...draft, panels }, next)));
     const result = state.data.value.panelStates[id];
     if (result && FINISHED_PANEL_STATUSES.has(result.status)) {
       setPanelState(copyId, result);
@@ -794,17 +839,18 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const draft = state.data.value.editDraft;
     if (!draft) return;
     const panels = draft.panels.filter((p) => p.id !== id);
-    const layout = draft.layout.filter((l) => l.id !== id);
-    setDraft(reflowPanels({ ...draft, panels, layout }));
+    const layout = dashboardLayout(draft).filter((l) => l.id !== id);
+    setDraft(reflowPanels(withDashboardLayout({ ...draft, panels }, layout)));
   }
 
   function resizeDraftPanel(id: string, w: number, h: number) {
     const draft = state.data.value.editDraft;
     if (!draft) return;
-    const layout = draft.layout.some((l) => l.id === id)
-      ? draft.layout.map((l) => (l.id === id ? { ...l, w, h } : l))
-      : [...draft.layout, { id, x: 0, y: 0, w, h }];
-    setDraft(reflowPanels({ ...draft, layout }));
+    const current = dashboardLayout(draft);
+    const layout = current.some((l) => l.id === id)
+      ? current.map((l) => (l.id === id ? { ...l, w, h } : l))
+      : [...current, { id, x: 0, y: 0, w, h }];
+    setDraft(reflowPanels(withDashboardLayout(draft, layout)));
   }
 
   // Reorder the draft's panels to match `orderedIds` (drag-and-drop result), then
@@ -862,16 +908,16 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       operationKey: "saveDashboard",
       showToast: false,
       onSuccess: (data) => {
-        // Adopt the saved blob as the live dashboard and re-render.
+        // Adopt the saved blob as the live dashboard and re-render. The list
+        // page refetches its summaries when it mounts.
         if (data) {
           state.data.value.current = data;
-          const idx = state.data.value.dashboards.findIndex((d) => d.id === data.id);
-          if (idx >= 0) state.data.value.dashboards[idx] = data;
         } else {
           state.data.value.current = {
             ...dashboard,
             name: body.name,
             description: body.description,
+            corrupt: false,
             panels: cloneBlob(draft),
           };
         }
@@ -889,7 +935,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // Run a panel's query through the SAME execution path live panels use, storing
   // the result in `previewState` for the editor's Preview pane.
-  async function previewPanel(panel: DashboardPanel) {
+  async function previewPanel(panel: DashboardQueryPanel) {
     previewAbort?.abort();
     const controller = new AbortController();
     previewAbort = controller;
@@ -986,6 +1032,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     setDraftDescription,
     upsertDraftPanel,
     updateDraftPanel,
+    switchDraftPanelKind,
     setDraftCacheTtl,
     setDraftDefaultTimeRange,
     createDraftShell,

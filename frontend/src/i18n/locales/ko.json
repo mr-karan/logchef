@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "대시보드를 생성했습니다",
   "dashboards.dashboardDeleted": "대시보드를 삭제했습니다",
   "dashboards.dashboardSaved": "대시보드를 저장했습니다",
+  "dashboards.corruptTitle": "저장된 패널을 읽을 수 없습니다",
+  "dashboards.corruptDescription": "이 대시보드의 저장된 패널이 유효성 검사를 통과하지 못해 여기에서 표시하거나 편집할 수 없습니다. 작성자 또는 관리자가 API를 통해 저장된 패널을 복구할 수 있습니다.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "새 채팅",
   "askChef.close": "Ask Chef 닫기",

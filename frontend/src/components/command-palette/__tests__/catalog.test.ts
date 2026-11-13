@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { alertsApi } from '@/api/alerts'
 import type { RequestOptions } from '@/api/apiUtils'
 import { collectionsApi, type Collection } from '@/api/collections'
-import { dashboardsApi, type Dashboard } from '@/api/dashboards'
+import { dashboardsApi, type DashboardSummary } from '@/api/dashboards'
 import { savedQueriesApi } from '@/api/savedQueries'
 import type { Source } from '@/api/sources'
 import { teamsApi, type UserTeamMembership } from '@/api/teams'
@@ -23,8 +23,8 @@ function apiSource(id: number): Source {
   }
 }
 
-function dashboard(id: number): Dashboard {
-  return { id, revision: 1, name: `Board ${id}`, description: '', panels: { version: 1, layout: [], panels: [] }, created_at: '', updated_at: '' }
+function dashboard(id: number): DashboardSummary {
+  return { id, revision: 1, name: `Board ${id}`, description: '', panel_count: 0, panel_types: [], tab_count: 1, can_edit: true, corrupt: false, created_at: '', updated_at: '' }
 }
 
 function collection(id: number): Collection {
@@ -166,7 +166,7 @@ describe('palette catalog', () => {
 
   it('drops a response that arrives after the palette closed and opened again', async () => {
     const api = stub()
-    let late: (value: APIResponse<Dashboard[]>) => void = () => {}
+    let late: (value: APIResponse<DashboardSummary[]>) => void = () => {}
     api.dashboards.mockImplementationOnce(() => new Promise((resolve) => { late = resolve }))
     catalog.open(OPTIONS)
     await flush()

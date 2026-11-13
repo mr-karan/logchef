@@ -1,15 +1,18 @@
 import type { HistogramDataPoint } from "@/api/explore";
-import type {
-  DashboardLayoutItem,
-  DashboardPanel,
-  DashboardPanels,
-  DashboardPanelType,
-  PanelQueryLanguage,
+import {
+  DASHBOARD_PANELS_VERSION,
+  type DashboardLayoutItem,
+  type DashboardPanel,
+  type DashboardPanels,
+  type DashboardQueryPanel,
+  type DashboardViz,
+  type DashboardVizType,
+  type PanelQueryLanguage,
 } from "@/api/dashboards";
 
 // The dashboard grid is 12 columns wide. Panel widths are restricted to a small
-// set of presets (mirrors the server-side validation in pkg/models/dashboards.go)
-// and heights are clamped to 1..6 rows.
+// set of presets (mirrors the server-side validation in pkg/models) and
+// heights are clamped to 1..6 rows.
 const DASHBOARD_GRID_COLUMNS = 12;
 const ALLOWED_PANEL_WIDTHS = [2, 3, 4, 6, 8, 9, 12] as const;
 const MIN_PANEL_HEIGHT = 1;
@@ -17,14 +20,109 @@ const MAX_PANEL_HEIGHT = 6;
 const DEFAULT_PANEL_WIDTH = 6;
 const DEFAULT_PANEL_HEIGHT = 2;
 export const MAX_DASHBOARD_PANELS = 24;
-const DASHBOARD_PANELS_VERSION = 1;
+export const MAX_DASHBOARD_TABS = 1;
+const MAX_TAB_TITLE_CODE_POINTS = 60;
+export const MAX_DASHBOARD_NAME_CODE_POINTS = 200;
+export const MAX_DASHBOARD_DESCRIPTION_CODE_POINTS = 2000;
+export const MAX_TABLE_LIMIT = 10000;
+const MAX_TRANSLATE_LIMIT = 100000;
 // Sanity bound on the blob's cache_ttl_seconds (server also clamps to max_ttl at
-// request time); mirrors the validation in internal/core/dashboards.go.
+// request time); mirrors the validation in pkg/models.
 const MAX_DASHBOARD_CACHE_TTL_SECONDS = 86400;
 
-const VALID_PANEL_TYPES: readonly DashboardPanelType[] = ["timeseries", "stat", "table", "breakdown"];
+const VALID_VIZ_TYPES: readonly DashboardVizType[] = ["stat", "chart", "pie", "toplist", "table"];
 // Mirrors pkg/models.QueryLanguage's Valid() set (server: query.go).
 const VALID_QUERY_LANGUAGES: readonly PanelQueryLanguage[] = ["logchefql", "clickhouse-sql", "logsql"];
+
+/** The empty schema 2 blob a new dashboard starts from. */
+export function emptyDashboardPanels(): DashboardPanels {
+  return { version: DASHBOARD_PANELS_VERSION, features: [], tabs: [{ id: "main", title: "Main", layout: [] }], panels: [] };
+}
+
+/** The layout of the tab this release shows: the first one. */
+export function dashboardLayout(blob: Pick<DashboardPanels, "tabs">): DashboardLayoutItem[] {
+  return blob.tabs?.[0]?.layout ?? [];
+}
+
+/** The blob with the shown tab's layout replaced; other fields are kept. */
+export function withDashboardLayout(blob: DashboardPanels, layout: DashboardLayoutItem[]): DashboardPanels {
+  const tabs = blob.tabs?.length ? blob.tabs : emptyDashboardPanels().tabs;
+  return { ...blob, tabs: tabs.map((tab, index) => (index === 0 ? { ...tab, layout } : tab)) };
+}
+
+/**
+ * Trim the Unicode White_Space set from a group-by value, as Go's
+ * strings.TrimSpace does: U+0085 is trimmed and U+FEFF is kept, unlike
+ * JavaScript's trim(). Validation and request building both use it.
+ */
+export function trimDashboardGroupBy(value: string | undefined): string {
+  return (value ?? "").replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+}
+
+/**
+ * The localized copy name for a dashboard, cut by code points so it fits the
+ * 200-code-point name bound. The localized suffix is preserved and a surrogate
+ * pair is never split.
+ */
+export function dashboardCopyName(name: string, format: (name: string) => string): string {
+  const points = Array.from(name);
+  let keep = points.length;
+  let candidate = format(name);
+  while (keep > 0 && Array.from(candidate).length > MAX_DASHBOARD_NAME_CODE_POINTS) {
+    keep--;
+    candidate = format(points.slice(0, keep).join(""));
+  }
+  return candidate;
+}
+
+/** A name cut to the 200-code-point bound without splitting a surrogate pair. */
+export function clampDashboardName(name: string): string {
+  const points = Array.from(name);
+  return points.length > MAX_DASHBOARD_NAME_CODE_POINTS ? points.slice(0, MAX_DASHBOARD_NAME_CODE_POINTS).join("") : name;
+}
+
+/** A fresh query panel shell: a line chart with no source yet. */
+export function newQueryPanel(id: string, title: string): DashboardQueryPanel {
+  return {
+    id,
+    kind: "query",
+    title,
+    team_id: 0,
+    source_id: 0,
+    query: { mode: "count", language: "logchefql", text: "", interval: "auto" },
+    viz: { type: "chart", mark: "line", stack: "none" },
+  };
+}
+
+/** The builder's four choices. Pie and toplist are the two breakdown views. */
+export type PanelBuilderKind = "chart" | "stat" | "breakdown" | "table";
+
+export function panelBuilderKind(viz: Pick<DashboardViz, "type">): PanelBuilderKind {
+  return viz.type === "pie" || viz.type === "toplist" ? "breakdown" : viz.type;
+}
+
+/**
+ * The panel re-shaped for another builder kind. Fields the new kind does not
+ * use are dropped; the query text, language, team and source stay.
+ */
+export function switchPanelKind(panel: DashboardQueryPanel, kind: PanelBuilderKind): DashboardQueryPanel {
+  if (panelBuilderKind(panel.viz) === kind) return panel;
+  const { language, text } = panel.query;
+  const translate = language === "logchefql" && panel.query.translate_limit !== undefined
+    ? { translate_limit: panel.query.translate_limit }
+    : {};
+  const groupBy = panel.query.group_by !== undefined ? { group_by: panel.query.group_by } : {};
+  switch (kind) {
+    case "chart":
+      return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "chart", mark: "line", stack: "none" } };
+    case "stat":
+      return { ...panel, query: { mode: "count", language, text, interval: "auto", ...translate }, viz: { type: "stat", reduce: "sum" } };
+    case "breakdown":
+      return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "toplist" } };
+    case "table":
+      return { ...panel, query: { mode: "result", language, text }, viz: { type: "table" } };
+  }
+}
 
 interface NormalizedPanel {
   panel: DashboardPanel;
@@ -200,24 +298,20 @@ export function sizeForPanel(layout: DashboardLayoutItem[], id: string): { w: nu
  * reflow used after add / remove / resize / reorder.
  */
 export function reflowPanels(blob: DashboardPanels): DashboardPanels {
+  const layout = dashboardLayout(blob);
   const order: PanelSize[] = (blob.panels ?? []).map((p) => {
-    const { w, h } = sizeForPanel(blob.layout ?? [], p.id);
+    const { w, h } = sizeForPanel(layout, p.id);
     return { id: p.id, w, h };
   });
   // Keep the blob's other fields (e.g. cache_ttl_seconds); only the layout changes.
-  return {
-    ...blob,
-    version: blob.version || DASHBOARD_PANELS_VERSION,
-    panels: [...(blob.panels ?? [])],
-    layout: packLayout(order),
-  };
+  return withDashboardLayout({ ...blob, panels: [...(blob.panels ?? [])] }, packLayout(order));
 }
 
 /**
  * Validate a panels blob against the same rules the server enforces on save
- * (pkg/models/dashboards.go). Returns a friendly message on the first violation,
- * or null when valid. The server 400 remains the authoritative backstop; this
- * just surfaces problems inline before the round-trip.
+ * (pkg/models/dashboards_v2.go). Returns a friendly message on the first
+ * violation, or null when valid. The server 400 remains the authoritative
+ * backstop; this just surfaces problems inline before the round-trip.
  */
 export function validatePanelsBlob(blob: DashboardPanels): string | null {
   if (!blob || blob.version !== DASHBOARD_PANELS_VERSION) {
@@ -229,57 +323,114 @@ export function validatePanelsBlob(blob: DashboardPanels): string | null {
       return `Cache TTL must be between 0 and ${MAX_DASHBOARD_CACHE_TTL_SECONDS} seconds.`;
     }
   }
+  const tabs = blob.tabs ?? [];
+  if (tabs.length < 1) return "A dashboard needs at least one tab.";
+  if (tabs.length > MAX_DASHBOARD_TABS) return `A dashboard can have at most ${MAX_DASHBOARD_TABS} tab in this release.`;
   const panels = blob.panels ?? [];
   if (panels.length > MAX_DASHBOARD_PANELS) {
     return `A dashboard can have at most ${MAX_DASHBOARD_PANELS} panels (this one has ${panels.length}).`;
   }
   const seen = new Set<string>();
   for (const p of panels) {
-    if (!p.id) {
-      return "A panel is missing an id.";
+    const error = validatePanel(p, seen);
+    if (error) return error;
+  }
+  const seenLayoutIds = new Set<string>();
+  const seenTabIds = new Set<string>();
+  for (const tab of tabs) {
+    if (!tab.id) return "A tab is missing an id.";
+    if (seenTabIds.has(tab.id)) return `Duplicate tab id "${tab.id}".`;
+    seenTabIds.add(tab.id);
+    const titleLength = Array.from(tab.title ?? "").length;
+    if (titleLength < 1 || titleLength > MAX_TAB_TITLE_CODE_POINTS) {
+      return `Tab titles must be 1 to ${MAX_TAB_TITLE_CODE_POINTS} characters.`;
     }
-    if (seen.has(p.id)) {
-      return `Duplicate panel id "${p.id}".`;
-    }
-    seen.add(p.id);
-    if (!VALID_PANEL_TYPES.includes(p.type)) {
-      return `Panel "${p.title || p.id}" has an unsupported type.`;
-    }
-    if (!p.team_id || p.team_id <= 0) {
-      return `Panel "${p.title || p.id}" needs a team.`;
-    }
-    if (!p.source_id || p.source_id <= 0) {
-      return `Panel "${p.title || p.id}" needs a source.`;
-    }
-    if (!VALID_QUERY_LANGUAGES.includes(p.query_language)) {
-      return `Panel "${p.title || p.id}" has an unsupported query language.`;
-    }
-    if (p.type === "breakdown" && !p.options?.group_by?.trim()) {
-      return `Breakdown panel "${p.title || p.id}" requires a group-by field.`;
-    }
-    const breakdownView = p.options?.breakdown_view as string | undefined;
-    if (breakdownView !== undefined) {
-      if (p.type !== "breakdown") {
-        if (breakdownView !== "") return `Panel "${p.title || p.id}" cannot use a breakdown view.`;
-      } else if (breakdownView !== "horizontal-bars" && breakdownView !== "donut") {
-        return `Breakdown panel "${p.title || p.id}" has an unsupported breakdown view.`;
+    for (const l of tab.layout ?? []) {
+      if (!l.id) {
+        return "A panel layout entry is missing an id.";
+      }
+      if (seenLayoutIds.has(l.id)) {
+        return `Duplicate layout id "${l.id}".`;
+      }
+      seenLayoutIds.add(l.id);
+      if (!(ALLOWED_PANEL_WIDTHS as readonly number[]).includes(l.w)) {
+        return `Panel layout has an invalid width (${l.w}); allowed: ${ALLOWED_PANEL_WIDTHS.join(", ")}.`;
+      }
+      if (l.h < MIN_PANEL_HEIGHT || l.h > MAX_PANEL_HEIGHT) {
+        return `Panel layout has an invalid height (${l.h}); allowed: ${MIN_PANEL_HEIGHT}-${MAX_PANEL_HEIGHT}.`;
       }
     }
   }
-  const seenLayoutIds = new Set<string>();
-  for (const l of blob.layout ?? []) {
-    if (!l.id) {
-      return "A panel layout entry is missing an id.";
+  return null;
+}
+
+function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
+  const label = p.title || p.id;
+  if (!p.id) {
+    return "A panel is missing an id.";
+  }
+  if (seen.has(p.id)) {
+    return `Duplicate panel id "${p.id}".`;
+  }
+  seen.add(p.id);
+  if (p.kind !== "query") {
+    return `Panel "${label}" has an unsupported kind.`;
+  }
+  if (p.locked) {
+    return `Panel "${label}" is locked and cannot be saved.`;
+  }
+  if (!p.team_id || p.team_id <= 0) {
+    return `Panel "${label}" needs a team.`;
+  }
+  if (!p.source_id || p.source_id <= 0) {
+    return `Panel "${label}" needs a source.`;
+  }
+  const { query, viz } = p;
+  if (!query || (query.mode !== "count" && query.mode !== "result")) {
+    return `Panel "${label}" has an unsupported query mode.`;
+  }
+  if (!VALID_QUERY_LANGUAGES.includes(query.language)) {
+    return `Panel "${label}" has an unsupported query language.`;
+  }
+  if (!viz || !VALID_VIZ_TYPES.includes(viz.type)) {
+    return `Panel "${label}" has an unsupported type.`;
+  }
+  const count = query.mode === "count";
+  if (count && viz.type === "table") {
+    return `Table panel "${label}" needs result mode.`;
+  }
+  if (!count && viz.type !== "table") {
+    return `Panel "${label}" cannot run in result mode in this release.`;
+  }
+  if (query.group_by !== undefined) {
+    if (!count) return `Panel "${label}" cannot group a result query.`;
+    if (trimDashboardGroupBy(query.group_by) === "") return `Panel "${label}" has a blank group-by field.`;
+  }
+  if ((viz.type === "pie" || viz.type === "toplist") && query.group_by === undefined) {
+    return `Breakdown panel "${label}" requires a group-by field.`;
+  }
+  if (query.interval !== undefined && (!count || query.interval !== "auto")) {
+    return `Panel "${label}" has an unsupported interval.`;
+  }
+  if (query.limit !== undefined) {
+    if (count) return `Panel "${label}" cannot limit a count query.`;
+    if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > MAX_TABLE_LIMIT) {
+      return `Panel "${label}" needs a row limit between 1 and ${MAX_TABLE_LIMIT}.`;
     }
-    if (seenLayoutIds.has(l.id)) {
-      return `Duplicate layout id "${l.id}".`;
+  }
+  if (query.translate_limit !== undefined) {
+    if (!count || query.language !== "logchefql") return `Panel "${label}" cannot set a translate limit.`;
+    if (!Number.isInteger(query.translate_limit) || query.translate_limit < 1 || query.translate_limit > MAX_TRANSLATE_LIMIT) {
+      return `Panel "${label}" needs a translate limit between 1 and ${MAX_TRANSLATE_LIMIT}.`;
     }
-    seenLayoutIds.add(l.id);
-    if (!(ALLOWED_PANEL_WIDTHS as readonly number[]).includes(l.w)) {
-      return `Panel layout has an invalid width (${l.w}); allowed: ${ALLOWED_PANEL_WIDTHS.join(", ")}.`;
-    }
-    if (l.h < MIN_PANEL_HEIGHT || l.h > MAX_PANEL_HEIGHT) {
-      return `Panel layout has an invalid height (${l.h}); allowed: ${MIN_PANEL_HEIGHT}-${MAX_PANEL_HEIGHT}.`;
+  }
+  if (viz.type === "table" && viz.visible_columns !== undefined) {
+    if (viz.visible_columns.length === 0) return `Panel "${label}" lists no columns; remove the column subset to show every column.`;
+    const names = new Set<string>();
+    for (const name of viz.visible_columns) {
+      if (!name) return `Panel "${label}" has an empty column name.`;
+      if (names.has(name)) return `Panel "${label}" lists column "${name}" twice.`;
+      names.add(name);
     }
   }
   return null;
@@ -529,13 +680,13 @@ export function copyableDashboardPanels(
   blob: DashboardPanels,
   canUseTeam: (teamId: number) => boolean
 ): { panels: DashboardPanels; skipped: number } {
-  const kept = (blob.panels ?? []).filter((p) => !p.locked && canUseTeam(p.team_id));
+  const kept = (blob.panels ?? []).filter((p): p is DashboardQueryPanel => !p.locked && canUseTeam(p.team_id));
   const keptIds = new Set(kept.map((p) => p.id));
   const panels: DashboardPanels = JSON.parse(
     JSON.stringify({
       ...blob,
       panels: kept,
-      layout: (blob.layout ?? []).filter((l) => keptIds.has(l.id)),
+      tabs: (blob.tabs ?? []).map((tab) => ({ ...tab, layout: (tab.layout ?? []).filter((l) => keptIds.has(l.id)) })),
     })
   );
   return { panels, skipped: (blob.panels ?? []).length - kept.length };

@@ -51,6 +51,7 @@ const isLocked = computed(() => props.panel.locked === true || panelState.value.
 // ran over, which can lag the dashboard's window while a refresh is queued.
 const exploreLink = computed(() => {
   if (!props.linkTitle || isLocked.value) return null;
+  if (props.panel.locked) return null;
   const range = panelState.value.range ?? store.appliedRange ?? store.effectiveRange;
   return { name: "LogExplorer", query: panelExploreQuery(props.panel, range) };
 });
@@ -63,17 +64,36 @@ const chartHeight = computed(() =>
   Math.max(70, props.heightPx - BODY_PADDING_PX - (props.chrome ? HEADER_PX : 0))
 );
 
+const vizType = computed(() => props.panel.viz.type);
+
 const typeIcon = computed(() => {
-  switch (props.panel.type) {
-    case "timeseries":
+  switch (vizType.value) {
+    case "chart":
       return BarChart3;
     case "stat":
       return Hash;
-    case "breakdown":
+    case "pie":
+    case "toplist":
       return ListFilter;
     default:
       return Table2;
   }
+});
+
+// A locked panel keeps only its viz type; the options below come from an
+// unlocked panel's viz. The chart sub-component keeps the schema 1 style names.
+const chartStyle = computed<"line" | "area" | "bars">(() => {
+  const panel = props.panel;
+  if (panel.locked || panel.viz.type !== "chart") return "line";
+  return panel.viz.mark === "bar" ? "bars" : (panel.viz.mark ?? "line");
+});
+const barMode = computed<"stacked" | "grouped">(() => {
+  const panel = props.panel;
+  return !panel.locked && panel.viz.type === "chart" && panel.viz.stack === "none" ? "grouped" : "stacked";
+});
+const columnSubset = computed(() => {
+  const panel = props.panel;
+  return !panel.locked && panel.viz.type === "table" ? panel.viz.visible_columns : undefined;
 });
 </script>
 
@@ -126,33 +146,33 @@ const typeIcon = computed(() => {
       <!-- Success -->
       <template v-else>
         <PanelTimeseries
-          v-if="panel.type === 'timeseries' && panelState.timeseries"
+          v-if="vizType === 'chart' && panelState.timeseries"
           :buckets="panelState.timeseries.buckets"
           :granularity="panelState.timeseries.granularity"
           :group-by="panelState.timeseries.groupBy"
           :notice="panelState.timeseries.notice"
           :range="panelState.timeseries.range"
           :height="chartHeight"
-          :chart="panel.options?.chart"
-          :bar-mode="panel.options?.bar_mode"
+          :chart="chartStyle"
+          :bar-mode="barMode"
         />
         <PanelStat
-          v-else-if="panel.type === 'stat' && panelState.stat"
+          v-else-if="vizType === 'stat' && panelState.stat"
           :value="panelState.stat.value"
         />
         <PanelBreakdown
-          v-else-if="panel.type === 'breakdown' && panelState.breakdown"
+          v-else-if="(vizType === 'pie' || vizType === 'toplist') && panelState.breakdown"
           :buckets="panelState.breakdown.buckets"
           :group-by="panelState.breakdown.groupBy"
           :notice="panelState.breakdown.notice"
           :height="chartHeight"
-          :view="panel.options?.breakdown_view"
+          :view="vizType === 'pie' ? 'donut' : 'horizontal-bars'"
         />
         <PanelTable
-          v-else-if="panel.type === 'table' && panelState.table"
+          v-else-if="vizType === 'table' && panelState.table"
           :columns="panelState.table.columns"
           :rows="panelState.table.rows"
-          :column-subset="panel.options?.columns"
+          :column-subset="columnSubset"
         />
       </template>
     </div>

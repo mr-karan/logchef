@@ -17,7 +17,9 @@ async function apiRequest<T>(
     // suppress the global error toast (e.g. per-panel 403s on a dashboard, where
     // an inline locked/error state is shown instead of a toast storm).
     ...(options?.suppressErrorToast ? { suppressErrorToast: true } : {}),
-    ...(options?.suppressForbiddenRedirect ? { suppressForbiddenRedirect: true } : {})
+    ...(options?.suppressForbiddenRedirect ? { suppressForbiddenRedirect: true } : {}),
+    // Per-request headers, such as the dashboard client contract headers.
+    ...(options?.headers ? { headers: options.headers } : {}),
   };
   
   let response;
@@ -33,7 +35,13 @@ async function apiRequest<T>(
 /**
  * Shorthand methods for common API operations
  */
-export type RequestOptions = { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean; suppressForbiddenRedirect?: boolean };
+export type RequestOptions = {
+  timeout?: number;
+  signal?: AbortSignal;
+  suppressErrorToast?: boolean;
+  suppressForbiddenRedirect?: boolean;
+  headers?: Record<string, string>;
+};
 
 export const apiClient = {
   get: <T>(url: string, options?: RequestOptions) => apiRequest<T>("get", url, undefined, options),

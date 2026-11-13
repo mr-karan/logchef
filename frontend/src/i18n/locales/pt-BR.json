@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "Painel criado",
   "dashboards.dashboardDeleted": "Painel excluído",
   "dashboards.dashboardSaved": "Painel salvo",
+  "dashboards.corruptTitle": "Não foi possível ler os painéis salvos",
+  "dashboards.corruptDescription": "Os painéis salvos deste dashboard falham na validação, então nada pode ser mostrado ou editado aqui. O criador ou um administrador pode repará-los pela API.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Novo chat",
   "askChef.close": "Fechar Ask Chef",

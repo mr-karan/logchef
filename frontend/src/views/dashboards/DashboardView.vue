@@ -39,6 +39,7 @@ import { useDashboardsStore, DEFAULT_DASHBOARD_CACHE_TTL_SECONDS } from "@/store
 import { useMetaStore } from "@/stores/meta";
 import { usePreferencesStore } from "@/stores/preferences";
 import {
+  dashboardLayout,
   normalizeDashboardLayout,
   cellRect,
   pointToCell,
@@ -81,13 +82,19 @@ const isEditing = computed(() => store.isEditing);
 const canEdit = computed(() => store.canEdit && !metaStore.demoReadOnly);
 
 // In edit mode the grid renders from the working draft; otherwise from the live
-// dashboard. Both go through the same normalizer for stable placements.
-const activeBlob = computed(() => (store.isEditing ? store.editDraft : store.current?.panels));
+// dashboard. Both go through the same normalizer for stable placements. A
+// corrupt dashboard has no blob to render.
+const isCorrupt = computed(() => store.current?.corrupt === true);
+const activeBlob = computed(() => {
+  if (store.isEditing) return store.editDraft;
+  const current = store.current;
+  return current && !current.corrupt ? current.panels : null;
+});
 
 const placements = computed(() => {
   const blob = activeBlob.value;
   if (!blob) return [];
-  return normalizeDashboardLayout(blob.panels ?? [], blob.layout ?? []);
+  return normalizeDashboardLayout(blob.panels ?? [], dashboardLayout(blob));
 });
 
 // Panel model lookup + draft-start ordering, used by the edit canvas.
@@ -114,9 +121,6 @@ const pendingNewPanelId = ref<string | null>(null);
 function openAddPanel() {
   const id = store.createDraftShell();
   if (!id) return;
-  // Persist an explicit chart choice on new panels so a future change to the
-  // "absent chart" default can't silently restyle already-saved panels.
-  store.updateDraftPanel(id, { options: { chart: "line" } });
   pendingNewPanelId.value = id;
   editingPanelId.value = id;
   editorOpen.value = true;
@@ -835,6 +839,19 @@ onBeforeRouteUpdate((to, from) => {
         <Plus class="h-5 w-5" />
         <span class='text-xs font-medium'>{{ t('ui.addPanel') }}</span>
       </button>
+    </div>
+
+    <!-- Corrupt dashboard: the stored panels fail validation and nothing renders. -->
+    <div v-else-if="dashboard && isCorrupt" class="dash-empty">
+      <div class="dash-empty__icon">
+        <LayoutDashboard class="h-7 w-7" />
+      </div>
+      <div>
+        <p class='text-base font-semibold'>{{ t('dashboards.corruptTitle') }}</p>
+        <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          {{ t('dashboards.corruptDescription') }}
+        </p>
+      </div>
     </div>
 
     <!-- Empty dashboard (view mode) -->

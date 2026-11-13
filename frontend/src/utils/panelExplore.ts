@@ -1,16 +1,16 @@
-import type { DashboardPanel } from "@/api/dashboards";
+import type { DashboardQueryPanel } from "@/api/dashboards";
 import type { ResolvedWindow } from "@/utils/timeWindow";
 import { exploreWindowQuery } from "@/utils/alertExplore";
 
-type PanelQueryFields = Pick<DashboardPanel, "type" | "team_id" | "source_id" | "query" | "query_language">;
+type PanelQueryFields = Pick<DashboardQueryPanel, "team_id" | "source_id" | "query">;
 
 // Explorer query for the logs a panel shows, over the window the panel ran.
 export function panelExploreQuery(panel: PanelQueryFields, window: Pick<ResolvedWindow, "start" | "end">): Record<string, string> {
-  let text = panel.query.trim();
-  if (panel.query_language === "logsql") {
-    // Stat, timeseries and breakdown panels run through the histogram endpoint,
-    // which ignores LogsQL pipes, so they count only the filter.
-    if (panel.type !== "table") text = logsqlFilter(text);
+  let text = panel.query.text.trim();
+  if (panel.query.language === "logsql") {
+    // Count panels run through the histogram endpoint, which ignores LogsQL
+    // pipes, so they count only the filter.
+    if (panel.query.mode === "count") text = logsqlFilter(text);
     // The backend runs an empty LogsQL query as "*", but Explorer will not run
     // an empty native query, so send the match-all filter it stands for.
     text ||= "*";
@@ -20,7 +20,7 @@ export function panelExploreQuery(panel: PanelQueryFields, window: Pick<Resolved
     sourceId: panel.source_id,
     start: window.start,
     end: window.end,
-    mode: panel.query_language === "logchefql" ? "logchefql" : "native",
+    mode: panel.query.language === "logchefql" ? "logchefql" : "native",
     query: text,
   });
 }

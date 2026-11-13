@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This release makes dashboard saves atomic and closes a hole in collection
 links: pinning someone else's saved query into a collection no longer gives the
-collection's owners and editors the right to edit it. Startup runs two database
-migrations on each metadata store (SQLite 000039 and 000040, Postgres 000013
-and 000014).
+collection's owners and editors the right to edit it. Startup runs three database
+migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
+000013, 000014 and 000015).
 
 ### Upgrade notes
 - After upgrading, reload any Logchef tab that was already open. Save dashboard
@@ -59,6 +59,30 @@ and 000014).
   403 instead of 404, and a request from a user without access to the query's
   source gets 403 instead of 400. `DELETE` of a link that does not exist now
   answers 404 instead of 200.
+- **Breaking for scripts:** a dashboard saved by this version's frontend is
+  stored as panel schema 2. A client reads it only when it sends
+  `X-Logchef-Dashboard-Schema: 2`; without that header, or with `1`, GET
+  returns an empty schema 1 blob with `panels_corrupt: true`, `min_schema: 2`
+  and `can_edit: false`. A client writes it only when it also sends
+  `X-Logchef-Dashboard-Features` with the comma-separated features its code
+  supports (none exist yet, so an empty header is right); a save that would
+  drop a stored feature, or a schema 1 body on a schema 2 dashboard, returns
+  409. Any other schema header value returns 400. Dashboards that no schema 2
+  client has saved stay schema 1 and keep working for scripts as before.
+- `GET /dashboards` returns summaries (`panel_count`, `panel_types`,
+  `tab_count`, `corrupt`, `can_edit`, `revision`) and no panel blobs. A script
+  that read blobs from the list must read each dashboard with
+  `GET /dashboards/:id`. A client without the schema header still sees
+  `panels` and `panels_corrupt: true` on every summary.
+- A schema 2 save drops keys the server does not know. A script that stored
+  its own keys in a panel blob loses them the first time the new frontend
+  saves that dashboard.
+- Dashboard names are limited to 200 characters and descriptions to 2,000,
+  counted in Unicode code points. Longer names from before this version are
+  cut in the list and returned whole by `GET /dashboards/:id`.
+- Startup fills derived list columns for every existing dashboard on both
+  SQLite (migration 000041) and Postgres (000015). The step is idempotent and
+  reads each blob once.
 
 ### Security
 - Collection links have a kind. A `pin` is a bookmark and grants nothing. A
@@ -98,6 +122,13 @@ and 000014).
   source.
 - "Add to query" next to the loaded-rows search turns the term into a
   contains filter on the message field.
+- Panel blobs may be up to 512 KiB (was 100 KB).
+- The server upgrades every stored schema 1 dashboard to schema 2 when a schema
+  2 client reads it, without rewriting the stored blob. Existing dashboards
+  look the same and send the same panel requests.
+- A dashboard whose stored panels fail validation opens with a notice instead
+  of an error. Its creator or an admin gets the stored blob back as
+  `raw_panels_json` from `GET /dashboards/:id` for repair; other users get 403.
 
 ### Changed
 - Every link, member and team-share write runs in one transaction under the

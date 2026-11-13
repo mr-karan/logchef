@@ -137,7 +137,8 @@ and asks what to do: **Save as copy** creates a new dashboard from your version,
 **Overwrite with mine** shows when the newer version was saved and replaces it after
 you confirm, and **Discard and load latest** drops your changes and shows theirs.
 
-A dashboard can contain up to 24 panels.
+A dashboard can contain up to 24 panels. Names are limited to 200 characters
+and descriptions to 2,000.
 
 ## Who can edit
 
@@ -147,6 +148,34 @@ A dashboard can contain up to 24 panels.
 Per-dashboard sharing roles are not part of this release. As always, viewing a panel
 never grants access to its underlying source; source access is enforced when the
 panel's query runs.
+
+## API clients
+
+Scripts that use the dashboards API send two headers on every dashboard
+request.
+
+- `X-Logchef-Dashboard-Schema` names the newest panel schema the script can
+  read: `1` or `2`. Without it the server treats the script as a schema 1
+  client. The frontend saves dashboards as schema 2, and a schema 1 client
+  reading one gets an empty blob with `panels_corrupt: true` and
+  `min_schema: 2` instead of panels it cannot read.
+- `X-Logchef-Dashboard-Features` lists, separated by commas, the features the
+  script's code supports. A save to a dashboard that uses a feature the script
+  did not declare is refused with 409, so a script can never drop state it
+  does not know. No feature exists yet, so an empty value is correct today.
+  Declare what your code supports; never copy a dashboard's stored `features`
+  list into the header.
+
+`GET /dashboards` returns one summary per dashboard (panel count, panel
+kinds, tab count, revision, edit rights and a corrupt flag) and no panel
+blobs. Read a dashboard's panels with `GET /dashboards/:id`. Every update
+must carry the `revision` from that read, and the panel blob may be up to
+512 KiB.
+
+A dashboard whose stored panels fail validation shows a notice instead of
+panels. Its creator or an admin gets the stored blob back as
+`raw_panels_json` from `GET /dashboards/:id` and can repair it with an
+update.
 
 ## No configuration needed
 

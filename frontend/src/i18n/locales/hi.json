@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "डैशबोर्ड बनाया गया",
   "dashboards.dashboardDeleted": "डैशबोर्ड हटाया गया",
   "dashboards.dashboardSaved": "डैशबोर्ड सहेजा गया",
+  "dashboards.corruptTitle": "सहेजे गए पैनल पढ़े नहीं जा सके",
+  "dashboards.corruptDescription": "इस डैशबोर्ड के सहेजे गए पैनल सत्यापन में विफल हैं, इसलिए यहाँ कुछ भी दिखाया या संपादित नहीं किया जा सकता। इसका निर्माता या कोई व्यवस्थापक API के माध्यम से सहेजे गए पैनल ठीक कर सकता है।",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "नई चैट",
   "askChef.close": "Ask Chef बंद करें",

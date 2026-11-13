@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "Tableau de bord créé",
   "dashboards.dashboardDeleted": "Tableau de bord supprimé",
   "dashboards.dashboardSaved": "Tableau de bord enregistré",
+  "dashboards.corruptTitle": "Les panneaux enregistrés n'ont pas pu être lus",
+  "dashboards.corruptDescription": "Les panneaux enregistrés de ce tableau de bord échouent à la validation, rien ne peut donc être affiché ni modifié ici. Son créateur ou un administrateur peut les réparer via l'API.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Nouvelle conversation",
   "askChef.close": "Fermer Ask Chef",
