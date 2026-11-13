@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
+
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 const (
@@ -36,14 +38,35 @@ type QueryBuilder struct {
 // QueryBuildResult describes the SQL produced by the query builder and the
 // limit policy decisions that were applied.
 type QueryBuildResult struct {
-	SQL              string
-	RequestedLimit   int
-	OriginalLimit    int
-	AppliedLimit     int
-	LimitAdded       bool
-	LimitCapped      bool
-	ExplicitLimit    bool
-	UnparseableLimit bool
+	SQL            string
+	RequestedLimit int
+	OriginalLimit  int
+	// AppliedLimit is the most rows the caller returns. FetchLimit is the row
+	// bound sent to ClickHouse: one past AppliedLimit when the server probes
+	// for a cut result, so a row beyond the limit proves the truncation.
+	AppliedLimit  int
+	FetchLimit    int
+	LimitSource   models.LimitSource
+	LimitAdded    bool
+	LimitCapped   bool
+	ExplicitLimit bool
+}
+
+// QueryOptions returns the execution options that enforce the applied limit:
+// the server-side row bound, the reader's cap and the facts the stats report.
+func (r QueryBuildResult) QueryOptions(timeoutSeconds int) QueryOptions {
+	return QueryOptions{
+		TimeoutSeconds: &timeoutSeconds,
+		Settings: map[string]any{
+			"max_execution_time":   timeoutSeconds,
+			"max_result_rows":      r.FetchLimit,
+			"result_overflow_mode": "break",
+		},
+		LimitApplied: r.AppliedLimit,
+		MaxRows:      r.AppliedLimit,
+		LimitSource:  r.LimitSource,
+		Probed:       r.FetchLimit > r.AppliedLimit,
+	}
 }
 
 // NewQueryBuilder creates a new QueryBuilder for restricted mode.
@@ -222,10 +245,6 @@ func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLim
 
 	result := QueryBuildResult{RequestedLimit: requestedLimit}
 	qb.ensureLimitWithPolicy(selectQuery, requestedLimit, defaultLimit, maxLimit, &result)
-	if result.UnparseableLimit {
-		return QueryBuildResult{}, fmt.Errorf("LIMIT must be a numeric literal")
-	}
-
 	result.SQL = formatSQL(selectQuery)
 
 	return result, nil
@@ -321,57 +340,78 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 	return nil
 }
 
-// ensureLimitWithPolicy handles LIMIT clauses:
-// - requestedLimit > 0: force requested limit, capped at maxLimit.
-// - requestedLimit == 0 and SQL has LIMIT: respect it, capped at maxLimit.
-// - requestedLimit == 0 and SQL has no LIMIT: add defaultLimit.
+// ensureLimitWithPolicy applies the LIMIT rule to the outer statement. The
+// effective limit is the smallest of the statement's own literal LIMIT, the
+// request limit and the configured maximum; the default applies when neither
+// the statement nor the request sets one. A clamp changes only the row count,
+// so OFFSET stays, and LIMIT n BY and limits inside subqueries or CTEs are
+// never touched. When a cap wins, the SQL asks for one row past it.
 func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery, requestedLimit, defaultLimit, maxLimit int, result *QueryBuildResult) {
+	capLimit, capSource := 0, models.LimitSource("")
 	if requestedLimit > 0 {
-		limit := requestedLimit
-		if maxLimit > 0 && limit > maxLimit {
-			limit = maxLimit
-			result.LimitCapped = true
-		}
-		result.AppliedLimit = limit
-		stmt.Limit = &clickhouseparser.LimitClause{
-			Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", limit)},
-		}
-		return
+		capLimit, capSource = requestedLimit, models.LimitSourceRequest
+	}
+	if maxLimit > 0 && (capLimit == 0 || maxLimit < capLimit) {
+		capLimit, capSource = maxLimit, models.LimitSourceMax
 	}
 
 	if stmt.Limit != nil && stmt.Limit.Limit != nil {
-		existing, err := strconv.Atoi(formatSQL(stmt.Limit.Limit))
-		if err != nil {
-			result.UnparseableLimit = true
-			return
-		}
 		result.ExplicitLimit = true
-		result.OriginalLimit = existing
-		if existing == 0 {
-			return
-		}
-		result.AppliedLimit = existing
-		if maxLimit > 0 && existing > maxLimit {
-			result.AppliedLimit = maxLimit
+		literal, ok := literalLimit(stmt.Limit.Limit)
+		switch {
+		case !ok:
+			// A LIMIT expression cannot be compared or probed. It stands, and
+			// the cap bounds the result through max_result_rows and the reader.
+			result.AppliedLimit, result.FetchLimit, result.LimitSource = capLimit, capLimit, capSource
+			if capLimit == 0 {
+				result.LimitSource = models.LimitSourceStatement
+			}
+		case capLimit == 0 || literal <= capLimit:
+			result.OriginalLimit = literal
+			result.AppliedLimit, result.FetchLimit, result.LimitSource = literal, literal, models.LimitSourceStatement
+		default:
+			result.OriginalLimit = literal
 			result.LimitCapped = true
-			stmt.Limit.Limit = &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", maxLimit)}
+			result.AppliedLimit, result.FetchLimit, result.LimitSource = capLimit, capLimit+1, capSource
+			stmt.Limit.Limit = numberLiteral(capLimit + 1)
 		}
 		return
 	}
 
-	if defaultLimit <= 0 {
-		defaultLimit = DefaultLimit
+	limit, source := capLimit, capSource
+	if requestedLimit <= 0 {
+		if defaultLimit <= 0 {
+			defaultLimit = DefaultLimit
+		}
+		limit, source = defaultLimit, models.LimitSourceDefault
+		result.LimitAdded = true
+		if maxLimit > 0 && maxLimit < limit {
+			limit, source = maxLimit, models.LimitSourceMax
+		}
 	}
-	if maxLimit > 0 && defaultLimit > maxLimit {
-		defaultLimit = maxLimit
-		result.LimitCapped = true
+	result.LimitCapped = source == models.LimitSourceMax
+	result.AppliedLimit, result.FetchLimit, result.LimitSource = limit, limit+1, source
+	if stmt.Limit == nil {
+		stmt.Limit = &clickhouseparser.LimitClause{}
 	}
+	stmt.Limit.Limit = numberLiteral(limit + 1)
+}
 
-	result.AppliedLimit = defaultLimit
-	result.LimitAdded = true
-	stmt.Limit = &clickhouseparser.LimitClause{
-		Limit: &clickhouseparser.NumberLiteral{Literal: fmt.Sprintf("%d", defaultLimit)},
+// literalLimit returns the row count of a LIMIT written as a whole number.
+func literalLimit(expr clickhouseparser.Expr) (int, bool) {
+	number, ok := expr.(*clickhouseparser.NumberLiteral)
+	if !ok {
+		return 0, false
 	}
+	limit, err := strconv.Atoi(number.Literal)
+	if err != nil || limit < 0 {
+		return 0, false
+	}
+	return limit, true
+}
+
+func numberLiteral(n int) *clickhouseparser.NumberLiteral {
+	return &clickhouseparser.NumberLiteral{Literal: strconv.Itoa(n)}
 }
 
 func legacyDefaultLimit(maxLimit int) int {

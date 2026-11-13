@@ -39,6 +39,25 @@ type QueryOptions struct {
 	MaxRows          int
 	MaxResponseBytes int
 	Warnings         []models.QueryWarning
+	LimitSource      models.LimitSource
+	// Probed reports that the query asked for one row past MaxRows, so a row
+	// beyond the cap proves the result was cut.
+	Probed bool
+}
+
+// truncation is the state of a result that stopped for reason after rows
+// rows. A result that fills the cap without a probe may be incomplete, unless
+// the statement's own LIMIT set the cap: then the author asked for that many.
+func (opts QueryOptions) truncation(rows int, reason string) models.Truncation {
+	switch {
+	case reason == "byte_limit":
+		return models.TruncationBytes
+	case reason == "row_limit":
+		return models.TruncationRows
+	case !opts.Probed && opts.MaxRows > 0 && rows >= opts.MaxRows && opts.LimitSource != models.LimitSourceStatement:
+		return models.TruncationUnknown
+	}
+	return models.TruncationNone
 }
 
 // RowStreamWriter receives rows as they are read from ClickHouse.
@@ -219,6 +238,8 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			LimitApplied:    opts.LimitApplied,
 			Truncated:       truncatedReason != "",
 			TruncatedReason: truncatedReason,
+			LimitSource:     opts.LimitSource,
+			Truncation:      opts.truncation(len(resultData), truncatedReason),
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
@@ -299,6 +320,8 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		recordRowsReturned(hookCtx, rowsReturned)
 		stats.RowsReturned = rowsReturned
 		stats.LimitApplied = opts.LimitApplied
+		stats.LimitSource = opts.LimitSource
+		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason)
 		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
 		return writer.Finish(stats)
 	})

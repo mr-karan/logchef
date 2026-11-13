@@ -233,17 +233,7 @@ func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Cl
 		buildResult.SQL = fmt.Sprintf("%s OFFSET %d", buildResult.SQL, offset)
 	}
 
-	timeout := tailPollTimeoutSeconds
-	result, err := client.QueryWithOptions(ctx, buildResult.SQL, clickhouse.QueryOptions{
-		TimeoutSeconds: &timeout,
-		Settings: map[string]any{
-			"max_execution_time":   timeout,
-			"max_result_rows":      buildResult.AppliedLimit,
-			"result_overflow_mode": "break",
-		},
-		LimitApplied: buildResult.AppliedLimit,
-		MaxRows:      buildResult.AppliedLimit,
-	})
+	result, err := client.QueryWithOptions(ctx, buildResult.SQL, buildResult.QueryOptions(tailPollTimeoutSeconds))
 	if err != nil {
 		return nil, err
 	}

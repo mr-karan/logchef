@@ -120,16 +120,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
 	}
 
-	opts := clickhouse.QueryOptions{
-		TimeoutSeconds: req.QueryTimeout,
-		Settings: map[string]any{
-			"max_execution_time":   *req.QueryTimeout,
-			"max_result_rows":      buildResult.AppliedLimit,
-			"result_overflow_mode": "break",
-		},
-		LimitApplied: buildResult.AppliedLimit,
-		MaxRows:      buildResult.AppliedLimit,
-	}
+	opts := buildResult.QueryOptions(*req.QueryTimeout)
 
 	contentType, extension := exportContentType(format)
 	filename := fmt.Sprintf("logchef-%s.%s", time.Now().UTC().Format("20060102-150405"), extension)

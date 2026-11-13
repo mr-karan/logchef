@@ -59,7 +59,35 @@ type QueryStats struct {
 	LimitApplied    int     `json:"limit_applied,omitempty"`
 	Truncated       bool    `json:"truncated,omitempty"`
 	TruncatedReason string  `json:"truncated_reason,omitempty"`
+	// LimitSource names the bound that set LimitApplied. Truncation states
+	// whether rows were cut from the result.
+	LimitSource LimitSource `json:"limit_source,omitempty"`
+	Truncation  Truncation  `json:"truncation,omitempty"`
 }
+
+// LimitSource is the bound that set a query's effective row limit: the
+// statement's own LIMIT, the request limit, the configured default when
+// neither was set, or the configured maximum.
+type LimitSource string
+
+const (
+	LimitSourceStatement LimitSource = "statement"
+	LimitSourceRequest   LimitSource = "request"
+	LimitSourceDefault   LimitSource = "default"
+	LimitSourceMax       LimitSource = "max"
+)
+
+// Truncation is a result's truncation state. Rows is a proven cut: a row past
+// the limit arrived. Bytes means the response byte budget stopped the reader.
+// Unknown means the result filled a cap that the server could not probe past.
+type Truncation string
+
+const (
+	TruncationNone    Truncation = "none"
+	TruncationRows    Truncation = "rows"
+	TruncationBytes   Truncation = "bytes"
+	TruncationUnknown Truncation = "unknown"
+)
 
 // ColumnInfo represents column metadata from ClickHouse
 type ColumnInfo struct {

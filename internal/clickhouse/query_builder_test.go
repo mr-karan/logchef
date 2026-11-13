@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestExtendedQueryBuilder(t *testing.T) {
@@ -164,40 +166,144 @@ func TestRestrictedQueryBuilder(t *testing.T) {
 	}
 }
 
-func TestQueryBuilderLimit(t *testing.T) {
-	qb := NewExtendedQueryBuilder("mydb.logs", 10000)
-
-	tests := []struct {
-		name      string
-		sql       string
-		limit     int
-		wantLIMIT string
+// TestLimitRule covers the LIMIT rule: the smallest of the statement's own
+// literal LIMIT, the request limit and the configured maximum wins, the
+// default applies when neither the statement nor the request sets one, a
+// clamp keeps OFFSET, and a cap asks for one extra row.
+func TestLimitRule(t *testing.T) {
+	qb := NewExtendedQueryBuilder("mydb.logs", 100000)
+	for _, tc := range []struct {
+		name                   string
+		sql                    string
+		request, def, max      int
+		wantSQL                string
+		wantApplied, wantFetch int
+		wantSource             models.LimitSource
+		wantCapped, wantAdded  bool
 	}{
 		{
-			name:      "adds LIMIT when missing",
-			sql:       "SELECT * FROM mydb.logs",
-			limit:     100,
-			wantLIMIT: "LIMIT 100",
+			name: "statement below the request wins without a probe",
+			sql:  "SELECT * FROM mydb.logs ORDER BY x DESC LIMIT 20", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs ORDER BY x DESC LIMIT 20", wantApplied: 20, wantFetch: 20, wantSource: models.LimitSourceStatement,
 		},
 		{
-			name:      "replaces existing LIMIT",
-			sql:       "SELECT * FROM mydb.logs LIMIT 1000",
-			limit:     100,
-			wantLIMIT: "LIMIT 100",
+			name: "statement equal to the request is the author's",
+			sql:  "SELECT * FROM mydb.logs LIMIT 100", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 100", wantApplied: 100, wantFetch: 100, wantSource: models.LimitSourceStatement,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := qb.BuildRawQuery(tt.sql, tt.limit)
+		{
+			name: "request below the statement clamps and keeps OFFSET",
+			sql:  "SELECT * FROM mydb.logs LIMIT 5000 OFFSET 200", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101 OFFSET 200", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest, wantCapped: true,
+		},
+		{
+			name: "comma offset form keeps its offset",
+			sql:  "SELECT * FROM mydb.logs LIMIT 200, 5000", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101 OFFSET 200", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest, wantCapped: true,
+		},
+		{
+			name: "maximum below the statement without a request",
+			sql:  "SELECT * FROM mydb.logs LIMIT 5000", request: 0, def: 1000, max: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceMax, wantCapped: true,
+		},
+		{
+			name: "maximum below the request",
+			sql:  "SELECT * FROM mydb.logs", request: 500, def: 1000, max: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceMax, wantCapped: true,
+		},
+		{
+			name: "request without a statement limit probes",
+			sql:  "SELECT * FROM mydb.logs", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "default without a statement or request limit",
+			sql:  "SELECT * FROM mydb.logs", request: 0, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 1001", wantApplied: 1000, wantFetch: 1001, wantSource: models.LimitSourceDefault, wantAdded: true,
+		},
+		{
+			name: "default above the maximum",
+			sql:  "SELECT * FROM mydb.logs", request: 0, def: 1000, max: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceMax, wantCapped: true, wantAdded: true,
+		},
+		{
+			name: "no ceiling and no default falls back",
+			sql:  "SELECT * FROM mydb.logs", request: 0, def: 0, max: 0,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 1001", wantApplied: 1000, wantFetch: 1001, wantSource: models.LimitSourceDefault, wantAdded: true,
+		},
+		{
+			name: "offset without a limit keeps the offset",
+			sql:  "SELECT * FROM mydb.logs OFFSET 10", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101 OFFSET 10", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "LIMIT n BY is a separate clause",
+			sql:  "SELECT * FROM mydb.logs ORDER BY a LIMIT 1 BY a LIMIT 500", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs ORDER BY a LIMIT 1 BY a LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest, wantCapped: true,
+		},
+		{
+			name: "LIMIT n BY alone gets the request limit",
+			sql:  "SELECT * FROM mydb.logs LIMIT 1 BY a", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 1 BY a LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a LIMIT inside a CTE is untouched",
+			sql:  "WITH c AS (SELECT * FROM mydb.logs LIMIT 5) SELECT * FROM c", request: 100, def: 1000, max: 100000,
+			wantSQL: "WITH c AS (SELECT * FROM mydb.logs LIMIT 5) SELECT * FROM c LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a LIMIT inside a subquery is untouched while the outer one clamps",
+			sql:  "SELECT * FROM (SELECT * FROM mydb.logs LIMIT 5000) LIMIT 7000 OFFSET 3", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM (SELECT * FROM mydb.logs LIMIT 5000) LIMIT 101 OFFSET 3", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest, wantCapped: true,
+		},
+		{
+			name: "a LIMIT expression stands and the request caps without a probe",
+			sql:  "SELECT * FROM mydb.logs LIMIT 5 * 2", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 5 * 2", wantApplied: 100, wantFetch: 100, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a LIMIT expression without a request is capped by the maximum",
+			sql:  "SELECT * FROM mydb.logs LIMIT 5 * 2", request: 0, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 5 * 2", wantApplied: 100000, wantFetch: 100000, wantSource: models.LimitSourceMax,
+		},
+		{
+			name: "a LIMIT expression without a ceiling is unbounded",
+			sql:  "SELECT * FROM mydb.logs LIMIT 5 * 2", request: 0, def: 1000, max: 0,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 5 * 2", wantApplied: 0, wantFetch: 0, wantSource: models.LimitSourceStatement,
+		},
+		{
+			name: "LIMIT 0 is the author's",
+			sql:  "SELECT * FROM mydb.logs LIMIT 0", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 0", wantApplied: 0, wantFetch: 0, wantSource: models.LimitSourceStatement,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := qb.BuildRawQueryWithLimitPolicy(tc.sql, tc.request, tc.def, tc.max)
 			if err != nil {
-				t.Errorf("BuildRawQuery() error = %v", err)
-				return
+				t.Fatalf("BuildRawQueryWithLimitPolicy() error = %v", err)
 			}
-			if !strings.Contains(result, tt.wantLIMIT) {
-				t.Errorf("BuildRawQuery() = %q, should contain %q", result, tt.wantLIMIT)
+			want := QueryBuildResult{
+				SQL: tc.wantSQL, RequestedLimit: tc.request, OriginalLimit: got.OriginalLimit, ExplicitLimit: got.ExplicitLimit,
+				AppliedLimit: tc.wantApplied, FetchLimit: tc.wantFetch, LimitSource: tc.wantSource, LimitCapped: tc.wantCapped, LimitAdded: tc.wantAdded,
+			}
+			if got != want {
+				t.Fatalf("BuildRawQueryWithLimitPolicy() = %+v, want %+v", got, want)
+			}
+			opts := got.QueryOptions(30)
+			if opts.MaxRows != tc.wantApplied || opts.Settings["max_result_rows"] != tc.wantFetch || opts.Probed != (tc.wantFetch > tc.wantApplied) {
+				t.Fatalf("QueryOptions() = %+v, want MaxRows %d, max_result_rows %d", opts, tc.wantApplied, tc.wantFetch)
 			}
 		})
+	}
+}
+
+// TestLimitRuleCountMode keeps count mode stripping the outer LIMIT before the
+// histogram wraps the query.
+func TestLimitRuleCountMode(t *testing.T) {
+	qb := NewQueryBuilder("mydb.logs", 0)
+	got, err := qb.RemoveLimitClause("SELECT * FROM mydb.logs ORDER BY x DESC LIMIT 20 OFFSET 5")
+	if err != nil || got != "SELECT * FROM mydb.logs ORDER BY x DESC" {
+		t.Fatalf("RemoveLimitClause() = %q, %v", got, err)
 	}
 }
 
@@ -209,8 +315,8 @@ func TestQueryBuilderDefaultLimitFromMaxLimit(t *testing.T) {
 		t.Fatalf("BuildRawQuery() error = %v", err)
 	}
 
-	if !strings.Contains(result, "LIMIT 1000000") {
-		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1000000")
+	if !strings.Contains(result, "LIMIT 1000001") {
+		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1000001")
 	}
 }
 
@@ -222,8 +328,8 @@ func TestQueryBuilderDefaultLimitFallback(t *testing.T) {
 		t.Fatalf("BuildRawQuery() error = %v", err)
 	}
 
-	if !strings.Contains(result, "LIMIT 1000") {
-		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1000")
+	if !strings.Contains(result, "LIMIT 1001") {
+		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1001")
 	}
 }
 
