@@ -367,6 +367,16 @@ describe('windowed explorer over HTTP', () => {
     }
   });
 
+  it('publishes byte truncation to the toolbar when the first row cannot fit', async () => {
+    const endStats: QueryStats = { execution_time_ms: 1, rows_read: 1, bytes_read: 200, rows_returned: 0, limit_source: 'request', truncation: 'bytes' };
+    respond = req => req.count ? [event({ type: 'end' })] : [event({ type: 'end', stats: endStats })];
+    const seen: (QueryStats | null)[] = [];
+    const store = createWindowedSession({ teamId: 1, sourceId: 1, request, histogram: false, onRows: (_rows, stats) => seen.push(stats) });
+    sessions.push(store);
+    await store.start();
+    expect(seen.at(-1)).toEqual(endStats);
+  });
+
   // The events TestWindowedPageTruncation checks on the server: the last event of a page with stats has its truncation.
   it.each([
     ['a row past the limit', [event({ type: 'rows', window: windows[0], status: 'partial', logs: [row('a'), row('b')], stats: { execution_time_ms: 1, rows_read: 3, bytes_read: 9, limit_source: 'request', truncation: 'rows' }, cursor: 'next' }), event({ type: 'end', cursor: 'next' })], 'rows'],
