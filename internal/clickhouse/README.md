@@ -68,15 +68,19 @@ also report scan work.
 
 Canceled or truncated queries report only progress received before cancellation.
 The driver may not deliver a final progress packet. Zero counters therefore do
-not distinguish an empty scan from unavailable progress. JSON capability probes
-do not contribute to the result query's scan statistics.
+not distinguish an empty scan from unavailable progress. The JSON capability
+probe and the read of the server's limits are queries of their own. They add
+nothing to the result query's scan statistics, and the caller's query ID and
+driver callbacks do not reach them.
 Counters saturate at the platform's maximum integer instead of wrapping on overflow.
 
 LogChef owns the progress and profile callbacks for result queries. The result
 profile shows whether a result stayed under a limit that ClickHouse ends
-silently, such as `max_result_bytes` in break mode. Other driver callbacks and
-query IDs remain available. Execution metrics count each query once across
-buffered, streaming, and DDL paths.
+silently, such as `max_result_bytes` in break mode. After its first successful
+query, each client reads those limits from `system.settings` once, so a limit
+set in the ClickHouse user's settings profile counts too. Other driver
+callbacks and query IDs remain available. Execution metrics count each query
+once across buffered, streaming, and DDL paths.
 
 LogchefQL compilation reuses the source inspection cache when column metadata
 is missing. The cache expires after one minute and checks the source revision.
