@@ -244,7 +244,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     });
   }
 
-  async function loadDashboard(id: number) {
+  function applyDefaultTimeRange(dashboard: Dashboard | null) {
+    const defaultRange = dashboard?.panels?.default_time_range;
+    const defaultWindow = defaultRange ? relativeWindow(defaultRange) : null;
+    if (defaultWindow) state.data.value.window = defaultWindow;
+  }
+
+  async function loadDashboard(id: number, { discardDraft = false } = {}) {
     // Claim a load generation. The GET itself isn't abortable (shared API
     // surface), so the token is the guard: apply the response only if it's
     // still the newest load and the view hasn't been torn down.
@@ -259,15 +265,12 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // refresh for a dashboard we're no longer viewing.
     if (token !== loadToken) return result;
     if (result.success) {
+      if (discardDraft) resetEdit();
       state.data.value.current = result.data ?? null;
       state.data.value.panelStates = {};
       // A dashboard with a saved default opens in that range; one without keeps
       // the range the viewer already has.
-      const defaultRange = state.data.value.current?.panels?.default_time_range;
-      const defaultWindow = defaultRange ? relativeWindow(defaultRange) : null;
-      if (defaultWindow) {
-        state.data.value.window = defaultWindow;
-      }
+      applyDefaultTimeRange(state.data.value.current);
       if (state.data.value.current) {
         await refreshAllPanels();
       }
@@ -594,6 +597,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     editDashboardId = dashboard.id;
     editBaseRevision = dashboard.revision;
     if (dashboard.revision !== shown.revision) {
+      applyDefaultTimeRange(dashboard);
       state.data.value.panelStates = {};
       await refreshAllPanels();
     }
@@ -612,12 +616,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // Drops the draft. current.panels was never mutated, so the view reverts to the
   // last-loaded state, unless a refused save showed that state is stale.
-  async function cancelEdit() {
+  async function cancelEdit(): Promise<DashboardResult> {
     const reloadId = editConflicted ? editDashboardId : null;
     abortPreview();
     abortSinglePanels();
+    if (reloadId !== null) return await loadDashboard(reloadId, { discardDraft: true });
     resetEdit();
-    if (reloadId !== null) await loadDashboard(reloadId);
+    return { success: true };
   }
 
   // Reads the dashboard being edited without touching current or the draft.

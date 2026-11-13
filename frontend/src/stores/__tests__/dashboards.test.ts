@@ -475,6 +475,17 @@ describe("dashboards store — #119/#120 hardening", () => {
     expect(mocks.update.mock.calls[0][1].revision).toBe(2);
   });
 
+  it("applies the newer revision's default time range before refreshing edit panels", async () => {
+    const store = await loadEditableDashboard();
+    store.setWindow({ kind: "relative", spec: "30m" });
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({
+      revision: 2, panels: { ...emptyPanels(), default_time_range: "6h" },
+    }) });
+    await store.enterEdit();
+    expect(store.window).toEqual({ kind: "relative", spec: "6h" });
+    expect(Number(store.appliedRange?.end) - Number(store.appliedRange?.start)).toBe(6 * 60 * 60 * 1000);
+  });
+
   it("stays out of edit mode when the fresh read fails", async () => {
     const store = await loadEditableDashboard();
     mocks.get.mockRejectedValue({ status: "error", error_type: "NotFoundError", message: "Dashboard not found" });

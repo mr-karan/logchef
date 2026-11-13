@@ -4,14 +4,21 @@ import { createPinia } from "pinia";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { i18n } from "@/i18n";
 
-vi.mock("@/api/apiUtils", () => ({
-  apiClient: {
-    get: async () => ({ status: "success", data: {
-      id: 1, revision: 1, name: "My dashboard", description: "", created_at: "", updated_at: "", can_edit: true,
-      panels: { version: 1, panels: [], layout: [] },
-    } }),
-  },
+const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }));
+vi.mock("@/api/apiUtils", () => ({ apiClient: api }));
+vi.mock("../components/PanelBuilderDrawer.vue", () => ({
+  default: defineComponent({
+    props: ["open", "panelId"],
+    template: '<div v-if="open" data-testid="panel-editor" :data-panel-id="panelId">Panel editor</div>',
+  }),
 }));
+import { useDashboardsStore } from "@/stores/dashboards";
+import { toast } from "vue-sonner";
+const dashboard = {
+  id: 1, revision: 1, name: "My dashboard", description: "", created_at: "", updated_at: "", can_edit: true,
+  panels: { version: 1, panels: [], layout: [] },
+};
+const conflictError = { status: "error", error_type: "ConflictError", message: "modified", statusCode: 409 };
 
 import DashboardView from "../DashboardView.vue";
 
@@ -24,8 +31,13 @@ describe("DashboardView discard confirmation", () => {
   let app: App;
   let host: HTMLDivElement;
   let router: Router;
+  let store: ReturnType<typeof useDashboardsStore>;
 
   beforeEach(async () => {
+    api.get.mockReset().mockResolvedValue({ status: "success", data: dashboard });
+    api.put.mockReset().mockRejectedValue(conflictError);
+    api.post.mockReset();
+    vi.spyOn(toast, "error");
     vi.stubGlobal("ResizeObserver", class {
       observe() {}
       unobserve() {}
@@ -41,7 +53,9 @@ describe("DashboardView discard confirmation", () => {
     ] });
     await router.push("/dashboards/1");
     app = createApp(defineComponent({ template: "<router-view />" }));
-    app.use(createPinia()).use(i18n).use(router).mount(host);
+    const pinia = createPinia();
+    app.use(pinia).use(i18n).use(router).mount(host);
+    store = useDashboardsStore(pinia);
     await settle();
     button("Edit").click();
     await settle();
@@ -70,6 +84,99 @@ describe("DashboardView discard confirmation", () => {
     if (!dialog) throw new Error("discard dialog was not rendered");
     return button(text, dialog);
   }
+
+  async function conflictOnSave() {
+    button("Save").click();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("Save as copy");
+    expect(store.editName).toBe("My edited dashboard");
+  }
+
+  it("opens the conflict dialog after a 409 and keeps the draft when dismissed", async () => {
+    await conflictOnSave();
+    dialogButton("Keep editing").click();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(store.isEditing).toBe(true);
+    expect(store.editName).toBe("My edited dashboard");
+  });
+
+  it("saves a conflict as a copy and navigates to it", async () => {
+    await conflictOnSave();
+    api.post.mockResolvedValue({ status: "success", data: { ...dashboard, id: 2, name: "My edited dashboard (copy)" } });
+    dialogButton("Save as copy").click();
+    await settle();
+    expect(router.currentRoute.value.path).toBe("/dashboards/2");
+    expect(api.post.mock.calls[0]?.[1]).toMatchObject({ name: "My edited dashboard (copy)" });
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  });
+
+  it("preserves the draft and open panel editor when saving a copy fails", async () => {
+    button("Add panel").click();
+    await settle();
+    const editor = host.querySelector('[data-testid="panel-editor"]');
+    expect(editor).not.toBeNull();
+    const panelId = editor?.getAttribute("data-panel-id");
+    if (!panelId) throw new Error("panel editor has no panel");
+    store.updateDraftPanel(panelId, { team_id: 1, source_id: 1, type: "table" });
+    const draft = JSON.stringify(store.editDraft);
+    await conflictOnSave();
+    api.post.mockRejectedValue({ status: "error", message: "Copy unavailable" });
+    dialogButton("Save as copy").click();
+    await settle();
+    expect(host.querySelector('[data-testid="panel-editor"]')).toBe(editor);
+    expect(JSON.stringify(store.editDraft)).toBe(draft);
+    expect(store.isEditing).toBe(true);
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(toast.error).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ description: "Copy unavailable" }));
+  });
+
+  it("discards the draft after loading the latest dashboard", async () => {
+    await conflictOnSave();
+    api.get.mockResolvedValue({ status: "success", data: { ...dashboard, revision: 2, name: "Theirs" } });
+    dialogButton("Discard and load latest").click();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(store.isEditing).toBe(false);
+    expect(host.querySelector("h1")?.textContent).toContain("Theirs");
+  });
+
+  it("shows a failed reload and keeps the conflict open until retry succeeds", async () => {
+    await conflictOnSave();
+    api.get.mockRejectedValueOnce({ status: "error", message: "Reload unavailable" });
+    dialogButton("Discard and load latest").click();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(store.isEditing).toBe(true);
+    expect(store.editName).toBe("My edited dashboard");
+    expect(toast.error).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ description: "Reload unavailable" }));
+    api.get.mockResolvedValue({ status: "success", data: { ...dashboard, revision: 2, name: "Theirs" } });
+    dialogButton("Discard and load latest").click();
+    await settle();
+    expect(host.querySelector("h1")?.textContent).toContain("Theirs");
+    expect(store.isEditing).toBe(false);
+  });
+
+  it.each([false, true])("confirms overwrite against the fetched revision, repeated conflict %s", async (repeatConflict) => {
+    await conflictOnSave();
+    api.get.mockResolvedValue({ status: "success", data: { ...dashboard, revision: 2 } });
+    dialogButton("Overwrite with mine").click();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("Revision 2");
+    expect(api.put).toHaveBeenCalledTimes(1);
+    if (!repeatConflict) api.put.mockResolvedValue({ status: "success", data: { ...dashboard, revision: 3, name: "My edited dashboard" } });
+    dialogButton("Overwrite").click();
+    await settle();
+    expect(api.put.mock.calls[1]?.[1]).toMatchObject({ revision: 2, name: "My edited dashboard" });
+    if (repeatConflict) {
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("Save as copy");
+      expect(store.isEditing).toBe(true);
+      expect(store.editName).toBe("My edited dashboard");
+    } else {
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(store.current?.revision).toBe(3);
+    }
+  });
 
   it("keeps edits when the discard dialog is canceled and discards only on confirmation", async () => {
     button("Cancel").click();
