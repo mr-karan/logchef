@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = [];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -60,12 +60,24 @@ export interface DashboardPanelQuery {
   translate_limit?: number;
 }
 
+export type ColumnKind = "time" | "date" | "number" | "category" | "bool" | "other";
+export type StatReduce = "last" | "first" | "sum" | "avg" | "min" | "max";
+export interface ConfirmedColumn { kind: ColumnKind; confidence: "confirmed" }
+export interface NumberFormat {
+ notation?: "auto" | "standard" | "compact";
+ decimals?: number;
+ grouping?: boolean;
+ scale?: number;
+ unit?: "none" | "percent" | "bytes" | "duration_ms" | "duration_s";
+ prefix?: string;
+ suffix?: string;
+}
 export type DashboardViz =
-  | { type: "stat"; reduce?: "sum" }
+  | { type: "stat"; value?: string; order_by?: string; reduce?: StatReduce; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "chart"; mark?: DashboardChartMark; stack?: DashboardChartStack }
   | { type: "pie"; donut?: boolean }
   | { type: "toplist" }
-  | { type: "table"; visible_columns?: string[] };
+  | { type: "table"; visible_columns?: string[]; columns?: Record<string, ConfirmedColumn> };
 
 export interface DashboardQueryPanel {
   id: string;

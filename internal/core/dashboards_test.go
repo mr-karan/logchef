@@ -606,7 +606,7 @@ func TestUpdateDashboardClientContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = save(dashboardClient(t, "2", "tabs, formats, made-up"), v2)
-	if !errors.As(err, &stale) || !strings.Contains(stale.Detail, "tabs, formats") {
+	if !errors.As(err, &stale) || !strings.Contains(stale.Detail, "tabs") {
 		t.Fatalf("stored unknown features: err = %v, want DashboardClientStaleError naming them", err)
 	}
 	if got := stored(); got != newer {

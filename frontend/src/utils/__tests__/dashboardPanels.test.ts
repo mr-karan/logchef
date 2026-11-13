@@ -545,9 +545,9 @@ describe("validatePanelsBlob", () => {
     ]))).toMatch(/duplicate/i);
   });
 
-  it("ties the mode to the viz: tables need result mode, everything else count", () => {
+  it("ties the mode to the viz: tables need result mode and result stats need a value", () => {
     expect(validatePanelsBlob(withPanel(chart("a", {}, { viz: { type: "table" } })))).toMatch(/result mode/i);
-    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "stat" } })))).toMatch(/result mode/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "stat" } })))).toMatch(/value column/i);
   });
 
   it("checks the group-by rules", () => {

@@ -399,8 +399,32 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
   if (count && viz.type === "table") {
     return `Table panel "${label}" needs result mode.`;
   }
-  if (!count && viz.type !== "table") {
+  if (!count && viz.type !== "table" && viz.type !== "stat") {
     return `Panel "${label}" cannot run in result mode in this release.`;
+  }
+  if (viz.type === "stat") {
+    if (!count && !viz.value) return `Panel "${label}" needs a value column.`;
+    if (count && (viz.value !== undefined || viz.order_by !== undefined)) return `Panel "${label}" cannot use result roles in count mode.`;
+    if (viz.reduce !== undefined && !["last", "first", "sum", "avg", "min", "max"].includes(viz.reduce)) return `Panel "${label}" has an invalid reducer.`;
+    for (const role of [viz.value, viz.order_by]) {
+      if (role !== undefined && (Array.from(role).length < 1 || Array.from(role).length > 128)) return `Panel "${label}" has an invalid column role.`;
+    }
+    const f = viz.format;
+    if (f) {
+      if (f.notation !== undefined && !["auto", "standard", "compact"].includes(f.notation)) return `Panel "${label}" has an invalid notation.`;
+      if (f.unit !== undefined && !["none", "percent", "bytes", "duration_ms", "duration_s"].includes(f.unit)) return `Panel "${label}" has an invalid unit.`;
+      if (f.decimals !== undefined && (!Number.isInteger(f.decimals) || f.decimals < 0 || f.decimals > 10)) return `Panel "${label}" needs 0 to 10 decimals.`;
+      if (f.scale !== undefined && (!Number.isFinite(f.scale) || f.scale === 0)) return `Panel "${label}" needs a finite, nonzero scale.`;
+      if ([f.prefix, f.suffix].some((v) => v !== undefined && Array.from(v).length > 16)) return `Panel "${label}" has a format affix longer than 16 characters.`;
+    }
+  }
+  if (viz.type === "stat" || viz.type === "table") {
+    if (count && viz.columns !== undefined) return `Panel "${label}" cannot set column kinds in count mode.`;
+    const columns = Object.entries(viz.columns ?? {});
+    if (columns.length > 100) return `Panel "${label}" has too many column kinds.`;
+    for (const [name, c] of columns) {
+      if (!name || Array.from(name).length > 128 || c.confidence !== "confirmed" || !["time", "date", "number", "category", "bool", "other"].includes(c.kind)) return `Panel "${label}" has an invalid confirmed column kind.`;
+    }
   }
   if (query.group_by !== undefined) {
     if (!count) return `Panel "${label}" cannot group a result query.`;

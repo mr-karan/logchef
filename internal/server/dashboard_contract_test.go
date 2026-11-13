@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -192,20 +193,22 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	team, src := mkTestTeam(t, s.store, "team", creator)
 	app := dashboardApp(s, creator)
 
-	// The current client stores the schema 2 blob that uses every feature.
-	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+panelBlobV2JSON(team.ID, src.ID)+`}`, schema2)
+	// The current client stores a result stat with both phase 5 features.
+	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"reduce":"sum"`, `"reduce":"last","format":{"decimals":2}`, 1)
+	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, schema2)
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v", status, resp)
 	}
 	id := int(resp["data"].(map[string]any)["id"].(float64))
 	path := "/dashboards/" + strconv.Itoa(id)
 	features := models.KnownDashboardFeatures()
+	sort.Strings(features)
 	if got := models.DashboardPanelsStoredFeatures(json.RawMessage(storedBlob(t, s, id))); len(got) != len(features) {
 		t.Fatalf("stored features = %v, want every known feature %v", got, features)
 	}
 	before := storedBlob(t, s, id)
 	v1Body := fmt.Sprintf(`{"name":"matrix","revision":1,"panels":%s}`, panelBlobJSON(team.ID, src.ID))
-	v2Body := `{"name":"matrix","revision":1,"panels":` + panelBlobV2JSON(team.ID, src.ID) + `}`
+	v2Body := `{"name":"matrix","revision":1,"panels":` + blob + `}`
 
 	type matrixCase struct {
 		name    string
