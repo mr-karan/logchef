@@ -127,21 +127,48 @@ describe("SQL string value completion", () => {
     expect(contextAtCaret("method = 'it''s\\\\|'")?.partial).toBe("it's\\");
   });
 
-  it.each([2000, 8000])("scans an IN list of %i values with linear character reads", (count) => {
+  const inList = (count: number) => {
     const list = Array.from({ length: count }, (_, i) => `'host-${String(i).padStart(5, "0")}.example'`).join(", ");
-    const text = `SELECT * FROM http WHERE host IN (${list}, '')`;
+    return `SELECT * FROM http WHERE host IN (${list}, '')`;
+  };
+
+  // Indexed reads and string-method calls are counted exactly, so these bounds
+  // never flake. They miss a call whose own cost grows with the input, such as
+  // text.slice(0, index), which the timing check below covers.
+  it.each([2000, 8000])("scans an IN list of %i values with linear reads and calls", (count) => {
+    const text = inList(count);
     let characterReads = 0;
+    let methodCalls = 0;
     const measuredText = new Proxy(new String(text), {
       get(target, property) {
         if (typeof property === "string" && /^\d+$/.test(property)) characterReads++;
         const value = Reflect.get(target, property);
-        return typeof value === "function" ? value.bind(target) : value;
+        if (typeof value !== "function") return value;
+        methodCalls++;
+        return value.bind(target);
       },
     });
-    // A boxed string exposes indexed reads without adding instrumentation to the scanner.
     const cursor: unknown = Reflect.apply(getSQLCompletionCursor, undefined, [measuredText, text.length - 2, schema]);
     expect(cursor).toMatchObject({ kind: "value", field: "host", partial: "" });
+    // Fewer reads than characters means the scanner stopped indexing and this guard needs revisiting.
     expect(characterReads).toBeGreaterThan(text.length);
     expect(characterReads).toBeLessThan(4 * text.length);
+    expect(methodCalls).toBeLessThan(8 * count);
+  });
+
+  it("scans sixteen times the values in far less than sixteen squared the time", () => {
+    const best = (count: number) => {
+      const text = inList(count);
+      let fastest = Infinity;
+      for (let run = 0; run < 5; run++) {
+        const started = performance.now();
+        getSQLCompletionCursor(text, text.length - 2, schema);
+        fastest = Math.min(fastest, performance.now() - started);
+      }
+      return fastest;
+    };
+    best(2000);
+    // Linear costs about 16 times as long and quadratic about 256 times; 64 sits far from both.
+    expect(best(32000) / best(2000)).toBeLessThan(64);
   });
 });
