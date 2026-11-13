@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -35,7 +36,12 @@ type linkRouteEnv struct {
 
 func newLinkRouteEnv(t *testing.T) *linkRouteEnv {
 	t.Helper()
-	e := &linkRouteEnv{collectionRouteEnv: newCollectionRouteEnv(t)}
+	return newLinkRouteEnvWithStore(t, func(st store.Store) store.Store { return st })
+}
+
+func newLinkRouteEnvWithStore(t *testing.T, wrap func(store.Store) store.Store) *linkRouteEnv {
+	t.Helper()
+	e := &linkRouteEnv{collectionRouteEnv: newCollectionRouteEnvWithStore(t, wrap)}
 	ctx := context.Background()
 	db := e.s.store
 	e.creator = mkTestUser(t, db, "link-creator@test.dev", models.UserRoleMember)
@@ -327,17 +333,26 @@ func TestCollectionItemRoutesBusy(t *testing.T) {
 	}
 }
 
+// demotingLinkStore changes the caller just before the next link transaction.
+// It is installed when the server is built and armed later, so the running
+// server's background workers never see the store field change.
 type demotingLinkStore struct {
 	store.Store
+	armed atomic.Pointer[callerChange]
+}
+
+type callerChange struct {
 	user   *models.User
 	change func(*models.User)
 }
 
-func (s demotingLinkStore) WithTx(ctx context.Context, fn func(store.StoreOps) error) error {
-	user := *s.user
-	s.change(&user)
-	if err := s.UpdateUser(ctx, &user); err != nil {
-		return err
+func (s *demotingLinkStore) WithTx(ctx context.Context, fn func(store.StoreOps) error) error {
+	if c := s.armed.Load(); c != nil {
+		user := *c.user
+		c.change(&user)
+		if err := s.UpdateUser(ctx, &user); err != nil {
+			return err
+		}
 	}
 	return s.Store.WithTx(ctx, fn)
 }
@@ -354,7 +369,11 @@ func testCollectionLinkCallerChanged(t *testing.T, change func(*models.User)) {
 	t.Helper()
 	for _, method := range []string{http.MethodPut, http.MethodPost, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
-			e := newLinkRouteEnv(t)
+			demoting := &demotingLinkStore{}
+			e := newLinkRouteEnvWithStore(t, func(st store.Store) store.Store {
+				demoting.Store = st
+				return demoting
+			})
 			ctx := context.Background()
 			if err := core.AddCollectionMember(ctx, e.s.store, e.s.log, e.coll.ID, e.creator.ID, e.admin.ID, models.CollectionRoleMember); err != nil {
 				t.Fatal(err)
@@ -368,7 +387,7 @@ func testCollectionLinkCallerChanged(t *testing.T, change func(*models.User)) {
 			} else {
 				wantKind = ""
 			}
-			e.s.store = demotingLinkStore{Store: e.s.store, user: e.admin, change: change}
+			demoting.armed.Store(&callerChange{user: e.admin, change: change})
 			path, body := e.item(e.query.ID), `{"kind":"managed"}`
 			if method == http.MethodPost {
 				path, body = e.items, postBody(e.query.ID, "managed")

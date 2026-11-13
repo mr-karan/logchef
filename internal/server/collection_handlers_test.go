@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mr-karan/logchef/internal/store"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,6 +30,13 @@ type collectionRouteEnv struct {
 
 func newCollectionRouteEnv(t *testing.T) *collectionRouteEnv {
 	t.Helper()
+	return newCollectionRouteEnvWithStore(t, func(st store.Store) store.Store { return st })
+}
+
+// newCollectionRouteEnvWithStore builds the server around wrap(db), so a test
+// can change store behavior without reassigning the store of a running server.
+func newCollectionRouteEnvWithStore(t *testing.T, wrap func(store.Store) store.Store) *collectionRouteEnv {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: logger,
@@ -42,7 +50,7 @@ func newCollectionRouteEnv(t *testing.T) *collectionRouteEnv {
 	cfg := &config.Config{Auth: config.AuthConfig{APITokenSecret: strings.Repeat("t", 32)}}
 	s := New(ServerOptions{
 		Config: cfg,
-		SQLite: db,
+		SQLite: wrap(db),
 		FS:     http.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/" />`)}}),
 		Logger: logger,
 	})
