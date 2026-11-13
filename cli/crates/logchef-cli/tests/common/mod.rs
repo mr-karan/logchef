@@ -244,6 +244,8 @@ pub struct ServerState {
     pub histogram_requests: Vec<serde_json::Value>,
     pub query_logs: Vec<serde_json::Value>,
     pub source_type: Option<String>,
+    /// The `stats` of a logs/query response on source 2 of team 1.
+    pub query_stats: serde_json::Value,
 }
 
 pub struct FakeServer {
@@ -524,6 +526,18 @@ fn route(
                 }}),
             )
         }
+        ("GET", "/api/v1/teams/1/sources/2") => (
+            200,
+            serde_json::json!({"status": "success", "data": {"id": 2, "name": "app", "source_type": "clickhouse"}}),
+        ),
+        ("POST", "/api/v1/teams/1/sources/2/logs/query") => (
+            200,
+            serde_json::json!({"status": "success", "data": {
+                "logs": [{"n": 1}],
+                "columns": [{"name": "n", "type": "UInt64"}],
+                "stats": state.lock().unwrap().query_stats,
+            }}),
+        ),
         _ => (
             404,
             serde_json::json!({"status": "error", "message": "not found"}),
