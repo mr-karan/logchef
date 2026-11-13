@@ -345,18 +345,9 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 		return nil, "", clickhouse.QueryOptions{}, &clickhouse.ValidationError{Message: err.Error()}
 	}
 
-	opts := clickhouse.QueryOptions{
-		TimeoutSeconds: req.QueryTimeout,
-		Settings: map[string]any{
-			"max_execution_time":   *req.QueryTimeout,
-			"max_result_rows":      buildResult.AppliedLimit,
-			"result_overflow_mode": "break",
-		},
-		LimitApplied:     buildResult.AppliedLimit,
-		MaxRows:          buildResult.AppliedLimit,
-		MaxResponseBytes: req.MaxResponseBytes,
-		Warnings:         queryWarningsForBuildResult(buildResult),
-	}
+	opts := buildResult.QueryOptions(*req.QueryTimeout)
+	opts.MaxResponseBytes = req.MaxResponseBytes
+	opts.Warnings = queryWarningsForBuildResult(buildResult)
 	return client, buildResult.SQL, opts, nil
 }
 
