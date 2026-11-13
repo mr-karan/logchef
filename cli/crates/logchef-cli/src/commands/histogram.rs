@@ -120,10 +120,8 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
         ctx.defaults.timezone.as_deref(),
     )?;
 
-    // Wall-clock strings (in the effective timezone) for translation; the
-    // ClickHouse translator bakes these into the generated SQL.
-    let wall = resolve_time_range(
-        TimeInput::Instant {
+    let range = resolve_time_range(
+        TimeInput::Rfc3339 {
             start: start_utc,
             end: end_utc,
         },
@@ -142,9 +140,9 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
             &TranslateRequest {
                 variables: Vec::new(),
                 query,
-                start_time: Some(wall.start.clone()),
-                end_time: Some(wall.end.clone()),
-                timezone: Some(wall.timezone.clone()),
+                start_time: Some(range.start.clone()),
+                end_time: Some(range.end.clone()),
+                timezone: Some(range.timezone.clone()),
                 limit: None,
             },
         )
@@ -167,7 +165,7 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
         end_timestamp: Some(end_utc.timestamp_millis()),
         window: Some(window),
         group_by: args.group_by.clone(),
-        timezone: Some(wall.timezone.clone()),
+        timezone: Some(range.timezone.clone()),
         limit: Some(100),
         query_timeout: Some(args.timeout),
     };

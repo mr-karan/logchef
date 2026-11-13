@@ -567,6 +567,11 @@ impl CollectionQueryContent {
         overrides: &[String],
     ) -> crate::error::Result<Vec<TemplateVariable>> {
         let saved = self.variables.as_deref().unwrap_or_default();
+        if saved.is_empty() && !overrides.is_empty() {
+            return Err(crate::error::Error::other(
+                "This query has no variables; --var cannot be used",
+            ));
+        }
         let names = saved
             .iter()
             .map(|v| v.name.as_str())
@@ -596,20 +601,10 @@ impl CollectionQueryContent {
                 let (value, origin) = if let Some(mut supplied) =
                     values.remove(variable.name.as_str())
                 {
-                    let compact = self
-                        .content
-                        .as_deref()
-                        .unwrap_or_default()
-                        .chars()
-                        .filter(|c| !c.is_whitespace())
-                        .collect::<String>()
-                        .to_lowercase();
-                    let multi = !variable.options.is_empty()
-                        || compact
-                            .contains(&format!("in({{{{{}}}}})", variable.name.to_lowercase()));
+                    let multi = variable.input_type.as_deref() == Some("multiselect");
                     if supplied.len() > 1 && !multi {
                         return Err(crate::error::Error::other(format!(
-                            "Repeated --var requires options or IN (...). Saved variables: {names}"
+                            "Repeated --var for {} requires a multiselect variable. Saved variables: {names}", variable.name
                         )));
                     }
                     (
@@ -632,7 +627,11 @@ impl CollectionQueryContent {
                             .default_value
                             .clone()
                             .unwrap_or(serde_json::Value::Null),
-                        "default",
+                        if variable.default_value.as_ref().is_none_or(|v| v.is_null()) {
+                            "unset"
+                        } else {
+                            "default"
+                        },
                     )
                 };
                 Ok(TemplateVariable {
@@ -653,6 +652,63 @@ impl CollectionQueryContent {
 mod template_request_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_multiselect_accepts_repeated_overrides() {
+        for expression in [
+            "IN ({{x}})",
+            "in({{x}})",
+            "min({{x}})",
+            "arrayJoin({{x}})",
+            "{{x}}",
+        ] {
+            for (input, options) in [
+                (None, json!([])),
+                (None, json!(["a", "b"])),
+                (Some("input"), json!([])),
+                (Some("select"), json!(["a", "b"])),
+                (Some("multiselect"), json!([])),
+                (Some("multiselect"), json!(["a", "b"])),
+            ] {
+                let content: CollectionQueryContent = serde_json::from_value(json!({
+                    "content": expression,
+                    "variables": [{"name":"x", "inputType":input, "options":options}]
+                }))
+                .unwrap();
+                let result = content.query_variables(&["x=a".into(), "x=b".into()]);
+                if input == Some("multiselect") {
+                    assert_eq!(result.unwrap()[0].value, json!(["a", "b"]));
+                } else {
+                    let error = result.unwrap_err().to_string();
+                    assert!(error.contains("multiselect"), "{error}");
+                    assert!(error.contains("x"), "{error}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn variables_without_defaults_have_unset_origin() {
+        let content: CollectionQueryContent = serde_json::from_value(json!({
+            "variables":[{"name":"x"}]
+        }))
+        .unwrap();
+        let variables = content.query_variables(&[]).unwrap();
+        assert_eq!(variables[0].origin, "unset");
+        assert!(variables[0].value.is_null());
+    }
+
+    #[test]
+    fn overrides_on_queries_without_variables_explain_the_problem() {
+        let empty: CollectionQueryContent = serde_json::from_value(json!({})).unwrap();
+        assert!(
+            empty
+                .query_variables(&["x=a".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("query has no variables")
+        );
+    }
 
     #[test]
     fn empty_saved_values_use_defaults_but_explicit_empty_clears() {
@@ -676,10 +732,10 @@ mod template_request_tests {
     }
 
     #[test]
-    fn saved_values_and_in_list_overrides_retain_their_shape() {
+    fn saved_values_and_multiselect_overrides_retain_their_shape() {
         let content: CollectionQueryContent = serde_json::from_value(json!({
             "content":"env IN ( {{env}} )",
-            "variables":[{"name":"env","value":"saved","defaultValue":"default"}]
+            "variables":[{"name":"env","inputType":"multiselect","value":"saved","defaultValue":"default"}]
         }))
         .unwrap();
         assert_eq!(

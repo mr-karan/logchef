@@ -670,7 +670,7 @@ logchef saved-queries "https://logs.example.com/logs/explore?team=8&source=11&id
 | `--team` | `-t` | Team name or ID | Query's resolved team |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | Query's source |
 | `--limit` | `-l` | Override maximum number of results | From saved query |
-| `--var` | `-V` | Set variable value (`name=value`); repeat for options or IN (...) to select multiple values | |
+| `--var` | `-V` | Set variable value (`name=value`); repeat for multiselect variables to select multiple values | |
 | `--show-sql` | | Print the template and resolved variables with types, values, and origins; translate LogchefQL on the server without running it | `false` |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting | `false` |
@@ -703,10 +703,10 @@ blocks. Do not add SQL or LogsQL quotes to variable values.
 Saved-query and collection variables resolve from an explicit `--var`, then a non-empty saved value, then `defaultValue`.
 Empty strings, null, and empty arrays count as empty saved values.
 An explicit `--var env=` clears the variable and bypasses its default.
-Repeated overrides such as `--var env=prod --var env=stage` produce an array when the variable has options or appears in `IN (...)`.
-A single override stays a scalar. Malformed overrides and unknown names fail and list the saved variable names.
-For saved queries, `--show-sql` prints the template plus each variable's name, type, value, and origin (`--var`, saved value, or default).
-For LogchefQL it also prints the translated SQL returned by the server.
+Repeated overrides such as `--var env=prod --var env=stage` produce an array only when the saved variable has `inputType: "multiselect"`. Repeated overrides for single-select and plain inputs fail.
+A single override stays a scalar. Malformed overrides and unknown names fail and list the saved variable names. A query without variables reports that it has no variables.
+For saved queries, `--show-sql` prints the template plus each variable's name, type, value, and origin (`--var`, saved value, default, or unset). Unset variables print without a null value.
+For LogchefQL it also prints the translated query (SQL for ClickHouse, LogsQL for VictoriaLogs) returned by the server.
 
 ### Collections
 
@@ -730,7 +730,7 @@ logchef collections "Error Dashboard" --team "production" --source "nginx-logs"
 | `--from` | | Override absolute start time (ISO 8601) | |
 | `--to` | | Override absolute end time (ISO 8601) | |
 | `--limit` | `-l` | Override maximum number of results | (from collection) |
-| `--var` | | Set variable value (`name=value`); repeat for options or IN (...) to select multiple values | |
+| `--var` | | Set variable value (`name=value`); repeat for multiselect variables to select multiple values | |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |

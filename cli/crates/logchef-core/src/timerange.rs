@@ -256,11 +256,14 @@ pub fn calendar_range(
     let tz = resolve_timezone(configured_tz);
     let date = now.with_timezone(&tz).date_naive();
     let midnight = |date: chrono::NaiveDate| {
-        tz.from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+        let local = date.and_hms_opt(0, 0, 0).unwrap();
+        tz.from_local_datetime(&local)
             .earliest()
+            .or_else(|| chrono_tz::GapInfo::new(&local, &tz).and_then(|gap| gap.end))
+            .filter(|dt| dt.date_naive() == date)
             .map(|dt| dt.with_timezone(&Utc))
             .ok_or_else(|| {
-                crate::error::Error::other(format!("Calendar day has no midnight in {tz}"))
+                crate::error::Error::other(format!("Calendar day has no valid instant in {tz}"))
             })
     };
     Some((|| {
@@ -283,6 +286,49 @@ pub fn calendar_range(
 mod calendar_tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn midnight_gaps_use_first_valid_instant_on_transition_and_following_day() {
+        for (zone, date, expected) in [
+            ("America/Havana", "2026-03-08", "2026-03-08T05:00:00Z"),
+            ("Asia/Beirut", "2026-03-29", "2026-03-28T22:00:00Z"),
+            ("Africa/Cairo", "2026-04-24", "2026-04-23T22:00:00Z"),
+            ("America/Santiago", "2026-09-06", "2026-09-06T04:00:00Z"),
+        ] {
+            let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap();
+            let tz: Tz = zone.parse().unwrap();
+            let first = DateTime::parse_from_rfc3339(expected)
+                .unwrap()
+                .with_timezone(&Utc);
+            for day in [date, date.succ_opt().unwrap()] {
+                let now = tz
+                    .from_local_datetime(&day.and_hms_opt(12, 0, 0).unwrap())
+                    .single()
+                    .unwrap()
+                    .with_timezone(&Utc);
+                let (today, end) = calendar_range("today", now, Some(zone)).unwrap().unwrap();
+                assert_eq!(end, now);
+                let (yesterday, yesterday_end) = calendar_range("yesterday", now, Some(zone))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(yesterday_end, today);
+                if day == date {
+                    assert_eq!(today, first, "{zone}");
+                    assert_eq!(today.with_timezone(&tz).date_naive(), date);
+                    assert!(yesterday < today);
+                } else {
+                    assert_eq!(yesterday, first, "{zone}");
+                    assert_eq!(
+                        today,
+                        tz.from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+                            .earliest()
+                            .unwrap()
+                            .with_timezone(&Utc)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn calendar_days_follow_zone_and_dst_instead_of_fixed_durations() {
