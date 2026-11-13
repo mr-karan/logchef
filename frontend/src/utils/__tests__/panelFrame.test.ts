@@ -21,8 +21,8 @@ describe("exact numbers", () => {
     expect(formatNumber(exact("124000000"), { scale: 1e-7, decimals: 2, suffix: " Cr" }, { locale: "en-US" }).text).toBe("12.40 Cr");
   });
   it("checks each side of the coefficient, scale, exponent and literal bounds before BigInt", () => {
-    for (const valid of ["0." + "0".repeat(399) + "1", "1" + "0".repeat(400), "1e-400", "9".repeat(100), "1." + "0".repeat(300)]) expect(parseExact(valid)).not.toBeNull();
-    for (const invalid of ["0." + "0".repeat(400) + "1", "1" + "0".repeat(401), "1e-401", "9".repeat(101), "1e99999", "0x1f", "1,000", "NaN", "12ms"]) expect(parseExact(invalid)).toBeNull();
+    for (const valid of ["0." + "0".repeat(399) + "1", "1" + "0".repeat(400), "1e-400", "9".repeat(100), "1." + "0".repeat(300), "1e0000", "1." + "0".repeat(510)]) expect(parseExact(valid)).not.toBeNull();
+    for (const invalid of ["0." + "0".repeat(400) + "1", "1" + "0".repeat(401), "1e-401", "9".repeat(101), "1e99999", "1e00000", "1." + "0".repeat(511), "0x1f", "1,000", "NaN", "12ms"]) expect(parseExact(invalid)).toBeNull();
     const spy = vi.spyOn(globalThis, "BigInt");
     expect(parseExact("0." + "0".repeat(10000) + "1")).toBeNull();
     expect(parseExact("1" + "0".repeat(10000))).toBeNull();
@@ -64,6 +64,12 @@ describe("panel frames", () => {
     expect(suggestKind(["42", "0.5"])).toBe("number");
     expect(suggestKind(["2026-11-12T01:02:03Z"])).toBe("time");
   });
+  it("shows timestamps in the explicit viewer zone and rejects impossible dates", () => {
+    const frame = resultFrame({ columns: [{ name: "at", type: "DateTime64(3)" }], rows: [{ at: "2026-11-12T23:30:01Z" }, { at: "2026-02-30T10:00:00Z" }] });
+    expect(frameCellText(frame.rows[0].at, frame.columns[0], "UTC")).toBe("2026-11-12 23:30:01");
+    expect(frameCellText(frame.rows[0].at, frame.columns[0], "Asia/Kolkata")).toBe("2026-11-13 05:00:01");
+    expect(frame.rows[1].at).toBeNull();
+  });
   it("keeps NULL, empty, real Other and synthetic Other groups distinct", () => {
     const frame = countFrame([{ bucket: "2026-11-12T00:00:00Z", log_count: 2, group_value: "Other" }, { bucket: "2026-11-12T00:00:00Z", log_count: 3, is_other: true }, { bucket: "2026-11-12T00:00:00Z", log_count: 1, is_null: true }, { bucket: "2026-11-12T00:00:00Z", log_count: 4, group_value: "" }], "1h", true);
     expect(frame.rows.map((r) => r.series)).toEqual([{ kind: "value", value: "Other" }, { kind: "other" }, { kind: "null" }, { kind: "value", value: "" }]);
@@ -92,7 +98,7 @@ describe("stat reducers", () => {
     expect(reduceStat(numericFrame([]), { value: "n", reduce, count: false }).value).toBeNull();
     expect(reduceStat(numericFrame([{ n: null }]), { value: "n", reduce, count: false }).value).toBeNull();
   });
-  it("returns zero for an empty count", () => {
-    expect(frameCellText(reduceStat(countFrame([], null, false), { value: "count", reduce: "sum", count: true }).value)).toBe("0");
+  it.each(["sum", "avg", "min", "max", "first", "last"] as const)("%s returns zero for an empty count", (reduce) => {
+    expect(frameCellText(reduceStat(countFrame([], null, false), { value: "count", reduce, count: true }).value)).toBe("0");
   });
 });

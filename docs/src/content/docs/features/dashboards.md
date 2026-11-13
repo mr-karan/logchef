@@ -16,7 +16,7 @@ its panels.
 
 A dashboard holds a set of **panels** laid out on a 12-column grid. Each panel is a
 self-contained visualization: it points at a team and source, carries its own query
-(LogchefQL, or native LogsQL for a VictoriaLogs source), and renders as one of
+(LogchefQL, ClickHouse SQL, or native LogsQL for a VictoriaLogs source), and renders as one of
 the panel types below.
 Panels do not share a query, only the dashboard's time range and refresh interval.
 
@@ -30,8 +30,9 @@ explorer, they can see in a panel.
   draws. You can render it as a line, area, or bars (stacked or grouped), and
   optionally group by a field to break the series out (for example, 5xx
   responses split by service).
-- **Stat**: a single number: the total match count for the query over the current
-  time range. Good for "how many errors in the last 15 minutes".
+- **Stat**: a match count or a computed value from a result column. Run SQL or
+  a LogsQL stats query, select the value column, and reduce it with `last`,
+  `first`, `sum`, `avg`, `min`, or `max`.
 - **Breakdown**: log counts by a required field over the selected range. Use
   horizontal bars (default) or a donut for a compact top-category view.
 - **Table**: the matching rows, like the explorer results grid. Set a row limit and
@@ -39,10 +40,11 @@ explorer, they can see in a panel.
   smaller of the two wins. A panel whose rows were cut shows a chip: **First N
   rows**, **Cut by size** or **May be incomplete**.
 
-Time series, stat, and breakdown panels all use the source's histogram endpoint.
-For native VictoriaLogs panels, write the filter portion of LogsQL: VictoriaLogs'
-hits API ignores pipes while building histogram data. Table panels execute the
-full LogsQL query and can use pipes such as `fields` and `unpack_json`.
+Time series and breakdown panels use **count** mode through the histogram
+endpoint. Stats support both **count** and **result** mode. Tables use result
+mode. A result query runs as written, including SQL aggregates and LogsQL stats
+pipes. The default result limit is 1,000 rows, with a maximum of 10,000.
+VictoriaLogs' histogram API counts the filter portion and ignores pipes.
 
 Grouped histograms return the top 10 series and combine any remaining series
 into an **other** bucket. Prefer fields such as service, environment, host, or
@@ -53,13 +55,45 @@ severity over high-cardinality request and trace IDs.
 Each panel picks its own team and source, so a single dashboard can mix panels from
 different backends: a ClickHouse time series next to a VictoriaLogs stat. LogchefQL
 compiles to whatever the panel's source speaks, so the same filter works across
-backends. The panel builder also offers a native LogsQL toggle when a VictoriaLogs
-source is selected. Native ClickHouse SQL is not exposed in the dashboard panel
-builder in this release; use LogchefQL for ClickHouse panels.
+backends. The panel builder offers **ClickHouse SQL** for ClickHouse sources
+and **LogsQL** for VictoriaLogs sources. Selecting ClickHouse SQL starts a
+result query. Existing SQL count panels continue to work.
 
 If a viewer lacks access to a panel's source, that panel renders a locked state
 while the rest of the dashboard loads normally, the same pattern used for shared
 collection items.
+
+## Computed stats and exact values
+
+For a total in crores, run a result query such as
+`SELECT sum(amount) AS total FROM payments`. Choose **Stat**, select `total`
+as the value column, then set Scale to `1e-7`, Decimals to `2`, and Suffix to
+` Cr`. A total of 124,000,000 displays as **12.40 Cr**.
+
+Set **Order by** to the date or timestamp column for `first` and `last`.
+Rows sort chronologically, with result order breaking ties. The tile shows
+the selected row's date. A selected NULL remains NULL, and ties or invalid
+order cells produce a notice. Other reducers ignore NULLs. An empty result
+shows **No data**; an empty count is zero.
+
+Number formats support `auto`, `standard`, and `compact` notation, thousands
+separators, 0 to 10 decimals, scale, units, prefix, and suffix. Auto keeps the
+full number while it fits. The tooltip keeps the exact value. Decimal rounding
+uses half away from zero. Wide integers and decimal strings keep their digits
+through table cells, tooltips, sorting, and stat arithmetic. Averages retain
+10 fraction digits before display formatting.
+
+ClickHouse column types determine each column's kind. VictoriaLogs provides
+no declared types, so its result columns remain text until you confirm their
+kinds under **Column kinds**. Guessed kinds appear only in the builder. A bad
+number, date, time, or boolean cell becomes NULL with a notice; other cells
+keep their values. Date-only columns keep their calendar date in every
+viewer timezone. Timestamp columns use your timezone preference.
+
+Changing visualization, roles, kinds, reducer, or format reuses the fetched
+frame. It does not rerun the query. Dashboards that use these settings store
+`result_frames` or `formats` features. An older client cannot save over them
+and asks you to reload before editing.
 
 ## Build a VictoriaLogs overview
 

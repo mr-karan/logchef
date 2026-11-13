@@ -11,13 +11,16 @@ const props = defineProps<{ frame: PanelFrame; panel: DashboardQueryPanel }>();
 const container = ref<HTMLElement>();
 const measure = ref<HTMLElement>();
 const width = ref(0);
+const measuredWidth = ref(0);
 useResizeObserver(container, ([entry]) => { width.value = entry.contentRect.width; });
+useResizeObserver(measure, ([entry]) => { measuredWidth.value = entry.contentRect.width; });
+const kinds = computed(() => props.panel.viz.type === "stat" ? props.panel.viz.columns : undefined);
+const typedFrame = computed(() => frameWithKinds(props.frame, kinds.value));
 const result = computed(() => {
   const viz = props.panel.viz;
   if (viz.type !== "stat") return { error: "Invalid stat visualization" };
   try {
-    const frame = frameWithKinds(props.frame, viz.columns);
-    return { stat: reduceStat(frame, { value: props.panel.query.mode === "count" ? "count" : viz.value ?? "", reduce: viz.reduce ?? (props.panel.query.mode === "count" ? "sum" : "last"), orderBy: viz.order_by, count: props.panel.query.mode === "count", zone: preferences.zone }) };
+    return { stat: reduceStat(typedFrame.value, { value: props.panel.query.mode === "count" ? "count" : viz.value ?? "", reduce: viz.reduce ?? (props.panel.query.mode === "count" ? "sum" : "last"), orderBy: viz.order_by, count: props.panel.query.mode === "count", zone: preferences.zone }) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Unable to read stat" };
   }
@@ -30,7 +33,7 @@ const standard = computed(() => {
 const formatted = computed(() => {
   const value = result.value.stat?.value;
   if (value === null || value === undefined) return null;
-  const compact = width.value > 0 && (measure.value?.getBoundingClientRect().width ?? 0) > width.value - 16;
+  const compact = width.value > 0 && measuredWidth.value > width.value - 16;
   return formatNumber(value, format.value, { compact });
 });
 </script>

@@ -63,7 +63,7 @@ export function countFrame(buckets: HistogramDataPoint[], interval: string | nul
   return { ...frame, interval, notices: notice ? [notice] : [] };
 }
 
-const rfc3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const rfc3339 = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function validDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 }
@@ -79,7 +79,7 @@ function readCell(value: unknown, column: FrameColumn): unknown {
   if (typeof value !== "string") return null;
   if (column.kind === "date") return validDate(value.slice(0, column.backendType ? 10 : value.length)) ? value.slice(0, 10) : null;
   const timestamp = column.backendType ? value.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(value) ? "" : "Z") : value;
-  return rfc3339.test(timestamp) && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+  return rfc3339.test(timestamp) && validDate(timestamp.slice(0, 10)) && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
 }
 
 export function frameWithKinds(frame: PanelFrame, overrides: Record<string, ConfirmedColumn> = {}): PanelFrame {
@@ -92,10 +92,12 @@ export function frameWithKinds(frame: PanelFrame, overrides: Record<string, Conf
   const notices: string[] = [];
   for (const name of Object.keys(overrides)) if (!columns.some((c) => c.name === name)) notices.push(`Column "${name}" is missing from the result.`);
   const invalid = new Map<string, number>();
-  const rows = frame.rawRows.map((raw) => {
+  const previousColumns = new Map(frame.columns.map((column) => [column.name, column]));
+  const rows = frame.rawRows.map((raw, index) => {
     const row: Record<string, unknown> = {};
     for (const c of columns) {
-      const value = readCell(raw[c.name], c);
+      const previous = previousColumns.get(c.name);
+      const value = index < frame.rows.length && previous?.kind === c.kind && previous.repr === c.repr ? frame.rows[index][c.name] : readCell(raw[c.name], c);
       row[c.name] = value;
       if (value === null && raw[c.name] !== null && raw[c.name] !== undefined && raw[c.name] !== "") invalid.set(c.name, (invalid.get(c.name) ?? 0) + 1);
     }
@@ -116,7 +118,10 @@ export function suggestKind(values: unknown[]): ColumnKind {
 export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"): string {
   if (value === null || value === undefined) return "";
   if (isExact(value)) return exactString(value);
-  if (column?.kind === "time" && typeof value === "string") return new Date(value).toLocaleString(undefined, { hour12: false, timeZone: zone });
+  if (column?.kind === "time" && typeof value === "string") {
+    const parts = new Map(new Intl.DateTimeFormat("en", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(value)).map((p) => [p.type, p.value]));
+    return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")} ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}`;
+  }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }

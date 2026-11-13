@@ -1,4 +1,3 @@
-import type { HistogramDataPoint } from "@/api/explore";
 import {
   DASHBOARD_PANELS_VERSION,
   type DashboardLayoutItem,
@@ -116,10 +115,12 @@ export function switchPanelKind(panel: DashboardQueryPanel, kind: PanelBuilderKi
     case "chart":
       return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "chart", mark: "line", stack: "none" } };
     case "stat":
+      if (panel.query.mode === "result") return { ...panel, viz: { type: "stat", reduce: "last", ...(panel.viz.type === "table" ? { columns: panel.viz.columns } : {}) } };
       return { ...panel, query: { mode: "count", language, text, interval: "auto", ...translate }, viz: { type: "stat", reduce: "sum" } };
     case "breakdown":
       return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "toplist" } };
     case "table":
+      if (panel.query.mode === "result") return { ...panel, viz: { type: "table", ...(panel.viz.type === "stat" ? { columns: panel.viz.columns } : {}) } };
       return { ...panel, query: { mode: "result", language, text }, viz: { type: "table" } };
   }
 }
@@ -206,21 +207,6 @@ export function normalizeDashboardLayout(
 
   placed.sort((a, b) => (a.y - b.y) || (a.x - b.x));
   return placed;
-}
-
-/**
- * Sum the log counts across every histogram bucket. This is how a "stat" panel
- * derives its single big number: the total match count over the window. Grouped
- * buckets (multiple rows per timestamp) all contribute to the total.
- */
-export function sumHistogramCounts(buckets: HistogramDataPoint[] | null | undefined): number {
-  if (!buckets || buckets.length === 0) {
-    return 0;
-  }
-  return buckets.reduce((total, bucket) => {
-    const count = Number(bucket?.log_count);
-    return total + (Number.isFinite(count) ? count : 0);
-  }, 0);
 }
 
 // ---------------------------------------------------------------------------

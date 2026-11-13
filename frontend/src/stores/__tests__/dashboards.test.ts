@@ -645,7 +645,7 @@ describe("dashboards store — #119/#120 hardening", () => {
       query: { mode: "count", language: "clickhouse-sql", text: "SELECT 1", interval: "auto" },
       viz: { type: "stat", reduce: "sum" },
     });
-    await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("success"));
+    await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("empty"));
     expect(store.getPanelState("p1").frame).toBeDefined();
     // stat -> table: the cached stat value would render blank under a table, so
     // it must be dropped immediately (the panel re-executes into "loading").
@@ -737,6 +737,14 @@ describe("dashboards store — schema 2 request parity", () => {
     }
     return store;
   }
+
+  it("ignores VictoriaLogs type guesses for a LogchefQL result before source metadata is loaded", async () => {
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [{ n: "00123" }], columns: [{ name: "n", type: "UInt64" }], generated_query_language: "logsql" } });
+    const store = await runPanels(tablePanel("vl-result"));
+    const frame = store.getPanelState("vl-result").frame;
+    expect(frame?.columns[0]).toMatchObject({ backendType: null, kind: "category" });
+    expect(frame?.rows[0].n).toBe("00123");
+  });
 
   it("runs result SQL as written and reuses the frame for role, reducer, kind, format and visualization edits", async () => {
     mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [{ n: "9007199254740993" }], columns: [{ name: "n", type: "UInt64" }] } });

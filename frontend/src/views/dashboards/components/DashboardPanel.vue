@@ -12,6 +12,7 @@ import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 import { panelExploreQuery } from "@/utils/panelExplore";
+import { trimDashboardGroupBy } from "@/utils/dashboardPanels";
 import { histogramBuckets } from "@/utils/panelFrame";
 import { truncationMessage } from "@/utils/truncation";
 
@@ -69,7 +70,7 @@ const chartHeight = computed(() =>
 const vizType = computed(() => props.panel.viz?.type);
 
 const buckets = computed(() => panelState.value.frame ? histogramBuckets(panelState.value.frame) : []);
-const groupBy = computed(() => !props.panel.locked ? props.panel.query.group_by ?? null : null);
+const groupBy = computed(() => !props.panel.locked ? trimDashboardGroupBy(props.panel.query.group_by) || null : null);
 const notice = computed(() => panelState.value.frame?.notices.join(" ") || null);
 // A cut result says so on every visualization, and so does an empty one: a
 // byte budget can stop the reader before its first row. A cap that cut
@@ -170,7 +171,7 @@ const columnSubset = computed(() => {
       </div>
 
       <!-- Empty -->
-      <div v-else-if="panelState.status === 'empty'" class="dash-panel__message">
+      <div v-else-if="panelState.status === 'empty' && !(vizType === 'stat' && !panel.locked && panel.query.mode === 'count' && panelState.frame)" class="dash-panel__message">
         <span>{{ t('ui.noDataForThisTimeRange') }}</span>
       </div>
 

@@ -5,7 +5,7 @@ import type { DashboardQueryPanel } from "@/api/dashboards";
 import { resultFrame } from "@/utils/panelFrame";
 import PanelStat from "../PanelStat.vue";
 
- describe("stat frame rendering", () => {
+describe("stat frame rendering", () => {
   it("shows exact digits in the value and tooltip, then scales without another query", async () => {
     const panel = ref<DashboardQueryPanel>({ id: "s", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT n" }, viz: { type: "stat", value: "n" } });
     const host = document.createElement("div");

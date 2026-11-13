@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PanelResultOptions from "./PanelResultOptions.vue";
+import type { PanelFrame } from "@/utils/panelFrame";
 import { useI18n } from "vue-i18n";
 
 import { computed, ref } from "vue";
@@ -18,6 +20,7 @@ interface Props {
   query: DashboardPanelQuery;
   viz: DashboardViz;
   fieldSuggestions: string[];
+  frame?: PanelFrame;
 }
 const props = defineProps<Props>();
 const emit = defineEmits<{
@@ -71,7 +74,7 @@ const columnInput = ref("");
 // larger typed value on every keystroke (native max-clamping only kicks in on
 // step-button use / form validation, not free typing), so clamp explicitly so
 // the panel can never end up with a limit above the enforced max.
-const MAX_BUILDER_TABLE_LIMIT = 1000;
+const MAX_BUILDER_TABLE_LIMIT = 10000;
 const LIMIT_MIN = 1;
 function clampLimit(value: unknown): number | undefined {
   const n = Number(value);
@@ -82,7 +85,7 @@ function clampLimit(value: unknown): number | undefined {
 const visibleColumns = computed(() => (props.viz.type === "table" ? props.viz.visible_columns ?? [] : []));
 
 function setColumns(columns: string[]) {
-  emit("update:viz", columns.length ? { type: "table", visible_columns: columns } : { type: "table" });
+  emit("update:viz", columns.length ? { ...props.viz, type: "table", visible_columns: columns } : { type: "table", ...(props.viz.type === "table" ? { columns: props.viz.columns } : {}) });
 }
 
 function addColumn() {
@@ -175,10 +178,7 @@ function removeColumn(name: string) {
     </div>
   </div>
 
-  <!-- Stat: no options yet. -->
-  <p v-else-if="kind === 'stat'" class="text-xs text-muted-foreground">
-    {{ t('ui.statPanelsShowTheTotalMatchCountOverTheSelectedTimeRange') }}
-  </p>
+  <PanelResultOptions v-else-if="kind === 'stat'" :query="query" :viz="viz" :frame="frame" @update:viz="(v) => emit('update:viz', v)" />
 
   <!-- Table: row limit + column subset. -->
   <div v-else-if="kind === 'table'" class="space-y-4">
@@ -190,7 +190,7 @@ function removeColumn(name: string) {
         min="1"
         :max="MAX_BUILDER_TABLE_LIMIT"
         class="w-32"
-        :model-value="query.limit ?? 100"
+        :model-value="query.limit ?? 1000"
         @update:model-value="(v) => emit('update:query', { limit: clampLimit(v) })"
       />
     </div>
@@ -220,5 +220,6 @@ function removeColumn(name: string) {
         <option v-for="name in fieldSuggestions" :key="name" :value="name" />
       </datalist>
     </div>
+    <PanelResultOptions :query="query" :viz="viz" :frame="frame" @update:viz="(v) => emit('update:viz', v)" />
   </div>
 </template>
