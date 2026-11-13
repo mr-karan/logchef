@@ -229,7 +229,6 @@ async fn run_saved_query(
     let variables = content.query_variables(&args.variables);
     let final_query = content.content.clone().unwrap_or_default();
 
-    let time_range = saved_query_time_range(&content, ctx.defaults.timezone.as_deref())?;
     let limit = args.limit.or(content.limit).unwrap_or(ctx.defaults.limit);
 
     if args.show_sql {
@@ -243,20 +242,23 @@ async fn run_saved_query(
     );
 
     let response = if query.query_language != "logchefql" {
+        let (start, end) = parse_time_range(&content)?;
         let request = SqlQueryRequest {
             variables,
             query_text: final_query,
             limit: args.limit,
-            timezone: Some(time_range.timezone.clone()),
+            timezone: None,
             start_time: None,
             end_time: None,
             query_timeout: Some(args.timeout),
-        };
+        }
+        .with_time_range(start, end, ctx.defaults.timezone.as_deref());
         client
             .query_sql(team_id, source_id, &request)
             .await
             .context("SQL query failed")?
     } else {
+        let time_range = saved_query_time_range(&content, ctx.defaults.timezone.as_deref())?;
         let request = QueryRequest {
             variables,
             query: final_query,

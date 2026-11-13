@@ -238,6 +238,8 @@ pub struct ServerState {
     pub bearer_seen: Vec<String>,
     /// Advertised as `ui_url` in /api/v1/meta when set.
     pub ui_url: Option<String>,
+    pub saved_query: serde_json::Value,
+    pub native_requests: Vec<serde_json::Value>,
 }
 
 pub struct FakeServer {
@@ -389,6 +391,29 @@ fn route(
 ) -> (u16, serde_json::Value) {
     let path = req.path.split('?').next().unwrap_or_default();
     match (req.method.as_str(), path) {
+        ("GET", "/api/v1/saved-queries") => (
+            200,
+            serde_json::json!({"status": "success", "data": [state.lock().unwrap().saved_query.clone()]}),
+        ),
+        ("GET", "/api/v1/saved-queries/7/resolve") => {
+            let mut query = state.lock().unwrap().saved_query.clone();
+            query["resolved_team_id"] = serde_json::json!(1);
+            (200, serde_json::json!({"status": "success", "data": query}))
+        }
+        ("POST", "/api/v1/teams/1/sources/2/logs/query") => {
+            state
+                .lock()
+                .unwrap()
+                .native_requests
+                .push(serde_json::from_str(&req.body).unwrap());
+            (
+                200,
+                serde_json::json!({"status": "success", "data": {
+                    "logs": [], "columns": [], "stats": {"execution_time_ms": 1, "rows_read": 0, "bytes_read": 0}
+                }}),
+            )
+        }
+
         ("GET", "/api/v1/meta") => {
             let mut data = serde_json::json!({"version": "test"});
             let s = state.lock().unwrap();
