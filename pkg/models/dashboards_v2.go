@@ -221,7 +221,7 @@ var dashboardFeatureRules = []struct {
 	{"result_charts", func(blob *dashboardPanelsV2) bool {
 		for _, p := range blob.Panels {
 			v := p.Viz
-			if v != nil && ((p.Query != nil && p.Query.Mode == DashboardQueryModeResult && (v.Type == DashboardVizChart || v.Type == DashboardVizPie || v.Type == DashboardVizToplist)) || v.XScale != nil || v.Orientation != nil || v.ShowValues != nil || v.Legend != nil || v.MinSlicePercent != nil || v.MaxRows != nil) {
+			if v != nil && ((p.Query != nil && p.Query.Mode == DashboardQueryModeResult && (v.Type == DashboardVizChart || v.Type == DashboardVizPie || v.Type == DashboardVizToplist)) || (v.Format != nil && (v.Type == DashboardVizChart || v.Type == DashboardVizPie || v.Type == DashboardVizToplist)) || v.XScale != nil || v.Orientation != nil || v.ShowValues != nil || v.Legend != nil || v.MinSlicePercent != nil || v.MaxRows != nil) {
 				return true
 			}
 		}

@@ -57,7 +57,7 @@ export function resultFrame(input: {
 }
 
 export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null, range?: ResolvedWindow, alignment: BucketAlignment = "calendar"): PanelFrame {
-  if (range) {
+  if (buckets.length) {
     const step = parseGranularityToMilliseconds(interval);
     if (!step) throw new Error("Count results require a valid bucket interval.");
     const byTime = new Map<number, HistogramDataPoint[]>();
@@ -73,7 +73,7 @@ export function countFrame(buckets: HistogramDataPoint[], interval: string | nul
         ...series, bucket: new Date(ts).toISOString().replace(".000Z", "Z"), log_count: 0,
       })),
     });
-    const filled = fillBucketGaps(rows, step, makeZero, histogramBucketBounds(range, step, alignment));
+    const filled = fillBucketGaps(rows, step, makeZero, range ? histogramBucketBounds(range, step, alignment) : undefined);
     buckets = filled.flatMap((row) => row.buckets);
   }
   const rows = buckets.map((b) => ({

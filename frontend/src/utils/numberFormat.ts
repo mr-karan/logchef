@@ -1,13 +1,28 @@
 import type { NumberFormat } from "@/api/dashboards";
 import { averageExact, compareExact, exactString, isExact, multiplyExact, normalizeExact, parseExact, roundExact, type ExactNumber, type FrameNumber } from "./exactNumber";
 
+const localeFormats = new Map<string, { grouped: Intl.NumberFormat; plain: Intl.NumberFormat; decimal: string; digits: string[] }>();
+function localeFormat(locale?: string) {
+  const key = locale ?? "default";
+  let cached = localeFormats.get(key);
+  if (!cached) {
+    const grouped = new Intl.NumberFormat(locale, { useGrouping: true });
+    const plain = new Intl.NumberFormat(locale, { useGrouping: false });
+    cached = { grouped, plain, decimal: plain.formatToParts(1.1).find(p => p.type === "decimal")?.value ?? ".", digits: Array.from({ length: 10 }, (_, i) => plain.format(i)) };
+    if (localeFormats.size >= 32) localeFormats.clear();
+    localeFormats.set(key, cached);
+  }
+  return cached;
+}
+
 function grouped(value: ExactNumber, decimals: number | undefined, grouping: boolean, locale?: string): string {
   const [whole, fraction] = exactString(value, decimals).split(".");
-  const formatter = new Intl.NumberFormat(locale, { useGrouping: grouping });
+  const cached = localeFormat(locale);
+  const formatter = grouping ? cached.grouped : cached.plain;
   const parts = formatter.formatToParts(whole === "-0" ? -0 : BigInt(whole));
   if (!fraction) return parts.map((p) => p.value).join("");
-  const decimal = new Intl.NumberFormat(locale).formatToParts(1.1).find((p) => p.type === "decimal")?.value ?? ".";
-  const digits = Array.from({ length: 10 }, (_, digit) => new Intl.NumberFormat(locale, { useGrouping: false }).format(digit));
+  const decimal = cached.decimal;
+  const digits = cached.digits;
   const localized = Array.from(fraction, (digit) => digits[Number(digit)]).join("");
   const lastInteger = parts.length - 1 - [...parts].reverse().findIndex((p) => p.type === "integer");
   return parts.map((p, i) => p.value + (i === lastInteger ? decimal + localized : "")).join("");

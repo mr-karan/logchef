@@ -1,181 +1,161 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
 import { useElementSize } from "@vueuse/core";
+import { computed, markRaw, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { VisAxis, VisStackedBar, VisGroupedBar, VisLine, VisArea, VisScatter, VisXYContainer, VisCrosshair, VisTooltip } from "@unovis/vue";
+import { Scale, StackedBar, GroupedBar } from "@unovis/ts";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
-import { buildPanelChart, type ChartModel, type ChartViz } from "@/utils/panelCharts";
-import { parseGranularityToMilliseconds } from "@/utils/histogram-chart";
-import { formatNumber } from "@/utils/numberFormat";
+import { buildPanelChart, chartStacked, chartValue, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
+import { chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
+import { addExact, isExact, parseExact, type FrameNumber } from "@/utils/exactNumber";
+import { escapeHtml } from "@/lib/html";
 import type { ResolvedWindow } from "@/utils/timeWindow";
 
 const props = withDefaults(defineProps<{ frame: PanelFrame; viz: ChartViz; count: boolean; height?: number; range?: ResolvedWindow }>(), { height: 200 });
+const { t } = useI18n();
 const preferences = usePreferencesStore();
-const host = ref<HTMLElement | null>(null);
-const { width, height: hostHeight } = useElementSize(host);
 const result = computed(() => {
-  try { return { model: buildPanelChart(props.frame, props.viz, props.count, preferences.zone), error: null }; }
+  try {
+    const model = buildPanelChart(props.frame, props.viz, props.count, preferences.zone);
+    markRaw(model.rows);
+    return { model, error: null };
+  }
   catch (error) { return { model: null, error: error instanceof Error ? error.message : String(error) }; }
 });
 const emptyModel: ChartModel = { rows: [], series: [], time: false, notices: [] };
 const model = computed(() => result.value.model ?? emptyModel);
-const approximate = computed(() => model.value.rows.some((r) => [...r.values.values()].some((v) => v?.approximate)));
-const horizontal = computed(() => props.viz.orientation === "horizontal");
+const horizontal = computed(() => props.viz.orientation === "horizontal" && mark.value === "bar");
 const mark = computed(() => props.viz.mark ?? "line");
-const stacked = computed(() => props.viz.stack === "stacked");
-const plot = computed(() => {
-  const w = Math.max(240, width.value || 640);
-  const h = Math.max(90, (hostHeight.value > 0 ? Math.min(props.height, hostHeight.value) : props.height) - 2 - (props.viz.legend !== false && model.value.series.length > 1 ? 26 : 0) - model.value.notices.length * 18);
-  return { w, h, left: horizontal.value ? 105 : 60, right: w - 20, top: 18, bottom: h - 32 };
-});
-const geometry = computed(() => {
-  const { rows, series, time } = model.value;
-  const cells = rows.map((row) => {
-    let positive = 0;
-    let negative = 0;
-    return series.map((s) => {
-      const value = row.values.get(s.key);
+const stacked = computed(() => chartStacked(props.viz));
+const x = (row: ChartRow) => row.x;
+const accessors = computed(() => model.value.series.map(s => (row: ChartRow) => row.values.get(s.key)?.coordinate ?? Number.NaN));
+const colors = computed(() => model.value.series.map(s => s.color));
+const plotHost = ref<HTMLElement | null>(null);
+const { height: plotHeight } = useElementSize(plotHost);
+const chartHeight = computed(() => Math.max(60, plotHeight.value || props.height - 30));
+const extent = computed(() => {
+  let low = 0, high = 0;
+  for (const row of model.value.rows) {
+    let positive = 0, negative = 0;
+    for (const value of row.values.values()) {
       const n = value?.coordinate ?? 0;
-      const start = stacked.value ? n < 0 ? negative : positive : 0;
       if (stacked.value) { if (n < 0) negative += n; else positive += n; }
-      return { series: s, row, value, start, end: start + n };
+      else { low = Math.min(low, n); high = Math.max(high, n); }
+    }
+    if (stacked.value) { low = Math.min(low, negative); high = Math.max(high, positive); }
+  }
+  return chartTicks(low, high, props.count);
+});
+const domain = computed<[number, number]>(() => [extent.value[0], extent.value.at(-1) ?? 1]);
+const xDomain = computed<[number, number]>(() => {
+  const rows = model.value.rows;
+  const first = rows[0]?.x ?? 0, last = rows.at(-1)?.x ?? 0;
+  if (!model.value.time) return [-0.5, Math.max(0.5, rows.length - 0.5)];
+  let step = Infinity;
+  for (let i = 1; i < rows.length; i++) if (rows[i].x > rows[i - 1].x) step = Math.min(step, rows[i].x - rows[i - 1].x);
+  if (!Number.isFinite(step)) step = 60000;
+  return [first - step / 2, last + step / 2];
+});
+const timeFormatter = computed(() => chartTimeFormatter(props.frame, props.viz, props.count, preferences.zone));
+const xScale = computed(() => model.value.time && !horizontal.value ? Scale.scaleUtc() : Scale.scaleLinear());
+const categoryTicks = computed(() => model.value.time ? undefined : model.value.rows.map(r => r.x));
+function xTick(value: number | Date) {
+  return model.value.time ? timeFormatter.value.format(Number(value)).replaceAll(",", "") : model.value.rows[Number(value)]?.label ?? "";
+}
+const yTick = (value: number | Date) => chartValue(Number(value), props.viz.format).text;
+const active = ref<number | null>(null);
+watch(model, () => { active.value = null; });
+function keydown(event: KeyboardEvent) {
+  if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Escape"].includes(event.key)) return;
+  event.preventDefault();
+  const last = model.value.rows.length - 1;
+  if (event.key === "Escape") active.value = null;
+  else if (event.key === "Home") active.value = 0;
+  else if (event.key === "End") active.value = last;
+  else active.value = Math.max(0, Math.min(last, (active.value ?? 0) + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1)));
+}
+function tooltip(row: ChartRow): string {
+  let total: FrameNumber = 0;
+  const lines = model.value.series.map(s => {
+    const value = row.values.get(s.key);
+    if (value) {
+      // Totals use the raw frame values, independent of display units and formatting.
+      const raw = value.raw;
+      if (typeof total === "number" && typeof raw === "number") total += raw;
+      else { const a = isExact(total) ? total : parseExact(total), b = isExact(raw) ? raw : parseExact(raw); if (a && b) total = addExact(a, b); }
+    }
+    return `<div class="panel-chart__tooltip-row"><span><i style="background:${s.color}"></i>${escapeHtml(s.label)}</span><strong>${escapeHtml(value?.exact ?? "NULL")}</strong></div>`;
+  }).join("");
+  return `<div role="tooltip" class="panel-chart__tooltip"><strong>${escapeHtml(row.label)}</strong>${lines}<div class="panel-chart__tooltip-row panel-chart__total"><span>${escapeHtml(t('common.total'))}</span><strong>${escapeHtml(chartValue(total, props.viz.format).exact)}</strong></div></div>`;
+}
+const barTooltipTriggers = computed(() => horizontal.value ? { [StackedBar.selectors.barGroup]: tooltip, [GroupedBar.selectors.barGroup]: tooltip } : {});
+const tooltipTemplate = (_datum: unknown, _x: number | Date, data: ChartRow[], index?: number) => index === undefined || !data[index] ? "" : tooltip(data[index]);
+const keyboardTooltip = computed(() => active.value === null || !model.value.rows[active.value] ? "" : tooltip(model.value.rows[active.value]));
+function barLabels(svg: SVGSVGElement) {
+  svg.querySelectorAll('.panel-chart__value').forEach(e => e.remove());
+  if (!props.viz.show_values || mark.value !== "bar") return;
+  const groups = svg.querySelectorAll(`.${StackedBar.selectors.barGroup}, .${GroupedBar.selectors.barGroup}`);
+  groups.forEach((group, rowIndex) => {
+    const row = model.value.rows[rowIndex];
+    if (!row) return;
+    group.querySelectorAll<SVGPathElement>(`.${StackedBar.selectors.bar}, .${GroupedBar.selectors.bar}`).forEach((bar, seriesIndex) => {
+      const series = model.value.series[seriesIndex];
+      const value = series && row.values.get(series.key);
+      if (!value) return;
+      const box = bar.getBBox();
+      if (stacked.value && (horizontal.value ? box.width < 30 : box.height < 13)) return;
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('class', 'panel-chart__value');
+      text.setAttribute('x', String(box.x + box.width / 2));
+      text.setAttribute('y', String(box.y + box.height / 2 + 3));
+      text.setAttribute('text-anchor', 'middle');
+      text.textContent = value.text;
+      bar.parentNode?.append(text);
     });
   });
-  const bounds = cells.flat().flatMap((c) => [c.start, c.end]);
-  let low = bounds.reduce((a, b) => Math.min(a, b), 0);
-  let high = bounds.reduce((a, b) => Math.max(a, b), 0);
-  if (low === high) high = low + 1;
-  const span = high - low;
-  if (!Number.isFinite(span)) return { cells: [], low: 0, high: 1, error: "The chart's numeric range is too wide. Use a table to see exact values.", x: (_v: number) => 0, y: (_v: number) => 0, band: 1 };
-  if (low < 0) low -= span * 0.03;
-  high += span * 0.12;
-  let xLow = rows[0]?.x ?? 0;
-  let xHigh = rows.at(-1)?.x ?? 1;
-  let step = 1;
-  if (time) {
-    const differences = rows.slice(1).map((r, i) => r.x - rows[i].x).filter((v) => v > 0);
-    step = differences.length ? Math.min(...differences) : 86400000;
-    xLow -= step / 2;
-    xHigh += step / 2;
-    if (props.count && props.range) { xLow = props.range.start; xHigh = props.range.end; }
-  } else { xLow = -0.5; xHigh = Math.max(0.5, rows.length - 0.5); }
-  const p = plot.value;
-  const xLength = horizontal.value ? p.bottom - p.top : p.right - p.left;
-  const x = (value: number) => (horizontal.value ? p.top : p.left) + (value - xLow) / (xHigh - xLow || 1) * xLength;
-  const y = (value: number) => horizontal.value ? p.left + (value - low) / (high - low) * (p.right - p.left) : p.bottom - (value - low) / (high - low) * (p.bottom - p.top);
-  return { cells, low, high, x, y, band: Math.min(60, step / (xHigh - xLow || 1) * xLength * 0.75), error: null };
-});
-function point(cell: (typeof geometry.value.cells)[number][number], seriesIndex: number) {
-  const g = geometry.value;
-  const band = stacked.value ? g.band : g.band / Math.max(1, model.value.series.length);
-  const center = g.x(cell.row.x) + (mark.value === "bar" && !stacked.value ? -g.band / 2 + band * (seriesIndex + 0.5) : 0);
-  const end = g.y(cell.end);
-  const start = g.y(cell.start);
-  return { x: horizontal.value ? end : center, y: horizontal.value ? center : end, bx: horizontal.value ? Math.min(start, end) : center - band / 2, by: horizontal.value ? center - band / 2 : Math.min(start, end), width: horizontal.value ? Math.abs(end - start) : band * 0.9, height: horizontal.value ? band * 0.9 : Math.abs(end - start) };
 }
-function path(index: number, area = false): string {
-  const paths: string[] = [];
-  let segment: [number, number, number][] = [];
-  const flush = () => {
-    if (!segment.length) return;
-    const pairs = segment.map(([x, y]) => `${x},${y}`);
-    let d = `M${pairs.join(" L")}`;
-    if (area) d += ` L${[...segment].reverse().map(([x, _y, base]) => horizontal.value ? `${base},${_y}` : `${x},${base}`).join(" L")} Z`;
-    paths.push(d);
-    segment = [];
-  };
-  for (const row of geometry.value.cells) {
-    const cell = row[index];
-    if (!cell?.value) { flush(); continue; }
-    const p = point(cell, index);
-    segment.push([p.x, p.y, geometry.value.y(cell.start)]);
-  }
-  flush();
-  return paths.join(" ");
-}
-const ticks = computed(() => Array.from({ length: 4 }, (_, i) => geometry.value.low + (geometry.value.high - geometry.value.low) * i / 3));
-const timeTickFormatter = computed(() => {
-  const rows = model.value.rows;
-  const first = rows[0]?.x ?? 0;
-  const last = rows.at(-1)?.x ?? first;
-  const start = props.count && props.range ? props.range.start : first;
-  const end = props.count && props.range ? props.range.end : last;
-  const steps = rows.slice(1).map((r, i) => r.x - rows[i].x).filter((n) => n > 0);
-  const step = parseGranularityToMilliseconds(props.frame.interval) ?? (steps.length ? Math.min(...steps) : 0);
-  const columnName = props.count ? "time" : props.viz.x;
-  const kind = props.viz.columns?.[columnName ?? ""]?.kind ?? props.frame.columns.find((c) => c.name === columnName)?.kind;
-  const dateOnly = kind === "date" || step >= 86400000;
-  const timeZone = kind === "date" ? "UTC" : preferences.zone;
-  const day = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
-  const year = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" });
-  const showDate = dateOnly || day.format(start) !== day.format(end);
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    ...(showDate ? { month: "short", day: "numeric" } : {}),
-    ...(year.format(start) !== year.format(end) ? { year: "numeric" } : {}),
-    ...(!dateOnly ? { hour: "2-digit", minute: "2-digit", ...(step < 60000 ? { second: "2-digit" } : {}), hourCycle: "h23" } : {}),
-  });
-});
-function tickLabel(row: ChartModel["rows"][number]): string {
-  if (model.value.time) return timeTickFormatter.value.format(row.x).replaceAll(",", "");
-  return row.label.length > 18 ? row.label.slice(0, 16) + "…" : row.label;
-}
-const xTicks = computed(() => {
-  let last = -Infinity;
-  const spacing = horizontal.value ? 20 : Math.max(80, ...model.value.rows.map((r) => tickLabel(r).length * 6 + 12));
-  return model.value.rows.filter((row) => {
-    const position = geometry.value.x(row.x);
-    if (position - last < spacing) return false;
-    last = position;
-    return true;
-  });
-});
-const tooltip = ref("");
 </script>
 
 <template>
-  <div ref="host" class="panel-chart">
-    <p v-if="result.error || geometry.error" role="alert" class="text-xs text-destructive">{{ result.error || geometry.error }}</p>
-    <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">No data</p>
+  <div class="panel-chart">
+    <p v-if="result.error" role="alert" class="text-xs text-destructive">{{ result.error }}</p>
+    <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <template v-else>
-      <svg :width="plot.w" :height="plot.h" role="img" :aria-label="`${mark} chart`" class="panel-chart__plot">
-        <text v-if="approximate" class="panel-chart__approximate" :x="plot.left - 15" :y="plot.top - 4">≈<title>Approximate coordinates. Tooltips show exact values.</title></text>
-        <g v-for="tick in ticks" :key="tick" class="panel-chart__axis">
-          <line :x1="horizontal ? geometry.y(tick) : plot.left" :x2="horizontal ? geometry.y(tick) : plot.right" :y1="horizontal ? plot.top : geometry.y(tick)" :y2="horizontal ? plot.bottom : geometry.y(tick)" />
-          <text :x="horizontal ? geometry.y(tick) : plot.left - 5" :y="horizontal ? plot.bottom + 18 : geometry.y(tick) + 3" :text-anchor="horizontal ? 'middle' : 'end'">{{ formatNumber(tick, viz.format, { compact: true }).text }}</text>
-        </g>
-        <text v-for="row in xTicks" :key="row.key" class="panel-chart__tick" :x="horizontal ? plot.left - 5 : geometry.x(row.x)" :y="horizontal ? geometry.x(row.x) + 3 : plot.bottom + 18" :text-anchor="horizontal ? 'end' : 'middle'"><title>{{ row.label }}</title>{{ tickLabel(row) }}</text>
-        <template v-if="mark !== 'bar'">
-          <path v-for="(series, i) in model.series" :key="series.key" :d="path(i, mark === 'area')" :fill="mark === 'area' ? series.color : 'none'" :fill-opacity="0.25" :stroke="series.color" stroke-width="2" />
-        </template>
-        <g v-for="row in geometry.cells" :key="row[0]?.row.key">
-          <template v-for="(cell, i) in row" :key="cell.series.key">
-            <g v-if="cell.value" class="panel-chart__point" tabindex="0" :aria-label="`${cell.row.label}, ${cell.series.label}: ${cell.value.exact}`" @mouseenter="tooltip = `${cell.row.label} · ${cell.series.label}: ${cell.value.exact}`" @mouseleave="tooltip = ''" @focus="tooltip = `${cell.row.label} · ${cell.series.label}: ${cell.value.exact}`" @blur="tooltip = ''">
-              <title>{{ cell.row.label }} · {{ cell.series.label }}: {{ cell.value.exact }}</title>
-              <rect v-if="mark === 'bar'" class="panel-chart__bar" :x="point(cell, i).bx" :y="point(cell, i).by" :width="point(cell, i).width" :height="point(cell, i).height" :fill="cell.series.color" rx="2" />
-              <circle v-else :cx="point(cell, i).x" :cy="point(cell, i).y" r="3" :fill="cell.series.color" />
-              <text v-if="viz.show_values && (!stacked || mark !== 'bar' || (horizontal ? point(cell, i).width : point(cell, i).height) >= 12)" class="panel-chart__value" :style="stacked && mark === 'bar' ? { fill: cell.series.labelColor } : undefined" :class="{ 'panel-chart__value--stacked': stacked && mark === 'bar' }" :x="stacked && mark === 'bar' ? point(cell, i).bx + point(cell, i).width / 2 : point(cell, i).x + (horizontal ? 4 : 0)" :y="stacked && mark === 'bar' ? point(cell, i).by + point(cell, i).height / 2 + 3 : point(cell, i).y - (horizontal ? 0 : 5)" :text-anchor="horizontal && !(stacked && mark === 'bar') ? 'start' : 'middle'">{{ cell.value.text }}</text>
-            </g>
+      <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="`${mark} chart. Use arrow keys to inspect buckets.`" @keydown="keydown" @focus="active = 0" @blur="active = null">
+        <VisXYContainer :data="model.rows" :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :padding="{ left: 8, right: 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
+          <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="!horizontal && !model.time ? -45 : 0" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
+          <VisAxis :type="horizontal ? 'x' : 'y'" :tick-values="extent" tick-text-color="var(--muted-foreground)" :tick-format="yTick" :tick-line="false" :domain-line="false" />
+          <VisStackedBar v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.2" :rounded-corners="2" />
+          <VisGroupedBar v-else-if="mark === 'bar'" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :group-padding="0.2" :bar-padding="0.05" :bar-min-height="0" />
+          <VisLine v-else-if="mark === 'line'" :x="x" :y="accessors" :color="colors" />
+          <VisArea v-else-if="stacked" :x="x" :y="accessors" :color="colors" :opacity="0.35" :line="true" />
+          <template v-else>
+            <VisArea v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :color="colors[i]" :opacity="0.35" :line="true" />
           </template>
-        </g>
-      </svg>
-      <p v-if="tooltip" class="panel-chart__tooltip" role="tooltip">{{ tooltip }}</p>
+          <template v-if="viz.show_values && mark !== 'bar'">
+            <VisScatter v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :size="0" :label="(row: ChartRow) => row.values.get(model.series[i].key)?.text ?? ''" label-color="var(--foreground)" label-position="top" />
+          </template>
+          <VisTooltip :triggers="barTooltipTriggers" />
+          <VisCrosshair v-if="!horizontal" :x="x" :y="stacked ? undefined : accessors" :y-stacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hide-when-far-from-pointer="false" :force-show-at="active === null ? undefined : model.rows[active]?.x" />
+        </VisXYContainer>
+      </div>
+      <div v-if="keyboardTooltip" class="panel-chart__keyboard" aria-live="polite" v-html="keyboardTooltip" />
       <div v-if="viz.legend !== false && model.series.length > 1" class="panel-chart__legend" aria-label="Series legend"><span v-for="series in model.series" :key="series.key"><i :style="{ background: series.color }" />{{ series.label }}</span></div>
       <p v-for="notice in model.notices" :key="notice" role="status" class="text-xs text-muted-foreground">{{ notice }}</p>
     </template>
   </div>
 </template>
 
-<style scoped>
-.panel-chart { width: 100%; height: 100%; overflow: auto; position: relative; }
-.panel-chart__plot { display: block; overflow: visible; }
-.panel-chart__approximate { fill: var(--muted-foreground); font-size: 12px; }
-.panel-chart__axis line { stroke: var(--border); stroke-opacity: 0.5; }
-.panel-chart__axis text, .panel-chart__tick { fill: var(--muted-foreground); font-size: 10px; }
-.panel-chart__value { fill: var(--foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
-.panel-chart__value--stacked { font-size: 9px; }
-.panel-chart__legend { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; font-size: 11px; }
+<style>
+.panel-chart { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; --vis-tooltip-padding: 0px; --vis-tooltip-background-color: transparent; --vis-tooltip-border-color: transparent; --vis-tooltip-shadow-color: transparent; --vis-axis-tick-label-color: var(--muted-foreground); --vis-axis-grid-color: var(--border); --vis-crosshair-line-stroke-color: var(--muted-foreground); }
+.panel-chart__plot { flex: 1 1 0; min-height: 60px; min-width: 200px; overflow: hidden; }
+.panel-chart__value, .panel-chart .vis-scatter-label { fill: var(--foreground); stroke: var(--background); stroke-width: 3px; paint-order: stroke; font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.panel-chart__legend { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: 11px; }
 .panel-chart__legend span { display: inline-flex; align-items: center; gap: 4px; }
-.panel-chart__legend i { width: 8px; height: 8px; border-radius: 2px; }
-.panel-chart__tooltip { position: absolute; top: 0; right: 0; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font-size: 11px; pointer-events: none; max-width: 100%; overflow-wrap: anywhere; z-index: 1; }
-.panel-chart__point:hover { opacity: 0.8; }
+.panel-chart__legend i, .panel-chart__tooltip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.panel-chart__tooltip { min-width: 160px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; }
+.panel-chart__tooltip-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 4px; }
+.panel-chart__total { border-top: 1px solid var(--border); padding-top: 4px; }
+.panel-chart__keyboard { position: absolute; top: 0; right: 0; z-index: 2; pointer-events: none; }
 </style>

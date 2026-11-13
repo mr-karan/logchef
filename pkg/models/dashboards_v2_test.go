@@ -1092,6 +1092,7 @@ func TestDashboardResultCharts(t *testing.T) {
 		`{"type":"pie","label":"service","value":"n","min_slice_percent":1,"donut":true}`,
 		`{"type":"toplist","label":"service","value":"n","max_rows":20}`,
 	} {
+		viz = strings.TrimSuffix(viz, "}") + `,"format":{"decimals":3}}`
 		panel := strings.Replace(v2TablePanel, `{"type":"table","visible_columns":["a","b"]}`, viz, 1)
 		raw := v2Blob(v2Layout, panel)
 		canonical, err := CanonicalDashboardPanels(raw)
@@ -1104,12 +1105,13 @@ func TestDashboardResultCharts(t *testing.T) {
 		}
 		for _, future := range []string{`"compare":{}`, `"sparkline":true`, `"thresholds":[]`, `"rules":[]`, `"combine":"sum"`} {
 			bad := strings.Replace(string(raw), `"type":`, future+`,"type":`, 1)
-			if ValidateDashboardPanels(json.RawMessage(bad)) == nil {
-				t.Errorf("accepted %s", future)
+			if err := ValidateDashboardPanels(json.RawMessage(bad)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Errorf("expected unknown field for %s, got %v", future, err)
 			}
 		}
 	}
-	for _, viz := range []string{
+	why := []string{"needs viz.x", "needs viz.x", "repeats a viz.y", "invalid role name", "viz.x_scale", "viz.orientation", "needs viz.label", "viz.min_slice_percent", "viz.min_slice_percent", "viz.max_rows", "role its visualization does not use", "role its visualization does not use"}
+	for i, viz := range []string{
 		`{"type":"chart","x":"day","y":[]}`, `{"type":"chart","y":["a"]}`,
 		`{"type":"chart","x":"day","y":["a","a"]}`, `{"type":"chart","x":"day","y":[""]}`,
 		`{"type":"chart","x":"day","y":["a"],"x_scale":"log"}`, `{"type":"chart","x":"day","y":["a"],"orientation":"diagonal"}`,
@@ -1118,14 +1120,33 @@ func TestDashboardResultCharts(t *testing.T) {
 		`{"type":"stat","value":"n","x":"day"}`, `{"type":"table","label":"day"}`,
 	} {
 		raw := v2Blob(v2Layout, strings.Replace(v2TablePanel, `{"type":"table","visible_columns":["a","b"]}`, viz, 1))
-		if ValidateDashboardPanels(raw) == nil {
-			t.Errorf("accepted %s", viz)
+		if err := ValidateDashboardPanels(raw); err == nil || !strings.Contains(err.Error(), why[i]) {
+			t.Errorf("expected %s for %s, got %v", why[i], viz, err)
 		}
 	}
 	for _, role := range []string{`"x":"time"`, `"y":[]`, `"series":"series"`, `"label":"series"`, `"value":"count"`} {
 		raw := strings.Replace(v2ChartPanel, `"mark":"bar"`, role+`,"mark":"bar"`, 1)
-		if ValidateDashboardPanels(v2Blob(v2Layout, raw)) == nil {
-			t.Errorf("stored count role %s", role)
+		if err := ValidateDashboardPanels(v2Blob(v2Layout, raw)); err == nil || !strings.Contains(err.Error(), "result roles or columns in count mode") {
+			t.Errorf("expected count role rejection for %s, got %v", role, err)
+		}
+	}
+}
+
+func TestDashboardCountChartFormats(t *testing.T) {
+	for _, viz := range []string{
+		`{"type":"chart","mark":"bar","show_values":true,"legend":false,"orientation":"horizontal","x_scale":"category"}`,
+		`{"type":"chart","format":{"decimals":3}}`,
+		`{"type":"pie","format":{"decimals":3}}`,
+		`{"type":"toplist","format":{"decimals":3}}`,
+	} {
+		raw := v2Blob(v2Layout, strings.Replace(v2ChartPanel, `{"type":"chart","mark":"bar","stack":"stacked"}`, viz, 1))
+		canonical, err := CanonicalDashboardPanels(raw)
+		if err != nil {
+			t.Fatalf("%s: %v", viz, err)
+		}
+		features, err := DashboardFeatures(canonical)
+		if err != nil || !slices.Contains(features, "result_charts") {
+			t.Fatalf("%s features %v: %v", viz, features, err)
 		}
 	}
 }

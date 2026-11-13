@@ -34,7 +34,7 @@ describe("result chart frames", () => {
     const grouped = resultFrame({ columns: [{ name: "time", type: "DateTime" }, { name: "service", type: "String" }, { name: "n", type: "UInt32" }], rows: [] });
     expect(suggestRoles(grouped, "chart")).toMatchObject({ x: "time", y: ["n"], series: "service" });
     const native = resultFrame({ columns: [{ name: "service", type: "String" }, { name: "n", type: "String" }], rows: [{ service: "api", n: "12" }, { service: "web", n: "13" }], untyped: true });
-    expect(suggestViz(native).columns).toBeUndefined();
+    expect(suggestViz(native).columns).toMatchObject({ n: { kind: "number", confidence: "confirmed" } });
     expect(suggestViz(native)).toMatchObject({ type: "chart", mark: "bar", y: ["n"] });
   });
 });
@@ -90,14 +90,14 @@ it("caps pies at 50 query-ordered slices without changing their shares", () => {
   const pie = buildPanelList(source, { type: "pie", label: "label", value: "n" }, false);
   expect(pie.items).toHaveLength(50);
   expect(pie.items[0].label).toBe("label 0");
-  expect(pie.items[49].label).toBe("label 49");
+  expect(pie.items[49].label).toBe("Other");
   expect(pie.items[0].percentage).toBeCloseTo(100 / 52);
-  expect(pie.notices).toContain("50 of 52 slices shown.");
+  expect(pie.notices).toContain("50 of 52 slices shown. Overflow folded into Other.");
 });
 
-it("treats equivalent time instants as duplicate result keys", () => {
+it("retains full timestamp strings as result keys", () => {
   const source = resultFrame({ columns: [{ name: "t", type: "DateTime64" }, { name: "n", type: "UInt32" }], rows: [{ t: "2026-11-10T00:00:00Z", n: 1 }, { t: "2026-11-10T01:00:00+01:00", n: 2 }] });
-  expect(() => buildPanelChart(source, { type: "chart", x: "t", y: ["n"] }, false)).toThrow("1 duplicate key(s)");
+  expect(buildPanelChart(source, { type: "chart", x: "t", y: ["n"] }, false).rows).toHaveLength(2);
 });
 
 it("retains the exact real tiny remainder with a categorical color", () => {
@@ -106,7 +106,7 @@ it("retains the exact real tiny remainder with a categorical color", () => {
   expect(pie.total?.exact).toBe("117,301");
   expect(pie.items.map((i) => [i.label, i.value.exact])).toEqual([["POST", "59,500"], ["GET", "57,800"], ["Other", "1"]]);
   expect(pie.items[2].percentage).toBeCloseTo(100 / 117301);
-  expect(pie.items[2].color).toMatch(/^var\(--chart-\d\)$/);
+  expect(pie.items[2].color).toBe("var(--panel-chart-other)");
   expect(new Set(pie.items.map((i) => i.color)).size).toBe(3);
 });
 it("does not invent a remainder when all slices meet the threshold", () => {

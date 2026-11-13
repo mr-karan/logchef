@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { chartStacked } from "@/utils/panelCharts";
 import PanelResultOptions from "./PanelResultOptions.vue";
 import type { PanelFrame } from "@/utils/panelFrame";
 import { useI18n } from "vue-i18n";
@@ -47,7 +48,7 @@ const BREAKDOWN_VIEWS: { value: "toplist" | "pie"; label: string }[] = [
 
 // The effective chart style, matching what PanelChart renders.
 const effectiveMark = computed<DashboardChartMark>(() => (props.viz.type === "chart" ? props.viz.mark ?? "line" : "line"));
-const effectiveStack = computed(() => (props.viz.type === "chart" ? props.viz.stack ?? "stacked" : "stacked"));
+const effectiveStack = computed(() => (props.viz.type === "chart" ? chartStacked(props.viz) ? "stacked" : "none" : "stacked"));
 
 // Bars and areas stack by default, as schema 1 drew them.
 function setMark(mark: DashboardChartMark) {
@@ -68,7 +69,20 @@ function setBreakdownView(view: "toplist" | "pie") {
 function setXScale(event: Event) {
   if (props.viz.type !== "chart" || !(event.target instanceof HTMLSelectElement)) return;
   const value = event.target.value;
-  if (value === "auto" || value === "time" || value === "category") emit("update:viz", { ...props.viz, x_scale: value });
+  const viz = { ...props.viz };
+  if (value === "auto") delete viz.x_scale;
+  else if (value === "time" || value === "category") viz.x_scale = value;
+  emit("update:viz", viz);
+}
+
+function toggleChartOption(option: "show_values" | "legend" | "orientation") {
+  if (props.viz.type !== "chart") return;
+  const viz = { ...props.viz };
+  if (option === "show_values") { if (viz.show_values) delete viz.show_values; else viz.show_values = true; }
+  else if (option === "legend") { if (viz.legend === false) delete viz.legend; else viz.legend = false; }
+  else if (viz.orientation === "horizontal") delete viz.orientation;
+  else viz.orientation = "horizontal";
+  emit("update:viz", viz);
 }
 
 function setGroupBy(value: unknown) {
@@ -229,13 +243,13 @@ function removeColumn(name: string) {
     </div>
   </div>
   <div v-if="viz.type === 'chart'" class="mt-4 space-y-3">
-    <div class="space-y-1"><Label for="chart-scale">X scale</Label><select id="chart-scale" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x_scale ?? 'auto'" @change="setXScale"><option value="auto">Auto, time for dates</option><option value="time">Time, oldest first</option><option value="category">Category, query order</option></select></div>
-    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.show_values ?? false" @change="emit('update:viz', { ...viz, show_values: !viz.show_values })" />Show values</label>
-    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.legend ?? true" @change="emit('update:viz', { ...viz, legend: !(viz.legend ?? true) })" />Show legend</label>
-    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.orientation === 'horizontal'" @change="emit('update:viz', { ...viz, orientation: viz.orientation === 'horizontal' ? 'vertical' : 'horizontal' })" />Horizontal</label>
+    <div class="space-y-1"><Label for="chart-scale">{{ t('dashboardBuilder.XScale') }}</Label><select id="chart-scale" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x_scale ?? 'auto'" @change="setXScale"><option value="auto">{{ t('dashboardBuilder.AutoTimeForDates') }}</option><option value="time">{{ t('dashboardBuilder.TimeOldestFirst') }}</option><option value="category">{{ t('dashboardBuilder.CategoryQueryOrder') }}</option></select></div>
+    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.show_values ?? false" @change="toggleChartOption('show_values')" />{{ t('dashboardBuilder.ShowValues') }}</label>
+    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.legend ?? true" @change="toggleChartOption('legend')" />{{ t('dashboardBuilder.ShowLegend') }}</label>
+    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.orientation === 'horizontal'" @change="toggleChartOption('orientation')" />{{ t('dashboardBuilder.Horizontal') }}</label>
   </div>
-  <div v-if="viz.type === 'pie'" class="mt-4 space-y-2"><label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.donut ?? false" @change="emit('update:viz', { ...viz, donut: !viz.donut })" />Donut</label><Label for="pie-min">Fold slices below %</Label><Input id="pie-min" type="number" min="0.01" max="99.99" step="any" :model-value="viz.min_slice_percent ?? ''" @update:model-value="(v) => viz.type === 'pie' && emit('update:viz', { ...viz, min_slice_percent: v === '' ? undefined : Number(v) })" /></div>
-  <div v-if="viz.type === 'toplist'" class="mt-4 space-y-1"><Label for="toplist-max">Maximum rows</Label><Input id="toplist-max" type="number" min="1" max="10000" :model-value="viz.max_rows ?? 20" @update:model-value="(v) => viz.type === 'toplist' && emit('update:viz', { ...viz, max_rows: clampLimit(v) })" /></div>
+  <div v-if="viz.type === 'pie'" class="mt-4 space-y-2"><label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.donut ?? false" @change="emit('update:viz', { ...viz, donut: !viz.donut })" />{{ t('ui.donut') }}</label><Label for="pie-min">{{ t('dashboardBuilder.FoldSlicesBelow') }}</Label><Input id="pie-min" type="number" min="0.01" max="99.99" step="any" :model-value="viz.min_slice_percent ?? ''" @update:model-value="(v) => viz.type === 'pie' && emit('update:viz', { ...viz, min_slice_percent: v === '' ? undefined : Number(v) })" /></div>
+  <div v-if="viz.type === 'toplist'" class="mt-4 space-y-1"><Label for="toplist-max">{{ t('dashboardBuilder.MaximumRows') }}</Label><Input id="toplist-max" type="number" min="1" max="10000" :model-value="viz.max_rows ?? 20" @update:model-value="(v) => viz.type === 'toplist' && emit('update:viz', { ...viz, max_rows: clampLimit(v) })" /></div>
   <PanelResultOptions class="mt-4" :query="query" :viz="viz" :frame="frame" @update:viz="(v) => emit('update:viz', v)" />
 
 </template>
