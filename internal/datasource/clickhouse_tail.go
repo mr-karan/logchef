@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	// tailBatchLimit caps rows fetched per poll. A poll returning a full batch
-	// signals more rows are waiting past this poll's LIMIT; TailLogs re-polls
+	// tailBatchLimit caps rows fetched per poll. A poll whose result was cut,
+	// by the batch limit or a source limit, signals more rows are waiting past
+	// this page; TailLogs re-polls
 	// immediately instead of waiting for the next tick, so a busy boundary drains
 	// rather than silently losing the remainder. The row-rate ceiling upstream
 	// (server-side) is what actually drops excess rows for a sustained firehose.
@@ -66,6 +67,12 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 	client, err := p.manager.GetConnection(source.ID)
 	if err != nil {
 		return fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
+	}
+
+	// The poll SQL composes the filter, and SETTINGS in it could end a poll
+	// early without an error. The tail would skip the rest of that page.
+	if clickhouse.SettingsMayCut(buildTailPollSQL(source.GetFullTableName(), source.MetaTSField, strings.TrimSpace(req.Query), time.Time{}, time.Time{})) {
+		return &ValidationError{Field: "query", Message: "the tail filter's SETTINGS can end a poll early without an error. Set every overflow mode to 'throw' and leave out max_result_rows and max_result_bytes"}
 	}
 
 	interval := req.PollInterval
@@ -121,7 +128,7 @@ func (p *ClickHouseProvider) pollTailLogs(ctx context.Context, client *clickhous
 			windowStart = drainWindowStart
 			offset = drainOffset
 		}
-		rows, err := p.pollTail(ctx, client, source, tsField, filter, windowStart, scanUpperBound, offset)
+		rows, cut, err := p.pollTail(ctx, client, source, tsField, filter, windowStart, scanUpperBound, offset)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -151,7 +158,7 @@ func (p *ClickHouseProvider) pollTailLogs(ctx context.Context, client *clickhous
 				}
 			}
 
-			if len(rows) >= tailBatchLimit {
+			if cut {
 				draining = true
 				drainOffset += len(rows)
 				consecutiveDrains++
@@ -219,13 +226,15 @@ func (p *ClickHouseProvider) now64(ctx context.Context, client *clickhouse.Clien
 }
 
 // pollTail builds and runs a single poll query for rows at/after the cursor.
-func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Client, source *models.Source, tsField, filter string, cursor, upperBound time.Time, offset int) ([]map[string]any, error) {
+// cut reports a page that a limit may have ended before its last row, so the
+// next page continues from its offset.
+func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Client, source *models.Source, tsField, filter string, cursor, upperBound time.Time, offset int) (rows []map[string]any, cut bool, err error) {
 	sql := buildTailPollSQL(source.GetFullTableName(), tsField, filter, cursor, upperBound)
 
 	qb := client.QueryBuilder(source.GetFullTableName(), tailBatchLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(sql, tailBatchLimit, tailBatchLimit, tailBatchLimit)
 	if err != nil {
-		return nil, fmt.Errorf("build tail query: %w", err)
+		return nil, false, fmt.Errorf("build tail query: %w", err)
 	}
 	if offset > 0 {
 		// The query builder owns LIMIT. Append OFFSET after it so a drain page
@@ -235,9 +244,9 @@ func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Cl
 
 	result, err := client.QueryWithOptions(ctx, buildResult.SQL, buildResult.QueryOptions(tailPollTimeoutSeconds))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return result.Logs, nil
+	return result.Logs, result.Stats.Truncation != models.TruncationNone, nil
 }
 
 // buildTailPollSQL composes one bounded scan page. Both bounds are emitted as

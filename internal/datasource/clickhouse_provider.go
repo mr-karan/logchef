@@ -600,11 +600,16 @@ const (
 )
 
 // formatAlertQuery is the one ClickHouse alert SQL check, shared by save-time
-// validation and evaluation so both accept and run the same statement.
+// validation and evaluation so both accept and run the same statement. An
+// alert compares a value its query computed, so SETTINGS that let ClickHouse
+// end the query early without an error are rejected.
 func formatAlertQuery(raw string) (string, error) {
 	query, err := clickhouse.FormatSelectQuery(raw)
 	if err != nil {
 		return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	if clickhouse.SettingsMayCut(query) {
+		return "", &ValidationError{Field: "query", Message: "the alert query's SETTINGS can end it early without an error, so its value may be wrong. Set every overflow mode to 'throw' and leave out max_result_rows and max_result_bytes"}
 	}
 	return query, nil
 }
@@ -638,8 +643,10 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 	if err != nil {
 		return nil, err
 	}
-	// An empty truncated result would read as value 0 and drive the alert state.
-	if result.Stats.Truncated && len(result.Logs) == 0 {
+	// An alert reads the first row, and a result limit only cuts rows after
+	// the first block. An empty truncated result would read as value 0 and
+	// drive the alert state.
+	if result.Stats.Truncation != models.TruncationNone && len(result.Logs) == 0 {
 		return nil, fmt.Errorf("alert query's first row exceeds the %d byte result limit", alertMaxResponseBytes)
 	}
 	return result, nil
