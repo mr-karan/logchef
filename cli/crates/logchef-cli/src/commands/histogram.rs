@@ -140,6 +140,7 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
             team_id,
             source_id,
             &TranslateRequest {
+                variables: Vec::new(),
                 query,
                 start_time: Some(wall.start.clone()),
                 end_time: Some(wall.end.clone()),

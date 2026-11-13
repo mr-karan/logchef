@@ -133,7 +133,7 @@ logchef collections "Error Dashboard" --var env=prod        # fill a {{env}} var
 logchef saved-queries                                       # list saved queries
 logchef saved-queries 14                                    # run by id
 logchef saved-queries 'https://logs.example.com/logs/explore?team=8&source=11&id=14'
-logchef saved-queries "Error Dashboard" --show-sql          # print resolved query, don't run
+logchef saved-queries "Error Dashboard" --show-sql          # print template, variable values and origins, plus translated LogchefQL
 ```
 
 Collections/saved queries can be either LogchefQL or native; the `TYPE` column
@@ -149,6 +149,16 @@ quoting per dialect.
 Use `--var d=2026-11-12` without adding quotes to the value. Overrides retain
 the saved variable type. Optional `[[ ]]` blocks are rendered by the server.
 Date-only values reject timestamps and impossible calendar dates.
+
+Overrides use `--var name=value` and retain the saved type. An omitted override
+uses the non-empty saved value, then the saved default. Empty strings, null,
+and empty arrays count as empty. Explicit `--var env=` clears the value and
+bypasses the default. Repeated `--var env=prod --var env=stage` produces an
+array for variables with options or used in `IN (...)`; one value stays a
+scalar. Unknown names and malformed overrides fail with the saved names.
+Saved-query `--show-sql` prints the template and each resolved variable's
+name, type, value, and origin (`--var`, saved value, or default). LogchefQL
+also prints the server's translated SQL without executing the query.
 
 ## Handing off to the UI
 

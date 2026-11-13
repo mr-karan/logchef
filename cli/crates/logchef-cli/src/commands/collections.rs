@@ -70,7 +70,7 @@ pub struct CollectionsArgs {
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
 
-    /// Variable overrides (format: name=value)
+    /// Variable overrides (name=value). Empty clears the default. Repeat for options or IN (...) to select multiple values.
     #[arg(long = "var", short = 'V', value_name = "NAME=VALUE")]
     variables: Vec<String>,
 }
@@ -322,19 +322,21 @@ async fn run_collection(
     let content: CollectionQueryContent =
         serde_json::from_str(&collection.query_content).context("Failed to parse query content")?;
 
-    let variables = content.query_variables(&args.variables);
+    let variables = content.query_variables(&args.variables)?;
     let final_query = content.content.clone().unwrap_or_default();
 
     let (start, end) = if let Some(since) = &args.since {
         // Use override
         let end = Utc::now();
-        let start = end - parse_duration(since)?;
-        (start, end)
+        logchef_core::timerange::calendar_range(since, end, ctx.defaults.timezone.as_deref())
+            .map(|result| result.map_err(anyhow::Error::from))
+            .unwrap_or_else(|| Ok((end - parse_duration(since)?, end)))?
     } else if let Some(tr) = &content.time_range {
         if let Some(rel) = &tr.relative {
             let end = Utc::now();
-            let start = end - parse_duration(rel)?;
-            (start, end)
+            logchef_core::timerange::calendar_range(rel, end, ctx.defaults.timezone.as_deref())
+                .map(|result| result.map_err(anyhow::Error::from))
+                .unwrap_or_else(|| Ok((end - parse_duration(rel)?, end)))?
         } else if let Some(abs) = &tr.absolute {
             let start = Utc
                 .timestamp_millis_opt(abs.start)
@@ -365,7 +367,7 @@ async fn run_collection(
 
     let response = if collection.query_language == "logchefql" {
         let time_range = resolve_time_range(
-            TimeInput::Instant { start, end },
+            TimeInput::Rfc3339 { start, end },
             ctx.defaults.timezone.as_deref(),
         );
         let request = QueryRequest {
@@ -382,16 +384,14 @@ async fn run_collection(
             .await
             .context("Query failed")?
     } else {
-        let request = SqlQueryRequest {
+        let request = SqlQueryRequest::new(
+            final_query,
             variables,
-            query_text: final_query,
-            limit: Some(limit),
-            timezone: None,
-            start_time: None,
-            end_time: None,
-            query_timeout: Some(30),
-        }
-        .with_time_range(start, end, ctx.defaults.timezone.as_deref());
+            Some(limit),
+            Some(30),
+            (start, end),
+            ctx.defaults.timezone.as_deref(),
+        );
         client
             .query_sql(team_id, source_id, &request)
             .await
