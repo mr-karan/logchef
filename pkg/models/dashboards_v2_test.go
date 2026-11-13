@@ -59,7 +59,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"unknown panel key", v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","description":"later","team_id":1,"source_id":1,"query":`+countQ+`,"viz":{"type":"stat"}}`), `unknown field "description"`},
 		{"unknown query key", panel(`{"mode":"count","language":"logchefql","text":"x","range":"today-6d"}`, `{"type":"stat"}`), `unknown field "range"`},
 		{"unknown viz key", panel(countQ, `{"type":"chart","show_values":true}`), `unknown field "show_values"`},
-		{"result-mode role is a later phase", panel(resultQ, `{"type":"stat","value":"n"}`), `unknown field "value"`},
+		{"comparison is a later phase", panel(resultQ, `{"type":"stat","value":"n","compare":{}}`), `unknown field "compare"`},
 		{"null value", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":null}`, `{"type":"stat"}`), "null at panels[0].query.group_by"},
 		{"trailing data", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]} {}`), "after top-level value"},
 		{"no tabs", json.RawMessage(`{"version":2,"features":[],"tabs":[],"panels":[]}`), "at least one tab"},
@@ -97,7 +97,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"translate_limit too large", panel(`{"mode":"count","language":"logchefql","text":"x","translate_limit":100001}`, `{"type":"stat"}`), "invalid query.translate_limit"},
 		{"bad viz type", panel(countQ, `{"type":"gauge"}`), "invalid viz.type"},
 		{"table in count mode", panel(countQ, `{"type":"table"}`), "table needs result mode"},
-		{"stat in result mode is a later phase", panel(resultQ, `{"type":"stat"}`), "only tables run in result mode"},
+		{"stat in result mode is a later phase", panel(resultQ, `{"type":"stat"}`), "needs viz.value"},
 		{"pie without group_by", panel(countQ, `{"type":"pie"}`), "needs query.group_by"},
 		{"toplist without group_by", panel(countQ, `{"type":"toplist"}`), "needs query.group_by"},
 		{"mark on stat", panel(countQ, `{"type":"stat","mark":"line"}`), "only a chart uses"},
@@ -105,7 +105,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"stack on stat", panel(countQ, `{"type":"stat","stack":"none"}`), "only a chart uses"},
 		{"bad stack", panel(countQ, `{"type":"chart","stack":"grouped"}`), "invalid viz.stack"},
 		{"reduce on chart", panel(countQ, `{"type":"chart","reduce":"sum"}`), "only a stat uses"},
-		{"reduce last is a later phase", panel(countQ, `{"type":"stat","reduce":"last"}`), "invalid viz.reduce"},
+		{"reduce last is a later phase", panel(countQ, `{"type":"stat","reduce":"median"}`), "invalid viz.reduce"},
 		{"donut on toplist", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":"a"}`, `{"type":"toplist","donut":true}`), "only a pie uses"},
 		{"visible_columns on chart", panel(countQ, `{"type":"chart","visible_columns":["a"]}`), "only a table uses"},
 		{"empty visible_columns", panel(resultQ, `{"type":"table","visible_columns":[]}`), "empty viz.visible_columns"},
@@ -647,7 +647,7 @@ func TestDashboardSchema2FeatureTableComplete(t *testing.T) {
 	paths := map[string]struct{}{}
 	var walk func(typ reflect.Type, prefix string)
 	walk = func(typ reflect.Type, prefix string) {
-		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice {
+		for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice || typ.Kind() == reflect.Map {
 			typ = typ.Elem()
 		}
 		if typ.Kind() != reflect.Struct {
@@ -998,5 +998,27 @@ func TestParseDashboardClientKnownFeature(t *testing.T) {
 		if len(c.Features) != want {
 			t.Fatalf("features: %v", c.Features)
 		}
+	}
+}
+
+func TestDashboardResultFrames(t *testing.T) {
+	panel := strings.Replace(v2TablePanel, `"viz":{"type":"table","visible_columns":["a","b"]}`, `"viz":{"type":"stat","value":"n","order_by":"day","reduce":"last","columns":{"n":{"kind":"number","confidence":"confirmed"}},"format":{"scale":1e-7,"decimals":2,"suffix":" Cr"}}`, 1)
+	raw := v2Blob(v2Layout, panel)
+	canonical, err := CanonicalDashboardPanels(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := DashboardFeatures(canonical)
+	if err != nil || !slices.Equal(features, []string{"formats", "result_frames"}) {
+		t.Fatalf("features %v: %v", features, err)
+	}
+	for _, replacement := range [][2]string{{`"last"`, `"median"`}, {`"confirmed"`, `"guessed"`}, {`"decimals":2`, `"decimals":11`}, {`"scale":1e-7`, `"scale":0`}, {`"suffix":" Cr"`, `"suffix":"12345678901234567"`}, {`"kind":"number"`, `"kind":"numeric"`}, {`"value":"n"`, `"value":""`}} {
+		if err := ValidateDashboardPanels(json.RawMessage(strings.Replace(string(raw), replacement[0], replacement[1], 1))); err == nil {
+			t.Errorf("accepted %v", replacement)
+		}
+	}
+	client, err := ParseDashboardClient(new("2"), "result_frames,formats")
+	if err != nil || !client.Supports("result_frames") || !client.Supports("formats") {
+		t.Fatalf("client %v: %v", client, err)
 	}
 }
