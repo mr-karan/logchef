@@ -3,12 +3,16 @@ import type { CalendarCellTriggerProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { CalendarCellTrigger, useForwardProps } from "reka-ui"
+import { isToday } from "@internationalized/date"
+import { usePreferencesStore } from "@/stores/preferences"
 import { cn } from "@/lib/utils"
 import { buttonVariants } from '@/components/ui/button'
 
 const props = withDefaults(defineProps<CalendarCellTriggerProps & { class?: HTMLAttributes["class"] }>(), {
   as: "button",
 })
+
+const preferencesStore = usePreferencesStore()
 
 const delegatedProps = reactiveOmit(props, "class")
 
@@ -18,6 +22,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 <template>
   <CalendarCellTrigger
     data-slot="calendar-cell-trigger"
+    :data-today="isToday(props.day, preferencesStore.zone) ? '' : undefined"
     :class="cn(
       buttonVariants({ variant: 'ghost' }),
       'size-8 p-0 font-normal aria-selected:opacity-100 cursor-default',

@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n"
 import type { CalendarRootEmits, CalendarRootProps, DateValue } from "reka-ui"
 import type { HTMLAttributes, Ref } from "vue"
 import { ref, toValue, watch } from "vue"
-import { getLocalTimeZone, today } from "@internationalized/date"
+import { today } from "@internationalized/date"
 import { reactiveOmit, useVModel } from "@vueuse/core"
 import { CalendarRoot, useDateFormatter, useForwardPropsEmits } from "reka-ui"
 import { toDate } from "reka-ui/date"
@@ -19,6 +19,7 @@ import {
   CalendarNextButton,
   CalendarPrevButton,
 } from "."
+import { usePreferencesStore } from "@/stores/preferences"
 import CalendarMonthGrid from "./CalendarMonthGrid.vue"
 import CalendarYearGrid from "./CalendarYearGrid.vue"
 
@@ -35,7 +36,7 @@ const delegatedProps = reactiveOmit(props, "class", "placeholder")
 
 const placeholder = useVModel(props, "placeholder", emits, {
   passive: true,
-  defaultValue: props.defaultPlaceholder ?? today(getLocalTimeZone()),
+  defaultValue: props.defaultPlaceholder ?? today(usePreferencesStore().zone),
 }) as Ref<DateValue>
 
 const formatter = useDateFormatter(props.locale ?? toValue(locale))

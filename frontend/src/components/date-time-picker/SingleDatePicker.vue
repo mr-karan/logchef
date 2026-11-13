@@ -46,8 +46,7 @@ const preferencesStore = usePreferencesStore();
 const showPicker = ref(false);
 const showCalendar = ref(false);
 
-// A variable's date is zone-less wall-clock text whose zone the user's SQL names,
-// so the browser zone here only round-trips its fields.
+// Stored variable dates keep their wall-clock fields; shortcuts use the display zone.
 const currentTimezoneId = computed(() => getLocalTimeZone());
 
 const timeValue = ref("00:00:00");
@@ -220,7 +219,7 @@ function handleTimeChange(e: Event) {
 }
 
 function setNow() {
-  const current = now(props.includeTime ? currentTimezoneId.value : preferencesStore.zone);
+  const current = now(preferencesStore.zone);
   const year = current.year;
   const month = String(current.month).padStart(2, '0');
   const day = String(current.day).padStart(2, '0');
