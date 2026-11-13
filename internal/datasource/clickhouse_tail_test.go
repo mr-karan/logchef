@@ -421,7 +421,7 @@ func BenchmarkTailDrainOffsetClickHouse(b *testing.B) {
 		b.Run(fmt.Sprintf("offset_%d", offset), func(b *testing.B) {
 			timeout := tailPollTimeoutSeconds
 			query := buildTailPollSQL(source.GetFullTableName(), "ts", "", cursor, time.Now().UTC().Add(time.Minute))
-			qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), tailBatchLimit)
+			qb := client.QueryBuilder(source.GetFullTableName(), tailBatchLimit)
 			built, err := qb.BuildRawQueryWithLimitPolicy(query, tailBatchLimit, tailBatchLimit, tailBatchLimit)
 			if err != nil {
 				b.Fatal(err)

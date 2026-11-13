@@ -32,6 +32,8 @@ func (w *collectingStreamWriter) Finish(stats models.QueryStats) error {
 // TestQueryLogsLimitRuleClickHouse runs the LIMIT rule against ClickHouse: the
 // statement's own limit wins when it is smaller, a clamp keeps OFFSET, a probe
 // row proves a cut, and a LIMIT expression fills its cap with an unknown state.
+// A source's max_result_rows at or below the probe row leaves a filled result
+// unknown.
 func TestQueryLogsLimitRuleClickHouse(t *testing.T) {
 	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
 	if addr == "" {
@@ -48,10 +50,19 @@ func TestQueryLogsLimitRuleClickHouse(t *testing.T) {
 	}
 	provider := NewClickHouseProvider(manager, log)
 
-	for _, tc := range []struct {
+	maxResultRows := func(rows int64, overflow string) *models.ClickHouseQuerySettings {
+		settings := &models.ClickHouseQuerySettings{MaxResultRows: &rows}
+		if overflow != "" {
+			settings.ResultOverflowMode = &overflow
+		}
+		return settings
+	}
+
+	for i, tc := range []struct {
 		name           string
 		query          string
 		limit          int
+		settings       *models.ClickHouseQuerySettings
 		wantRows       int
 		wantFirst      uint64
 		wantSource     models.LimitSource
@@ -110,11 +121,44 @@ func TestQueryLogsLimitRuleClickHouse(t *testing.T) {
 			wantRows: 100, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
 		},
 		{
+			name: "source max_result_rows equal to the request", query: "SELECT number FROM numbers(10000) ORDER BY number", limit: 100,
+			settings: maxResultRows(100, ""),
+			wantRows: 100, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationUnknown,
+		},
+		{
+			name: "source max_result_rows below the request", query: "SELECT number FROM numbers(10000) ORDER BY number", limit: 100,
+			settings: maxResultRows(50, ""),
+			wantRows: 50, wantFirst: 0, wantSource: models.LimitSourceMax, wantTruncation: models.TruncationUnknown,
+		},
+		{
+			name: "source max_result_rows that throws leaves the probe out", query: "SELECT number FROM numbers(10000) ORDER BY number", limit: 100,
+			settings: maxResultRows(100, "throw"),
+			wantRows: 100, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationUnknown,
+		},
+		{
+			name: "source max_result_rows above the probe row", query: "SELECT number FROM numbers(10000) ORDER BY number", limit: 100,
+			settings: maxResultRows(1000, ""),
+			wantRows: 100, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationRows,
+		},
+		{
+			name: "source max_result_rows with a complete result", query: "SELECT number FROM numbers(30) ORDER BY number", limit: 100,
+			settings: maxResultRows(50, ""),
+			wantRows: 30, wantFirst: 0, wantSource: models.LimitSourceMax, wantTruncation: models.TruncationNone,
+		},
+		{
 			name: "LIMIT n BY untouched", query: "SELECT number % 3 AS n, number FROM numbers(1000) ORDER BY n, number LIMIT 1 BY n", limit: 100,
 			wantRows: 3, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			source := source
+			if tc.settings != nil {
+				source = &models.Source{ID: models.SourceID(100 + i), Connection: source.Connection}
+				source.Connection.Settings = tc.settings
+				if err := manager.AddSource(ctx, source); err != nil {
+					t.Fatal(err)
+				}
+			}
 			req := QueryRequest{RawQuery: tc.query, Limit: tc.limit, DefaultLimit: 1000, MaxLimit: 100000}
 			result, err := provider.QueryLogs(ctx, source, req)
 			if err != nil {

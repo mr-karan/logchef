@@ -327,6 +327,71 @@ func TestLimitRule(t *testing.T) {
 	}
 }
 
+// TestLimitRuleSourceMaxResultRows holds the LIMIT rule to the source's
+// max_result_rows. ClickHouse ends every result there, so the probe row never
+// passes it, and a lower one is the configured maximum.
+func TestLimitRuleSourceMaxResultRows(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		maxResultRows          any
+		sql                    string
+		request                int
+		wantSQL                string
+		wantApplied, wantFetch int
+		wantSource             models.LimitSource
+	}{
+		{
+			name: "a cap equal to the request leaves no room for the probe", maxResultRows: int64(100),
+			sql: "SELECT * FROM mydb.logs", request: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 100", wantApplied: 100, wantFetch: 100, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a cap below the request is the maximum", maxResultRows: int64(50),
+			sql: "SELECT * FROM mydb.logs", request: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 50", wantApplied: 50, wantFetch: 50, wantSource: models.LimitSourceMax,
+		},
+		{
+			name: "a cap below the statement clamps it and keeps OFFSET", maxResultRows: int64(10),
+			sql: "SELECT * FROM mydb.logs LIMIT 20 OFFSET 5", request: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 10 OFFSET 5", wantApplied: 10, wantFetch: 10, wantSource: models.LimitSourceMax,
+		},
+		{
+			name: "a statement within the cap is the author's", maxResultRows: int64(20),
+			sql: "SELECT * FROM mydb.logs LIMIT 20", request: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 20", wantApplied: 20, wantFetch: 20, wantSource: models.LimitSourceStatement,
+		},
+		{
+			name: "a cap above the probe row keeps the probe", maxResultRows: int64(1000),
+			sql: "SELECT * FROM mydb.logs", request: 100,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a LIMIT expression is bounded by the cap", maxResultRows: 50,
+			sql: "SELECT * FROM mydb.logs LIMIT 5 * 20", request: 0,
+			wantSQL: "SELECT * FROM mydb.logs LIMIT 5 * 20", wantApplied: 50, wantFetch: 50, wantSource: models.LimitSourceMax,
+		},
+		{
+			name: "a set operation is capped within it", maxResultRows: int64(100),
+			sql: "SELECT a FROM mydb.logs UNION ALL SELECT b FROM mydb.logs", request: 100,
+			wantSQL: "SELECT * FROM (SELECT a FROM mydb.logs UNION ALL SELECT b FROM mydb.logs) LIMIT 100", wantApplied: 100, wantFetch: 100, wantSource: models.LimitSourceRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{querySettings: map[string]any{"max_result_rows": tc.maxResultRows}}
+			got, err := client.QueryBuilder("mydb.logs", 100000).BuildRawQueryWithLimitPolicy(tc.sql, tc.request, 1000, 100000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.SQL != tc.wantSQL || got.AppliedLimit != tc.wantApplied || got.FetchLimit != tc.wantFetch || got.LimitSource != tc.wantSource {
+				t.Fatalf("BuildRawQueryWithLimitPolicy() = %+v, want SQL %q applied %d fetch %d source %q", got, tc.wantSQL, tc.wantApplied, tc.wantFetch, tc.wantSource)
+			}
+			if opts := got.QueryOptions(30); opts.Probed != (tc.wantFetch > tc.wantApplied) || opts.MaxRows != tc.wantApplied {
+				t.Fatalf("QueryOptions() = %+v", opts)
+			}
+		})
+	}
+}
+
 // TestLimitRuleCountMode keeps count mode stripping the outer LIMIT before the
 // histogram wraps the query, and leaving a set operation's branch limits.
 func TestLimitRuleCountMode(t *testing.T) {
