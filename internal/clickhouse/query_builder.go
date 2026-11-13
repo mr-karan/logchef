@@ -1,9 +1,11 @@
 package clickhouse
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 
@@ -135,6 +137,9 @@ func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 	parser := clickhouseparser.NewParser(rawSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
+		if queryAfterExcept(rawSQL, err) {
+			return nil, fmt.Errorf("the SQL parser reads EXCEPT right after a select list as a column modifier, not as a set operation; put the first SELECT in parentheses, as in (SELECT 1) EXCEPT SELECT 2: %w", ErrInvalidQuery)
+		}
 		return nil, fmt.Errorf("invalid SQL syntax: %w", err)
 	}
 
@@ -154,6 +159,19 @@ func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 		return nil, err
 	}
 	return selectQuery, nil
+}
+
+// queryAfterExcept reports a parse error at a SELECT that follows EXCEPT.
+// After a select list, the parser expects the column modifier of
+// SELECT * EXCEPT (a), where ClickHouse reads a set operation.
+func queryAfterExcept(rawSQL string, err error) bool {
+	var parseErr *clickhouseparser.ParseError
+	if !errors.As(err, &parseErr) || parseErr.Got == nil || !strings.EqualFold(parseErr.Got.String, "SELECT") {
+		return false
+	}
+	before := strings.TrimRightFunc(rawSQL[:parseErr.Got.Pos], unicode.IsSpace)
+	word := before[strings.LastIndexFunc(before, func(r rune) bool { return !unicode.IsLetter(r) })+1:]
+	return strings.EqualFold(word, "EXCEPT")
 }
 
 // checkIdentifiers rejects quoted identifiers that ClickHouse reads as a
@@ -444,10 +462,32 @@ func limitedSelect(stmt *clickhouseparser.SelectQuery) *clickhouseparser.SelectQ
 	for stmt.InnerQuery != nil && setOperand(stmt) == nil {
 		stmt = stmt.InnerQuery
 	}
-	if setOperand(stmt) != nil {
+	if setOperand(stmt) != nil || exceptHoldsQuery(stmt) {
 		return nil
 	}
 	return stmt
+}
+
+// exceptHoldsQuery reports a select item whose EXCEPT modifier holds a query.
+// The parser reads SELECT 1 EXCEPT (SELECT 2) that way, and ClickHouse reads
+// a set operation, so the statement has no LIMIT of its own.
+func exceptHoldsQuery(stmt *clickhouseparser.SelectQuery) bool {
+	for _, item := range stmt.SelectItems {
+		for _, modifier := range item.Modifiers {
+			if !strings.EqualFold(modifier.Name.Name, "EXCEPT") || modifier.Params == nil || modifier.Params.Items == nil {
+				continue
+			}
+			for _, param := range modifier.Params.Items.Items {
+				if column, ok := param.(*clickhouseparser.ColumnExpr); ok {
+					param = column.Expr
+				}
+				if _, ok := param.(*clickhouseparser.SelectQuery); ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // setOperand returns the query after stmt in a UNION, EXCEPT or INTERSECT.
