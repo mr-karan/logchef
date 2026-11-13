@@ -21,6 +21,14 @@ type fakeProvider struct {
 	alertModes      []models.AlertEditorMode
 	evaluateAlertFn func(ctx context.Context, source *models.Source, req datasource.AlertQueryRequest) (*models.QueryResult, error)
 	queryLogsFn     func(ctx context.Context, source *models.Source, req datasource.QueryRequest) (*models.QueryResult, error)
+	compileFn       func(ctx context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error)
+}
+
+func (f *fakeProvider) CompileLogchefQL(ctx context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	if f.compileFn == nil {
+		return nil, datasource.ErrOperationNotSupported
+	}
+	return f.compileFn(ctx, source, req)
 }
 
 func (f *fakeProvider) Type() models.SourceType { return models.SourceTypeClickHouse }

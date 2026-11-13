@@ -138,17 +138,12 @@ type PreparedLogchefQL struct {
 	Params datasource.QueryRequest
 }
 
-// PrepareLogchefQLQuery validates req, applies the configured limit and
-// timeout policy, substitutes variables and compiles the query.
+// PrepareLogchefQLQuery validates req, applies the configured timeout
+// policy, substitutes variables and compiles the query. The limit policy
+// applies when the query runs.
 func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg config.QueryConfig, src access.AuthorizedSource, req LogchefQLQueryRequest) (*PreparedLogchefQL, error) {
 	if req.StartTime == "" || req.EndTime == "" {
 		return nil, &QueryRequestError{Message: "start_time and end_time are required"}
-	}
-	if req.Limit <= 0 {
-		req.Limit = cfg.DefaultPreviewLimit
-	}
-	if req.Limit > cfg.MaxPreviewLimit {
-		req.Limit = cfg.MaxPreviewLimit
 	}
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
@@ -173,13 +168,15 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 
 	// ClickHouse bakes the time range into the SQL. For VictoriaLogs the
 	// LogsQL query carries no time range, so the parsed window goes to
-	// QueryLogs separately.
+	// QueryLogs separately. The request limit stays out of the compiled
+	// query: the limit rule applies it when the query runs, so it can probe
+	// for a cut, and the SQL that the histogram and the export reuse carries
+	// no limit of its own.
 	compiled, err := CompileLogchefQL(ctx, ds, src, datasource.LogchefQLCompileRequest{
 		Query:     query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
 		Timezone:  req.Timezone,
-		Limit:     req.Limit,
 	})
 	if err != nil {
 		return nil, err
