@@ -139,7 +139,7 @@ func decodeRawString(raw json.RawMessage) string {
 // an upgraded blob has an empty features list. A blob that the schema 1
 // validator rejects fails to upgrade.
 func UpgradeDashboardPanels(raw json.RawMessage) (json.RawMessage, error) {
-	schema, err := dashboardPanelsSchema(raw)
+	schema, err := DashboardPanelsSchema(raw)
 	if err != nil {
 		return nil, err
 	}

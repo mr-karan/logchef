@@ -25,9 +25,6 @@ type Dashboard struct {
 	// display; empty for dashboards whose author was deleted (created_by NULL).
 	CreatedByName  string `db:"-"`
 	CreatedByEmail string `db:"-"`
-	// Summary holds the derived list columns. Every write of PanelsJSON writes
-	// them in the same statement, so blob and summary cannot disagree.
-	Summary DashboardPanelsSummary `db:"-"`
 }
 
 // EmptyDashboardPanelsJSON is the empty schema 1 blob. It is the `panels` value
@@ -252,7 +249,7 @@ func RedactDashboardPanels(raw json.RawMessage, lockedIDs map[string]struct{}) (
 	if len(raw) == 0 || len(lockedIDs) == 0 {
 		return raw, nil
 	}
-	schema, err := dashboardPanelsSchema(raw)
+	schema, err := DashboardPanelsSchema(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +288,7 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 	if len(raw) > MaxDashboardPanelsSizeV2 {
 		return fmt.Errorf("panels payload is %d bytes, exceeds the %d byte limit", len(raw), MaxDashboardPanelsSizeV2)
 	}
-	schema, err := dashboardPanelsSchema(raw)
+	schema, err := DashboardPanelsSchema(raw)
 	if err != nil {
 		return err
 	}
@@ -305,9 +302,9 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 	}
 }
 
-// dashboardPanelsSchema reads the blob's version with a lenient decode. It
+// DashboardPanelsSchema reads the blob's version with a lenient decode. It
 // fails only when the blob is not a JSON object.
-func dashboardPanelsSchema(raw json.RawMessage) (int, error) {
+func DashboardPanelsSchema(raw json.RawMessage) (int, error) {
 	var probe struct {
 		Version int `json:"version"`
 	}

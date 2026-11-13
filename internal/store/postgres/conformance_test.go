@@ -20,6 +20,23 @@ func TestConformance(t *testing.T) {
 	s := opener(dsn)(t)
 	storetest.Run(t, s)
 	t.Run("MembershipWritesSerialized", func(t *testing.T) { storetest.RunMembershipWritesSerialized(t, s) })
+	t.Run("DashboardSummaries", func(t *testing.T) {
+		conn, err := pgx.Connect(context.Background(), dsn)
+		if err != nil {
+			t.Fatalf("connect for hooks: %v", err)
+		}
+		t.Cleanup(func() { _ = conn.Close(context.Background()) })
+		storetest.RunDashboardSummaries(t, s, storetest.SummaryStaleHooks{
+			ResetSummaryRevision: func(ctx context.Context, id int) error {
+				_, err := conn.Exec(ctx, "UPDATE dashboards SET summary_revision = 0 WHERE id = $1", id)
+				return err
+			},
+			SetSummaryVersion: func(ctx context.Context, id, version int) error {
+				_, err := conn.Exec(ctx, "UPDATE dashboards SET summary_version = $1 WHERE id = $2", version, id)
+				return err
+			},
+		})
+	})
 }
 
 // TestOAuthConformance runs the OAuth suite. Each opened store has its own

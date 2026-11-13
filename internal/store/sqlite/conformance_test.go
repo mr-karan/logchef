@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
 	"io"
 	"log/slog"
 	"testing"
@@ -16,7 +17,28 @@ import (
 // TestConformance runs the shared store.Store conformance suite against a fresh,
 // migrated SQLite database in a temp dir.
 func TestConformance(t *testing.T) {
-	storetest.Run(t, opener(sqlitetest.Path(t))(t))
+	path := sqlitetest.Path(t)
+	s := opener(path)(t)
+	storetest.Run(t, s)
+	t.Run("DashboardSummaries", func(t *testing.T) {
+		raw, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatalf("open raw sqlite: %v", err)
+		}
+		t.Cleanup(func() { _ = raw.Close() })
+		exec := func(ctx context.Context, query string, args ...any) error {
+			_, err := raw.ExecContext(ctx, query, args...)
+			return err
+		}
+		storetest.RunDashboardSummaries(t, s, storetest.SummaryStaleHooks{
+			ResetSummaryRevision: func(ctx context.Context, id int) error {
+				return exec(ctx, "UPDATE dashboards SET summary_revision = 0 WHERE id = ?", id)
+			},
+			SetSummaryVersion: func(ctx context.Context, id, version int) error {
+				return exec(ctx, "UPDATE dashboards SET summary_version = ? WHERE id = ?", version, id)
+			},
+		})
+	})
 }
 
 // TestOAuthConformance runs the OAuth suite. Each opened store has its own

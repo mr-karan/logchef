@@ -306,8 +306,8 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listCollectionsForUserStmt, err = db.PrepareContext(ctx, listCollectionsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListCollectionsForUser: %w", err)
 	}
-	if q.listDashboardsStmt, err = db.PrepareContext(ctx, listDashboards); err != nil {
-		return nil, fmt.Errorf("error preparing query ListDashboards: %w", err)
+	if q.listDashboardSummariesStmt, err = db.PrepareContext(ctx, listDashboardSummaries); err != nil {
+		return nil, fmt.Errorf("error preparing query ListDashboardSummaries: %w", err)
 	}
 	if q.listExpiredExportJobPathsStmt, err = db.PrepareContext(ctx, listExpiredExportJobPaths); err != nil {
 		return nil, fmt.Errorf("error preparing query ListExpiredExportJobPaths: %w", err)
@@ -350,6 +350,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listSourcesForUserStmt, err = db.PrepareContext(ctx, listSourcesForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSourcesForUser: %w", err)
+	}
+	if q.listStaleDashboardSummaryInputsStmt, err = db.PrepareContext(ctx, listStaleDashboardSummaryInputs); err != nil {
+		return nil, fmt.Errorf("error preparing query ListStaleDashboardSummaryInputs: %w", err)
 	}
 	if q.listSystemSettingsStmt, err = db.PrepareContext(ctx, listSystemSettings); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSystemSettings: %w", err)
@@ -422,6 +425,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.removeTeamSourceStmt, err = db.PrepareContext(ctx, removeTeamSource); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamSource: %w", err)
+	}
+	if q.repairDashboardSummaryStmt, err = db.PrepareContext(ctx, repairDashboardSummary); err != nil {
+		return nil, fmt.Errorf("error preparing query RepairDashboardSummary: %w", err)
 	}
 	if q.resolveAlertHistoryForAlertStmt, err = db.PrepareContext(ctx, resolveAlertHistoryForAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query ResolveAlertHistoryForAlert: %w", err)
@@ -994,9 +1000,9 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listCollectionsForUserStmt: %w", cerr)
 		}
 	}
-	if q.listDashboardsStmt != nil {
-		if cerr := q.listDashboardsStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listDashboardsStmt: %w", cerr)
+	if q.listDashboardSummariesStmt != nil {
+		if cerr := q.listDashboardSummariesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listDashboardSummariesStmt: %w", cerr)
 		}
 	}
 	if q.listExpiredExportJobPathsStmt != nil {
@@ -1067,6 +1073,11 @@ func (q *Queries) Close() error {
 	if q.listSourcesForUserStmt != nil {
 		if cerr := q.listSourcesForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSourcesForUserStmt: %w", cerr)
+		}
+	}
+	if q.listStaleDashboardSummaryInputsStmt != nil {
+		if cerr := q.listStaleDashboardSummaryInputsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listStaleDashboardSummaryInputsStmt: %w", cerr)
 		}
 	}
 	if q.listSystemSettingsStmt != nil {
@@ -1187,6 +1198,11 @@ func (q *Queries) Close() error {
 	if q.removeTeamSourceStmt != nil {
 		if cerr := q.removeTeamSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeTeamSourceStmt: %w", cerr)
+		}
+	}
+	if q.repairDashboardSummaryStmt != nil {
+		if cerr := q.repairDashboardSummaryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing repairDashboardSummaryStmt: %w", cerr)
 		}
 	}
 	if q.resolveAlertHistoryForAlertStmt != nil {
@@ -1482,7 +1498,7 @@ type Queries struct {
 	listCollectionMembersStmt             *sql.Stmt
 	listCollectionTeamsStmt               *sql.Stmt
 	listCollectionsForUserStmt            *sql.Stmt
-	listDashboardsStmt                    *sql.Stmt
+	listDashboardSummariesStmt            *sql.Stmt
 	listExpiredExportJobPathsStmt         *sql.Stmt
 	listInterruptedExportJobsStmt         *sql.Stmt
 	listManagedSourcesStmt                *sql.Stmt
@@ -1497,6 +1513,7 @@ type Queries struct {
 	listSourceTeamsStmt                   *sql.Stmt
 	listSourcesStmt                       *sql.Stmt
 	listSourcesForUserStmt                *sql.Stmt
+	listStaleDashboardSummaryInputsStmt   *sql.Stmt
 	listSystemSettingsStmt                *sql.Stmt
 	listSystemSettingsByCategoryStmt      *sql.Stmt
 	listTeamMembersWithDetailsStmt        *sql.Stmt
@@ -1521,6 +1538,7 @@ type Queries struct {
 	removeCollectionTeamStmt              *sql.Stmt
 	removeTeamMemberStmt                  *sql.Stmt
 	removeTeamSourceStmt                  *sql.Stmt
+	repairDashboardSummaryStmt            *sql.Stmt
 	resolveAlertHistoryForAlertStmt       *sql.Stmt
 	revokeOAuthGrantStmt                  *sql.Stmt
 	revokeOAuthGrantByTokenStmt           *sql.Stmt
@@ -1653,7 +1671,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listCollectionMembersStmt:             q.listCollectionMembersStmt,
 		listCollectionTeamsStmt:               q.listCollectionTeamsStmt,
 		listCollectionsForUserStmt:            q.listCollectionsForUserStmt,
-		listDashboardsStmt:                    q.listDashboardsStmt,
+		listDashboardSummariesStmt:            q.listDashboardSummariesStmt,
 		listExpiredExportJobPathsStmt:         q.listExpiredExportJobPathsStmt,
 		listInterruptedExportJobsStmt:         q.listInterruptedExportJobsStmt,
 		listManagedSourcesStmt:                q.listManagedSourcesStmt,
@@ -1668,6 +1686,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSourceTeamsStmt:                   q.listSourceTeamsStmt,
 		listSourcesStmt:                       q.listSourcesStmt,
 		listSourcesForUserStmt:                q.listSourcesForUserStmt,
+		listStaleDashboardSummaryInputsStmt:   q.listStaleDashboardSummaryInputsStmt,
 		listSystemSettingsStmt:                q.listSystemSettingsStmt,
 		listSystemSettingsByCategoryStmt:      q.listSystemSettingsByCategoryStmt,
 		listTeamMembersWithDetailsStmt:        q.listTeamMembersWithDetailsStmt,
@@ -1692,6 +1711,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeCollectionTeamStmt:              q.removeCollectionTeamStmt,
 		removeTeamMemberStmt:                  q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                  q.removeTeamSourceStmt,
+		repairDashboardSummaryStmt:            q.repairDashboardSummaryStmt,
 		resolveAlertHistoryForAlertStmt:       q.resolveAlertHistoryForAlertStmt,
 		revokeOAuthGrantStmt:                  q.revokeOAuthGrantStmt,
 		revokeOAuthGrantByTokenStmt:           q.revokeOAuthGrantByTokenStmt,

@@ -784,11 +784,11 @@ func TestSummarizeDashboardPanels(t *testing.T) {
 	})
 }
 
-func TestCanonicalDashboardPanelsV2(t *testing.T) {
+func TestCanonicalDashboardPanels(t *testing.T) {
 	in := json.RawMessage(`{ "version": 2, "features": ["tabs", "made-up"],
 		"tabs": [ {"id":"main","title":"Main","layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}]} ],
 		"panels": [ {"id":"p1","kind":"query","title":"a<b>&c","team_id":1,"source_id":1,"query":{"mode":"count","language":"logchefql","text":"x & y"},"viz":{"type":"stat"}} ] }`)
-	got, err := CanonicalDashboardPanelsV2(in)
+	got, err := CanonicalDashboardPanels(in)
 	if err != nil {
 		t.Fatalf("canonical: %v", err)
 	}
@@ -796,11 +796,11 @@ func TestCanonicalDashboardPanelsV2(t *testing.T) {
 	if string(got) != want {
 		t.Fatalf("canonical form\n got %s\nwant %s", got, want)
 	}
-	again, err := CanonicalDashboardPanelsV2(got)
+	again, err := CanonicalDashboardPanels(got)
 	if err != nil || string(again) != want {
 		t.Fatalf("canonical form is not stable: %s %v", again, err)
 	}
-	if _, err := CanonicalDashboardPanelsV2(json.RawMessage(`{"version":2,"features":[],"tabs":[],"panels":[]}`)); err == nil {
+	if _, err := CanonicalDashboardPanels(json.RawMessage(`{"version":2,"features":[],"tabs":[],"panels":[]}`)); err == nil {
 		t.Fatal("invalid blob accepted")
 	}
 }
