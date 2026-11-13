@@ -330,7 +330,7 @@ func TestLimitRule(t *testing.T) {
 				t.Fatalf("BuildRawQueryWithLimitPolicy() = %+v, want %+v", got, want)
 			}
 			opts := got.QueryOptions(30)
-			if opts.MaxRows != tc.wantApplied || opts.Settings["max_result_rows"] != tc.wantFetch || opts.Probed != (tc.wantFetch > tc.wantApplied) {
+			if opts.MaxRows != tc.wantApplied || opts.ResultRows != tc.wantFetch {
 				t.Fatalf("QueryOptions() = %+v, want MaxRows %d, max_result_rows %d", opts, tc.wantApplied, tc.wantFetch)
 			}
 		})
@@ -416,7 +416,7 @@ func TestLimitRuleSourceMaxResultRows(t *testing.T) {
 			if got.SQL != tc.wantSQL || got.AppliedLimit != tc.wantApplied || got.FetchLimit != tc.wantFetch || got.LimitSource != tc.wantSource {
 				t.Fatalf("BuildRawQueryWithLimitPolicy() = %+v, want SQL %q applied %d fetch %d source %q", got, tc.wantSQL, tc.wantApplied, tc.wantFetch, tc.wantSource)
 			}
-			if opts := got.QueryOptions(30); opts.Probed != (tc.wantFetch > tc.wantApplied) || opts.MaxRows != tc.wantApplied {
+			if opts := got.QueryOptions(30); opts.ResultRows != tc.wantFetch || opts.MaxRows != tc.wantApplied {
 				t.Fatalf("QueryOptions() = %+v", opts)
 			}
 		})

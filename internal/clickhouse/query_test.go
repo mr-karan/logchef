@@ -185,7 +185,12 @@ func TestScanRowMapJSONClickHouse(t *testing.T) {
 	query := `SELECT CAST(raw, 'JSON(max_dynamic_paths=1)') AS p, toJSONString(p) AS expected
 		FROM (SELECT arrayJoin(['{"component":"badger","nested":{"count":42},"timestamp1":[0,1,2]}', '{"component":"other"}', '{}', '{"items":[{"name":"first"},{"name":"second"}],"enabled":true}', '{"mixed":[1,"two",null],"empty":[],"missing":null}']) AS raw)`
 	for _, stringify := range []bool{false, true} {
-		options := QueryOptions{Settings: map[string]any{"output_format_native_write_json_as_string": stringify}}
+		client, err := NewClient(ClientOptions{Host: testClickHouseAddr(t), Settings: map[string]any{"output_format_native_write_json_as_string": stringify}}, client.logger)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = client.Close() })
+		var options QueryOptions
 		result, err := client.QueryWithOptions(ctx, query, options)
 		if err != nil {
 			t.Fatal(err)

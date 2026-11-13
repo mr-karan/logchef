@@ -172,8 +172,7 @@ func TestNativeJSONCapabilityRetryClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	timeout := 5
-	client.contextWithNativeJSON(cancelled, QueryOptions{TimeoutSeconds: &timeout})
+	client.flattensJSON(cancelled)
 	if client.flattenedJSON != nil {
 		t.Fatal("failed capability probe was cached")
 	}

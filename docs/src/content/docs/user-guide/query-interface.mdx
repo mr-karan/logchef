@@ -166,10 +166,18 @@ When rows were cut, the results bar says so: **First N rows** when a row past
 the limit existed, **Cut by size** when the response size budget stopped the
 result, and **May be incomplete** when nothing proves the result whole. That
 happens when a non-literal `LIMIT` or the source's `max_result_rows` setting
-filled the cap. It also happens when the result reached a ClickHouse limit that
-stops a query without an error, such as `max_result_bytes`, whether the source
-settings or the ClickHouse user's settings profile set it. A result that fits
-shows nothing.
+filled the cap, or when the result reached the source's `max_result_bytes` in
+break mode. It also happens when the query's own `SETTINGS` let ClickHouse stop
+it early without an error: an overflow mode other than `'throw'`, or
+`max_result_rows` or `max_result_bytes` without `result_overflow_mode = 'throw'`.
+A result that fits shows nothing.
+
+Logchef sends its own result limits with every ClickHouse query, so a row or
+byte limit in the ClickHouse user's settings profile no longer cuts results.
+Every other ClickHouse limit that can stop a query early, such as
+`max_rows_to_read`, `max_rows_to_sort` or `max_rows_to_group_by`, is sent in
+`throw` mode. A query that reaches one of those limits fails with an error that
+names it, rather than returning part of the result.
 
 ### Export
 

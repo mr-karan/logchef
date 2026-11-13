@@ -69,18 +69,39 @@ also report scan work.
 Canceled or truncated queries report only progress received before cancellation.
 The driver may not deliver a final progress packet. Zero counters therefore do
 not distinguish an empty scan from unavailable progress. The JSON capability
-probe and the read of the server's limits are queries of their own. They add
-nothing to the result query's scan statistics, and the caller's query ID and
-driver callbacks do not reach them.
+probe is a query of its own. It adds nothing to the result query's scan
+statistics, and the caller's query ID and driver callbacks do not reach it.
 Counters saturate at the platform's maximum integer instead of wrapping on overflow.
 
-LogChef owns the progress and profile callbacks for result queries. The result
-profile shows whether a result stayed under a limit that ClickHouse ends
-silently, such as `max_result_bytes` in break mode. After its first successful
-query, each client reads those limits from `system.settings` once, so a limit
-set in the ClickHouse user's settings profile counts too. Other driver
-callbacks and query IDs remain available. Execution metrics count each query
-once across buffered, streaming, and DDL paths.
+LogChef owns the progress and profile callbacks for result queries. Other
+driver callbacks and query IDs remain available. Execution metrics count each
+query once across buffered, streaming, and DDL paths.
+
+## Result limits and truncation
+
+`result_limits.go` sends every setting that can end a result query early, so
+completeness never depends on a lookup of the server's settings:
+
+- Logchef's result limits: `max_result_rows` from the LIMIT rule's row bound
+  (0 for callers that bound rows only in the reader), `max_result_bytes = 0`,
+  `result_overflow_mode = 'break'`, and `limit = 0`, `offset = 0`. They
+  override a ClickHouse settings profile. The source's settings override them.
+- `throw` for every other overflow mode: read, read leaf, group by, sort,
+  distinct, set, join, transfer, timeout and timeout leaf. A profile limit
+  then fails the query instead of cutting it. `timeout_overflow_mode_leaf`
+  goes only to servers from 23.11, read from `version()` once per client,
+  because an unknown setting fails the query.
+- `max_execution_time`: the request's timeout, capped by the source's. The Go
+  context ends the query at that timeout plus a grace period, but the driver
+  never sees the deadline: clickhouse-go would replace `max_execution_time`
+  with it.
+
+A result reports `rows` or `bytes` when the reader proves the cut, and
+`unknown` when the SQL's own `SETTINGS` can end it early (see
+`SettingsMayCut`), when it fills an unprobed cap, or when a result limit it
+sent in break mode could have cut it. The server's result profile proves that
+a break-mode `max_result_bytes` did not cut. A ClickHouse limit error names the
+setting behind it.
 
 LogchefQL compilation reuses the source inspection cache when column metadata
 is missing. The cache expires after one minute and checks the source revision.

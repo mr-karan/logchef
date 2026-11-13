@@ -150,8 +150,12 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 		c.logger.Error("failed to execute histogram query", "error", err, "table", tableName)
 		return nil, fmt.Errorf("failed to execute histogram query: %w", err)
 	}
-	if result.Stats.Truncated {
+	switch result.Stats.Truncation {
+	case models.TruncationRows, models.TruncationBytes:
 		return nil, models.ErrHistogramBudgetExceeded
+	case models.TruncationUnknown:
+		return nil, &ValidationError{Message: "the histogram may be incomplete: the query's own SETTINGS, or the source's max_result_rows or max_result_bytes, can end it early without an error. Remove those SETTINGS or raise the source's limits"}
+	case models.TruncationNone:
 	}
 
 	results := c.parseHistogramResults(result, params.GroupBy != "")
