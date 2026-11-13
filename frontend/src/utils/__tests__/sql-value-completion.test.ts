@@ -157,18 +157,24 @@ describe("SQL string value completion", () => {
   });
 
   it("scans sixteen times the values in far less than sixteen squared the time", () => {
-    const best = (count: number) => {
-      const text = inList(count);
-      let fastest = Infinity;
-      for (let run = 0; run < 5; run++) {
-        const started = performance.now();
-        getSQLCompletionCursor(text, text.length - 2, schema);
-        fastest = Math.min(fastest, performance.now() - started);
-      }
-      return fastest;
+    const small = inList(2000);
+    const large = inList(32000);
+    const time = (text: string) => {
+      const started = performance.now();
+      getSQLCompletionCursor(text, text.length - 2, schema);
+      return performance.now() - started;
     };
-    best(2000);
-    // Linear costs about 16 times as long and quadratic about 256 times; 64 sits far from both.
-    expect(best(32000) / best(2000)).toBeLessThan(64);
+    time(small);
+    time(large);
+    // Each pair runs the two sizes back to back, so load has to hit the large
+    // half of every pair to inflate the best ratio. Linear is about 16x and
+    // quadratic about 256x; 64 sits far from both.
+    let bestRatio = Infinity;
+    for (let pair = 0; pair < 7; pair++) {
+      const smallMs = time(small);
+      const largeMs = time(large);
+      bestRatio = Math.min(bestRatio, largeMs / Math.max(smallMs, 0.001));
+    }
+    expect(bestRatio).toBeLessThan(64);
   });
 });
