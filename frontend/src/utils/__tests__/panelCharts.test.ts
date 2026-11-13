@@ -34,7 +34,8 @@ describe("result chart frames", () => {
     const grouped = resultFrame({ columns: [{ name: "time", type: "DateTime" }, { name: "service", type: "String" }, { name: "n", type: "UInt32" }], rows: [] });
     expect(suggestRoles(grouped, "chart")).toMatchObject({ x: "time", y: ["n"], series: "service" });
     const native = resultFrame({ columns: [{ name: "service", type: "String" }, { name: "n", type: "String" }], rows: [{ service: "api", n: "12" }, { service: "web", n: "13" }], untyped: true });
-    expect(suggestViz(native)).toMatchObject({ type: "chart", mark: "bar", y: ["n"], columns: { n: { kind: "number", confidence: "confirmed" } } });
+    expect(suggestViz(native).columns).toBeUndefined();
+    expect(suggestViz(native)).toMatchObject({ type: "chart", mark: "bar", y: ["n"] });
   });
 });
 
@@ -73,4 +74,28 @@ describe("list and pie frames", () => {
     expect(pie.items).toHaveLength(4);
     expect(pie.items.map((i) => i.value.exact)).toEqual(["7", "4", "3", "2"]);
   });
+});
+
+it("suggests table for multiple category columns and preserves explicit roles", async () => {
+  const { withSuggestedRoles } = await import("../panelCharts");
+  const source = resultFrame({ columns: [{ name: "day", type: "Date" }, { name: "n", type: "UInt32" }, { name: "s", type: "String" }], rows: [] });
+  expect(withSuggestedRoles(source, { type: "chart", x: "s", y: ["n"], x_scale: "category" })).toMatchObject({ x: "s", y: ["n"], x_scale: "category" });
+  expect(withSuggestedRoles(source, { type: "chart", x: "day", y: ["n"] })).toEqual({ type: "chart", x: "day", y: ["n"] });
+  const categories = resultFrame({ columns: [{ name: "a", type: "String" }, { name: "b", type: "String" }, { name: "n", type: "UInt32" }], rows: [{ a: "a", b: "b", n: 1 }, { a: "b", b: "c", n: 2 }] });
+  expect(suggestViz(categories).type).toBe("table");
+});
+
+it("caps pies at 50 query-ordered slices without changing their shares", () => {
+  const source = resultFrame({ columns: [{ name: "label", type: "String" }, { name: "n", type: "UInt32" }], rows: Array.from({ length: 52 }, (_, i) => ({ label: `label ${i}`, n: 1 })) });
+  const pie = buildPanelList(source, { type: "pie", label: "label", value: "n" }, false);
+  expect(pie.items).toHaveLength(50);
+  expect(pie.items[0].label).toBe("label 0");
+  expect(pie.items[49].label).toBe("label 49");
+  expect(pie.items[0].percentage).toBeCloseTo(100 / 52);
+  expect(pie.notices).toContain("50 of 52 slices shown.");
+});
+
+it("treats equivalent time instants as duplicate result keys", () => {
+  const source = resultFrame({ columns: [{ name: "t", type: "DateTime64" }, { name: "n", type: "UInt32" }], rows: [{ t: "2026-11-10T00:00:00Z", n: 1 }, { t: "2026-11-10T01:00:00+01:00", n: 2 }] });
+  expect(() => buildPanelChart(source, { type: "chart", x: "t", y: ["n"] }, false)).toThrow("1 duplicate key(s)");
 });

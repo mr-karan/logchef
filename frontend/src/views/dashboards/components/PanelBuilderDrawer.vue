@@ -25,9 +25,10 @@ import { sourcesApi, asClickHouseConnection, type Source } from "@/api/sources";
 import { supportsQueryLanguage } from "@/lib/queryMetadata";
 import { isSuccessResponse } from "@/api/types";
 import { usePreferencesStore } from "@/stores/preferences";
-import type { DashboardQueryPanel } from "@/api/dashboards";
+import type { DashboardQueryPanel, DashboardViz } from "@/api/dashboards";
 import { execSignature } from "@/utils/dashboardRuntime";
 import { panelBuilderKind, type PanelBuilderKind } from "@/utils/dashboardPanels";
+import { suggestViz, withSuggestedRoles } from "@/utils/panelCharts";
 import type { DraftPanelPatch } from "@/stores/dashboards";
 
 const { t } = useI18n();
@@ -53,7 +54,7 @@ const isDark = computed(() => themeStore.isDark);
 const monacoTheme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
 const PANEL_TYPES: { value: PanelBuilderKind; label: string }[] = [
-  { value: "chart", get label() { return t('ui.timeSeries'); } },
+  { value: "chart", label: "Chart" },
   { value: "stat", get label() { return t('ui.stat'); } },
   { value: "breakdown", get label() { return t('ui.breakdown'); } },
   { value: "table", get label() { return t('ui.table'); } },
@@ -74,9 +75,15 @@ function patchPanel(patch: DraftPanelPatch) {
   if (!props.panelId) return;
   store.updateDraftPanel(props.panelId, patch);
 }
+let suggestNextVisualization = false;
 function switchKind(kind: PanelBuilderKind) {
   if (!props.panelId) return;
+  suggestNextVisualization = false;
+  previousCountPanel = null;
   store.switchDraftPanelKind(props.panelId, kind);
+  const p = panel.value;
+  const frame = store.previewState?.frame;
+  if (p?.query.mode === "result" && frame) patchPanel({ viz: withSuggestedRoles(frame, p.viz) });
 }
 
 // Auto-close if the panel this drawer was pointed at disappears out from under
@@ -102,21 +109,21 @@ const supportsLogsql = computed(() =>
   sourceDetail.value ? supportsQueryLanguage(sourceDetail.value, "logsql") : false
 );
 
-const countOnlyKind = computed(() => panelKind.value === "chart" || panelKind.value === "breakdown");
 let previousCountPanel: DashboardQueryPanel | null = null;
 
 const mode = computed<"logchefql" | "native">({
   get: () => panel.value?.query.language === "logchefql" ? "logchefql" : "native",
   set: (v) => {
     const language = v === "native" ? supportsLogsql.value ? "logsql" : "clickhouse-sql" : "logchefql";
-    if (language === "clickhouse-sql" && countOnlyKind.value) return;
-    if (language === "logchefql" && previousCountPanel && panel.value?.id === previousCountPanel.id && panel.value.source_id === previousCountPanel.source_id && !countOnlyKind.value) {
+    if (language === "logchefql" && previousCountPanel && panel.value?.id === previousCountPanel.id && panel.value.source_id === previousCountPanel.source_id) {
       const previous = previousCountPanel;
       previousCountPanel = null;
+      suggestNextVisualization = false;
       patchPanel({ query: { ...previous.query, language, text: panel.value.query.text, limit: undefined }, viz: previous.viz });
       return;
     }
     if (language === "clickhouse-sql" && panel.value?.query.mode === "count") {
+      suggestNextVisualization = true;
       previousCountPanel = panel.value;
       patchPanel({ query: { mode: "result", language, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: { type: "stat", reduce: "last", ...(panel.value.viz.type === "stat" ? { format: panel.value.viz.format } : {}) } });
       return;
@@ -126,10 +133,18 @@ const mode = computed<"logchefql" | "native">({
 });
 function setQueryMode(mode: "count" | "result") {
   const p = panel.value;
-  if (!p || p.query.mode === mode) return;
+  if (!p || p.query.mode === mode || (mode === "count" && p.query.language === "clickhouse-sql")) return;
   const { language, text } = p.query;
+  previousCountPanel = null;
+  suggestNextVisualization = mode === "result";
   if (mode === "result") patchPanel({ query: { mode, language, text, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: p.viz.type === "table" ? p.viz : { type: "stat", reduce: "last" } });
   else patchPanel({ query: { mode, language, text, limit: undefined, interval: "auto" }, viz: { type: "stat", reduce: "sum", ...(p.viz.type === "stat" ? { format: p.viz.format } : {}) } });
+}
+
+function setVisualization(viz: DashboardViz) {
+  previousCountPanel = null;
+  suggestNextVisualization = false;
+  patchPanel({ viz });
 }
 
 // SqlMonacoEditor has no LogsQL grammar; feed native queries to the
@@ -163,7 +178,8 @@ async function loadSourceDetail(teamId: number, sourceId: number) {
     const resp = await sourcesApi.getTeamSource(teamId, sourceId);
     if (requestId !== sourceDetailRequestId) return; // a newer call superseded this one
     sourceDetail.value = isSuccessResponse(resp) ? resp.data : null;
-    if (sourceDetail.value && ((panel.value?.query.language === "logsql" && !supportsLogsql.value) || (panel.value?.query.language === "clickhouse-sql" && supportsLogsql.value))) mode.value = "native";
+    if (sourceDetail.value && panel.value?.query.language === "logsql" && !supportsLogsql.value) mode.value = "logchefql";
+    else if (sourceDetail.value && panel.value?.query.language === "clickhouse-sql" && supportsLogsql.value) mode.value = "native";
   } catch {
     if (requestId !== sourceDetailRequestId) return;
     sourceDetail.value = teamSources.value.find((s) => s.id === sourceId) ?? null;
@@ -194,6 +210,7 @@ async function onSourceChange(sourceId: number) {
 watch(
   () => [props.open, props.panelId] as const,
   async ([open]) => {
+    suggestNextVisualization = false;
     if (!open) return;
     if (teams.value.length === 0) {
       await teamsStore.loadUserTeams();
@@ -215,6 +232,13 @@ watch(
 const canPreview = computed(() => !!panel.value && panel.value.team_id > 0 && panel.value.source_id > 0);
 const isPreviewing = computed(() => store.previewState?.status === "loading");
 const previewState = computed(() => store.previewState ?? undefined);
+watch(() => previewState.value?.frame, (frame) => {
+  const p = panel.value;
+  if (!frame || p?.query.mode !== "result") return;
+  const viz = suggestNextVisualization ? suggestViz(frame) : withSuggestedRoles(frame, p.viz);
+  suggestNextVisualization = false;
+  patchPanel({ viz });
+});
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPreviewedPanelId: string | null = null;
@@ -343,8 +367,6 @@ function onOpenChange(value: boolean) {
               size="sm"
               :variant="panelKind === t.value ? 'default' : 'ghost'"
               class="h-7 px-2.5 text-xs"
-              :disabled="panel.query.language === 'clickhouse-sql' && (t.value === 'chart' || t.value === 'breakdown')"
-              :title="panel.query.language === 'clickhouse-sql' && (t.value === 'chart' || t.value === 'breakdown') ? 'SQL result charts and breakdowns are not available yet. Switch to LogchefQL to count logs.' : undefined"
               @click="switchKind(t.value)"
             >
               {{ t.label }}
@@ -397,9 +419,7 @@ function onOpenChange(value: boolean) {
               />
               <div class="flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2"><Label class='text-xs text-muted-foreground'>{{ t('ui.query') }}</Label>
-                  <template v-if="panelKind === 'stat' || panelKind === 'table'">
-                    <button v-for="queryMode in (['count', 'result'] as const)" :key="queryMode" type="button" class="rounded border px-2 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :disabled="queryMode === 'count' && (panelKind === 'table' || panel.query.language === 'clickhouse-sql')" :aria-pressed="panel.query.mode === queryMode" @click="setQueryMode(queryMode)">{{ queryMode }}</button>
-                  </template></div>
+                  <button v-for="queryMode in (['count', 'result'] as const)" :key="queryMode" type="button" class="rounded border px-2 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :disabled="queryMode === 'count' && (panelKind === 'table' || panel.query.language === 'clickhouse-sql')" :aria-pressed="panel.query.mode === queryMode" @click="setQueryMode(queryMode)">{{ queryMode }}</button></div>
                 <div v-if="sourceDetail" class="flex items-center gap-1 rounded-md border p-0.5">
                   <button
                     type="button"
@@ -413,8 +433,6 @@ function onOpenChange(value: boolean) {
                     type="button"
                     class="rounded px-2 py-0.5 text-xs"
                     :class="mode === 'native' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'"
-                    :disabled="!supportsLogsql && countOnlyKind"
-                    :title="!supportsLogsql && countOnlyKind ? 'SQL result charts and breakdowns are not available yet. Use a stat or table for SQL results.' : undefined"
                     @click="mode = 'native'"
                   >
                     {{ supportsLogsql ? 'LogsQL' : 'ClickHouse SQL' }}
@@ -455,7 +473,7 @@ function onOpenChange(value: boolean) {
                 :viz="panel.viz"
                 :field-suggestions="fieldSuggestions"
                 @update:query="(patch) => patchPanel({ query: patch })"
-                @update:viz="(viz) => patchPanel({ viz })"
+                @update:viz="setVisualization"
               />
             </div>
           </div>

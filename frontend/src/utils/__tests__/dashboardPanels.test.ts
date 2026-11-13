@@ -701,9 +701,11 @@ describe("copyableDashboardPanels", () => {
 });
 
 
-describe("phase 5 SQL kind boundary", () => {
+describe("SQL result kind boundary", () => {
   it.each(["chart", "breakdown"] as const)("keeps a SQL result panel when asked for %s", (kind) => {
     const sql: DashboardQueryPanel = { id: "sql", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1 AS n" }, viz: { type: "stat", value: "n" } };
-    expect(switchPanelKind(sql, kind)).toBe(sql);
+    const switched = switchPanelKind(sql, kind);
+    expect(switched.query).toEqual(sql.query);
+    expect(switched.viz.type).toBe(kind === "chart" ? "chart" : "toplist");
   });
 });

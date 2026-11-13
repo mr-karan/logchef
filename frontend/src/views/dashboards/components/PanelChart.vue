@@ -10,19 +10,20 @@ import type { ResolvedWindow } from "@/utils/timeWindow";
 const props = withDefaults(defineProps<{ frame: PanelFrame; viz: ChartViz; count: boolean; height?: number; range?: ResolvedWindow }>(), { height: 200 });
 const preferences = usePreferencesStore();
 const host = ref<HTMLElement | null>(null);
-const { width } = useElementSize(host);
+const { width, height: hostHeight } = useElementSize(host);
 const result = computed(() => {
   try { return { model: buildPanelChart(props.frame, props.viz, props.count, preferences.zone), error: null }; }
   catch (error) { return { model: null, error: error instanceof Error ? error.message : String(error) }; }
 });
 const emptyModel: ChartModel = { rows: [], series: [], time: false, notices: [] };
 const model = computed(() => result.value.model ?? emptyModel);
+const approximate = computed(() => model.value.rows.some((r) => [...r.values.values()].some((v) => v?.approximate)));
 const horizontal = computed(() => props.viz.orientation === "horizontal");
 const mark = computed(() => props.viz.mark ?? "line");
 const stacked = computed(() => props.viz.stack === "stacked");
 const plot = computed(() => {
   const w = Math.max(240, width.value || 640);
-  const h = Math.max(90, props.height - (props.viz.legend !== false && model.value.series.length > 1 ? 26 : 0) - model.value.notices.length * 18);
+  const h = Math.max(90, (hostHeight.value > 0 ? Math.min(props.height, hostHeight.value) : props.height) - 2 - (props.viz.legend !== false && model.value.series.length > 1 ? 26 : 0) - model.value.notices.length * 18);
   return { w, h, left: horizontal.value ? 105 : 60, right: w - 20, top: 18, bottom: h - 32 };
 });
 const geometry = computed(() => {
@@ -44,7 +45,7 @@ const geometry = computed(() => {
   if (low === high) high = low + 1;
   const span = high - low;
   if (!Number.isFinite(span)) return { cells: [], low: 0, high: 1, error: "The chart's numeric range is too wide. Use a table to see exact values.", x: (_v: number) => 0, y: (_v: number) => 0, band: 1 };
-  low -= span * 0.03;
+  if (low < 0) low -= span * 0.03;
   high += span * 0.12;
   let xLow = rows[0]?.x ?? 0;
   let xHigh = rows.at(-1)?.x ?? 1;
@@ -91,7 +92,16 @@ function path(index: number, area = false): string {
   return paths.join(" ");
 }
 const ticks = computed(() => Array.from({ length: 4 }, (_, i) => geometry.value.low + (geometry.value.high - geometry.value.low) * i / 3));
-const xTicks = computed(() => model.value.rows.filter((_r, i) => i % Math.max(1, Math.ceil(model.value.rows.length / 6)) === 0));
+const xTicks = computed(() => {
+  let last = -Infinity;
+  const spacing = horizontal.value ? 20 : 110;
+  return model.value.rows.filter((row) => {
+    const position = geometry.value.x(row.x);
+    if (position - last < spacing) return false;
+    last = position;
+    return true;
+  });
+});
 const tooltip = ref("");
 </script>
 
@@ -101,6 +111,7 @@ const tooltip = ref("");
     <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">No data</p>
     <template v-else>
       <svg :width="plot.w" :height="plot.h" role="img" :aria-label="`${mark} chart`" class="panel-chart__plot">
+        <text v-if="approximate" class="panel-chart__approximate" :x="plot.left - 15" :y="plot.top - 4">≈<title>Approximate coordinates. Tooltips show exact values.</title></text>
         <g v-for="tick in ticks" :key="tick" class="panel-chart__axis">
           <line :x1="horizontal ? geometry.y(tick) : plot.left" :x2="horizontal ? geometry.y(tick) : plot.right" :y1="horizontal ? plot.top : geometry.y(tick)" :y2="horizontal ? plot.bottom : geometry.y(tick)" />
           <text :x="horizontal ? geometry.y(tick) : plot.left - 5" :y="horizontal ? plot.bottom + 18 : geometry.y(tick) + 3" :text-anchor="horizontal ? 'middle' : 'end'">{{ formatNumber(tick, viz.format, { compact: true }).text }}</text>
@@ -115,7 +126,7 @@ const tooltip = ref("");
               <title>{{ cell.row.label }} · {{ cell.series.label }}: {{ cell.value.exact }}</title>
               <rect v-if="mark === 'bar'" class="panel-chart__bar" :x="point(cell, i).bx" :y="point(cell, i).by" :width="point(cell, i).width" :height="point(cell, i).height" :fill="cell.series.color" rx="2" />
               <circle v-else :cx="point(cell, i).x" :cy="point(cell, i).y" r="3" :fill="cell.series.color" />
-              <text v-if="viz.show_values" class="panel-chart__value" :x="point(cell, i).x + (horizontal ? 4 : 0)" :y="point(cell, i).y - (horizontal ? 0 : 5)" :text-anchor="horizontal ? 'start' : 'middle'">{{ cell.value.text }}</text>
+              <text v-if="viz.show_values && (!stacked || mark !== 'bar' || (horizontal ? point(cell, i).width : point(cell, i).height) >= 12)" class="panel-chart__value" :class="{ 'panel-chart__value--stacked': stacked && mark === 'bar' }" :x="stacked && mark === 'bar' ? point(cell, i).bx + point(cell, i).width / 2 : point(cell, i).x + (horizontal ? 4 : 0)" :y="stacked && mark === 'bar' ? point(cell, i).by + point(cell, i).height / 2 + 3 : point(cell, i).y - (horizontal ? 0 : 5)" :text-anchor="horizontal && !(stacked && mark === 'bar') ? 'start' : 'middle'">{{ cell.value.text }}</text>
             </g>
           </template>
         </g>
@@ -130,9 +141,11 @@ const tooltip = ref("");
 <style scoped>
 .panel-chart { width: 100%; height: 100%; overflow: auto; position: relative; }
 .panel-chart__plot { display: block; overflow: visible; }
+.panel-chart__approximate { fill: var(--muted-foreground); font-size: 12px; }
 .panel-chart__axis line { stroke: var(--border); stroke-opacity: 0.5; }
 .panel-chart__axis text, .panel-chart__tick { fill: var(--muted-foreground); font-size: 10px; }
 .panel-chart__value { fill: var(--foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.panel-chart__value--stacked { fill: white; font-size: 9px; }
 .panel-chart__legend { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; font-size: 11px; }
 .panel-chart__legend span { display: inline-flex; align-items: center; gap: 4px; }
 .panel-chart__legend i { width: 8px; height: 8px; border-radius: 2px; }

@@ -8,19 +8,22 @@ import { Label } from "@/components/ui/label";
 const props = defineProps<{ query: DashboardPanelQuery; viz: DashboardViz; frame?: PanelFrame }>();
 const emit = defineEmits<{ "update:viz": [viz: DashboardViz] }>();
 const columns = computed(() => props.frame?.columns ?? []);
+const missingX = computed(() => {
+  const viz = props.viz;
+  return viz.type === "chart" && viz.x && !columns.value.some((c) => c.name === viz.x);
+});
 const kinds: ColumnKind[] = ["time", "date", "number", "category", "bool", "other"];
 const reducers: StatReduce[] = ["last", "first", "sum", "avg", "min", "max"];
 const notations: NonNullable<NumberFormat["notation"]>[] = ["auto", "standard", "compact"];
 const units: NonNullable<NumberFormat["unit"]>[] = ["none", "percent", "bytes", "duration_ms", "duration_s"];
-const format = computed(() => props.viz.type === "stat" ? props.viz.format ?? {} : {});
+const format = computed(() => props.viz.type !== "table" ? props.viz.format ?? {} : {});
 function kindFor(name: string): ColumnKind {
   const viz = props.viz;
-  const confirmed = viz.type === "stat" || viz.type === "table" ? viz.columns && Object.hasOwn(viz.columns, name) ? viz.columns[name] : undefined : undefined;
+  const confirmed = viz.columns && Object.hasOwn(viz.columns, name) ? viz.columns[name] : undefined;
   const column = columns.value.find((c) => c.name === name);
   return confirmed?.kind ?? (column?.backendType ? column.kind : suggestKind(props.frame?.rawRows.slice(0, 100).map((r) => r[name]) ?? []));
 }
 function setKind(name: string, kind: ColumnKind) {
-  if (props.viz.type !== "stat" && props.viz.type !== "table") return;
   emit("update:viz", { ...props.viz, columns: { ...props.viz.columns, [name]: { kind, confidence: "confirmed" } } });
 }
 function setRole(role: "value" | "order_by", name: string) {
@@ -39,11 +42,36 @@ function setRole(role: "value" | "order_by", name: string) {
   } else delete viz[role];
   emit("update:viz", viz);
 }
+function setChartRole(role: "x" | "series" | "label" | "value", name: string) {
+  const viz = props.viz;
+  if (viz.type !== "chart" && viz.type !== "pie" && viz.type !== "toplist") return;
+  const next = { ...viz, [role]: name || undefined };
+  if (name && columns.value.find((c) => c.name === name)?.backendType === null) next.columns = { ...next.columns, [name]: { kind: kindFor(name), confidence: "confirmed" } };
+  emit("update:viz", next);
+}
+function toggleY(name: string) {
+  const viz = props.viz;
+  if (viz.type !== "chart") return;
+  const y = viz.y?.includes(name) ? viz.y.filter((v) => v !== name) : [...(viz.y ?? []), name];
+  const columns = props.frame?.columns.find((c) => c.name === name)?.backendType === null ? { ...viz.columns, [name]: { kind: kindFor(name), confidence: "confirmed" as const } } : viz.columns;
+  emit("update:viz", { ...viz, y, columns });
+}
+function moveY(index: number, direction: number) {
+  if (props.viz.type !== "chart") return;
+  const y = [...(props.viz.y ?? [])];
+  const target = index + direction;
+  if (target < 0 || target >= y.length) return;
+  [y[index], y[target]] = [y[target], y[index]];
+  emit("update:viz", { ...props.viz, y });
+}
+function selectValue(event: Event): string {
+  return event.target instanceof HTMLSelectElement ? event.target.value : "";
+}
 function setReduce(reduce: StatReduce) {
   if (props.viz.type === "stat") emit("update:viz", { ...props.viz, reduce });
 }
 function setFormat(patch: Partial<NumberFormat>) {
-  if (props.viz.type !== "stat") return;
+  if (props.viz.type === "table") return;
   const next = { ...format.value, ...patch };
   for (const key of Object.keys(next)) if (Reflect.get(next, key) === undefined) Reflect.deleteProperty(next, key);
   const viz = { ...props.viz };
@@ -63,6 +91,19 @@ function setScale(value: unknown) {
 
 <template>
   <div class="space-y-4">
+    <template v-if="query.mode === 'result' && viz.type === 'chart'">
+      <Label for="chart-x">X column</Label>
+      <select id="chart-x" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x ?? ''" @change="setChartRole('x', selectValue($event))"><option value="">Select column</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option><option v-if="missingX" :value="viz.x">{{ viz.x }} (missing)</option></select>
+      <fieldset class="space-y-1"><legend class="text-xs">Y columns, in legend order</legend>
+        <div v-for="(name, i) in viz.y ?? []" :key="name" class="flex items-center gap-2 text-xs"><span class="flex-1">{{ name }}</span><button type="button" :aria-label="`Move ${name} up`" :disabled="i === 0" @click="moveY(i, -1)">↑</button><button type="button" :aria-label="`Move ${name} down`" :disabled="i === (viz.y?.length ?? 0) - 1" @click="moveY(i, 1)">↓</button><button type="button" :aria-label="`Remove ${name}`" @click="toggleY(name)">×</button></div>
+        <label v-for="c in columns" :key="c.name" class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.y?.includes(c.name)" @change="toggleY(c.name)" />{{ c.name }}</label>
+      </fieldset>
+      <Label for="chart-series">Series column</Label>
+      <select id="chart-series" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.series ?? ''" @change="setChartRole('series', selectValue($event))"><option value="">One series per Y column</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option></select>
+    </template>
+    <template v-if="query.mode === 'result' && (viz.type === 'pie' || viz.type === 'toplist')">
+      <div v-for="role in (['label', 'value'] as const)" :key="role" class="space-y-1"><Label :for="`list-${role}`">{{ role === 'label' ? 'Label column' : 'Value column' }}</Label><select :id="`list-${role}`" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz[role] ?? ''" @change="setChartRole(role, selectValue($event))"><option value="">Select column</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option></select></div>
+    </template>
     <template v-if="viz.type === 'stat'">
       <template v-if="query.mode === 'result'">
         <div class="space-y-1.5"><Label for="stat-value">Value column</Label>
@@ -76,6 +117,8 @@ function setScale(value: unknown) {
         <div class="flex flex-wrap gap-1"><button v-for="reduce in reducers" :key="reduce" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(viz.reduce ?? (query.mode === 'count' ? 'sum' : 'last')) === reduce" @click="setReduce(reduce)">{{ reduce }}</button></div>
       </div>
       <p v-if="query.mode === 'result' && !viz.order_by && (viz.reduce ?? 'last') !== 'sum' && ['first', 'last'].includes(viz.reduce ?? 'last') && (frame?.rows.length ?? 0) > 1" class="text-xs text-amber-600">Set Order by to select the first or last row chronologically.</p>
+    </template>
+    <template v-if="viz.type !== 'table'">
       <fieldset class="space-y-3 rounded border p-3"><legend class="px-1 text-xs">Number format</legend>
         <div class="flex flex-wrap gap-1"><button v-for="notation in notations" :key="notation" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(format.notation ?? 'auto') === notation" @click="setFormat({ notation })">{{ notation }}</button></div>
         <div class="grid grid-cols-2 gap-2">
@@ -91,7 +134,7 @@ function setScale(value: unknown) {
     <datalist id="result-columns"><option v-for="column in columns" :key="column.name" :value="column.name" /></datalist>
     <fieldset v-if="query.mode === 'result' && columns.length" class="space-y-2"><legend class="text-xs font-medium">Column kinds</legend>
       <div v-for="column in columns" :key="column.name" class="space-y-1">
-        <Label :for="`kind-${column.name}`" class="text-xs">{{ column.name }} <span class="text-muted-foreground">{{ (viz.type === 'stat' || viz.type === 'table') && viz.columns && Object.hasOwn(viz.columns, column.name) ? 'confirmed' : column.backendType ?? 'guessed' }}</span></Label>
+        <Label :for="`kind-${column.name}`" class="text-xs">{{ column.name }} <span class="text-muted-foreground">{{ viz.columns && Object.hasOwn(viz.columns, column.name) ? 'confirmed' : column.backendType ?? 'guessed' }}</span></Label>
         <div :id="`kind-${column.name}`" class="flex flex-wrap gap-1"><button v-for="kind in kinds" :key="kind" type="button" class="rounded border px-1.5 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="kindFor(column.name) === kind" @click="setKind(column.name, kind)">{{ kind }}</button></div>
       </div>
     </fieldset>

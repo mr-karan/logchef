@@ -45,24 +45,32 @@ const BREAKDOWN_VIEWS: { value: "toplist" | "pie"; label: string }[] = [
   { value: "pie", get label() { return t('ui.donut'); } },
 ];
 
-// The effective chart style, matching what PanelTimeseries renders.
+// The effective chart style, matching what PanelChart renders.
 const effectiveMark = computed<DashboardChartMark>(() => (props.viz.type === "chart" ? props.viz.mark ?? "line" : "line"));
 const effectiveStack = computed(() => (props.viz.type === "chart" ? props.viz.stack ?? "stacked" : "stacked"));
 
 // Bars and areas stack by default, as schema 1 drew them.
 function setMark(mark: DashboardChartMark) {
-  emit("update:viz", { type: "chart", mark, stack: mark === "line" ? "none" : "stacked" });
+  if (props.viz.type === "chart") emit("update:viz", { ...props.viz, mark, stack: mark === "line" ? "none" : "stacked" });
 }
 
 function setStack(stack: "stacked" | "none") {
-  emit("update:viz", { type: "chart", mark: effectiveMark.value, stack });
+  if (props.viz.type === "chart") emit("update:viz", { ...props.viz, stack });
 }
 
 function setBreakdownView(view: "toplist" | "pie") {
-  emit("update:viz", view === "pie" ? { type: "pie", donut: true } : { type: "toplist" });
+  if (props.viz.type !== "pie" && props.viz.type !== "toplist") return;
+  const { label, value, columns, format } = props.viz;
+  emit("update:viz", view === "pie" ? { type: "pie", donut: true, label, value, columns, format } : { type: "toplist", label, value, columns, format });
 }
 
 // A blank group leaves the key out, which the server requires.
+function setXScale(event: Event) {
+  if (props.viz.type !== "chart" || !(event.target instanceof HTMLSelectElement)) return;
+  const value = event.target.value;
+  if (value === "auto" || value === "time" || value === "category") emit("update:viz", { ...props.viz, x_scale: value });
+}
+
 function setGroupBy(value: unknown) {
   const text = String(value ?? "");
   emit("update:query", { group_by: trimDashboardGroupBy(text) === "" ? undefined : text });
@@ -104,7 +112,7 @@ function removeColumn(name: string) {
 <template>
   <!-- Chart: group-by field + render style. -->
   <div v-if="kind === 'chart'" class="space-y-4">
-    <div class="space-y-1.5">
+    <div v-if="query.mode === 'count'" class="space-y-1.5">
       <Label for="panel-groupby">{{ t('ui.groupBy2') }} <span class='text-muted-foreground'>{{ t('ui.optional2') }}</span></Label>
       <Input
         id="panel-groupby"
@@ -133,7 +141,7 @@ function removeColumn(name: string) {
         </Button>
       </div>
     </div>
-    <div v-if="effectiveMark === 'bar'" class="space-y-1.5">
+    <div v-if="effectiveMark !== 'line'" class="space-y-1.5">
       <Label>{{ t('ui.barMode') }}</Label>
       <div class="grid grid-cols-2 gap-1.5">
         <Button
@@ -153,7 +161,7 @@ function removeColumn(name: string) {
 
   <!-- Breakdown: a required grouping field and a view-only selector. -->
   <div v-else-if="kind === 'breakdown'" class="space-y-4">
-    <div class="space-y-1.5">
+    <div v-if="query.mode === 'count'" class="space-y-1.5">
       <Label for="panel-breakdown-groupby">{{ t('ui.groupBy2') }} <span class='text-destructive'>{{ t('ui.required') }}</span></Label>
       <Input
         id="panel-breakdown-groupby"
@@ -178,7 +186,6 @@ function removeColumn(name: string) {
     </div>
   </div>
 
-  <PanelResultOptions v-else-if="kind === 'stat'" :query="query" :viz="viz" :frame="frame" @update:viz="(v) => emit('update:viz', v)" />
 
   <!-- Table: row limit + column subset. -->
   <div v-else-if="kind === 'table'" class="space-y-4">
@@ -220,6 +227,15 @@ function removeColumn(name: string) {
         <option v-for="name in fieldSuggestions" :key="name" :value="name" />
       </datalist>
     </div>
-    <PanelResultOptions :query="query" :viz="viz" :frame="frame" @update:viz="(v) => emit('update:viz', v)" />
   </div>
+  <div v-if="viz.type === 'chart'" class="mt-4 space-y-3">
+    <div class="space-y-1"><Label for="chart-scale">X scale</Label><select id="chart-scale" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x_scale ?? 'auto'" @change="setXScale"><option value="auto">Auto</option><option value="time">Time</option><option value="category">Category, query order</option></select></div>
+    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.show_values ?? false" @change="emit('update:viz', { ...viz, show_values: !viz.show_values })" />Show values</label>
+    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.legend ?? true" @change="emit('update:viz', { ...viz, legend: !(viz.legend ?? true) })" />Show legend</label>
+    <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.orientation === 'horizontal'" @change="emit('update:viz', { ...viz, orientation: viz.orientation === 'horizontal' ? 'vertical' : 'horizontal' })" />Horizontal</label>
+  </div>
+  <div v-if="viz.type === 'pie'" class="mt-4 space-y-2"><label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.donut ?? false" @change="emit('update:viz', { ...viz, donut: !viz.donut })" />Donut</label><Label for="pie-min">Fold slices below %</Label><Input id="pie-min" type="number" min="0.01" max="99.99" step="any" :model-value="viz.min_slice_percent ?? ''" @update:model-value="(v) => viz.type === 'pie' && emit('update:viz', { ...viz, min_slice_percent: v === '' ? undefined : Number(v) })" /></div>
+  <div v-if="viz.type === 'toplist'" class="mt-4 space-y-1"><Label for="toplist-max">Maximum rows</Label><Input id="toplist-max" type="number" min="1" max="10000" :model-value="viz.max_rows ?? 20" @update:model-value="(v) => viz.type === 'toplist' && emit('update:viz', { ...viz, max_rows: clampLimit(v) })" /></div>
+  <PanelResultOptions class="mt-4" :query="query" :viz="viz" :frame="frame" @update:viz="(v) => emit('update:viz', v)" />
+
 </template>

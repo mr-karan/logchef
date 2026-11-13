@@ -1,7 +1,7 @@
 import type { DashboardViz, DashboardVizType, NumberFormat } from "@/api/dashboards";
 import { addExact, compareExact, exactString, isExact, parseExact, type FrameNumber } from "./exactNumber";
 import { frameCellText, frameWithKinds, suggestKind, type FrameColumn, type PanelFrame } from "./panelFrame";
-import { getColorForGroupValue, parseGranularityToMilliseconds } from "./histogram-chart";
+import { parseGranularityToMilliseconds } from "./histogram-chart";
 import { formatNumber } from "./numberFormat";
 
 export type ChartViz = Extract<DashboardViz, { type: "chart" }>;
@@ -12,28 +12,32 @@ export interface ChartRow { key: string; x: number; label: string; values: Map<s
 export interface ChartModel { rows: ChartRow[]; series: ChartSeries[]; time: boolean; notices: string[] }
 export interface ListItem extends ChartSeries { value: ChartValue; percentage: number }
 
+function suggestionColumns(frame: PanelFrame): FrameColumn[] {
+  return frame.columns.map((c) => c.backendType === null && c.confidence !== "confirmed" ? { ...c, kind: suggestKind(frame.rawRows.slice(0, 100).map((r) => r[c.name])) } : c);
+}
+
 export function suggestRoles(frame: PanelFrame, type: DashboardVizType): DashboardViz {
-  const columns = frame.columns.map((c) => c.backendType === null && c.confidence !== "confirmed" ? { ...c, kind: suggestKind(frame.rawRows.slice(0, 100).map((r) => r[c.name])) } : c);
+  const columns = suggestionColumns(frame);
   const numbers = columns.filter((c) => c.kind === "number");
   const time = columns.find((c) => c.kind === "time" || c.kind === "date");
   const categories = columns.filter((c) => c.kind === "category");
-  const confirmed = Object.fromEntries(columns.filter((c) => c.backendType === null).map((c) => [c.name, { kind: c.kind, confidence: "confirmed" as const }]));
-  const kinds = Object.keys(confirmed).length ? { columns: confirmed } : {};
   switch (type) {
-    case "stat": return { type, value: numbers[0]?.name, order_by: time?.name, ...kinds };
-    case "chart": return { type, x: (time ?? categories[0])?.name, y: numbers.map((c) => c.name), ...(time && categories.length === 1 && numbers.length === 1 ? { series: categories[0].name } : {}), ...kinds };
-    case "pie": case "toplist": return { type, label: columns.find((c) => c.kind !== "number")?.name, value: numbers[0]?.name, ...kinds };
-    case "table": return { type, ...kinds };
+    case "stat": return { type, value: numbers[0]?.name, order_by: time?.name };
+    case "chart": return { type, x: (time ?? categories[0])?.name, y: numbers.map((c) => c.name), ...(time && categories.length === 1 && numbers.length === 1 ? { series: categories[0].name } : {}) };
+    case "pie": case "toplist": return { type, label: columns.find((c) => c.kind !== "number")?.name, value: numbers[0]?.name };
+    case "table": return { type };
   }
 }
 
 export function suggestViz(frame: PanelFrame): DashboardViz {
   const roles = suggestRoles(frame, "chart");
-  const numbers = frame.columns.filter((c) => c.kind === "number" || (c.backendType === null && suggestKind(frame.rawRows.slice(0, 100).map((r) => r[c.name])) === "number"));
+  const columns = suggestionColumns(frame);
+  const numbers = columns.filter((c) => c.kind === "number");
   if (frame.rows.length === 1 && numbers.length === 1) return suggestRoles(frame, "stat");
   if (roles.type === "chart" && roles.x && roles.y?.length) {
-    const time = frame.columns.some((c) => c.kind === "time" || c.kind === "date");
-    if (time || frame.rows.length <= 50) return { ...roles, mark: time ? "line" : "bar", stack: "none" };
+    const kinds = columns.map((c) => c.kind);
+    const time = kinds.some((k) => k === "time" || k === "date");
+    if (time || kinds.filter((k) => k === "category").length === 1 && frame.rows.length <= 50) return { ...roles, mark: time ? "line" : "bar", stack: "none" };
   }
   return suggestRoles(frame, "table");
 }
@@ -101,7 +105,7 @@ export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean
   for (const source of frame.rows) {
     const xv = source[x.name];
     const groupKey = group ? identity(source[group.name]) : "";
-    const rowKey = identity(xv);
+    const rowKey = identity(time && xv !== null ? Date.parse(String(xv)) : xv);
     const key = JSON.stringify([rowKey, groupKey]);
     keys.set(key, (keys.get(key) ?? 0) + 1);
     if (keys.get(key) === 2 && firstDuplicate === undefined) firstDuplicate = `${label(xv, x, count, zone)}${group ? `, ${label(source[group.name], group, count, zone)}` : ""}`;
@@ -165,6 +169,7 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
   }
   if (!count) duplicateError(keys, firstDuplicate, [dimension.name]);
   if (nulls) notices.push(`${nulls} NULL value(s) omitted.`);
+  const colors = new Map([...values.keys()].map((key, i) => [key, `var(--chart-${i % 5 + 1})`]));
   let entries = [...values.values()];
   const totalValue = entries.reduce<FrameNumber | null>((a, e) => e.value === null ? a : a === null ? e.value : sum(a, e.value), null);
   if (count) entries.sort((a, b) => isExact(a.value) && isExact(b.value) ? compareExact(b.value, a.value) : Number(b.value) - Number(a.value));
@@ -181,10 +186,23 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
   }
   const maxRows = viz.type === "pie" ? 50 : viz.max_rows ?? 20;
   if (entries.length > maxRows) notices.push(`${maxRows} of ${entries.length} ${viz.type === "pie" ? "slices" : "rows"} shown.`);
-  const items = entries.map((e) => ({ ...e, color: getColorForGroupValue(e.key), value: e.value === null ? { coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0 }));
+  const items = entries.map((e) => ({ ...e, color: colors.get(e.key) ?? "var(--muted-foreground)", value: e.value === null ? { coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0 }));
   const max = Math.max(0, ...items.map((i) => Math.abs(i.value.coordinate)));
   const total = items.reduce((s, i) => s + (max ? Math.abs(i.value.coordinate) / max : 0), 0);
   for (const item of items) item.percentage = total ? Math.abs(item.value.coordinate) / max / total * 100 : 0;
   if (items.some((i) => i.value.approximate)) notices.push("Chart coordinates are approximate. Tooltips show exact values.");
   return { items: items.slice(0, maxRows), notices, total: totalValue === null ? null : chartValue(totalValue, viz.format) };
+}
+
+export function withSuggestedRoles(frame: PanelFrame, viz: DashboardViz): DashboardViz {
+  if (viz.type === "chart" && viz.x && viz.y?.length) return viz;
+  if (viz.type === "stat" && viz.value) return viz;
+  if ((viz.type === "pie" || viz.type === "toplist") && viz.label && viz.value) return viz;
+  const suggested = suggestRoles(frameWithKinds(frame, viz.columns), viz.type);
+  const columns = { ...suggested.columns, ...viz.columns };
+  const kinds = Object.keys(columns).length ? { columns } : {};
+  if (viz.type === "chart" && suggested.type === "chart") return { ...viz, x: viz.x ?? suggested.x, y: viz.y?.length ? viz.y : suggested.y, series: viz.series ?? suggested.series, ...kinds };
+  if (viz.type === "stat" && suggested.type === "stat") return { ...viz, value: viz.value ?? suggested.value, order_by: viz.order_by ?? suggested.order_by, ...kinds };
+  if ((viz.type === "pie" || viz.type === "toplist") && (suggested.type === "pie" || suggested.type === "toplist")) return { ...viz, label: viz.label ?? suggested.label, value: viz.value ?? suggested.value, ...kinds };
+  return viz;
 }

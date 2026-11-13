@@ -60,6 +60,7 @@ describe("PanelChart", () => {
     const host = await render(source, { type: "chart", x: "x", y: ["n"], mark: "bar", show_values: true });
     expect(host.querySelector(".panel-chart__value")?.textContent).toContain("≈");
     expect(host.textContent).toContain("coordinates are approximate");
+    expect(host.querySelector(".panel-chart__approximate")?.textContent).toContain("≈");
     host.querySelector(".panel-chart__point")?.dispatchEvent(new MouseEvent("mouseenter"));
     await nextTick();
     expect(host.querySelector("[role=tooltip]")?.textContent).toContain("9,007,199,254,740,993");

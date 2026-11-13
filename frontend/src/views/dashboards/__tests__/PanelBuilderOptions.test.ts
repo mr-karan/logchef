@@ -89,3 +89,49 @@ describe("result options review regressions", () => {
     } finally { app.unmount(); }
   });
 });
+
+describe("result chart builder", () => {
+  it("stores roles and options while changing marks and preserves y order", async () => {
+    const { ref } = await import("vue");
+    const { resultFrame } = await import("@/utils/panelFrame");
+    const viz = ref<import("@/api/dashboards").DashboardViz>({ type: "chart", x: "client", y: ["revenue", "amount"], mark: "bar", x_scale: "category", show_values: true });
+    const host = document.createElement("div");
+    const app = createApp({ render: () => h(PanelBuilderOptions, {
+      query: { mode: "result", language: "clickhouse-sql", text: "SELECT client, amount, revenue" },
+      viz: viz.value, fieldSuggestions: [], frame: resultFrame({ columns: [{ name: "client", type: "String" }, { name: "amount", type: "UInt64" }, { name: "revenue", type: "UInt64" }], rows: [] }),
+      "onUpdate:viz": (next) => { viz.value = next; },
+    }) }).use(i18n);
+    try {
+      app.mount(host);
+      expect(host.querySelector("#panel-groupby")).toBeNull();
+      [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Area")?.click();
+      await nextTick();
+      expect(viz.value).toMatchObject({ type: "chart", x: "client", y: ["revenue", "amount"], mark: "area", x_scale: "category", show_values: true });
+      host.querySelector<HTMLButtonElement>('[aria-label="Move amount up"]')?.click();
+      await nextTick();
+      expect(viz.value).toMatchObject({ y: ["amount", "revenue"] });
+      const select = host.querySelector<HTMLSelectElement>("#chart-scale");
+      if (!select) throw new Error("x scale missing");
+      select.value = "time";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await nextTick();
+      expect(viz.value).toMatchObject({ x_scale: "time", y: ["amount", "revenue"] });
+    } finally { app.unmount(); }
+  });
+  it("keeps label and value roles when switching a toplist to pie", async () => {
+    const changes: import("@/api/dashboards").DashboardViz[] = [];
+    const host = document.createElement("div");
+    const app = createApp({ render: () => h(PanelBuilderOptions, {
+      query: { mode: "result", language: "clickhouse-sql", text: "SELECT client, amount" },
+      viz: { type: "toplist", label: "client", value: "amount" }, fieldSuggestions: [],
+      "onUpdate:viz": (next) => changes.push(next),
+    }) }).use(i18n);
+    try {
+      app.mount(host);
+      [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Donut")?.click();
+      await nextTick();
+      expect(changes.at(-1)).toMatchObject({ type: "pie", label: "client", value: "amount", donut: true });
+      expect(host.querySelector("#panel-breakdown-groupby")).toBeNull();
+    } finally { app.unmount(); }
+  });
+});
