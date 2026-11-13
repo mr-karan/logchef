@@ -36,7 +36,6 @@ import {
 } from "@/utils/dashboardPanels";
 import {
   epochMs,
-  parseZoneId,
   parseRelativeSpec,
   relativeWindow,
   resolveWindow,
@@ -425,7 +424,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const data = unwrap(resp);
       const buckets = data?.data ?? [];
 
-      const frame = countFrame(buckets, data?.granularity ?? window, !!groupBy, data?.notice, { ...range, zone: nativeLanguage === "logsql" ? parseZoneId("UTC")! : range.zone });
+      const frame = countFrame(buckets, data?.granularity ?? window, !!groupBy, data?.notice, range, nativeLanguage === "logsql" ? "fixed-offset" : "calendar");
       return { status: buckets.length ? "success" : "empty", frame };
     }
 

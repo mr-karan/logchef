@@ -187,3 +187,42 @@ it("keeps multi-hour count buckets aligned after a skipped DST hour", () => {
   expect(frame.rawRows.map((r) => r.time)).toEqual(["2026-03-08T05:00:00Z", "2026-03-08T07:00:00Z", "2026-03-08T08:00:00Z", "2026-03-08T10:00:00Z"]);
   expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe("2");
 });
+
+
+describe("declared date wire values", () => {
+  it.each(["Date", "Date32", "Nullable(Date)", "LowCardinality(Date32)"])("keeps %s RFC 3339 values as calendar dates in non-UTC zones", (type) => {
+    const original = process.env.TZ;
+    try {
+      for (const zone of ["Etc/GMT+8", "Pacific/Apia"]) {
+        process.env.TZ = zone;
+        const frame = resultFrame({ columns: [{ name: "day", type }], rows: [{ day: "2026-11-12T00:00:00Z" }, { day: "2026-11-12T00:00:00+13:00" }] });
+        expect(frame.rows.map((row) => frameCellText(row.day, frame.columns[0], zone))).toEqual(["2026-11-12", "2026-11-12"]);
+        expect(frame.notices).toEqual([]);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+  it("keeps confirmed String dates strict even when typed dates accept timestamps", () => {
+    const raw = resultFrame({ columns: [{ name: "day", type: "String" }], rows: ["2026-11-12", "2026-11-12T00:00:00Z", "2026-11-12junk"].map((day) => ({ day })) });
+    expect(frameWithKinds(raw, { day: { kind: "date", confidence: "confirmed" } }).rows.map((row) => row.day)).toEqual(["2026-11-12", null, null]);
+  });
+});
+
+it.each(["constructor", "toString", "valueOf", "__proto__"])("treats absent %s cells as NULL without an invalid-cell notice", (name) => {
+  const frame = resultFrame({ columns: [{ name, type: "UInt64" }], rows: [{}] });
+  expect(frame.rows[0][name]).toBeNull();
+  expect(frame.notices).toEqual([]);
+});
+
+it.each([
+  ["10m", ["2026-11-12T00:10:00Z", "2026-11-12T00:20:00Z", "2026-11-12T00:30:00Z", "2026-11-12T00:40:00Z"]],
+  ["30m", ["2026-11-12T00:00:00Z", "2026-11-12T00:30:00Z"]],
+])("keeps ClickHouse %s Kathmandu buckets on the epoch grid", (interval, times) => {
+  const range = { start: epochMs(Date.parse("2026-11-12T00:17:00Z")), end: epochMs(Date.parse("2026-11-12T00:47:00Z")), zone: parseZoneId("Asia/Kathmandu")! };
+  const frame = countFrame(times.map((bucket) => ({ bucket, log_count: 4 })), interval, false, undefined, range);
+  expect(frame.rawRows.map((row) => row.time)).toEqual(times);
+  expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe("4");
+  expect(frameCellText(reduceStat(frame, { value: "count", reduce: "min", count: true }).value)).toBe("4");
+});
