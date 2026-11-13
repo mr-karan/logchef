@@ -129,7 +129,7 @@ const columnSubset = computed(() => {
 
       <div v-else-if="panelState.status === 'unsupported'" class="dash-panel__message">
         <AlertCircle class="dash-panel__message-icon" />
-        <span>{{ t('ui.serverUpdated') }}</span>
+        <span>{{ t('ui.panelNeedsReload') }}</span>
       </div>
 
       <!-- Loading -->

@@ -231,7 +231,7 @@ describe("DashboardView discard confirmation", () => {
 });
 
 describe("DashboardView read compatibility", () => {
-  it.each([false, true])("shows reload without an edit entry, stub=%s", async (stub) => {
+  it.each([[false, true], [true, true], [false, false]])("shows reload without an edit entry, stub=%s banner=%s", async (stub, banner) => {
     api.get.mockReset().mockImplementation(async () => ({ status: "success", data: {
       ...dashboard,
       panels_corrupt: compatibility.stub,
@@ -248,7 +248,7 @@ describe("DashboardView read compatibility", () => {
     const stamp = document.createElement("meta");
     stamp.name = "logchef-version";
     stamp.content = "old-version";
-    document.head.append(stamp);
+    if (banner) document.head.append(stamp);
     const pinia = createPinia();
     const meta = useMetaStore(pinia);
     await meta.loadMeta();
@@ -257,11 +257,12 @@ describe("DashboardView read compatibility", () => {
       app.use(pinia).use(i18n).use(router).mount(host);
       await settle();
       const notices = [...host.querySelectorAll('[role="status"]')];
-      expect(notices.filter((notice) => notice.textContent?.includes("Logchef was updated"))).toHaveLength(1);
+      expect(notices.filter((notice) => notice.textContent?.includes("Logchef was updated"))).toHaveLength(banner ? 1 : 0);
       expect(notices.some((notice) => notice.textContent?.includes("This dashboard is read-only. Reload to use its newer features."))).toBe(true);
       expect([...host.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Edit")).toBe(false);
       expect(host.textContent).not.toContain("This dashboard is empty");
-      if (!stub) expect(host.querySelector(".dash-panel__message")?.textContent).toContain("Reload to continue");
+      expect(host.textContent?.split("Logchef was updated").length).toBe(banner ? 2 : 1);
+      if (!stub) expect(host.querySelector(".dash-panel__message")?.textContent).toContain("This panel uses a feature this version cannot show.");
     } finally {
       app.unmount(); host.remove(); stamp.remove(); compatibility.future = false; compatibility.stub = false; vi.unstubAllGlobals();
     }
