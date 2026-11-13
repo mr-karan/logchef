@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 
+import { usePreferencesStore } from "@/stores/preferences";
 import { computed, ref, watch } from "vue";
 import { ChevronLeft, ChevronRight } from "lucide-vue-next";
 import {
@@ -12,7 +13,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { PanelColumn } from "@/stores/dashboards";
+import type { ConfirmedColumn } from "@/api/dashboards";
+import { frameWithKinds, frameCellText, type PanelFrame } from "@/utils/panelFrame";
 
 const { t } = useI18n();
 
@@ -20,11 +22,14 @@ const { t } = useI18n();
 // declares an explicit column subset (options.columns) we show only those, in
 // that order; otherwise every returned column is shown.
 interface Props {
-  columns: PanelColumn[];
-  rows: Record<string, any>[];
+  frame: PanelFrame;
+  kinds?: Record<string, ConfirmedColumn>;
   columnSubset?: string[];
 }
+const preferences = usePreferencesStore();
 const props = defineProps<Props>();
+const typedFrame = computed(() => frameWithKinds(props.frame, props.kinds));
+const rows = computed(() => typedFrame.value.rows);
 
 // Rendering every row unbounded means a saved row limit of e.g. 100k turns
 // into 100k DOM rows. Paginate client-side instead - the panel's own row
@@ -33,26 +38,26 @@ const props = defineProps<Props>();
 const PAGE_SIZE = 100;
 const page = ref(0);
 
-// A new query result replaces props.rows with a fresh array - always land
+// A new query result replaces rows.value with a fresh array - always land
 // back on page 1 rather than stranding the viewer on a page past the end of
 // a smaller new result set.
 watch(
-  () => props.rows,
+  () => rows.value,
   () => {
     page.value = 0;
   }
 );
 
-const pageCount = computed(() => Math.max(1, Math.ceil(props.rows.length / PAGE_SIZE)));
+const pageCount = computed(() => Math.max(1, Math.ceil(rows.value.length / PAGE_SIZE)));
 const pagedRows = computed(() => {
   const start = page.value * PAGE_SIZE;
-  return props.rows.slice(start, start + PAGE_SIZE);
+  return rows.value.slice(start, start + PAGE_SIZE);
 });
 const rangeLabel = computed(() => {
-  if (props.rows.length === 0) return t('explore.rowCount', { count: 0 }, 0);
+  if (rows.value.length === 0) return t('explore.rowCount', { count: 0 }, 0);
   const start = page.value * PAGE_SIZE + 1;
-  const end = Math.min(props.rows.length, start + PAGE_SIZE - 1);
-  return t('explore.resultRange', { start: start.toLocaleString(), end: end.toLocaleString(), total: props.rows.length.toLocaleString() });
+  const end = Math.min(rows.value.length, start + PAGE_SIZE - 1);
+  return t('explore.resultRange', { start: start.toLocaleString(), end: end.toLocaleString(), total: rows.value.length.toLocaleString() });
 });
 
 function prevPage() {
@@ -73,28 +78,28 @@ const displayColumns = computed<string[]>(() => {
   if (subset.length > 0) {
     return subset;
   }
-  if (props.columns.length > 0) {
-    return props.columns.map((c) => c.name);
+  if (typedFrame.value.columns.length > 0) {
+    return typedFrame.value.columns.map((c) => c.name);
   }
   // Fall back to the union of keys across a bounded sample of rows.
   const keys = new Set<string>();
-  const sampleSize = Math.min(props.rows.length, COLUMN_UNION_SAMPLE_SIZE);
+  const sampleSize = Math.min(rows.value.length, COLUMN_UNION_SAMPLE_SIZE);
   for (let i = 0; i < sampleSize; i += 1) {
-    for (const key of Object.keys(props.rows[i])) keys.add(key);
+    for (const key of Object.keys(rows.value[i])) keys.add(key);
   }
   return [...keys];
 });
 
-function cellValue(row: Record<string, any>, column: string): string {
-  const value = row[column];
-  if (value === null || value === undefined) return "";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+function cellValue(row: Record<string, unknown>, column: string): string {
+  return frameCellText(row[column], typedFrame.value.columns.find((c) => c.name === column), preferences.zone);
 }
+const notices = computed(() => [...typedFrame.value.notices, ...(props.columnSubset ?? []).filter((name) => !typedFrame.value.columns.some((c) => c.name === name)).map((name) => `Column "${name}" is missing from the result.`)]);
+
 </script>
 
 <template>
   <div class="panel-table">
+    <p v-for="notice in notices" :key="notice" class="text-xs text-muted-foreground" role="status">{{ notice }}</p>
     <div class="panel-table__scroll">
       <Table>
         <TableHeader class="panel-table__header">

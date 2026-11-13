@@ -12,6 +12,7 @@ import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 import { panelExploreQuery } from "@/utils/panelExplore";
+import { histogramBuckets } from "@/utils/panelFrame";
 import { truncationMessage } from "@/utils/truncation";
 
 const { t } = useI18n();
@@ -67,12 +68,15 @@ const chartHeight = computed(() =>
 
 const vizType = computed(() => props.panel.viz?.type);
 
+const buckets = computed(() => panelState.value.frame ? histogramBuckets(panelState.value.frame) : []);
+const groupBy = computed(() => !props.panel.locked ? props.panel.query.group_by ?? null : null);
+const notice = computed(() => panelState.value.frame?.notices.join(" ") || null);
 // A cut result says so on every visualization, and so does an empty one: a
 // byte budget can stop the reader before its first row. A cap that cut
 // nothing is silent.
 const truncationText = computed(() => {
   if (panelState.value.status !== "success" && panelState.value.status !== "empty") return null;
-  const message = truncationMessage(panelState.value.table?.stats);
+  const message = truncationMessage(panelState.value.stats);
   return message ? t(message.key, { count: message.count }, message.count) : null;
 });
 
@@ -173,32 +177,33 @@ const columnSubset = computed(() => {
       <!-- Success -->
       <template v-else>
         <PanelTimeseries
-          v-if="vizType === 'chart' && panelState.timeseries"
-          :buckets="panelState.timeseries.buckets"
-          :granularity="panelState.timeseries.granularity"
-          :group-by="panelState.timeseries.groupBy"
-          :notice="panelState.timeseries.notice"
-          :range="panelState.timeseries.range"
+          v-if="vizType === 'chart' && panelState.frame && panelState.range"
+          :buckets="buckets"
+          :granularity="panelState.frame.interval"
+          :group-by="groupBy"
+          :notice="notice"
+          :range="panelState.range"
           :height="chartHeight"
           :chart="chartStyle"
           :bar-mode="barMode"
         />
         <PanelStat
-          v-else-if="vizType === 'stat' && panelState.stat"
-          :value="panelState.stat.value"
+          v-else-if="vizType === 'stat' && panelState.frame && !panel.locked"
+          :frame="panelState.frame"
+          :panel="panel"
         />
         <PanelBreakdown
-          v-else-if="(vizType === 'pie' || vizType === 'toplist') && panelState.breakdown"
-          :buckets="panelState.breakdown.buckets"
-          :group-by="panelState.breakdown.groupBy"
-          :notice="panelState.breakdown.notice"
+          v-else-if="(vizType === 'pie' || vizType === 'toplist') && panelState.frame && groupBy"
+          :buckets="buckets"
+          :group-by="groupBy"
+          :notice="notice"
           :height="chartHeight"
           :view="vizType === 'pie' ? 'donut' : 'horizontal-bars'"
         />
         <PanelTable
-          v-else-if="vizType === 'table' && panelState.table"
-          :columns="panelState.table.columns"
-          :rows="panelState.table.rows"
+          v-else-if="vizType === 'table' && panelState.frame"
+          :frame="panelState.frame"
+          :kinds="!panel.locked && panel.viz.type === 'table' ? panel.viz.columns : undefined"
           :column-subset="columnSubset"
         />
       </template>
