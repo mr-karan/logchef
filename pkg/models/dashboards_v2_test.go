@@ -932,19 +932,42 @@ func TestCanonicalDashboardPersistedSize(t *testing.T) {
 			t.Fatalf("got %d stored bytes and error %v; want rejection", len(out), err)
 		}
 	})
-	t.Run("accepts stored form just under limit", func(t *testing.T) {
+	storedOfSize := func(t *testing.T, size int) []byte {
+		t.Helper()
 		empty := v2Blob(v2Layout, strings.Replace(v2StatPanel, `"text":"x"`, `"text":""`, 1))
 		const separators = 87_000
-		padding := strings.Repeat("x", MaxDashboardPanelsSizeV2-1-len(empty)-6*separators)
-		raw := v2Blob(v2Layout, strings.Replace(v2StatPanel, `"text":"x"`, `"text":"`+strings.Repeat("\u2028", separators)+padding+`"`, 1))
-		out, err := CanonicalDashboardPanels(raw)
-		if err != nil || len(out) != MaxDashboardPanelsSizeV2-1 {
-			t.Fatalf("got %d stored bytes and error %v; want %d bytes", len(out), err, MaxDashboardPanelsSizeV2-1)
-		}
-		if err := ValidateDashboardPanels(out); err != nil {
-			t.Fatalf("stored blob is invalid: %v", err)
-		}
-	})
+		padding := strings.Repeat("x", size-len(empty)-6*separators)
+		return v2Blob(v2Layout, strings.Replace(v2StatPanel, `"text":"x"`, `"text":"`+strings.Repeat("\u2028", separators)+padding+`"`, 1))
+	}
+	for _, tc := range []struct {
+		name   string
+		stored int
+		accept bool
+	}{
+		{"one byte under the limit", MaxDashboardPanelsSizeV2 - 1, true},
+		{"exactly at the limit", MaxDashboardPanelsSizeV2, true},
+		{"one byte over the limit", MaxDashboardPanelsSizeV2 + 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := storedOfSize(t, tc.stored)
+			if len(raw) >= MaxDashboardPanelsSizeV2 {
+				t.Fatal("request must fit")
+			}
+			out, err := CanonicalDashboardPanels(raw)
+			if !tc.accept {
+				if err == nil || out != nil {
+					t.Fatalf("got %d stored bytes and error %v; want rejection", len(out), err)
+				}
+				return
+			}
+			if err != nil || len(out) != tc.stored {
+				t.Fatalf("got %d stored bytes and error %v; want %d bytes", len(out), err, tc.stored)
+			}
+			if err := ValidateDashboardPanels(out); err != nil {
+				t.Fatalf("stored blob is invalid: %v", err)
+			}
+		})
+	}
 }
 
 func TestParseDashboardClientKnownFeature(t *testing.T) {

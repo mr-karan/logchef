@@ -1,5 +1,6 @@
 {
   "ui.dashboardNeedsReload": "This dashboard is read-only. Reload to use its newer features.",
+  "ui.panelNeedsReload": "This panel uses a feature this version cannot show.",
   "ui.serverUpdated": "Logchef was updated. Reload to continue.",
   "dashboards.conflict.title": "This dashboard changed while you were editing",
   "dashboards.conflict.description": "Someone saved a newer version, so your changes were not saved. They are still here. Choose how to keep them.",
