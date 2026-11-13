@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats"];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -74,9 +74,9 @@ export interface NumberFormat {
 }
 export type DashboardViz =
   | { type: "stat"; value?: string; order_by?: string; reduce?: StatReduce; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
-  | { type: "chart"; mark?: DashboardChartMark; stack?: DashboardChartStack }
-  | { type: "pie"; donut?: boolean }
-  | { type: "toplist" }
+  | { type: "chart"; x?: string; y?: string[]; series?: string; mark?: DashboardChartMark; stack?: DashboardChartStack; x_scale?: "auto" | "time" | "category"; orientation?: "horizontal" | "vertical"; show_values?: boolean; legend?: boolean; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
+  | { type: "pie"; label?: string; value?: string; donut?: boolean; min_slice_percent?: number; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
+  | { type: "toplist"; label?: string; value?: string; max_rows?: number; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "table"; visible_columns?: string[]; columns?: Record<string, ConfirmedColumn> };
 
 export interface DashboardQueryPanel {

@@ -59,7 +59,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"unknown top-level key", json.RawMessage(`{"version":2,"features":[],"variables":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]}`), `unknown field "variables"`},
 		{"unknown panel key", v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","description":"later","team_id":1,"source_id":1,"query":`+countQ+`,"viz":{"type":"stat"}}`), `unknown field "description"`},
 		{"unknown query key", panel(`{"mode":"count","language":"logchefql","text":"x","range":"today-6d"}`, `{"type":"stat"}`), `unknown field "range"`},
-		{"unknown viz key", panel(countQ, `{"type":"chart","show_values":true}`), `unknown field "show_values"`},
+		{"unknown viz key", panel(countQ, `{"type":"chart","thresholds":[]}`), `unknown field "thresholds"`},
 		{"comparison is a later phase", panel(resultQ, `{"type":"stat","value":"n","compare":{}}`), `unknown field "compare"`},
 		{"null value", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":null}`, `{"type":"stat"}`), "null at panels[0].query.group_by"},
 		{"trailing data", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]} {}`), "after top-level value"},
@@ -690,6 +690,8 @@ func TestDashboardSchema2FeatureTableComplete(t *testing.T) {
 	}
 
 	enums := map[string]any{
+		"panels.viz.x_scale":            validDashboardXScales,
+		"panels.viz.orientation":        validDashboardOrientations,
 		"panels.kind":                   validDashboardPanelKinds,
 		"panels.query.mode":             validDashboardQueryModes,
 		"panels.query.language":         validDashboardQueryLanguages,
@@ -1081,5 +1083,49 @@ func TestDashboardResultFrameFeatureTriggers(t *testing.T) {
 				t.Fatalf("features %v: %v; blob %s", features, err, canonical)
 			}
 		})
+	}
+}
+
+func TestDashboardResultCharts(t *testing.T) {
+	for _, viz := range []string{
+		`{"type":"chart","x":"day","y":["a","b","c"],"series":"service","x_scale":"category","orientation":"horizontal","show_values":true,"legend":false,"mark":"bar","stack":"stacked"}`,
+		`{"type":"pie","label":"service","value":"n","min_slice_percent":1,"donut":true}`,
+		`{"type":"toplist","label":"service","value":"n","max_rows":20}`,
+	} {
+		panel := strings.Replace(v2TablePanel, `{"type":"table","visible_columns":["a","b"]}`, viz, 1)
+		raw := v2Blob(v2Layout, panel)
+		canonical, err := CanonicalDashboardPanels(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		features, err := DashboardFeatures(canonical)
+		if err != nil || !slices.Contains(features, "result_charts") {
+			t.Fatalf("features %v: %v", features, err)
+		}
+		for _, future := range []string{`"compare":{}`, `"sparkline":true`, `"thresholds":[]`, `"rules":[]`, `"combine":"sum"`} {
+			bad := strings.Replace(string(raw), `"type":`, future+`,"type":`, 1)
+			if ValidateDashboardPanels(json.RawMessage(bad)) == nil {
+				t.Errorf("accepted %s", future)
+			}
+		}
+	}
+	for _, viz := range []string{
+		`{"type":"chart","x":"day","y":[]}`, `{"type":"chart","y":["a"]}`,
+		`{"type":"chart","x":"day","y":["a","a"]}`, `{"type":"chart","x":"day","y":[""]}`,
+		`{"type":"chart","x":"day","y":["a"],"x_scale":"log"}`, `{"type":"chart","x":"day","y":["a"],"orientation":"diagonal"}`,
+		`{"type":"pie","value":"n"}`, `{"type":"pie","label":"l","value":"n","min_slice_percent":0}`,
+		`{"type":"pie","label":"l","value":"n","min_slice_percent":100}`, `{"type":"toplist","label":"l","value":"n","max_rows":0}`,
+		`{"type":"stat","value":"n","x":"day"}`, `{"type":"table","label":"day"}`,
+	} {
+		raw := v2Blob(v2Layout, strings.Replace(v2TablePanel, `{"type":"table","visible_columns":["a","b"]}`, viz, 1))
+		if ValidateDashboardPanels(raw) == nil {
+			t.Errorf("accepted %s", viz)
+		}
+	}
+	for _, role := range []string{`"x":"time"`, `"y":[]`, `"series":"series"`, `"label":"series"`, `"value":"count"`} {
+		raw := strings.Replace(v2ChartPanel, `"mark":"bar"`, role+`,"mark":"bar"`, 1)
+		if ValidateDashboardPanels(v2Blob(v2Layout, raw)) == nil {
+			t.Errorf("stored count role %s", role)
+		}
 	}
 }
