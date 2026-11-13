@@ -48,13 +48,13 @@ type QueryOptions struct {
 // truncation is the state of a result that stopped for reason after rows
 // rows. A result that fills the cap without a probe may be incomplete, unless
 // the statement's own LIMIT set the cap: then the author asked for that many.
-func (opts QueryOptions) truncation(rows int, reason string) models.Truncation {
+func (opts QueryOptions) truncation(rows int, reason string, end queryEnd) models.Truncation {
 	switch {
 	case reason == "byte_limit":
 		return models.TruncationBytes
 	case reason == "row_limit":
 		return models.TruncationRows
-	case hasSilentBreakLimit(opts.Settings):
+	case end.mayHaveBroken():
 		return models.TruncationUnknown
 	case !opts.Probed && opts.MaxRows > 0 && rows >= opts.MaxRows && opts.LimitSource != models.LimitSourceStatement:
 		return models.TruncationUnknown
@@ -62,18 +62,41 @@ func (opts QueryOptions) truncation(rows int, reason string) models.Truncation {
 	return models.TruncationNone
 }
 
-// A short result cannot prove completeness when ClickHouse can stop silently.
-func hasSilentBreakLimit(settings map[string]any) bool {
-	for _, bound := range []struct{ limit, mode string }{
-		{"max_result_bytes", "result_overflow_mode"},
-		{"max_rows_to_read", "read_overflow_mode"},
-		{"max_bytes_to_read", "read_overflow_mode"},
-	} {
-		if settings[bound.mode] == "break" {
-			value, err := strconv.ParseUint(fmt.Sprint(settings[bound.limit]), 10, 64)
-			if err == nil && value > 0 {
-				return true
-			}
+// queryEnd is what a query that ran to its end reported.
+type queryEnd struct {
+	// settings are the settings the query sent.
+	settings map[string]any
+	// resultBytes sums the server's result profile, when profiled says one arrived.
+	resultBytes uint64
+	profiled    bool
+	rowsRead    uint64
+	bytesRead   uint64
+}
+
+// breakLimits are the limits at which ClickHouse ends a query without an
+// error when their overflow mode is break. reached reports whether a query
+// could have hit the limit; a counter below it proves the limit did not stop
+// the query.
+var breakLimits = []struct {
+	limit, mode string
+	reached     func(end queryEnd, limit uint64) bool
+}{
+	// The result profile counts allocated bytes, never fewer than max_result_bytes counts.
+	{"max_result_bytes", "result_overflow_mode", func(end queryEnd, limit uint64) bool { return !end.profiled || end.resultBytes >= limit }},
+	{"max_rows_to_read", "read_overflow_mode", func(end queryEnd, limit uint64) bool { return end.rowsRead >= limit }},
+	{"max_bytes_to_read", "read_overflow_mode", func(end queryEnd, limit uint64) bool { return end.bytesRead >= limit }},
+}
+
+// mayHaveBroken reports whether a break limit could have ended the query, so
+// a short result cannot prove that it is complete.
+func (end queryEnd) mayHaveBroken() bool {
+	for _, bound := range breakLimits {
+		if end.settings[bound.mode] != "break" {
+			continue
+		}
+		limit, err := strconv.ParseUint(fmt.Sprint(end.settings[bound.limit]), 10, 64)
+		if err == nil && limit > 0 && bound.reached(end, limit) {
+			return true
 		}
 	}
 	return false
@@ -99,12 +122,15 @@ func recordRowsReturned(ctx context.Context, rows int) {
 }
 
 // Progress packets contain increments, not cumulative totals. The driver may
-// deliver them from its reader goroutine while the caller processes result rows.
-// For canceled or truncated queries these are only the increments received.
+// deliver them, and the result profile, from its reader goroutine while the
+// caller processes result rows. For canceled or truncated queries these are
+// only the increments received.
 type queryProgress struct {
-	mu    sync.Mutex
-	rows  uint64
-	bytes uint64
+	mu          sync.Mutex
+	rows        uint64
+	bytes       uint64
+	resultBytes uint64
+	profiled    bool
 }
 
 func (p *queryProgress) add(delta *clickhouse.Progress) {
@@ -112,6 +138,19 @@ func (p *queryProgress) add(delta *clickhouse.Progress) {
 	defer p.mu.Unlock()
 	p.rows += min(delta.Rows, math.MaxUint64-p.rows)
 	p.bytes += min(delta.Bytes, math.MaxUint64-p.bytes)
+}
+
+func (p *queryProgress) profile(info *clickhouse.ProfileInfo) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resultBytes += min(info.Bytes, math.MaxUint64-p.resultBytes)
+	p.profiled = true
+}
+
+func (p *queryProgress) end(settings map[string]any) queryEnd {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return queryEnd{settings: settings, resultBytes: p.resultBytes, profiled: p.profiled, rowsRead: p.rows, bytesRead: p.bytes}
 }
 
 func (p *queryProgress) apply(stats *models.QueryStats) {
@@ -260,7 +299,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			Truncated:       truncatedReason != "",
 			TruncatedReason: truncatedReason,
 			LimitSource:     opts.LimitSource,
-			Truncation:      opts.truncation(len(resultData), truncatedReason),
+			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(opts.Settings)),
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
@@ -344,7 +383,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		stats.RowsReturned = rowsReturned
 		stats.LimitApplied = opts.LimitApplied
 		stats.LimitSource = opts.LimitSource
-		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason)
+		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(opts.Settings))
 		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
 		return writer.Finish(stats)
 	})

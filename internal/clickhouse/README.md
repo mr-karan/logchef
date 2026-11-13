@@ -72,8 +72,10 @@ not distinguish an empty scan from unavailable progress. JSON capability probes
 do not contribute to the result query's scan statistics.
 Counters saturate at the platform's maximum integer instead of wrapping on overflow.
 
-LogChef owns the progress callback for result queries. Other driver callbacks
-and query IDs remain available. Execution metrics count each query once across
+LogChef owns the progress and profile callbacks for result queries. The result
+profile shows whether a result stayed under a limit that ClickHouse ends
+silently, such as `max_result_bytes` in break mode. Other driver callbacks and
+query IDs remain available. Execution metrics count each query once across
 buffered, streaming, and DDL paths.
 
 LogchefQL compilation reuses the source inspection cache when column metadata

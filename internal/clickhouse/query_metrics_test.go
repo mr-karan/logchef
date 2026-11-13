@@ -159,8 +159,8 @@ func TestQueryScannedWorkClickHouse(t *testing.T) {
 	if err := client.conn.Exec(ctx, "INSERT INTO "+table+" SELECT number FROM numbers(100000)"); err != nil {
 		t.Fatal(err)
 	}
-	var profiles atomic.Int64
-	ctx = ch.Context(ctx, ch.WithQueryID("logchef-scanned-work-test"), ch.WithProfileInfo(func(*ch.ProfileInfo) { profiles.Add(1) }))
+	var events atomic.Int64
+	ctx = ch.Context(ctx, ch.WithQueryID("logchef-scanned-work-test"), ch.WithProfileEvents(func([]ch.ProfileEvent) { events.Add(1) }))
 	query := "SELECT sum(number), initialQueryID() FROM " + table
 	result, err := client.QueryWithOptions(ctx, query, QueryOptions{})
 	if err != nil {
@@ -183,8 +183,8 @@ func TestQueryScannedWorkClickHouse(t *testing.T) {
 	}
 	assertScannedWork(stats)
 	assertScannedWork(writer.stats)
-	if !writer.finished || profiles.Load() < 2 || queryCount(t, source, "select", "success") != 2 {
-		t.Fatalf("finished=%v profiles=%d query count=%d", writer.finished, profiles.Load(), queryCount(t, source, "select", "success"))
+	if !writer.finished || events.Load() < 2 || queryCount(t, source, "select", "success") != 2 {
+		t.Fatalf("finished=%v profile event packets=%d query count=%d", writer.finished, events.Load(), queryCount(t, source, "select", "success"))
 	}
 
 	// Filtering all input still scans rows even though no result rows survive.

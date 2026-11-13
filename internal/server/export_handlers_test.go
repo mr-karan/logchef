@@ -162,6 +162,7 @@ func TestExportQueriesClickHouse(t *testing.T) {
 		settings         *models.ClickHouseQuerySettings
 	}{
 		{name: "optional block", body: `{"query_text":"SELECT 1 AS value [[WHERE 1={{x}}]]","format":"ndjson"}`, want: `"row":{"value":1}`},
+		{name: "byte cap the result stays under", body: `{"query_text":"SELECT number FROM numbers(30)","format":"ndjson"}`, want: `"truncation":"none"`, settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(1_000_000))}},
 		{name: "silent byte cap", body: `{"query_text":"SELECT number FROM numbers(10000) SETTINGS max_block_size=10, max_threads=1","format":"ndjson"}`, want: `"truncation":"unknown"`, settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(100)), ResultOverflowMode: new("break")}},
 	} {
 		for _, operation := range []string{"stream", "job"} {

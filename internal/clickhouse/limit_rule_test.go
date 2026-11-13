@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 func TestTruncationState(t *testing.T) {
@@ -30,8 +32,48 @@ func TestTruncationState(t *testing.T) {
 		{name: "no cap is never a cut", opts: QueryOptions{}, rows: 5000, want: models.TruncationNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.opts.truncation(tc.rows, tc.reason); got != tc.want {
+			if got := tc.opts.truncation(tc.rows, tc.reason, queryEnd{}); got != tc.want {
 				t.Fatalf("truncation(%d, %q) = %q, want %q", tc.rows, tc.reason, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTruncationBreakLimits holds a short result to the limits that
+// ClickHouse ends silently: a counter below a limit proves that the limit did
+// not cut.
+func TestTruncationBreakLimits(t *testing.T) {
+	probed := QueryOptions{MaxRows: 100, Probed: true, LimitSource: models.LimitSourceRequest}
+	for _, tc := range []struct {
+		name string
+		sent clickhouse.Settings
+		end  queryEnd
+		want models.Truncation
+	}{
+		{name: "a byte cap the result stayed under", sent: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"},
+			end: queryEnd{profiled: true, resultBytes: 4104}, want: models.TruncationNone},
+		{name: "a byte cap the result reached", sent: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"},
+			end: queryEnd{profiled: true, resultBytes: 1_000_000}, want: models.TruncationUnknown},
+		{name: "a byte cap without the result profile", sent: clickhouse.Settings{"max_result_bytes": int64(1_000_000), "result_overflow_mode": "break"},
+			end: queryEnd{}, want: models.TruncationUnknown},
+		{name: "a byte cap that throws", sent: clickhouse.Settings{"max_result_bytes": int64(100), "result_overflow_mode": "throw"},
+			end: queryEnd{profiled: true, resultBytes: 1_000_000}, want: models.TruncationNone},
+		{name: "a row read cap the query reached", sent: clickhouse.Settings{"max_rows_to_read": int64(100), "read_overflow_mode": "break"},
+			end: queryEnd{rowsRead: 100}, want: models.TruncationUnknown},
+		{name: "a row read cap the query stayed under", sent: clickhouse.Settings{"max_rows_to_read": int64(100), "read_overflow_mode": "break"},
+			end: queryEnd{rowsRead: 99}, want: models.TruncationNone},
+		{name: "a byte read cap the query reached", sent: clickhouse.Settings{"max_bytes_to_read": int64(800), "read_overflow_mode": "break"},
+			end: queryEnd{bytesRead: 880}, want: models.TruncationUnknown},
+		{name: "a byte read cap the query stayed under", sent: clickhouse.Settings{"max_bytes_to_read": int64(800), "read_overflow_mode": "break"},
+			end: queryEnd{bytesRead: 400}, want: models.TruncationNone},
+		{name: "a read cap that throws", sent: clickhouse.Settings{"max_rows_to_read": int64(100)},
+			end: queryEnd{rowsRead: 5000}, want: models.TruncationNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			end := tc.end
+			end.settings = tc.sent
+			if got := probed.truncation(5, "", end); got != tc.want {
+				t.Fatalf("truncation = %q, want %q", got, tc.want)
 			}
 		})
 	}

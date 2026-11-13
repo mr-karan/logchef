@@ -146,6 +146,16 @@ func TestQueryLogsLimitRuleClickHouse(t *testing.T) {
 			wantRows: 30, wantFirst: 0, wantSource: models.LimitSourceMax, wantTruncation: models.TruncationNone,
 		},
 		{
+			name: "source max_result_bytes the result stays under", query: "SELECT number FROM numbers(30) ORDER BY number", limit: 100,
+			settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(1_000_000))},
+			wantRows: 30, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
+		},
+		{
+			name: "source max_result_bytes the result reaches", query: "SELECT number FROM numbers(10000) SETTINGS max_block_size = 10, max_threads = 1", limit: 100,
+			settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(100))},
+			wantRows: 20, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationUnknown,
+		},
+		{
 			name: "LIMIT n BY untouched", query: "SELECT number % 3 AS n, number FROM numbers(1000) ORDER BY n, number LIMIT 1 BY n", limit: 100,
 			wantRows: 3, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
 		},
