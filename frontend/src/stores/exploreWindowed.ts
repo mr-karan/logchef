@@ -117,8 +117,8 @@ export function createWindowedSession(snapshot: SearchSnapshot) {
     }
     if (event.type === 'end' && !count) {
       // A page that the byte budget ended before a window's first row reports the cut on its end.
-      if (event.stats && stats) {
-        stats = { ...stats, limit_source: event.stats.limit_source, truncation: event.stats.truncation };
+      if (event.stats) {
+        stats = stats ? { ...stats, limit_source: event.stats.limit_source, truncation: event.stats.truncation } : event.stats;
         publishRows();
       }
       if (!retry || advanceRetry) {
