@@ -21,7 +21,8 @@ const mocks = vi.hoisted(() => ({
   translate: vi.fn(),
 }));
 
-vi.mock("@/api/dashboards", () => ({
+vi.mock("@/api/dashboards", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/dashboards")>()),
   dashboardsApi: {
     list: mocks.list,
     get: mocks.get,
@@ -38,9 +39,12 @@ vi.mock("@/api/dashboards", () => ({
 }));
 
 import { useDashboardsStore } from "../dashboards";
-import type { Dashboard, DashboardPanel, DashboardPanels } from "@/api/dashboards";
+import type { Dashboard, DashboardLockedPanel, DashboardPanel, DashboardPanels, DashboardQueryPanel } from "@/api/dashboards";
 import { epochMs } from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
+import { dashboardLayout, emptyDashboardPanels } from "@/utils/dashboardPanels";
+
+type ValidDashboard = Extract<Dashboard, { corrupt: false }>;
 
 // Tear each test's store down as the dashboard view does on unmount, so a
 // pending refresh cannot fire into the next test's mocks.
@@ -49,14 +53,20 @@ afterEach(() => {
 });
 
 function emptyPanels(): DashboardPanels {
-  return { version: 1, layout: [], panels: [] };
+  return emptyDashboardPanels();
 }
 
-function makeDashboard(overrides: Partial<Dashboard> = {}): Dashboard {
+/** A blob whose single tab holds `layout`. */
+function panelsWith(panels: DashboardPanel[], layout: { id: string; x: number; y: number; w: number; h: number }[] = []): DashboardPanels {
+  return { ...emptyPanels(), tabs: [{ id: "main", title: "Main", layout }], panels };
+}
+
+function makeDashboard(overrides: Partial<ValidDashboard> = {}): ValidDashboard {
   return {
     id: 3,
     name: "HTTP errors",
     description: "desc",
+    corrupt: false,
     panels: emptyPanels(),
     created_at: "2026-07-08T00:00:00Z",
     updated_at: "2026-07-08T00:00:00Z",
@@ -66,16 +76,32 @@ function makeDashboard(overrides: Partial<Dashboard> = {}): Dashboard {
   };
 }
 
-function tablePanel(id = "p1"): DashboardPanel {
+function currentPanels(store: ReturnType<typeof useDashboardsStore>): DashboardPanel[] {
+  const current = store.current;
+  return current && !current.corrupt ? current.panels.panels : [];
+}
+
+function tablePanel(id = "p1"): DashboardQueryPanel {
   return {
     id,
+    kind: "query",
     title: "Recent logs",
-    type: "table",
     team_id: 1,
     source_id: 1,
-    query: "",
-    query_language: "logchefql",
-    options: { limit: 50 },
+    query: { mode: "result", language: "logchefql", text: "", limit: 50 },
+    viz: { type: "table" },
+  };
+}
+
+function chartPanel(id: string, query: Partial<DashboardQueryPanel["query"]> = {}): DashboardQueryPanel {
+  return {
+    id,
+    kind: "query",
+    title: "Series",
+    team_id: 1,
+    source_id: 1,
+    query: { mode: "count", language: "logchefql", text: "", interval: "auto", ...query },
+    viz: { type: "chart", mark: "line", stack: "none" },
   };
 }
 
@@ -124,7 +150,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.isDirty).toBe(true);
     expect(store.editDraft?.panels).toHaveLength(1);
     // reflow gave the new panel a layout entry at default size in the first slot.
-    expect(store.editDraft?.layout).toEqual([{ id: "p1", x: 0, y: 0, w: 6, h: 2 }]);
+    expect(dashboardLayout(store.editDraft!)).toEqual([{ id: "p1", x: 0, y: 0, w: 6, h: 2 }]);
   });
 
   it("cancelEdit discards the draft and reverts to the last-loaded state", async () => {
@@ -138,7 +164,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.editDraft).toBeNull();
     expect(store.isDirty).toBe(false);
     // The live dashboard was never mutated.
-    expect(store.current?.panels.panels).toHaveLength(0);
+    expect(currentPanels(store)).toHaveLength(0);
   });
 
   it("removing a panel returns the draft to a clean state matching the snapshot", async () => {
@@ -163,9 +189,12 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.editDraft?.panels.map((p) => p.id)).toEqual(["p1", copyId, "p2"]);
     const copy = store.editDraft?.panels[1];
     expect(copy?.title).toBe("Recent logs (copy)");
-    expect(copy?.options).toEqual({ limit: 50 });
-    expect(copy?.options).not.toBe(store.editDraft?.panels[0].options);
-    const copyLayout = store.editDraft?.layout.find((l) => l.id === copyId);
+    expect(copy?.locked).toBeFalsy();
+    const copyQuery = copy && !copy.locked ? copy.query : undefined;
+    expect(copyQuery).toEqual({ mode: "result", language: "logchefql", text: "", limit: 50 });
+    const original = store.editDraft?.panels[0];
+    expect(copyQuery).not.toBe(original && !original.locked ? original.query : undefined);
+    const copyLayout = dashboardLayout(store.editDraft!).find((l) => l.id === copyId);
     expect(copyLayout).toMatchObject({ w: 4, h: 3 });
   });
 
@@ -241,7 +270,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     store.upsertDraftPanel(tablePanel());
 
     const saved = makeDashboard({
-      panels: { version: 1, layout: [{ id: "p1", x: 0, y: 0, w: 6, h: 2 }], panels: [tablePanel()] },
+      panels: panelsWith([tablePanel()], [{ id: "p1", x: 0, y: 0, w: 6, h: 2 }]),
       updated_at: "2026-07-08T01:00:00Z",
     });
     mocks.update.mockResolvedValue({ status: "success", data: saved });
@@ -256,7 +285,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(body.panels.panels).toHaveLength(1);
     expect(store.isEditing).toBe(false);
     expect(store.editDraft).toBeNull();
-    expect(store.current?.panels.panels).toHaveLength(1);
+    expect(currentPanels(store)).toHaveLength(1);
     expect(store.current?.updated_at).toBe("2026-07-08T01:00:00Z");
   });
 
@@ -347,8 +376,8 @@ describe("dashboards store — panel time params", () => {
     store.setWindow(window);
     await store.enterEdit();
     store.upsertDraftPanel(tablePanel("logchefql-table"));
-    store.upsertDraftPanel({ ...tablePanel("sql-table"), query_language: "clickhouse-sql" });
-    store.upsertDraftPanel({ ...tablePanel("logchefql-series"), type: "timeseries", options: {} });
+    store.upsertDraftPanel({ ...tablePanel("sql-table"), query: { ...tablePanel().query, language: "clickhouse-sql" } });
+    store.upsertDraftPanel(chartPanel("logchefql-series"));
     await vi.waitFor(() => expect(store.getPanelState("logchefql-series").status).toBe("empty"));
     return store;
   }
@@ -369,7 +398,7 @@ describe("dashboards store — panel time params", () => {
   it("labels a timeseries panel in the zone its query ran in", async () => {
     const store = await runEveryPanelType();
     mocks.histogram.mockResolvedValue({ status: "success", data: { data: [{ bucket: "2026-10-19T04:00:00Z", log_count: 1 }], granularity: "1m" } });
-    store.upsertDraftPanel({ ...tablePanel("filled-series"), type: "timeseries", options: {} });
+    store.upsertDraftPanel(chartPanel("filled-series"));
     await vi.waitFor(() => expect(store.getPanelState("filled-series").status).toBe("success"));
 
     expect(store.getPanelState("filled-series").timeseries?.range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
@@ -462,7 +491,7 @@ describe("dashboards store — #119/#120 hardening", () => {
     const store = await loadEditableDashboard(makeDashboard({ revision: 1, name: "Old name" }));
     mocks.get.mockResolvedValue({
       status: "success",
-      data: makeDashboard({ revision: 2, name: "New name", panels: { version: 1, layout: [], panels: [tablePanel()] } }),
+      data: makeDashboard({ revision: 2, name: "New name", panels: panelsWith([tablePanel()]) }),
     });
     await store.enterEdit();
     expect(store.current?.revision).toBe(2);
@@ -585,7 +614,7 @@ describe("dashboards store — #119/#120 hardening", () => {
   it("runs a native logsql table panel through logs/query, not logchefql (#119 A4)", async () => {
     const store = await loadEditableDashboard();
     await store.enterEdit();
-    store.upsertDraftPanel({ ...tablePanel("lp"), query: "level:error", query_language: "logsql" });
+    store.upsertDraftPanel({ ...tablePanel("lp"), query: { mode: "result", language: "logsql", text: "level:error", limit: 50 } });
     await vi.waitFor(() => expect(mocks.logsQuery).toHaveBeenCalledTimes(1));
     expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
     expect(mocks.translate).not.toHaveBeenCalled();
@@ -597,10 +626,7 @@ describe("dashboards store — #119/#120 hardening", () => {
   it("runs a native logsql timeseries panel through histogram without translate (#119 A4)", async () => {
     const store = await loadEditableDashboard();
     await store.enterEdit();
-    store.upsertDraftPanel({
-      id: "lt", title: "t", type: "timeseries", team_id: 1, source_id: 1,
-      query: "*", query_language: "logsql", options: {},
-    });
+    store.upsertDraftPanel(chartPanel("lt", { language: "logsql", text: "*" }));
     await vi.waitFor(() => expect(mocks.histogram).toHaveBeenCalledTimes(1));
     expect(mocks.translate).not.toHaveBeenCalled();
     const [, , body] = mocks.histogram.mock.calls[0];
@@ -614,14 +640,15 @@ describe("dashboards store — #119/#120 hardening", () => {
     await store.enterEdit();
     // clickhouse-sql skips the translate step so the stat result is deterministic.
     store.upsertDraftPanel({
-      id: "p1", title: "count", type: "stat", team_id: 1, source_id: 1,
-      query: "SELECT 1", query_language: "clickhouse-sql", options: {},
+      id: "p1", kind: "query", title: "count", team_id: 1, source_id: 1,
+      query: { mode: "count", language: "clickhouse-sql", text: "SELECT 1", interval: "auto" },
+      viz: { type: "stat", reduce: "sum" },
     });
     await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("success"));
     expect(store.getPanelState("p1").stat).toBeDefined();
     // stat -> table: the cached stat value would render blank under a table, so
     // it must be dropped immediately (the panel re-executes into "loading").
-    store.updateDraftPanel("p1", { type: "table" });
+    store.switchDraftPanelKind("p1", "table");
     expect(store.getPanelState("p1").stat).toBeUndefined();
     expect(store.getPanelState("p1").status).not.toBe("success");
   });
@@ -631,7 +658,7 @@ describe("dashboards store — #119/#120 hardening", () => {
     const store = await loadEditableDashboard();
     await store.enterEdit();
     store.upsertDraftPanel({
-      ...tablePanel("big"), query: "SELECT 1", query_language: "clickhouse-sql", options: { limit: 100000 },
+      ...tablePanel("big"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 10000 },
     });
     await vi.waitFor(() => expect(mocks.logsQuery).toHaveBeenCalledTimes(1));
     const [, , body] = mocks.logsQuery.mock.calls[0];
@@ -650,28 +677,23 @@ describe("dashboards store — B1 per-panel redaction (locked panels)", () => {
   });
 
   it("renders a server-locked panel as locked and fires no data fetch, while an accessible panel loads", async () => {
-    const accessible: DashboardPanel = { ...tablePanel("open"), query: "SELECT 1", query_language: "clickhouse-sql" };
-    // A redacted panel: server blanked the query and set locked.
-    const locked: DashboardPanel = {
+    const accessible: DashboardQueryPanel = { ...tablePanel("open"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 50 } };
+    // A redacted panel: the server dropped the query and kept the viz type.
+    const locked: DashboardLockedPanel = {
       id: "shut",
+      kind: "query",
       title: "Secret",
-      type: "table",
       team_id: 2,
       source_id: 2,
-      query: "",
-      query_language: "logchefql",
+      viz: { type: "table" },
       locked: true,
     };
     const dashboard = makeDashboard({
       can_edit: false,
-      panels: {
-        version: 1,
-        layout: [
-          { id: "open", x: 0, y: 0, w: 6, h: 2 },
-          { id: "shut", x: 6, y: 0, w: 6, h: 2 },
-        ],
-        panels: [accessible, locked],
-      },
+      panels: panelsWith([accessible, locked], [
+        { id: "open", x: 0, y: 0, w: 6, h: 2 },
+        { id: "shut", x: 6, y: 0, w: 6, h: 2 },
+      ]),
     });
     mocks.get.mockResolvedValue({ status: "success", data: dashboard });
 
@@ -690,5 +712,108 @@ describe("dashboards store — B1 per-panel redaction (locked panels)", () => {
     expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
     expect(mocks.translate).not.toHaveBeenCalled();
     expect(mocks.histogram).not.toHaveBeenCalled();
+  });
+});
+
+describe("dashboards store — schema 2 request parity", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [] } });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "1m" } });
+    mocks.translate.mockResolvedValue({
+      status: "success",
+      data: { valid: true, sql: "", full_sql: "SELECT 1", generated_query_language: "clickhouse-sql", conditions: [], fields_used: [] },
+    });
+  });
+
+  async function runPanels(...panels: DashboardQueryPanel[]) {
+    const layout = panels.map((p, i) => ({ id: p.id, x: 0, y: i, w: 12, h: 1 }));
+    const store = await loadEditableDashboard(makeDashboard({ panels: panelsWith(panels, layout) }));
+    for (const p of panels) {
+      await vi.waitFor(() => expect(["empty", "success"]).toContain(store.getPanelState(p.id).status));
+    }
+    return store;
+  }
+
+  it("sends an upgraded stat's translate limit to translate only, on both backends", async () => {
+    const stat: DashboardQueryPanel = {
+      ...chartPanel("stat", { translate_limit: 50000 }),
+      viz: { type: "stat", reduce: "sum" },
+    };
+    await runPanels(stat);
+    expect(mocks.translate).toHaveBeenCalledTimes(1);
+    expect(mocks.translate.mock.calls[0][2].limit).toBe(50000);
+    expect(mocks.histogram.mock.calls[0][2]).not.toHaveProperty("limit");
+
+    vi.clearAllMocks();
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "1m" } });
+    mocks.translate.mockResolvedValue({
+      status: "success",
+      data: { valid: true, generated_query: "level:error", generated_query_language: "logsql", conditions: [], fields_used: [] },
+    });
+    await runPanels(stat);
+    expect(mocks.translate.mock.calls[0][2].limit).toBe(50000);
+    expect(mocks.histogram.mock.calls[0][2]).toMatchObject({ query_text: "level:error", query_language: "logsql" });
+  });
+
+  it("sends limit 100 for a table whose blob sets none, through both table paths", async () => {
+    const logchefql: DashboardQueryPanel = { ...tablePanel("lq"), query: { mode: "result", language: "logchefql", text: "" } };
+    const sql: DashboardQueryPanel = { ...tablePanel("sql"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1" } };
+    await runPanels(logchefql, sql);
+    expect(mocks.logchefqlQuery.mock.calls[0][2].limit).toBe(100);
+    expect(mocks.logsQuery.mock.calls[0][2].limit).toBe(100);
+  });
+
+  it("trims U+0085 around a group when building the request and keeps U+FEFF", async () => {
+    await runPanels(chartPanel("nel", { group_by: "\u0085service\u0085" }), chartPanel("bom", { group_by: "\ufeff" }));
+    const groups = mocks.histogram.mock.calls.map((call) => call[2].group_by);
+    expect(groups).toContain("service");
+    expect(groups).toContain("\ufeff");
+  });
+
+  it("a stat panel never sends a group", async () => {
+    await runPanels({ ...chartPanel("s", { group_by: "host" }), viz: { type: "stat", reduce: "sum" } });
+    expect(mocks.histogram.mock.calls[0][2].group_by).toBeUndefined();
+  });
+
+  it("saving an unchanged dashboard sends the loaded blob back as it was", async () => {
+    // A fixture that uses every feature this build declares (none yet) and
+    // every base field, so a dropped field would show up here.
+    const fixture: DashboardPanels = {
+      version: 2,
+      features: [],
+      cache_ttl_seconds: 300,
+      default_time_range: "6h",
+      tabs: [{ id: "main", title: "Main", layout: [
+        { id: "c", x: 0, y: 0, w: 6, h: 2 }, { id: "s", x: 6, y: 0, w: 3, h: 2 }, { id: "p", x: 9, y: 0, w: 3, h: 2 }, { id: "t", x: 0, y: 2, w: 12, h: 3 },
+      ] }],
+      panels: [
+        { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "auto", translate_limit: 50 }, viz: { type: "chart", mark: "bar", stack: "none" } },
+        { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "count", language: "logsql", text: "*", interval: "auto" }, viz: { type: "stat", reduce: "sum" } },
+        { id: "p", kind: "query", title: "pie", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "", group_by: "host", interval: "auto" }, viz: { type: "pie", donut: true } },
+        { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 100 }, viz: { type: "table", visible_columns: ["message", "host"] } },
+      ],
+    };
+    const store = await loadEditableDashboard(makeDashboard({ panels: JSON.parse(JSON.stringify(fixture)) }));
+    await store.enterEdit();
+    expect(store.isDirty).toBe(false);
+    mocks.update.mockResolvedValue({ status: "success", data: makeDashboard({ revision: 2, panels: fixture }) });
+    const result = await store.saveEdit();
+    expect(result.success).toBe(true);
+    expect(mocks.update.mock.calls[0][1].panels).toEqual(fixture);
+  });
+
+  it("refuses to enter edit mode on a corrupt dashboard and renders nothing for it", async () => {
+    const corrupt: Dashboard = { ...makeDashboard(), corrupt: true, raw_panels_json: "{nope" } as unknown as Dashboard;
+    mocks.get.mockResolvedValue({ status: "success", data: corrupt });
+    const store = useDashboardsStore();
+    await store.loadDashboard(3);
+    expect(store.canEdit).toBe(false);
+    await store.enterEdit();
+    expect(store.isEditing).toBe(false);
+    expect(mocks.histogram).not.toHaveBeenCalled();
+    expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
   });
 });

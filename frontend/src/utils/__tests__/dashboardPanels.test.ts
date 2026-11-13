@@ -19,6 +19,13 @@ import {
   addTileSlot,
   layoutRowCount,
   copyableDashboardPanels,
+  clampDashboardName,
+  dashboardCopyName,
+  dashboardLayout,
+  emptyDashboardPanels,
+  switchPanelKind,
+  trimDashboardGroupBy,
+  withDashboardLayout,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
@@ -26,19 +33,29 @@ import type {
   DashboardPanel,
   DashboardLayoutItem,
   DashboardPanels,
+  DashboardQueryPanel,
 } from "@/api/dashboards";
 
-function panel(id: string, overrides: Partial<DashboardPanel> = {}): DashboardPanel {
+function panel(id: string, overrides: Partial<DashboardQueryPanel> = {}): DashboardQueryPanel {
   return {
     id,
+    kind: "query",
     title: id,
-    type: "table",
     team_id: 1,
     source_id: 1,
-    query: "",
-    query_language: "logchefql",
+    query: { mode: "result", language: "logchefql", text: "" },
+    viz: { type: "table" },
     ...overrides,
   };
+}
+
+function chart(id: string, query: Partial<DashboardQueryPanel["query"]> = {}, overrides: Partial<DashboardQueryPanel> = {}): DashboardQueryPanel {
+  return panel(id, { query: { mode: "count", language: "logchefql", text: "", interval: "auto", ...query }, viz: { type: "chart", mark: "line", stack: "none" }, ...overrides });
+}
+
+/** A blob whose single tab holds `layout`. */
+function blobOf(panels: DashboardPanel[], layout: DashboardLayoutItem[] = [], rest: Partial<DashboardPanels> = {}): DashboardPanels {
+  return { ...emptyDashboardPanels(), ...rest, panels, tabs: [{ id: "main", title: "Main", layout }] };
 }
 
 describe("snapPanelWidth", () => {
@@ -385,9 +402,7 @@ describe("sizeForPanel", () => {
 });
 
 describe("reflowPanels", () => {
-  function blob(panels: DashboardPanel[], layout: DashboardLayoutItem[]): DashboardPanels {
-    return { version: 1, panels, layout };
-  }
+  const blob = blobOf;
 
   it("re-packs layout in panel array order, preserving each panel's size", () => {
     const panels = [panel("a"), panel("b"), panel("c")];
@@ -397,16 +412,18 @@ describe("reflowPanels", () => {
       { id: "c", x: 0, y: 9, w: 12, h: 3 },
     ];
     const out = reflowPanels(blob(panels, layout));
-    expect(out.layout).toEqual([
+    expect(dashboardLayout(out)).toEqual([
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "b", x: 6, y: 0, w: 4, h: 1 },
       { id: "c", x: 0, y: 2, w: 12, h: 3 },
     ]);
   });
 
-  it("keeps the blob's other fields, such as the cache TTL", () => {
-    const out = reflowPanels({ version: 1, cache_ttl_seconds: 0, panels: [panel("a")], layout: [] });
+  it("keeps the blob's other fields, such as the cache TTL and the tab", () => {
+    const out = reflowPanels(blobOf([panel("a")], [], { cache_ttl_seconds: 0, features: [] }));
     expect(out.cache_ttl_seconds).toBe(0);
+    expect(out.tabs.map((t) => t.id)).toEqual(["main"]);
+    expect(out.features).toEqual([]);
   });
 
   it("places a just-added (layout-less) panel in the first free slot at default size", () => {
@@ -415,7 +432,7 @@ describe("reflowPanels", () => {
     const panels = [panel("a"), panel("new")];
     const layout: DashboardLayoutItem[] = [{ id: "a", x: 0, y: 0, w: 6, h: 2 }];
     const out = reflowPanels(blob(panels, layout));
-    expect(out.layout).toEqual([
+    expect(dashboardLayout(out)).toEqual([
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "new", x: 6, y: 0, w: 6, h: 2 },
     ]);
@@ -429,7 +446,7 @@ describe("reflowPanels", () => {
       { id: "c", x: 0, y: 4, w: 6, h: 2 },
     ];
     const out = reflowPanels(blob(panels, layout));
-    expect(out.layout).toEqual([
+    expect(dashboardLayout(out)).toEqual([
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "c", x: 6, y: 0, w: 6, h: 2 },
     ]);
@@ -442,7 +459,7 @@ describe("reflowPanels", () => {
       { id: "b", x: 6, y: 0, w: 6, h: 2 },
     ];
     const out = reflowPanels(blob(panels, layout));
-    expect(out.layout).toEqual([
+    expect(dashboardLayout(out)).toEqual([
       { id: "a", x: 0, y: 0, w: 12, h: 2 },
       { id: "b", x: 0, y: 2, w: 6, h: 2 }, // pushed to its own row
     ]);
@@ -451,79 +468,115 @@ describe("reflowPanels", () => {
 
 describe("validatePanelsBlob", () => {
   function base(overrides: Partial<DashboardPanels> = {}): DashboardPanels {
-    return {
-      version: 1,
-      panels: [panel("a", { team_id: 1, source_id: 1 })],
-      layout: [{ id: "a", x: 0, y: 0, w: 6, h: 2 }],
-      ...overrides,
-    };
+    return { ...blobOf([panel("a")], [{ id: "a", x: 0, y: 0, w: 6, h: 2 }]), ...overrides };
+  }
+  function withLayout(layout: DashboardLayoutItem[]): DashboardPanels {
+    return withDashboardLayout(base(), layout);
+  }
+  function withPanel(p: DashboardQueryPanel): DashboardPanels {
+    return blobOf([p], [{ id: p.id, x: 0, y: 0, w: 6, h: 2 }]);
   }
 
-  it("returns null for a valid blob", () => {
+  it("returns null for a valid blob of every kind", () => {
     expect(validatePanelsBlob(base())).toBeNull();
+    expect(validatePanelsBlob(withPanel(chart("c", { group_by: "service", translate_limit: 50 })))).toBeNull();
+    expect(validatePanelsBlob(withPanel(chart("s", {}, { viz: { type: "stat", reduce: "sum" } })))).toBeNull();
+    expect(validatePanelsBlob(withPanel(chart("p", { group_by: "host" }, { viz: { type: "pie", donut: true } })))).toBeNull();
+    expect(validatePanelsBlob(withPanel(chart("t", { group_by: "host" }, { viz: { type: "toplist" } })))).toBeNull();
+    expect(validatePanelsBlob(withPanel(panel("tbl", { query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 100 }, viz: { type: "table", visible_columns: ["a"] } })))).toBeNull();
+    expect(validatePanelsBlob(emptyDashboardPanels())).toBeNull();
   });
 
   it("rejects an unsupported version", () => {
-    expect(validatePanelsBlob(base({ version: 2 }))).toMatch(/version/i);
+    expect(validatePanelsBlob(base({ version: 1 }))).toMatch(/version/i);
+  });
+
+  it("requires exactly one tab in this release", () => {
+    expect(validatePanelsBlob(base({ tabs: [] }))).toMatch(/at least one tab/i);
+    expect(validatePanelsBlob(base({ tabs: [...base().tabs, { id: "b", title: "B", layout: [] }] }))).toMatch(/at most 1 tab/i);
+    expect(validatePanelsBlob(base({ tabs: [{ id: "main", title: "", layout: [] }], panels: [] }))).toMatch(/tab titles/i);
   });
 
   it("rejects more than 24 panels", () => {
-    const panels = Array.from({ length: 25 }, (_, i) => panel(`p${i}`, { team_id: 1, source_id: 1 }));
-    expect(validatePanelsBlob(base({ panels, layout: [] }))).toMatch(/at most 24/i);
+    const panels = Array.from({ length: 25 }, (_, i) => panel(`p${i}`));
+    expect(validatePanelsBlob(blobOf(panels))).toMatch(/at most 24/i);
   });
 
   it("rejects duplicate panel ids", () => {
-    const panels = [panel("dup", { team_id: 1, source_id: 1 }), panel("dup", { team_id: 1, source_id: 1 })];
-    expect(validatePanelsBlob(base({ panels, layout: [] }))).toMatch(/duplicate/i);
+    expect(validatePanelsBlob(blobOf([panel("dup"), panel("dup")]))).toMatch(/duplicate/i);
   });
 
-  it("rejects an invalid panel type", () => {
-    const panels = [{ ...panel("a", { team_id: 1, source_id: 1 }), type: "pie" }] as unknown as DashboardPanel[];
-    expect(validatePanelsBlob(base({ panels }))).toMatch(/type/i);
+  it("rejects an invalid viz type and kind", () => {
+    const bad = { ...panel("a"), viz: { type: "gauge" } } as unknown as DashboardQueryPanel;
+    expect(validatePanelsBlob(withPanel(bad))).toMatch(/type/i);
+    const text = { ...panel("a"), kind: "text" } as unknown as DashboardQueryPanel;
+    expect(validatePanelsBlob(withPanel(text))).toMatch(/kind/i);
   });
 
   it("requires a team and a source", () => {
-    expect(validatePanelsBlob(base({ panels: [panel("a", { team_id: 0, source_id: 1 })] }))).toMatch(/team/i);
-    expect(validatePanelsBlob(base({ panels: [panel("a", { team_id: 1, source_id: 0 })] }))).toMatch(/source/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { team_id: 0 })))).toMatch(/team/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { source_id: 0 })))).toMatch(/source/i);
   });
 
   it("rejects invalid layout width/height", () => {
-    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 5, h: 2 }] }))).toMatch(/width/i);
-    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 6, h: 9 }] }))).toMatch(/height/i);
+    expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w: 5, h: 2 }]))).toMatch(/width/i);
+    expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w: 6, h: 9 }]))).toMatch(/height/i);
   });
 
   it("accepts the finer grid presets (2/8/9-wide panels)", () => {
-    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 8, h: 2 }] }))).toBeNull();
-    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 9, h: 2 }] }))).toBeNull();
-    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 2, h: 2 }] }))).toBeNull();
-  });
-
-  // B7: mirror pkg/models/dashboards.go's query_language enum + layout id
-  // empty/duplicate checks, which this validator previously omitted.
-  it("rejects an invalid query_language", () => {
-    const panels = [{ ...panel("a", { team_id: 1, source_id: 1 }), query_language: "bogus" }] as unknown as DashboardPanel[];
-    expect(validatePanelsBlob(base({ panels }))).toMatch(/query language/i);
-  });
-
-  it("accepts every valid query_language", () => {
-    for (const lang of ["logchefql", "clickhouse-sql", "logsql"] as const) {
-      const panels = [panel("a", { team_id: 1, source_id: 1, query_language: lang })];
-      expect(validatePanelsBlob(base({ panels }))).toBeNull();
+    for (const w of [2, 8, 9]) {
+      expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w, h: 2 }]))).toBeNull();
     }
   });
 
-  it("rejects a layout entry with an empty id", () => {
-    expect(validatePanelsBlob(base({ layout: [{ id: "", x: 0, y: 0, w: 6, h: 2 }] }))).toMatch(
-      /missing an id/i
-    );
+  it("rejects an invalid query language and accepts every valid one", () => {
+    const bogus = { ...panel("a"), query: { ...panel("a").query, language: "bogus" } } as unknown as DashboardQueryPanel;
+    expect(validatePanelsBlob(withPanel(bogus))).toMatch(/query language/i);
+    for (const language of ["logchefql", "clickhouse-sql", "logsql"] as const) {
+      expect(validatePanelsBlob(withPanel(panel("a", { query: { mode: "result", language, text: "" } })))).toBeNull();
+    }
   });
 
-  it("rejects duplicate layout ids", () => {
-    const layout: DashboardLayoutItem[] = [
+  it("rejects a layout entry with an empty id and duplicate layout ids", () => {
+    expect(validatePanelsBlob(withLayout([{ id: "", x: 0, y: 0, w: 6, h: 2 }]))).toMatch(/missing an id/i);
+    expect(validatePanelsBlob(withLayout([
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "a", x: 6, y: 0, w: 6, h: 2 },
-    ];
-    expect(validatePanelsBlob(base({ layout }))).toMatch(/duplicate/i);
+    ]))).toMatch(/duplicate/i);
+  });
+
+  it("ties the mode to the viz: tables need result mode, everything else count", () => {
+    expect(validatePanelsBlob(withPanel(chart("a", {}, { viz: { type: "table" } })))).toMatch(/result mode/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "stat" } })))).toMatch(/result mode/i);
+  });
+
+  it("checks the group-by rules", () => {
+    expect(validatePanelsBlob(withPanel(chart("a", { group_by: "  \u0085" })))).toMatch(/blank group-by/i);
+    expect(validatePanelsBlob(withPanel(chart("a", { group_by: "\ufeff" })))).toBeNull();
+    expect(validatePanelsBlob(withPanel(chart("a", { group_by: "host" }, { viz: { type: "pie" } })))).toBeNull();
+    expect(validatePanelsBlob(withPanel(chart("a", {}, { viz: { type: "pie" } })))).toMatch(/group-by/i);
+    expect(validatePanelsBlob(withPanel(chart("a", {}, { viz: { type: "toplist" } })))).toMatch(/group-by/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { query: { mode: "result", language: "logchefql", text: "", group_by: "x" } })))).toMatch(/group/i);
+  });
+
+  it("checks the limit rules", () => {
+    expect(validatePanelsBlob(withPanel(panel("a", { query: { mode: "result", language: "logchefql", text: "", limit: 0 } })))).toMatch(/row limit/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { query: { mode: "result", language: "logchefql", text: "", limit: 10001 } })))).toMatch(/row limit/i);
+    expect(validatePanelsBlob(withPanel(chart("a", { limit: 10 })))).toMatch(/limit/i);
+    expect(validatePanelsBlob(withPanel(chart("a", { language: "clickhouse-sql", translate_limit: 10 })))).toMatch(/translate limit/i);
+    expect(validatePanelsBlob(withPanel(chart("a", { translate_limit: 100001 })))).toMatch(/translate limit/i);
+    expect(validatePanelsBlob(withPanel(chart("a", { interval: "24h" as never })))).toMatch(/interval/i);
+  });
+
+  it("checks the visible columns of a table", () => {
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "table", visible_columns: [] } })))).toMatch(/no columns/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "table", visible_columns: [""] } })))).toMatch(/empty column/i);
+    expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "table", visible_columns: ["a", "a"] } })))).toMatch(/twice/i);
+  });
+
+  it("rejects a locked panel", () => {
+    const locked = { ...panel("a"), locked: true } as unknown as DashboardQueryPanel;
+    expect(validatePanelsBlob(withPanel(locked))).toMatch(/locked/i);
   });
 });
 
@@ -566,53 +619,91 @@ describe("B11: degenerate grid geometry", () => {
   });
 });
 
-describe("breakdown panel validation", () => {
-  const breakdownBlob = (panels: DashboardPanel[]): DashboardPanels => ({
-    version: 1, panels, layout: panels.map((p, index) => ({ id: p.id, x: index * 6, y: 0, w: 6, h: 2 })),
+describe("trimDashboardGroupBy", () => {
+  it("trims the Unicode White_Space set like Go, keeping U+FEFF", () => {
+    expect(trimDashboardGroupBy("  service ")).toBe("service");
+    expect(trimDashboardGroupBy("\u0085service\u0085")).toBe("service");
+    expect(trimDashboardGroupBy("\ufeffservice")).toBe("\ufeffservice");
+    expect(trimDashboardGroupBy("\u0085")).toBe("");
+    expect(trimDashboardGroupBy(undefined)).toBe("");
   });
-  it("requires a non-empty group-by and validates its view", () => {
-    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: {} })]))).toMatch(/group-by/i);
-    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "  " } })]))).toMatch(/group-by/i);
-    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "service", breakdown_view: "donut" } })]))).toBeNull();
-    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "service", breakdown_view: "pie" as never } })]))).toMatch(/view/i);
-    expect(validatePanelsBlob(breakdownBlob([panel("b", { options: { breakdown_view: "donut" } })]))).toMatch(/breakdown view/i);
+});
+
+describe("dashboardCopyName", () => {
+  const format = (name: string) => `${name} (copy)`;
+
+  it("keeps a short name whole", () => {
+    expect(dashboardCopyName("Ops", format)).toBe("Ops (copy)");
+  });
+
+  it("cuts the base by code points until the localized name fits 200", () => {
+    const name = "é".repeat(200);
+    const copy = dashboardCopyName(name, format);
+    expect(Array.from(copy)).toHaveLength(200);
+    expect(copy.endsWith(" (copy)")).toBe(true);
+    expect(copy.startsWith("é".repeat(193))).toBe(true);
+  });
+
+  it("never splits a surrogate pair", () => {
+    const name = "😀".repeat(200);
+    const copy = dashboardCopyName(name, format);
+    expect(Array.from(copy)).toHaveLength(200);
+    expect(copy).toBe("😀".repeat(193) + " (copy)");
+    expect(clampDashboardName(name)).toBe("😀".repeat(200));
+    expect(Array.from(clampDashboardName("😀".repeat(201)))).toHaveLength(200);
+  });
+});
+
+describe("switchPanelKind", () => {
+  const source = chart("a", { group_by: "host", translate_limit: 50, text: "level=error" });
+
+  it("keeps the text, language, team and source and drops what the kind does not use", () => {
+    const stat = switchPanelKind(source, "stat");
+    expect(stat.query).toEqual({ mode: "count", language: "logchefql", text: "level=error", interval: "auto", translate_limit: 50 });
+    expect(stat.viz).toEqual({ type: "stat", reduce: "sum" });
+    const table = switchPanelKind(source, "table");
+    expect(table.query).toEqual({ mode: "result", language: "logchefql", text: "level=error" });
+    expect(table.viz).toEqual({ type: "table" });
+    const breakdown = switchPanelKind(source, "breakdown");
+    expect(breakdown.query.group_by).toBe("host");
+    expect(breakdown.viz).toEqual({ type: "toplist" });
+    expect(switchPanelKind(breakdown, "chart").viz).toEqual({ type: "chart", mark: "line", stack: "none" });
+  });
+
+  it("returns the same panel for the same kind", () => {
+    expect(switchPanelKind(source, "chart")).toBe(source);
+    const pie = chart("p", { group_by: "h" }, { viz: { type: "pie", donut: true } });
+    expect(switchPanelKind(pie, "breakdown")).toBe(pie);
   });
 });
 
 describe("copyableDashboardPanels", () => {
   const anyTeam = () => true;
+  const locked = { id: "b", kind: "query", title: "b", team_id: 1, source_id: 1, viz: { type: "table" }, locked: true } as const;
 
   it("leaves out locked panels and their layout entries", () => {
-    const blob: DashboardPanels = {
-      version: 1,
-      cache_ttl_seconds: 60,
-      panels: [panel("a"), panel("b", { locked: true }), panel("c")],
-      layout: [
-        { id: "a", x: 0, y: 0, w: 6, h: 2 },
-        { id: "b", x: 6, y: 0, w: 6, h: 2 },
-        { id: "c", x: 0, y: 2, w: 12, h: 2 },
-      ],
-    };
+    const blob = blobOf([panel("a"), locked, panel("c")], [
+      { id: "a", x: 0, y: 0, w: 6, h: 2 },
+      { id: "b", x: 6, y: 0, w: 6, h: 2 },
+      { id: "c", x: 0, y: 2, w: 12, h: 2 },
+    ], { cache_ttl_seconds: 60 });
     const { panels, skipped } = copyableDashboardPanels(blob, anyTeam);
     expect(skipped).toBe(1);
     expect(panels.panels.map((p) => p.id)).toEqual(["a", "c"]);
-    expect(panels.layout.map((l) => l.id)).toEqual(["a", "c"]);
+    expect(dashboardLayout(panels).map((l) => l.id)).toEqual(["a", "c"]);
     expect(panels.cache_ttl_seconds).toBe(60);
+    expect(panels.version).toBe(2);
   });
 
   it("returns a copy that does not share references with the source", () => {
-    const blob: DashboardPanels = { version: 1, panels: [panel("a")], layout: [] };
+    const blob = blobOf([panel("a")]);
     const { panels } = copyableDashboardPanels(blob, anyTeam);
     panels.panels[0].title = "changed";
     expect(blob.panels[0].title).toBe("a");
   });
 
   it("leaves out panels whose team the caller cannot use", () => {
-    const blob: DashboardPanels = {
-      version: 1,
-      panels: [panel("a", { team_id: 1 }), panel("b", { team_id: 2 })],
-      layout: [],
-    };
+    const blob = blobOf([panel("a", { team_id: 1 }), panel("b", { team_id: 2 })]);
     const { panels, skipped } = copyableDashboardPanels(blob, (teamId) => teamId === 1);
     expect(panels.panels.map((p) => p.id)).toEqual(["a"]);
     expect(skipped).toBe(1);

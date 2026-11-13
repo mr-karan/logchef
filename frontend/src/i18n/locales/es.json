@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "Panel creado",
   "dashboards.dashboardDeleted": "Panel eliminado",
   "dashboards.dashboardSaved": "Panel guardado",
+  "dashboards.corruptTitle": "No se pudieron leer los paneles guardados",
+  "dashboards.corruptDescription": "Los paneles guardados de este panel de control no pasan la validación, por lo que aquí no se puede mostrar ni editar nada. Su creador o un administrador puede repararlos a través de la API.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Nuevo chat",
   "askChef.close": "Cerrar Ask Chef",

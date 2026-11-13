@@ -7,7 +7,7 @@ import {
   resolveEffectiveCacheTtl,
 } from "../dashboardRuntime";
 import type { DashboardCachePolicy } from "@/api/meta";
-import type { DashboardPanel } from "@/api/dashboards";
+import type { DashboardQueryPanel } from "@/api/dashboards";
 
 // A well-formed server policy: caching on, 10m default, 1h max.
 const POLICY: DashboardCachePolicy = {
@@ -232,29 +232,31 @@ describe("clampTableLimit", () => {
 });
 
 describe("execSignature", () => {
-  const base: DashboardPanel = {
+  const base: DashboardQueryPanel = {
     id: "p1",
+    kind: "query",
     title: "A",
-    type: "table",
     team_id: 1,
     source_id: 2,
-    query: "level:error",
-    query_language: "logchefql",
-    options: { limit: 50 },
+    query: { mode: "result", language: "logchefql", text: "level:error", limit: 50 },
+    viz: { type: "table" },
   };
 
   it("ignores fields that do not affect the fetched result", () => {
     expect(execSignature({ ...base, id: "p2", title: "B" })).toBe(execSignature(base));
+    expect(execSignature({ ...base, viz: { type: "table", visible_columns: ["a"] } })).toBe(execSignature(base));
   });
 
-  it.each<[string, Partial<DashboardPanel>]>([
-    ["type", { type: "stat" }],
-    ["query", { query: "level:warn" }],
-    ["query language", { query_language: "clickhouse-sql" }],
+  it.each<[string, Partial<DashboardQueryPanel>]>([
+    ["viz type", { viz: { type: "stat" } }],
+    ["mode", { query: { ...base.query, mode: "count" } }],
+    ["query text", { query: { ...base.query, text: "level:warn" } }],
+    ["query language", { query: { ...base.query, language: "clickhouse-sql" } }],
     ["team", { team_id: 9 }],
     ["source", { source_id: 9 }],
-    ["limit", { options: { limit: 10 } }],
-    ["group by", { options: { limit: 50, group_by: "host" } }],
+    ["limit", { query: { ...base.query, limit: 10 } }],
+    ["group by", { query: { ...base.query, group_by: "host" } }],
+    ["translate limit", { query: { ...base.query, translate_limit: 5 } }],
   ])("changes when %s changes", (_name, patch) => {
     expect(execSignature({ ...base, ...patch })).not.toBe(execSignature(base));
   });

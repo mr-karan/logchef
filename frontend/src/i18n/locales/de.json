@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "Dashboard erstellt",
   "dashboards.dashboardDeleted": "Dashboard gelöscht",
   "dashboards.dashboardSaved": "Dashboard gespeichert",
+  "dashboards.corruptTitle": "Gespeicherte Panels konnten nicht gelesen werden",
+  "dashboards.corruptDescription": "Die gespeicherten Panels dieses Dashboards bestehen die Prüfung nicht, daher kann hier nichts angezeigt oder bearbeitet werden. Der Ersteller oder ein Admin kann die gespeicherten Panels über die API reparieren.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Neuer Chat",
   "askChef.close": "Ask Chef schließen",

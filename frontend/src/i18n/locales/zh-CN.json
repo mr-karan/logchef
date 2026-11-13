@@ -1474,6 +1474,8 @@
   "dashboards.dashboardCreated": "仪表盘已创建",
   "dashboards.dashboardDeleted": "仪表盘已删除",
   "dashboards.dashboardSaved": "仪表盘已保存",
+  "dashboards.corruptTitle": "无法读取已保存的面板",
+  "dashboards.corruptDescription": "此仪表盘已保存的面板未通过验证，因此这里无法显示或编辑任何内容。其创建者或管理员可以通过 API 修复已保存的面板。",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "新对话",
   "askChef.close": "关闭 Ask Chef",

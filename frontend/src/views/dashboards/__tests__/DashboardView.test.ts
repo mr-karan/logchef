@@ -15,8 +15,8 @@ vi.mock("../components/PanelBuilderDrawer.vue", () => ({
 import { useDashboardsStore } from "@/stores/dashboards";
 import { toast } from "vue-sonner";
 const dashboard = {
-  id: 1, revision: 1, name: "My dashboard", description: "", created_at: "", updated_at: "", can_edit: true,
-  panels: { version: 1, panels: [], layout: [] },
+  id: 1, revision: 1, name: "My dashboard", description: "", created_at: "", updated_at: "", can_edit: true, corrupt: false,
+  panels: { version: 2, features: [], tabs: [{ id: "main", title: "Main", layout: [] }], panels: [] },
 };
 const conflictError = { status: "error", error_type: "ConflictError", message: "modified", statusCode: 409 };
 
@@ -118,7 +118,7 @@ describe("DashboardView discard confirmation", () => {
     expect(editor).not.toBeNull();
     const panelId = editor?.getAttribute("data-panel-id");
     if (!panelId) throw new Error("panel editor has no panel");
-    store.updateDraftPanel(panelId, { team_id: 1, source_id: 1, type: "table" });
+    store.updateDraftPanel(panelId, { team_id: 1, source_id: 1, viz: { type: "table" } });
     const draft = JSON.stringify(store.editDraft);
     await conflictOnSave();
     api.post.mockRejectedValue({ status: "error", message: "Copy unavailable" });

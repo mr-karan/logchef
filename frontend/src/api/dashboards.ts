@@ -5,51 +5,87 @@ import type { QueryResponse as LogchefqlQueryResponse, TranslateResponse } from 
 // Panel query languages accepted by the panel blob. Mirrors pkg/models QueryLanguage.
 export type PanelQueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
 
-// The three chart kinds a panel can render (mirrors pkg/models/dashboards.go).
-export type DashboardPanelType = "timeseries" | "stat" | "table" | "breakdown";
+// ---------------------------------------------------------------------------
+// Panel blob schema 2 (RFC 0003). A panel is a query plus a visualization,
+// tabs own the layouts, and the server writes the features list. Mirrors
+// pkg/models/dashboards_v2.go, which stays the authority.
+// ---------------------------------------------------------------------------
 
-export interface DashboardPanelOptions {
-  /** Field to group a timeseries by (produces stacked series). */
-  group_by?: string;
-  /** Row cap for table panels. */
-  limit?: number;
-  /** Subset of columns to display for table panels (empty/absent = all). */
-  columns?: string[];
-  /**
-   * Timeseries render style. Absent = "line" (Grafana-like default) — this
-   * also applies to legacy panels saved before this option existed, since the
-   * runtime has no way to distinguish "legacy" from "new" at render time.
-   * Explicit values are always honored.
-   */
-  chart?: "bars" | "line" | "area";
-  /**
-   * Bar render mode, only meaningful when chart is "bars".
-   * - "stacked" (default when absent): bars drawn cumulatively.
-   * - "grouped": bars drawn side-by-side per series.
-   */
-  bar_mode?: "stacked" | "grouped";
-  /** Breakdown rendering style. Absent defaults to horizontal bars. */
-  breakdown_view?: "horizontal-bars" | "donut";
+export const DASHBOARD_PANELS_VERSION = 2;
+
+/**
+ * The features this build's code understands. The server refuses a save to a
+ * dashboard whose stored features are not all declared here, so a build can
+ * never drop state it does not know. Each phase that adds blob state adds its
+ * feature name here together with the code that keeps it. Never copy a
+ * dashboard's stored `features` into this list.
+ */
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = [];
+
+export const DASHBOARD_SCHEMA_HEADER = "X-Logchef-Dashboard-Schema";
+export const DASHBOARD_FEATURES_HEADER = "X-Logchef-Dashboard-Features";
+
+/** The client contract headers every dashboard request carries. */
+export function dashboardClientHeaders(): Record<string, string> {
+  return {
+    [DASHBOARD_SCHEMA_HEADER]: String(DASHBOARD_PANELS_VERSION),
+    [DASHBOARD_FEATURES_HEADER]: DASHBOARD_CLIENT_FEATURES.join(","),
+  };
 }
 
-export interface DashboardPanel {
+export type DashboardQueryMode = "count" | "result";
+export type DashboardVizType = "stat" | "chart" | "pie" | "toplist" | "table";
+export type DashboardChartMark = "line" | "area" | "bar";
+export type DashboardChartStack = "none" | "stacked";
+
+export interface DashboardPanelQuery {
+  mode: DashboardQueryMode;
+  language: PanelQueryLanguage;
+  text: string;
+  /** Field to group a count by. `count` mode only; omitted when blank. */
+  group_by?: string;
+  /** Histogram window. `count` mode only; `auto` is the only value in this release. */
+  interval?: "auto";
+  /** Row cap for `result` mode. */
+  limit?: number;
+  /** `count` mode with LogchefQL only: passed as the translate request's limit. */
+  translate_limit?: number;
+}
+
+export type DashboardViz =
+  | { type: "stat"; reduce?: "sum" }
+  | { type: "chart"; mark?: DashboardChartMark; stack?: DashboardChartStack }
+  | { type: "pie"; donut?: boolean }
+  | { type: "toplist" }
+  | { type: "table"; visible_columns?: string[] };
+
+export interface DashboardQueryPanel {
   id: string;
+  kind: "query";
   title: string;
-  type: DashboardPanelType;
   team_id: number;
   source_id: number;
-  query: string;
-  query_language: PanelQueryLanguage;
-  options?: DashboardPanelOptions;
-  /**
-   * Response-only redaction flag (never sent on create/update). Set true by the
-   * server when the requesting user lacks access to this panel's source: the
-   * query text / language / options are blanked and only the placeholder
-   * metadata (team_id, source_id, type, title) plus layout survive. The panel
-   * renders a "locked" state and must NOT be executed (there is no query to run).
-   */
-  locked?: boolean;
+  query: DashboardPanelQuery;
+  viz: DashboardViz;
+  locked?: false;
 }
+
+/**
+ * A panel the server redacted because the viewer lacks access to its source:
+ * the query is gone and only the placeholder fields and the viz type survive.
+ * It renders a locked state and must never be executed.
+ */
+export interface DashboardLockedPanel {
+  id: string;
+  kind: "query";
+  title: string;
+  team_id: number;
+  source_id: number;
+  viz: { type: DashboardVizType };
+  locked: true;
+}
+
+export type DashboardPanel = DashboardQueryPanel | DashboardLockedPanel;
 
 export interface DashboardLayoutItem {
   id: string;
@@ -59,40 +95,70 @@ export interface DashboardLayoutItem {
   h: number;
 }
 
+export interface DashboardTab {
+  id: string;
+  title: string;
+  layout: DashboardLayoutItem[];
+}
+
 /** The versioned blob stored in dashboards.panels_json. */
 export interface DashboardPanels {
   version: number;
-  layout: DashboardLayoutItem[];
-  panels: DashboardPanel[];
+  /** Written by the server from what the blob uses; sent back unchanged. */
+  features: string[];
   /**
-   * Per-dashboard result-cache TTL in seconds (mirrors pkg/models
-   * dashboardPanels.CacheTTLSeconds). Absent = the client default (600).
-   * 0 = caching OFF. >0 = that TTL. The blob is JSON-serialized verbatim, so
-   * this stays snake_case to match the server's `cache_ttl_seconds` JSON tag.
+   * Per-dashboard result-cache TTL in seconds. Absent = the client default
+   * (600). 0 = caching OFF. >0 = that TTL. Snake_case matches the server's tag.
    */
   cache_ttl_seconds?: number;
   /**
    * Relative range the dashboard opens with ("15m", "6h", "7d", "today").
-   * Absent = keep the viewer's current range. Mirrors pkg/models
-   * dashboardPanels.DefaultTimeRange.
+   * Absent = keep the viewer's current range.
    */
   default_time_range?: string;
+  /** At least one tab. Each owns its layout; this release shows one. */
+  tabs: DashboardTab[];
+  /** Panel definitions, independent of placement. */
+  panels: DashboardPanel[];
 }
 
-export interface Dashboard {
+interface DashboardBase {
   id: number;
   name: string;
   description: string;
-  panels: DashboardPanels;
   created_by?: number | null;
   created_by_name?: string;
   created_by_email?: string;
   created_at: string;
   updated_at: string;
   revision: number;
-  can_edit?: boolean;
-  /** Set on list when the stored panel blob is unreadable; `panels` is then empty. */
-  panels_corrupt?: boolean;
+  can_edit: boolean;
+}
+
+/**
+ * A dashboard as GET, create and update return it. A corrupt row carries its
+ * stored blob as an opaque string for repair and no panels.
+ */
+export type Dashboard =
+  | (DashboardBase & { corrupt: false; panels: DashboardPanels })
+  | (DashboardBase & { corrupt: true; raw_panels_json: string });
+
+/** One row of the dashboard list: derived counts and kinds, never a blob. */
+export interface DashboardSummary {
+  id: number;
+  name: string;
+  description: string;
+  panel_count: number;
+  /** Distinct visualization kinds, sorted. */
+  panel_types: DashboardVizType[];
+  tab_count: number;
+  created_by_name?: string;
+  created_by_email?: string;
+  revision: number;
+  can_edit: boolean;
+  corrupt: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateDashboardRequest {
@@ -108,13 +174,18 @@ export interface UpdateDashboardRequest {
   panels: DashboardPanels;
 }
 
-/** CRUD over the dashboards resource. */
+function withClientHeaders(options?: RequestOptions): RequestOptions {
+  return { ...options, headers: { ...dashboardClientHeaders(), ...options?.headers } };
+}
+
+/** CRUD over the dashboards resource. Every request carries the client contract headers. */
 export const dashboardsApi = {
-  list: (options?: RequestOptions) => apiClient.get<Dashboard[]>("/dashboards", options),
-  get: (id: number) => apiClient.get<Dashboard>(`/dashboards/${id}`),
-  create: (req: CreateDashboardRequest) => apiClient.post<Dashboard>("/dashboards", req),
-  update: (id: number, req: UpdateDashboardRequest) => apiClient.put<Dashboard>(`/dashboards/${id}`, req),
-  remove: (id: number) => apiClient.delete<{ message: string }>(`/dashboards/${id}`),
+  list: (options?: RequestOptions) => apiClient.get<DashboardSummary[]>("/dashboards", withClientHeaders(options)),
+  get: (id: number) => apiClient.get<Dashboard>(`/dashboards/${id}`, withClientHeaders()),
+  create: (req: CreateDashboardRequest) => apiClient.post<Dashboard>("/dashboards", req, withClientHeaders()),
+  update: (id: number, req: UpdateDashboardRequest) =>
+    apiClient.put<Dashboard>(`/dashboards/${id}`, req, withClientHeaders()),
+  remove: (id: number) => apiClient.delete<{ message: string }>(`/dashboards/${id}`, withClientHeaders()),
 };
 
 // ---------------------------------------------------------------------------

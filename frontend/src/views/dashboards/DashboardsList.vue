@@ -54,8 +54,9 @@ import { useTeamsStore } from "@/stores/teams";
 import { usePreferencesStore } from "@/stores/preferences";
 import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useTableSearchSort, type SortDir } from "@/composables/useTableSearchSort";
-import { copyableDashboardPanels } from "@/utils/dashboardPanels";
-import type { Dashboard } from "@/api/dashboards";
+import { clampDashboardName, copyableDashboardPanels, dashboardCopyName, emptyDashboardPanels } from "@/utils/dashboardPanels";
+import { dashboardsApi, type Dashboard, type DashboardSummary, type DashboardVizType } from "@/api/dashboards";
+import { isSuccessResponse } from "@/api/types";
 
 const { t, locale } = useI18n();
 
@@ -70,7 +71,7 @@ const isLoading = computed(() => store.isLoadingOperation("fetchDashboards"));
 const dashboards = computed(() => store.dashboards);
 const demoReadOnly = computed(() => metaStore.demoReadOnly);
 
-function ownerName(d: Dashboard): string {
+function ownerName(d: DashboardSummary): string {
   return d.created_by_name || d.created_by_email || t("common.unknown");
 }
 
@@ -118,32 +119,43 @@ function openDashboard(id: number) {
   router.push(`/dashboards/${id}`);
 }
 
-function panelCount(d: Dashboard): number {
-  return d.panels?.panels?.length ?? 0;
+function panelCount(d: DashboardSummary): number {
+  return d.panel_count;
 }
 
-// Distinct panel types on a dashboard, for the small type-icon row on each
-// card — a cheap stand-in for a real thumbnail that still hints at content.
-const TYPE_ICONS = { timeseries: BarChart3, stat: Hash, breakdown: ListFilter, table: Table2 } as const;
-function panelTypeIcons(d: Dashboard) {
-  const types = new Set((d.panels?.panels ?? []).map((p) => p.type));
-  return Array.from(types)
-    .filter((t): t is keyof typeof TYPE_ICONS => t in TYPE_ICONS)
-    .map((t) => TYPE_ICONS[t]);
+// Distinct panel kinds on a dashboard, for the small type-icon row on each
+// card: a cheap stand-in for a real thumbnail that still hints at content.
+// Pie and toplist are the two breakdown views and share one icon.
+const TYPE_ICONS: Record<DashboardVizType, typeof BarChart3> = {
+  chart: BarChart3,
+  stat: Hash,
+  pie: ListFilter,
+  toplist: ListFilter,
+  table: Table2,
+};
+function panelTypeIcons(d: DashboardSummary) {
+  const icons = (d.panel_types ?? []).map((kind) => TYPE_ICONS[kind]).filter((icon) => icon !== undefined);
+  return Array.from(new Set(icons));
 }
 
-function updatedLabel(d: Dashboard): string {
+function updatedLabel(d: DashboardSummary): string {
   const date = new Date(d.updated_at);
   return Number.isNaN(date.getTime()) ? "" : formatInZone(epochMs(date), preferencesStore.zone, { dateStyle: "medium" }, locale.value);
 }
 
 // --- Create / duplicate dialog -----------------------------------------------
 // Duplicate opens the create dialog prefilled from the source dashboard, the
-// same flow alerts and sources use. The copy belongs to the caller.
+// same flow alerts and sources use. The copy belongs to the caller. The list
+// holds summaries, so Duplicate reads the full dashboard by id first.
 const createOpen = ref(false);
 const newName = ref("");
 const newDescription = ref("");
-const duplicateSource = ref<Dashboard | null>(null);
+const duplicateSource = ref<(Dashboard & { corrupt: false }) | null>(null);
+
+// The dialog keeps the name inside the 200-code-point bound the server enforces.
+function setNewName(value: unknown) {
+  newName.value = clampDashboardName(String(value ?? ""));
+}
 const isCreating = computed(() => store.isLoadingOperation("createDashboard"));
 // Global admins may use any team; everyone else only the teams they belong to.
 const duplicateCopy = computed(() => {
@@ -165,7 +177,7 @@ function openCreate() {
   createOpen.value = true;
 }
 
-async function openDuplicate(d: Dashboard) {
+async function openDuplicate(d: DashboardSummary) {
   const request = ++openRequest;
   // Without the caller's teams, panels would be wrongly left out of the copy.
   // A failed load already shows an error toast.
@@ -173,9 +185,18 @@ async function openDuplicate(d: Dashboard) {
     const teams = await teamsStore.loadUserTeams();
     if (!teams.success || request !== openRequest) return;
   }
-  duplicateSource.value = d;
-  newName.value = t("common.copyName", { name: d.name });
-  newDescription.value = d.description;
+  // The API client, not loadDashboard: the store's current dashboard must not change.
+  let source: Dashboard | null = null;
+  try {
+    const resp = await dashboardsApi.get(d.id);
+    if (isSuccessResponse(resp)) source = resp.data;
+  } catch {
+    source = null;
+  }
+  if (request !== openRequest || !source || source.corrupt) return;
+  duplicateSource.value = source;
+  newName.value = dashboardCopyName(source.name, (name) => t("common.copyName", { name }));
+  newDescription.value = source.description;
   createOpen.value = true;
 }
 
@@ -186,7 +207,7 @@ async function submitCreate() {
     name,
     description: newDescription.value.trim(),
     // A duplicate carries the source's panels; a new dashboard starts empty.
-    panels: duplicateCopy.value?.panels ?? { version: 1, layout: [], panels: [] },
+    panels: duplicateCopy.value?.panels ?? emptyDashboardPanels(),
   });
   if (result.success && result.data) {
     createOpen.value = false;
@@ -196,10 +217,10 @@ async function submitCreate() {
 
 // --- Delete -----------------------------------------------------------------
 // The target outlives the dialog's close animation, so its text stays put.
-const deleteTarget = ref<Dashboard | null>(null);
+const deleteTarget = ref<DashboardSummary | null>(null);
 const deleteOpen = ref(false);
 
-function confirmDelete(d: Dashboard) {
+function confirmDelete(d: DashboardSummary) {
   deleteTarget.value = d;
   deleteOpen.value = true;
 }
@@ -212,10 +233,10 @@ async function doDelete() {
 // Row actions are hidden in the read-only demo. Anyone who can see a dashboard
 // may duplicate it, unless its stored panels are unreadable; only editors may
 // delete it.
-function duplicateAction(d: Dashboard) {
-  return demoReadOnly.value || d.panels_corrupt ? undefined : () => void openDuplicate(d);
+function duplicateAction(d: DashboardSummary) {
+  return demoReadOnly.value || d.corrupt ? undefined : () => void openDuplicate(d);
 }
-function deleteAction(d: Dashboard) {
+function deleteAction(d: DashboardSummary) {
   return d.can_edit && !demoReadOnly.value ? () => confirmDelete(d) : undefined;
 }
 </script>
@@ -415,9 +436,10 @@ function deleteAction(d: Dashboard) {
             <Label for="dash-name">{{ t('ui.name') }}</Label>
             <Input
               id="dash-name"
-              v-model="newName"
+              :model-value="newName"
               :placeholder="t('ui.eGHTTPErrorOverview')"
               autofocus
+              @update:model-value="setNewName"
               @keydown.enter.prevent="submitCreate"
             />
           </div>

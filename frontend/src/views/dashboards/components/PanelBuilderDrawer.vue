@@ -25,11 +25,9 @@ import { sourcesApi, asClickHouseConnection, type Source } from "@/api/sources";
 import { supportsQueryLanguage } from "@/lib/queryMetadata";
 import { isSuccessResponse } from "@/api/types";
 import { usePreferencesStore } from "@/stores/preferences";
-import type {
-  DashboardPanel as PanelModel,
-  DashboardPanelOptions,
-  DashboardPanelType,
-} from "@/api/dashboards";
+import type { DashboardQueryPanel } from "@/api/dashboards";
+import { panelBuilderKind, type PanelBuilderKind } from "@/utils/dashboardPanels";
+import type { DraftPanelPatch } from "@/stores/dashboards";
 
 const { t } = useI18n();
 
@@ -53,29 +51,31 @@ const themeStore = useThemeStore();
 const isDark = computed(() => themeStore.isDark);
 const monacoTheme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
-const PANEL_TYPES: { value: DashboardPanelType; label: string }[] = [
-  { value: "timeseries", get label() { return t('ui.timeSeries'); } },
+const PANEL_TYPES: { value: PanelBuilderKind; label: string }[] = [
+  { value: "chart", get label() { return t('ui.timeSeries'); } },
   { value: "stat", get label() { return t('ui.stat'); } },
   { value: "breakdown", get label() { return t('ui.breakdown'); } },
   { value: "table", get label() { return t('ui.table'); } },
 ];
 
-const panel = computed<PanelModel | null>(() => {
+// A draft never holds a locked panel: only a creator or an admin edits, and
+// they see every panel. The filter keeps the type honest.
+const panel = computed<DashboardQueryPanel | null>(() => {
   const draft = store.editDraft;
   if (!draft || !props.panelId) return null;
-  return draft.panels.find((p) => p.id === props.panelId) ?? null;
+  const found = draft.panels.find((p) => p.id === props.panelId) ?? null;
+  return found && !found.locked ? found : null;
 });
+const panelKind = computed(() => (panel.value ? panelBuilderKind(panel.value.viz) : "chart"));
 
-// The ONLY write path into the draft panel — patch-merges into the panel (and
-// shallow-merges `options` specifically) via the store action, then reflows.
-function patchPanel(
-  patch: Partial<Omit<PanelModel, "options">> & { options?: Partial<DashboardPanelOptions> }
-) {
+// The ONLY write path into the draft panel via the store action, then reflows.
+function patchPanel(patch: DraftPanelPatch) {
   if (!props.panelId) return;
   store.updateDraftPanel(props.panelId, patch);
 }
-function patchOptions(patch: Partial<DashboardPanelOptions>) {
-  patchPanel({ options: patch });
+function switchKind(kind: PanelBuilderKind) {
+  if (!props.panelId) return;
+  store.switchDraftPanelKind(props.panelId, kind);
 }
 
 // Auto-close if the panel this drawer was pointed at disappears out from under
@@ -105,9 +105,11 @@ const supportsLogsql = computed(() =>
 // LogsQL (VictoriaLogs only). clickhouse-sql native is intentionally never
 // offered here — see PanelEditorSheet's original note, preserved by design.
 const mode = computed<"logchefql" | "native">({
-  get: () => (panel.value?.query_language === "logsql" ? "native" : "logchefql"),
+  get: () => (panel.value?.query.language === "logsql" ? "native" : "logchefql"),
   set: (v) => {
-    patchPanel({ query_language: v === "native" && supportsLogsql.value ? "logsql" : "logchefql" });
+    const language = v === "native" && supportsLogsql.value ? "logsql" : "logchefql";
+    // Only LogchefQL translates, so a translate limit leaves with the language.
+    patchPanel({ query: language === "logchefql" ? { language } : { language, translate_limit: undefined } });
   },
 });
 
@@ -168,7 +170,7 @@ async function onSourceChange(sourceId: number) {
   // to still be valid for a different source - clear it rather than silently
   // keep a stale, probably-invalid query pointed at the newly picked source.
   const shouldClearQuery = previousSourceId > 0 && previousSourceId !== sourceId;
-  patchPanel(shouldClearQuery ? { source_id: sourceId, query: "" } : { source_id: sourceId });
+  patchPanel(shouldClearQuery ? { source_id: sourceId, query: { text: "" } } : { source_id: sourceId });
   store.clearPreview();
   await loadSourceDetail(teamId, sourceId);
 }
@@ -240,12 +242,10 @@ const previewSignature = computed(() => {
   const p = panel.value;
   if (!p) return "";
   return JSON.stringify({
-    type: p.type,
     team: p.team_id,
     source: p.source_id,
     query: p.query,
-    lang: p.query_language,
-    options: p.options ?? {},
+    viz: p.viz,
     range: store.effectiveRange,
   });
 });
@@ -330,9 +330,9 @@ function onOpenChange(value: boolean) {
               :key="t.value"
               type="button"
               size="sm"
-              :variant="panel.type === t.value ? 'default' : 'ghost'"
+              :variant="panelKind === t.value ? 'default' : 'ghost'"
               class="h-7 px-2.5 text-xs"
-              @click="patchPanel({ type: t.value })"
+              @click="switchKind(t.value)"
             >
               {{ t.label }}
             </Button>
@@ -410,7 +410,7 @@ function onOpenChange(value: boolean) {
                 <SqlMonacoEditor
                   v-if="panel.source_id"
                   :key="`${panel.source_id}-${editorLanguage}`"
-                  :value="panel.query"
+                  :value="panel.query.text"
                   :theme="monacoTheme"
                   :language="editorLanguage"
                   :schema="editorSchema"
@@ -419,7 +419,7 @@ function onOpenChange(value: boolean) {
                   :table-name="tableName"
                   :is-executing="isPreviewing"
                   :visible="open"
-                  @change="(v: string) => patchPanel({ query: v })"
+                  @change="(v: string) => patchPanel({ query: { text: v } })"
                   @submit="runNow"
                 />
                 <div v-else class="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -432,10 +432,11 @@ function onOpenChange(value: boolean) {
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto pl-0.5">
               <Label class='text-xs text-muted-foreground'>{{ t('ui.options') }}</Label>
               <PanelBuilderOptions
-                :type="panel.type"
-                :options="panel.options ?? {}"
+                :query="panel.query"
+                :viz="panel.viz"
                 :field-suggestions="fieldSuggestions"
-                @update:options="patchOptions"
+                @update:query="(patch) => patchPanel({ query: patch })"
+                @update:viz="(viz) => patchPanel({ viz })"
               />
             </div>
           </div>

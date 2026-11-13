@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "ダッシュボードを作成しました",
   "dashboards.dashboardDeleted": "ダッシュボードを削除しました",
   "dashboards.dashboardSaved": "ダッシュボードを保存しました",
+  "dashboards.corruptTitle": "保存されたパネルを読み込めませんでした",
+  "dashboards.corruptDescription": "このダッシュボードの保存されたパネルは検証に失敗したため、ここでは表示も編集もできません。作成者または管理者が API から保存されたパネルを修復できます。",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "新しいチャット",
   "askChef.close": "Ask Chef を閉じる",

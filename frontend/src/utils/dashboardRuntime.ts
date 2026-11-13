@@ -1,5 +1,5 @@
 import type { DashboardCachePolicy } from "@/api/meta";
-import type { DashboardPanel } from "@/api/dashboards";
+import type { DashboardQueryPanel } from "@/api/dashboards";
 
 // Table panel row cap. The builder's limit option maxes at 1000; a hand-edited
 // or legacy blob could carry anything (a saved limit:100000 would try to render
@@ -86,14 +86,16 @@ export function clampTableLimit(value: number | undefined): number {
 
 // Signature of the fields that determine a panel's fetched result. Two panels
 // with the same signature render identically, so panelState is reusable.
-export function execSignature(p: DashboardPanel): string {
+export function execSignature(p: DashboardQueryPanel): string {
   return JSON.stringify([
-    p.type,
-    p.query,
-    p.query_language,
+    p.viz.type,
+    p.query.mode,
+    p.query.text,
+    p.query.language,
     p.team_id,
     p.source_id,
-    p.options?.limit ?? null,
-    p.options?.group_by ?? null,
+    p.query.limit ?? null,
+    p.query.group_by ?? null,
+    p.query.translate_limit ?? null,
   ]);
 }

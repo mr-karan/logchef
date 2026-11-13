@@ -1474,6 +1474,8 @@
   "dashboards.dashboardCreated": "Dashboard created",
   "dashboards.dashboardDeleted": "Dashboard deleted",
   "dashboards.dashboardSaved": "Dashboard saved",
+  "dashboards.corruptTitle": "Saved panels could not be read",
+  "dashboards.corruptDescription": "This dashboard's stored panels fail validation, so nothing can be shown or edited here. Its creator or an admin can repair the stored panels through the API.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "New chat",
   "askChef.close": "Close Ask Chef",

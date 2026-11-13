@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "儀表板已建立",
   "dashboards.dashboardDeleted": "儀表板已刪除",
   "dashboards.dashboardSaved": "儀表板已儲存",
+  "dashboards.corruptTitle": "無法讀取已儲存的面板",
+  "dashboards.corruptDescription": "此儀表板已儲存的面板未通過驗證，因此這裡無法顯示或編輯任何內容。其建立者或管理員可以透過 API 修復已儲存的面板。",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "新對話",
   "askChef.close": "關閉 Ask Chef",

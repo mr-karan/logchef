@@ -718,6 +718,8 @@
   "dashboards.dashboardCreated": "Dashboard creata",
   "dashboards.dashboardDeleted": "Dashboard eliminata",
   "dashboards.dashboardSaved": "Dashboard salvata",
+  "dashboards.corruptTitle": "Impossibile leggere i pannelli salvati",
+  "dashboards.corruptDescription": "I pannelli salvati di questa dashboard non superano la convalida, quindi qui non è possibile mostrare o modificare nulla. Il creatore o un amministratore può ripararli tramite l'API.",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Nuova chat",
   "askChef.close": "Chiudi Ask Chef",

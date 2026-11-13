@@ -6,85 +6,108 @@ import { X } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { DashboardPanelOptions, DashboardPanelType } from "@/api/dashboards";
+import type { DashboardChartMark, DashboardPanelQuery, DashboardViz } from "@/api/dashboards";
+import { panelBuilderKind, trimDashboardGroupBy, MAX_TABLE_LIMIT } from "@/utils/dashboardPanels";
 
 const { t } = useI18n();
 
-// Per-type option fields for the panel builder drawer. Kept as a separate
-// component so PanelBuilderDrawer.vue doesn't grow a third editing surface —
-// this one only ever patches `options`, never the panel's other fields.
+// Per-kind option fields for the panel builder drawer. Kept as a separate
+// component so PanelBuilderDrawer.vue doesn't grow a third editing surface.
+// A query patch merges into the panel's query; a viz is replaced whole.
 interface Props {
-  type: DashboardPanelType;
-  options: DashboardPanelOptions;
+  query: DashboardPanelQuery;
+  viz: DashboardViz;
   fieldSuggestions: string[];
 }
 const props = defineProps<Props>();
 const emit = defineEmits<{
-  (e: "update:options", patch: Partial<DashboardPanelOptions>): void;
+  (e: "update:query", patch: Partial<DashboardPanelQuery>): void;
+  (e: "update:viz", viz: DashboardViz): void;
 }>();
 
-const CHART_STYLES: { value: NonNullable<DashboardPanelOptions["chart"]>; label: string }[] = [
+const kind = computed(() => panelBuilderKind(props.viz));
+
+const CHART_STYLES: { value: DashboardChartMark; label: string }[] = [
   { value: "line", get label() { return t('ui.line'); } },
   { value: "area", get label() { return t('ui.area'); } },
-  { value: "bars", get label() { return t('ui.bars'); } },
+  { value: "bar", get label() { return t('ui.bars'); } },
 ];
 
-const BAR_MODES: { value: NonNullable<DashboardPanelOptions["bar_mode"]>; label: string }[] = [
+const BAR_MODES: { value: "stacked" | "none"; label: string }[] = [
   { value: "stacked", get label() { return t('ui.stacked'); } },
-  { value: "grouped", get label() { return t('ui.grouped'); } },
+  { value: "none", get label() { return t('ui.grouped'); } },
 ];
-const BREAKDOWN_VIEWS: { value: NonNullable<DashboardPanelOptions["breakdown_view"]>; label: string }[] = [
-  { value: "horizontal-bars", get label() { return t('ui.horizontalBars'); } },
-  { value: "donut", get label() { return t('ui.donut'); } },
+const BREAKDOWN_VIEWS: { value: "toplist" | "pie"; label: string }[] = [
+  { value: "toplist", get label() { return t('ui.horizontalBars'); } },
+  { value: "pie", get label() { return t('ui.donut'); } },
 ];
 
 // The effective chart style, matching what PanelTimeseries renders.
-const effectiveChart = computed<NonNullable<DashboardPanelOptions["chart"]>>(
-  () => props.options.chart ?? "line"
-);
+const effectiveMark = computed<DashboardChartMark>(() => (props.viz.type === "chart" ? props.viz.mark ?? "line" : "line"));
+const effectiveStack = computed(() => (props.viz.type === "chart" ? props.viz.stack ?? "stacked" : "stacked"));
+
+// Bars and areas stack by default, as schema 1 drew them.
+function setMark(mark: DashboardChartMark) {
+  emit("update:viz", { type: "chart", mark, stack: mark === "line" ? "none" : "stacked" });
+}
+
+function setStack(stack: "stacked" | "none") {
+  emit("update:viz", { type: "chart", mark: effectiveMark.value, stack });
+}
+
+function setBreakdownView(view: "toplist" | "pie") {
+  emit("update:viz", view === "pie" ? { type: "pie", donut: true } : { type: "toplist" });
+}
+
+// A blank group leaves the key out, which the server requires.
+function setGroupBy(value: unknown) {
+  const text = String(value ?? "");
+  emit("update:query", { group_by: trimDashboardGroupBy(text) === "" ? undefined : text });
+}
 
 const columnInput = ref("");
 
-// The <input max="1000"> attribute alone doesn't stop the browser from
-// emitting a larger typed value on every keystroke (native max-clamping only
-// kicks in on step-button use / form validation, not free typing) - clamp
-// explicitly so the panel can never end up with a limit above the enforced
-// max.
+// The <input max> attribute alone doesn't stop the browser from emitting a
+// larger typed value on every keystroke (native max-clamping only kicks in on
+// step-button use / form validation, not free typing), so clamp explicitly so
+// the panel can never end up with a limit above the enforced max.
 const LIMIT_MIN = 1;
-const LIMIT_MAX = 1000;
 function clampLimit(value: unknown): number | undefined {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.min(LIMIT_MAX, Math.max(LIMIT_MIN, Math.round(n)));
+  return Math.min(MAX_TABLE_LIMIT, Math.max(LIMIT_MIN, Math.round(n)));
+}
+
+const visibleColumns = computed(() => (props.viz.type === "table" ? props.viz.visible_columns ?? [] : []));
+
+function setColumns(columns: string[]) {
+  emit("update:viz", columns.length ? { type: "table", visible_columns: columns } : { type: "table" });
 }
 
 function addColumn() {
   const raw = columnInput.value.trim().replace(/,$/, "").trim();
-  if (raw) {
-    const cols = props.options.columns ?? [];
-    if (!cols.includes(raw)) {
-      emit("update:options", { columns: [...cols, raw] });
-    }
+  if (raw && !visibleColumns.value.includes(raw)) {
+    setColumns([...visibleColumns.value, raw]);
   }
   columnInput.value = "";
 }
 
 function removeColumn(name: string) {
-  emit("update:options", { columns: (props.options.columns ?? []).filter((c) => c !== name) });
+  setColumns(visibleColumns.value.filter((c) => c !== name));
 }
 </script>
 
 <template>
-  <!-- Timeseries: group-by field + chart render style. -->
-  <div v-if="type === 'timeseries'" class="space-y-4">
+  <!-- Chart: group-by field + render style. -->
+  <div v-if="kind === 'chart'" class="space-y-4">
     <div class="space-y-1.5">
       <Label for="panel-groupby">{{ t('ui.groupBy2') }} <span class='text-muted-foreground'>{{ t('ui.optional2') }}</span></Label>
       <Input
         id="panel-groupby"
-        :model-value="options.group_by ?? ''"
+        :model-value="query.group_by ?? ''"
         list="panel-field-suggestions"
         :placeholder="t('ui.eGService')"
-        @update:model-value="(v) => emit('update:options', { group_by: String(v ?? '') })"
+        @update:model-value="setGroupBy"
       />
       <datalist id="panel-field-suggestions">
         <option v-for="name in fieldSuggestions" :key="name" :value="name" />
@@ -98,15 +121,15 @@ function removeColumn(name: string) {
           :key="style.value"
           type="button"
           size="sm"
-          :variant="effectiveChart === style.value ? 'default' : 'outline'"
+          :variant="effectiveMark === style.value ? 'default' : 'outline'"
           class="h-8 text-xs"
-          @click="emit('update:options', { chart: style.value })"
+          @click="setMark(style.value)"
         >
           {{ style.label }}
         </Button>
       </div>
     </div>
-    <div v-if="effectiveChart === 'bars'" class="space-y-1.5">
+    <div v-if="effectiveMark === 'bar'" class="space-y-1.5">
       <Label>{{ t('ui.barMode') }}</Label>
       <div class="grid grid-cols-2 gap-1.5">
         <Button
@@ -114,9 +137,9 @@ function removeColumn(name: string) {
           :key="mode.value"
           type="button"
           size="sm"
-          :variant="(options.bar_mode ?? 'stacked') === mode.value ? 'default' : 'outline'"
+          :variant="effectiveStack === mode.value ? 'default' : 'outline'"
           class="h-8 text-xs"
-          @click="emit('update:options', { bar_mode: mode.value })"
+          @click="setStack(mode.value)"
         >
           {{ mode.label }}
         </Button>
@@ -125,15 +148,15 @@ function removeColumn(name: string) {
   </div>
 
   <!-- Breakdown: a required grouping field and a view-only selector. -->
-  <div v-else-if="type === 'breakdown'" class="space-y-4">
+  <div v-else-if="kind === 'breakdown'" class="space-y-4">
     <div class="space-y-1.5">
       <Label for="panel-breakdown-groupby">{{ t('ui.groupBy2') }} <span class='text-destructive'>{{ t('ui.required') }}</span></Label>
       <Input
         id="panel-breakdown-groupby"
-        :model-value="options.group_by ?? ''"
+        :model-value="query.group_by ?? ''"
         list="panel-field-suggestions"
         :placeholder="t('ui.eGService')"
-        @update:model-value="(v) => emit('update:options', { group_by: String(v ?? '') })"
+        @update:model-value="setGroupBy"
       />
       <datalist id="panel-field-suggestions">
         <option v-for="name in fieldSuggestions" :key="name" :value="name" />
@@ -143,8 +166,8 @@ function removeColumn(name: string) {
       <Label>{{ t('ui.view') }}</Label>
       <div class="grid grid-cols-2 gap-1.5">
         <Button v-for="view in BREAKDOWN_VIEWS" :key="view.value" type="button" size="sm"
-          :variant="(options.breakdown_view ?? 'horizontal-bars') === view.value ? 'default' : 'outline'"
-          class="h-8 text-xs" @click="emit('update:options', { breakdown_view: view.value })">
+          :variant="viz.type === view.value ? 'default' : 'outline'"
+          class="h-8 text-xs" @click="setBreakdownView(view.value)">
           {{ view.label }}
         </Button>
       </div>
@@ -152,29 +175,29 @@ function removeColumn(name: string) {
   </div>
 
   <!-- Stat: no options yet. -->
-  <p v-else-if="type === 'stat'" class="text-xs text-muted-foreground">
+  <p v-else-if="kind === 'stat'" class="text-xs text-muted-foreground">
     {{ t('ui.statPanelsShowTheTotalMatchCountOverTheSelectedTimeRange') }}
   </p>
 
   <!-- Table: row limit + column subset. -->
-  <div v-else-if="type === 'table'" class="space-y-4">
+  <div v-else-if="kind === 'table'" class="space-y-4">
     <div class="space-y-1.5">
       <Label for="panel-limit">{{ t('ui.rowLimit') }}</Label>
       <Input
         id="panel-limit"
         type="number"
         min="1"
-        max="1000"
+        :max="MAX_TABLE_LIMIT"
         class="w-32"
-        :model-value="options.limit ?? 50"
-        @update:model-value="(v) => emit('update:options', { limit: clampLimit(v) })"
+        :model-value="query.limit ?? 100"
+        @update:model-value="(v) => emit('update:query', { limit: clampLimit(v) })"
       />
     </div>
     <div class="space-y-1.5">
       <Label for="panel-columns">{{ t('ui.columns') }} <span class='text-muted-foreground'>{{ t('ui.optionalAllIfEmpty') }}</span></Label>
       <div class="flex flex-wrap gap-1.5">
         <span
-          v-for="col in options.columns ?? []"
+          v-for="col in visibleColumns"
           :key="col"
           class="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs"
         >
