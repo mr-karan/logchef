@@ -18,6 +18,7 @@ import {
   type DateValue,
 } from "@internationalized/date";
 import { validateDay } from "@/utils/template";
+import { usePreferencesStore } from "@/stores/preferences";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -41,6 +42,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string | null];
 }>();
 
+const preferencesStore = usePreferencesStore();
 const showPicker = ref(false);
 const showCalendar = ref(false);
 
@@ -218,7 +220,7 @@ function handleTimeChange(e: Event) {
 }
 
 function setNow() {
-  const current = now(currentTimezoneId.value);
+  const current = now(props.includeTime ? currentTimezoneId.value : preferencesStore.zone);
   const year = current.year;
   const month = String(current.month).padStart(2, '0');
   const day = String(current.day).padStart(2, '0');

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 
+import { now as zonedNow } from '@internationalized/date'
+import { usePreferencesStore } from '@/stores/preferences'
 import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Settings, Type, ChevronDown, X, Plus, List, CalendarIcon } from 'lucide-vue-next'
@@ -39,6 +41,7 @@ const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
 }>()
 
+const preferencesStore = usePreferencesStore()
 const variableStore = useVariableStore()
 const { allVariables } = storeToRefs(variableStore)
 
@@ -80,7 +83,7 @@ const updateVariableType = (variable: VariableState) => {
       const minutes = String(now.getMinutes()).padStart(2, '0')
       const seconds = String(now.getSeconds()).padStart(2, '0')
       variable.value = variable.type === 'day'
-        ? `${year}-${month}-${day}`
+        ? zonedNow(preferencesStore.zone).toString().slice(0, 10)
         : `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
       variable.inputType = 'datepicker'
       break
