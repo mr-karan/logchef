@@ -12,6 +12,7 @@ import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 import { panelExploreQuery } from "@/utils/panelExplore";
+import { truncationMessage } from "@/utils/truncation";
 
 const { t } = useI18n();
 
@@ -66,6 +67,13 @@ const chartHeight = computed(() =>
 
 const vizType = computed(() => props.panel.viz?.type);
 
+// A cut result says so on every visualization. A cap that cut nothing is silent.
+const truncationText = computed(() => {
+  if (panelState.value.status !== "success") return null;
+  const message = truncationMessage(panelState.value.table?.stats);
+  return message ? t(message.key, { count: message.count }, message.count) : null;
+});
+
 const typeIcon = computed(() => {
   switch (vizType.value) {
     case "chart":
@@ -119,6 +127,11 @@ const columnSubset = computed(() => {
     </div>
 
     <div class="dash-panel__body">
+      <span
+        v-if="truncationText"
+        class="dash-panel__chip border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+        :title="truncationText"
+      >{{ truncationText }}</span>
       <!-- Locked: viewer lacks source access. Covers both the server-redacted
            panel (panel.locked) and the query-time AuthorizationError path
            (panelState.status === 'locked'), unified via isLocked. -->
@@ -256,6 +269,18 @@ const columnSubset = computed(() => {
 .dash-panel__fill {
   width: 100%;
   height: 100%;
+}
+.dash-panel__chip {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  z-index: 2;
+  padding: 0.1rem 0.45rem;
+  border-width: 1px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .dash-panel__message {
   display: flex;

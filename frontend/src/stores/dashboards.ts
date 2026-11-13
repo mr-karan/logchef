@@ -20,7 +20,7 @@ import {
   type PanelQueryLanguage,
   type CacheDirective,
 } from "@/api/dashboards";
-import type { HistogramDataPoint } from "@/api/explore";
+import type { HistogramDataPoint, QueryStats } from "@/api/explore";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import {
   dashboardLayout,
@@ -104,6 +104,8 @@ export interface PanelState {
   table?: {
     columns: PanelColumn[];
     rows: Record<string, any>[];
+    /** The result's limit and truncation state, from the query response. */
+    stats?: QueryStats;
   };
 }
 
@@ -488,7 +490,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const rows = data?.data ?? data?.logs ?? [];
       return {
         status: rows.length ? "success" : "empty",
-        table: { columns: data?.columns ?? [], rows },
+        table: { columns: data?.columns ?? [], rows, stats: data?.stats },
       };
     }
 
@@ -509,7 +511,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const rows = data?.logs ?? [];
     return {
       status: rows.length ? "success" : "empty",
-      table: { columns: data?.columns ?? [], rows },
+      table: { columns: data?.columns ?? [], rows, stats: data?.stats },
     };
   }
 
