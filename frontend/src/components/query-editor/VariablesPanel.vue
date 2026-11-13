@@ -102,7 +102,7 @@ const clearMultiSelectValues = (variable: VariableState) => {
               {{ variable.label || variable.name }}
             </Label>
             <span class="text-xs px-1 py-0.5 bg-muted text-muted-foreground rounded font-mono flex-shrink-0">
-              {{ variable.type === 'date' ? 'DT' : variable.type === 'day' ? 'D' : variable.type[0] }}
+              {{ variable.type === 'date' ? 'dt' : variable.type === 'day' ? 'd' : variable.type[0] }}
             </span>
             <span v-if="variable.isOptional" class="text-[10px] px-1 py-0.5 bg-muted/50 text-muted-foreground/70 rounded flex-shrink-0 italic">
               {{ t('ui.optional3') }}

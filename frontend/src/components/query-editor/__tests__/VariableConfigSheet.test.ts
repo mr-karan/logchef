@@ -1,15 +1,18 @@
+process.env.TZ = 'America/Los_Angeles'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from '@/i18n'
 import { useVariableStore, type VariableState } from '@/stores/variables'
+import { usePreferencesStore } from '@/stores/preferences'
 import VariableConfigSheet from '../VariableConfigSheet.vue'
 
 let app: App | undefined
-afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
+afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.useRealTimers() })
 
 async function mountVariable(type: VariableState['type'], defaultValue: VariableState['defaultValue']) {
   const pinia = createPinia()
+  usePreferencesStore(pinia).preferences.timezone = 'utc'
   const store = useVariableStore(pinia)
   store.setAllVariable([{ name: 'd', label: 'Day', type, value: '2026-11-12', defaultValue, inputType: 'datepicker' }])
   const host = document.createElement('div')
@@ -62,4 +65,13 @@ it.each([
   expect(store.allVariables[0]?.type).toBe('day')
   expect(store.allVariables[0]?.defaultValue).toBe(expected)
   expect(typeSelect().textContent?.trim()).toBe('Date')
+})
+
+it('seeds day in UTC display time near midnight in a non-UTC browser zone', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-13T00:30:00Z'))
+  expect(new Date().getDate()).toBe(12)
+  const store = await mountVariable('date', '')
+  await chooseType('Date')
+  expect(store.allVariables[0]?.value).toBe('2026-11-13')
 })

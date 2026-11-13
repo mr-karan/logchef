@@ -1,18 +1,22 @@
-import { afterEach, expect, it } from 'vitest'
+import { createPinia } from 'pinia'
+import { usePreferencesStore } from '@/stores/preferences'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import { i18n } from '@/i18n'
 import SingleDatePicker from '../SingleDatePicker.vue'
 
 process.env.TZ = 'America/Los_Angeles'
 let app: App | undefined
-afterEach(() => { app?.unmount(); document.body.innerHTML = '' })
+afterEach(() => { app?.unmount(); document.body.innerHTML = ''; vi.useRealTimers() })
 
 async function open(includeTime: boolean, modelValue: string) {
   const emitted: (string | null)[] = []
   const host = document.createElement('div')
   document.body.appendChild(host)
   app = createApp(SingleDatePicker, { includeTime, modelValue, 'onUpdate:modelValue': (value: string | null) => emitted.push(value) })
-  app.use(i18n).mount(host)
+  const pinia = createPinia()
+  usePreferencesStore(pinia).preferences.timezone = 'utc'
+  app.use(pinia).use(i18n).mount(host)
   host.querySelector('button')?.click()
   await nextTick(); await nextTick()
   return emitted
@@ -56,4 +60,15 @@ it('trims date-only drafts and labels the shortcut Today', async () => {
   await nextTick()
   apply()
   expect(emitted).toEqual(['2024-02-29'])
+})
+
+it('Today uses UTC display time near midnight in a non-UTC browser zone', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-13T00:30:00Z'))
+  expect(new Date().getDate()).toBe(12)
+  const emitted = await open(false, '2026-11-10')
+  const today = [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Today')
+  if (!today) throw new Error('Today missing')
+  today.click()
+  expect(emitted).toEqual(['2026-11-13'])
 })
