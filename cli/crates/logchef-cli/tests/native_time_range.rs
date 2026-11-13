@@ -20,7 +20,7 @@ fn execute(
             "version": 2,
             "content": "SELECT 1 [[WHERE env IN ({{env}})]]",
             "variables": [{
-                "name":"env", "type":"text", "value":"",
+                "name":"env", "type":"text", "inputType":"multiselect", "value":"",
                 "defaultValue":"prod", "options":[{"value":"prod"}]
             }],
             "limit": 10, "timeRange": time_range
@@ -50,7 +50,11 @@ fn execute(
     ])
     .args(extra);
     let out = run(cmd);
-    let requests = server.state().native_requests.clone();
+    let requests = if extra.contains(&"--show-sql") && dsl {
+        server.state().translate_requests.clone()
+    } else {
+        server.state().native_requests.clone()
+    };
     (out, requests)
 }
 fn request_body(command: &str, time_range: Value, extra: &[&str]) -> Value {
@@ -192,7 +196,7 @@ fn show_sql_lists_resolution_and_translates_dsl() {
             (vec!["--show-sql"], "default"),
             (vec!["--show-sql", "--var", "env=stage"], "--var"),
         ] {
-            let (out, _) = execute(
+            let (out, requests) = execute(
                 "saved-queries",
                 json!({"relative":"15m"}),
                 &extra,
@@ -205,6 +209,18 @@ fn show_sql_lists_resolution_and_translates_dsl() {
             assert!(text.contains("env") && text.contains("text") && text.contains(origin));
             if dsl {
                 assert!(text.contains("SELECT translated"));
+                assert_eq!(requests.len(), 1);
+                assert_eq!(
+                    requests[0]["variables"],
+                    json!([{"name":"env","type":"text","value":if origin == "--var" {"stage"} else {"prod"}}])
+                );
+                assert_eq!(requests[0]["timezone"], "UTC");
+                let start =
+                    DateTime::parse_from_rfc3339(requests[0]["start_time"].as_str().unwrap())
+                        .unwrap();
+                let end = DateTime::parse_from_rfc3339(requests[0]["end_time"].as_str().unwrap())
+                    .unwrap();
+                assert_eq!(end - start, chrono::Duration::minutes(15));
             }
         }
     }
@@ -246,4 +262,136 @@ fn fallback_hour_bounds_preserve_distinct_instants_in_both_commands() {
             );
         }
     }
+}
+
+#[test]
+fn show_sql_marks_missing_defaults_as_unset_without_null() {
+    let server = FakeServer::start(false);
+    server.state().saved_query = json!({
+        "id":7,"source_id":2,"name":"Unset","query_language":"clickhouse-sql","editor_mode":"native",
+        "query_content":json!({"content":"SELECT {{env}}","variables":[{"name":"env","type":"text"}]}).to_string()
+    });
+    let home = TestHome::new("unset-variable");
+    home.write_config(&config_with(&server.url, json!({"token":PAT})));
+    let out = run({
+        let mut cmd = home.logchef();
+        cmd.args(["saved-queries", "7", "--show-sql"]);
+        cmd
+    });
+    assert_success(&out);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("env (text) [unset]"), "{text}");
+    assert!(!text.contains("null"), "{text}");
+}
+
+fn since_across_fallback(command: &str, victorialogs: bool) {
+    let server = FakeServer::start(false);
+    server.state().source_type = Some(
+        if victorialogs {
+            "victorialogs"
+        } else {
+            "clickhouse"
+        }
+        .into(),
+    );
+    if command == "tail" {
+        server.state().query_logs =
+            vec![json!({"timestamp":"2025-11-02T05:30:00Z","message":"row"})];
+    }
+    let home = TestHome::new("since-fallback");
+    let mut config = config_with(&server.url, json!({"token":PAT}));
+    config["contexts"]["test"]["defaults"]["timezone"] = json!("America/New_York");
+    home.write_config(&config);
+    let anchor = DateTime::parse_from_rfc3339("2025-11-02T05:30:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let minutes = (Utc::now() - anchor).num_minutes();
+    assert!(minutes > 0);
+    let since = format!("{minutes}m");
+    let before = Utc::now();
+    let mut cmd = home.logchef();
+    cmd.args([
+        command,
+        if command == "sql" {
+            "SELECT * FROM logs"
+        } else {
+            ""
+        },
+        "--team",
+        "1",
+        "--source",
+        "2",
+        "--since",
+        &since,
+    ]);
+    if command == "tail" {
+        cmd.args(["--poll", "--max-lines", "1"]);
+    }
+    let out = run(cmd);
+    assert_success(&out);
+    let after = Utc::now();
+    let state = server.state();
+    let body = if command == "histogram" {
+        &state.translate_requests[0]
+    } else {
+        &state.native_requests[0]
+    };
+    assert_eq!(body["timezone"], "America/New_York");
+    if command == "sql" && !victorialogs {
+        let sql = body["query_text"].as_str().unwrap();
+        assert!(sql.contains("fromUnixTimestamp64Milli("), "{sql}");
+        let instants: Vec<i64> = sql
+            .split("fromUnixTimestamp64Milli(")
+            .skip(1)
+            .map(|value| value.split(',').next().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(instants.len(), 2, "{sql}");
+        assert!(instants[0] >= (before - chrono::Duration::minutes(minutes)).timestamp_millis());
+        assert!(instants[0] <= (after - chrono::Duration::minutes(minutes)).timestamp_millis());
+        assert!(instants[1] >= before.timestamp_millis());
+        assert!(instants[1] <= after.timestamp_millis());
+        assert_eq!(instants[1] - instants[0], minutes * 60_000);
+    } else {
+        let start = DateTime::parse_from_rfc3339(body["start_time"].as_str().unwrap())
+            .expect("start must preserve an instant");
+        let end = DateTime::parse_from_rfc3339(body["end_time"].as_str().unwrap())
+            .expect("end must preserve an instant");
+        assert!(start >= before - chrono::Duration::minutes(minutes));
+        assert!(start <= after - chrono::Duration::minutes(minutes));
+        assert!(end >= before && end <= after);
+        assert!(
+            (end - start - chrono::Duration::minutes(minutes))
+                .num_milliseconds()
+                .abs()
+                < 1000
+        );
+        if command == "histogram" {
+            assert_eq!(
+                state.histogram_requests[0]["start_timestamp"],
+                start.timestamp_millis()
+            );
+            assert_eq!(
+                state.histogram_requests[0]["end_timestamp"],
+                end.timestamp_millis()
+            );
+        }
+    }
+}
+
+#[test]
+fn query_since_preserves_fallback_instants() {
+    since_across_fallback("query", false);
+}
+#[test]
+fn sql_since_preserves_fallback_instants() {
+    since_across_fallback("sql", false);
+    since_across_fallback("sql", true);
+}
+#[test]
+fn tail_since_preserves_fallback_instants() {
+    since_across_fallback("tail", false);
+}
+#[test]
+fn histogram_since_preserves_fallback_instants() {
+    since_across_fallback("histogram", false);
 }

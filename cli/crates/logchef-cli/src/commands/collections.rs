@@ -70,7 +70,7 @@ pub struct CollectionsArgs {
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
 
-    /// Variable overrides (name=value). Empty clears the default. Repeat for options or IN (...) to select multiple values.
+    /// Variable overrides (name=value). Empty clears the default. Repeat for multiselect variables to select multiple values.
     #[arg(long = "var", short = 'V', value_name = "NAME=VALUE")]
     variables: Vec<String>,
 }

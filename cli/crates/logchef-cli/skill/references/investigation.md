@@ -154,11 +154,15 @@ Overrides use `--var name=value` and retain the saved type. An omitted override
 uses the non-empty saved value, then the saved default. Empty strings, null,
 and empty arrays count as empty. Explicit `--var env=` clears the value and
 bypasses the default. Repeated `--var env=prod --var env=stage` produces an
-array for variables with options or used in `IN (...)`; one value stays a
-scalar. Unknown names and malformed overrides fail with the saved names.
+array only for saved variables with `inputType: "multiselect"`; one value
+stays a scalar. Repeated overrides for other inputs fail. Unknown names and
+malformed overrides fail with the saved names. Queries without variables
+report that they have no variables.
 Saved-query `--show-sql` prints the template and each resolved variable's
-name, type, value, and origin (`--var`, saved value, or default). LogchefQL
-also prints the server's translated SQL without executing the query.
+name, type, value, and origin (`--var`, saved value, default, or unset).
+Unset variables print without a null value. LogchefQL also prints the
+server's translated query, SQL for ClickHouse or LogsQL for VictoriaLogs,
+without executing the query.
 
 ## Handing off to the UI
 

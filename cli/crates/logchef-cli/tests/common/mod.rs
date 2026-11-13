@@ -240,6 +240,10 @@ pub struct ServerState {
     pub ui_url: Option<String>,
     pub saved_query: serde_json::Value,
     pub native_requests: Vec<serde_json::Value>,
+    pub translate_requests: Vec<serde_json::Value>,
+    pub histogram_requests: Vec<serde_json::Value>,
+    pub query_logs: Vec<serde_json::Value>,
+    pub source_type: Option<String>,
 }
 
 pub struct FakeServer {
@@ -391,6 +395,25 @@ fn route(
 ) -> (u16, serde_json::Value) {
     let path = req.path.split('?').next().unwrap_or_default();
     match (req.method.as_str(), path) {
+        ("GET", "/api/v1/teams/1/sources/2") => (
+            200,
+            serde_json::json!({"status":"success","data":{
+                "id":2,"name":"logs","_meta_ts_field":"timestamp",
+                "source_type":state.lock().unwrap().source_type.as_deref().unwrap_or("clickhouse")
+            }}),
+        ),
+        ("POST", "/api/v1/teams/1/sources/2/logs/histogram") => {
+            state
+                .lock()
+                .unwrap()
+                .histogram_requests
+                .push(serde_json::from_str(&req.body).unwrap());
+            (
+                200,
+                serde_json::json!({"status":"success","data":{"data":[]}}),
+            )
+        }
+
         ("GET", "/api/v1/saved-queries") => (
             200,
             serde_json::json!({"status": "success", "data": [state.lock().unwrap().saved_query.clone()]}),
@@ -402,7 +425,7 @@ fn route(
         }
         ("POST", "/api/v1/teams/1/sources/2/logchefql/translate") => {
             let body: serde_json::Value = serde_json::from_str(&req.body).unwrap();
-            assert_eq!(body["variables"][0]["name"], "env");
+            state.lock().unwrap().translate_requests.push(body);
             (
                 200,
                 serde_json::json!({"status":"success","data":{"valid":true,"full_sql":"SELECT translated"}}),
@@ -420,7 +443,7 @@ fn route(
             (
                 200,
                 serde_json::json!({"status": "success", "data": {
-                    "logs": [], "columns": [], "stats": {"execution_time_ms": 1, "rows_read": 0, "bytes_read": 0}
+                    "logs": state.lock().unwrap().query_logs.clone(), "columns": [], "stats": {"execution_time_ms": 1, "rows_read": 0, "bytes_read": 0}
                 }}),
             )
         }

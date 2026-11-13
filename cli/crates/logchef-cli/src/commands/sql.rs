@@ -627,7 +627,7 @@ fn parse_time_range(
         (None, None) => {
             let end = Utc::now();
             let start = end - parse_duration(since.unwrap_or("15m"))?;
-            TimeInput::Instant { start, end }
+            TimeInput::Rfc3339 { start, end }
         }
     };
     Ok(resolve_time_range(input, configured_tz))
@@ -677,6 +677,13 @@ fn sql_time_condition(
 }
 
 fn sql_datetime_expr(value: &str, timezone: &str) -> String {
+    if let Ok(instant) = DateTime::parse_from_rfc3339(value) {
+        return format!(
+            "fromUnixTimestamp64Milli({}, '{}')",
+            instant.timestamp_millis(),
+            sql_string(timezone)
+        );
+    }
     format!(
         "toDateTime('{}', '{}')",
         sql_string(value),

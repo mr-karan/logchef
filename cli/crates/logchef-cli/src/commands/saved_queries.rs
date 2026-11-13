@@ -42,11 +42,11 @@ pub struct SavedQueriesArgs {
     #[arg(long, short = 'l')]
     limit: Option<u32>,
 
-    /// Variable overrides (name=value). Empty clears the default. Repeat for options or IN (...) to select multiple values.
+    /// Variable overrides (name=value). Empty clears the default. Repeat for multiselect variables to select multiple values.
     #[arg(long = "var", short = 'V', value_name = "NAME=VALUE")]
     variables: Vec<String>,
 
-    /// Print the query template, resolved variables and their origins, and server-translated SQL for LogchefQL
+    /// Print the query template, resolved variables and their origins, and server-translated query for LogchefQL
     #[arg(long)]
     show_sql: bool,
 
@@ -234,10 +234,14 @@ async fn run_saved_query(
     if args.show_sql {
         println!("{}", final_query);
         for variable in &variables {
-            println!(
-                "{} ({}) = {} [{}]",
-                variable.name, variable.var_type, variable.value, variable.origin
-            );
+            if variable.origin == "unset" {
+                println!("{} ({}) [unset]", variable.name, variable.var_type);
+            } else {
+                println!(
+                    "{} ({}) = {} [{}]",
+                    variable.name, variable.var_type, variable.value, variable.origin
+                );
+            }
         }
         if query.query_language == "logchefql" {
             let range = saved_query_time_range(&content, ctx.defaults.timezone.as_deref())?;

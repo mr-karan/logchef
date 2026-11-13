@@ -437,7 +437,7 @@ async fn run_poll(
     loop {
         let end = Utc::now();
         let time_range = resolve_time_range(
-            TimeInput::Instant { start, end },
+            TimeInput::Rfc3339 { start, end },
             ctx.defaults.timezone.as_deref(),
         );
         let request = QueryRequest {

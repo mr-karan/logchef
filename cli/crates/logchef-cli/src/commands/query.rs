@@ -364,7 +364,7 @@ fn parse_time_range(
         (None, None) => {
             let end = Utc::now();
             let start = end - parse_duration(since)?;
-            TimeInput::Instant { start, end }
+            TimeInput::Rfc3339 { start, end }
         }
     };
     Ok(resolve_time_range(input, configured_tz))
