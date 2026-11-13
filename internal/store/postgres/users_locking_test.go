@@ -150,7 +150,8 @@ func awaitLockWaitOrDone(t *testing.T, ctx context.Context, monitor *pgx.Conn, d
 		var waiting bool
 		err := monitor.QueryRow(ctx, `SELECT EXISTS (
 			SELECT 1 FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()
+			WHERE datname = current_database() AND application_name = current_setting('application_name')
+				AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()
 		)`).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
