@@ -750,7 +750,7 @@ onBeforeRouteUpdate((to, from) => {
     </div>
 
     <div v-if="store.needsReload" role="status" class="flex items-center justify-center gap-3 border border-amber-500/25 bg-amber-500/10 p-3 text-sm">
-      <span>{{ t('ui.serverUpdated') }}</span>
+      <span>{{ t('ui.dashboardNeedsReload') }}</span>
       <Button variant="outline" size="sm" @click="reloadPage">{{ t('pages.reloadPage') }}</Button>
     </div>
 

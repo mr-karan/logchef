@@ -4,6 +4,8 @@ import { createPinia } from "pinia";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { i18n } from "@/i18n";
 
+vi.mock("@/api/meta", () => ({ metaApi: { getMeta: async () => ({ status: "success", data: { version: "new-version", http_server_timeout: "30s", max_query_limit: 100000 } }) } }));
+
 const compatibility = vi.hoisted(() => ({ future: false, stub: false }));
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }));
 vi.mock("@/api/apiUtils", () => ({ apiClient: api }));
@@ -22,6 +24,8 @@ const dashboard = {
 const conflictError = { status: "error", error_type: "ConflictError", message: "modified", statusCode: 409 };
 
 import DashboardView from "../DashboardView.vue";
+import VersionBanner from "@/components/VersionBanner.vue";
+import { useMetaStore } from "@/stores/meta";
 
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -241,16 +245,25 @@ describe("DashboardView read compatibility", () => {
     document.body.appendChild(host);
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/dashboards/:id", component: DashboardView }] });
     await router.push("/dashboards/1");
-    const app = createApp(defineComponent({ template: "<router-view />" }));
+    const stamp = document.createElement("meta");
+    stamp.name = "logchef-version";
+    stamp.content = "old-version";
+    document.head.append(stamp);
+    const pinia = createPinia();
+    const meta = useMetaStore(pinia);
+    await meta.loadMeta();
+    const app = createApp(defineComponent({ components: { VersionBanner }, template: "<VersionBanner /><router-view />" }));
     try {
-      app.use(createPinia()).use(i18n).use(router).mount(host);
+      app.use(pinia).use(i18n).use(router).mount(host);
       await settle();
-      expect(host.querySelector('[role="status"]')?.textContent).toContain("Reload to continue");
+      const notices = [...host.querySelectorAll('[role="status"]')];
+      expect(notices.filter((notice) => notice.textContent?.includes("Logchef was updated"))).toHaveLength(1);
+      expect(notices.some((notice) => notice.textContent?.includes("This dashboard is read-only. Reload to use its newer features."))).toBe(true);
       expect([...host.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Edit")).toBe(false);
       expect(host.textContent).not.toContain("This dashboard is empty");
       if (!stub) expect(host.querySelector(".dash-panel__message")?.textContent).toContain("Reload to continue");
     } finally {
-      app.unmount(); host.remove(); compatibility.future = false; compatibility.stub = false; vi.unstubAllGlobals();
+      app.unmount(); host.remove(); stamp.remove(); compatibility.future = false; compatibility.stub = false; vi.unstubAllGlobals();
     }
   });
 });

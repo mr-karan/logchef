@@ -1,4 +1,5 @@
 {
+  "ui.dashboardNeedsReload": "此仪表盘为只读状态。请重新加载以使用其较新的功能。",
   "ui.serverUpdated": "Logchef 已更新。请重新加载以继续。",
   "dashboards.conflict.title": "你编辑期间此仪表盘已被更改",
   "dashboards.conflict.description": "有人保存了更新的版本，因此你的更改未保存。更改仍然保留在这里。请选择如何保留它们。",

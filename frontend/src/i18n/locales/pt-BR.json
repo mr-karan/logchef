@@ -1,4 +1,5 @@
 {
+  "ui.dashboardNeedsReload": "Este painel é somente leitura. Recarregue a página para usar seus novos recursos.",
   "ui.serverUpdated": "O Logchef foi atualizado. Recarregue a página para continuar.",
   "dashboards.conflict.title": "Este dashboard mudou enquanto você editava",
   "dashboards.conflict.description": "Alguém salvou uma versão mais recente, então suas alterações não foram salvas. Elas ainda estão aqui. Escolha como mantê-las.",
