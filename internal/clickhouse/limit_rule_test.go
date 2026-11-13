@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"testing"
 	"time"
@@ -73,5 +74,61 @@ func TestLimitRuleSourceMaxResultRowsClickHouse(t *testing.T) {
 				t.Fatalf("%d rows, source %q, truncation %q, want %d rows, source %q, truncation unknown", len(result.Logs), got.LimitSource, got.Truncation, tc.wantRows, tc.wantSource)
 			}
 		})
+	}
+}
+
+func TestLimitRuleSilentBreakClickHouse(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	for _, bound := range []struct{ name, mode string }{
+		{"max_result_bytes", "result_overflow_mode"},
+		{"max_rows_to_read", "read_overflow_mode"},
+		{"max_bytes_to_read", "read_overflow_mode"},
+	} {
+		for _, sourceSetting := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/source=%v", bound.name, sourceSetting), func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				settings := map[string]any{bound.name: int64(100), bound.mode: "break", "max_block_size": 10, "max_threads": 1}
+				clientOptions := ClientOptions{Host: addr}
+				if sourceSetting {
+					clientOptions.QuerySettings = settings
+				}
+				client, err := NewClient(clientOptions, slog.New(slog.NewTextHandler(io.Discard, nil)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer client.Close()
+				built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy("SELECT number FROM numbers(10000)", 1000, 1000, 100000)
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts := built.QueryOptions(10)
+				if !sourceSetting {
+					maps.Copy(opts.Settings, settings)
+				}
+				t.Run("buffered", func(t *testing.T) {
+					result, err := client.QueryWithOptions(ctx, built.SQL, opts)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if result.Stats.Truncation != models.TruncationUnknown {
+						t.Fatalf("%d rows, truncation %q, want unknown", len(result.Logs), result.Stats.Truncation)
+					}
+				})
+				t.Run("stream", func(t *testing.T) {
+					writer := &statsRowWriter{}
+					stats, err := client.QueryStream(ctx, built.SQL, opts, writer)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if stats.Truncation != models.TruncationUnknown || writer.stats.Truncation != models.TruncationUnknown {
+						t.Fatalf("%d rows, truncation %q, Finish %q, want unknown", stats.RowsReturned, stats.Truncation, writer.stats.Truncation)
+					}
+				})
+			})
+		}
 	}
 }

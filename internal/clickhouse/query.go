@@ -54,10 +54,29 @@ func (opts QueryOptions) truncation(rows int, reason string) models.Truncation {
 		return models.TruncationBytes
 	case reason == "row_limit":
 		return models.TruncationRows
+	case hasSilentBreakLimit(opts.Settings):
+		return models.TruncationUnknown
 	case !opts.Probed && opts.MaxRows > 0 && rows >= opts.MaxRows && opts.LimitSource != models.LimitSourceStatement:
 		return models.TruncationUnknown
 	}
 	return models.TruncationNone
+}
+
+// A short result cannot prove completeness when ClickHouse can stop silently.
+func hasSilentBreakLimit(settings map[string]any) bool {
+	for _, bound := range []struct{ limit, mode string }{
+		{"max_result_bytes", "result_overflow_mode"},
+		{"max_rows_to_read", "read_overflow_mode"},
+		{"max_bytes_to_read", "read_overflow_mode"},
+	} {
+		if settings[bound.mode] == "break" {
+			value, err := strconv.ParseUint(fmt.Sprint(settings[bound.limit]), 10, 64)
+			if err == nil && value > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RowStreamWriter receives rows as they are read from ClickHouse.
@@ -134,6 +153,8 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 		defaultTimeout := DefaultQueryTimeout
 		opts.TimeoutSeconds = &defaultTimeout
 	}
+
+	opts.Settings = buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
 
 	// Bound the Go context by the timeout too — max_execution_time only limits
 	// ClickHouse-side execution, not a stalled network read or driver hang.
@@ -256,6 +277,8 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		defaultTimeout := DefaultQueryTimeout
 		opts.TimeoutSeconds = &defaultTimeout
 	}
+
+	opts.Settings = buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
 
 	// Bound the Go context by the timeout (backstop for network/driver stalls
 	// beyond ClickHouse's max_execution_time). Safe to cancel on return: rows
