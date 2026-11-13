@@ -11,8 +11,7 @@ import {
   type DashboardPanels,
   type DashboardQueryPanel,
   type DashboardSummary,
-  DASHBOARD_CLIENT_FEATURES,
-  DASHBOARD_PANELS_VERSION,
+  dashboardNeedsReload,
   type DashboardViz,
   type CreateDashboardRequest,
   type UpdateDashboardRequest,
@@ -227,12 +226,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const editName = computed(() => state.data.value.editName);
   const editDescription = computed(() => state.data.value.editDescription);
   const previewState = computed(() => state.data.value.previewState);
-  const needsReload = computed(() => {
-    const dashboard = current.value;
-    if (!dashboard || dashboard.corrupt) return false;
-    if (dashboard.panels_corrupt || dashboard.panels.version !== DASHBOARD_PANELS_VERSION) return true;
-    return dashboard.panels.features.some((feature) => !DASHBOARD_CLIENT_FEATURES.includes(feature));
-  });
+  const needsReload = computed(() => (current.value ? dashboardNeedsReload(current.value) : false));
   // A corrupt dashboard has no panels to edit; its creator repairs it through the API.
   const canEdit = computed(() => {
     const current = state.data.value.current;

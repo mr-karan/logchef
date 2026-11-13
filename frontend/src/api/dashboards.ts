@@ -22,6 +22,14 @@ export const DASHBOARD_PANELS_VERSION = 2;
  */
 export const DASHBOARD_CLIENT_FEATURES: readonly string[] = [];
 
+// A dashboard this client cannot round-trip: the server's stub for an older
+// client, or a stored feature this build does not know.
+export function dashboardNeedsReload(dashboard: Dashboard): boolean {
+  if (dashboard.corrupt) return false;
+  if (dashboard.panels_corrupt || dashboard.panels.version !== DASHBOARD_PANELS_VERSION) return true;
+  return dashboard.panels.features.some((feature) => !DASHBOARD_CLIENT_FEATURES.includes(feature));
+}
+
 export const DASHBOARD_SCHEMA_HEADER = "X-Logchef-Dashboard-Schema";
 export const DASHBOARD_FEATURES_HEADER = "X-Logchef-Dashboard-Features";
 
