@@ -1,6 +1,8 @@
+import { histogramBucketBounds, type ResolvedWindow } from "./timeWindow";
+import { fillBucketGaps, parseGranularityToMilliseconds } from "./histogram-chart";
 import type { ColumnKind, ConfirmedColumn, StatReduce } from "@/api/dashboards";
 import type { HistogramDataPoint, QueryStats, Truncation, LimitSource } from "@/api/explore";
-import { addExact, averageExact, compareExact, exactString, isExact, parseExact, type FrameNumber } from "./exactNumber";
+import { addExact, averageExact, compareExact, exactString, isExact, parseExact, type FrameNumber, type ExactNumber } from "./exactNumber";
 
 export interface FrameColumn {
   name: string;
@@ -54,7 +56,26 @@ export function resultFrame(input: {
   return frameWithKinds(frame);
 }
 
-export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null): PanelFrame {
+export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null, range?: ResolvedWindow): PanelFrame {
+  if (range) {
+    const step = parseGranularityToMilliseconds(interval);
+    if (!step) throw new Error("Count results require a valid bucket interval.");
+    const byTime = new Map<number, HistogramDataPoint[]>();
+    for (const bucket of buckets) {
+      const ts = Date.parse(bucket.bucket);
+      byTime.set(ts, [...(byTime.get(ts) ?? []), bucket]);
+    }
+    const rows = [...byTime].map(([ts, buckets]) => ({ ts, buckets })).sort((a, b) => a.ts - b.ts);
+    const series = new Map(buckets.map((bucket) => [JSON.stringify([bucket.is_other ?? false, bucket.is_null ?? false, bucket.group_value ?? ""]), bucket]));
+    const makeZero = (ts: number) => ({
+      ts,
+      buckets: [...(grouped && series.size ? series.values() : [{}])].map((series) => ({
+        ...series, bucket: new Date(ts).toISOString().replace(".000Z", "Z"), log_count: 0,
+      })),
+    });
+    const filled = fillBucketGaps(rows, step, makeZero, histogramBucketBounds(range, step));
+    buckets = filled.flatMap((row) => row.buckets);
+  }
   const rows = buckets.map((b) => ({
     time: b.bucket, count: b.log_count,
     ...(grouped ? { series: b.is_other ? { kind: "other" } : b.is_null ? { kind: "null" } : { kind: "value", value: b.group_value ?? "" } } : {}),
@@ -77,29 +98,29 @@ function readCell(value: unknown, column: FrameColumn): unknown {
   }
   if (column.kind === "bool") return value === true || value === "true" ? true : value === false || value === "false" ? false : null;
   if (typeof value !== "string") return null;
-  if (column.kind === "date") return validDate(value.slice(0, column.backendType ? 10 : value.length)) ? value.slice(0, 10) : null;
-  const timestamp = column.backendType ? value.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(value) ? "" : "Z") : value;
+  if (column.kind === "date") return validDate(value) ? value : null;
+  const timestamp = column.backendType && /DateTime/.test(column.backendType) ? value.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(value) ? "" : "Z") : value;
   return rfc3339.test(timestamp) && validDate(timestamp.slice(0, 10)) && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
 }
 
 export function frameWithKinds(frame: PanelFrame, overrides: Record<string, ConfirmedColumn> = {}): PanelFrame {
-  if (frame.rows.length === frame.rawRows.length && Object.keys(overrides).every((name) => frame.columns.some((c) => c.name === name)) && frame.columns.every((c) => overrides[c.name] ? c.confidence === "confirmed" && c.kind === overrides[c.name].kind : c.confidence === "declared")) return frame;
+  if (frame.rows.length === frame.rawRows.length && Object.keys(overrides).every((name) => frame.columns.some((c) => c.name === name)) && frame.columns.every((c) => Object.hasOwn(overrides, c.name) ? c.confidence === "confirmed" && c.kind === overrides[c.name].kind : c.confidence === "declared")) return frame;
   const columns = frame.columns.map((c): FrameColumn => {
     const declared = declaredColumn(c.name, c.backendType);
-    const confirmed = overrides[c.name];
+    const confirmed = Object.hasOwn(overrides, c.name) ? overrides[c.name] : undefined;
     return confirmed ? { ...declared, kind: confirmed.kind, confidence: "confirmed", repr: confirmed.kind === "number" ? declared.repr ?? "decimal" : null } : declared;
   });
   const notices: string[] = [];
-  for (const name of Object.keys(overrides)) if (!columns.some((c) => c.name === name)) notices.push(`Column "${name}" is missing from the result.`);
+  for (const name of Object.keys(overrides)) if ((frame.rawRows.length || columns.length) && !columns.some((c) => c.name === name)) notices.push(`Column "${name}" is missing from the result.`);
   const invalid = new Map<string, number>();
   const previousColumns = new Map(frame.columns.map((column) => [column.name, column]));
   const rows = frame.rawRows.map((raw, index) => {
-    const row: Record<string, unknown> = {};
+    const row: Record<string, unknown> = Object.create(null);
     for (const c of columns) {
       const previous = previousColumns.get(c.name);
       const value = index < frame.rows.length && previous?.kind === c.kind && previous.repr === c.repr ? frame.rows[index][c.name] : readCell(raw[c.name], c);
       row[c.name] = value;
-      if (value === null && raw[c.name] !== null && raw[c.name] !== undefined && raw[c.name] !== "") invalid.set(c.name, (invalid.get(c.name) ?? 0) + 1);
+      if (value === null && raw[c.name] !== null && raw[c.name] !== undefined && raw[c.name] !== "" && !(typeof raw[c.name] === "string" && /^(?:NaN|[+-]?Inf)$/.test(String(raw[c.name])))) invalid.set(c.name, (invalid.get(c.name) ?? 0) + 1);
     }
     return row;
   });
@@ -117,10 +138,14 @@ export function suggestKind(values: unknown[]): ColumnKind {
 
 export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"): string {
   if (value === null || value === undefined) return "";
-  if (isExact(value)) return exactString(value);
+  if (isExact(value)) {
+    const scale = column?.repr === "decimal" ? column.backendType?.match(/Decimal(?:\(\d+,\s*|(?:32|64|128|256)\(\s*)(\d+)/)?.[1] : undefined;
+    return exactString(value, scale === undefined ? undefined : Number(scale));
+  }
   if (column?.kind === "time" && typeof value === "string") {
     const parts = new Map(new Intl.DateTimeFormat("en", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(value)).map((p) => [p.type, p.value]));
-    return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")} ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}`;
+    const fraction = value.match(/\.(\d+)/)?.[1];
+    return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")} ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}${fraction ? "." + fraction : ""}`;
   }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
@@ -134,27 +159,56 @@ export interface ReducedStat {
 function compareCells(a: unknown, b: unknown, column: FrameColumn): number {
   if (isExact(a) && isExact(b)) return compareExact(a, b);
   if (typeof a === "number" && typeof b === "number") return a - b;
-  if (column.kind === "time") return Date.parse(String(a)) - Date.parse(String(b));
-  return String(a).localeCompare(String(b));
+  if (column.kind === "time") {
+    const millis = Date.parse(String(a)) - Date.parse(String(b));
+    if (millis) return millis;
+    const fraction = (v: unknown) => String(v).match(/\.(\d+)/)?.[1] ?? "";
+    const left = fraction(a), right = fraction(b);
+    const length = Math.max(left.length, right.length);
+    return compareText(left.padEnd(length, "0"), right.padEnd(length, "0"));
+  }
+  return compareText(String(a), String(b));
+}
+
+function compareText(a: string, b: string): number {
+  const left = Array.from(a, (c) => c.codePointAt(0)!);
+  const right = Array.from(b, (c) => c.codePointAt(0)!);
+  for (let i = 0; i < Math.min(left.length, right.length); i++) if (left[i] !== right[i]) return left[i] - right[i];
+  return left.length - right.length;
 }
 
 export function reduceStat(frame: PanelFrame, options: { value: string; reduce: StatReduce; orderBy?: string; count: boolean; zone?: string }): ReducedStat {
+  if (!frame.rows.length && !frame.columns.length) return { value: options.count ? parseExact(0) : null, rowLabel: null, notices: frame.notices };
   const column = frame.columns.find((c) => c.name === options.value);
   if (!column) throw new Error(`Column "${options.value}" is missing from the result.`);
   if (column.kind !== "number") throw new Error(`Column "${column.name}" must be a number (backend type ${column.backendType ?? "untyped"}).`);
   const notices = [...frame.notices];
   let rows = frame.rows;
+  if (options.count) {
+    const totals = new Map<string, ExactNumber>();
+    for (const row of rows) {
+      const time = new Date(String(row.time)).toISOString().replace(".000Z", "Z");
+      const count = row.count;
+      if (isExact(count)) {
+        const previous = totals.get(time);
+        totals.set(time, previous ? addExact(previous, count) : count);
+      }
+    }
+    rows = [...totals].map(([time, count]) => ({ time, count }));
+  }
   let order: FrameColumn | undefined;
-  if (options.orderBy) {
-    order = frame.columns.find((c) => c.name === options.orderBy);
+  const orderBy = options.count ? "time" : options.orderBy;
+  if (orderBy) {
+    order = frame.columns.find((c) => c.name === orderBy);
     if (!order) throw new Error(`Column "${options.orderBy}" is missing from the result.`);
   }
   if (!rows.length && options.count) return { value: parseExact(0), rowLabel: null, notices };
   if (options.reduce === "first" || options.reduce === "last") {
     if (order) {
       const key = order;
+      const before = rows.length;
       rows = rows.filter((r) => r[key.name] !== null && r[key.name] !== undefined);
-      if (rows.length !== frame.rows.length) notices.push(`${frame.rows.length - rows.length} row(s) have no valid order value.`);
+      if (rows.length !== before) notices.push(`${before - rows.length} row(s) have no valid order value.`);
       rows = [...rows].sort((a, b) => compareCells(a[key.name], b[key.name], key));
     }
     const selected = options.reduce === "first" ? rows[0] : rows.at(-1);

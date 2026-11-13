@@ -822,7 +822,7 @@ describe("dashboards store — schema 2 request parity", () => {
   });
 
   it("saving an unchanged dashboard sends the loaded blob back as it was", async () => {
-    // A fixture that uses every feature this build declares (none yet) and
+    // A fixture that uses every feature this build declares and
     // every base field, so a dropped field would show up here.
     const fixture: DashboardPanels = {
       version: 2,
@@ -834,9 +834,9 @@ describe("dashboards store — schema 2 request parity", () => {
       ] }],
       panels: [
         { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "auto", translate_limit: 50 }, viz: { type: "chart", mark: "bar", stack: "none" } },
-        { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "count", language: "logsql", text: "*", interval: "auto" }, viz: { type: "stat", reduce: "sum" } },
+        { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n", order_by: "at", columns: { n: { kind: "number", confidence: "confirmed" }, at: { kind: "time", confidence: "confirmed" } }, reduce: "last", format: { decimals: 2 } } },
         { id: "p", kind: "query", title: "pie", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "", group_by: "host", interval: "auto" }, viz: { type: "pie", donut: true } },
-        { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 100 }, viz: { type: "table", visible_columns: ["message", "host"] } },
+        { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 100 }, viz: { type: "table", visible_columns: ["message", "host"], columns: { host: { kind: "category", confidence: "confirmed" } } } },
       ],
     };
     const store = await loadEditableDashboard(makeDashboard({ panels: JSON.parse(JSON.stringify(fixture)) }));
@@ -888,5 +888,19 @@ describe("dashboard read compatibility", () => {
     expect(mocks.get).toHaveBeenCalledTimes(1);
     expect(mocks.histogram).not.toHaveBeenCalled();
     expect(mocks.logsQuery).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("count preview", () => {
+  beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks(); });
+  it("carries the executed range into a chart preview", async () => {
+    mocks.translate.mockResolvedValue({ status: "success", data: { sql: "SELECT 1" } });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [{ bucket: "2026-11-12T00:01:00Z", log_count: 4 }], granularity: "1m" } });
+    const store = useDashboardsStore();
+    await store.previewPanel({ ...tablePanel(), query: { mode: "count", language: "logsql", text: "*", interval: "auto" }, viz: { type: "chart" } });
+    expect(store.previewState?.status).toBe("success");
+    expect(store.previewState?.range).toBeDefined();
+    expect(new Date(store.previewState!.range!.start).toISOString()).toBe(mocks.histogram.mock.calls[0][2].start_time);
   });
 });

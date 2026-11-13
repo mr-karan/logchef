@@ -185,24 +185,28 @@ export function formatTooltipTimestamp(
 // between them. Filling the gaps makes the series read as a real histogram
 // (and lets line/area charts draw a continuous baseline). VictoriaLogs already
 // zero-fills server-side, so filled input is simply left unchanged.
-function fillBucketGaps<T extends { ts: number }>(
+export function fillBucketGaps<T extends { ts: number }>(
   rows: T[],
   stepMs: number,
   makeZero: (ts: number) => T,
+  bounds?: { first: number; last: number; next: (ts: number) => number },
 ): T[] {
   // Require a finite, positive step. A non-finite (Infinity/NaN) or
   // non-positive step would otherwise make `for (...; ts += stepMs)` below
   // loop forever (or never advance) instead of safely skipping the fill.
-  if (rows.length < 2 || !Number.isFinite(stepMs) || stepMs <= 0) return rows;
-  const first = rows[0].ts;
-  const last = rows[rows.length - 1].ts;
+  if ((!bounds && rows.length < 2) || !Number.isFinite(stepMs) || stepMs <= 0) return rows;
+  const first = bounds?.first ?? rows[0].ts;
+  const last = bounds?.last ?? rows[rows.length - 1].ts;
   // Safety: never expand beyond a sane bucket count (guards against a bad
   // step/window producing a runaway loop).
-  if ((last - first) / stepMs > 5000) return rows;
+  if ((last - first) / stepMs > 5000) {
+    if (bounds) throw new Error("Too many count buckets. Choose a shorter range.");
+    return rows;
+  }
 
   const byTs = new Map(rows.map((row) => [row.ts, row]));
   const out: T[] = [];
-  for (let ts = first; ts <= last + stepMs / 2; ts += stepMs) {
+  for (let ts = first; ts <= last; ts = bounds ? bounds.next(ts) : ts + stepMs) {
     out.push(byTs.get(ts) ?? makeZero(ts));
   }
   // Belt-and-suspenders: keep any real bucket that didn't land on the generated

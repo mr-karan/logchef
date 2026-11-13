@@ -102,12 +102,23 @@ const supportsLogsql = computed(() =>
   sourceDetail.value ? supportsQueryLanguage(sourceDetail.value, "logsql") : false
 );
 
+const countOnlyKind = computed(() => panelKind.value === "chart" || panelKind.value === "breakdown");
+let previousCountPanel: DashboardQueryPanel | null = null;
+
 const mode = computed<"logchefql" | "native">({
   get: () => panel.value?.query.language === "logchefql" ? "logchefql" : "native",
   set: (v) => {
     const language = v === "native" ? supportsLogsql.value ? "logsql" : "clickhouse-sql" : "logchefql";
+    if (language === "clickhouse-sql" && countOnlyKind.value) return;
+    if (language === "logchefql" && previousCountPanel && panel.value?.id === previousCountPanel.id && panel.value.source_id === previousCountPanel.source_id && !countOnlyKind.value) {
+      const previous = previousCountPanel;
+      previousCountPanel = null;
+      patchPanel({ query: { ...previous.query, language, text: panel.value.query.text, limit: undefined }, viz: previous.viz });
+      return;
+    }
     if (language === "clickhouse-sql" && panel.value?.query.mode === "count") {
-      patchPanel({ query: { mode: "result", language, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: { type: "stat", reduce: "last" } });
+      previousCountPanel = panel.value;
+      patchPanel({ query: { mode: "result", language, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: { type: "stat", reduce: "last", ...(panel.value.viz.type === "stat" ? { format: panel.value.viz.format } : {}) } });
       return;
     }
     patchPanel({ query: language === "logchefql" ? { language } : { language, translate_limit: undefined } });
@@ -118,7 +129,7 @@ function setQueryMode(mode: "count" | "result") {
   if (!p || p.query.mode === mode) return;
   const { language, text } = p.query;
   if (mode === "result") patchPanel({ query: { mode, language, text, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: p.viz.type === "table" ? p.viz : { type: "stat", reduce: "last" } });
-  else patchPanel({ query: { mode, language, text, limit: undefined, interval: "auto" }, viz: { type: "stat", reduce: "sum" } });
+  else patchPanel({ query: { mode, language, text, limit: undefined, interval: "auto" }, viz: { type: "stat", reduce: "sum", ...(p.viz.type === "stat" ? { format: p.viz.format } : {}) } });
 }
 
 // SqlMonacoEditor has no LogsQL grammar; feed native queries to the
@@ -152,12 +163,10 @@ async function loadSourceDetail(teamId: number, sourceId: number) {
     const resp = await sourcesApi.getTeamSource(teamId, sourceId);
     if (requestId !== sourceDetailRequestId) return; // a newer call superseded this one
     sourceDetail.value = isSuccessResponse(resp) ? resp.data : null;
+    if (sourceDetail.value && ((panel.value?.query.language === "logsql" && !supportsLogsql.value) || (panel.value?.query.language === "clickhouse-sql" && supportsLogsql.value))) mode.value = "native";
   } catch {
     if (requestId !== sourceDetailRequestId) return;
     sourceDetail.value = teamSources.value.find((s) => s.id === sourceId) ?? null;
-  } finally {
-    if (requestId !== sourceDetailRequestId) return;
-    if ((panel.value?.query.language === "logsql" && !supportsLogsql.value) || (panel.value?.query.language === "clickhouse-sql" && supportsLogsql.value)) mode.value = "native";
   }
 }
 
@@ -334,6 +343,8 @@ function onOpenChange(value: boolean) {
               size="sm"
               :variant="panelKind === t.value ? 'default' : 'ghost'"
               class="h-7 px-2.5 text-xs"
+              :disabled="panel.query.language === 'clickhouse-sql' && (t.value === 'chart' || t.value === 'breakdown')"
+              :title="panel.query.language === 'clickhouse-sql' && (t.value === 'chart' || t.value === 'breakdown') ? 'SQL result charts and breakdowns are not available yet. Switch to LogchefQL to count logs.' : undefined"
               @click="switchKind(t.value)"
             >
               {{ t.label }}
@@ -402,6 +413,8 @@ function onOpenChange(value: boolean) {
                     type="button"
                     class="rounded px-2 py-0.5 text-xs"
                     :class="mode === 'native' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'"
+                    :disabled="!supportsLogsql && countOnlyKind"
+                    :title="!supportsLogsql && countOnlyKind ? 'SQL result charts and breakdowns are not available yet. Use a stat or table for SQL results.' : undefined"
                     @click="mode = 'native'"
                   >
                     {{ supportsLogsql ? 'LogsQL' : 'ClickHouse SQL' }}

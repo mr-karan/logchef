@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
@@ -1039,5 +1040,46 @@ func TestDashboardEmptyColumnKindsKeepFeature(t *testing.T) {
 	}
 	if !slices.Equal(features, DashboardPanelsStoredFeatures(canonical)) {
 		t.Fatalf("stored features disagree with canonical blob %s", canonical)
+	}
+}
+
+func TestDashboardResultFrameFeatureTriggers(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		panel    string
+		features []string
+	}{
+		{"value only", strings.Replace(v2TablePanel, `"viz":{"type":"table","visible_columns":["a","b"]}`, `"viz":{"type":"stat","value":"n"}`, 1), []string{"result_frames"}},
+		{"order", strings.Replace(v2TablePanel, `"viz":{"type":"table","visible_columns":["a","b"]}`, `"viz":{"type":"stat","value":"n","order_by":"day"}`, 1), []string{"result_frames"}},
+		{"columns only", strings.Replace(v2TablePanel, `"visible_columns":["a","b"]`, `"columns":{"a":{"kind":"number","confidence":"confirmed"}}`, 1), []string{"result_frames"}},
+		{"format only", strings.Replace(v2StatPanel, `"reduce":"sum"`, `"reduce":"sum","format":{"decimals":2}`, 1), []string{"formats"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			canonical, err := CanonicalDashboardPanels(v2Blob(v2Layout, tc.panel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			features, err := DashboardFeatures(canonical)
+			if err != nil || !slices.Equal(features, tc.features) {
+				t.Fatalf("features %v: %v; blob %s", features, err, canonical)
+			}
+			again, err := CanonicalDashboardPanels(canonical)
+			if err != nil || !bytes.Equal(canonical, again) {
+				t.Fatalf("canonical bytes changed: %s -> %s; %v", canonical, again, err)
+			}
+		})
+	}
+	for _, reduce := range []string{"first", "last", "min", "max", "avg"} {
+		t.Run(reduce, func(t *testing.T) {
+			panel := strings.Replace(v2StatPanel, `"reduce":"sum"`, `"reduce":"`+reduce+`"`, 1)
+			canonical, err := CanonicalDashboardPanels(v2Blob(v2Layout, panel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			features, err := DashboardFeatures(canonical)
+			if err != nil || !slices.Equal(features, []string{"result_frames"}) {
+				t.Fatalf("features %v: %v; blob %s", features, err, canonical)
+			}
+		})
 	}
 }

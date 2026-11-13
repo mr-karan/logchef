@@ -15,7 +15,7 @@ const units: NonNullable<NumberFormat["unit"]>[] = ["none", "percent", "bytes", 
 const format = computed(() => props.viz.type === "stat" ? props.viz.format ?? {} : {});
 function kindFor(name: string): ColumnKind {
   const viz = props.viz;
-  const confirmed = viz.type === "stat" || viz.type === "table" ? viz.columns?.[name] : undefined;
+  const confirmed = viz.type === "stat" || viz.type === "table" ? viz.columns && Object.hasOwn(viz.columns, name) ? viz.columns[name] : undefined : undefined;
   const column = columns.value.find((c) => c.name === name);
   return confirmed?.kind ?? (column?.backendType ? column.kind : suggestKind(props.frame?.rawRows.slice(0, 100).map((r) => r[name]) ?? []));
 }
@@ -26,6 +26,13 @@ function setKind(name: string, kind: ColumnKind) {
 function setRole(role: "value" | "order_by", name: string) {
   if (props.viz.type !== "stat") return;
   const viz = { ...props.viz };
+  const previous = viz[role];
+  const otherRole = role === "value" ? "order_by" : "value";
+  if (previous && previous !== name && previous !== viz[otherRole] && viz.columns) {
+    viz.columns = { ...viz.columns };
+    delete viz.columns[previous];
+    if (!Object.keys(viz.columns).length) delete viz.columns;
+  }
   if (name) {
     viz[role] = name;
     if (columns.value.find((c) => c.name === name)?.backendType === null) viz.columns = { ...viz.columns, [name]: { kind: kindFor(name), confidence: "confirmed" } };
@@ -39,7 +46,10 @@ function setFormat(patch: Partial<NumberFormat>) {
   if (props.viz.type !== "stat") return;
   const next = { ...format.value, ...patch };
   for (const key of Object.keys(next)) if (Reflect.get(next, key) === undefined) Reflect.deleteProperty(next, key);
-  emit("update:viz", { ...props.viz, format: next });
+  const viz = { ...props.viz };
+  if (Object.keys(next).length) viz.format = next;
+  else delete viz.format;
+  emit("update:viz", viz);
 }
 function setDecimals(value: unknown) {
   setFormat({ decimals: value === "" ? undefined : Math.min(10, Math.max(0, Math.round(Number(value)))) });
@@ -81,7 +91,7 @@ function setScale(value: unknown) {
     <datalist id="result-columns"><option v-for="column in columns" :key="column.name" :value="column.name" /></datalist>
     <fieldset v-if="query.mode === 'result' && columns.length" class="space-y-2"><legend class="text-xs font-medium">Column kinds</legend>
       <div v-for="column in columns" :key="column.name" class="space-y-1">
-        <Label :for="`kind-${column.name}`" class="text-xs">{{ column.name }} <span class="text-muted-foreground">{{ (viz.type === 'stat' || viz.type === 'table') && viz.columns?.[column.name] ? 'confirmed' : column.backendType ?? 'guessed' }}</span></Label>
+        <Label :for="`kind-${column.name}`" class="text-xs">{{ column.name }} <span class="text-muted-foreground">{{ (viz.type === 'stat' || viz.type === 'table') && viz.columns && Object.hasOwn(viz.columns, column.name) ? 'confirmed' : column.backendType ?? 'guessed' }}</span></Label>
         <div :id="`kind-${column.name}`" class="flex flex-wrap gap-1"><button v-for="kind in kinds" :key="kind" type="button" class="rounded border px-1.5 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="kindFor(column.name) === kind" @click="setKind(column.name, kind)">{{ kind }}</button></div>
       </div>
     </fieldset>
