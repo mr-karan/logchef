@@ -54,7 +54,7 @@ type Querier interface {
 	// Insert a new collection (personal or shared)
 	CreateCollection(ctx context.Context, arg CreateCollectionParams) (CreateCollectionRow, error)
 	// Dashboards -----------------------------------------------------------------
-	// Insert a new dashboard and return its id.
+	// Insert a new dashboard with the derived list columns of its blob.
 	CreateDashboard(ctx context.Context, arg CreateDashboardParams) (int64, error)
 	// Export Jobs
 	// Persist an async export job
@@ -129,7 +129,7 @@ type Querier interface {
 	GetCollectionItemLink(ctx context.Context, arg GetCollectionItemLinkParams) (GetCollectionItemLinkRow, error)
 	// Look up a single membership row
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
-	// Look up one dashboard by id, with creator identity like ListDashboards.
+	// Look up one dashboard by id, with creator identity like ListDashboardSummaries.
 	GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
@@ -213,9 +213,10 @@ type Querier interface {
 	// direct role wins; team-only access is always 'member'. member_count counts
 	// direct membership rows only (owners included); team_count counts team shares.
 	ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error)
-	// List every dashboard, newest-updated first, with the creator's email/name via
-	// a LEFT JOIN (NULL for dashboards whose author was deleted).
-	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
+	// List every dashboard's summary, newest-updated first, from the derived
+	// columns and never from panels_json. A name or description from before the
+	// bound is cut to it.
+	ListDashboardSummaries(ctx context.Context) ([]ListDashboardSummariesRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtype.Timestamptz) ([]pgtype.Text, error)
 	// Get all sources managed by provisioning config
@@ -246,6 +247,8 @@ type Querier interface {
 	ListSources(ctx context.Context) ([]Source, error)
 	// List all sources a user has access to
 	ListSourcesForUser(ctx context.Context, userID int64) ([]Source, error)
+	// Rows whose derived columns do not match their blob, in id order.
+	ListStaleDashboardSummaryInputs(ctx context.Context, arg ListStaleDashboardSummaryInputsParams) ([]ListStaleDashboardSummaryInputsRow, error)
 	ListSystemSettings(ctx context.Context) ([]SystemSetting, error)
 	ListSystemSettingsByCategory(ctx context.Context, category string) ([]SystemSetting, error)
 	// List all members of a team with user details
@@ -290,6 +293,9 @@ type Querier interface {
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
+	// Write derived columns for one revision, only while the row still holds that
+	// revision and is still stale. Changes neither revision nor updated_at.
+	RepairDashboardSummary(ctx context.Context, arg RepairDashboardSummaryParams) (int64, error)
 	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
 	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)
 	// Revoke the grant that owns an access-token ID hash or refresh-token hash,
@@ -330,7 +336,8 @@ type Querier interface {
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
-	// Compare-and-swap on the client revision; no row means missing or stale.
+	// Compare-and-swap on the client revision; no row means missing or stale. The
+	// derived columns move with the blob in this one statement.
 	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)

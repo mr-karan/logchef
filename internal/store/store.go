@@ -149,18 +149,27 @@ type CollectionStore interface {
 }
 
 // DashboardStore persists dashboards (a saved grid of visualization panels).
-// The panel blob is validated in models/core, not here — these methods are the
-// raw persistence surface. Reads/mutations on a missing id return
-// models.ErrNotFound.
+// Every write of the panel blob derives the list columns from it with
+// models.SummarizeDashboardPanels and writes them in the same statement.
 type DashboardStore interface {
 	CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error
 	GetDashboard(ctx context.Context, id int) (*models.Dashboard, error)
-	ListDashboards(ctx context.Context) ([]*models.Dashboard, error)
-	// UpdateDashboard writes name, description and panels with a
-	// compare-and-swap on dashboard.Revision, the revision the caller loaded.
+	// ListDashboardSummaries returns every dashboard's summary from the derived
+	// columns, newest-updated first. It never reads panels_json.
+	ListDashboardSummaries(ctx context.Context) ([]*models.DashboardSummary, error)
+	// ListStaleDashboardSummaryInputs returns up to limit rows with id above
+	// afterID whose derived columns are stale, in id order, with their blob.
+	ListStaleDashboardSummaryInputs(ctx context.Context, afterID, limit int) ([]models.DashboardSummaryInput, error)
+	// RepairDashboardSummary writes summary for the row only if it still holds
+	// expectedRevision and is still stale. It returns the affected-row count
+	// and changes neither revision nor updated_at.
+	RepairDashboardSummary(ctx context.Context, id, expectedRevision int, summary models.DashboardPanelsSummary) (int64, error)
+	// UpdateDashboard writes name, description, panels and the derived columns
+	// with a compare-and-swap on dashboard.Revision, the revision the caller
+	// loaded.
 	// On success dashboard.Revision is the new revision. When the stored
-	// revision differs (another save won) it returns models.ErrConflict and
-	// writes nothing.
+	// revision differs it returns models.ErrConflict, and when the row does
+	// not exist models.ErrNotFound.
 	UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) error
 	DeleteDashboard(ctx context.Context, id int) error
 }

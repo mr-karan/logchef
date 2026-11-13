@@ -1017,13 +1017,13 @@ ORDER BY ci.created_at ASC, ci.collection_id ASC, ci.saved_query_id ASC;
 -- Dashboards -----------------------------------------------------------------
 
 -- name: CreateDashboard :one
--- Insert a new dashboard and return its id.
-INSERT INTO dashboards (name, description, panels_json, created_by)
-VALUES ($1, $2, $3, $4)
+-- Insert a new dashboard with the derived list columns of its blob.
+INSERT INTO dashboards (name, description, panels_json, created_by, panel_count, tab_count, panel_types, panel_team_ids, panels_corrupt, summary_revision, summary_version)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10)
 RETURNING id;
 
 -- name: GetDashboard :one
--- Look up one dashboard by id, with creator identity like ListDashboards.
+-- Look up one dashboard by id, with creator identity like ListDashboardSummaries.
 SELECT
     d.id,
     d.name,
@@ -1039,33 +1039,69 @@ FROM dashboards d
 LEFT JOIN users u ON u.id = d.created_by
 WHERE d.id = $1;
 
--- name: ListDashboards :many
--- List every dashboard, newest-updated first, with the creator's email/name via
--- a LEFT JOIN (NULL for dashboards whose author was deleted).
+-- name: ListDashboardSummaries :many
+-- List every dashboard's summary, newest-updated first, from the derived
+-- columns and never from panels_json. A name or description from before the
+-- bound is cut to it.
 SELECT
     d.id,
-    d.name,
-    d.description,
-    d.panels_json,
+    left(d.name, 200)::text AS name,
+    coalesce(left(d.description, 2000), '')::text AS description,
     d.created_by,
     d.created_at,
     d.updated_at,
     d.revision,
+    d.panel_count,
+    d.tab_count,
+    d.panel_types,
+    d.panel_team_ids,
+    d.panels_corrupt,
+    d.summary_revision,
+    d.summary_version,
     u.email AS created_by_email,
     u.full_name AS created_by_name
 FROM dashboards d
 LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC;
 
+-- name: ListStaleDashboardSummaryInputs :many
+-- Rows whose derived columns do not match their blob, in id order.
+SELECT id, revision, panels_json
+FROM dashboards
+WHERE id > $1 AND (summary_revision != revision OR summary_version < $2)
+ORDER BY id ASC
+LIMIT $3;
+
+-- name: RepairDashboardSummary :execrows
+-- Write derived columns for one revision, only while the row still holds that
+-- revision and is still stale. Changes neither revision nor updated_at.
+UPDATE dashboards
+SET panel_count = $1,
+    tab_count = $2,
+    panel_types = $3,
+    panel_team_ids = $4,
+    panels_corrupt = $5,
+    summary_revision = $6,
+    summary_version = $7
+WHERE id = $8 AND revision = $9 AND (summary_revision != revision OR summary_version < $10);
+
 -- name: UpdateDashboard :one
--- Compare-and-swap on the client revision; no row means missing or stale.
+-- Compare-and-swap on the client revision; no row means missing or stale. The
+-- derived columns move with the blob in this one statement.
 UPDATE dashboards
 SET name = $1,
     description = $2,
     panels_json = $3,
+    panel_count = $4,
+    tab_count = $5,
+    panel_types = $6,
+    panel_team_ids = $7,
+    panels_corrupt = $8,
+    summary_revision = revision + 1,
+    summary_version = $9,
     revision = revision + 1,
     updated_at = now()
-WHERE id = $4 AND revision = $5
+WHERE id = $10 AND revision = $11
 RETURNING revision;
 
 -- name: DeleteDashboard :one

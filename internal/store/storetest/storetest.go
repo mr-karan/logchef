@@ -625,16 +625,20 @@ func verifyDashboardGetAndList(t *testing.T, ctx context.Context, s store.Store,
 		t.Fatalf("created_by not persisted: %+v", got.CreatedBy)
 	}
 
-	// List includes it, newest-updated first, with the creator's email joined in.
-	list, err := s.ListDashboards(ctx)
+	// The list includes it, newest-updated first, as a summary with the
+	// creator's email joined in and no blob.
+	list, err := s.ListDashboardSummaries(ctx)
 	if err != nil || len(list) == 0 {
-		t.Fatalf("ListDashboards: %v / %d", err, len(list))
+		t.Fatalf("ListDashboardSummaries: %v / %d", err, len(list))
 	}
 	if list[0].ID != d.ID {
-		t.Errorf("ListDashboards[0].ID = %d, want %d (newest first)", list[0].ID, d.ID)
+		t.Errorf("ListDashboardSummaries[0].ID = %d, want %d (newest first)", list[0].ID, d.ID)
 	}
 	if list[0].CreatedByEmail != owner.Email {
-		t.Errorf("ListDashboards[0].CreatedByEmail = %q, want %q", list[0].CreatedByEmail, owner.Email)
+		t.Errorf("ListDashboardSummaries[0].CreatedByEmail = %q, want %q", list[0].CreatedByEmail, owner.Email)
+	}
+	if list[0].PanelCount != 1 || list[0].Revision != 1 {
+		t.Errorf("ListDashboardSummaries[0] = %+v, want one panel at revision 1", list[0])
 	}
 
 	return got

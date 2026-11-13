@@ -595,10 +595,21 @@ func validateDashboardVizOptionsV2(panelID string, v *dashboardVizV2) error {
 	return nil
 }
 
-// CanonicalDashboardPanelsV2 validates a schema 2 request blob and returns the
-// bytes to store: the same blob re-encoded with the features list that the
-// server computed, so a client cannot understate what the blob uses.
-func CanonicalDashboardPanelsV2(raw json.RawMessage) (json.RawMessage, error) {
+// CanonicalDashboardPanels validates a request blob and returns the bytes to
+// store: a schema 1 blob verbatim, or a schema 2 blob re-encoded with the
+// features list that the server computed, so a client cannot understate what
+// the blob uses.
+func CanonicalDashboardPanels(raw json.RawMessage) (json.RawMessage, error) {
+	if err := ValidateDashboardPanels(raw); err != nil {
+		return nil, err
+	}
+	if schema, _ := DashboardPanelsSchema(raw); schema != DashboardPanelsVersion2 {
+		return raw, nil
+	}
+	return canonicalDashboardPanelsV2(raw)
+}
+
+func canonicalDashboardPanelsV2(raw json.RawMessage) (json.RawMessage, error) {
 	blob, err := decodeDashboardPanelsV2(raw)
 	if err != nil {
 		return nil, err

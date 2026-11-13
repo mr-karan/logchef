@@ -96,14 +96,21 @@ type CollectionTeam struct {
 }
 
 type Dashboard struct {
-	ID          int64              `json:"id"`
-	Name        string             `json:"name"`
-	Description pgtype.Text        `json:"description"`
-	PanelsJson  string             `json:"panels_json"`
-	CreatedBy   pgtype.Int8        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Revision    int64              `json:"revision"`
+	ID              int64              `json:"id"`
+	Name            string             `json:"name"`
+	Description     pgtype.Text        `json:"description"`
+	PanelsJson      string             `json:"panels_json"`
+	CreatedBy       pgtype.Int8        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Revision        int64              `json:"revision"`
+	PanelCount      int32              `json:"panel_count"`
+	TabCount        int32              `json:"tab_count"`
+	PanelTypes      string             `json:"panel_types"`
+	PanelTeamIds    string             `json:"panel_team_ids"`
+	PanelsCorrupt   bool               `json:"panels_corrupt"`
+	SummaryRevision int32              `json:"summary_revision"`
+	SummaryVersion  int32              `json:"summary_version"`
 }
 
 type ExportJob struct {

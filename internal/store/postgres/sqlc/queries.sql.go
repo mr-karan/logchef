@@ -584,26 +584,38 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 
 const createDashboard = `-- name: CreateDashboard :one
 
-INSERT INTO dashboards (name, description, panels_json, created_by)
-VALUES ($1, $2, $3, $4)
+INSERT INTO dashboards (name, description, panels_json, created_by, panel_count, tab_count, panel_types, panel_team_ids, panels_corrupt, summary_revision, summary_version)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10)
 RETURNING id
 `
 
 type CreateDashboardParams struct {
-	Name        string      `json:"name"`
-	Description pgtype.Text `json:"description"`
-	PanelsJson  string      `json:"panels_json"`
-	CreatedBy   pgtype.Int8 `json:"created_by"`
+	Name           string      `json:"name"`
+	Description    pgtype.Text `json:"description"`
+	PanelsJson     string      `json:"panels_json"`
+	CreatedBy      pgtype.Int8 `json:"created_by"`
+	PanelCount     int32       `json:"panel_count"`
+	TabCount       int32       `json:"tab_count"`
+	PanelTypes     string      `json:"panel_types"`
+	PanelTeamIds   string      `json:"panel_team_ids"`
+	PanelsCorrupt  bool        `json:"panels_corrupt"`
+	SummaryVersion int32       `json:"summary_version"`
 }
 
 // Dashboards -----------------------------------------------------------------
-// Insert a new dashboard and return its id.
+// Insert a new dashboard with the derived list columns of its blob.
 func (q *Queries) CreateDashboard(ctx context.Context, arg CreateDashboardParams) (int64, error) {
 	row := q.db.QueryRow(ctx, createDashboard,
 		arg.Name,
 		arg.Description,
 		arg.PanelsJson,
 		arg.CreatedBy,
+		arg.PanelCount,
+		arg.TabCount,
+		arg.PanelTypes,
+		arg.PanelTeamIds,
+		arg.PanelsCorrupt,
+		arg.SummaryVersion,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -1406,7 +1418,7 @@ type GetDashboardRow struct {
 	CreatedByName  pgtype.Text        `json:"created_by_name"`
 }
 
-// Look up one dashboard by id, with creator identity like ListDashboards.
+// Look up one dashboard by id, with creator identity like ListDashboardSummaries.
 func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error) {
 	row := q.db.QueryRow(ctx, getDashboard, id)
 	var i GetDashboardRow
@@ -2809,16 +2821,22 @@ func (q *Queries) ListCollectionsForUser(ctx context.Context, userID int64) ([]L
 	return items, nil
 }
 
-const listDashboards = `-- name: ListDashboards :many
+const listDashboardSummaries = `-- name: ListDashboardSummaries :many
 SELECT
     d.id,
-    d.name,
-    d.description,
-    d.panels_json,
+    left(d.name, 200)::text AS name,
+    coalesce(left(d.description, 2000), '')::text AS description,
     d.created_by,
     d.created_at,
     d.updated_at,
     d.revision,
+    d.panel_count,
+    d.tab_count,
+    d.panel_types,
+    d.panel_team_ids,
+    d.panels_corrupt,
+    d.summary_revision,
+    d.summary_version,
     u.email AS created_by_email,
     u.full_name AS created_by_name
 FROM dashboards d
@@ -2826,39 +2844,52 @@ LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC
 `
 
-type ListDashboardsRow struct {
-	ID             int64              `json:"id"`
-	Name           string             `json:"name"`
-	Description    pgtype.Text        `json:"description"`
-	PanelsJson     string             `json:"panels_json"`
-	CreatedBy      pgtype.Int8        `json:"created_by"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Revision       int64              `json:"revision"`
-	CreatedByEmail pgtype.Text        `json:"created_by_email"`
-	CreatedByName  pgtype.Text        `json:"created_by_name"`
+type ListDashboardSummariesRow struct {
+	ID              int64              `json:"id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	CreatedBy       pgtype.Int8        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Revision        int64              `json:"revision"`
+	PanelCount      int32              `json:"panel_count"`
+	TabCount        int32              `json:"tab_count"`
+	PanelTypes      string             `json:"panel_types"`
+	PanelTeamIds    string             `json:"panel_team_ids"`
+	PanelsCorrupt   bool               `json:"panels_corrupt"`
+	SummaryRevision int32              `json:"summary_revision"`
+	SummaryVersion  int32              `json:"summary_version"`
+	CreatedByEmail  pgtype.Text        `json:"created_by_email"`
+	CreatedByName   pgtype.Text        `json:"created_by_name"`
 }
 
-// List every dashboard, newest-updated first, with the creator's email/name via
-// a LEFT JOIN (NULL for dashboards whose author was deleted).
-func (q *Queries) ListDashboards(ctx context.Context) ([]ListDashboardsRow, error) {
-	rows, err := q.db.Query(ctx, listDashboards)
+// List every dashboard's summary, newest-updated first, from the derived
+// columns and never from panels_json. A name or description from before the
+// bound is cut to it.
+func (q *Queries) ListDashboardSummaries(ctx context.Context) ([]ListDashboardSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardSummaries)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListDashboardsRow{}
+	items := []ListDashboardSummariesRow{}
 	for rows.Next() {
-		var i ListDashboardsRow
+		var i ListDashboardSummariesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.Description,
-			&i.PanelsJson,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Revision,
+			&i.PanelCount,
+			&i.TabCount,
+			&i.PanelTypes,
+			&i.PanelTeamIds,
+			&i.PanelsCorrupt,
+			&i.SummaryRevision,
+			&i.SummaryVersion,
 			&i.CreatedByEmail,
 			&i.CreatedByName,
 		); err != nil {
@@ -3490,6 +3521,47 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.ConnectionConfig,
 			&i.IdentityKey,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleDashboardSummaryInputs = `-- name: ListStaleDashboardSummaryInputs :many
+SELECT id, revision, panels_json
+FROM dashboards
+WHERE id > $1 AND (summary_revision != revision OR summary_version < $2)
+ORDER BY id ASC
+LIMIT $3
+`
+
+type ListStaleDashboardSummaryInputsParams struct {
+	ID             int64 `json:"id"`
+	SummaryVersion int32 `json:"summary_version"`
+	Limit          int32 `json:"limit"`
+}
+
+type ListStaleDashboardSummaryInputsRow struct {
+	ID         int64  `json:"id"`
+	Revision   int64  `json:"revision"`
+	PanelsJson string `json:"panels_json"`
+}
+
+// Rows whose derived columns do not match their blob, in id order.
+func (q *Queries) ListStaleDashboardSummaryInputs(ctx context.Context, arg ListStaleDashboardSummaryInputsParams) ([]ListStaleDashboardSummaryInputsRow, error) {
+	rows, err := q.db.Query(ctx, listStaleDashboardSummaryInputs, arg.ID, arg.SummaryVersion, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStaleDashboardSummaryInputsRow{}
+	for rows.Next() {
+		var i ListStaleDashboardSummaryInputsRow
+		if err := rows.Scan(&i.ID, &i.Revision, &i.PanelsJson); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4180,6 +4252,52 @@ func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourcePara
 	return err
 }
 
+const repairDashboardSummary = `-- name: RepairDashboardSummary :execrows
+UPDATE dashboards
+SET panel_count = $1,
+    tab_count = $2,
+    panel_types = $3,
+    panel_team_ids = $4,
+    panels_corrupt = $5,
+    summary_revision = $6,
+    summary_version = $7
+WHERE id = $8 AND revision = $9 AND (summary_revision != revision OR summary_version < $10)
+`
+
+type RepairDashboardSummaryParams struct {
+	PanelCount       int32  `json:"panel_count"`
+	TabCount         int32  `json:"tab_count"`
+	PanelTypes       string `json:"panel_types"`
+	PanelTeamIds     string `json:"panel_team_ids"`
+	PanelsCorrupt    bool   `json:"panels_corrupt"`
+	SummaryRevision  int32  `json:"summary_revision"`
+	SummaryVersion   int32  `json:"summary_version"`
+	ID               int64  `json:"id"`
+	Revision         int64  `json:"revision"`
+	SummaryVersion_2 int32  `json:"summary_version_2"`
+}
+
+// Write derived columns for one revision, only while the row still holds that
+// revision and is still stale. Changes neither revision nor updated_at.
+func (q *Queries) RepairDashboardSummary(ctx context.Context, arg RepairDashboardSummaryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, repairDashboardSummary,
+		arg.PanelCount,
+		arg.TabCount,
+		arg.PanelTypes,
+		arg.PanelTeamIds,
+		arg.PanelsCorrupt,
+		arg.SummaryRevision,
+		arg.SummaryVersion,
+		arg.ID,
+		arg.Revision,
+		arg.SummaryVersion_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
 SET status = 'resolved',
@@ -4689,26 +4807,46 @@ UPDATE dashboards
 SET name = $1,
     description = $2,
     panels_json = $3,
+    panel_count = $4,
+    tab_count = $5,
+    panel_types = $6,
+    panel_team_ids = $7,
+    panels_corrupt = $8,
+    summary_revision = revision + 1,
+    summary_version = $9,
     revision = revision + 1,
     updated_at = now()
-WHERE id = $4 AND revision = $5
+WHERE id = $10 AND revision = $11
 RETURNING revision
 `
 
 type UpdateDashboardParams struct {
-	Name        string      `json:"name"`
-	Description pgtype.Text `json:"description"`
-	PanelsJson  string      `json:"panels_json"`
-	ID          int64       `json:"id"`
-	Revision    int64       `json:"revision"`
+	Name           string      `json:"name"`
+	Description    pgtype.Text `json:"description"`
+	PanelsJson     string      `json:"panels_json"`
+	PanelCount     int32       `json:"panel_count"`
+	TabCount       int32       `json:"tab_count"`
+	PanelTypes     string      `json:"panel_types"`
+	PanelTeamIds   string      `json:"panel_team_ids"`
+	PanelsCorrupt  bool        `json:"panels_corrupt"`
+	SummaryVersion int32       `json:"summary_version"`
+	ID             int64       `json:"id"`
+	Revision       int64       `json:"revision"`
 }
 
-// Compare-and-swap on the client revision; no row means missing or stale.
+// Compare-and-swap on the client revision; no row means missing or stale. The
+// derived columns move with the blob in this one statement.
 func (q *Queries) UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error) {
 	row := q.db.QueryRow(ctx, updateDashboard,
 		arg.Name,
 		arg.Description,
 		arg.PanelsJson,
+		arg.PanelCount,
+		arg.TabCount,
+		arg.PanelTypes,
+		arg.PanelTeamIds,
+		arg.PanelsCorrupt,
+		arg.SummaryVersion,
 		arg.ID,
 		arg.Revision,
 	)
