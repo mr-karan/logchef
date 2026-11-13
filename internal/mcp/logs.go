@@ -18,7 +18,7 @@ type QueryLogsParams struct {
 	StartTime    string `json:"start_time,omitempty" jsonschema:"Inclusive start time (RFC3339)"`
 	EndTime      string `json:"end_time,omitempty" jsonschema:"End time (RFC3339)"`
 	RawSQL       string `json:"raw_sql" jsonschema:"Datasource-native query: ClickHouse SQL or VictoriaLogs LogsQL. Use get_source_schema first to understand available columns. Include WHERE clauses with timestamp filters and ORDER BY and LIMIT clauses."`
-	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum number of log entries to return (1-100 default 100)"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"Request row limit (1-100 default 100). A smaller LIMIT in raw_sql wins. stats.limit_source names the bound that applied and stats.truncation (none rows bytes unknown) says whether rows were cut"`
 	QueryTimeout *int   `json:"query_timeout,omitempty" jsonschema:"Query timeout in seconds (default 30)"`
 }
 

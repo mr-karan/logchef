@@ -153,6 +153,19 @@ same row. A stream also ends automatically after a fixed session lifetime; reope
 
 The time histogram shows log volume distribution. Click and drag to zoom into a time range. Use **Group By** to segment by a field (e.g., severity).
 
+### Row limit
+
+The toolbar's row limit and a `LIMIT` in your own SQL or LogsQL both apply, and
+the smaller one wins, together with the server's configured maximum. A query
+that ends in `ORDER BY duration DESC LIMIT 20` shows 20 rows whatever the
+toolbar says. `OFFSET` is kept, and a `LIMIT` inside a subquery or CTE is never
+changed.
+
+When rows were cut, the results bar says so: **First N rows** when a row past
+the limit existed, **Cut by size** when the response size budget stopped the
+result, and **May be incomplete** when a non-literal `LIMIT` filled the cap. A
+result that fits shows nothing.
+
 ### Export
 
 Export results as CSV: all rows, visible rows, filtered rows, or current page.

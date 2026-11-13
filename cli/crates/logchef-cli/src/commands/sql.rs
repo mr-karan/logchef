@@ -72,7 +72,7 @@ pub struct SqlArgs {
     #[arg(long)]
     stream: bool,
 
-    /// Result row limit. In stream mode this caps the download; otherwise it caps the preview.
+    /// Result row limit. A smaller LIMIT in the query wins. In stream mode this caps the download; otherwise it caps the preview.
     #[arg(long)]
     limit: Option<u32>,
 
