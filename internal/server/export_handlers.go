@@ -14,7 +14,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
@@ -94,7 +93,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		exportLimit = s.config.Export.MaxRows
 	}
 
-	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
+	qb := client.QueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)

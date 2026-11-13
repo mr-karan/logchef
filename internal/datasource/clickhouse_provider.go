@@ -339,7 +339,7 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
-	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), req.MaxLimit)
+	qb := client.QueryBuilder(source.GetFullTableName(), req.MaxLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(req.RawQuery, req.Limit, req.DefaultLimit, req.MaxLimit)
 	if err != nil {
 		return nil, "", clickhouse.QueryOptions{}, &clickhouse.ValidationError{Message: err.Error()}

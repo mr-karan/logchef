@@ -222,7 +222,7 @@ func (p *ClickHouseProvider) now64(ctx context.Context, client *clickhouse.Clien
 func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Client, source *models.Source, tsField, filter string, cursor, upperBound time.Time, offset int) ([]map[string]any, error) {
 	sql := buildTailPollSQL(source.GetFullTableName(), tsField, filter, cursor, upperBound)
 
-	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), tailBatchLimit)
+	qb := client.QueryBuilder(source.GetFullTableName(), tailBatchLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(sql, tailBatchLimit, tailBatchLimit, tailBatchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("build tail query: %w", err)

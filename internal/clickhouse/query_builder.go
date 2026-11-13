@@ -33,6 +33,8 @@ type QueryBuilder struct {
 	mode         QueryMode
 	defaultLimit int
 	maxLimit     int
+	// maxResultRows is the source's max_result_rows, or 0 when it sets none.
+	maxResultRows int
 }
 
 // QueryBuildResult describes the SQL produced by the query builder and the
@@ -90,6 +92,20 @@ func NewExtendedQueryBuilder(tableName string, maxLimit int) *QueryBuilder {
 		defaultLimit: legacyDefaultLimit(maxLimit),
 		maxLimit:     maxLimit,
 	}
+}
+
+// QueryBuilder returns an extended-mode builder for queries on this client.
+// Its LIMIT rule holds to the max_result_rows that the source sends with
+// every query.
+func (c *Client) QueryBuilder(tableName string, maxLimit int) *QueryBuilder {
+	qb := NewExtendedQueryBuilder(tableName, maxLimit)
+	switch rows := c.querySettings["max_result_rows"].(type) {
+	case int64:
+		qb.maxResultRows = int(rows)
+	case int:
+		qb.maxResultRows = rows
+	}
+	return qb
 }
 
 // BuildRawQuery parses, validates, and adds LIMIT to a SQL query.
@@ -352,7 +368,15 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 // sets one. A clamp changes only the row count, so OFFSET stays, and LIMIT n
 // BY and limits inside subqueries, CTEs or set operation branches are never
 // touched. When a cap wins, the SQL asks for one row past it.
+//
+// The source's max_result_rows is a configured maximum too. ClickHouse ends
+// every result there, so a probe row past it could never arrive: a cap that
+// reaches it asks for no extra row, and a result that fills it may be
+// incomplete.
 func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery, requestedLimit, defaultLimit, maxLimit int, result *QueryBuildResult) {
+	if qb.maxResultRows > 0 && (maxLimit <= 0 || qb.maxResultRows < maxLimit) {
+		maxLimit = qb.maxResultRows
+	}
 	capLimit, capSource := 0, models.LimitSource("")
 	if requestedLimit > 0 {
 		capLimit, capSource = requestedLimit, models.LimitSourceRequest
@@ -378,8 +402,8 @@ func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery
 		default:
 			result.OriginalLimit = literal
 			result.LimitCapped = true
-			result.AppliedLimit, result.FetchLimit, result.LimitSource = capLimit, capLimit+1, capSource
-			stmt.Limit.Limit = numberLiteral(capLimit + 1)
+			result.AppliedLimit, result.FetchLimit, result.LimitSource = capLimit, qb.probeLimit(capLimit), capSource
+			stmt.Limit.Limit = numberLiteral(result.FetchLimit)
 		}
 		return
 	}
@@ -396,11 +420,20 @@ func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery
 		}
 	}
 	result.LimitCapped = source == models.LimitSourceMax
-	result.AppliedLimit, result.FetchLimit, result.LimitSource = limit, limit+1, source
+	result.AppliedLimit, result.FetchLimit, result.LimitSource = limit, qb.probeLimit(limit), source
 	if stmt.Limit == nil {
 		stmt.Limit = &clickhouseparser.LimitClause{}
 	}
-	stmt.Limit.Limit = numberLiteral(limit + 1)
+	stmt.Limit.Limit = numberLiteral(result.FetchLimit)
+}
+
+// probeLimit is the row bound to fetch for a cap of limit rows: one past it,
+// unless the source's max_result_rows would stop the result before that row.
+func (qb *QueryBuilder) probeLimit(limit int) int {
+	if qb.maxResultRows > 0 && limit >= qb.maxResultRows {
+		return limit
+	}
+	return limit + 1
 }
 
 // limitedSelect returns the SELECT that holds the statement's own LIMIT,
