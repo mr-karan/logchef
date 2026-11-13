@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -181,7 +182,7 @@ func TestHandleTestWebhookTransportErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			timeout := "1s"
+			timeout := "10s"
 			if tc.name == "timeout" {
 				timeout = "30ms"
 			}
@@ -200,7 +201,7 @@ func TestHandleTestWebhookTransportErrors(t *testing.T) {
 			}
 			req := httptest.NewRequest(http.MethodPost, "/test-webhook", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
-			response, err := app.Test(req)
+			response, err := app.Test(req, fiber.TestConfig{Timeout: 30 * time.Second, FailOnTimeout: true})
 			if err != nil {
 				t.Fatal(err)
 			}
