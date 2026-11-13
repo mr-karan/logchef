@@ -953,5 +953,15 @@
   "dashboardBuilder.Percent": "百分比",
   "dashboardBuilder.Bytes": "位元組",
   "dashboardBuilder.DurationMs": "時長 (ms)",
-  "dashboardBuilder.DurationS": "時長 (s)"
+  "dashboardBuilder.DurationS": "時長 (s)",
+  "panelChart.inspect": "{mark} 圖表。使用方向鍵查看時段。",
+  "panelChart.seriesLegend": "數列圖例",
+  "panelChart.sliceLegend": "扇區圖例",
+  "panelChart.toplist": "排行榜",
+  "panelChart.labelsHidden": "數值標籤已隱藏。請放大圖表或減少資料點。",
+  "panelChart.other": "其他",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(空值)",
+  "panelChart.emptyCategory": "(空)",
+  "panelChart.allZero": "所有值皆為零。"
 }

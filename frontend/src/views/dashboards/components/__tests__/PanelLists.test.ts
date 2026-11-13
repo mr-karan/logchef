@@ -2,6 +2,7 @@ import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { afterEach, describe, expect, it } from "vitest";
 import { countFrame, resultFrame, type PanelFrame } from "@/utils/panelFrame";
+import { i18n } from "@/i18n";
 import PanelPie from "../PanelPie.vue";
 import PanelTopList from "../PanelTopList.vue";
 import type { ListViz } from "@/utils/panelCharts";
@@ -12,7 +13,7 @@ async function render(frame: PanelFrame, viz: ListViz, count = false) {
   const host = document.createElement("div");
   document.body.append(host);
   const app = viz.type === "pie" ? createApp(PanelPie, { frame, viz, count }) : createApp(PanelTopList, { frame, viz, count });
-  app.use(createPinia()).mount(host);
+  app.use(createPinia()).use(i18n).mount(host);
   cleanups.push(() => { app.unmount(); host.remove(); });
   await nextTick();
   return host;
@@ -58,4 +59,9 @@ describe("PanelTopList and PanelPie", () => {
     expect(host.querySelector(".panel-toplist__value")?.textContent).toBe("NULL");
     expect(host.textContent).toContain("1 of 2 rows shown");
   });
+});
+
+it.each(['pie', 'toplist'] as const)('uses the range-empty message for %s', async type => {
+  const host = await render(resultFrame({ columns: [], rows: [] }), { type });
+  expect(host.textContent).toContain('No data for this time range');
 });

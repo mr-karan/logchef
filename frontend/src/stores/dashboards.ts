@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed } from "vue";
+import { computed, markRaw } from "vue";
 import { useBaseStore } from "@/stores/base";
 import { useMetaStore } from "@/stores/meta";
 import {
@@ -244,6 +244,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   function setPanelState(panelId: string, next: PanelState) {
+    if (next.frame) markRaw(next.frame);
     state.data.value.panelStates = {
       ...state.data.value.panelStates,
       [panelId]: next,
@@ -920,6 +921,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const range = effectiveRange.value;
       const result = await fetchPanelFrame(panel, range, signal);
       if (signal.aborted) return;
+      if (result.frame) markRaw(result.frame);
       state.data.value.previewState = { ...result, range, querySignature };
     } catch (err) {
       if (signal.aborted || isAbortError(err)) return;

@@ -7,12 +7,12 @@ const frame = resultFrame({ columns: [{ name: "day", type: "Date" }, { name: "a"
 describe("result chart frames", () => {
   it("preserves category query order and NULL while time axes sort without filling", () => {
     const category = buildPanelChart(frame, { type: "chart", x: "day", y: ["b", "a"], x_scale: "category" }, false);
-    expect(category.rows.map((r) => r.label)).toEqual(["2026-11-10", "2026-11-08"]);
+    expect(category.rows.map((r) => r.label())).toEqual(["2026-11-10", "2026-11-08"]);
     expect(category.series.map((s) => s.label)).toEqual(["b", "a"]);
     expect(category.rows[1].values.get(category.series[1].key)).toBeNull();
     expect(category.rows[0].values.get(category.series[0].key)).toMatchObject({ exact: "9,007,199,254,740,993", approximate: true });
     const time = buildPanelChart(frame, { type: "chart", x: "day", y: ["a"] }, false);
-    expect(time.rows.map((r) => r.label)).toEqual(["2026-11-08", "2026-11-10"]);
+    expect(time.rows.map((r) => r.label())).toEqual(["2026-11-08", "2026-11-10"]);
     expect(time.rows).toHaveLength(2);
   });
   it("checks unique keys over the full result before applying the 50-series cap", () => {

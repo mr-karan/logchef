@@ -1693,5 +1693,15 @@
   "dashboardBuilder.Percent": "百分比",
   "dashboardBuilder.Bytes": "字节",
   "dashboardBuilder.DurationMs": "时长 (ms)",
-  "dashboardBuilder.DurationS": "时长 (s)"
+  "dashboardBuilder.DurationS": "时长 (s)",
+  "panelChart.inspect": "{mark} 图表。使用方向键查看时间段。",
+  "panelChart.seriesLegend": "系列图例",
+  "panelChart.sliceLegend": "扇区图例",
+  "panelChart.toplist": "排行榜",
+  "panelChart.labelsHidden": "数值标签已隐藏。请放大图表或减少数据点。",
+  "panelChart.other": "其他",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(空值)",
+  "panelChart.emptyCategory": "(空)",
+  "panelChart.allZero": "所有值均为零。"
 }

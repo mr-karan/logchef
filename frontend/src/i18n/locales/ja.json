@@ -953,5 +953,15 @@
   "dashboardBuilder.Percent": "パーセント",
   "dashboardBuilder.Bytes": "バイト",
   "dashboardBuilder.DurationMs": "期間 (ms)",
-  "dashboardBuilder.DurationS": "期間 (s)"
+  "dashboardBuilder.DurationS": "期間 (s)",
+  "panelChart.inspect": "{mark} グラフ。矢印キーでバケットを確認できます。",
+  "panelChart.seriesLegend": "系列の凡例",
+  "panelChart.sliceLegend": "扇形の凡例",
+  "panelChart.toplist": "上位リスト",
+  "panelChart.labelsHidden": "値ラベルを非表示にしました。グラフを広げるか点を減らしてください。",
+  "panelChart.other": "その他",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(null)",
+  "panelChart.emptyCategory": "(空)",
+  "panelChart.allZero": "すべての値がゼロです。"
 }

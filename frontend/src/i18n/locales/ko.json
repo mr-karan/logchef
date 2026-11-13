@@ -953,5 +953,15 @@
   "dashboardBuilder.Percent": "백분율",
   "dashboardBuilder.Bytes": "바이트",
   "dashboardBuilder.DurationMs": "기간 (ms)",
-  "dashboardBuilder.DurationS": "기간 (s)"
+  "dashboardBuilder.DurationS": "기간 (s)",
+  "panelChart.inspect": "{mark} 차트. 화살표 키로 구간을 확인하세요.",
+  "panelChart.seriesLegend": "계열 범례",
+  "panelChart.sliceLegend": "조각 범례",
+  "panelChart.toplist": "상위 목록",
+  "panelChart.labelsHidden": "값 레이블이 숨겨졌습니다. 차트를 키우거나 점 수를 줄이세요.",
+  "panelChart.other": "기타",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(null)",
+  "panelChart.emptyCategory": "(비어 있음)",
+  "panelChart.allZero": "모든 값이 0입니다."
 }

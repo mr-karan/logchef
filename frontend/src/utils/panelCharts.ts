@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n";
 import type { DashboardViz, DashboardVizType, NumberFormat } from "@/api/dashboards";
 import { addExact, compareExact, exactString, isExact, multiplyExact, parseExact, type FrameNumber } from "./exactNumber";
 import { frameCellText, frameWithKinds, suggestKind, type FrameColumn, type PanelFrame } from "./panelFrame";
@@ -8,15 +9,26 @@ export type ChartViz = Extract<DashboardViz, { type: "chart" }>;
 export type ListViz = Extract<DashboardViz, { type: "pie" | "toplist" }>;
 export interface ChartValue { raw: FrameNumber | null; coordinate: number; text: string; exact: string; approximate: boolean }
 export interface ChartSeries { key: string; label: string; color: string }
-export interface ChartRow { key: string; x: number; label: string; values: Map<string, ChartValue | null> }
+export interface ChartRow { key: string; x: number; label: () => string; values: Map<string, ChartValue | null> }
 export interface ChartModel { rows: ChartRow[]; series: ChartSeries[]; time: boolean; notices: string[] }
 export interface ListItem extends ChartSeries { value: ChartValue; percentage: number; displayPercentage: number }
 
-export function chartColors(key: string, text: string, other = false): Pick<ChartSeries, "color"> {
+export function chartColors(key: string, text: string, other = false, used = new Set<string>()): Pick<ChartSeries, "color"> {
   let hash = 0;
   for (const char of key) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) | 0;
   const semantic = /^(error|err|fatal|critical|crit|alert|emerg|emergency|warn|warning|info|information|notice|debug|trace|verbose|get|post|put|delete|patch|options|head)$/i.test(text);
-  return { color: other ? "var(--panel-chart-other)" : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})` };
+  const preferred = other ? "var(--panel-chart-other)" : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})`;
+  let color = preferred;
+  for (let offset = 1; used.has(color) && offset <= 12; offset++) color = `var(--panel-chart-${(Math.abs(hash) + offset) % 12 + 1})`;
+  if (used.has(color)) color = `hsl(${(used.size * 137.508) % 360} 65% 45%)`;
+  used.add(color);
+  return { color };
+}
+
+export function chartLabelColor(hex: string): string {
+  const channels = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return luminance > 0.179 ? "#000000" : "#ffffff";
 }
 
 export function chartStacked(viz: ChartViz): boolean {
@@ -81,12 +93,12 @@ function identity(value: unknown): string {
 
 function label(value: unknown, col: FrameColumn, count: boolean, zone: string): string {
   if (count && typeof value === "object" && value !== null && "kind" in value) {
-    if (value.kind === "other") return "Other";
-    if (value.kind === "null") return "(null)";
-    if (value.kind === "value" && "value" in value) return String(value.value) || "(empty)";
+    if (value.kind === "other") return i18n.global.t("panelChart.other");
+    if (value.kind === "null") return i18n.global.t("panelChart.nullCategory");
+    if (value.kind === "value" && "value" in value) return String(value.value) || i18n.global.t("panelChart.emptyCategory");
   }
-  if (value === null || value === undefined) return "(null)";
-  return frameCellText(value, col, zone) || "(empty)";
+  if (value === null || value === undefined) return i18n.global.t("panelChart.nullCategory");
+  return frameCellText(value, col, zone) || i18n.global.t("panelChart.emptyCategory");
 }
 
 function number(value: unknown): FrameNumber | null {
@@ -105,7 +117,7 @@ export function chartValue(value: FrameNumber, format?: NumberFormat): ChartValu
   const approximate = isExact(value) && (!converted || compareExact(converted, value) !== 0);
   let formatted: ReturnType<typeof formatNumber> | undefined;
   const magnitude = Math.abs(coordinate * (format?.scale ?? 1));
-  const decimals = magnitude > 0 && magnitude < 1 ? Math.min(10, Math.max(2, 1 - Math.floor(Math.log10(magnitude)))) : undefined;
+  const decimals = magnitude > 0 && magnitude < 1 ? Math.max(2, 1 - Math.floor(Math.log10(magnitude))) : undefined;
   const text = () => formatted ??= formatNumber(value, { ...format, decimals: format?.decimals ?? decimals });
   return { raw: value, coordinate, get text() { return text().text; }, get exact() { return text().exact; }, approximate };
 }
@@ -128,6 +140,7 @@ export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean
   const keys = new Map<string, number>();
   let firstDuplicate: string | undefined;
   const series = new Map<string, ChartSeries>();
+  const usedColors = new Set<string>();
   const rows = new Map<string, { row: ChartRow; values: Map<string, FrameNumber | null> }>();
   let nullX = 0;
   for (const source of frame.rows) {
@@ -138,13 +151,15 @@ export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean
     const key = JSON.stringify([rowKey, groupKey]);
     keys.set(key, (keys.get(key) ?? 0) + 1);
     if (keys.get(key) === 2 && firstDuplicate === undefined) firstDuplicate = `${label(xv, x, count, zone)}${group ? `, ${label(source[group.name], group, count, zone)}` : ""}`;
-    const entry = rows.get(rowKey) ?? { row: { key: rowKey, x: time ? Date.parse(String(xv)) : rows.size, get label() { return label(xv, x, count, zone); }, values: new Map() }, values: new Map<string, FrameNumber | null>() };
+    const entry = rows.get(rowKey) ?? { row: { key: rowKey, x: time ? Date.parse(String(xv)) : rows.size, label: () => label(xv, x, count, zone), values: new Map() }, values: new Map<string, FrameNumber | null>() };
     rows.set(rowKey, entry);
     for (const y of ys) {
       const sk = JSON.stringify([y.name, groupKey]);
       if (!series.has(sk)) {
         const text = group ? label(source[group.name], group, count, zone) : y.name;
-        series.set(sk, { key: sk, label: group && ys.length > 1 ? `${text} · ${y.name}` : text, ...chartColors(group ? colorIdentity(source[group.name], count) : identity(y.name), text, count && groupKey === '{"kind":"other"}') });
+        const colorKey = group ? colorIdentity(source[group.name], count) : identity(y.name);
+        const color = chartColors(group && ys.length > 1 ? JSON.stringify([colorKey, y.name]) : colorKey, text, count && groupKey === '{"kind":"other"}', usedColors);
+        series.set(sk, { key: sk, label: group && ys.length > 1 ? `${text} · ${y.name}` : text, ...color });
       }
       const value = number(source[y.name]);
       const previous = entry.values.get(sk);
@@ -206,10 +221,11 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
     notices.push(`50 of ${values.size} slices shown. Overflow folded into Other.`);
     entries.splice(49).forEach(e => fold(e.value));
   }
-  if (remainder !== null) entries.push({ key: "pie-remainder", label: "Other", value: remainder, colorKey: "pie-remainder" });
+  if (remainder !== null) entries.push({ key: "pie-remainder", label: i18n.global.t("panelChart.other"), value: remainder, colorKey: "pie-remainder" });
   const maxRows = viz.type === "pie" ? 50 : viz.max_rows ?? 20;
   if (entries.length > maxRows) notices.push(`${maxRows} of ${entries.length} ${viz.type === "pie" ? "slices" : "rows"} shown.`);
-  const items = entries.slice(0, maxRows).map((e) => ({ ...e, ...chartColors(e.colorKey, e.label, e.key === "pie-remainder" || e.key === '{"kind":"other"}'), value: e.value === null ? { raw: null, coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0, displayPercentage: 0 }));
+  const usedColors = new Set<string>();
+  const items = entries.slice(0, maxRows).map((e) => ({ ...e, ...chartColors(e.colorKey, e.label, e.key === "pie-remainder" || e.key === '{"kind":"other"}', usedColors), value: e.value === null ? { raw: null, coordinate: 0, text: i18n.global.t("panelChart.null"), exact: i18n.global.t("panelChart.null"), approximate: false } : chartValue(e.value, viz.format), percentage: 0, displayPercentage: 0 }));
   const max = Math.max(0, ...items.map((i) => Math.abs(i.value.coordinate)));
   const total = items.reduce((s, i) => s + (max ? Math.abs(i.value.coordinate) / max : 0), 0);
   for (const item of items) item.percentage = total ? Math.abs(item.value.coordinate) / max / total * 100 : 0;

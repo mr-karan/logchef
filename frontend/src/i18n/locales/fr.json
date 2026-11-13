@@ -953,5 +953,15 @@
   "dashboardBuilder.Percent": "pourcentage",
   "dashboardBuilder.Bytes": "octets",
   "dashboardBuilder.DurationMs": "durée (ms)",
-  "dashboardBuilder.DurationS": "durée (s)"
+  "dashboardBuilder.DurationS": "durée (s)",
+  "panelChart.inspect": "Graphique {mark}. Utilisez les flèches pour examiner les intervalles.",
+  "panelChart.seriesLegend": "Légende des séries",
+  "panelChart.sliceLegend": "Légende des secteurs",
+  "panelChart.toplist": "Classement",
+  "panelChart.labelsHidden": "Étiquettes masquées. Agrandissez le graphique ou affichez moins de points.",
+  "panelChart.other": "Autres",
+  "panelChart.null": "NULL",
+  "panelChart.nullCategory": "(nul)",
+  "panelChart.emptyCategory": "(vide)",
+  "panelChart.allZero": "Toutes les valeurs sont nulles."
 }

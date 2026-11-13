@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { resultFrame, countFrame } from '../panelFrame';
-import { buildPanelChart, buildPanelList, chartStacked, suggestViz, withSuggestedRoles } from '../panelCharts';
+import { resultFrame, countFrame, frameCellText } from '../panelFrame';
+import { buildPanelChart, buildPanelList, chartValue, chartStacked, suggestViz, withSuggestedRoles } from '../panelCharts';
 const columns = [{ name: 'x', type: 'String' }, { name: 'n', type: 'Decimal(20,4)' }];
 it('renders suggested VictoriaLogs roles', () => {
   const frame = resultFrame({ columns: [], untyped: true, rows: [{ _time: '2026-11-10T00:00:00Z', service: 'api', errors: '12' }, { _time: '2026-11-10T01:00:00Z', service: 'web', errors: '15' }] });
@@ -59,4 +59,20 @@ it('shares absent stack defaults for bars, areas and lines', () => {
   expect(chartStacked({ type: 'chart', mark: 'area' })).toBe(true);
   expect(chartStacked({ type: 'chart', mark: 'line' })).toBe(false);
   expect(chartStacked({ type: 'chart', mark: 'bar', stack: 'none' })).toBe(false);
+});
+
+it('preserves very small nonzero values', () => {
+  expect(chartValue(1e-12).text).not.toBe('0.0000000000');
+  expect(Number(chartValue(1e-12).text)).toBe(1e-12);
+});
+
+it('reuses timestamp formatters across cells in each zone', () => {
+  const formatter = vi.spyOn(Intl, 'DateTimeFormat');
+  try {
+    const frame = resultFrame({ columns: [{ name: 't', type: 'DateTime64(6)' }], rows: [{ t: '2026-11-10T00:00:00.123456Z' }] });
+    for (const zone of ['Asia/Kolkata', 'America/New_York']) {
+      for (let i = 0; i < 1000; i++) expect(frameCellText(frame.rows[0].t, frame.columns[0], zone)).toContain('.123456');
+    }
+    expect(formatter.mock.calls.length).toBeLessThanOrEqual(2);
+  } finally { formatter.mockRestore(); }
 });
