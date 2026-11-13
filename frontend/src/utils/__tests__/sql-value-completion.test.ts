@@ -127,20 +127,21 @@ describe("SQL string value completion", () => {
     expect(contextAtCaret("method = 'it''s\\\\|'")?.partial).toBe("it's\\");
   });
 
-  it("scans a long IN list in linear time", () => {
-    const fastest = (count: number) => {
-      const list = Array.from({ length: count }, (_, i) => `'host-${String(i).padStart(5, "0")}.example'`).join(", ");
-      const text = `SELECT * FROM http WHERE host IN (${list}, '')`;
-      let best = Infinity;
-      for (let run = 0; run < 5; run++) {
-        const started = performance.now();
-        const cursor = getSQLCompletionCursor(text, text.length - 2, schema);
-        best = Math.min(best, performance.now() - started);
-        expect(cursor).toMatchObject({ kind: "value", field: "host", partial: "" });
-      }
-      return best;
-    };
-    // Four times the input costs about four times as long when linear and sixteen when quadratic.
-    expect(fastest(8000) / fastest(2000)).toBeLessThan(8);
+  it.each([2000, 8000])("scans an IN list of %i values with linear character reads", (count) => {
+    const list = Array.from({ length: count }, (_, i) => `'host-${String(i).padStart(5, "0")}.example'`).join(", ");
+    const text = `SELECT * FROM http WHERE host IN (${list}, '')`;
+    let characterReads = 0;
+    const measuredText = new Proxy(new String(text), {
+      get(target, property) {
+        if (typeof property === "string" && /^\d+$/.test(property)) characterReads++;
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    // A boxed string exposes indexed reads without adding instrumentation to the scanner.
+    const cursor: unknown = Reflect.apply(getSQLCompletionCursor, undefined, [measuredText, text.length - 2, schema]);
+    expect(cursor).toMatchObject({ kind: "value", field: "host", partial: "" });
+    expect(characterReads).toBeGreaterThan(text.length);
+    expect(characterReads).toBeLessThan(4 * text.length);
   });
 });
