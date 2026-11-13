@@ -244,7 +244,12 @@ func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLim
 	}
 
 	result := QueryBuildResult{RequestedLimit: requestedLimit}
-	qb.ensureLimitWithPolicy(selectQuery, requestedLimit, defaultLimit, maxLimit, &result)
+	target := limitedSelect(selectQuery)
+	if target == nil {
+		selectQuery = wrapSetOperation(selectQuery)
+		target = selectQuery
+	}
+	qb.ensureLimitWithPolicy(target, requestedLimit, defaultLimit, maxLimit, &result)
 	result.SQL = formatSQL(selectQuery)
 
 	return result, nil
@@ -340,12 +345,13 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 	return nil
 }
 
-// ensureLimitWithPolicy applies the LIMIT rule to the outer statement. The
-// effective limit is the smallest of the statement's own literal LIMIT, the
-// request limit and the configured maximum; the default applies when neither
-// the statement nor the request sets one. A clamp changes only the row count,
-// so OFFSET stays, and LIMIT n BY and limits inside subqueries or CTEs are
-// never touched. When a cap wins, the SQL asks for one row past it.
+// ensureLimitWithPolicy applies the LIMIT rule to stmt, the SELECT that holds
+// the statement's own LIMIT. The effective limit is the smallest of the
+// statement's own literal LIMIT, the request limit and the configured
+// maximum; the default applies when neither the statement nor the request
+// sets one. A clamp changes only the row count, so OFFSET stays, and LIMIT n
+// BY and limits inside subqueries, CTEs or set operation branches are never
+// touched. When a cap wins, the SQL asks for one row past it.
 func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery, requestedLimit, defaultLimit, maxLimit int, result *QueryBuildResult) {
 	capLimit, capSource := 0, models.LimitSource("")
 	if requestedLimit > 0 {
@@ -397,6 +403,50 @@ func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery
 	stmt.Limit.Limit = numberLiteral(limit + 1)
 }
 
+// limitedSelect returns the SELECT that holds the statement's own LIMIT,
+// inside any parentheses around the statement. A set operation has no LIMIT
+// of its own, since each branch's LIMIT belongs to that branch, so it returns
+// nil.
+func limitedSelect(stmt *clickhouseparser.SelectQuery) *clickhouseparser.SelectQuery {
+	for stmt.InnerQuery != nil && setOperand(stmt) == nil {
+		stmt = stmt.InnerQuery
+	}
+	if setOperand(stmt) != nil {
+		return nil
+	}
+	return stmt
+}
+
+// setOperand returns the query after stmt in a UNION, EXCEPT or INTERSECT.
+func setOperand(stmt *clickhouseparser.SelectQuery) *clickhouseparser.SelectQuery {
+	for _, next := range []*clickhouseparser.SelectQuery{stmt.UnionAll, stmt.UnionDistinct, stmt.Except, stmt.Intersect} {
+		if next != nil {
+			return next
+		}
+	}
+	return nil
+}
+
+// wrapSetOperation selects every row of a set operation from a subquery, so
+// one LIMIT can bound its whole result. ClickHouse takes a LIMIT after the
+// last branch as that branch's own and rejects one after a parenthesized
+// group. The trailing SETTINGS and FORMAT apply to the whole statement, so
+// they move to the outer query.
+func wrapSetOperation(stmt *clickhouseparser.SelectQuery) *clickhouseparser.SelectQuery {
+	last := stmt
+	for next := setOperand(last); next != nil; next = setOperand(last) {
+		last = next
+	}
+	wrapper := &clickhouseparser.SelectQuery{
+		SelectItems: []*clickhouseparser.SelectItem{{Expr: &clickhouseparser.Ident{Name: "*"}}},
+		From:        &clickhouseparser.FromClause{Expr: &clickhouseparser.TableExpr{Expr: &clickhouseparser.SubQuery{HasParen: true, Select: stmt}}},
+		Settings:    last.Settings,
+		Format:      last.Format,
+	}
+	last.Settings, last.Format = nil, nil
+	return wrapper
+}
+
 // literalLimit returns the row count of a LIMIT written as a whole number.
 func literalLimit(expr clickhouseparser.Expr) (int, bool) {
 	number, ok := expr.(*clickhouseparser.NumberLiteral)
@@ -421,12 +471,15 @@ func legacyDefaultLimit(maxLimit int) int {
 	return DefaultLimit
 }
 
-// RemoveLimitClause parses the SQL and removes any LIMIT clause.
+// RemoveLimitClause parses the SQL and removes the statement's own LIMIT
+// clause. The branches of a set operation keep theirs.
 func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
 	selectQuery, err := parseSelectQuery(rawSQL)
 	if err != nil {
 		return "", err
 	}
-	selectQuery.Limit = nil
+	if target := limitedSelect(selectQuery); target != nil {
+		target.Limit = nil
+	}
 	return formatSQL(selectQuery), nil
 }
