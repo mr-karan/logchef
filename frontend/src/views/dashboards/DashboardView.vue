@@ -79,6 +79,10 @@ const dashboard = computed(() => store.current);
 const notFound = ref(false);
 
 const isEditing = computed(() => store.isEditing);
+function reloadPage() {
+  window.location.reload();
+}
+
 const canEdit = computed(() => store.canEdit && !metaStore.demoReadOnly);
 
 // In edit mode the grid renders from the working draft; otherwise from the live
@@ -88,7 +92,7 @@ const isCorrupt = computed(() => store.current?.corrupt === true);
 const activeBlob = computed(() => {
   if (store.isEditing) return store.editDraft;
   const current = store.current;
-  return current && !current.corrupt ? current.panels : null;
+  return current && !current.corrupt && current.panels.version === 2 ? current.panels : null;
 });
 
 const placements = computed(() => {
@@ -745,6 +749,11 @@ onBeforeRouteUpdate((to, from) => {
       </div>
     </div>
 
+    <div v-if="store.needsReload" role="status" class="flex items-center justify-center gap-3 border border-amber-500/25 bg-amber-500/10 p-3 text-sm">
+      <span>{{ t('ui.serverUpdated') }}</span>
+      <Button variant="outline" size="sm" @click="reloadPage">{{ t('pages.reloadPage') }}</Button>
+    </div>
+
     <!-- Not found -->
     <div
       v-if="notFound"
@@ -855,7 +864,7 @@ onBeforeRouteUpdate((to, from) => {
     </div>
 
     <!-- Empty dashboard (view mode) -->
-    <div v-else-if="dashboard && placements.length === 0" class="dash-empty">
+    <div v-else-if="dashboard && placements.length === 0 && !store.needsReload" class="dash-empty">
       <div class="dash-empty__icon">
         <LayoutDashboard class="h-7 w-7" />
       </div>

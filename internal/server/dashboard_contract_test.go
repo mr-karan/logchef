@@ -26,6 +26,7 @@ func dashboardApp(s *Server, user *models.User) *fiber.App {
 	withUser(app, http.MethodPost, "/dashboards", user, s.handleCreateDashboard)
 	withUser(app, http.MethodGet, "/dashboards/:dashboardID", user, s.handleGetDashboard)
 	withUser(app, http.MethodPut, "/dashboards/:dashboardID", user, s.handleUpdateDashboard)
+	withUser(app, http.MethodDelete, "/dashboards/:dashboardID", user, s.handleDeleteDashboard)
 	return app
 }
 
@@ -169,7 +170,7 @@ func TestDashboardSchemaHeader(t *testing.T) {
 		})
 	}
 
-	for _, value := range []string{"", "0", "3", "1,2", " "} {
+	for _, value := range []string{"", "0", "3", "1,2", " ", "\u00a02", "2\u2003"} {
 		t.Run("invalid "+strconv.Quote(value), func(t *testing.T) {
 			for _, path := range []string{"/dashboards", "/dashboards/" + strconv.Itoa(v1.ID)} {
 				status, resp, _ := call(t, app, http.MethodGet, path, "", dashboardHeaders{schema: new(value)})
@@ -543,5 +544,97 @@ func TestDashboardTextBoundsHTTP(t *testing.T) {
 	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":`+string(okName)+`,"panels":`+panelBlobV2JSON(team.ID, src.ID)+`}`, schema2)
 	if status != http.StatusCreated {
 		t.Fatalf("200-rune name: status %d body %v", status, resp)
+	}
+}
+
+func TestDashboardCanonicalWritesHTTP(t *testing.T) {
+	s := newDashboardTestServer(t)
+	owner := mkTestUser(t, s.store, "canonical@test.dev", models.UserRoleMember)
+	team, src := mkTestTeam(t, s.store, "team", owner)
+	app := dashboardApp(s, owner)
+	original := panelBlobV2JSON(team.ID, src.ID)
+	status, resp, _ := call(t, app, "POST", "/dashboards", `{"name":"safe","panels":`+original+`}`, schema2)
+	if status != 201 {
+		t.Fatalf("create: %d %v", status, resp)
+	}
+	id := int(resp["data"].(map[string]any)["id"].(float64))
+	path := "/dashboards/" + strconv.Itoa(id)
+	before := storedBlob(t, s, id)
+	for name, blob := range map[string]string{
+		"canonical size": strings.Replace(original, `"text":"x"`, `"text":"`+strings.Repeat("\u2028", 100_000)+`"`, 1),
+		"missing panels": `{"version":2,"tabs":[{"id":"main","title":"Main","layout":[]}]}`,
+		"missing layout": `{"version":2,"tabs":[{"id":"main","title":"Main"}],"panels":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rowsBefore, err := s.store.ListDashboardSummaries(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, method := range []string{"POST", "PUT"} {
+				target := "/dashboards"
+				if method == "PUT" {
+					target = path
+				}
+				status, resp, _ := call(t, app, method, target, `{"name":"bad","revision":1,"panels":`+blob+`}`, schema2)
+				if status != 400 {
+					t.Fatalf("%s: %d %v", method, status, resp)
+				}
+			}
+			rowsAfter, err := s.store.ListDashboardSummaries(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			unchanged, err := s.store.GetDashboard(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rowsAfter) != len(rowsBefore) || string(unchanged.PanelsJSON) != before || unchanged.Revision != 1 || unchanged.Name != "safe" {
+				t.Fatal("rejected write changed storage")
+			}
+		})
+	}
+	for _, value := range []string{"3", "\u00a02", "2\u2003"} {
+		status, resp, _ := call(t, app, "DELETE", path, "", dashboardHeaders{schema: new(value)})
+		if status != 400 || storedBlob(t, s, id) != before {
+			t.Fatalf("DELETE schema %q: %d %v", value, status, resp)
+		}
+	}
+	duplicate := strings.ReplaceAll(string(panelBlobJSON(team.ID, src.ID)), `"id":"p1"`, `"id":"p1","id":null`)
+	status, resp, _ = call(t, app, "POST", "/dashboards", `{"name":"duplicate null","panels":`+duplicate+`}`, schema2)
+	if status != 201 || resp["data"].(map[string]any)["corrupt"] != false {
+		t.Fatalf("duplicate null: %d %v", status, resp)
+	}
+}
+
+type perpetuallyStaleDashboardStore struct {
+	store.Store
+	passes int
+}
+
+func (s *perpetuallyStaleDashboardStore) ListDashboardSummaries(ctx context.Context) ([]*models.DashboardSummary, error) {
+	rows, err := s.Store.ListDashboardSummaries(ctx)
+	s.passes++
+	for _, row := range rows {
+		row.SummaryRevision = 0
+	}
+	return rows, err
+}
+func TestDashboardListRepairExhaustedHTTP(t *testing.T) {
+	s := newDashboardTestServer(t)
+	owner := mkTestUser(t, s.store, "busy@test.dev", models.UserRoleMember)
+	d := &models.Dashboard{Name: "busy", CreatedBy: &owner.ID, PanelsJSON: models.EmptyDashboardPanelsJSON()}
+	if err := s.store.CreateDashboard(t.Context(), d); err != nil {
+		t.Fatal(err)
+	}
+	race := &perpetuallyStaleDashboardStore{Store: s.store}
+	s.store = race
+	req := httptest.NewRequest(http.MethodGet, "/dashboards", http.NoBody)
+	resp, err := dashboardApp(s, owner).Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" || race.passes != 3 {
+		t.Fatalf("status %d, headers %v, passes %d", resp.StatusCode, resp.Header, race.passes)
 	}
 }

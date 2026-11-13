@@ -182,6 +182,9 @@ func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 // handleDeleteDashboard removes a dashboard (creator + global admin only).
 func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
 	user := currentUser(c)
+	if _, err := dashboardClient(c); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
 
 	id, err := parseDashboardID(c)
 	if err != nil {

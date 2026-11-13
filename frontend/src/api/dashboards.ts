@@ -133,6 +133,8 @@ interface DashboardBase {
   updated_at: string;
   revision: number;
   can_edit: boolean;
+  panels_corrupt?: boolean;
+  min_schema?: number;
 }
 
 /**

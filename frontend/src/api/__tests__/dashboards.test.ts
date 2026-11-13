@@ -1,15 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// The real request helper runs; only the axios instance is replaced, so the
-// test sees the config that an outgoing request would carry.
-const transport = vi.hoisted(() => ({
-  get: vi.fn(),
-  post: vi.fn(),
-  put: vi.fn(),
-  delete: vi.fn(),
-}));
-
-vi.mock("@/api/config", () => ({ api: transport }));
+import type { InternalAxiosRequestConfig } from "axios";
+import { api } from "../config";
 
 import {
   DASHBOARD_CLIENT_FEATURES,
@@ -20,20 +12,17 @@ import {
 } from "../dashboards";
 import { emptyDashboardPanels } from "@/utils/dashboardPanels";
 
-type Config = { headers?: Record<string, string>; signal?: AbortSignal; timeout?: number };
-
 describe("dashboardsApi client contract headers", () => {
+  const requests: InternalAxiosRequestConfig[] = [];
+  const originalAdapter = api.defaults.adapter;
+  afterEach(() => { api.defaults.adapter = originalAdapter; });
   beforeEach(() => {
-    vi.clearAllMocks();
-    for (const method of Object.values(transport)) {
-      method.mockResolvedValue({ data: { status: "success", data: null } });
-    }
+    requests.length = 0;
+    api.defaults.adapter = async (config) => {
+      requests.push(config);
+      return { data: { status: "success", data: null }, status: 200, statusText: "OK", headers: {}, config };
+    };
   });
-
-  function configOf(call: unknown[]): Config {
-    // get/delete take (url, config); post/put take (url, body, config).
-    return (call.length === 3 ? call[2] : call[1]) as Config;
-  }
 
   it("sends the schema and features headers on every dashboard request", async () => {
     const body = { name: "d", description: "", panels: emptyDashboardPanels() };
@@ -43,20 +32,14 @@ describe("dashboardsApi client contract headers", () => {
     await dashboardsApi.update(7, { ...body, revision: 1 });
     await dashboardsApi.remove(7);
 
-    const configs = [
-      configOf(transport.get.mock.calls[0]),
-      configOf(transport.get.mock.calls[1]),
-      configOf(transport.post.mock.calls[0]),
-      configOf(transport.put.mock.calls[0]),
-      configOf(transport.delete.mock.calls[0]),
-    ];
+    const configs = requests;
     expect(configs).toHaveLength(5);
     for (const config of configs) {
       expect(config.headers?.[DASHBOARD_SCHEMA_HEADER]).toBe("2");
       expect(config.headers?.[DASHBOARD_FEATURES_HEADER]).toBe(DASHBOARD_CLIENT_FEATURES.join(","));
     }
-    expect(transport.get.mock.calls[1][0]).toBe("/dashboards/7");
-    expect(transport.put.mock.calls[0][1]).toMatchObject({ revision: 1 });
+    expect(requests[1].url).toBe("/dashboards/7");
+    expect(JSON.parse(requests[3].data)).toMatchObject({ revision: 1 });
   });
 
   it("declares the schema it reads and only lowercase feature names its code keeps", () => {
@@ -70,7 +53,7 @@ describe("dashboardsApi client contract headers", () => {
   it("keeps the caller's options next to the headers", async () => {
     const controller = new AbortController();
     await dashboardsApi.list({ signal: controller.signal, timeout: 5 });
-    const config = configOf(transport.get.mock.calls[0]);
+    const config = requests[0];
     expect(config.signal).toBe(controller.signal);
     expect(config.timeout).toBe(5000);
     expect(config.headers?.[DASHBOARD_SCHEMA_HEADER]).toBe("2");

@@ -308,7 +308,7 @@ var ErrDashboardSchemaHeader = errors.New(DashboardSchemaHeader + " must be 1 or
 func ParseDashboardClient(schema *string, features string) (DashboardClient, error) {
 	client := DashboardClient{Schema: DashboardPanelsVersion, Features: map[DashboardFeature]struct{}{}}
 	if schema != nil {
-		switch strings.TrimSpace(*schema) {
+		switch strings.Trim(*schema, " \t") {
 		case "1":
 		case "2":
 			client.Schema = DashboardPanelsVersion2
@@ -320,7 +320,7 @@ func ParseDashboardClient(schema *string, features string) (DashboardClient, err
 		return client, nil
 	}
 	for entry := range strings.SplitSeq(features, ",") {
-		name := strings.TrimSpace(entry)
+		name := strings.Trim(entry, " \t")
 		if name == "" || !KnownDashboardFeature(name) {
 			continue
 		}
@@ -408,6 +408,9 @@ func validateDashboardPanelsV2Blob(blob *dashboardPanelsV2) error {
 	if err != nil {
 		return err
 	}
+	if blob.Panels == nil {
+		return fmt.Errorf("panels must be an array")
+	}
 	if len(blob.Panels) > MaxDashboardPanels {
 		return fmt.Errorf("dashboard has %d panels, exceeds the max of %d", len(blob.Panels), MaxDashboardPanels)
 	}
@@ -450,6 +453,9 @@ func validateDashboardTabs(tabs []dashboardTabV2) (map[string]struct{}, error) {
 		tabIDs[tab.ID] = struct{}{}
 		if n := utf8.RuneCountInString(tab.Title); n < 1 || n > MaxDashboardTabTitleRunes {
 			return nil, fmt.Errorf("tab %q has a title of %d characters (allowed: 1-%d)", tab.ID, n, MaxDashboardTabTitleRunes)
+		}
+		if tab.Layout == nil {
+			return nil, fmt.Errorf("tab %q layout must be an array", tab.ID)
 		}
 		ids, err := validateDashboardLayoutEntries(tab.Layout)
 		if err != nil {
@@ -628,7 +634,14 @@ func canonicalDashboardPanelsV2(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	blob.Features = dashboardFeaturesOf(blob)
-	return encodeJSONNoEscape(blob)
+	canonical, err := encodeJSONNoEscape(blob)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDashboardPanelsV2(canonical); err != nil {
+		return nil, err
+	}
+	return canonical, nil
 }
 
 // redactDashboardPanelsV2 keeps id, kind, title, team_id, source_id and

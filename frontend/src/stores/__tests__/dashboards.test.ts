@@ -39,6 +39,7 @@ vi.mock("@/api/dashboards", async (importOriginal) => ({
 }));
 
 import { useDashboardsStore } from "../dashboards";
+import { DASHBOARD_CLIENT_FEATURES } from "@/api/dashboards";
 import type { Dashboard, DashboardLockedPanel, DashboardPanel, DashboardPanels, DashboardQueryPanel } from "@/api/dashboards";
 import { epochMs } from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
@@ -783,7 +784,7 @@ describe("dashboards store — schema 2 request parity", () => {
     // every base field, so a dropped field would show up here.
     const fixture: DashboardPanels = {
       version: 2,
-      features: [],
+      features: [...DASHBOARD_CLIENT_FEATURES],
       cache_ttl_seconds: 300,
       default_time_range: "6h",
       tabs: [{ id: "main", title: "Main", layout: [
@@ -815,5 +816,35 @@ describe("dashboards store — schema 2 request parity", () => {
     expect(store.isEditing).toBe(false);
     expect(mocks.histogram).not.toHaveBeenCalled();
     expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("dashboard read compatibility", () => {
+  beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks(); });
+  it("blocks a newer blob discovered by the edit-time read", async () => {
+    mocks.get.mockResolvedValueOnce({ status: "success", data: makeDashboard({ panels: panelsWith([tablePanel()]) }) });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [] } });
+    const store = useDashboardsStore();
+    await store.loadDashboard(3);
+    mocks.get.mockResolvedValueOnce({ status: "success", data: makeDashboard({ revision: 2, panels: { ...panelsWith([tablePanel()]), features: ["future_feature"] } }) });
+    await store.enterEdit();
+    expect(store.canEdit).toBe(false);
+    expect(store.isEditing).toBe(false);
+    expect(store.getPanelState("p1").status).toBe("unsupported");
+  });
+  it.each([false, true])("blocks edit and execution for a newer response, stub=%s", async (stub) => {
+    const dashboard = makeDashboard({ panels: { ...panelsWith([tablePanel()]), features: ["future_feature"] }, ...(stub ? { panels_corrupt: true, min_schema: 2 } : {}) });
+    if (stub) dashboard.panels.version = 1;
+    mocks.get.mockResolvedValue({ status: "success", data: dashboard });
+    const store = useDashboardsStore();
+    await store.loadDashboard(3);
+    expect(store.canEdit).toBe(false);
+    expect(store.needsReload).toBe(true);
+    expect(store.getPanelState("p1").status).toBe("unsupported");
+    await store.enterEdit();
+    expect(store.isEditing).toBe(false);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(mocks.histogram).not.toHaveBeenCalled();
+    expect(mocks.logsQuery).not.toHaveBeenCalled();
   });
 });
