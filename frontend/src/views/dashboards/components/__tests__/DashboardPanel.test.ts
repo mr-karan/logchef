@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/i18n";
 import type { DashboardPanel as Panel } from "@/api/dashboards";
 import type { PanelState } from "@/stores/dashboards";
+import { resultFrame } from "@/utils/panelFrame";
 import DashboardPanel from "@/views/dashboards/components/DashboardPanel.vue";
 
 const panel: Panel = {
@@ -34,11 +35,8 @@ async function render(state: PanelState, chrome = true) {
 function tableState(truncation: "none" | "rows" | "bytes" | "unknown"): PanelState {
   return {
     status: "success",
-    table: {
-      columns: [{ name: "n", type: "UInt64" }],
-      rows: [{ n: 1 }],
-      stats: { execution_time_ms: 1, rows_read: 2, bytes_read: 0, rows_returned: 1, limit_applied: 1, limit_source: "request", truncation },
-    },
+    frame: resultFrame({ columns: [{ name: "n", type: "UInt64" }], rows: [{ n: "9007199254740993" }] }),
+    stats: { execution_time_ms: 1, rows_read: 2, bytes_read: 0, rows_returned: 1, limit_applied: 1, limit_source: "request", truncation },
   };
 }
 
@@ -89,5 +87,6 @@ describe("DashboardPanel truncation chip", () => {
     const root = await render(tableState("none"));
     expect(root.querySelector(".dash-panel__chip")).toBeNull();
     expect(root.textContent).toContain("Slow requests");
+    expect(root.textContent).toContain("9007199254740993");
   });
 });
