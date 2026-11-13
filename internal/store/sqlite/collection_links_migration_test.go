@@ -90,7 +90,7 @@ func TestCollectionItemKindMigration(t *testing.T) {
 	if !reflect.DeepEqual(inventoryIDs, []int{3, 4, 7}) {
 		t.Fatalf("inventory = %v, want [3 4 7]", inventoryIDs)
 	}
-	if err := m.Up(); err != nil {
+	if err := m.Migrate(40); err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
 	if version, dirty, err := m.Version(); err != nil || dirty || version != 40 {
@@ -107,7 +107,7 @@ func TestCollectionItemKindMigration(t *testing.T) {
 	if got := countRows(t, db, "collection_items"); got != 7 {
 		t.Fatalf("collection_items after down = %d, want 7", got)
 	}
-	if err := m.Up(); err != nil {
+	if err := m.Migrate(40); err != nil {
 		t.Fatalf("migrate up again: %v", err)
 	}
 	assertLinkKinds(t, db)
