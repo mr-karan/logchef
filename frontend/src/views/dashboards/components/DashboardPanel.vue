@@ -5,15 +5,14 @@ import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import { Lock, AlertCircle, BarChart3, Hash, Table2, ListFilter } from "lucide-vue-next";
 import { Skeleton } from "@/components/ui/skeleton";
-import PanelTimeseries from "./PanelTimeseries.vue";
+import PanelChart from "./PanelChart.vue";
 import PanelStat from "./PanelStat.vue";
-import PanelBreakdown from "./PanelBreakdown.vue";
+import PanelPie from "./PanelPie.vue";
+import PanelTopList from "./PanelTopList.vue";
 import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 import { panelExploreQuery } from "@/utils/panelExplore";
-import { trimDashboardGroupBy } from "@/utils/dashboardPanels";
-import { histogramBuckets } from "@/utils/panelFrame";
 import { truncationMessage } from "@/utils/truncation";
 
 const { t } = useI18n();
@@ -69,9 +68,6 @@ const chartHeight = computed(() =>
 
 const vizType = computed(() => props.panel.viz?.type);
 
-const buckets = computed(() => panelState.value.frame ? histogramBuckets(panelState.value.frame) : []);
-const groupBy = computed(() => !props.panel.locked ? trimDashboardGroupBy(props.panel.query.group_by) || null : null);
-const notice = computed(() => panelState.value.frame?.notices.join(" ") || null);
 // A cut result says so on every visualization, and so does an empty one: a
 // byte budget can stop the reader before its first row. A cap that cut
 // nothing is silent.
@@ -95,17 +91,6 @@ const typeIcon = computed(() => {
   }
 });
 
-// A locked panel keeps only its viz type; the options below come from an
-// unlocked panel's viz. The chart sub-component keeps the schema 1 style names.
-const chartStyle = computed<"line" | "area" | "bars">(() => {
-  const panel = props.panel;
-  if (panel.locked || panel.viz.type !== "chart") return "line";
-  return panel.viz.mark === "bar" ? "bars" : (panel.viz.mark ?? "line");
-});
-const barMode = computed<"stacked" | "grouped">(() => {
-  const panel = props.panel;
-  return !panel.locked && panel.viz.type === "chart" && panel.viz.stack === "none" ? "grouped" : "stacked";
-});
 const columnSubset = computed(() => {
   const panel = props.panel;
   return !panel.locked && panel.viz.type === "table" ? panel.viz.visible_columns : undefined;
@@ -171,36 +156,23 @@ const columnSubset = computed(() => {
       </div>
 
       <!-- Empty -->
-      <div v-else-if="panelState.status === 'empty' && !(vizType === 'stat' && panelState.frame)" class="dash-panel__message">
+      <div v-else-if="panelState.status === 'empty' && !panelState.frame" class="dash-panel__message">
         <span>{{ t('ui.noDataForThisTimeRange') }}</span>
       </div>
 
       <!-- Success -->
       <template v-else>
-        <PanelTimeseries
-          v-if="vizType === 'chart' && panelState.frame && panelState.range"
-          :buckets="buckets"
-          :granularity="panelState.frame.interval"
-          :group-by="groupBy"
-          :notice="notice"
-          :range="panelState.range"
-          :height="chartHeight"
-          :chart="chartStyle"
-          :bar-mode="barMode"
+        <PanelChart
+          v-if="!panel.locked && panel.viz.type === 'chart' && panelState.frame"
+          :frame="panelState.frame" :viz="panel.viz" :count="panel.query.mode === 'count'" :range="panelState.range" :height="chartHeight"
         />
         <PanelStat
           v-else-if="vizType === 'stat' && panelState.frame && !panel.locked"
           :frame="panelState.frame"
           :panel="panel"
         />
-        <PanelBreakdown
-          v-else-if="(vizType === 'pie' || vizType === 'toplist') && panelState.frame && groupBy"
-          :buckets="buckets"
-          :group-by="groupBy"
-          :notice="notice"
-          :height="chartHeight"
-          :view="vizType === 'pie' ? 'donut' : 'horizontal-bars'"
-        />
+        <PanelPie v-else-if="!panel.locked && panel.viz.type === 'pie' && panelState.frame" :frame="panelState.frame" :viz="panel.viz" :count="panel.query.mode === 'count'" :height="chartHeight" />
+        <PanelTopList v-else-if="!panel.locked && panel.viz.type === 'toplist' && panelState.frame" :frame="panelState.frame" :viz="panel.viz" :count="panel.query.mode === 'count'" />
         <PanelTable
           v-else-if="vizType === 'table' && panelState.frame"
           :frame="panelState.frame"
