@@ -228,6 +228,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     };
 
     let request = QueryRequest {
+        variables: Vec::new(),
         query,
         start_time: time_range.start,
         end_time: time_range.end,

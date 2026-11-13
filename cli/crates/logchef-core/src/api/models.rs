@@ -167,6 +167,8 @@ pub struct Column {
 
 #[derive(Debug, Serialize)]
 pub struct QueryRequest {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<TemplateVariable>,
     pub query: String,
     pub start_time: String,
     pub end_time: String,
@@ -180,6 +182,8 @@ pub struct QueryRequest {
 
 #[derive(Debug, Serialize)]
 pub struct SqlQueryRequest {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<TemplateVariable>,
     pub query_text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
@@ -517,4 +521,115 @@ pub struct CollectionVariable {
     pub input_type: Option<String>,
     #[serde(default)]
     pub value: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TemplateVariable {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub var_type: String,
+    pub value: serde_json::Value,
+}
+
+impl CollectionQueryContent {
+    pub fn query_variables(&self, overrides: &[String]) -> Vec<TemplateVariable> {
+        let overrides: std::collections::HashMap<_, _> = overrides
+            .iter()
+            .filter_map(|item| item.split_once('='))
+            .collect();
+        self.variables
+            .iter()
+            .flatten()
+            .map(|variable| TemplateVariable {
+                name: variable.name.clone(),
+                var_type: variable
+                    .var_type
+                    .clone()
+                    .unwrap_or_else(|| "text".to_string()),
+                value: overrides
+                    .get(variable.name.as_str())
+                    .map(|value| serde_json::Value::String((*value).to_string()))
+                    .or_else(|| variable.value.clone())
+                    .unwrap_or(serde_json::Value::Null),
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod template_request_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn saved_variables_reach_both_request_dialects_without_rendering() {
+        let query =
+            "SELECT {{text}}, {{number}}, {{date}}, {{day}} [[WHERE service = {{optional}}]]";
+        let content: CollectionQueryContent = serde_json::from_value(json!({
+            "content": query,
+            "variables": [
+                {"name": "text", "type": "text", "value": "O'Reilly"},
+                {"name": "number", "type": "number", "value": 42},
+                {"name": "date", "type": "date", "value": "2026-11-12 23:59:00"},
+                {"name": "day", "type": "day", "value": "2026-11-12"},
+                {"name": "optional", "type": "text", "value": null}
+            ]
+        }))
+        .unwrap();
+        let expected = json!([
+            {"name": "text", "type": "text", "value": "O'Reilly"},
+            {"name": "number", "type": "number", "value": 42},
+            {"name": "date", "type": "date", "value": "2026-11-12 23:59:00"},
+            {"name": "day", "type": "day", "value": "2026-11-12"},
+            {"name": "optional", "type": "text", "value": null}
+        ]);
+        let native = SqlQueryRequest {
+            query_text: content.content.clone().unwrap(),
+            variables: content.query_variables(&[]),
+            limit: None,
+            timezone: None,
+            start_time: None,
+            end_time: None,
+            query_timeout: None,
+        };
+        let dsl = QueryRequest {
+            query: content.content.clone().unwrap(),
+            variables: content.query_variables(&[]),
+            start_time: String::new(),
+            end_time: String::new(),
+            timezone: None,
+            limit: None,
+            query_timeout: None,
+        };
+        let native = serde_json::to_value(native).unwrap();
+        let dsl = serde_json::to_value(dsl).unwrap();
+        assert_eq!(native["query_text"], query);
+        assert_eq!(dsl["query"], query);
+        assert_eq!(native["variables"], expected);
+        assert_eq!(dsl["variables"], expected);
+    }
+
+    #[test]
+    fn overrides_keep_saved_types_and_split_only_the_first_equals() {
+        let content: CollectionQueryContent = serde_json::from_value(json!({"variables": [
+            {"name": "d", "type": "day", "value": "2026-11-12"},
+            {"name": "n", "type": "number", "value": 1},
+            {"name": "t", "value": "old"}
+        ]}))
+        .unwrap();
+        let variables = content.query_variables(&[
+            "d=2026-11-13".into(),
+            "n=2".into(),
+            "t=a=b".into(),
+            "invalid".into(),
+        ]);
+        assert_eq!(
+            serde_json::to_value(variables).unwrap(),
+            json!([
+                {"name": "d", "type": "day", "value": "2026-11-13"},
+                {"name": "n", "type": "number", "value": "2"},
+                {"name": "t", "type": "text", "value": "a=b"}
+            ])
+        );
+    }
 }

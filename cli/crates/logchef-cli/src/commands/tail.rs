@@ -441,6 +441,7 @@ async fn run_poll(
             ctx.defaults.timezone.as_deref(),
         );
         let request = QueryRequest {
+            variables: Vec::new(),
             query: args.query.clone(),
             start_time: time_range.start,
             end_time: time_range.end,

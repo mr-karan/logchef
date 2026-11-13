@@ -420,6 +420,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         None => (None, None),
     };
     let request = SqlQueryRequest {
+        variables: Vec::new(),
         query_text: sql,
         limit: args.limit,
         // For ClickHouse, any --since/--from/--to was baked into `sql` as a
