@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -241,4 +242,61 @@ func TestStreamFilterValidation(t *testing.T) {
 func isQueryRequestError(err error) bool {
 	_, ok := errors.AsType[*QueryRequestError](err)
 	return ok
+}
+
+// TestPrepareLogchefQLQueryLeavesLimitToTheRule compiles a LogchefQL run
+// without the request limit, so the datasource's limit rule applies it and can
+// probe for a cut, and passes the request limit through as it was sent.
+func TestPrepareLogchefQLQueryLeavesLimitToTheRule(t *testing.T) {
+	t.Parallel()
+	cfg := config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 60}
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	admin := &models.User{Email: "limit-rule-admin@example.com", FullName: "Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	if err := db.CreateUser(ctx, admin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	source := &models.Source{
+		Name:        "phase4_rule_src",
+		MetaTSField: "timestamp",
+		Connection:  models.ConnectionInfo{Host: "ch:9000", Username: "default", Database: "default", TableName: "phase4_rule_src"},
+	}
+	if err := db.CreateSource(ctx, source); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	team, err := CreateTeam(ctx, db, log, "limit-rule", "")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if err := db.AddTeamSource(ctx, team.ID, source.ID); err != nil {
+		t.Fatalf("AddTeamSource: %v", err)
+	}
+	src, err := access.AuthorizeTeamSource(ctx, db, access.SessionPrincipal(admin), team.ID, source.ID, models.TokenScopeLogsRead)
+	if err != nil {
+		t.Fatalf("AuthorizeTeamSource: %v", err)
+	}
+	ds := newFakeDatasourceService(db, log, &fakeProvider{
+		queryLanguages: []models.QueryLanguage{models.QueryLanguageClickHouseSQL, models.QueryLanguageLogchefQL},
+		compileFn:      datasource.NewClickHouseProvider(&clickhouse.Manager{}, log).CompileLogchefQL,
+	})
+
+	for _, limit := range []int{0, 20, 5000} {
+		prepared, err := PrepareLogchefQLQuery(ctx, ds, cfg, src, LogchefQLQueryRequest{
+			Query: `level="error"`, StartTime: "2026-04-08T00:00:00Z", EndTime: "2026-04-08T01:00:00Z", Limit: limit,
+		})
+		if err != nil {
+			t.Fatalf("PrepareLogchefQLQuery(limit %d): %v", limit, err)
+		}
+		if strings.Contains(prepared.Compiled.Query, "LIMIT") || strings.Contains(prepared.Params.RawQuery, "LIMIT") {
+			t.Fatalf("compiled query carries a LIMIT: %q", prepared.Compiled.Query)
+		}
+		if strings.HasSuffix(prepared.Compiled.Query, "\n") {
+			t.Fatalf("compiled query ends in a newline: %q", prepared.Compiled.Query)
+		}
+		params := prepared.Params
+		if params.Limit != limit || params.DefaultLimit != 100 || params.MaxLimit != 1000 {
+			t.Fatalf("limit %d: params carry limit %d default %d max %d", limit, params.Limit, params.DefaultLimit, params.MaxLimit)
+		}
+	}
 }

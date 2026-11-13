@@ -174,6 +174,10 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   for one extra row, so `rows` is a proven cut. The Explorer and dashboard
   panels show the state as a chip and no longer print a limit warning when
   nothing was cut. The older `truncated` and `truncated_reason` fields stay.
+- A LogchefQL run no longer bakes the request limit into the SQL it reports
+  as `generated_sql`; the limit applies when the query runs. The Explorer's
+  Download of a LogchefQL run therefore exports up to the export maximum
+  instead of stopping at the preview limit.
 
 ### Fixed
 - Dashboard saves use an atomic revision check so two edits from the same

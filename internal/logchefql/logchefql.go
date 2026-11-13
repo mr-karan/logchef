@@ -479,11 +479,11 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 	// ORDER BY clause
 	query.WriteString("ORDER BY ")
 	query.WriteString(queryescape.ClickHouseIdentifier(params.TimestampField))
-	query.WriteString(" DESC\n")
+	query.WriteString(" DESC")
 
 	// LIMIT clause
 	if params.Limit > 0 {
-		fmt.Fprintf(&query, "LIMIT %d", params.Limit)
+		fmt.Fprintf(&query, "\nLIMIT %d", params.Limit)
 	}
 
 	return query.String(), nil
