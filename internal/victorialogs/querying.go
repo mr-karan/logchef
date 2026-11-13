@@ -110,10 +110,10 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	form := url.Values{}
 	form.Set("query", query)
 
-	limit, limitAdded, limitCapped := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
-	if limit > 0 {
-		form.Set("limit", strconv.Itoa(limit))
-	}
+	limit, limitSource := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
+	// Ask for one row past the limit: a row beyond it proves the result was
+	// cut. A limit pipe inside the query still applies on its own.
+	form.Set("limit", strconv.Itoa(limit+1))
 	if req.StartTime != nil {
 		form.Set("start", formatAPITime(*req.StartTime))
 	}
@@ -150,22 +150,22 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	stats := statsFromHeaders(resp, len(logs))
 	stats.RowsReturned = len(logs)
 	stats.BytesReturned = bytesReturned
-	if limit > 0 {
-		stats.LimitApplied = limit
-	}
+	stats.LimitApplied = limit
+	stats.LimitSource = limitSource
+	stats.Truncation = truncationState(truncatedReason)
 	if truncatedReason != "" {
 		stats.Truncated = true
 		stats.TruncatedReason = truncatedReason
 	}
 
 	warnings := make([]models.QueryWarning, 0, 2)
-	if limitAdded {
+	if req.Limit <= 0 {
 		warnings = append(warnings, models.QueryWarning{
 			Code:    "LIMIT_APPLIED",
 			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", limit),
 		})
 	}
-	if limitCapped {
+	if limitSource == models.LimitSourceMax {
 		warnings = append(warnings, models.QueryWarning{
 			Code:    "LIMIT_CAPPED",
 			Message: fmt.Sprintf("Result limit capped at %d rows.", limit),
@@ -184,10 +184,12 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 // object per line) and enforces the response byte budget while reading, so a
 // single very large row cannot allocate beyond the budget. Byte accounting uses
 // the raw wire length (the escaped JSON actually transferred), not the decoded
-// string length. It returns the decoded rows, the column names in first-seen
-// order, the bytes accounted, and a truncation reason ("" if none).
-func readQueryRows(body io.Reader, maxResponseBytes, limitHint int) (logs []map[string]any, columnNames []string, bytesReturned int, truncatedReason string, err error) {
-	logs = make([]map[string]any, 0, limitHint)
+// string length. A positive maxRows stops the reader at that many rows, and a
+// further row is reported as a row truncation. It returns the decoded rows, the
+// column names in first-seen order, the bytes accounted, and a truncation
+// reason ("" if none).
+func readQueryRows(body io.Reader, maxResponseBytes, maxRows int) (logs []map[string]any, columnNames []string, bytesReturned int, truncatedReason string, err error) {
+	logs = make([]map[string]any, 0, min(max(maxRows, 0), 4096))
 	columnSet := make(map[string]struct{})
 	columnNames = make([]string, 0)
 
@@ -204,6 +206,9 @@ func readQueryRows(body io.Reader, maxResponseBytes, limitHint int) (logs []map[
 	for {
 		line, readErr := lineReader.ReadBytes('\n')
 		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
+			if maxRows > 0 && len(logs) >= maxRows {
+				return logs, columnNames, bytesReturned, "row_limit", nil
+			}
 			lineSize := len(line)
 			if maxResponseBytes > 0 && bytesReturned+lineSize > maxResponseBytes {
 				return logs, columnNames, bytesReturned, "byte_limit", nil
@@ -1334,11 +1339,11 @@ func splitTopLevelPipes(query string) []string {
 	return stages
 }
 
-// resolveQueryLimit mirrors the ClickHouse limit policy: a limit-less call
-// falls back to DefaultLimit (not MaxLimit), and any limit is capped at
-// MaxLimit. It reports whether a default was injected (LIMIT_APPLIED) or the
-// caller's limit was capped (LIMIT_CAPPED) so callers can surface a warning.
-func resolveQueryLimit(limit, defaultLimit, maxLimit int) (applied int, added, capped bool) {
+// resolveQueryLimit mirrors the ClickHouse limit rule for the request side: a
+// limit-less call falls back to DefaultLimit (not MaxLimit), and any limit is
+// capped at MaxLimit. A limit pipe inside the query is VictoriaLogs' own and
+// applies on top. The source names the bound that won.
+func resolveQueryLimit(limit, defaultLimit, maxLimit int) (applied int, source models.LimitSource) {
 	if defaultLimit <= 0 {
 		defaultLimit = defaultQueryLimit
 	}
@@ -1346,17 +1351,27 @@ func resolveQueryLimit(limit, defaultLimit, maxLimit int) (applied int, added, c
 		maxLimit = defaultLimit
 	}
 
+	applied, source = limit, models.LimitSourceRequest
 	if limit <= 0 {
-		applied = defaultLimit
-		added = true
-	} else {
-		applied = limit
+		applied, source = defaultLimit, models.LimitSourceDefault
 	}
 	if applied > maxLimit {
-		applied = maxLimit
-		capped = true
+		applied, source = maxLimit, models.LimitSourceMax
 	}
-	return applied, added, capped
+	return applied, source
+}
+
+// truncationState maps the reader's stop reason to a truncation state. Every
+// query asks for a probe row, so a result that filled its limit without one
+// is complete.
+func truncationState(reason string) models.Truncation {
+	switch reason {
+	case "byte_limit":
+		return models.TruncationBytes
+	case "row_limit":
+		return models.TruncationRows
+	}
+	return models.TruncationNone
 }
 
 // inferColumnType maps a field name to a display type. VictoriaLogs is

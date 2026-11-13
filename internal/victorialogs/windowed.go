@@ -137,7 +137,7 @@ func (p *Provider) PrepareWindowedQuery(source *models.Source, req datasource.Wi
 		windows = append(windows, datasource.SearchWindow{Index: len(windows), Start: start, End: end})
 		end = start
 	}
-	limit, _, _ := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
+	limit, _ := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
 	req.Limit = limit
 	fingerprintData, err := json.Marshal(struct {
 		Version  int             `json:"version"`
@@ -480,7 +480,7 @@ func (p *Provider) queryWindowRows(ctx context.Context, conn models.VictoriaLogs
 		return nil, models.QueryStats{}, err
 	}
 	defer resp.Body.Close()
-	rows, _, bytesReturned, truncated, err := readQueryRows(resp.Body, req.MaxResponseBytes, req.Limit+1)
+	rows, _, bytesReturned, truncated, err := readQueryRows(resp.Body, req.MaxResponseBytes, 0)
 	stats := statsFromHeaders(resp, len(rows))
 	stats.BytesReturned = bytesReturned
 	stats.Truncated = truncated != ""
