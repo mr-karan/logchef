@@ -1,16 +1,7 @@
-//! Shared time-range resolution for CLI commands that build a `start_time`/
-//! `end_time` window for a query request.
+//! Shared query time ranges and effective timezone resolution.
 //!
-//! The invariant this module enforces: **the wall-clock string sent to the
-//! server must always be formatted in the same timezone that is sent
-//! alongside it as the request's `timezone` field.** The server (and the
-//! ClickHouse SQL it generates) interprets the wall-clock string *in that
-//! timezone* — e.g. `toDateTime('2026-07-14 04:58:42', 'Asia/Kolkata')`. If
-//! the string was actually computed in UTC but labeled with a different
-//! zone, the whole window silently shifts by that zone's UTC offset.
-//!
-//! Every command should go through [`resolve_time_range`] rather than
-//! formatting timestamps and picking a timezone independently.
+//! Wall-clock bounds are formatted in the accompanying timezone.
+//! RFC3339 bounds preserve instants, including ambiguous local DST hours.
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
@@ -55,31 +46,33 @@ pub enum TimeInput<'a> {
     /// user-supplied `--from`/`--to`, entered as local wall-clock time).
     /// Passed through unchanged.
     WallClock { start: &'a str, end: &'a str },
-    /// A concrete instant range (e.g. `now - since`, or a stored epoch
-    /// timestamp) to be formatted as a wall-clock string in the effective
-    /// timezone.
+    /// Instants serialized as RFC3339 UTC bounds.
+    Rfc3339 {
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    },
+    /// Instants formatted as wall-clock strings in the effective timezone.
     Instant {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     },
 }
 
-/// A time range ready to go on the wire: `start`/`end` are wall-clock
-/// strings formatted in `timezone`, and `timezone` is exactly the zone name
-/// that must accompany them in the request so the server interprets them
-/// correctly.
+/// Query bounds with the effective timezone used for wall-clock values.
 pub struct ResolvedTimeRange {
     pub start: String,
     pub end: String,
     pub timezone: String,
 }
 
-/// Resolves a time range for a query request. Always returns a `timezone`
-/// that matches how `start`/`end` were formatted, enforcing the invariant
-/// described at the module level.
+/// Formats query bounds and includes the effective timezone.
 pub fn resolve_time_range(input: TimeInput<'_>, configured_tz: Option<&str>) -> ResolvedTimeRange {
     let tz = resolve_timezone(configured_tz);
     let (start, end) = match input {
+        TimeInput::Rfc3339 { start, end } => (
+            start.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            end.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+        ),
         TimeInput::WallClock { start, end } => (start.to_string(), end.to_string()),
         TimeInput::Instant { start, end } => (
             start
@@ -248,5 +241,63 @@ mod tests {
         // asserting it doesn't panic and always yields a parseable zone.
         let tz = resolve_timezone(None);
         assert!(tz.to_string().parse::<Tz>().is_ok());
+    }
+}
+
+pub fn calendar_range(
+    relative: &str,
+    now: DateTime<Utc>,
+    configured_tz: Option<&str>,
+) -> Option<crate::error::Result<(DateTime<Utc>, DateTime<Utc>)>> {
+    use chrono::TimeZone;
+    if relative != "today" && relative != "yesterday" {
+        return None;
+    }
+    let tz = resolve_timezone(configured_tz);
+    let date = now.with_timezone(&tz).date_naive();
+    let midnight = |date: chrono::NaiveDate| {
+        tz.from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+            .earliest()
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok_or_else(|| {
+                crate::error::Error::other(format!("Calendar day has no midnight in {tz}"))
+            })
+    };
+    Some((|| {
+        let end = midnight(date)?;
+        if relative == "today" {
+            Ok((end, now))
+        } else {
+            Ok((
+                midnight(
+                    date.pred_opt()
+                        .ok_or_else(|| crate::error::Error::other("Invalid previous day"))?,
+                )?,
+                end,
+            ))
+        }
+    })())
+}
+
+#[cfg(test)]
+mod calendar_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn calendar_days_follow_zone_and_dst_instead_of_fixed_durations() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 2, 4, 30, 0).unwrap();
+        let (start, end) = calendar_range("today", now, Some("America/New_York"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 11, 1, 4, 0, 0).unwrap());
+        assert_eq!(end, now);
+        let now = Utc.with_ymd_and_hms(2026, 11, 2, 12, 0, 0).unwrap();
+        let (start, end) = calendar_range("yesterday", now, Some("America/New_York"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(start, Utc.with_ymd_and_hms(2026, 11, 1, 4, 0, 0).unwrap());
+        assert_eq!(end, Utc.with_ymd_and_hms(2026, 11, 2, 5, 0, 0).unwrap());
+        assert_eq!(end - start, chrono::Duration::hours(25));
     }
 }

@@ -198,17 +198,24 @@ pub struct SqlQueryRequest {
 }
 
 impl SqlQueryRequest {
-    pub fn with_time_range(
-        mut self,
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
+    pub fn new(
+        query_text: String,
+        variables: Vec<TemplateVariable>,
+        limit: Option<u32>,
+        query_timeout: Option<u32>,
+        range: (DateTime<Utc>, DateTime<Utc>),
         configured_tz: Option<&str>,
     ) -> Self {
         let tz = crate::timerange::resolve_timezone(configured_tz);
-        self.start_time = Some(start.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
-        self.end_time = Some(end.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
-        self.timezone = Some(tz.to_string());
-        self
+        Self {
+            query_text,
+            variables,
+            limit,
+            query_timeout,
+            start_time: Some(range.0.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)),
+            end_time: Some(range.1.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)),
+            timezone: Some(tz.to_string()),
+        }
     }
 }
 
@@ -242,6 +249,8 @@ pub struct ExportJobResponse {
 
 #[derive(Debug, Serialize)]
 pub struct TranslateRequest {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<TemplateVariable>,
     pub query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_time: Option<String>,
@@ -536,6 +545,10 @@ pub struct CollectionVariable {
     pub input_type: Option<String>,
     #[serde(default)]
     pub value: Option<serde_json::Value>,
+    #[serde(default, rename = "defaultValue")]
+    pub default_value: Option<serde_json::Value>,
+    #[serde(default)]
+    pub options: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -544,28 +557,93 @@ pub struct TemplateVariable {
     #[serde(rename = "type")]
     pub var_type: String,
     pub value: serde_json::Value,
+    #[serde(skip)]
+    pub origin: &'static str,
 }
 
 impl CollectionQueryContent {
-    pub fn query_variables(&self, overrides: &[String]) -> Vec<TemplateVariable> {
-        let overrides: std::collections::HashMap<_, _> = overrides
+    pub fn query_variables(
+        &self,
+        overrides: &[String],
+    ) -> crate::error::Result<Vec<TemplateVariable>> {
+        let saved = self.variables.as_deref().unwrap_or_default();
+        let names = saved
             .iter()
-            .filter_map(|item| item.split_once('='))
-            .collect();
-        self.variables
+            .map(|v| v.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut values: std::collections::HashMap<&str, Vec<serde_json::Value>> =
+            std::collections::HashMap::new();
+        for item in overrides {
+            let (name, value) = item.split_once('=').ok_or_else(|| {
+                crate::error::Error::other(format!(
+                    "Invalid --var {item:?}, expected name=value. Saved variables: {names}"
+                ))
+            })?;
+            if name.trim() != name || !saved.iter().any(|v| v.name == name) {
+                return Err(crate::error::Error::other(format!(
+                    "Invalid --var name {name:?}. Saved variables: {names}"
+                )));
+            }
+            values
+                .entry(name)
+                .or_default()
+                .push(serde_json::Value::String(value.to_string()));
+        }
+        saved
             .iter()
-            .flatten()
-            .map(|variable| TemplateVariable {
-                name: variable.name.clone(),
-                var_type: variable
-                    .var_type
-                    .clone()
-                    .unwrap_or_else(|| "text".to_string()),
-                value: overrides
-                    .get(variable.name.as_str())
-                    .map(|value| serde_json::Value::String((*value).to_string()))
-                    .or_else(|| variable.value.clone())
-                    .unwrap_or(serde_json::Value::Null),
+            .map(|variable| {
+                let (value, origin) = if let Some(mut supplied) =
+                    values.remove(variable.name.as_str())
+                {
+                    let compact = self
+                        .content
+                        .as_deref()
+                        .unwrap_or_default()
+                        .chars()
+                        .filter(|c| !c.is_whitespace())
+                        .collect::<String>()
+                        .to_lowercase();
+                    let multi = !variable.options.is_empty()
+                        || compact
+                            .contains(&format!("in({{{{{}}}}})", variable.name.to_lowercase()));
+                    if supplied.len() > 1 && !multi {
+                        return Err(crate::error::Error::other(format!(
+                            "Repeated --var requires options or IN (...). Saved variables: {names}"
+                        )));
+                    }
+                    (
+                        if supplied.len() == 1 {
+                            supplied.remove(0)
+                        } else {
+                            serde_json::Value::Array(supplied)
+                        },
+                        "--var",
+                    )
+                } else if let Some(value) = variable.value.as_ref().filter(|v| {
+                    !v.is_null()
+                        && v.as_str() != Some("")
+                        && v.as_array().is_none_or(|a| !a.is_empty())
+                }) {
+                    (value.clone(), "saved value")
+                } else {
+                    (
+                        variable
+                            .default_value
+                            .clone()
+                            .unwrap_or(serde_json::Value::Null),
+                        "default",
+                    )
+                };
+                Ok(TemplateVariable {
+                    name: variable.name.clone(),
+                    var_type: variable
+                        .var_type
+                        .clone()
+                        .unwrap_or_else(|| "text".to_string()),
+                    value,
+                    origin,
+                })
             })
             .collect()
     }
@@ -575,6 +653,55 @@ impl CollectionQueryContent {
 mod template_request_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn empty_saved_values_use_defaults_but_explicit_empty_clears() {
+        for empty in [json!(""), json!(null), json!([])] {
+            let content: CollectionQueryContent = serde_json::from_value(json!({
+                "content": "SELECT {{required}} [[WHERE env = {{env}}]]",
+                "variables": [
+                    {"name":"required","type":"number","defaultValue":42},
+                    {"name":"env","type":"text","value":empty,"defaultValue":"prod"}
+                ]
+            }))
+            .unwrap();
+            let variables = content.query_variables(&[]).unwrap();
+            assert_eq!(variables[0].value, json!(42));
+            assert_eq!(variables[1].value, json!("prod"));
+            assert_eq!(variables[1].origin, "default");
+            let cleared = content.query_variables(&["env=".into()]).unwrap();
+            assert_eq!(cleared[1].value, json!(""));
+            assert_eq!(cleared[1].origin, "--var");
+        }
+    }
+
+    #[test]
+    fn saved_values_and_in_list_overrides_retain_their_shape() {
+        let content: CollectionQueryContent = serde_json::from_value(json!({
+            "content":"env IN ( {{env}} )",
+            "variables":[{"name":"env","value":"saved","defaultValue":"default"}]
+        }))
+        .unwrap();
+        assert_eq!(
+            content.query_variables(&[]).unwrap()[0].origin,
+            "saved value"
+        );
+        assert_eq!(
+            content.query_variables(&[]).unwrap()[0].value,
+            json!("saved")
+        );
+        assert_eq!(
+            content.query_variables(&["env=a".into()]).unwrap()[0].value,
+            json!("a")
+        );
+        assert_eq!(
+            content
+                .query_variables(&["env=a".into(), "env=b".into()])
+                .unwrap()[0]
+                .value,
+            json!(["a", "b"])
+        );
+    }
 
     #[test]
     fn saved_variables_reach_both_request_dialects_without_rendering() {
@@ -600,7 +727,7 @@ mod template_request_tests {
         ]);
         let native = SqlQueryRequest {
             query_text: content.content.clone().unwrap(),
-            variables: content.query_variables(&[]),
+            variables: content.query_variables(&[]).unwrap(),
             limit: None,
             timezone: None,
             start_time: None,
@@ -609,7 +736,7 @@ mod template_request_tests {
         };
         let dsl = QueryRequest {
             query: content.content.clone().unwrap(),
-            variables: content.query_variables(&[]),
+            variables: content.query_variables(&[]).unwrap(),
             start_time: String::new(),
             end_time: String::new(),
             timezone: None,
@@ -632,12 +759,9 @@ mod template_request_tests {
             {"name": "t", "value": "old"}
         ]}))
         .unwrap();
-        let variables = content.query_variables(&[
-            "d=2026-11-13".into(),
-            "n=2".into(),
-            "t=a=b".into(),
-            "invalid".into(),
-        ]);
+        let variables = content
+            .query_variables(&["d=2026-11-13".into(), "n=2".into(), "t=a=b".into()])
+            .unwrap();
         assert_eq!(
             serde_json::to_value(variables).unwrap(),
             json!([

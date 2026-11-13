@@ -400,7 +400,18 @@ fn route(
             query["resolved_team_id"] = serde_json::json!(1);
             (200, serde_json::json!({"status": "success", "data": query}))
         }
-        ("POST", "/api/v1/teams/1/sources/2/logs/query") => {
+        ("POST", "/api/v1/teams/1/sources/2/logchefql/translate") => {
+            let body: serde_json::Value = serde_json::from_str(&req.body).unwrap();
+            assert_eq!(body["variables"][0]["name"], "env");
+            (
+                200,
+                serde_json::json!({"status":"success","data":{"valid":true,"full_sql":"SELECT translated"}}),
+            )
+        }
+        (
+            "POST",
+            "/api/v1/teams/1/sources/2/logs/query" | "/api/v1/teams/1/sources/2/logchefql/query",
+        ) => {
             state
                 .lock()
                 .unwrap()

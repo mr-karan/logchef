@@ -42,11 +42,11 @@ pub struct SavedQueriesArgs {
     #[arg(long, short = 'l')]
     limit: Option<u32>,
 
-    /// Variable overrides (format: name=value)
+    /// Variable overrides (name=value). Empty clears the default. Repeat for options or IN (...) to select multiple values.
     #[arg(long = "var", short = 'V', value_name = "NAME=VALUE")]
     variables: Vec<String>,
 
-    /// Print the resolved query without running it
+    /// Print the query template, resolved variables and their origins, and server-translated SQL for LogchefQL
     #[arg(long)]
     show_sql: bool,
 
@@ -226,13 +226,40 @@ async fn run_saved_query(
     let content: CollectionQueryContent =
         serde_json::from_str(&query.query_content).context("Failed to parse query content")?;
 
-    let variables = content.query_variables(&args.variables);
+    let variables = content.query_variables(&args.variables)?;
     let final_query = content.content.clone().unwrap_or_default();
 
     let limit = args.limit.or(content.limit).unwrap_or(ctx.defaults.limit);
 
     if args.show_sql {
         println!("{}", final_query);
+        for variable in &variables {
+            println!(
+                "{} ({}) = {} [{}]",
+                variable.name, variable.var_type, variable.value, variable.origin
+            );
+        }
+        if query.query_language == "logchefql" {
+            let range = saved_query_time_range(&content, ctx.defaults.timezone.as_deref())?;
+            let translated = client
+                .translate_logchefql(
+                    team_id,
+                    source_id,
+                    &logchef_core::api::TranslateRequest {
+                        query: final_query,
+                        variables,
+                        start_time: Some(range.start),
+                        end_time: Some(range.end),
+                        timezone: Some(range.timezone),
+                        limit: Some(limit),
+                    },
+                )
+                .await?;
+            if !translated.valid {
+                anyhow::bail!("Translation failed: {:?}", translated.error);
+            }
+            println!("{}", translated.generated_query());
+        }
         return Ok(());
     }
 
@@ -242,17 +269,15 @@ async fn run_saved_query(
     );
 
     let response = if query.query_language != "logchefql" {
-        let (start, end) = parse_time_range(&content)?;
-        let request = SqlQueryRequest {
+        let (start, end) = parse_time_range(&content, ctx.defaults.timezone.as_deref())?;
+        let request = SqlQueryRequest::new(
+            final_query,
             variables,
-            query_text: final_query,
-            limit: args.limit,
-            timezone: None,
-            start_time: None,
-            end_time: None,
-            query_timeout: Some(args.timeout),
-        }
-        .with_time_range(start, end, ctx.defaults.timezone.as_deref());
+            args.limit,
+            Some(args.timeout),
+            (start, end),
+            ctx.defaults.timezone.as_deref(),
+        );
         client
             .query_sql(team_id, source_id, &request)
             .await
@@ -652,25 +677,28 @@ fn parse_query_param_i64(url: &Url, key: &str) -> Option<i64> {
         .and_then(|(_, v)| v.parse::<i64>().ok())
 }
 
-/// The request window for a saved query: bounds formatted in the effective
-/// timezone, returned together with that zone so they are always sent as a
-/// pair.
+/// RFC3339 instants and the effective timezone for a saved query.
 fn saved_query_time_range(
     content: &CollectionQueryContent,
     configured_tz: Option<&str>,
 ) -> Result<ResolvedTimeRange> {
-    let (start, end) = parse_time_range(content)?;
+    let (start, end) = parse_time_range(content, configured_tz)?;
     Ok(resolve_time_range(
-        TimeInput::Instant { start, end },
+        TimeInput::Rfc3339 { start, end },
         configured_tz,
     ))
 }
 
-fn parse_time_range(content: &CollectionQueryContent) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+fn parse_time_range(
+    content: &CollectionQueryContent,
+    configured_tz: Option<&str>,
+) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
     if let Some(tr) = &content.time_range {
         if let Some(rel) = &tr.relative {
             let end = Utc::now();
-            return Ok((end - parse_duration(rel)?, end));
+            return logchef_core::timerange::calendar_range(rel, end, configured_tz)
+                .map(|result| result.map_err(anyhow::Error::from))
+                .unwrap_or_else(|| Ok((end - parse_duration(rel)?, end)));
         }
 
         if let Some(abs) = &tr.absolute {
@@ -781,7 +809,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn saved_query_window_is_formatted_in_the_zone_it_is_sent_with() {
+    fn saved_query_window_preserves_instants_with_the_effective_zone() {
         let start = Utc.with_ymd_and_hms(2026, 7, 14, 3, 30, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2026, 7, 14, 4, 0, 0).unwrap();
         let content: CollectionQueryContent = serde_json::from_value(serde_json::json!({
@@ -793,8 +821,8 @@ mod tests {
         .unwrap();
 
         let range = saved_query_time_range(&content, Some("Asia/Kolkata")).unwrap();
-        assert_eq!(range.start, "2026-07-14 09:00:00");
-        assert_eq!(range.end, "2026-07-14 09:30:00");
+        assert_eq!(range.start, "2026-07-14T03:30:00Z");
+        assert_eq!(range.end, "2026-07-14T04:00:00Z");
         assert_eq!(range.timezone, "Asia/Kolkata");
     }
 
@@ -806,14 +834,7 @@ mod tests {
         .unwrap();
         let range = saved_query_time_range(&content, Some("Asia/Kolkata")).unwrap();
         assert_eq!(range.timezone, "Asia/Kolkata");
-        let kolkata = logchef_core::timerange::parse_timezone("Asia/Kolkata").unwrap();
-        let wall = |s: &str| {
-            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                .unwrap()
-                .and_local_timezone(kolkata)
-                .unwrap()
-                .with_timezone(&Utc)
-        };
+        let wall = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
         let end = wall(&range.end);
         assert!(
             (Utc::now() - end).num_seconds().abs() < 5,

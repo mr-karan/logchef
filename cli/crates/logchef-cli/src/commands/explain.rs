@@ -71,6 +71,7 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
             team_id,
             source_id,
             &TranslateRequest {
+                variables: Vec::new(),
                 query: args.query.clone(),
                 start_time: None,
                 end_time: None,

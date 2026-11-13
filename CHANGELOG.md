@@ -14,6 +14,9 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 000013, 000014 and 000015).
 
 ### Upgrade notes
+- **Breaking for scripts:** CLI variables are now typed and rendered by the server.
+  Pre-quoted values such as `--var "d='2026-11-12'"` must drop their quotes,
+  for example `--var d=2026-11-12`.
 - After upgrading, reload any Logchef tab that was already open. Save dashboard
   edits before the upgrade: an old tab's save is refused with 428 and its draft
   cannot be saved.
