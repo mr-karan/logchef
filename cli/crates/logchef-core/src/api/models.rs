@@ -455,6 +455,14 @@ pub struct QueryStats {
     pub rows_read: i64,
     #[serde(default)]
     pub bytes_read: i64,
+    /// The bound that set the row limit: `statement`, `request`, `default`
+    /// or `max`. Servers before the LIMIT rule omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_source: Option<String>,
+    /// Whether rows were cut: `none`, `rows`, `bytes` or `unknown`. Servers
+    /// before the LIMIT rule omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
