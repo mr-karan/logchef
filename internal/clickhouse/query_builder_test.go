@@ -302,6 +302,16 @@ func TestLimitRule(t *testing.T) {
 			wantSQL: "(SELECT * FROM mydb.logs LIMIT 20) SETTINGS max_threads=1", wantApplied: 20, wantFetch: 20, wantSource: models.LimitSourceStatement,
 		},
 		{
+			name: "a query after EXCEPT in parentheses is a set operation capped as a whole",
+			sql:  "SELECT 1 EXCEPT (SELECT 2) SETTINGS max_threads = 1", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM (SELECT 1 EXCEPT(SELECT 2)) LIMIT 101 SETTINGS max_threads=1", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a column EXCEPT modifier keeps the statement's own limit",
+			sql:  "SELECT * EXCEPT (a) FROM mydb.logs LIMIT 20", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * EXCEPT(a) FROM mydb.logs LIMIT 20", wantApplied: 20, wantFetch: 20, wantSource: models.LimitSourceStatement,
+		},
+		{
 			name: "LIMIT 0 is the author's",
 			sql:  "SELECT * FROM mydb.logs LIMIT 0", request: 100, def: 1000, max: 100000,
 			wantSQL: "SELECT * FROM mydb.logs LIMIT 0", wantApplied: 0, wantFetch: 0, wantSource: models.LimitSourceStatement,
@@ -324,6 +334,27 @@ func TestLimitRule(t *testing.T) {
 				t.Fatalf("QueryOptions() = %+v, want MaxRows %d, max_result_rows %d", opts, tc.wantApplied, tc.wantFetch)
 			}
 		})
+	}
+}
+
+// TestExceptAfterSelectList names the parser limitation when EXCEPT follows a
+// select list, and leaves other syntax errors as they are.
+func TestExceptAfterSelectList(t *testing.T) {
+	qb := NewExtendedQueryBuilder("", 100000)
+	for sql, wantLimitation := range map[string]bool{
+		"SELECT 1 EXCEPT SELECT 2":                        true,
+		"select a, b except\n  select c, d":               true,
+		"SELECT * EXCEPT a FROM t":                        false,
+		"SELECT a FROM t EXCEPT DISTINCT SELECT a FROM t": false,
+		"SELECT 1 UNION SELECT 2":                         false,
+	} {
+		_, err := qb.BuildRawQueryWithLimitPolicy(sql, 100, 1000, 100000)
+		if err == nil || errors.Is(err, ErrInvalidQuery) != wantLimitation {
+			t.Errorf("BuildRawQueryWithLimitPolicy(%q) error = %v, want the parser limitation %v", sql, err, wantLimitation)
+		}
+	}
+	if _, err := qb.BuildRawQueryWithLimitPolicy("(SELECT 1) EXCEPT SELECT 2", 100, 1000, 100000); err != nil {
+		t.Fatalf("the suggested form does not build: %v", err)
 	}
 }
 

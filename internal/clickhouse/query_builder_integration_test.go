@@ -9,6 +9,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/mr-karan/logchef/internal/queryescape"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestQueryBuilderClickHousePreservesLiteralValues(t *testing.T) {
@@ -156,4 +157,29 @@ func exceptionCode(ctx context.Context, client *Client, sql string) int32 {
 		return exception.Code
 	}
 	return -1
+}
+
+// TestExceptAfterSelectListClickHouse runs EXCEPT after a select list in the
+// two forms that build: a parenthesized query after EXCEPT, and the
+// parenthesized first SELECT that the parser limitation's error suggests.
+func TestExceptAfterSelectListClickHouse(t *testing.T) {
+	client, ctx := integrationClient(t)
+	for _, sql := range []string{
+		"SELECT toUInt64(arrayJoin([0, 1, 2, 3, 4])) EXCEPT (SELECT toUInt64(2))",
+		"(SELECT toUInt64(arrayJoin([0, 1, 2, 3, 4]))) EXCEPT SELECT toUInt64(2)",
+	} {
+		t.Run(sql, func(t *testing.T) {
+			built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy(sql, 3, 1000, 100000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := client.QueryWithOptions(ctx, built.SQL, built.QueryOptions(10))
+			if err != nil {
+				t.Fatalf("execute %q: %v", built.SQL, err)
+			}
+			if len(result.Logs) != 3 || result.Stats.Truncation != models.TruncationRows {
+				t.Fatalf("%q returned %d rows, truncation %q, want 3 rows cut from 4", built.SQL, len(result.Logs), result.Stats.Truncation)
+			}
+		})
+	}
 }
