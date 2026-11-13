@@ -7,10 +7,11 @@ import PanelChart from "../PanelChart.vue";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach((f) => f()));
-async function render(frame: PanelFrame, viz: ChartViz, count = false) {
+async function render(frame: PanelFrame, viz: ChartViz, count = false, range = { start: Date.parse("2026-11-09"), end: Date.parse("2026-11-16"), zone: "UTC" }) {
+  localStorage.setItem("logchef_user_preferences", JSON.stringify({ timezone: "utc" }));
   const host = document.createElement("div");
   document.body.append(host);
-  const app = createApp(PanelChart, { frame, viz, count, height: 260, range: { start: 0, end: Date.parse("2026-11-13"), zone: "UTC" } }).use(createPinia());
+  const app = createApp(PanelChart, { frame, viz, count, height: 260, range }).use(createPinia());
   app.mount(host);
   cleanups.push(() => { app.unmount(); host.remove(); });
   await nextTick();
@@ -84,4 +85,35 @@ describe("PanelChart", () => {
     expect(host.querySelector("rect")?.getAttribute("width")).not.toBe("0");
     expect(host.querySelector(".panel-chart__legend")).toBeNull();
   });
+});
+
+it.each(["auto", "time", "category"] as const)("positions descending date rows with %s scale", async (x_scale) => {
+  const host = await render(daily, { type: "chart", x: "day", y: ["a"], mark: "bar", x_scale });
+  const points = [...host.querySelectorAll(".panel-chart__point")];
+  expect(points.map((e) => e.getAttribute("aria-label")?.split(",")[0])).toEqual(x_scale === "category" ? ["2026-11-12", "2026-11-10"] : ["2026-11-10", "2026-11-12"]);
+  const bars = [...host.querySelectorAll("rect")];
+  expect(Number(bars[0].getAttribute("x"))).toBeLessThan(Number(bars[1].getAttribute("x")));
+});
+it("formats count time ticks without ellipsis and keeps full timestamps in tooltips", async () => {
+  const source = countFrame([
+    { bucket: "2026-11-09T10:00:00Z", log_count: 5 },
+    { bucket: "2026-11-09T11:00:00Z", log_count: 8 },
+  ], "1h", false);
+  const host = await render(source, { type: "chart", mark: "bar" }, true);
+  const tick = host.querySelector(".panel-chart__tick")!;
+  expect([...tick.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("")).toBe("Nov 9 10:00");
+  expect(tick.querySelector("title")?.textContent).toBe("2026-11-09 10:00:00");
+  expect(tick.textContent).not.toContain("…");
+});
+
+it.each([
+  ["1s", "2026-11-09T10:00:01Z", "2026-11-09T10:00:10Z", "10:00:01"],
+  ["1m", "2026-11-09T10:00:00Z", "2026-11-09T10:30:00Z", "10:00"],
+  ["24h", "2026-11-09T00:00:00Z", "2026-11-16T00:00:00Z", "Nov 9"],
+  ["24h", "2026-12-31T00:00:00Z", "2027-01-02T00:00:00Z", "Dec 31 2026"],
+])("uses %s tick precision across %s to %s", async (interval, start, end, expected) => {
+  const source = countFrame([{ bucket: start, log_count: 5 }], interval, false);
+  const host = await render(source, { type: "chart" }, true, { start: Date.parse(start), end: Date.parse(end), zone: "UTC" });
+  const tick = host.querySelector(".panel-chart__tick")!;
+  expect([...tick.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("")).toBe(expected);
 });

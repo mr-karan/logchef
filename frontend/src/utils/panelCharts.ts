@@ -7,10 +7,15 @@ import { formatNumber } from "./numberFormat";
 export type ChartViz = Extract<DashboardViz, { type: "chart" }>;
 export type ListViz = Extract<DashboardViz, { type: "pie" | "toplist" }>;
 export interface ChartValue { coordinate: number; text: string; exact: string; approximate: boolean }
-export interface ChartSeries { key: string; label: string; color: string }
+export interface ChartSeries { key: string; label: string; color: string; labelColor: string }
 export interface ChartRow { key: string; x: number; label: string; values: Map<string, ChartValue | null> }
 export interface ChartModel { rows: ChartRow[]; series: ChartSeries[]; time: boolean; notices: string[] }
 export interface ListItem extends ChartSeries { value: ChartValue; percentage: number }
+
+function chartColors(index: number): Pick<ChartSeries, "color" | "labelColor"> {
+  const token = index % 5 + 1;
+  return { color: `var(--chart-${token})`, labelColor: `var(--chart-${token}-foreground)` };
+}
 
 function suggestionColumns(frame: PanelFrame): FrameColumn[] {
   return frame.columns.map((c) => c.backendType === null && c.confidence !== "confirmed" ? { ...c, kind: suggestKind(frame.rawRows.slice(0, 100).map((r) => r[c.name])) } : c);
@@ -116,7 +121,7 @@ export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean
       const sk = JSON.stringify([y.name, groupKey]);
       if (!series.has(sk)) {
         const text = group ? label(source[group.name], group, count, zone) : y.name;
-        series.set(sk, { key: sk, label: group && ys.length > 1 ? `${text} · ${y.name}` : text, color: `var(--chart-${series.size % 5 + 1})` });
+        series.set(sk, { key: sk, label: group && ys.length > 1 ? `${text} · ${y.name}` : text, ...chartColors(series.size) });
       }
       const value = number(source[y.name]);
       const previous = entry.values.get(sk);
@@ -169,7 +174,7 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
   }
   if (!count) duplicateError(keys, firstDuplicate, [dimension.name]);
   if (nulls) notices.push(`${nulls} NULL value(s) omitted.`);
-  const colors = new Map([...values.keys()].map((key, i) => [key, `var(--chart-${i % 5 + 1})`]));
+  const colors = new Map([...values.keys()].map((key, i) => [key, chartColors(i)]));
   let entries = [...values.values()];
   const totalValue = entries.reduce<FrameNumber | null>((a, e) => e.value === null ? a : a === null ? e.value : sum(a, e.value), null);
   if (count) entries.sort((a, b) => isExact(a.value) && isExact(b.value) ? compareExact(b.value, a.value) : Number(b.value) - Number(a.value));
@@ -186,7 +191,7 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
   }
   const maxRows = viz.type === "pie" ? 50 : viz.max_rows ?? 20;
   if (entries.length > maxRows) notices.push(`${maxRows} of ${entries.length} ${viz.type === "pie" ? "slices" : "rows"} shown.`);
-  const items = entries.map((e) => ({ ...e, color: colors.get(e.key) ?? "var(--muted-foreground)", value: e.value === null ? { coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0 }));
+  const items = entries.map((e) => ({ ...e, ...(colors.get(e.key) ?? chartColors(colors.size)), value: e.value === null ? { coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0 }));
   const max = Math.max(0, ...items.map((i) => Math.abs(i.value.coordinate)));
   const total = items.reduce((s, i) => s + (max ? Math.abs(i.value.coordinate) / max : 0), 0);
   for (const item of items) item.percentage = total ? Math.abs(item.value.coordinate) / max / total * 100 : 0;
