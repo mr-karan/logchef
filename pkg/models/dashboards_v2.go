@@ -638,6 +638,9 @@ func canonicalDashboardPanelsV2(raw json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(canonical) > MaxDashboardPanelsSizeV2 {
+		return nil, fmt.Errorf("panels request is %d bytes; its stored form would be %d bytes after encoding, over the %d-byte limit", len(raw), len(canonical), MaxDashboardPanelsSizeV2)
+	}
 	if err := validateDashboardPanelsV2(canonical); err != nil {
 		return nil, err
 	}

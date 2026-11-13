@@ -579,6 +579,12 @@ func TestDashboardCanonicalWritesHTTP(t *testing.T) {
 				if status != 400 {
 					t.Fatalf("%s: %d %v", method, status, resp)
 				}
+				if name == "canonical size" {
+					want := "invalid dashboard configuration: panels request is 300301 bytes; its stored form would be 600301 bytes after encoding, over the 524288-byte limit"
+					if resp["message"] != want {
+						t.Fatalf("%s: message %v, want %q", method, resp["message"], want)
+					}
+				}
 			}
 			rowsAfter, err := s.store.ListDashboardSummaries(context.Background())
 			if err != nil {
