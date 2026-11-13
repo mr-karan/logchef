@@ -108,6 +108,7 @@ func TestIntegrationWindowedSearch(t *testing.T) {
 	waitForFixtures(t, provider, source, queryWindow{start: base, end: end}, len(rows))
 	req := datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &base, EndTime: &end, Limit: 2, MaxResponseBytes: 1 << 20}}
 	var all []map[string]any
+	var truncations []models.Truncation
 	for range 10 {
 		plan, err := provider.PrepareWindowedQuery(source, req)
 		if err != nil {
@@ -115,12 +116,16 @@ func TestIntegrationWindowedSearch(t *testing.T) {
 		}
 		cursor := ""
 		count := 0
+		var last *models.QueryStats
 		if err := provider.StreamWindowedQuery(context.Background(), source, plan, func(event datasource.WindowedEvent) error {
 			if event.Status == "failed" {
 				t.Fatalf("window failed: %+v", event)
 			}
 			all = append(all, event.Logs...)
 			count += len(event.Logs)
+			if event.Stats != nil {
+				last = event.Stats
+			}
 			if event.Type == "end" {
 				cursor = event.Cursor
 			}
@@ -131,6 +136,10 @@ func TestIntegrationWindowedSearch(t *testing.T) {
 		if count > 2 {
 			t.Fatal("page limit exceeded")
 		}
+		if last == nil || last.LimitSource != models.LimitSourceRequest {
+			t.Fatalf("page stats %+v lack the request limit source", last)
+		}
+		truncations = append(truncations, last.Truncation)
 		if cursor == "" {
 			break
 		}
@@ -138,6 +147,11 @@ func TestIntegrationWindowedSearch(t *testing.T) {
 	}
 	if len(all) != len(rows) {
 		t.Fatalf("got %d rows, want %d: %+v", len(all), len(rows), all)
+	}
+	// Pages end inside the four same-time rows twice, then at the edge of the
+	// boundary window with one window left, then after the last window.
+	if want := []models.Truncation{models.TruncationRows, models.TruncationRows, models.TruncationUnknown, models.TruncationNone}; !reflect.DeepEqual(truncations, want) {
+		t.Fatalf("page truncations %v, want %v", truncations, want)
 	}
 	seen := make(map[string]bool)
 	for i, row := range all {
