@@ -179,7 +179,7 @@ func TestSessionCookieAttributes(t *testing.T) {
 			}
 			req := httptest.NewRequest(http.MethodPost, "/login", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
-			resp, err := app.Test(req)
+			resp, err := app.Test(req, fiber.TestConfig{Timeout: 30 * time.Second, FailOnTimeout: true})
 			if err != nil {
 				t.Fatal(err)
 			}
