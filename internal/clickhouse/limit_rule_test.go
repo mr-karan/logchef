@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -53,22 +54,24 @@ func TestLimitRuleSourceMaxResultRowsClickHouse(t *testing.T) {
 		{maxResultRows: 100, wantRows: 100, wantSource: models.LimitSourceRequest},
 		{maxResultRows: 50, wantRows: 50, wantSource: models.LimitSourceMax},
 	} {
-		settings := map[string]any{"max_result_rows": tc.maxResultRows, "max_block_size": 100, "max_threads": 1}
-		client, err := NewClient(ClientOptions{Host: addr, QuerySettings: settings}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer client.Close()
-		built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy("SELECT number FROM numbers(10000)", 100, 1000, 100000)
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := client.QueryWithOptions(ctx, built.SQL, built.QueryOptions(30))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := result.Stats; len(result.Logs) != tc.wantRows || got.LimitSource != tc.wantSource || got.Truncation != models.TruncationUnknown {
-			t.Fatalf("max_result_rows %d: %d rows, source %q, truncation %q, want %d rows, source %q, truncation unknown", tc.maxResultRows, len(result.Logs), got.LimitSource, got.Truncation, tc.wantRows, tc.wantSource)
-		}
+		t.Run(fmt.Sprintf("max_result_rows %d", tc.maxResultRows), func(t *testing.T) {
+			settings := map[string]any{"max_result_rows": tc.maxResultRows, "max_block_size": 100, "max_threads": 1}
+			client, err := NewClient(ClientOptions{Host: addr, QuerySettings: settings}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			built, err := client.QueryBuilder("", 100000).BuildRawQueryWithLimitPolicy("SELECT number FROM numbers(10000)", 100, 1000, 100000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := client.QueryWithOptions(ctx, built.SQL, built.QueryOptions(30))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := result.Stats; len(result.Logs) != tc.wantRows || got.LimitSource != tc.wantSource || got.Truncation != models.TruncationUnknown {
+				t.Fatalf("%d rows, source %q, truncation %q, want %d rows, source %q, truncation unknown", len(result.Logs), got.LimitSource, got.Truncation, tc.wantRows, tc.wantSource)
+			}
+		})
 	}
 }
