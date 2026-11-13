@@ -7,40 +7,42 @@ import (
 	"strings"
 )
 
-// Dashboard is a saved grid of visualization panels. The full panel layout,
-// per-panel source/query/type and options live in a single versioned JSON blob
-// (PanelsJSON), validated by ValidateDashboardPanels before persistence.
+// Dashboard is a stored dashboard row. The panel layout, per-panel query and
+// visualization live in one versioned JSON blob (PanelsJSON), validated by
+// ValidateDashboardPanels before persistence. Responses are built from it by
+// core.BuildDashboardResponse, never by marshaling it directly.
 type Dashboard struct {
-	ID          int             `json:"id" db:"id"`
-	Name        string          `json:"name" db:"name"`
-	Description string          `json:"description" db:"description"`
-	PanelsJSON  json.RawMessage `json:"panels" db:"panels_json"`
-	CreatedBy   *UserID         `json:"created_by,omitempty" db:"created_by"`
+	ID          int             `db:"id"`
+	Name        string          `db:"name"`
+	Description string          `db:"description"`
+	PanelsJSON  json.RawMessage `db:"panels_json"`
+	CreatedBy   *UserID         `db:"created_by"`
 	// Revision counts saves, from 1. Every update is a compare-and-swap on the
 	// revision the client loaded, so two saves from one revision cannot both win.
-	Revision int `json:"revision" db:"revision"`
+	Revision int `db:"revision"`
 	Timestamps
 	// CreatedByName / CreatedByEmail identify the dashboard's creator for
-	// display. Populated on list (LEFT JOIN users); empty for dashboards whose
-	// author was deleted (created_by NULL).
-	CreatedByName  string `json:"created_by_name,omitempty" db:"-"`
-	CreatedByEmail string `json:"created_by_email,omitempty" db:"-"`
-	// CanEdit is a per-request UI authorization hint for the calling user
-	// (creator or global admin). nil when not computed.
-	CanEdit *bool `json:"can_edit,omitempty" db:"-"`
-	// PanelsCorrupt is set on list when the stored panel blob failed
-	// validation. To keep one bad row from breaking the whole list response
-	// (finding B12), PanelsJSON is then replaced with an empty blob and this
-	// flag is raised so the UI can surface a "needs repair" state.
-	PanelsCorrupt bool `json:"panels_corrupt,omitempty" db:"-"`
+	// display; empty for dashboards whose author was deleted (created_by NULL).
+	CreatedByName  string `db:"-"`
+	CreatedByEmail string `db:"-"`
+	// Summary holds the derived list columns. Every write of PanelsJSON writes
+	// them in the same statement, so blob and summary cannot disagree.
+	Summary DashboardPanelsSummary `db:"-"`
 }
 
-// EmptyDashboardPanelsJSON is the minimal valid panel blob. It replaces a
-// corrupt stored blob in list responses (finding B12) so the row still
-// marshals cleanly.
+// EmptyDashboardPanelsJSON is the empty schema 1 blob. It is the `panels` value
+// of the stub that schema 1 clients get for a schema 2 row.
 func EmptyDashboardPanelsJSON() json.RawMessage {
 	return json.RawMessage(`{"version":1,"layout":[],"panels":[]}`)
 }
+
+// Dashboard name and description bounds, in Unicode code points. Rows from
+// before the bound can be longer; the list truncates them and GET returns
+// them whole.
+const (
+	MaxDashboardNameRunes        = 200
+	MaxDashboardDescriptionRunes = 2000
+)
 
 // CreateDashboardRequest is the body for creating a dashboard.
 type CreateDashboardRequest struct {
@@ -60,7 +62,8 @@ type UpdateDashboardRequest struct {
 	Revision *int `json:"revision"`
 }
 
-// Dashboard panel-blob limits and allowed values, per the approved #56 design.
+// Schema 1 panel-blob limits and allowed values, per the approved #56 design.
+// Schema 1 validation does not change; schema 2 lives in dashboards_v2.go.
 const (
 	DashboardPanelsVersion = 1
 	MaxDashboardPanels     = 24
@@ -207,39 +210,54 @@ type DashboardPanelRef struct {
 	SourceID int
 }
 
-// DashboardPanelRefs extracts the (team_id, source_id) each panel references
-// from a raw panel blob. It returns an error if the blob is not parseable;
-// callers that already ran ValidateDashboardPanels can rely on it succeeding.
+// DashboardPanelRefs extracts the (team_id, source_id) each query panel
+// references from a raw panel blob of either schema. It parses leniently, so
+// it also works on a blob that fails validation; it returns an error only when
+// the blob is not JSON of the expected shape.
 func DashboardPanelRefs(raw json.RawMessage) ([]DashboardPanelRef, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	var blob dashboardPanels
+	var blob struct {
+		Panels []struct {
+			ID       string             `json:"id"`
+			Kind     DashboardPanelKind `json:"kind"`
+			TeamID   int                `json:"team_id"`
+			SourceID int                `json:"source_id"`
+		} `json:"panels"`
+	}
 	if err := json.Unmarshal(raw, &blob); err != nil {
 		return nil, fmt.Errorf("panels payload is not valid JSON: %w", err)
 	}
 	refs := make([]DashboardPanelRef, 0, len(blob.Panels))
 	for i := range blob.Panels {
 		p := &blob.Panels[i]
+		if p.Kind != "" && p.Kind != DashboardPanelKindQuery {
+			continue
+		}
 		refs = append(refs, DashboardPanelRef{PanelID: p.ID, TeamID: p.TeamID, SourceID: p.SourceID})
 	}
 	return refs, nil
 }
 
-// RedactDashboardPanels returns a fresh COPY of the raw panel blob in which the
-// panels named in lockedIDs have had their sensitive fields (query text, query
-// language, options) blanked and Locked set to true. The team_id, source_id,
-// type and title are kept so the frontend can still render the panel's
-// position and a "locked" placeholder, and the layout is left untouched.
+// RedactDashboardPanels returns a fresh COPY of the raw panel blob of either
+// schema in which the panels named in lockedIDs have had their query blanked
+// and Locked set to true. Id, title, team_id, source_id and the panel's type
+// are kept so the frontend can render a "locked" placeholder in place, and
+// the layout is left untouched.
 //
-// The input bytes are never mutated: this is response-shaping only. Redaction
-// re-marshals from the parsed struct, so unknown/forward-compat keys on panels
-// are dropped in the returned copy — acceptable because it is only used for the
-// response, never written back to the store. When there is nothing to redact
-// (empty blob or empty lockedIDs), the original raw is returned verbatim.
+// The input bytes are never mutated: this is response-shaping only. When there
+// is nothing to redact (empty blob or empty lockedIDs), raw is returned verbatim.
 func RedactDashboardPanels(raw json.RawMessage, lockedIDs map[string]struct{}) (json.RawMessage, error) {
 	if len(raw) == 0 || len(lockedIDs) == 0 {
 		return raw, nil
+	}
+	schema, err := dashboardPanelsSchema(raw)
+	if err != nil {
+		return nil, err
+	}
+	if schema == DashboardPanelsVersion2 {
+		return redactDashboardPanelsV2(raw, lockedIDs)
 	}
 	var blob dashboardPanels
 	if err := json.Unmarshal(raw, &blob); err != nil {
@@ -261,13 +279,46 @@ func RedactDashboardPanels(raw json.RawMessage, lockedIDs map[string]struct{}) (
 	return out, nil
 }
 
-// ValidateDashboardPanels checks a raw panels_json blob against the approved
-// design's rules and returns a descriptive error on the first violation. It is
-// the single source of truth for panel-blob validity across create and update.
+// ValidateDashboardPanels checks a raw panels_json blob and returns a
+// descriptive error on the first violation. It is the single entry point for
+// panel-blob validity across create, update and read, and dispatches on the
+// blob's version: schema 1 rules below, schema 2 rules in dashboards_v2.go.
+// A stored blob that fails it is corrupt.
 func ValidateDashboardPanels(raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("panels payload is required")
 	}
+	if len(raw) > MaxDashboardPanelsSizeV2 {
+		return fmt.Errorf("panels payload is %d bytes, exceeds the %d byte limit", len(raw), MaxDashboardPanelsSizeV2)
+	}
+	schema, err := dashboardPanelsSchema(raw)
+	if err != nil {
+		return err
+	}
+	switch schema {
+	case DashboardPanelsVersion:
+		return validateDashboardPanelsV1(raw)
+	case DashboardPanelsVersion2:
+		return validateDashboardPanelsV2(raw)
+	default:
+		return fmt.Errorf("unsupported panels version %d, expected %d or %d", schema, DashboardPanelsVersion, DashboardPanelsVersion2)
+	}
+}
+
+// dashboardPanelsSchema reads the blob's version with a lenient decode. It
+// fails only when the blob is not a JSON object.
+func dashboardPanelsSchema(raw json.RawMessage) (int, error) {
+	var probe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return 0, fmt.Errorf("panels payload is not valid JSON: %w", err)
+	}
+	return probe.Version, nil
+}
+
+// validateDashboardPanelsV1 holds the schema 1 rules. They do not change.
+func validateDashboardPanelsV1(raw json.RawMessage) error {
 	if len(raw) > MaxDashboardPanelsSize {
 		return fmt.Errorf("panels payload is %d bytes, exceeds the %d byte limit", len(raw), MaxDashboardPanelsSize)
 	}
@@ -281,14 +332,8 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 		return fmt.Errorf("unsupported panels version %d, expected %d", blob.Version, DashboardPanelsVersion)
 	}
 
-	if blob.CacheTTLSeconds != nil {
-		if *blob.CacheTTLSeconds < 0 || *blob.CacheTTLSeconds > MaxDashboardCacheTTLSeconds {
-			return fmt.Errorf("cache_ttl_seconds %d is out of range (allowed: 0-%d)", *blob.CacheTTLSeconds, MaxDashboardCacheTTLSeconds)
-		}
-	}
-
-	if blob.DefaultTimeRange != nil && !dashboardTimeRangePattern.MatchString(*blob.DefaultTimeRange) {
-		return fmt.Errorf("default_time_range %q is not a relative range such as 15m, 6h, 7d or today", *blob.DefaultTimeRange)
+	if err := validateDashboardSettings(blob.CacheTTLSeconds, blob.DefaultTimeRange); err != nil {
+		return err
 	}
 
 	if len(blob.Panels) > MaxDashboardPanels {
@@ -304,6 +349,20 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 		return err
 	}
 	return validateDashboardCoverage(panelIDs, layoutIDs)
+}
+
+// validateDashboardSettings checks the dashboard-wide settings that both
+// schemas share.
+func validateDashboardSettings(cacheTTLSeconds *int, defaultTimeRange *string) error {
+	if cacheTTLSeconds != nil {
+		if *cacheTTLSeconds < 0 || *cacheTTLSeconds > MaxDashboardCacheTTLSeconds {
+			return fmt.Errorf("cache_ttl_seconds %d is out of range (allowed: 0-%d)", *cacheTTLSeconds, MaxDashboardCacheTTLSeconds)
+		}
+	}
+	if defaultTimeRange != nil && !dashboardTimeRangePattern.MatchString(*defaultTimeRange) {
+		return fmt.Errorf("default_time_range %q is not a relative range such as 15m, 6h, 7d or today", *defaultTimeRange)
+	}
+	return nil
 }
 
 // validateDashboardPanelEntries validates each panel and returns the set of
