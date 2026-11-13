@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
+
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -13,7 +15,7 @@ import (
 // Postgres aborts one with 40P01, which WithTx reports as ErrDatabaseBusy so
 // the request can answer 503. The other commits.
 func TestDeadlockMapsToDatabaseBusy(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	a, b := opener(dsn)(t), opener(dsn)(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
