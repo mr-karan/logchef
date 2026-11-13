@@ -63,56 +63,6 @@ describe('useVariables', () => {
     setActivePinia(createPinia())
   })
 
-  describe('convertVariables', () => {
-    it('replaces text variable with quoted value', () => {
-      const variableStore = useVariableStore()
-      variableStore.upsertVariable({
-        name: 'env', type: 'text', label: 'env',
-        inputType: 'input', value: 'production',
-      })
-
-      const { convertVariables } = useVariables()
-      const result = convertVariables('WHERE env = {{ env }}')
-      expect(result).toBe("WHERE env = 'production'")
-    })
-
-    it('replaces number variable without quotes', () => {
-      const variableStore = useVariableStore()
-      variableStore.upsertVariable({
-        name: 'limit_val', type: 'number', label: 'limit',
-        inputType: 'input', value: 100,
-      })
-
-      const { convertVariables } = useVariables()
-      const result = convertVariables('LIMIT {{ limit_val }}')
-      expect(result).toBe('LIMIT 100')
-    })
-
-    it('uses defaultValue when value is empty', () => {
-      const variableStore = useVariableStore()
-      variableStore.upsertVariable({
-        name: 'env', type: 'text', label: 'env',
-        inputType: 'input', value: '', defaultValue: 'staging',
-      })
-
-      const { convertVariables } = useVariables()
-      const result = convertVariables('WHERE env = {{ env }}')
-      expect(result).toBe("WHERE env = 'staging'")
-    })
-
-    it('escapes single quotes in SQL strings', () => {
-      const variableStore = useVariableStore()
-      variableStore.upsertVariable({
-        name: 'msg', type: 'text', label: 'msg',
-        inputType: 'input', value: "it's a test",
-      })
-
-      const { convertVariables } = useVariables()
-      const result = convertVariables('WHERE msg = {{ msg }}')
-      expect(result).toBe("WHERE msg = 'it''s a test'")
-    })
-  })
-
   describe('ensureVariablesFromSql', () => {
     it('creates missing variables in store', () => {
       const variableStore = useVariableStore()
@@ -223,11 +173,6 @@ describe('day variables', () => {
   it('preserves the date-only literal and API type, including default values', () => {
     useVariableStore().setAllVariable([{ name: 'd', type: 'day', label: 'Date', inputType: 'datepicker', value: '', defaultValue: '2024-02-29' }])
     const variables = useVariables()
-    expect(variables.convertVariables('toDate(ts) = {{d}}')).toBe("toDate(ts) = '2024-02-29'")
     expect(variables.getVariablesForApi()).toEqual([{ name: 'd', type: 'day', value: '2024-02-29' }])
-  })
-  it.each(['2026-02-29', '2026-11-12 00:00:00', '2026-1-02', "2026-11-12' OR 1=1"])('rejects invalid day %s in previews', value => {
-    useVariableStore().setAllVariable([{ name: 'd', type: 'day', label: 'Date', inputType: 'datepicker', value }])
-    expect(() => useVariables().convertVariables('{{d}}')).toThrow('Invalid day')
   })
 })

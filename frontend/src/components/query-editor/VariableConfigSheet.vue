@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { validateDay } from '@/utils/template'
 import { SingleDatePicker } from '@/components/date-time-picker'
 import { useVariableStore, type VariableState } from '@/stores/variables'
 import { hasVariableValue, inputTypeFor, formatVariableValue } from './variableUtils'
@@ -60,6 +61,17 @@ const updateVariableType = (variable: VariableState) => {
       break
     case 'day':
     case 'date': {
+      if (variable.type === 'day') {
+        const defaultValue = variable.defaultValue
+        variable.defaultValue = ''
+        if (typeof defaultValue === 'string' && Number.isFinite(Date.parse(defaultValue))) {
+          try {
+            variable.defaultValue = validateDay(defaultValue.slice(0, 10))
+          } catch {
+            variable.defaultValue = ''
+          }
+        }
+      }
       const now = new Date()
       const year = now.getFullYear()
       const month = String(now.getMonth() + 1).padStart(2, '0')
@@ -184,7 +196,10 @@ watch(
                       </div>
                     </SelectItem>
                     <SelectItem value="day">
-                      {{ t('ui.date') }}
+                      <div class="flex items-center gap-2">
+                        <div class="w-2 h-2 bg-orange-500 rounded-full"></div>
+                        {{ t('ui.date') }}
+                      </div>
                     </SelectItem>
                     <SelectItem value="date">
                       <div class="flex items-center gap-2">

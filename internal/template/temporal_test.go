@@ -3,6 +3,7 @@ package template
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,36 @@ func TestDayQuoteAndOptionalContexts(t *testing.T) {
 		if err != nil || got != "d = '2026-11-12' " {
 			t.Fatalf("dialect %d: %q, %v", dialect, got, err)
 		}
+	}
+}
+
+func TestEmptyDay(t *testing.T) {
+	for _, dialect := range []Dialect{ClickHouseSQL, LogsQL, LogchefQL} {
+		variables := []Variable{{Name: "d", Type: TypeDay, Value: ""}}
+		got, err := dialect.Substitute("SELECT 1[[ AND d = {{d}} ]]", variables)
+		if err != nil || got != "SELECT 1" {
+			t.Errorf("dialect %d optional empty day: got %q, %v", dialect, got, err)
+		}
+		_, err = dialect.Substitute("d = {{d}}", variables)
+		if err == nil || !strings.Contains(err.Error(), "variable {{d}} requires a value") {
+			t.Errorf("dialect %d required empty day: got %v", dialect, err)
+		}
+	}
+}
+
+func TestDayArrays(t *testing.T) {
+	variables := []Variable{{Name: "d", Type: TypeDay, Value: []string{"2024-02-29", "2026-11-12"}}}
+	for dialect, want := range map[Dialect]string{
+		ClickHouseSQL: "d IN ('2024-02-29', '2026-11-12')",
+		LogsQL:        `d IN ("2024-02-29", "2026-11-12")`,
+	} {
+		got, err := dialect.Substitute("d IN ({{d}})", variables)
+		if err != nil || got != want {
+			t.Errorf("dialect %d day array: got %q, %v; want %q", dialect, got, err, want)
+		}
+	}
+	_, err := LogchefQL.Substitute("d IN ({{d}})", variables)
+	if err == nil || !strings.Contains(err.Error(), "LogchefQL requires a single value") {
+		t.Errorf("LogchefQL day array: got %v", err)
 	}
 }

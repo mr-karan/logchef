@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
   },
   teamsStore: { currentTeamId: 1 },
   translate: vi.fn(),
-  convertVariables: vi.fn((query: string) => query),
   getVariablesForApi: vi.fn(() => [
     { name: "trade_id", type: "text" as const, value: "api's" },
   ]),
@@ -55,7 +54,6 @@ vi.mock("@/api/logchefql", () => ({
 
 vi.mock("@/composables/useVariables", () => ({
   useVariables: () => ({
-    convertVariables: mocks.convertVariables,
     getVariablesForApi: mocks.getVariablesForApi,
   }),
 }));
@@ -90,7 +88,6 @@ describe("useQuery SQL translation", () => {
     expect(mocks.exploreStore.setNativeQuery).toHaveBeenCalledWith(
       "SELECT * FROM logs WHERE message = 'prefix api\\'s'",
     );
-    expect(mocks.convertVariables).not.toHaveBeenCalled();
   });
 
   it.each([zoneFromPreference("utc"), parseZoneId("Asia/Kolkata") ?? zoneFromPreference("utc")])(
