@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
+import { resetLocalTimeZone, setLocalTimeZone } from "@internationalized/date";
 
 // Mock the dashboards API module so the store's CRUD + panel-execution paths
 // resolve deterministically without touching the network. The store imports
@@ -42,6 +43,7 @@ import { useDashboardsStore } from "../dashboards";
 import { DASHBOARD_CLIENT_FEATURES } from "@/api/dashboards";
 import type { Dashboard, DashboardLockedPanel, DashboardPanel, DashboardPanels, DashboardQueryPanel } from "@/api/dashboards";
 import { epochMs } from "@/utils/timeWindow";
+import { frameCellText, reduceStat } from "@/utils/panelFrame";
 import { usePreferencesStore } from "@/stores/preferences";
 import { dashboardLayout, emptyDashboardPanels } from "@/utils/dashboardPanels";
 
@@ -902,5 +904,36 @@ describe("count preview", () => {
     expect(store.previewState?.status).toBe("success");
     expect(store.previewState?.range).toBeDefined();
     expect(new Date(store.previewState!.range!.start).toISOString()).toBe(mocks.histogram.mock.calls[0][2].start_time);
+  });
+});
+
+
+describe("VictoriaLogs fixed-offset count grids", () => {
+  beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks(); });
+  afterEach(() => { resetLocalTimeZone(); });
+  it.each([
+    { zone: "Asia/Kolkata", interval: "1h", start: "2026-11-12T00:00:00Z", end: "2026-11-12T03:00:00Z", times: ["2026-11-11T23:30:00Z", "2026-11-12T00:30:00Z", "2026-11-12T01:30:00Z", "2026-11-12T02:30:00Z"] },
+    { zone: "Asia/Kolkata", interval: "2h", start: "2026-11-12T00:00:00Z", end: "2026-11-12T06:00:00Z", times: ["2026-11-11T22:30:00Z", "2026-11-12T00:30:00Z", "2026-11-12T02:30:00Z", "2026-11-12T04:30:00Z"] },
+    { zone: "Europe/Berlin", interval: "2h", start: "2026-11-12T00:00:00Z", end: "2026-11-12T06:00:00Z", times: ["2026-11-11T23:00:00Z", "2026-11-12T01:00:00Z", "2026-11-12T03:00:00Z", "2026-11-12T05:00:00Z"] },
+    { zone: "Europe/Berlin", interval: "24h", start: "2026-11-12T00:00:00Z", end: "2026-11-15T00:00:00Z", times: ["2026-11-11T23:00:00Z", "2026-11-12T23:00:00Z", "2026-11-13T23:00:00Z", "2026-11-14T23:00:00Z"] },
+    { zone: "America/New_York", interval: "2h", start: "2026-03-08T05:30:00Z", end: "2026-03-08T10:30:00Z", times: ["2026-03-08T05:00:00Z", "2026-03-08T07:00:00Z", "2026-03-08T09:00:00Z"] },
+    { zone: "America/New_York", interval: "24h", start: "2026-03-07T17:00:00Z", end: "2026-03-10T16:00:00Z", times: ["2026-03-07T05:00:00Z", "2026-03-08T05:00:00Z", "2026-03-09T05:00:00Z", "2026-03-10T05:00:00Z"] },
+  ])("does not double $interval buckets in $zone from $start", async ({ zone, interval, start, end, times }) => {
+    setLocalTimeZone(zone);
+    usePreferencesStore().preferences.timezone = "local";
+    const store = useDashboardsStore();
+    store.setWindow({ kind: "absolute", start: epochMs(Date.parse(start)), end: epochMs(Date.parse(end)) });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: times.map((bucket, i) => ({ bucket, log_count: 2 * (i + 1) })), granularity: interval } });
+    mocks.translate.mockResolvedValue({ status: "success", data: { valid: true, generated_query: "*", generated_query_language: "logsql" } });
+    for (const language of ["logsql", "logchefql"] as const) {
+      await store.previewPanel({ ...chartPanel("vl-count", { language, text: "*" }), viz: { type: "stat", reduce: "avg" } });
+      expect(mocks.histogram.mock.lastCall?.[2].timezone).toBe(zone);
+      const frame = store.previewState?.frame;
+      expect(frame?.rawRows.map((row) => row.time)).toEqual(times);
+      if (!frame) throw new Error("Missing count frame");
+      expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe(String(times.length + 1));
+      expect(frameCellText(reduceStat(frame, { value: "count", reduce: "min", count: true }).value)).toBe("2");
+      expect(frameCellText(reduceStat(frame, { value: "count", reduce: "last", count: true }).value)).toBe(String(2 * times.length));
+    }
   });
 });

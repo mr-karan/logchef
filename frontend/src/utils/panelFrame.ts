@@ -1,4 +1,4 @@
-import { histogramBucketBounds, type ResolvedWindow } from "./timeWindow";
+import { histogramBucketBounds, type BucketAlignment, type ResolvedWindow } from "./timeWindow";
 import { fillBucketGaps, parseGranularityToMilliseconds } from "./histogram-chart";
 import type { ColumnKind, ConfirmedColumn, StatReduce } from "@/api/dashboards";
 import type { HistogramDataPoint, QueryStats, Truncation, LimitSource } from "@/api/explore";
@@ -56,7 +56,7 @@ export function resultFrame(input: {
   return frameWithKinds(frame);
 }
 
-export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null, range?: ResolvedWindow): PanelFrame {
+export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null, range?: ResolvedWindow, alignment: BucketAlignment = "calendar"): PanelFrame {
   if (range) {
     const step = parseGranularityToMilliseconds(interval);
     if (!step) throw new Error("Count results require a valid bucket interval.");
@@ -73,7 +73,7 @@ export function countFrame(buckets: HistogramDataPoint[], interval: string | nul
         ...series, bucket: new Date(ts).toISOString().replace(".000Z", "Z"), log_count: 0,
       })),
     });
-    const filled = fillBucketGaps(rows, step, makeZero, histogramBucketBounds(range, step));
+    const filled = fillBucketGaps(rows, step, makeZero, histogramBucketBounds(range, step, alignment));
     buckets = filled.flatMap((row) => row.buckets);
   }
   const rows = buckets.map((b) => ({
@@ -98,7 +98,10 @@ function readCell(value: unknown, column: FrameColumn): unknown {
   }
   if (column.kind === "bool") return value === true || value === "true" ? true : value === false || value === "false" ? false : null;
   if (typeof value !== "string") return null;
-  if (column.kind === "date") return validDate(value) ? value : null;
+  if (column.kind === "date") {
+    const date = declaredColumn(column.name, column.backendType).kind === "date" ? value.slice(0, 10) : value;
+    return validDate(date) ? date : null;
+  }
   const timestamp = column.backendType && /DateTime/.test(column.backendType) ? value.replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(value) ? "" : "Z") : value;
   return rfc3339.test(timestamp) && validDate(timestamp.slice(0, 10)) && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
 }
@@ -118,9 +121,10 @@ export function frameWithKinds(frame: PanelFrame, overrides: Record<string, Conf
     const row: Record<string, unknown> = Object.create(null);
     for (const c of columns) {
       const previous = previousColumns.get(c.name);
-      const value = index < frame.rows.length && previous?.kind === c.kind && previous.repr === c.repr ? frame.rows[index][c.name] : readCell(raw[c.name], c);
+      const rawValue = Object.hasOwn(raw, c.name) ? raw[c.name] : undefined;
+      const value = index < frame.rows.length && previous?.kind === c.kind && previous.repr === c.repr ? frame.rows[index][c.name] : readCell(rawValue, c);
       row[c.name] = value;
-      if (value === null && raw[c.name] !== null && raw[c.name] !== undefined && raw[c.name] !== "" && !(typeof raw[c.name] === "string" && /^(?:NaN|[+-]?Inf)$/.test(String(raw[c.name])))) invalid.set(c.name, (invalid.get(c.name) ?? 0) + 1);
+      if (value === null && rawValue !== null && rawValue !== undefined && rawValue !== "" && !(typeof rawValue === "string" && /^(?:NaN|[+-]?Inf)$/.test(rawValue))) invalid.set(c.name, (invalid.get(c.name) ?? 0) + 1);
     }
     return row;
   });

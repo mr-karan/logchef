@@ -207,8 +207,18 @@ export function sqlTimeCondition(tsField: string, window: ResolvedWindow): strin
   return `${field} BETWEEN ${sqlBound(window.start, window.zone)} AND ${sqlBound(window.end, window.zone)}`;
 }
 
-export function histogramBucketBounds(range: ResolvedWindow, stepMs: number): { first: number; last: number; next: (ts: number) => number } {
+export type BucketAlignment = "calendar" | "fixed-offset";
+
+export function histogramBucketBounds(range: ResolvedWindow, stepMs: number, alignment: BucketAlignment = "calendar"): { first: number; last: number; next: (ts: number) => number } {
+  if (alignment === "fixed-offset") {
+    // VictoriaLogs /hits keeps the range-start offset even across DST changes.
+    const offset = zoneOffsetMs(range.start, range.zone);
+    const align = (ts: number) => Math.floor((ts + offset) / stepMs) * stepMs - offset;
+    return { first: align(range.start), last: align(range.end), next: (ts) => ts + stepMs };
+  }
   const align = (ts: number) => {
+    // ClickHouse toStartOfInterval uses the epoch for 10m, 15m and 30m.
+    if ([600_000, 900_000, 1_800_000].includes(stepMs)) return Math.floor(ts / stepMs) * stepMs;
     const date = fromAbsolute(ts, range.zone);
     const wall = toCalendarDateTime(date);
     if (stepMs > 3_600_000) {
