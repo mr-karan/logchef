@@ -164,8 +164,12 @@ whole.
 
 When rows were cut, the results bar says so: **First N rows** when a row past
 the limit existed, **Cut by size** when the response size budget stopped the
-result, and **May be incomplete** when a non-literal `LIMIT` or the source's
-`max_result_rows` setting filled the cap. A result that fits shows nothing.
+result, and **May be incomplete** when nothing proves the result whole. That
+happens when a non-literal `LIMIT` or the source's `max_result_rows` setting
+filled the cap. It also happens when the result reached a ClickHouse limit that
+stops a query without an error, such as `max_result_bytes`, whether the source
+settings or the ClickHouse user's settings profile set it. A result that fits
+shows nothing.
 
 ### Export
 

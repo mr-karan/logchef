@@ -53,6 +53,10 @@ type Client struct {
 	querySettings  clickhouse.Settings
 	capabilitiesMu sync.Mutex
 	flattenedJSON  *bool
+	// defaults are the break limits this client's queries get from the
+	// server unless they send them; nil until read.
+	defaults       map[string]any
+	defaultsFailed bool
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
