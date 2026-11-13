@@ -94,6 +94,22 @@ func TestQueryLogsLimitRuleClickHouse(t *testing.T) {
 			wantRows: 5, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
 		},
 		{
+			name: "UNION branch limits are their own", query: "SELECT number FROM numbers(5) LIMIT 2 UNION ALL SELECT number FROM numbers(5) LIMIT 3", limit: 100,
+			wantRows: 5, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
+		},
+		{
+			name: "parenthesized UNION branch limits are their own", query: "(SELECT number FROM numbers(5) LIMIT 2) UNION ALL (SELECT number FROM numbers(5) LIMIT 3)", limit: 100,
+			wantRows: 5, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
+		},
+		{
+			name: "UNION capped as a whole with a cut", query: "SELECT number FROM numbers(100) UNION ALL SELECT number FROM numbers(100)", limit: 150,
+			wantRows: 150, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationRows,
+		},
+		{
+			name: "UNION filling the cap exactly", query: "SELECT number FROM numbers(50) UNION ALL SELECT number FROM numbers(50) SETTINGS max_threads = 1", limit: 100,
+			wantRows: 100, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
+		},
+		{
 			name: "LIMIT n BY untouched", query: "SELECT number % 3 AS n, number FROM numbers(1000) ORDER BY n, number LIMIT 1 BY n", limit: 100,
 			wantRows: 3, wantFirst: 0, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationNone,
 		},

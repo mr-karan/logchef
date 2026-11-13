@@ -272,6 +272,36 @@ func TestLimitRule(t *testing.T) {
 			wantSQL: "SELECT * FROM mydb.logs LIMIT 5 * 2", wantApplied: 0, wantFetch: 0, wantSource: models.LimitSourceStatement,
 		},
 		{
+			name: "UNION branch limits are their own and the request caps the whole",
+			sql:  "SELECT * FROM mydb.logs LIMIT 2 UNION ALL SELECT * FROM mydb.logs LIMIT 3", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM (SELECT * FROM mydb.logs LIMIT 2 UNION ALL SELECT * FROM mydb.logs LIMIT 3) LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "parenthesized UNION branches keep their limits",
+			sql:  "(SELECT * FROM mydb.logs LIMIT 2) UNION ALL (SELECT * FROM mydb.logs LIMIT 3)", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM ((SELECT * FROM mydb.logs LIMIT 2) UNION ALL (SELECT * FROM mydb.logs LIMIT 3)) LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a set operation's trailing SETTINGS moves outside the cap",
+			sql:  "SELECT a FROM mydb.logs UNION DISTINCT SELECT b FROM mydb.logs SETTINGS max_threads = 1", request: 0, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM (SELECT a FROM mydb.logs UNION DISTINCT SELECT b FROM mydb.logs) LIMIT 1001 SETTINGS max_threads=1", wantApplied: 1000, wantFetch: 1001, wantSource: models.LimitSourceDefault, wantAdded: true,
+		},
+		{
+			name: "EXCEPT and INTERSECT are capped as a whole",
+			sql:  "(SELECT a FROM mydb.logs LIMIT 9) EXCEPT (SELECT a FROM mydb.logs LIMIT 1) INTERSECT SELECT a FROM mydb.logs", request: 500, def: 1000, max: 100,
+			wantSQL: "SELECT * FROM ((SELECT a FROM mydb.logs LIMIT 9) EXCEPT (SELECT a FROM mydb.logs LIMIT 1) INTERSECT SELECT a FROM mydb.logs) LIMIT 101", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceMax, wantCapped: true,
+		},
+		{
+			name: "a parenthesized set operation is capped outside its parentheses",
+			sql:  "(SELECT a FROM mydb.logs UNION ALL SELECT b FROM mydb.logs LIMIT 3) SETTINGS max_threads = 1", request: 100, def: 1000, max: 100000,
+			wantSQL: "SELECT * FROM ((SELECT a FROM mydb.logs UNION ALL SELECT b FROM mydb.logs LIMIT 3)) LIMIT 101 SETTINGS max_threads=1", wantApplied: 100, wantFetch: 101, wantSource: models.LimitSourceRequest,
+		},
+		{
+			name: "a parenthesized statement keeps its own limit",
+			sql:  "(SELECT * FROM mydb.logs LIMIT 20) SETTINGS max_threads = 1", request: 100, def: 1000, max: 100000,
+			wantSQL: "(SELECT * FROM mydb.logs LIMIT 20) SETTINGS max_threads=1", wantApplied: 20, wantFetch: 20, wantSource: models.LimitSourceStatement,
+		},
+		{
 			name: "LIMIT 0 is the author's",
 			sql:  "SELECT * FROM mydb.logs LIMIT 0", request: 100, def: 1000, max: 100000,
 			wantSQL: "SELECT * FROM mydb.logs LIMIT 0", wantApplied: 0, wantFetch: 0, wantSource: models.LimitSourceStatement,
@@ -298,12 +328,19 @@ func TestLimitRule(t *testing.T) {
 }
 
 // TestLimitRuleCountMode keeps count mode stripping the outer LIMIT before the
-// histogram wraps the query.
+// histogram wraps the query, and leaving a set operation's branch limits.
 func TestLimitRuleCountMode(t *testing.T) {
 	qb := NewQueryBuilder("mydb.logs", 0)
-	got, err := qb.RemoveLimitClause("SELECT * FROM mydb.logs ORDER BY x DESC LIMIT 20 OFFSET 5")
-	if err != nil || got != "SELECT * FROM mydb.logs ORDER BY x DESC" {
-		t.Fatalf("RemoveLimitClause() = %q, %v", got, err)
+	for sql, want := range map[string]string{
+		"SELECT * FROM mydb.logs ORDER BY x DESC LIMIT 20 OFFSET 5":                     "SELECT * FROM mydb.logs ORDER BY x DESC",
+		"(SELECT * FROM mydb.logs LIMIT 20)":                                            "(SELECT * FROM mydb.logs)",
+		"SELECT * FROM mydb.logs LIMIT 2 UNION ALL SELECT * FROM mydb.logs LIMIT 3":     "SELECT * FROM mydb.logs LIMIT 2 UNION ALL SELECT * FROM mydb.logs LIMIT 3",
+		"(SELECT * FROM mydb.logs LIMIT 2) UNION ALL (SELECT * FROM mydb.logs LIMIT 3)": "(SELECT * FROM mydb.logs LIMIT 2) UNION ALL (SELECT * FROM mydb.logs LIMIT 3)",
+	} {
+		got, err := qb.RemoveLimitClause(sql)
+		if err != nil || got != want {
+			t.Fatalf("RemoveLimitClause(%q) = %q, %v, want %q", sql, got, err, want)
+		}
 	}
 }
 
