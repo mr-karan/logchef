@@ -176,6 +176,18 @@ describe("DashboardsList", () => {
     expect(dialog()).toBeNull();
   });
 
+  it("opens no dialog for a dashboard this client cannot round-trip", async () => {
+    const newer = dashboard(1);
+    newer.panels = { ...newer.panels, features: ["feature-from-a-newer-release"] };
+    mocks.get.mockResolvedValue({ status: "success", data: newer });
+    await mount([summary(1)]);
+    await clickMenuItem(cards()[0], i18n.global.t("ui.duplicate"));
+    await settle();
+    expect(mocks.get).toHaveBeenCalledWith(1);
+    expect(dialog()).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it("lets a later Duplicate win over a slower earlier one", async () => {
     let resolveFirst!: (value: unknown) => void;
     mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));

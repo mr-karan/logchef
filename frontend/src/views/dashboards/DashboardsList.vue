@@ -55,10 +55,13 @@ import { usePreferencesStore } from "@/stores/preferences";
 import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useTableSearchSort, type SortDir } from "@/composables/useTableSearchSort";
 import { clampDashboardName, copyableDashboardPanels, dashboardCopyName, emptyDashboardPanels } from "@/utils/dashboardPanels";
-import { dashboardsApi, type Dashboard, type DashboardSummary, type DashboardVizType } from "@/api/dashboards";
+import { dashboardNeedsReload, dashboardsApi, type Dashboard, type DashboardSummary, type DashboardVizType } from "@/api/dashboards";
+import { useToast } from "@/composables/useToast";
+import { TOAST_DURATION } from "@/lib/constants";
 import { isSuccessResponse } from "@/api/types";
 
 const { t, locale } = useI18n();
+const { toast } = useToast();
 
 const router = useRouter();
 const store = useDashboardsStore();
@@ -194,6 +197,11 @@ async function openDuplicate(d: DashboardSummary) {
     source = null;
   }
   if (request !== openRequest || !source || source.corrupt) return;
+  // Copying a stub or an unknown feature would save an empty or lossy copy.
+  if (dashboardNeedsReload(source)) {
+    toast({ title: t("ui.serverUpdated"), variant: "destructive", duration: TOAST_DURATION.ERROR });
+    return;
+  }
   duplicateSource.value = source;
   newName.value = dashboardCopyName(source.name, (name) => t("common.copyName", { name }));
   newDescription.value = source.description;

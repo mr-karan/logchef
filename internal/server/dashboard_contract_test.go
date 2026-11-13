@@ -604,6 +604,12 @@ func TestDashboardCanonicalWritesHTTP(t *testing.T) {
 	if status != 201 || resp["data"].(map[string]any)["corrupt"] != false {
 		t.Fatalf("duplicate null: %d %v", status, resp)
 	}
+	upgraded := resp["data"].(map[string]any)["panels"].(map[string]any)
+	panelID := upgraded["panels"].([]any)[0].(map[string]any)["id"]
+	layoutID := upgraded["tabs"].([]any)[0].(map[string]any)["layout"].([]any)[0].(map[string]any)["id"]
+	if panelID != "p1" || layoutID != "p1" {
+		t.Fatalf("duplicate null upgraded ids: panel %v layout %v, want p1", panelID, layoutID)
+	}
 }
 
 type perpetuallyStaleDashboardStore struct {
