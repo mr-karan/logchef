@@ -1,17 +1,21 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { computed } from "vue";
 import type { ColumnKind, DashboardPanelQuery, DashboardViz, NumberFormat, StatReduce } from "@/api/dashboards";
 import { suggestKind, type PanelFrame } from "@/utils/panelFrame";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const { t } = useI18n();
 const props = defineProps<{ query: DashboardPanelQuery; viz: DashboardViz; frame?: PanelFrame }>();
 const emit = defineEmits<{ "update:viz": [viz: DashboardViz] }>();
 const columns = computed(() => props.frame?.columns ?? []);
+const missingSeries = computed(() => { const viz = props.viz; return viz.type === "chart" && viz.series && !columns.value.some(c => c.name === viz.series); });
 const missingX = computed(() => {
   const viz = props.viz;
   return viz.type === "chart" && viz.x && !columns.value.some((c) => c.name === viz.x);
 });
+const enumLabels: Record<string, string> = {"time": "pages.time", "date": "ui.date", "number": "ui.number", "category": "dashboardBuilder.Category", "bool": "dashboardBuilder.Bool", "other": "dashboardBuilder.Other", "first": "dashboardBuilder.First", "last": "dashboardBuilder.Last", "sum": "dashboardBuilder.Sum", "avg": "dashboardBuilder.Avg", "min": "dashboardBuilder.Min", "max": "dashboardBuilder.Max", "auto": "dashboardBuilder.Auto", "standard": "dashboardBuilder.Standard", "compact": "ui.compact", "none": "ui.none", "percent": "dashboardBuilder.Percent", "bytes": "dashboardBuilder.Bytes", "duration_ms": "dashboardBuilder.DurationMs", "duration_s": "dashboardBuilder.DurationS"};
 const kinds: ColumnKind[] = ["time", "date", "number", "category", "bool", "other"];
 const reducers: StatReduce[] = ["last", "first", "sum", "avg", "min", "max"];
 const notations: NonNullable<NumberFormat["notation"]>[] = ["auto", "standard", "compact"];
@@ -47,6 +51,7 @@ function setChartRole(role: "x" | "series" | "label" | "value", name: string) {
   if (viz.type !== "chart" && viz.type !== "pie" && viz.type !== "toplist") return;
   const next = { ...viz, [role]: name || undefined };
   if (name && columns.value.find((c) => c.name === name)?.backendType === null) next.columns = { ...next.columns, [name]: { kind: kindFor(name), confidence: "confirmed" } };
+  pruneColumns(next);
   emit("update:viz", next);
 }
 function toggleY(name: string) {
@@ -54,7 +59,14 @@ function toggleY(name: string) {
   if (viz.type !== "chart") return;
   const y = viz.y?.includes(name) ? viz.y.filter((v) => v !== name) : [...(viz.y ?? []), name];
   const columns = props.frame?.columns.find((c) => c.name === name)?.backendType === null ? { ...viz.columns, [name]: { kind: kindFor(name), confidence: "confirmed" as const } } : viz.columns;
-  emit("update:viz", { ...viz, y, columns });
+  const next = { ...viz, y, columns };
+  pruneColumns(next);
+  emit("update:viz", next);
+}
+function pruneColumns(viz: DashboardViz) {
+  const names = viz.type === "chart" ? [viz.x, ...(viz.y ?? []), viz.series] : viz.type === "pie" || viz.type === "toplist" ? [viz.label, viz.value] : [];
+  viz.columns = Object.fromEntries(Object.entries(viz.columns ?? {}).filter(([name]) => names.includes(name)));
+  if (!Object.keys(viz.columns).length) delete viz.columns;
 }
 function moveY(index: number, direction: number) {
   if (props.viz.type !== "chart") return;
@@ -92,50 +104,50 @@ function setScale(value: unknown) {
 <template>
   <div class="space-y-4">
     <template v-if="query.mode === 'result' && viz.type === 'chart'">
-      <Label for="chart-x">X column</Label>
-      <select id="chart-x" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x ?? ''" @change="setChartRole('x', selectValue($event))"><option value="">Select column</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option><option v-if="missingX" :value="viz.x">{{ viz.x }} (missing)</option></select>
-      <fieldset class="space-y-1"><legend class="text-xs">Y columns, in legend order</legend>
-        <div v-for="(name, i) in viz.y ?? []" :key="name" class="flex items-center gap-2 text-xs"><span class="flex-1">{{ name }}</span><button type="button" :aria-label="`Move ${name} up`" :disabled="i === 0" @click="moveY(i, -1)">↑</button><button type="button" :aria-label="`Move ${name} down`" :disabled="i === (viz.y?.length ?? 0) - 1" @click="moveY(i, 1)">↓</button><button type="button" :aria-label="`Remove ${name}`" @click="toggleY(name)">×</button></div>
+      <Label for="chart-x">{{ t('dashboardBuilder.XColumn') }}</Label>
+      <select id="chart-x" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x ?? ''" @change="setChartRole('x', selectValue($event))"><option value="">{{ t('dashboardBuilder.SelectColumn') }}</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option><option v-if="missingX" :value="viz.x">{{ viz.x }} {{ t('dashboardBuilder.Missing') }}</option></select>
+      <fieldset class="space-y-1"><legend class="text-xs">{{ t('dashboardBuilder.YColumnsInLegendOrder') }}</legend>
+        <div v-for="(name, i) in viz.y ?? []" :key="name" class="flex items-center gap-2 text-xs"><span class="flex-1">{{ name }}</span><button type="button" :aria-label="t('dashboardBuilder.MoveNameUp', { name })" :disabled="i === 0" @click="moveY(i, -1)">↑</button><button type="button" :aria-label="t('dashboardBuilder.MoveNameDown', { name })" :disabled="i === (viz.y?.length ?? 0) - 1" @click="moveY(i, 1)">↓</button><button type="button" :aria-label="t('dashboardBuilder.RemoveName', { name })" @click="toggleY(name)">×</button></div>
         <label v-for="c in columns" :key="c.name" class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.y?.includes(c.name)" @change="toggleY(c.name)" />{{ c.name }}</label>
       </fieldset>
-      <Label for="chart-series">Series column</Label>
-      <select id="chart-series" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.series ?? ''" @change="setChartRole('series', selectValue($event))"><option value="">One series per Y column</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option></select>
+      <Label for="chart-series">{{ t('dashboardBuilder.SeriesColumn') }}</Label>
+      <select id="chart-series" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.series ?? ''" @change="setChartRole('series', selectValue($event))"><option value="">{{ t('dashboardBuilder.OneSeriesPerYColumn') }}</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option><option v-if="missingSeries" :value="viz.series">{{ viz.series }} {{ t('dashboardBuilder.Missing') }}</option></select>
     </template>
     <template v-if="query.mode === 'result' && (viz.type === 'pie' || viz.type === 'toplist')">
-      <div v-for="role in (['label', 'value'] as const)" :key="role" class="space-y-1"><Label :for="`list-${role}`">{{ role === 'label' ? 'Label column' : 'Value column' }}</Label><select :id="`list-${role}`" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz[role] ?? ''" @change="setChartRole(role, selectValue($event))"><option value="">Select column</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option></select></div>
+      <div v-for="role in (['label', 'value'] as const)" :key="role" class="space-y-1"><Label :for="`list-${role}`">{{ role === 'label' ? t('dashboardBuilder.LabelColumn') : t('dashboardBuilder.ValueColumn') }}</Label><select :id="`list-${role}`" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz[role] ?? ''" @change="setChartRole(role, selectValue($event))"><option value="">{{ t('dashboardBuilder.SelectColumn') }}</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option></select></div>
     </template>
     <template v-if="viz.type === 'stat'">
       <template v-if="query.mode === 'result'">
-        <div class="space-y-1.5"><Label for="stat-value">Value column</Label>
+        <div class="space-y-1.5"><Label for="stat-value">{{ t('dashboardBuilder.ValueColumn') }}</Label>
           <Input id="stat-value" :model-value="viz.value ?? ''" list="result-columns" @update:model-value="(v) => setRole('value', String(v))" />
         </div>
-        <div class="space-y-1.5"><Label for="stat-order">Order by</Label>
+        <div class="space-y-1.5"><Label for="stat-order">{{ t('dashboardBuilder.OrderBy') }}</Label>
           <Input id="stat-order" :model-value="viz.order_by ?? ''" list="result-columns" @update:model-value="(v) => setRole('order_by', String(v))" />
         </div>
       </template>
-      <div class="space-y-1.5"><Label>Reduce</Label>
-        <div class="flex flex-wrap gap-1"><button v-for="reduce in reducers" :key="reduce" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(viz.reduce ?? (query.mode === 'count' ? 'sum' : 'last')) === reduce" @click="setReduce(reduce)">{{ reduce }}</button></div>
+      <div class="space-y-1.5"><Label>{{ t('dashboardBuilder.Reduce') }}</Label>
+        <div class="flex flex-wrap gap-1"><button v-for="reduce in reducers" :key="reduce" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(viz.reduce ?? (query.mode === 'count' ? 'sum' : 'last')) === reduce" @click="setReduce(reduce)">{{ t(enumLabels[reduce]) }}</button></div>
       </div>
-      <p v-if="query.mode === 'result' && !viz.order_by && (viz.reduce ?? 'last') !== 'sum' && ['first', 'last'].includes(viz.reduce ?? 'last') && (frame?.rows.length ?? 0) > 1" class="text-xs text-amber-600">Set Order by to select the first or last row chronologically.</p>
+      <p v-if="query.mode === 'result' && !viz.order_by && (viz.reduce ?? 'last') !== 'sum' && ['first', 'last'].includes(viz.reduce ?? 'last') && (frame?.rows.length ?? 0) > 1" class="text-xs text-amber-600">{{ t('dashboardBuilder.SetOrderByToSelectTheFirstOrLastRowChronologically') }}</p>
     </template>
     <template v-if="viz.type !== 'table'">
-      <fieldset class="space-y-3 rounded border p-3"><legend class="px-1 text-xs">Number format</legend>
-        <div class="flex flex-wrap gap-1"><button v-for="notation in notations" :key="notation" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(format.notation ?? 'auto') === notation" @click="setFormat({ notation })">{{ notation }}</button></div>
+      <fieldset class="space-y-3 rounded border p-3"><legend class="px-1 text-xs">{{ t('dashboardBuilder.NumberFormat') }}</legend>
+        <div class="flex flex-wrap gap-1"><button v-for="notation in notations" :key="notation" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(format.notation ?? 'auto') === notation" @click="setFormat({ notation })">{{ t(enumLabels[notation]) }}</button></div>
         <div class="grid grid-cols-2 gap-2">
-          <div><Label for="stat-decimals">Decimals</Label><Input id="stat-decimals" type="number" min="0" max="10" :model-value="format.decimals ?? ''" placeholder="Up to 2" @update:model-value="setDecimals" /></div>
-          <div><Label for="stat-scale">Scale</Label><Input id="stat-scale" type="number" step="any" :model-value="format.scale ?? 1" @update:model-value="setScale" /></div>
-          <div><Label for="stat-prefix">Prefix</Label><Input id="stat-prefix" :model-value="format.prefix ?? ''" :maxlength="16" @update:model-value="(v) => setFormat({ prefix: String(v) })" /></div>
-          <div><Label for="stat-suffix">Suffix</Label><Input id="stat-suffix" :model-value="format.suffix ?? ''" :maxlength="16" @update:model-value="(v) => setFormat({ suffix: String(v) })" /></div>
+          <div><Label for="stat-decimals">{{ t('dashboardBuilder.Decimals') }}</Label><Input id="stat-decimals" type="number" min="0" max="10" :model-value="format.decimals ?? ''" :placeholder="t('dashboardBuilder.AutomaticPrecision')" @update:model-value="setDecimals" /></div>
+          <div><Label for="stat-scale">{{ t('dashboardBuilder.Scale') }}</Label><Input id="stat-scale" type="number" step="any" :model-value="format.scale ?? 1" @update:model-value="setScale" /></div>
+          <div><Label for="stat-prefix">{{ t('dashboardBuilder.Prefix') }}</Label><Input id="stat-prefix" :model-value="format.prefix ?? ''" :maxlength="16" @update:model-value="(v) => setFormat({ prefix: String(v) })" /></div>
+          <div><Label for="stat-suffix">{{ t('dashboardBuilder.Suffix') }}</Label><Input id="stat-suffix" :model-value="format.suffix ?? ''" :maxlength="16" @update:model-value="(v) => setFormat({ suffix: String(v) })" /></div>
         </div>
-        <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="format.grouping ?? true" @change="setFormat({ grouping: !(format.grouping ?? true) })" />Group thousands</label>
-        <div class="flex flex-wrap gap-1"><button v-for="unit in units" :key="unit" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(format.unit ?? 'none') === unit" @click="setFormat({ unit })">{{ unit }}</button></div>
+        <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="format.grouping ?? true" @change="setFormat({ grouping: !(format.grouping ?? true) })" />{{ t('dashboardBuilder.GroupThousands') }}</label>
+        <div class="flex flex-wrap gap-1"><button v-for="unit in units" :key="unit" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(format.unit ?? 'none') === unit" @click="setFormat({ unit })">{{ t(enumLabels[unit]) }}</button></div>
       </fieldset>
     </template>
     <datalist id="result-columns"><option v-for="column in columns" :key="column.name" :value="column.name" /></datalist>
-    <fieldset v-if="query.mode === 'result' && columns.length" class="space-y-2"><legend class="text-xs font-medium">Column kinds</legend>
+    <fieldset v-if="query.mode === 'result' && columns.length" class="space-y-2"><legend class="text-xs font-medium">{{ t('dashboardBuilder.ColumnKinds') }}</legend>
       <div v-for="column in columns" :key="column.name" class="space-y-1">
-        <Label :for="`kind-${column.name}`" class="text-xs">{{ column.name }} <span class="text-muted-foreground">{{ viz.columns && Object.hasOwn(viz.columns, column.name) ? 'confirmed' : column.backendType ?? 'guessed' }}</span></Label>
-        <div :id="`kind-${column.name}`" class="flex flex-wrap gap-1"><button v-for="kind in kinds" :key="kind" type="button" class="rounded border px-1.5 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="kindFor(column.name) === kind" @click="setKind(column.name, kind)">{{ kind }}</button></div>
+        <Label :for="`kind-${column.name}`" class="text-xs">{{ column.name }} <span class="text-muted-foreground">{{ viz.columns && Object.hasOwn(viz.columns, column.name) ? t('dashboardBuilder.Confirmed') : column.backendType ?? t('dashboardBuilder.Guessed') }}</span></Label>
+        <div :id="`kind-${column.name}`" class="flex flex-wrap gap-1"><button v-for="kind in kinds" :key="kind" type="button" class="rounded border px-1.5 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="kindFor(column.name) === kind" @click="setKind(column.name, kind)">{{ t(enumLabels[kind]) }}</button></div>
       </div>
     </fieldset>
   </div>

@@ -1,20 +1,26 @@
 import type { DashboardViz, DashboardVizType, NumberFormat } from "@/api/dashboards";
-import { addExact, compareExact, exactString, isExact, parseExact, type FrameNumber } from "./exactNumber";
+import { addExact, compareExact, exactString, isExact, multiplyExact, parseExact, type FrameNumber } from "./exactNumber";
 import { frameCellText, frameWithKinds, suggestKind, type FrameColumn, type PanelFrame } from "./panelFrame";
-import { parseGranularityToMilliseconds } from "./histogram-chart";
+import { getColorForGroupValue } from "./histogram-chart";
 import { formatNumber } from "./numberFormat";
 
 export type ChartViz = Extract<DashboardViz, { type: "chart" }>;
 export type ListViz = Extract<DashboardViz, { type: "pie" | "toplist" }>;
-export interface ChartValue { coordinate: number; text: string; exact: string; approximate: boolean }
-export interface ChartSeries { key: string; label: string; color: string; labelColor: string }
+export interface ChartValue { raw: FrameNumber | null; coordinate: number; text: string; exact: string; approximate: boolean }
+export interface ChartSeries { key: string; label: string; color: string }
 export interface ChartRow { key: string; x: number; label: string; values: Map<string, ChartValue | null> }
 export interface ChartModel { rows: ChartRow[]; series: ChartSeries[]; time: boolean; notices: string[] }
-export interface ListItem extends ChartSeries { value: ChartValue; percentage: number }
+export interface ListItem extends ChartSeries { value: ChartValue; percentage: number; displayPercentage: number }
 
-function chartColors(index: number): Pick<ChartSeries, "color" | "labelColor"> {
-  const token = index % 5 + 1;
-  return { color: `var(--chart-${token})`, labelColor: `var(--chart-${token}-foreground)` };
+export function chartColors(key: string, text: string, other = false): Pick<ChartSeries, "color"> {
+  let hash = 0;
+  for (const char of key) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) | 0;
+  const semantic = /^(error|err|fatal|critical|crit|alert|emerg|emergency|warn|warning|info|information|notice|debug|trace|verbose|get|post|put|delete|patch|options|head)$/i.test(text);
+  return { color: other ? "var(--panel-chart-other)" : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})` };
+}
+
+export function chartStacked(viz: ChartViz): boolean {
+  return (viz.stack ?? ((viz.mark ?? "line") === "line" ? "none" : "stacked")) === "stacked";
 }
 
 function suggestionColumns(frame: PanelFrame): FrameColumn[] {
@@ -24,14 +30,22 @@ function suggestionColumns(frame: PanelFrame): FrameColumn[] {
 export function suggestRoles(frame: PanelFrame, type: DashboardVizType): DashboardViz {
   const columns = suggestionColumns(frame);
   const numbers = columns.filter((c) => c.kind === "number");
-  const time = columns.find((c) => c.kind === "time" || c.kind === "date");
+  const time = columns.find((c) => c.kind === "time" || c.kind === "date" || c.name === "_time");
   const categories = columns.filter((c) => c.kind === "category");
-  switch (type) {
+  const roles = (): DashboardViz => { switch (type) {
     case "stat": return { type, value: numbers[0]?.name, order_by: time?.name };
     case "chart": return { type, x: (time ?? categories[0])?.name, y: numbers.map((c) => c.name), ...(time && categories.length === 1 && numbers.length === 1 ? { series: categories[0].name } : {}) };
     case "pie": case "toplist": return { type, label: columns.find((c) => c.kind !== "number")?.name, value: numbers[0]?.name };
     case "table": return { type };
-  }
+  } };
+  const viz = roles();
+  return withConfirmedRoles(frame, viz);
+}
+
+function withConfirmedRoles(frame: PanelFrame, viz: DashboardViz): DashboardViz {
+  const names = viz.type === "chart" ? [viz.x, ...(viz.y ?? []), viz.series] : viz.type === "stat" ? [viz.value, viz.order_by] : viz.type === "table" ? [] : [viz.label, viz.value];
+  const confirmed = Object.fromEntries(suggestionColumns(frame).filter(c => c.backendType === null && names.includes(c.name)).map(c => [c.name, { kind: c.name === "_time" ? "time" as const : c.kind, confidence: "confirmed" as const }]));
+  return Object.keys(confirmed).length ? { ...viz, columns: { ...confirmed, ...viz.columns } } : viz;
 }
 
 export function suggestViz(frame: PanelFrame): DashboardViz {
@@ -41,7 +55,7 @@ export function suggestViz(frame: PanelFrame): DashboardViz {
   if (frame.rows.length === 1 && numbers.length === 1) return suggestRoles(frame, "stat");
   if (roles.type === "chart" && roles.x && roles.y?.length) {
     const kinds = columns.map((c) => c.kind);
-    const time = kinds.some((k) => k === "time" || k === "date");
+    const time = kinds.some((k) => k === "time" || k === "date") || roles.x === "_time";
     if (time || kinds.filter((k) => k === "category").length === 1 && frame.rows.length <= 50) return { ...roles, mark: time ? "line" : "bar", stack: "none" };
   }
   return suggestRoles(frame, "table");
@@ -53,6 +67,11 @@ function column(frame: PanelFrame, name: string | undefined, numeric = false): F
   if (!found) throw new Error(`Column "${name}" is missing from the result.`);
   if (numeric && found.kind !== "number") throw new Error(`Column "${name}" must be a number (backend type ${found.backendType ?? "untyped"}).`);
   return found;
+}
+
+function colorIdentity(value: unknown, count: boolean): string {
+  if (count && typeof value === "object" && value !== null && "kind" in value && value.kind === "value" && "value" in value) return identity(value.value);
+  return identity(value);
 }
 
 function identity(value: unknown): string {
@@ -84,8 +103,11 @@ export function chartValue(value: FrameNumber, format?: NumberFormat): ChartValu
   if (!Number.isFinite(coordinate)) throw new Error("A value is outside the chart coordinate range. Use a table to see its exact digits.");
   const converted = parseExact(coordinate);
   const approximate = isExact(value) && (!converted || compareExact(converted, value) !== 0);
-  const formatted = formatNumber(value, format);
-  return { coordinate, text: (approximate ? "≈ " : "") + formatted.text, exact: formatted.exact, approximate };
+  let formatted: ReturnType<typeof formatNumber> | undefined;
+  const magnitude = Math.abs(coordinate * (format?.scale ?? 1));
+  const decimals = magnitude > 0 && magnitude < 1 ? Math.min(10, Math.max(2, 1 - Math.floor(Math.log10(magnitude)))) : undefined;
+  const text = () => formatted ??= formatNumber(value, { ...format, decimals: format?.decimals ?? decimals });
+  return { raw: value, coordinate, get text() { return text().text; }, get exact() { return text().exact; }, approximate };
 }
 
 function duplicateError(keys: Map<string, number>, first: string | undefined, roles: string[]): void {
@@ -94,6 +116,7 @@ function duplicateError(keys: Map<string, number>, first: string | undefined, ro
 }
 
 export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean, zone = "UTC"): ChartModel {
+  if (!input.rows.length && !input.columns.length) return { rows: [], series: [], time: false, notices: input.notices };
   const frame = frameWithKinds(input, viz.columns);
   const x = column(frame, count ? "time" : viz.x);
   const ys = (count ? ["count"] : viz.y ?? []).map((name) => column(frame, name, true));
@@ -109,19 +132,19 @@ export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean
   let nullX = 0;
   for (const source of frame.rows) {
     const xv = source[x.name];
+    if (time && xv === null) { nullX++; continue; }
     const groupKey = group ? identity(source[group.name]) : "";
-    const rowKey = identity(time && xv !== null ? Date.parse(String(xv)) : xv);
+    const rowKey = identity(xv);
     const key = JSON.stringify([rowKey, groupKey]);
     keys.set(key, (keys.get(key) ?? 0) + 1);
     if (keys.get(key) === 2 && firstDuplicate === undefined) firstDuplicate = `${label(xv, x, count, zone)}${group ? `, ${label(source[group.name], group, count, zone)}` : ""}`;
-    if (time && xv === null) { nullX++; continue; }
-    const entry = rows.get(rowKey) ?? { row: { key: rowKey, x: time ? Date.parse(String(xv)) : rows.size, label: label(xv, x, count, zone), values: new Map() }, values: new Map<string, FrameNumber | null>() };
+    const entry = rows.get(rowKey) ?? { row: { key: rowKey, x: time ? Date.parse(String(xv)) : rows.size, get label() { return label(xv, x, count, zone); }, values: new Map() }, values: new Map<string, FrameNumber | null>() };
     rows.set(rowKey, entry);
     for (const y of ys) {
       const sk = JSON.stringify([y.name, groupKey]);
       if (!series.has(sk)) {
         const text = group ? label(source[group.name], group, count, zone) : y.name;
-        series.set(sk, { key: sk, label: group && ys.length > 1 ? `${text} · ${y.name}` : text, ...chartColors(series.size) });
+        series.set(sk, { key: sk, label: group && ys.length > 1 ? `${text} · ${y.name}` : text, ...chartColors(group ? colorIdentity(source[group.name], count) : identity(y.name), text, count && groupKey === '{"kind":"other"}') });
       }
       const value = number(source[y.name]);
       const previous = entry.values.get(sk);
@@ -136,30 +159,21 @@ export function buildPanelChart(input: PanelFrame, viz: ChartViz, count: boolean
     const value = entry.values.get(s.key);
     entry.row.values.set(s.key, value === undefined || value === null ? count ? chartValue(0, viz.format) : null : chartValue(value, viz.format));
   }
-  let result = [...rows.values()].map((e) => e.row);
+  const result = [...rows.values()].map((e) => e.row);
   if (time) result.sort((a, b) => a.x - b.x);
-  const step = count && time ? parseGranularityToMilliseconds(frame.interval) : null;
-  if (step && result.length > 1 && (result.at(-1)!.x - result[0].x) / step <= 10000) {
-    const filled: ChartRow[] = [];
-    for (const row of result) {
-      const previous = filled.at(-1);
-      if (previous) for (let ts = previous.x + step; ts < row.x; ts += step) filled.push({ key: String(ts), x: ts, label: frameCellText(new Date(ts).toISOString(), x, zone), values: new Map(visibleSeries.map((s) => [s.key, chartValue(0, viz.format)])) });
-      filled.push(row);
-    }
-    result = filled;
-  }
   if (result.some((r) => [...r.values.values()].some((v) => v?.approximate))) notices.push("Chart coordinates are approximate. Tooltips show exact values.");
   return { rows: result, series: visibleSeries, time, notices };
 }
 
 export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, zone = "UTC"): { items: ListItem[]; notices: string[]; total: ChartValue | null } {
+  if (!input.rows.length && !input.columns.length) return { items: [], notices: input.notices, total: null };
   const frame = frameWithKinds(input, viz.columns);
   const dimension = column(frame, count ? "series" : viz.label);
   const metric = column(frame, count ? "count" : viz.value, true);
   const notices = [...frame.notices];
   const keys = new Map<string, number>();
   let firstDuplicate: string | undefined;
-  const values = new Map<string, { key: string; label: string; value: FrameNumber | null }>();
+  const values = new Map<string, { key: string; label: string; value: FrameNumber | null; colorKey: string }>();
   let nulls = 0;
   for (const row of frame.rows) {
     const key = identity(row[dimension.name]);
@@ -170,39 +184,49 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
     if (value === null && viz.type === "pie") { nulls++; continue; }
     if (viz.type === "pie" && value !== null && (isExact(value) ? value.coefficient < 0n : value < 0)) throw new Error("Pie values must be nonnegative.");
     const previous = values.get(key);
-    values.set(key, { key, label: text, value: count && previous?.value !== undefined && previous.value !== null && value !== null ? sum(previous.value, value) : value });
+    values.set(key, { key, label: text, colorKey: colorIdentity(row[dimension.name], count), value: count && previous?.value !== undefined && previous.value !== null && value !== null ? sum(previous.value, value) : value });
   }
   if (!count) duplicateError(keys, firstDuplicate, [dimension.name]);
   if (nulls) notices.push(`${nulls} NULL value(s) omitted.`);
-  const colors = new Map([...values.keys()].map((key, i) => [key, chartColors(i)]));
   let entries = [...values.values()];
   const totalValue = entries.reduce<FrameNumber | null>((a, e) => e.value === null ? a : a === null ? e.value : sum(a, e.value), null);
   if (count) entries.sort((a, b) => isExact(a.value) && isExact(b.value) ? compareExact(b.value, a.value) : Number(b.value) - Number(a.value));
-  if (viz.type === "pie" && viz.min_slice_percent && entries.length) {
-    const coordinates = entries.map((v) => v.value === null ? 0 : chartValue(v.value).coordinate);
-    const max = Math.max(...coordinates);
-    const total = coordinates.reduce((n, v) => n + (max ? v / max : 0), 0);
-    let remainder: FrameNumber | null = null;
-    entries = entries.filter((e, i) => {
-      if (total && coordinates[i] / max / total * 100 < viz.min_slice_percent!) { remainder = e.value === null ? remainder : remainder === null ? e.value : sum(remainder, e.value); return false; }
+  let remainder: FrameNumber | null = null;
+  const fold = (value: FrameNumber | null) => { if (value !== null) remainder = remainder === null ? value : sum(remainder, value); };
+  if (viz.type === "pie" && viz.min_slice_percent && totalValue !== null) {
+    const total = isExact(totalValue) ? totalValue : parseExact(totalValue);
+    const threshold = parseExact(viz.min_slice_percent);
+    entries = entries.filter(e => {
+      const value = isExact(e.value) ? e.value : parseExact(e.value);
+      if (value && total && threshold && compareExact(multiplyExact(value, { kind: "exact", coefficient: 100n, scale: 0 }), multiplyExact(threshold, total)) < 0) { fold(e.value); return false; }
       return true;
     });
-    if (remainder !== null) entries.push({ key: "pie-remainder", label: "Other", value: remainder });
   }
+  if (viz.type === "pie" && entries.length + (remainder === null ? 0 : 1) > 50) {
+    notices.push(`50 of ${values.size} slices shown. Overflow folded into Other.`);
+    entries.splice(49).forEach(e => fold(e.value));
+  }
+  if (remainder !== null) entries.push({ key: "pie-remainder", label: "Other", value: remainder, colorKey: "pie-remainder" });
   const maxRows = viz.type === "pie" ? 50 : viz.max_rows ?? 20;
   if (entries.length > maxRows) notices.push(`${maxRows} of ${entries.length} ${viz.type === "pie" ? "slices" : "rows"} shown.`);
-  const items = entries.map((e) => ({ ...e, ...(colors.get(e.key) ?? chartColors(colors.size)), value: e.value === null ? { coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0 }));
+  const items = entries.slice(0, maxRows).map((e) => ({ ...e, ...chartColors(e.colorKey, e.label, e.key === "pie-remainder" || e.key === '{"kind":"other"}'), value: e.value === null ? { raw: null, coordinate: 0, text: "NULL", exact: "NULL", approximate: false } : chartValue(e.value, viz.format), percentage: 0, displayPercentage: 0 }));
   const max = Math.max(0, ...items.map((i) => Math.abs(i.value.coordinate)));
   const total = items.reduce((s, i) => s + (max ? Math.abs(i.value.coordinate) / max : 0), 0);
   for (const item of items) item.percentage = total ? Math.abs(item.value.coordinate) / max / total * 100 : 0;
+  if (total > 0) {
+    for (const item of items) item.displayPercentage = Math.floor(item.percentage * 10) / 10;
+    const remaining = Math.round(1000 - items.reduce((sum, item) => sum + Math.round(item.displayPercentage * 10), 0));
+    const rounded = [...items].sort((a, b) => (b.percentage - b.displayPercentage) - (a.percentage - a.displayPercentage));
+    for (let i = 0; i < remaining; i++) rounded[i].displayPercentage += 0.1;
+  }
   if (items.some((i) => i.value.approximate)) notices.push("Chart coordinates are approximate. Tooltips show exact values.");
-  return { items: items.slice(0, maxRows), notices, total: totalValue === null ? null : chartValue(totalValue, viz.format) };
+  return { items, notices, total: totalValue === null ? null : chartValue(totalValue, viz.format) };
 }
 
 export function withSuggestedRoles(frame: PanelFrame, viz: DashboardViz): DashboardViz {
-  if (viz.type === "chart" && viz.x && viz.y?.length) return viz;
-  if (viz.type === "stat" && viz.value) return viz;
-  if ((viz.type === "pie" || viz.type === "toplist") && viz.label && viz.value) return viz;
+  if (viz.type === "chart" && viz.x && viz.y?.length) return withConfirmedRoles(frame, viz);
+  if (viz.type === "stat" && viz.value) return withConfirmedRoles(frame, viz);
+  if ((viz.type === "pie" || viz.type === "toplist") && viz.label && viz.value) return withConfirmedRoles(frame, viz);
   const suggested = suggestRoles(frameWithKinds(frame, viz.columns), viz.type);
   const columns = { ...suggested.columns, ...viz.columns };
   const kinds = Object.keys(columns).length ? { columns } : {};

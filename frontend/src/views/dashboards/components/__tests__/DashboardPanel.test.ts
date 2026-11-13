@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/i18n";
 import type { DashboardPanel as Panel } from "@/api/dashboards";
 import type { PanelState } from "@/stores/dashboards";
-import { resultFrame } from "@/utils/panelFrame";
+import { countFrame, resultFrame } from "@/utils/panelFrame";
 import DashboardPanel from "@/views/dashboards/components/DashboardPanel.vue";
 
 const panel: Panel = {
@@ -92,4 +92,11 @@ describe("empty stat frames", () => {
     const root = await render({ status: "empty", frame: resultFrame({ columns: [{ name: "n", type: "UInt64" }], rows: [] }) }, true, { ...panel, viz: { type: "stat", value: "n" } });
     expect(root.querySelector(".panel-stat__value")?.textContent).toBe("No data");
   });
+});
+
+it("shows the empty count state without a phantom group or zero line", async () => {
+  const root = await render({ status: "empty", frame: countFrame([], "1h", true) }, true, { ...panel, query: { mode: "count", language: "logchefql", text: "" }, viz: { type: "chart" } });
+  expect(root.textContent).toContain("No data for this time range");
+  expect(root.querySelector("svg.panel-chart__plot")).toBeNull();
+  expect(root.textContent).not.toContain("(empty)");
 });

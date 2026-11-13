@@ -82,6 +82,7 @@ export interface PanelState {
   stats?: QueryStats;
   error?: string;
   range?: ResolvedWindow;
+  querySignature?: string;
 }
 
 
@@ -913,12 +914,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const controller = new AbortController();
     previewAbort = controller;
     const signal = controller.signal;
+    const querySignature = execSignature(panel);
     state.data.value.previewState = { status: "loading" };
     try {
       const range = effectiveRange.value;
       const result = await fetchPanelFrame(panel, range, signal);
       if (signal.aborted) return;
-      state.data.value.previewState = { ...result, range };
+      state.data.value.previewState = { ...result, range, querySignature };
     } catch (err) {
       if (signal.aborted || isAbortError(err)) return;
       const { locked, message } = classifyPanelError(err);

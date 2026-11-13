@@ -1,3 +1,9 @@
+const NativeNumberFormat = Intl.NumberFormat;
+Intl.NumberFormat = new Proxy(NativeNumberFormat, {
+  construct(target, args) { return Reflect.construct(target, [args[0] ?? "en-US", args[1]]); },
+  apply(target, self, args) { return Reflect.apply(target, self, [args[0] ?? "en-US", args[1]]); },
+});
+
 // Vitest global setup.
 //
 // Node 22+ ships an experimental built-in `localStorage`/`sessionStorage`

@@ -34,7 +34,7 @@ const tooltipTriggers = {
         </VisSingleContainer>
         <div class="panel-pie__legend" aria-label="Slice legend">
           <div v-for="item in result.items" :key="item.key" class="panel-pie__item" :title="`${item.label}: ${item.value.exact}`" tabindex="0">
-            <i :style="{ background: item.color }" /><span class="panel-pie__label">{{ item.label }}</span><span>{{ item.value.text }} · {{ item.percentage > 0 && item.percentage < 0.1 ? '<0.1' : item.percentage.toFixed(1) }}%</span>
+            <i :style="{ background: item.color }" /><span class="panel-pie__label">{{ item.label }}</span><span>{{ item.value.text }} · {{ item.percentage > 0 && item.percentage < 0.1 ? '<0.1' : item.displayPercentage.toFixed(1) }}%</span>
           </div>
         </div>
       </div>

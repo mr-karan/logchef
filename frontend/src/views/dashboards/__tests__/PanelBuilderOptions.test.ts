@@ -135,3 +135,36 @@ describe("result chart builder", () => {
     } finally { app.unmount(); }
   });
 });
+
+it('prunes result-chart confirmations, retains missing series and clears default options', async () => {
+  const { resultFrame } = await import('@/utils/panelFrame');
+  const viz = ref<DashboardViz>({ type: 'chart', x: 'old', y: ['n'], series: 'gone', columns: { old: { kind: 'category', confidence: 'confirmed' }, n: { kind: 'number', confidence: 'confirmed' } }, show_values: true, legend: false, orientation: 'horizontal', x_scale: 'category' });
+  const host = document.createElement('div');
+  const app = createApp({ render: () => h(PanelBuilderOptions, {
+    query: { mode: 'result', language: 'logsql', text: '*' }, viz: viz.value, fieldSuggestions: [],
+    frame: resultFrame({ columns: [], rows: [{ next: 'api', n: '12' }], untyped: true }),
+    'onUpdate:viz': (next) => { viz.value = next; },
+  }) }).use(i18n);
+  try {
+    app.mount(host);
+    expect(host.querySelector('#chart-series')?.textContent).toContain('gone (missing)');
+    const x = host.querySelector<HTMLSelectElement>('#chart-x')!;
+    x.value = 'next'; x.dispatchEvent(new Event('change'));
+    await nextTick();
+    expect(viz.value.columns).not.toHaveProperty('old');
+    const y = [...host.querySelectorAll<HTMLInputElement>('fieldset input[type=checkbox]')][1];
+    y.dispatchEvent(new Event('change'));
+    await nextTick();
+    expect(viz.value.columns).not.toHaveProperty('n');
+    for (const text of ['Show values', 'Show legend', 'Horizontal']) {
+      const input = [...host.querySelectorAll('label')].find(l => l.textContent?.trim() === text)?.querySelector('input');
+      expect(input).toBeTruthy(); input?.dispatchEvent(new Event('change')); await nextTick();
+    }
+    const scale = host.querySelector<HTMLSelectElement>('#chart-scale')!;
+    scale.value = 'auto'; scale.dispatchEvent(new Event('change')); await nextTick();
+    expect(viz.value).not.toHaveProperty('show_values');
+    expect(viz.value).not.toHaveProperty('legend');
+    expect(viz.value).not.toHaveProperty('orientation');
+    expect(viz.value).not.toHaveProperty('x_scale');
+  } finally { app.unmount(); }
+});

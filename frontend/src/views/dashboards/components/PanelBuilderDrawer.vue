@@ -54,7 +54,7 @@ const isDark = computed(() => themeStore.isDark);
 const monacoTheme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
 const PANEL_TYPES: { value: PanelBuilderKind; label: string }[] = [
-  { value: "chart", label: "Chart" },
+  { value: "chart", get label() { return t("ui.timeSeries"); } },
   { value: "stat", get label() { return t('ui.stat'); } },
   { value: "breakdown", get label() { return t('ui.breakdown'); } },
   { value: "table", get label() { return t('ui.table'); } },
@@ -82,7 +82,7 @@ function switchKind(kind: PanelBuilderKind) {
   previousCountPanel = null;
   store.switchDraftPanelKind(props.panelId, kind);
   const p = panel.value;
-  const frame = store.previewState?.frame;
+  const frame = store.previewState?.querySignature === (p && execSignature(p)) ? store.previewState.frame : undefined;
   if (p?.query.mode === "result" && frame) patchPanel({ viz: withSuggestedRoles(frame, p.viz) });
 }
 
@@ -137,8 +137,12 @@ function setQueryMode(mode: "count" | "result") {
   const { language, text } = p.query;
   previousCountPanel = null;
   suggestNextVisualization = mode === "result";
-  if (mode === "result") patchPanel({ query: { mode, language, text, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: p.viz.type === "table" ? p.viz : { type: "stat", reduce: "last" } });
-  else patchPanel({ query: { mode, language, text, limit: undefined, interval: "auto" }, viz: { type: "stat", reduce: "sum", ...(p.viz.type === "stat" ? { format: p.viz.format } : {}) } });
+  const viz = { ...p.viz };
+  if (viz.type === "chart") { delete viz.x; delete viz.y; delete viz.series; }
+  else if (viz.type === "stat") { delete viz.value; delete viz.order_by; viz.reduce = mode === "count" ? "sum" : "last"; }
+  else if (viz.type !== "table") { delete viz.label; delete viz.value; }
+  delete viz.columns;
+  patchPanel({ query: mode === "result" ? { mode, language, text, interval: undefined, group_by: undefined, translate_limit: undefined } : { mode, language, text, limit: undefined, interval: "auto" }, viz });
 }
 
 function setVisualization(viz: DashboardViz) {
@@ -234,7 +238,7 @@ const isPreviewing = computed(() => store.previewState?.status === "loading");
 const previewState = computed(() => store.previewState ?? undefined);
 watch(() => previewState.value?.frame, (frame) => {
   const p = panel.value;
-  if (!frame || p?.query.mode !== "result") return;
+  if (!frame || p?.query.mode !== "result" || previewState.value?.querySignature !== execSignature(p)) return;
   const viz = suggestNextVisualization ? suggestViz(frame) : withSuggestedRoles(frame, p.viz);
   suggestNextVisualization = false;
   patchPanel({ viz });
