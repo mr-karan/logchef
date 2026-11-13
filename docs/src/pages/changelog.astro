@@ -163,6 +163,49 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
+    <article class="version" id="unreleased">
+      <div class="version-header">
+        <a class="version-tag unreleased" href="#unreleased">Unreleased</a>
+      </div>
+
+      <p class="release-intro">
+        The Explorer is easier to read and harder to misuse. The message column gets the room, counters say what they count, and cell and row actions build useful filters.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">Added</div>
+        <ul class="change-list">
+          <li><strong>Cell menu</strong>: Right-click a cell to copy it or filter on it. Long values, such as a message, get a contains filter (<code>msg~"..."</code>) instead of an exact match on the whole line.</li>
+          <li><strong>Field actions in the expanded row</strong>: Every field, nested JSON keys included, has filter, exclude and Add as column. Nested keys use the dotted syntax, for example <code>msg.http.status</code>.</li>
+          <li><strong>Wrap</strong>: A toggle shows long values on several lines.</li>
+          <li><strong>Compact view</strong>: Timestamps show milliseconds, and one optional prefix field, such as <code>job_name</code>, shows before each line.</li>
+          <li><strong>Add to query</strong>: The loaded-rows search can turn its term into a contains filter on the message field.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">Changed</div>
+        <ul class="change-list">
+          <li>The message column takes the width left over by the other columns.</li>
+          <li>Scanned rows move to the stats strip as "N scanned". The table and compact views show "Showing 1–50 of 100 rows", like the JSON view.</li>
+          <li>LogchefQL syntax errors read as plain sentences, such as "expected a value after <code>msg~</code>", in the UI, the API and the CLI. Results from the previous run are dimmed while an error shows.</li>
+          <li>High-cardinality fields in the Fields panel say there are too many distinct values instead of listing fragments, and every field shows its type badge.</li>
+          <li>The query toolbar's AI Assistant is now Generate SQL and appears only in SQL mode. Ask Chef is the assistant for Search mode.</li>
+          <li>The filter editor starts at one line and grows with its content. The histogram hint moved into a tooltip.</li>
+          <li>The search box beside pagination is labelled Search loaded rows. In SQL mode, the disabled time range explains that the query's own dates apply.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>A click on a cell expands the row instead of putting the whole escaped log line into the editor, and no icons cover the value.</li>
+          <li>Expanded fields in the Fields panel stay open when a query runs, and Group By no longer shifts when the fast-filter hint appears.</li>
+          <li>Cmd/Ctrl+Enter closes the autocomplete popup.</li>
+        </ul>
+      </div>
+    </article>
+
     <article class="version" id="v2.6.1">
       <div class="version-header">
         <a class="version-tag" href="#v2.6.1">v2.6.1</a>

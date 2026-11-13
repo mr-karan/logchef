@@ -22,7 +22,6 @@ it('renders only the columns under the horizontal viewport, with spacers keeping
   const app = createApp(DataTable, {
     columns: columnNames.map(name => ({ name, type: 'String' })),
     data: [row, { ...row, timestamp: '2026-01-01T00:00:01Z' }],
-    stats: { execution_time_ms: 1, rows_read: 2, bytes_read: 64 },
     sourceId: 'virtualization-test',
     teamId: null,
   })
@@ -81,7 +80,6 @@ it('bounds first-mount work with every saved column visible and does not populat
   const app = createApp(DataTable, {
     columns: names.map(name => ({ name, type: 'String' })),
     data: Array.from({ length: 100 }, (_, i) => Object.fromEntries(names.map(name => [name, `${i}-${name}`]))),
-    stats: { execution_time_ms: 1, rows_read: 100, bytes_read: 64 },
     sourceId: 'wide-mount-test',
     teamId: 7,
     source: { source_type: 'victorialogs', capabilities: [] },

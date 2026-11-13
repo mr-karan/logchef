@@ -86,17 +86,53 @@ and 000014).
   when the query's creator or an admin adds a query to a shared collection, on
   by default. The collection view shows each link's kind and lets the creator
   or an admin switch it.
+- Right-click a cell to copy it or filter on it. Long values, such as a
+  message, get a contains filter (`msg~"..."`) instead of an exact match on
+  the whole line.
+- The expanded row lists every field, nested JSON keys included, with
+  filter, exclude and "Add as column" actions. Nested keys use the existing
+  dotted syntax, for example `msg.http.status`.
+- A Wrap toggle shows long values on several lines.
+- Compact view: timestamps show milliseconds, and one optional prefix field
+  (for example `job_name`) shows before each line. The choice is kept per
+  source.
+- "Add to query" next to the loaded-rows search turns the term into a
+  contains filter on the message field.
 
 ### Changed
 - Every link, member and team-share write runs in one transaction under the
   collection's lock. A write the database cannot serialize answers 503 with
   `Retry-After: 1`; nothing is written and the client retries.
+- The message column takes the width left over by the other columns.
+- The rows the query scanned move to the stats strip as "N scanned". The
+  table and compact views show "Showing 1–50 of 100 rows", like the JSON
+  view.
+- LogchefQL syntax errors read as plain sentences, such as "expected a value
+  after `msg~`", in the UI, the API and the CLI.
+- While an error is shown, the previous results are dimmed and marked as
+  coming from the previous run.
+- High-cardinality fields in the Fields panel say there are too many
+  distinct values instead of listing fragments. Every field shows its type
+  badge, collapsed or expanded.
+- The query toolbar's AI Assistant is now "Generate SQL" and appears only in
+  SQL mode. Ask Chef is the assistant for Search mode.
+- The filter editor starts at one line and grows with its content. The
+  histogram hint moved into a tooltip.
+- The search box beside pagination is labelled "Search loaded rows", since
+  it only filters rows already loaded.
+- In SQL mode, the disabled time range explains that the query's own dates
+  apply and that re-running does not move them forward.
 
 ### Fixed
 - Dashboard saves use an atomic revision check so two edits from the same
   revision cannot overwrite each other, including saves within one second.
 - Editing a dashboard starts from the latest saved version, and leaving the
   page with unsaved edits asks first on reload and tab close too.
+- A click on a cell no longer puts the whole escaped log line into the
+  editor. It expands the row, and the hover icons no longer cover the value.
+- Expanded fields in the Fields panel stay open when a query runs.
+- Group By no longer shifts sideways when the fast-filter hint appears.
+- Cmd/Ctrl+Enter closes the autocomplete popup before the results load.
 
 ## [2.6.1] - 2026-10-29
 

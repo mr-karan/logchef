@@ -11,7 +11,6 @@ it.each([{ detail: 'retained JSON' }, 42])('renders non-string severity %j witho
   const app = createApp(DataTable, {
     columns: [{ name: 'severity', type: 'String' }],
     data: [{ severity: value }], severityField: 'severity',
-    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 20 },
     sourceId: 'non-string-severity', teamId: null,
   })
   app.use(createPinia())
@@ -41,7 +40,6 @@ it.each(['severity_text', 'level'])('renders outcome tones without replacing hig
   const app = createApp({ render: () => h(DataTable, {
     columns, data, severityField,
     regexHighlights: { event_type: { pattern: 'FAILURE', isNegated: false } },
-    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 64 },
     sourceId: 'outcome-test', teamId: null,
   }) })
   app.use(createPinia())
@@ -87,7 +85,6 @@ it.each([
       { name: 'status', type: 'String' },
     ],
     data: [{ timestamp: '2026-01-01T00:00:00Z', service: value, status: value }],
-    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 64 },
     sourceId: `outcome-service-${value}`, teamId: null, onDrillDown,
   })
   app.use(createPinia())
@@ -104,17 +101,21 @@ it.each([
       expect(content?.classList.contains('outcome-failure')).toBe(columnName === 'status')
       expect(content?.classList.contains('outcome-badge')).toBe(columnName === 'status')
 
-      cell.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
-      await nextTick()
-      const buttons = cell.querySelectorAll<HTMLButtonElement>('.cell-actions button')
-      expect(buttons).toHaveLength(3)
-      buttons[0]?.click()
-      await nextTick()
-      expect(writeText).toHaveBeenLastCalledWith(value)
-      buttons[1]?.click()
-      expect(onDrillDown).toHaveBeenLastCalledWith({ column: columnName, value, operator: '=' })
-      buttons[2]?.click()
-      expect(onDrillDown).toHaveBeenLastCalledWith({ column: columnName, value, operator: '!=' })
+      // Copy, include and exclude live in the right-click menu, in that order.
+      for (const [index, check] of [
+        [0, () => expect(writeText).toHaveBeenLastCalledWith(value)],
+        [1, () => expect(onDrillDown).toHaveBeenLastCalledWith({ column: columnName, value, operator: '=' })],
+        [2, () => expect(onDrillDown).toHaveBeenLastCalledWith({ column: columnName, value, operator: '!=' })],
+      ] as const) {
+        cell.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }))
+        await nextTick()
+        await nextTick()
+        const items = document.querySelectorAll<HTMLElement>('[data-cell-menu] [role="menuitem"]')
+        expect(items).toHaveLength(3)
+        items[index]?.click()
+        await nextTick()
+        check()
+      }
     }
   } finally {
     app.unmount()
@@ -137,7 +138,6 @@ it.each([
   const app = createApp(DataTable, {
     columns: [{ name: 'record_status', type: 'String' }],
     data: [{ record_status: value }], severityField: 'record_status',
-    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 20 },
     sourceId: 'custom-severity', teamId: null,
   })
   app.use(createPinia())

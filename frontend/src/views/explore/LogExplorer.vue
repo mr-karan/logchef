@@ -39,6 +39,7 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
+import { addSelectField, appendCondition, buildCondition, type FilterOperator } from "@/utils/logchefql/filters";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
 
@@ -83,6 +84,8 @@ const {
   changeMode,
 } = useQuery();
 const isExecutingQuery = computed(() => runs.isRunning);
+// A failed run leaves the previous results on screen; they no longer match the query.
+const resultsStale = computed(() => runs.error !== null && runs.shown !== null && runs.shown !== runs.current);
 const canExecuteQuery = computed(() => exploreStore.canExecuteQuery);
 const rows = computed(() => runs.results?.rows ?? []);
 
@@ -278,60 +281,19 @@ const regexHighlights = computed(() => {
   return highlights;
 });
 
-// Function to handle drill-down from DataTable to add a filter condition
-const handleDrillDown = (data: {
-  column: string;
-  value: any;
-  operator: string;
-}) => {
-  // Only handle in LogchefQL mode
+// Adds a filter from a table cell or an expanded row to the LogchefQL query.
+const handleDrillDown = (data: { column: string; value: unknown; operator: FilterOperator }) => {
   if (activeMode.value !== "logchefql") return;
+  logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(data.column, data.operator, data.value));
+  nextTick(() => {
+    queryEditorRef.value?.focus(true);
+  });
+};
 
-  const { column, value, operator } = data;
-
-  // Create a new condition based on the column and value
-  let newCondition = "";
-  let formattedValue = "";
-
-  // Format value appropriately
-  if (value === null || value === undefined) {
-    formattedValue = "null";
-  } else if (typeof value === "string") {
-    // Escape quotes in the string value
-    const escapedValue = value.replace(/"/g, '\\"');
-    formattedValue = `"${escapedValue}"`;
-  } else if (typeof value === "number" || typeof value === "boolean") {
-    formattedValue = String(value);
-  } else {
-    // Convert objects to string representation
-    try {
-      formattedValue = `"${JSON.stringify(value).replace(/"/g, '\\"')}"`;
-    } catch (e) {
-      formattedValue = `"${String(value).replace(/"/g, '\\"')}"`;
-    }
-  }
-
-  // Create the condition based on the operator
-  newCondition = `${column}${operator}${formattedValue}`;
-
-  // Get the current query
-  let currentQuery = logchefQuery.value?.trim() || "";
-
-  // If there's already a query, append the new condition with "and"
-  if (currentQuery) {
-    // Check if we need to wrap existing query in parentheses
-    if (currentQuery.includes(" or ") && !currentQuery.startsWith("(")) {
-      currentQuery = `(${currentQuery})`;
-    }
-    currentQuery = `${currentQuery} and ${newCondition}`;
-  } else {
-    currentQuery = newCondition;
-  }
-
-  // Update the query
-  logchefQuery.value = currentQuery;
-
-  // Focus the editor and move cursor to the end of the query
+// Projects a nested field as an extra column; top-level columns are shown by the table itself.
+const handleAddColumn = (data: { field: string; shownColumns: string[] }) => {
+  if (activeMode.value !== "logchefql") return;
+  logchefQuery.value = addSelectField(logchefQuery.value ?? "", data.field, data.shownColumns);
   nextTick(() => {
     queryEditorRef.value?.focus(true);
   });
@@ -628,20 +590,7 @@ const addSortKeyExample = () => {
 };
 
 const appendLogchefqlCondition = (exampleQuery: string) => {
-
-  // Get current query
-  let currentQuery = logchefQuery.value?.trim() || "";
-
-  // If there's already a query, append the new condition with "and"
-  if (currentQuery) {
-    // Check if we need to wrap existing query in parentheses
-    if (currentQuery.includes(" or ") && !currentQuery.startsWith("(")) {
-      currentQuery = `(${currentQuery})`;
-    }
-    currentQuery = `${currentQuery} and ${exampleQuery}`;
-  } else {
-    currentQuery = exampleQuery;
-  }
+  const currentQuery = appendCondition(logchefQuery.value ?? "", exampleQuery);
 
   // Update the query through the store
   exploreStore.setLogchefqlCode(currentQuery);
@@ -744,24 +693,8 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
     return;
   }
 
-  // Build the filter expression
-  const needsQuotes = !/^\d+$/.test(value); // Only numbers don't need quotes
-  const quotedValue = needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value;
-  const filterExpression = `${field}${operator}${quotedValue}`;
-  
-  // Get current query
-  const currentQuery = exploreStore.logchefqlCode?.trim() || '';
-  
-  // Build new query - append with 'and' if there's existing content
-  let newQuery: string;
-  if (currentQuery) {
-    newQuery = `${currentQuery} and ${filterExpression}`;
-  } else {
-    newQuery = filterExpression;
-  }
-  
-  // Update the store
-  exploreStore.setLogchefqlCode(newQuery);
+  const filterValue = /^\d+$/.test(value) ? Number(value) : value;
+  exploreStore.setLogchefqlCode(appendCondition(exploreStore.logchefqlCode ?? '', buildCondition(field, operator, filterValue)));
   
   // Switch to LogchefQL mode if not already
   if (activeMode.value !== 'logchefql') {
@@ -1102,7 +1035,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
               currentSourceId &&
               hasValidSource &&
               exploreStore.hasWindow
-            ">
+            " :class="{ 'opacity-50 grayscale': resultsStale }" :data-stale="resultsStale || undefined">
               <!-- Unified Results Toolbar -->
               <WindowedSearchPanel @stop="nav.cancel()" @page="nav.page" />
               <ResultsToolbar
@@ -1134,7 +1067,8 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
               exploreStore.hasWindow
             ">
               <!-- Results Area -->
-              <div class="flex-1 overflow-hidden relative bg-background">
+              <div class="flex-1 overflow-hidden relative bg-background" :class="{ 'opacity-50 grayscale': resultsStale }"
+                :data-stale="resultsStale || undefined">
                 <!-- Live Tail Panel - takes over the results area while live -->
                 <LiveTailPanel
                   v-if="exploreStore.isLive"
@@ -1165,7 +1099,6 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${runs.shown?.id}-${displayMode}`"
                     :columns="runs.results.columns as any"
                     :data="rows"
-                    :stats="runs.results.stats"
                     :is-loading="runs.showsLoading || isInitialQueryPending"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
@@ -1177,6 +1110,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :active-mode="activeMode"
                     :display-mode="displayMode"
                     @drill-down="handleDrillDown"
+                    @add-column="handleAddColumn"
                     @update:display-mode="displayMode = $event"
                   />
 

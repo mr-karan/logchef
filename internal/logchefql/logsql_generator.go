@@ -121,7 +121,7 @@ func TranslateToLogsQL(query string, options *LogsQLTranslateOptions) *LogsQLTra
 
 	pq, err := ParseLogchefQL(query)
 	if err != nil {
-		result.Error = convertParticipleError(err)
+		result.Error = convertParticipleError(query, err)
 		return result
 	}
 

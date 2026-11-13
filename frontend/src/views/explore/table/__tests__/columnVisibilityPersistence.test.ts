@@ -21,7 +21,6 @@ function mountTable(initialColumnNames: string[]) {
       return h(DataTable, {
         columns: state.columnNames.map(name => ({ name, type: 'String' })),
         data: [row],
-        stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 32 },
         sourceId: 'vl-source',
         teamId: 7,
         source: { source_type: 'victorialogs', capabilities: [] },

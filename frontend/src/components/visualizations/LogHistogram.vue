@@ -24,6 +24,8 @@ import {
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
 import { useHistogramBrush } from "@/composables/useHistogramBrush";
+import { Info } from "lucide-vue-next";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const { t } = useI18n();
 
@@ -118,7 +120,7 @@ const chartSubtitle = computed(() => {
     return null;
   }
 
-  const parts = [t('chart.interactions')];
+  const parts: string[] = [];
   if (currentGranularity.value) {
     parts.unshift(t('chart.buckets', { interval: currentGranularity.value }));
   }
@@ -234,8 +236,24 @@ const formatXAxisTick = computed(() => {
 
 <template>
   <div class="log-histogram" :style="{ minHeight: `${chartBoxHeight}px` }">
-    <div class="log-histogram__header" v-if="chartSubtitle || histogramNotice">
-      <p v-if="chartSubtitle" class="log-histogram__subtitle">{{ chartSubtitle }}</p>
+    <div class="log-histogram__header" v-if="chartSubtitle !== null || histogramNotice">
+      <p v-if="chartSubtitle !== null" class="log-histogram__subtitle">
+        {{ chartSubtitle }}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="log-histogram__help"
+                :aria-label="t('chart.interactions')"
+              >
+                <Info class="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" class="text-xs">{{ t('chart.interactions') }}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </p>
       <p v-if="histogramNotice" class="log-histogram__notice" role="status">{{ histogramNotice }}</p>
     </div>
 
@@ -371,9 +389,19 @@ const formatXAxisTick = computed(() => {
 }
 
 .log-histogram__subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   color: var(--muted-foreground);
   font-size: 0.6875rem;
   line-height: 1rem;
+}
+
+.log-histogram__help {
+  display: inline-flex;
+  pointer-events: auto;
+  color: inherit;
+  cursor: help;
 }
 
 .log-histogram__notice {

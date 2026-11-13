@@ -25,7 +25,6 @@ it('updates literal highlights and query markers without changing columns', asyn
     data,
     queryFields: state.queryFields,
     regexHighlights: state.regexHighlights,
-    stats: { execution_time_ms: 1, rows_read: 2, bytes_read: 64 },
     sourceId: 'highlight-test', teamId: null,
   }) })
   app.use(createPinia())

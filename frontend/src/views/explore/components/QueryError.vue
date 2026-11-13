@@ -11,12 +11,14 @@ const exploreStore = useExploreStore()
 const runs = useExploreRuns()
 
 const displayError = computed(() => runs.error ?? exploreStore.error?.message)
+const showsStaleResults = computed(() => runs.error !== null && runs.shown !== null && runs.shown !== runs.current)
 </script>
 
 <template>
   <div v-if="displayError" class="mx-3 my-2 text-sm text-destructive bg-destructive/10 p-2 rounded">
     <div class='font-medium'>{{ t('ui.queryError') }}</div>
     <div>{{ displayError }}</div>
+    <div v-if="showsStaleResults" data-stale-note class="mt-1 text-xs text-muted-foreground">{{ t('explore.staleResults') }}</div>
     <div v-if="displayError.includes('Missing boolean operator')"
       class="mt-1.5 pt-1.5 border-t border-destructive/20 text-xs">
       <div class='font-medium'>{{ t('ui.hint') }}</div>

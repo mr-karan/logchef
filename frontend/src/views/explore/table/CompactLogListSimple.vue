@@ -2,11 +2,13 @@
 import { useI18n } from "vue-i18n";
 
 import { computed, ref, watch } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import TableControls from './TableControls.vue'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { Clock } from 'lucide-vue-next'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { 
   useTable,
   type PaginationState,
@@ -14,19 +16,18 @@ import {
 } from '@tanstack/vue-table'
 import { logTableFeatures, type ColumnDef } from './tableFeatures'
 import { valueUpdater } from '@/lib/utils'
-import type { QueryStats } from '@/api/explore'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import { isPrimaryMessageField } from './fieldSemantics'
 import { usePreferencesStore } from '@/stores/preferences'
 import { epochMs, formatInZone } from '@/utils/timeWindow'
+import type { FilterOperator } from '@/utils/logchefql/filters'
 
 const { t, locale } = useI18n();
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
   data?: Record<string, any>[]  // Primary prop - same as DataTable
-  stats?: QueryStats
   isLoading?: boolean
   sourceId?: string | number
   teamId?: string | number
@@ -35,26 +36,27 @@ interface Props {
   severityField?: string
   queryFields?: any[]
   regexHighlights?: Record<string, { pattern: string; isNegated: boolean }>
+  activeMode?: 'logchefql' | 'clickhouse-sql' | 'native'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   columns: () => [],
   data: () => [],
-  stats: undefined,
   isLoading: false,
   sourceId: 0,
   teamId: 0,
   timestampField: 'timestamp',
   severityField: 'level',
   queryFields: () => [],
-  regexHighlights: () => ({})
+  regexHighlights: () => ({}),
+  activeMode: 'logchefql',
 })
 
 // Use 'data' prop - consistent with DataTable component
 const logs = computed(() => props.data)
 
-defineEmits<{
-  'drill-down': [data: { column: string; value: any; operator: string }]
+const emit = defineEmits<{
+  'drill-down': [data: { column: string; value: unknown; operator: FilterOperator }]
 }>()
 
 // Table state
@@ -148,6 +150,33 @@ const table = useTable({
   onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
 })
 
+// One optional field (a service or job name, say) shown before each line.
+const NO_PREFIX = '__none__'
+const prefixChoice = useLocalStorage(`logchef.explore.compactPrefix.${props.sourceId}`, NO_PREFIX)
+const prefixCandidates = computed(() => tableColumns.value
+  .map(column => column.id)
+  .filter((id): id is string => !!id && id !== props.timestampField && !isPrimaryMessageField(id)))
+const prefixField = computed(() => prefixCandidates.value.includes(prefixChoice.value) ? prefixChoice.value : null)
+const prefixItems = computed(() => [
+  { value: NO_PREFIX, label: t('explore.noPrefixField') },
+  ...prefixCandidates.value.map(id => ({ value: id, label: id })),
+])
+const prefixText = (row: Record<string, any>) => {
+  if (!prefixField.value) return ''
+  const value = row[prefixField.value]
+  if (value === null || value === undefined || value === '') return ''
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+const searchQueryField = computed(() => {
+  if (props.activeMode !== 'logchefql') return undefined
+  return tableColumns.value.map(column => column.id).find(id => !!id && isPrimaryMessageField(id))
+})
+
+const handleAddSearchToQuery = (field: string, term: string) => {
+  emit('drill-down', { column: field, value: term, operator: '~' })
+}
+
 // Format timestamp for compact view
 const formatTimestamp = (timestamp: any) => {
   if (!timestamp) return ''
@@ -155,11 +184,12 @@ const formatTimestamp = (timestamp: any) => {
   const date = new Date(timestamp)
   if (isNaN(date.getTime())) return String(timestamp)
   
-  // Use compact format: HH:mm:ss
+  // HH:mm:ss.SSS: busy sources log many lines per second.
   return formatInZone(epochMs(date), preferencesStore.zone, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+    fractionalSecondDigits: 3,
     hour12: false
   })
 }
@@ -219,6 +249,7 @@ const buildMessage = (row: Record<string, any>) => {
   
   // Get all other fields in logfmt format
   const skipFields = new Set([props.timestampField, props.severityField, 'id', '_id'])
+  if (prefixField.value) skipFields.add(prefixField.value)
   const logfmtFields = Object.entries(row)
     .filter(([key, value]) => {
       // Skip timestamp/severity and already used message field
@@ -366,6 +397,7 @@ const renderedRows = computed(() => {
     return {
       id: `${row[props.timestampField]}-${tableRow.id}`, // Use table row ID for stability
       timestamp: ts,
+      prefix: prefixText(row),
       severity: sev,
       message: msg,
       rawMessage: rawMsg,
@@ -415,12 +447,27 @@ const handleClick = (event: MouseEvent, rowId: string) => {
     <TableControls 
       v-if="table"
       :table="table"
-      :stats="stats"
       :is-loading="isLoading"
       :show-column-selector="false"
       :show-pagination="true"
+      :search-query-field="searchQueryField"
       @update:globalFilter="globalFilter = $event"
-    />
+      @add-search-to-query="handleAddSearchToQuery"
+    >
+      <template #tools>
+        <div class="w-[160px]" data-compact-prefix>
+          <SearchableSelect
+            v-model="prefixChoice"
+            :items="prefixItems"
+            :max-visible-items="100"
+            :placeholder="t('explore.prefixField')"
+            :search-placeholder="t('ui.searchFields')"
+            :title="t('explore.prefixFieldHint')"
+            trigger-class="h-7 text-xs border-dashed"
+          />
+        </div>
+      </template>
+    </TableControls>
     
     <!-- Compact log list container -->
     <ScrollArea class="min-h-0 flex-1 font-mono text-xs">
@@ -430,7 +477,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
           v-for="row in renderedRows"
           :key="row.id"
           :data-row-id="row.id"
-          class="group grid grid-cols-[72px_1fr] gap-2 px-2 cursor-pointer border-b border-border/20 border-l-4 transition-colors"
+          class="group grid grid-cols-[96px_1fr] gap-2 px-2 cursor-pointer border-b border-border/20 border-l-4 transition-colors"
           :class="[
             row.borderClass, 
             row.bgClass, 
@@ -451,13 +498,21 @@ const handleClick = (event: MouseEvent, rowId: string) => {
           
           <!-- Message with syntax highlighting -->
           <div class="flex flex-col gap-1 min-w-0">
-            <span 
-              :class="expandedRowId === row.id 
-                ? 'whitespace-pre-wrap break-all text-foreground text-xs font-mono' 
-                : 'truncate text-foreground text-xs font-mono'"
-              v-html="highlightText(row.message, 'message')"
-              :title="expandedRowId === row.id ? '' : row.rawMessage"
-            ></span>
+            <div class="flex min-w-0 gap-2" :class="expandedRowId === row.id ? 'items-start' : 'items-center'">
+              <span
+                v-if="row.prefix"
+                data-row-prefix
+                class="shrink-0 max-w-[20ch] truncate text-sky-700 dark:text-sky-400 text-xs font-mono"
+                :title="`${prefixField}=${row.prefix}`"
+              >{{ row.prefix }}</span>
+              <span
+                :class="expandedRowId === row.id
+                  ? 'min-w-0 flex-1 whitespace-pre-wrap break-all text-foreground text-xs font-mono'
+                  : 'min-w-0 flex-1 truncate text-foreground text-xs font-mono'"
+                v-html="highlightText(row.message, 'message')"
+                :title="expandedRowId === row.id ? '' : row.rawMessage"
+              ></span>
+            </div>
             <!-- Show Context button when expanded -->
             <div v-if="expandedRowId === row.id && supportsLogContext" class="flex items-center gap-2 mt-1">
               <Button 

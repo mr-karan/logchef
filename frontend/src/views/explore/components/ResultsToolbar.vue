@@ -73,9 +73,9 @@ const warningText = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-center justify-between h-8 px-3 bg-muted/30 border-b text-xs">
+  <div class="flex items-center justify-between gap-3 h-8 px-3 bg-muted/30 border-b text-xs">
     <!-- Left: Histogram toggle + Stats -->
-    <div class="flex items-center gap-3">
+    <div class="flex min-w-0 items-center gap-3">
       <StreamPicker />
       <!-- Histogram Toggle -->
       <button
@@ -92,7 +92,7 @@ const warningText = computed(() => {
       <div v-if="isHistogramEligible" class="h-4 w-px bg-border" />
 
       <!-- Stats -->
-      <div class="flex items-center gap-2 text-muted-foreground">
+      <div class="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-muted-foreground">
         <span v-if="isLoading" class='animate-pulse'>{{ t('ui.loading') }}</span>
         <template v-else>
           <span class="font-medium text-foreground">{{ logsCount.toLocaleString() }}</span>
@@ -100,6 +100,12 @@ const warningText = computed(() => {
           <template v-if="formattedQueryTime">
             <span class="text-muted-foreground/50">•</span>
             <span :title="t('pages.queryTimeTooltip', { duration: formattedQueryTime })">{{ formattedQueryTime }}</span>
+          </template>
+          <template v-if="queryStats?.rows_read !== undefined">
+            <span class="text-muted-foreground/50">•</span>
+            <span data-rows-scanned :title="t('pages.rowsReadTooltip', { count: queryStats.rows_read.toLocaleString() })">
+              {{ t('explore.rowsScanned', { count: queryStats.rows_read.toLocaleString() }) }}
+            </span>
           </template>
           <template v-if="warningText">
             <span class="text-muted-foreground/50">•</span>
@@ -127,14 +133,12 @@ const warningText = computed(() => {
       </div>
     </div>
 
-    <!-- Center: Group By -->
-    <div v-if="isHistogramEligible" class="flex items-center">
-      <GroupBySelector v-if="!runs.windowed" :available-fields="availableFields" />
-    </div>
-    <div v-else />
-
-    <!-- Right: Export + View Toggles -->
-    <div class="flex items-center gap-1">
+    <!-- Right: Group By + Export + View Toggles. Group By lives here, not centred,
+         so it stays put when the stats on the left change width. -->
+    <div class="flex shrink-0 items-center gap-1">
+      <div v-if="isHistogramEligible && !runs.windowed" class="mr-2">
+        <GroupBySelector :available-fields="availableFields" />
+      </div>
       <!-- Download Button (only for sources advertising the exports capability) -->
       <TooltipProvider v-if="canExport">
         <Tooltip>

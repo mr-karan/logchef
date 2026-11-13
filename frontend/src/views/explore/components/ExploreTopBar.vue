@@ -91,7 +91,7 @@ const isNativeSqlMode = computed(() =>
 const isLive = computed(() => exploreStore.isLive)
 const timeControlsDisabled = computed(() => isNativeSqlMode.value || isLive.value)
 const timeControlsDisabledReason = computed(() =>
-  isLive.value ? t('ui.pausedDuringLiveTail') : t('ui.timeRangeIsControlledInYourSQLQuery')
+  isLive.value ? t('ui.pausedDuringLiveTail') : t('explore.sqlTimeRangeFixed')
 )
 const limitControlsDisabledReason = computed(() =>
   isLive.value ? t('ui.pausedDuringLiveTail') : t('ui.limitIsControlledByLIMITClauseInYourSQLQuery')

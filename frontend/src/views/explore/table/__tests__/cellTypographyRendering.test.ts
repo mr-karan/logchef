@@ -19,7 +19,6 @@ it('renders readable values, identifiers and numbers differently in the same col
     columns: [{ name: 'timestamp', type: 'DateTime' }, { name: 'value', type: 'String' }],
     data: values.map(value => ({ timestamp: '2026-10-27T10:00:00Z', value })),
     regexHighlights: { value: { pattern: 'notifications', isNegated: false } },
-    stats: { execution_time_ms: 1, rows_read: values.length, bytes_read: 64 },
     sourceId: 'cell-typography-test', teamId: null,
   });
   app.use(createPinia());
@@ -68,7 +67,6 @@ describe('identifier cells', () => {
       columns: [{ name: 'timestamp', type: 'DateTime' }, { name: 'value', type: 'String' }, { name: 'message', type: 'String' }],
       data: [{ timestamp: '2026-01-01T00:00:00Z', value, message: 'received' }],
       regexHighlights: { value: { pattern: '6789abcdef', isNegated: false } },
-      stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 32 },
       sourceId, teamId: 1,
     });
     app.use(createPinia());

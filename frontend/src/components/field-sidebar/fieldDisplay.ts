@@ -1,5 +1,6 @@
 import { Calendar, Database, Hash, Type } from 'lucide-vue-next'
-import { isFilterableField } from '@/lib/sourceFields'
+import { isFilterableField, isPrimaryMessageField } from '@/lib/sourceFields'
+import type { FieldValuesResult } from '@/api/sources'
 
 export interface FieldInfo {
   name: string
@@ -42,3 +43,12 @@ export const formatCount = (count: number): string => {
   if (count >= 1000) return `${(count / 1000).toFixed(1)}K`
   return count.toString()
 }
+
+// Past this many distinct values a top-values list is mostly fragments with tiny counts.
+export const TOP_VALUES_DISTINCT_LIMIT = 1000
+
+// Message fields are skipped without a query: every line is its own value.
+export const skipsValueLoading = (field: Pick<FieldInfo, 'name'>): boolean => isPrimaryMessageField(field.name)
+
+export const hasTooManyValues = (field: Pick<FieldInfo, 'name'>, values?: FieldValuesResult): boolean =>
+  skipsValueLoading(field) || (values?.total_distinct ?? 0) > TOP_VALUES_DISTINCT_LIMIT

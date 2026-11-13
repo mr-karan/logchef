@@ -1040,7 +1040,7 @@ func TestFieldValueToolsFilterLogs(t *testing.T) {
 				result := callTool(t, w.server(), session(w.member), name, input)
 				sent := backend.sentFilters()
 				if tc.sent == "" {
-					if !result.IsError || !strings.Contains(result.text(), "unexpected token") || len(sent) != 0 {
+					if !result.IsError || !strings.Contains(result.text(), "expected a value after `f1=`") || len(sent) != 0 {
 						t.Fatalf("query %q: result %s, backend filters %q, want a parse error and no backend call", tc.query, result.text(), sent)
 					}
 					continue
