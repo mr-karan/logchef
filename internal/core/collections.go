@@ -468,7 +468,10 @@ func beginLinkWrite(ctx context.Context, tx store.StoreOps, log *slog.Logger, co
 	if err := lockCollection(ctx, tx, collectionID); err != nil {
 		return nil, err
 	}
-	caller, err := tx.GetUser(ctx, caller.ID)
+	caller, err := tx.GetUserForUpdate(ctx, caller.ID)
+	if models.IsNotFound(err) || (err == nil && caller.Status != models.UserStatusActive) {
+		return nil, ErrCollectionNotParticipant
+	}
 	if err != nil {
 		return nil, err
 	}

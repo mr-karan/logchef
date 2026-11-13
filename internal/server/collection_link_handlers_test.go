@@ -329,12 +329,13 @@ func TestCollectionItemRoutesBusy(t *testing.T) {
 
 type demotingLinkStore struct {
 	store.Store
-	user *models.User
+	user   *models.User
+	change func(*models.User)
 }
 
 func (s demotingLinkStore) WithTx(ctx context.Context, fn func(store.StoreOps) error) error {
 	user := *s.user
-	user.Role = models.UserRoleMember
+	s.change(&user)
 	if err := s.UpdateUser(ctx, &user); err != nil {
 		return err
 	}
@@ -342,6 +343,15 @@ func (s demotingLinkStore) WithTx(ctx context.Context, fn func(store.StoreOps) e
 }
 
 func TestCollectionLinkDemotedAdmin(t *testing.T) {
+	testCollectionLinkCallerChanged(t, func(u *models.User) { u.Role = models.UserRoleMember })
+}
+
+func TestCollectionLinkDeactivatedAdmin(t *testing.T) {
+	testCollectionLinkCallerChanged(t, func(u *models.User) { u.Status = models.UserStatusInactive })
+}
+
+func testCollectionLinkCallerChanged(t *testing.T, change func(*models.User)) {
+	t.Helper()
 	for _, method := range []string{http.MethodPut, http.MethodPost, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
 			e := newLinkRouteEnv(t)
@@ -358,7 +368,7 @@ func TestCollectionLinkDemotedAdmin(t *testing.T) {
 			} else {
 				wantKind = ""
 			}
-			e.s.store = demotingLinkStore{Store: e.s.store, user: e.admin}
+			e.s.store = demotingLinkStore{Store: e.s.store, user: e.admin, change: change}
 			path, body := e.item(e.query.ID), `{"kind":"managed"}`
 			if method == http.MethodPost {
 				path, body = e.items, postBody(e.query.ID, "managed")
@@ -370,7 +380,7 @@ func TestCollectionLinkDemotedAdmin(t *testing.T) {
 			if got := e.storedKind(t); got != wantKind {
 				t.Fatalf("stored kind = %q, want %q", got, wantKind)
 			}
-			t.Logf("%s demoted admin returned 403; stored kind %q", method, wantKind)
+			t.Logf("%s changed admin returned 403; stored kind %q", method, wantKind)
 		})
 	}
 }
