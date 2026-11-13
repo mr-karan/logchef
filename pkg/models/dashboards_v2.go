@@ -212,6 +212,16 @@ var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
 	"panels.viz.reduce":     {string(DashboardStatReduceSum): dashboardFeatureBase},
 }
 
+// KnownDashboardFeatures lists the features this server computes, in the
+// order of the phases that added them.
+func KnownDashboardFeatures() []string {
+	names := make([]string, 0, len(dashboardFeatureRules))
+	for _, rule := range dashboardFeatureRules {
+		names = append(names, string(rule.name))
+	}
+	return names
+}
+
 // KnownDashboardFeature reports whether name is a feature this server computes.
 func KnownDashboardFeature(name string) bool {
 	for _, rule := range dashboardFeatureRules {

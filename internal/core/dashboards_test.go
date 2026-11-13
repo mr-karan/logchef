@@ -2,18 +2,38 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+func dashboardClient(t *testing.T, schema, features string) models.DashboardClient {
+	t.Helper()
+	var header *string
+	if schema != "" {
+		header = &schema
+	}
+	client, err := models.ParseDashboardClient(header, features)
+	if err != nil {
+		t.Fatalf("ParseDashboardClient(%q): %v", schema, err)
+	}
+	return client
+}
+
+func schema2Client(t *testing.T) models.DashboardClient { return dashboardClient(t, "2", "") }
+func schema1Client(t *testing.T) models.DashboardClient { return dashboardClient(t, "", "") }
 
 // TestSeedLiveDashboardFixture is a live-proof helper, not a unit test. It is
 // skipped in normal runs and only executes when LOGCHEF_SEED_DB is set. It
@@ -224,7 +244,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	}
 
 	// Editing to point at team-b (a foreign team) must be forbidden.
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
+	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
 	if !errors.Is(err, ErrDashboardForbidden) {
 		t.Fatalf("update to foreign team: err = %v, want ErrDashboardForbidden", err)
 	}
@@ -235,7 +255,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	if err := db.UpdateUser(ctx, admin); err != nil {
 		t.Fatalf("UpdateUser(admin): %v", err)
 	}
-	if _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
+	if _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
 		t.Fatalf("admin update to team-b: %v", err)
 	}
 }
@@ -341,11 +361,13 @@ func decodePanels(t *testing.T, raw json.RawMessage) map[string]decodedPanel {
 	return out
 }
 
-// TestRedactDashboardPanelsForViewer covers the B1 per-panel redaction delta: a
-// viewer with access to only SOME of a dashboard's panels' sources gets the
-// others' query text blanked and locked=true, while the creator and global
-// admins see everything. It also confirms the STORED blob is never mutated.
-func TestRedactDashboardPanelsForViewer(t *testing.T) {
+// TestBuildDashboardResponseRedaction covers the B1 per-panel redaction
+// delta through the one response builder: a viewer with access to only SOME
+// of a dashboard's panels' sources gets the others' query blanked and locked
+// in both client schemas, the creator and global admins see everything, the
+// list summary still counts the locked panel, and the STORED blob is never
+// mutated.
+func TestBuildDashboardResponseRedaction(t *testing.T) {
 	db := newTestDB(t)
 	log := discardLogger()
 	ctx := context.Background()
@@ -370,73 +392,418 @@ func TestRedactDashboardPanelsForViewer(t *testing.T) {
 		t.Fatalf("CreateDashboard: %v", err)
 	}
 
-	// Partial viewer: p1 (team-a) intact, p2 (team-b) blanked + locked.
-	loaded, err := GetDashboard(ctx, db, log, dash.ID)
-	if err != nil {
-		t.Fatalf("GetDashboard: %v", err)
+	build := func(user *models.User, client models.DashboardClient) *models.DashboardResponse {
+		t.Helper()
+		loaded, err := GetDashboard(ctx, db, log, dash.ID)
+		if err != nil {
+			t.Fatalf("GetDashboard: %v", err)
+		}
+		resp, err := BuildDashboardResponse(ctx, db, log, user, client, loaded)
+		if err != nil {
+			t.Fatalf("BuildDashboardResponse(%s): %v", user.Email, err)
+		}
+		if resp.Corrupt || resp.PanelsCorrupt {
+			t.Fatalf("response for %s is a stub or corrupt: %+v", user.Email, resp)
+		}
+		return resp
 	}
-	if err := RedactDashboardPanelsForViewer(ctx, db, log, partial, loaded); err != nil {
-		t.Fatalf("RedactDashboardPanelsForViewer(partial): %v", err)
-	}
-	panels := decodePanels(t, loaded.PanelsJSON)
+
+	// Partial viewer, schema 1 client: p1 (team-a) intact, p2 (team-b) blanked + locked.
+	panels := decodePanels(t, build(partial, schema1Client(t)).Panels)
 	if p1 := panels["p1"]; p1.Query != "queryA" || p1.Locked || p1.QueryLanguage != "logchefql" {
 		t.Errorf("accessible panel p1 was altered: %+v", p1)
 	}
 	p2 := panels["p2"]
-	if !p2.Locked {
-		t.Errorf("foreign panel p2 not locked: %+v", p2)
+	if !p2.Locked || p2.Query != "" || p2.QueryLanguage != "" {
+		t.Errorf("foreign panel p2 not redacted: %+v", p2)
 	}
-	if p2.Query != "" || p2.QueryLanguage != "" {
-		t.Errorf("foreign panel p2 query not blanked: %+v", p2)
-	}
-	// The renderable placeholder fields survive.
 	if p2.TeamID != int(teamB.ID) || p2.SourceID != int(srcB.ID) || p2.Type != "stat" || p2.Title != "B" {
 		t.Errorf("foreign panel p2 lost its layout metadata: %+v", p2)
 	}
 
-	// The STORED blob must be untouched by the GET+redact.
+	// Partial viewer, schema 2 client: the upgraded blob is redacted the same way.
+	v2 := build(partial, schema2Client(t))
+	var upgraded struct {
+		Version int `json:"version"`
+		Panels  []struct {
+			ID     string          `json:"id"`
+			Title  string          `json:"title"`
+			TeamID int             `json:"team_id"`
+			Query  json.RawMessage `json:"query"`
+			Viz    map[string]any  `json:"viz"`
+			Locked bool            `json:"locked"`
+		} `json:"panels"`
+	}
+	if err := json.Unmarshal(v2.Panels, &upgraded); err != nil {
+		t.Fatalf("decode schema 2 response: %v", err)
+	}
+	if upgraded.Version != 2 || len(upgraded.Panels) != 2 {
+		t.Fatalf("schema 2 response = %s", v2.Panels)
+	}
+	if open := upgraded.Panels[0]; open.Locked || !strings.Contains(string(open.Query), "queryA") || open.Viz["reduce"] != "sum" {
+		t.Errorf("accessible panel p1 was altered in schema 2: %+v", open)
+	}
+	if locked := upgraded.Panels[1]; !locked.Locked || locked.Query != nil || locked.Viz["type"] != "stat" || len(locked.Viz) != 1 || locked.Title != "B" || locked.TeamID != int(teamB.ID) {
+		t.Errorf("foreign panel p2 not redacted in schema 2: %+v", locked)
+	}
+	if strings.Contains(string(v2.Panels), "queryB") {
+		t.Errorf("schema 2 response leaked the locked query: %s", v2.Panels)
+	}
+
+	// The STORED blob must be untouched.
 	reloaded, err := db.GetDashboard(ctx, dash.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	stored := decodePanels(t, reloaded.PanelsJSON)
-	if stored["p2"].Query != "queryB" || stored["p2"].Locked {
-		t.Errorf("stored blob was mutated: %+v", stored["p2"])
+	if string(reloaded.PanelsJSON) != string(original) {
+		t.Errorf("stored blob was mutated: %s", reloaded.PanelsJSON)
 	}
 
-	// Creator and admin see everything unredacted.
+	// Creator and admin see everything unredacted, in either schema.
 	for _, viewer := range []*models.User{creator, admin} {
-		full, err := GetDashboard(ctx, db, log, dash.ID)
-		if err != nil {
-			t.Fatalf("GetDashboard(%s): %v", viewer.Email, err)
-		}
-		if err := RedactDashboardPanelsForViewer(ctx, db, log, viewer, full); err != nil {
-			t.Fatalf("RedactDashboardPanelsForViewer(%s): %v", viewer.Email, err)
-		}
-		got := decodePanels(t, full.PanelsJSON)
+		got := decodePanels(t, build(viewer, schema1Client(t)).Panels)
 		if got["p1"].Query != "queryA" || got["p2"].Query != "queryB" || got["p1"].Locked || got["p2"].Locked {
 			t.Errorf("%s got a redacted panel: p1=%+v p2=%+v", viewer.Email, got["p1"], got["p2"])
 		}
+		if resp := build(viewer, schema2Client(t)); !strings.Contains(string(resp.Panels), "queryB") || !resp.CanEdit {
+			t.Errorf("%s got a redacted schema 2 panel or no edit rights: %+v", viewer.Email, resp)
+		}
 	}
 
-	// And on the list path the partial viewer sees the same redaction.
+	// The list summary counts the locked panel and names its kind.
 	list, err := ListDashboards(ctx, db, log, partial)
 	if err != nil {
 		t.Fatalf("ListDashboards(partial): %v", err)
 	}
-	var found bool
-	for _, d := range list {
-		if d.ID == dash.ID {
-			found = true
-			lp := decodePanels(t, d.PanelsJSON)
-			if lp["p1"].Query != "queryA" || !lp["p2"].Locked || lp["p2"].Query != "" {
-				t.Errorf("list redaction wrong: p1=%+v p2=%+v", lp["p1"], lp["p2"])
-			}
-		}
-	}
-	if !found {
+	i := slices.IndexFunc(list, func(s *models.DashboardSummary) bool { return s.ID == dash.ID })
+	if i < 0 {
 		t.Fatalf("partial viewer did not see the shared dashboard in the list")
 	}
+	if s := list[i]; s.PanelCount != 2 || !slices.Equal(s.PanelTypes, []string{"stat"}) || s.CanEdit || s.Corrupt {
+		t.Errorf("list summary = %+v, want 2 stat panels without edit rights", s)
+	}
+}
+
+// TestBuildDashboardResponseSchemas covers the read table of the client
+// schema contract: a schema 1 row is served as stored to a schema 1 client and
+// upgraded for a schema 2 client; a schema 2 row is served as stored to a
+// schema 2 client and as the stub to a schema 1 client; a row with a feature
+// this server does not know is the stub for everyone.
+func TestBuildDashboardResponseSchemas(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	team, src := seedTeamWithSource(t, db, "team-a", creator)
+
+	v1 := panelBlob(team.ID, src.ID)
+	v2 := panelBlobV2(team.ID, src.ID)
+	newer := json.RawMessage(strings.Replace(string(v2), `"features":[]`, `"features":["tabs"]`, 1))
+	rows := map[string]*models.Dashboard{}
+	for name, blob := range map[string]json.RawMessage{"v1": v1, "v2": v2, "newer": newer} {
+		d := &models.Dashboard{Name: name, PanelsJSON: blob, CreatedBy: &creator.ID}
+		if err := db.CreateDashboard(ctx, d); err != nil {
+			t.Fatalf("CreateDashboard(%s): %v", name, err)
+		}
+		rows[name] = d
+	}
+	upgraded, err := models.UpgradeDashboardPanels(v1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		row, client string
+		wantPanels  string
+		stub        bool
+	}{
+		{"v1", "1", string(v1), false},
+		{"v1", "2", string(upgraded), false},
+		{"v2", "2", string(v2), false},
+		{"v2", "1", "", true},
+		{"newer", "1", "", true},
+		{"newer", "2", "", true},
+	} {
+		t.Run(tc.row+"/client"+tc.client, func(t *testing.T) {
+			resp, err := BuildDashboardResponse(ctx, db, log, creator, dashboardClient(t, tc.client, ""), rows[tc.row])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.stub {
+				if string(resp.Panels) != string(models.EmptyDashboardPanelsJSON()) || !resp.PanelsCorrupt || resp.MinSchema != 2 || resp.CanEdit || resp.Corrupt {
+					t.Fatalf("response = %+v, want the schema 1 stub", resp)
+				}
+				return
+			}
+			if string(resp.Panels) != tc.wantPanels || resp.PanelsCorrupt || resp.MinSchema != 0 || !resp.CanEdit || resp.Corrupt || resp.Revision != 1 {
+				t.Fatalf("response = %+v\npanels %s\nwant %s", resp, resp.Panels, tc.wantPanels)
+			}
+		})
+	}
+}
+
+// TestUpdateDashboardClientContract covers the write table: a schema 1 body
+// may replace a schema 1 row, a schema 2 body may replace a schema 1 row and
+// from then on the row is schema 2, a schema 1 body on a schema 2 row is
+// refused, and a stored feature the writer did not declare is refused and
+// named. A refused save leaves the row byte for byte as it was.
+func TestUpdateDashboardClientContract(t *testing.T) {
+	db, dbPath := newTestDBWithPath(t)
+	log := discardLogger()
+	ctx := context.Background()
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	team, src := seedTeamWithSource(t, db, "team-a", creator)
+
+	dash, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: "d", Panels: panelBlob(team.ID, src.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1 := panelBlob(team.ID, src.ID)
+	v2 := panelBlobV2(team.ID, src.ID)
+	save := func(client models.DashboardClient, body json.RawMessage) (*models.Dashboard, error) {
+		t.Helper()
+		current, err := db.GetDashboard(ctx, dash.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return UpdateDashboard(ctx, db, log, dash.ID, creator, client, &models.UpdateDashboardRequest{Name: "d", Panels: body, Revision: &current.Revision})
+	}
+	stored := func() string {
+		t.Helper()
+		current, err := db.GetDashboard(ctx, dash.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(current.PanelsJSON)
+	}
+
+	if _, err := save(schema1Client(t), v1); err != nil {
+		t.Fatalf("schema 1 body on a schema 1 row: %v", err)
+	}
+	if _, err := save(schema1Client(t), v2); err != nil {
+		t.Fatalf("schema 2 body on a schema 1 row: %v", err)
+	}
+	if got := stored(); got != string(v2) {
+		t.Fatalf("stored blob after a schema 2 save = %s, want the canonical schema 2 body", got)
+	}
+	_, err = save(schema1Client(t), v1)
+	var stale *DashboardClientStaleError
+	if !errors.Is(err, ErrDashboardClientStale) || !errors.As(err, &stale) || !strings.Contains(stale.Detail, "schema 2") {
+		t.Fatalf("schema 1 body on a schema 2 row: err = %v, want DashboardClientStaleError naming the schema", err)
+	}
+	if got := stored(); got != string(v2) {
+		t.Fatalf("a refused save changed the row: %s", got)
+	}
+	if _, err := save(schema2Client(t), v2); err != nil {
+		t.Fatalf("feature-free schema 2 row with no features header: %v", err)
+	}
+
+	// A newer server stored a feature this one does not know.
+	newer := strings.Replace(string(v2), `"features":[]`, `"features":["tabs","formats"]`, 1)
+	raw := openRawSQLite(t, dbPath)
+	if _, err := raw.ExecContext(ctx, "UPDATE dashboards SET panels_json = ? WHERE id = ?", newer, dash.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = save(dashboardClient(t, "2", "tabs, formats, made-up"), v2)
+	if !errors.As(err, &stale) || !strings.Contains(stale.Detail, "tabs, formats") {
+		t.Fatalf("stored unknown features: err = %v, want DashboardClientStaleError naming them", err)
+	}
+	if got := stored(); got != newer {
+		t.Fatalf("a refused save changed the row: %s", got)
+	}
+	resp, err := BuildDashboardResponse(ctx, db, log, creator, schema2Client(t), mustLoad(t, db, dash.ID))
+	if err != nil || !resp.PanelsCorrupt || resp.MinSchema != 2 {
+		t.Fatalf("row with an unknown feature is not served as the stub: %+v %v", resp, err)
+	}
+}
+
+func mustLoad(t *testing.T, db *sqlite.DB, id int) *models.Dashboard {
+	t.Helper()
+	d, err := db.GetDashboard(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// panelBlobV2 is the canonical schema 2 form of panelBlob.
+func panelBlobV2(teamID models.TeamID, sourceID models.SourceID) json.RawMessage {
+	return json.RawMessage(fmt.Sprintf(
+		`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}]}],"panels":[{"id":"p1","kind":"query","title":"a","team_id":%d,"source_id":%d,"query":{"mode":"count","language":"logchefql","text":"x","interval":"auto"},"viz":{"type":"stat","reduce":"sum"}}]}`,
+		int(teamID), int(sourceID),
+	))
+}
+
+// TestDashboardTextBounds covers the name and description bounds in code
+// points: 200 and 2,000 pass, one more fails with a validation error.
+func TestDashboardTextBounds(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	team, src := seedTeamWithSource(t, db, "team-a", creator)
+
+	for _, tc := range []struct {
+		name, description string
+		wantErr           bool
+	}{
+		{strings.Repeat("é", models.MaxDashboardNameRunes), strings.Repeat("日", models.MaxDashboardDescriptionRunes), false},
+		{strings.Repeat("é", models.MaxDashboardNameRunes+1), "", true},
+		{"ok", strings.Repeat("日", models.MaxDashboardDescriptionRunes+1), true},
+	} {
+		_, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: tc.name, Description: tc.description, Panels: panelBlob(team.ID, src.ID)})
+		if tc.wantErr != errors.Is(err, ErrInvalidDashboard) {
+			t.Errorf("name of %d and description of %d runes: err = %v", len([]rune(tc.name)), len([]rune(tc.description)), err)
+		}
+	}
+}
+
+// TestListDashboardsCorruptRowIsolated covers B12: a row whose stored blob
+// fails validation must not break the whole list. It is listed to its creator
+// as corrupt with no counts, kept from a team member, and valid rows still
+// come back.
+func TestListDashboardsCorruptRowIsolated(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	member := newTestUser(t, db, "member@test.dev", "Member")
+	team, src := seedTeamWithSource(t, db, "team-a", creator, member)
+
+	// A healthy dashboard.
+	good, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: "good", Panels: panelBlob(team.ID, src.ID)})
+	if err != nil {
+		t.Fatalf("CreateDashboard(good): %v", err)
+	}
+
+	// Corrupt rows inserted straight through the store (bypasses validation):
+	// one unparseable, one parseable but invalid.
+	corrupt := &models.Dashboard{Name: "corrupt", PanelsJSON: json.RawMessage(`{not valid json`), CreatedBy: &creator.ID}
+	if err := db.CreateDashboard(ctx, corrupt); err != nil {
+		t.Fatalf("store CreateDashboard(corrupt): %v", err)
+	}
+	invalid := &models.Dashboard{Name: "invalid", PanelsJSON: json.RawMessage(fmt.Sprintf(`{"version":1,"layout":[],"panels":[{"id":"p1","type":"pie","team_id":%d,"source_id":%d,"query_language":"logchefql"}]}`, team.ID, src.ID)), CreatedBy: &creator.ID}
+	if err := db.CreateDashboard(ctx, invalid); err != nil {
+		t.Fatalf("store CreateDashboard(invalid): %v", err)
+	}
+
+	list, err := ListDashboards(ctx, db, log, creator)
+	if err != nil {
+		t.Fatalf("ListDashboards: %v", err)
+	}
+	seen := map[int]*models.DashboardSummary{}
+	for _, d := range list {
+		seen[d.ID] = d
+	}
+	if g := seen[good.ID]; g == nil || g.Corrupt || g.PanelCount != 1 {
+		t.Errorf("good dashboard = %+v", g)
+	}
+	for _, bad := range []*models.Dashboard{corrupt, invalid} {
+		if c := seen[bad.ID]; c == nil || !c.Corrupt || c.PanelCount != 0 || len(c.PanelTypes) != 0 || !c.CanEdit {
+			t.Errorf("corrupt dashboard %s = %+v", bad.Name, c)
+		}
+	}
+
+	// A team member sees the valid row but neither corrupt one.
+	memberList, err := ListDashboards(ctx, db, log, member)
+	if err != nil {
+		t.Fatalf("ListDashboards(member): %v", err)
+	}
+	ids := make([]int, 0, len(memberList))
+	for _, d := range memberList {
+		ids = append(ids, d.ID)
+	}
+	if !slices.Contains(ids, good.ID) || slices.Contains(ids, corrupt.ID) || slices.Contains(ids, invalid.ID) {
+		t.Errorf("member sees %v, want only %d", ids, good.ID)
+	}
+	for _, bad := range []*models.Dashboard{corrupt, invalid} {
+		can, err := UserCanViewDashboard(ctx, db, member, bad)
+		if err != nil || can {
+			t.Errorf("member can view corrupt row %s: %v %v", bad.Name, can, err)
+		}
+		resp, err := BuildDashboardResponse(ctx, db, log, creator, schema2Client(t), bad)
+		if err != nil || !resp.Corrupt || resp.RawPanelsJSON != string(bad.PanelsJSON) || resp.Panels != nil || !resp.CanEdit {
+			t.Errorf("creator's corrupt response for %s = %+v, %v", bad.Name, resp, err)
+		}
+	}
+
+	// The full response must marshal without error (the B12 failure mode).
+	if _, err := json.Marshal(list); err != nil {
+		t.Fatalf("list response failed to marshal: %v", err)
+	}
+}
+
+// TestListDashboardsRepairsStaleSummaries covers the startup backfill and the
+// list repair: rows an older writer left stale are repaired before visibility
+// applies, a second backfill writes nothing, and the list never needs a blob.
+func TestListDashboardsRepairsStaleSummaries(t *testing.T) {
+	db, dbPath := newTestDBWithPath(t)
+	log := discardLogger()
+	ctx := context.Background()
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	member := newTestUser(t, db, "member@test.dev", "Member")
+	team, src := seedTeamWithSource(t, db, "team-a", creator, member)
+
+	var ids []int
+	for i := range 60 {
+		d, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: fmt.Sprintf("d%02d", i), Panels: panelBlob(team.ID, src.ID)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, d.ID)
+	}
+	raw := openRawSQLite(t, dbPath)
+	if _, err := raw.ExecContext(ctx, "UPDATE dashboards SET summary_revision = 0, panel_team_ids = '[]'"); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := ListDashboards(ctx, db, log, member)
+	if err != nil {
+		t.Fatalf("ListDashboards: %v", err)
+	}
+	if len(list) != 60 {
+		t.Fatalf("member sees %d dashboards after repair, want 60", len(list))
+	}
+	for _, s := range list {
+		if s.Stale() || !slices.Equal(s.PanelTeamIDs, []int{int(team.ID)}) || s.Revision != 1 {
+			t.Fatalf("summary not repaired: %+v", s)
+		}
+	}
+	n, err := BackfillDashboardSummaries(ctx, db, log)
+	if err != nil || n != 0 {
+		t.Fatalf("second backfill wrote %d rows, %v; want 0", n, err)
+	}
+	if !slices.Contains(ids, list[0].ID) {
+		t.Fatal("list returned an unknown row")
+	}
+}
+
+// newTestDBWithPath is newTestDB for tests that also need raw SQL on the file.
+func newTestDBWithPath(t *testing.T) (db *sqlite.DB, dbPath string) {
+	t.Helper()
+	dbPath = sqlitetest.Path(t)
+	db, err := sqlite.New(context.Background(), sqlite.Options{
+		Logger: discardLogger(),
+		Config: config.SQLiteConfig{Path: dbPath},
+	})
+	if err != nil {
+		t.Fatalf("sqlite.New failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db, dbPath
+}
+
+// openRawSQLite opens database/sql on the test store's file for statements
+// the store interface does not offer.
+func openRawSQLite(t *testing.T, dbPath string) *sql.DB {
+	t.Helper()
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	return raw
 }
 
 // TestUpdateDashboardRevisions covers the save contract: a body without a
@@ -457,7 +824,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 		t.Fatalf("new dashboard revision = %d, want 1", dash.Revision)
 	}
 
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
+	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d2", Panels: panelBlob(team.ID, src.ID),
 	})
 	if !errors.Is(err, ErrDashboardRevisionRequired) {
@@ -465,7 +832,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 	}
 
 	loaded := dash.Revision
-	updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
+	updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d3", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if err != nil {
@@ -475,7 +842,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 		t.Fatalf("update returned name %q revision %d, want d3 at revision 2", updated.Name, updated.Revision)
 	}
 
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, &models.UpdateDashboardRequest{
+	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d4", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if !errors.Is(err, ErrDashboardConflict) {
@@ -487,62 +854,5 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 	}
 	if stored.Name != "d3" || stored.Revision != 2 {
 		t.Fatalf("stored row after the refused update: name %q revision %d, want d3 at revision 2", stored.Name, stored.Revision)
-	}
-}
-
-// TestListDashboardsCorruptRowIsolated covers B12: a row with an unparseable
-// panel blob must not break the whole list. It is surfaced to its creator with
-// PanelsCorrupt set and its blob nulled out, and valid rows still come back.
-func TestListDashboardsCorruptRowIsolated(t *testing.T) {
-	db := newTestDB(t)
-	log := discardLogger()
-	ctx := context.Background()
-
-	creator := newTestUser(t, db, "creator@test.dev", "Creator")
-	team, src := seedTeamWithSource(t, db, "team-a", creator)
-
-	// A healthy dashboard.
-	good, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: "good", Panels: panelBlob(team.ID, src.ID)})
-	if err != nil {
-		t.Fatalf("CreateDashboard(good): %v", err)
-	}
-
-	// A corrupt row inserted straight through the store (bypasses validation).
-	corrupt := &models.Dashboard{Name: "corrupt", PanelsJSON: json.RawMessage(`{not valid json`), CreatedBy: &creator.ID}
-	if err := db.CreateDashboard(ctx, corrupt); err != nil {
-		t.Fatalf("store CreateDashboard(corrupt): %v", err)
-	}
-
-	list, err := ListDashboards(ctx, db, log, creator)
-	if err != nil {
-		t.Fatalf("ListDashboards: %v", err)
-	}
-
-	var sawGood, sawCorrupt bool
-	for _, d := range list {
-		switch d.ID {
-		case good.ID:
-			sawGood = true
-			if d.PanelsCorrupt {
-				t.Errorf("good dashboard wrongly flagged corrupt")
-			}
-		case corrupt.ID:
-			sawCorrupt = true
-			if !d.PanelsCorrupt {
-				t.Errorf("corrupt dashboard not flagged")
-			}
-			// The nulled-out blob must be valid JSON so the response marshals.
-			if err := json.Unmarshal(d.PanelsJSON, new(map[string]any)); err != nil {
-				t.Errorf("corrupt row blob not sanitized: %v", err)
-			}
-		}
-	}
-	if !sawGood || !sawCorrupt {
-		t.Fatalf("list missing rows: good=%v corrupt=%v", sawGood, sawCorrupt)
-	}
-
-	// The full response must marshal without error (the B12 failure mode).
-	if _, err := json.Marshal(list); err != nil {
-		t.Fatalf("list response failed to marshal: %v", err)
 	}
 }
