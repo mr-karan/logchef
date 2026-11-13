@@ -17,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -56,10 +57,7 @@ func TestLiveEvaluationCancellationHistory(t *testing.T) {
 				if backend == "sqlite" {
 					db, err = sqlite.New(ctx, sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 				} else {
-					dsn := os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")
-					if dsn == "" {
-						t.Skip("LOGCHEF_TEST_POSTGRES_DSN not set")
-					}
+					dsn := postgrestest.DSN(t)
 					db, err = postgres.New(ctx, postgres.Options{Logger: log, Config: config.PostgresConfig{DSN: dsn}})
 				}
 				if err != nil {

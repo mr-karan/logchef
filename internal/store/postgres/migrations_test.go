@@ -11,10 +11,11 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 )
 
 func TestMigrationRecordingRollback(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
@@ -39,7 +40,7 @@ applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		t.Fatalf("unexpected migration failure: %v", err)
 	}
 	var users *string
-	if err := conn.QueryRow(ctx, "SELECT to_regclass('public.users')::text").Scan(&users); err != nil {
+	if err := conn.QueryRow(ctx, "SELECT to_regclass('users')::text").Scan(&users); err != nil {
 		t.Fatal(err)
 	}
 	if users != nil {

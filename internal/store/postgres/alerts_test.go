@@ -10,12 +10,13 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/internal/store/storetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestPruneAlertHistoryPlan(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	opener(dsn)(t)
 	ctx := t.Context()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -45,7 +46,7 @@ func TestPruneAlertHistoryPlan(t *testing.T) {
 }
 
 func TestConcurrentResolvePreservesNewIncident(t *testing.T) {
-	dsn := resetSchema(t)
+	dsn := postgrestest.DSN(t)
 	s := opener(dsn)(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()

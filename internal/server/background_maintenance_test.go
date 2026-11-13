@@ -23,6 +23,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -36,10 +37,7 @@ func backgroundTestStore(t *testing.T, backend string) (store.Store, *sql.DB) {
 	var err error
 	driver, address := "sqlite", sqlitetest.Path(t)
 	if backend == "postgres" {
-		driver, address = "pgx", os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")
-		if address == "" {
-			t.Skip("LOGCHEF_TEST_POSTGRES_DSN not set")
-		}
+		driver, address = "pgx", postgrestest.DSN(t)
 		db, err = postgres.New(ctx, postgres.Options{Logger: log, Config: config.PostgresConfig{DSN: address}})
 	} else {
 		db, err = sqlite.New(ctx, sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: address}})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,44 +14,20 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func newProvisioningPostgres(t *testing.T) (*postgres.Store, string, *pgx.Conn) {
 	t.Helper()
-	dsn := os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("LOGCHEF_TEST_POSTGRES_DSN not set")
-	}
+	dsn := postgrestest.DSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := fmt.Sprintf("provisioning_%d", time.Now().UnixNano())
-	identifier := pgx.Identifier{schema}.Sanitize()
-	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil {
-		_ = conn.Close(ctx)
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(ctx, "DROP SCHEMA "+identifier+" CASCADE"); err != nil {
-			t.Error(err)
-		}
-		_ = conn.Close(ctx)
-	})
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query := parsed.Query()
-	query.Set("search_path", schema)
-	query.Set("application_name", schema)
-	parsed.RawQuery = query.Encode()
-	dsn = parsed.String()
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	db, err := postgres.New(ctx, postgres.Options{Logger: quietLogger(), Config: config.PostgresConfig{DSN: dsn}})
 	if err != nil {
 		t.Fatal(err)
