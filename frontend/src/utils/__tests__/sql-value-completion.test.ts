@@ -166,15 +166,19 @@ describe("SQL string value completion", () => {
     };
     time(small);
     time(large);
-    // Each pair runs the two sizes back to back, so load has to hit the large
-    // half of every pair to inflate the best ratio. Linear is about 16x and
-    // quadratic about 256x; 64 sits far from both.
-    let bestRatio = Infinity;
+    // Each pair runs the two sizes back to back, so load that hits one size
+    // lands in that pair only, and the median ignores one bad pair in either
+    // direction. Linear is about 16x and a costly quadratic about 256x; 64 sits
+    // far from both. A cheap quadratic hidden inside one native string call
+    // can stay under 64 at these sizes; the exact counts above are the main
+    // guard, and this check catches gross regressions only.
+    const ratios: number[] = [];
     for (let pair = 0; pair < 7; pair++) {
       const smallMs = time(small);
       const largeMs = time(large);
-      bestRatio = Math.min(bestRatio, largeMs / Math.max(smallMs, 0.001));
+      ratios.push(largeMs / Math.max(smallMs, 0.001));
     }
-    expect(bestRatio).toBeLessThan(64);
+    ratios.sort((a, b) => a - b);
+    expect(ratios[3]).toBeLessThan(64);
   });
 });
