@@ -216,16 +216,16 @@ describe("classifyPanelError", () => {
 
 describe("clampTableLimit", () => {
   it.each<[string, number | undefined, number]>([
-    ["undefined → default", undefined, 100],
-    ["0 → default", 0, 100],
-    ["negative → default", -5, 100],
-    ["NaN → default", NaN, 100],
-    ["Infinity → default", Infinity, 100],
+    ["undefined → default", undefined, 1000],
+    ["0 → default", 0, 1000],
+    ["negative → default", -5, 1000],
+    ["NaN → default", NaN, 1000],
+    ["Infinity → default", Infinity, 1000],
     ["fraction below 1 clamps up to 1", 0.5, 1],
     ["1.9 floors to 1", 1.9, 1],
     ["in range passes through", 250, 250],
     ["max passes through", 1000, 1000],
-    ["above max clamps", 100000, 1000],
+    ["above max clamps", 100000, 10000],
   ])("%s", (_name, value, expected) => {
     expect(clampTableLimit(value)).toBe(expected);
   });
@@ -244,11 +244,11 @@ describe("execSignature", () => {
 
   it("ignores fields that do not affect the fetched result", () => {
     expect(execSignature({ ...base, id: "p2", title: "B" })).toBe(execSignature(base));
+    expect(execSignature({ ...base, viz: { type: "stat", value: "n", reduce: "avg", format: { scale: 1e-7 } } })).toBe(execSignature(base));
     expect(execSignature({ ...base, viz: { type: "table", visible_columns: ["a"] } })).toBe(execSignature(base));
   });
 
   it.each<[string, Partial<DashboardQueryPanel>]>([
-    ["viz type", { viz: { type: "stat" } }],
     ["mode", { query: { ...base.query, mode: "count" } }],
     ["query text", { query: { ...base.query, text: "level:warn" } }],
     ["query language", { query: { ...base.query, language: "clickhouse-sql" } }],

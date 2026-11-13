@@ -402,7 +402,7 @@ describe("dashboards store — panel time params", () => {
     store.upsertDraftPanel(chartPanel("filled-series"));
     await vi.waitFor(() => expect(store.getPanelState("filled-series").status).toBe("success"));
 
-    expect(store.getPanelState("filled-series").timeseries?.range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
+    expect(store.getPanelState("filled-series").range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
   });
 
   // #137 — the title link opens the window a panel's shown result ran over.
@@ -646,11 +646,11 @@ describe("dashboards store — #119/#120 hardening", () => {
       viz: { type: "stat", reduce: "sum" },
     });
     await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("success"));
-    expect(store.getPanelState("p1").stat).toBeDefined();
+    expect(store.getPanelState("p1").frame).toBeDefined();
     // stat -> table: the cached stat value would render blank under a table, so
     // it must be dropped immediately (the panel re-executes into "loading").
     store.switchDraftPanelKind("p1", "table");
-    expect(store.getPanelState("p1").stat).toBeUndefined();
+    expect(store.getPanelState("p1").frame).toBeUndefined();
     expect(store.getPanelState("p1").status).not.toBe("success");
   });
 
@@ -663,7 +663,7 @@ describe("dashboards store — #119/#120 hardening", () => {
     });
     await vi.waitFor(() => expect(mocks.logsQuery).toHaveBeenCalledTimes(1));
     const [, , body] = mocks.logsQuery.mock.calls[0];
-    expect(body.limit).toBe(1000);
+    expect(body.limit).toBe(10000);
   });
 });
 
@@ -738,6 +738,21 @@ describe("dashboards store — schema 2 request parity", () => {
     return store;
   }
 
+  it("runs result SQL as written and reuses the frame for role, reducer, kind, format and visualization edits", async () => {
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [{ n: "9007199254740993" }], columns: [{ name: "n", type: "UInt64" }] } });
+    const panel: DashboardQueryPanel = { ...tablePanel("computed"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT sum(amount) AS n", limit: 1000 }, viz: { type: "stat", value: "n" } };
+    const store = await runPanels(panel);
+    expect(mocks.histogram).not.toHaveBeenCalled();
+    expect(mocks.logsQuery.mock.calls[0][2].query_text).toBe("SELECT sum(amount) AS n");
+    const frame = store.getPanelState("computed").frame;
+    expect(frame?.rows[0].n).toEqual({ kind: "exact", coefficient: 9007199254740993n, scale: 0 });
+    await store.enterEdit();
+    store.updateDraftPanel("computed", { viz: { type: "stat", value: "n", reduce: "sum", columns: { n: { kind: "number", confidence: "confirmed" } }, format: { scale: 1e-7, decimals: 2, suffix: " Cr" } } });
+    store.updateDraftPanel("computed", { viz: { type: "table", visible_columns: ["n"] } });
+    expect(mocks.logsQuery).toHaveBeenCalledTimes(1);
+    expect(store.getPanelState("computed").frame).toEqual(frame);
+  });
+
   it("sends an upgraded stat's translate limit to translate only, on both backends", async () => {
     const stat: DashboardQueryPanel = {
       ...chartPanel("stat", { translate_limit: 50000 }),
@@ -763,8 +778,8 @@ describe("dashboards store — schema 2 request parity", () => {
     const logchefql: DashboardQueryPanel = { ...tablePanel("lq"), query: { mode: "result", language: "logchefql", text: "" } };
     const sql: DashboardQueryPanel = { ...tablePanel("sql"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1" } };
     await runPanels(logchefql, sql);
-    expect(mocks.logchefqlQuery.mock.calls[0][2].limit).toBe(100);
-    expect(mocks.logsQuery.mock.calls[0][2].limit).toBe(100);
+    expect(mocks.logchefqlQuery.mock.calls[0][2].limit).toBe(1000);
+    expect(mocks.logsQuery.mock.calls[0][2].limit).toBe(1000);
   });
 
   it("keeps a table result's limit source and truncation state, through both table paths", async () => {
@@ -774,8 +789,8 @@ describe("dashboards store — schema 2 request parity", () => {
     const logchefql: DashboardQueryPanel = { ...tablePanel("lq"), query: { mode: "result", language: "logchefql", text: "" } };
     const sql: DashboardQueryPanel = { ...tablePanel("sql"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1" } };
     const store = await runPanels(logchefql, sql);
-    expect(store.getPanelState("lq").table?.stats).toMatchObject({ limit_source: "request", truncation: "rows" });
-    expect(store.getPanelState("sql").table?.stats).toMatchObject({ limit_source: "request", truncation: "rows" });
+    expect(store.getPanelState("lq").stats).toMatchObject({ limit_source: "request", truncation: "rows" });
+    expect(store.getPanelState("sql").stats).toMatchObject({ limit_source: "request", truncation: "rows" });
   });
 
   it("keeps the truncation state of a table result that a byte cut left empty", async () => {
@@ -793,9 +808,9 @@ describe("dashboards store — schema 2 request parity", () => {
     expect(groups).toContain("\ufeff");
   });
 
-  it("a stat panel never sends a group", async () => {
+  it("a stat retains query grouping independently of its visualization", async () => {
     await runPanels({ ...chartPanel("s", { group_by: "host" }), viz: { type: "stat", reduce: "sum" } });
-    expect(mocks.histogram.mock.calls[0][2].group_by).toBeUndefined();
+    expect(mocks.histogram.mock.calls[0][2].group_by).toBe("host");
   });
 
   it("saving an unchanged dashboard sends the loaded blob back as it was", async () => {

@@ -4,8 +4,8 @@ import type { DashboardQueryPanel } from "@/api/dashboards";
 // Table panel row cap. The builder's limit option maxes at 1000; a hand-edited
 // or legacy blob could carry anything (a saved limit:100000 would try to render
 // 100k rows), so the runtime clamps into [1, TABLE_LIMIT_MAX] regardless.
-const DEFAULT_TABLE_LIMIT = 100;
-const TABLE_LIMIT_MAX = 1000;
+const DEFAULT_TABLE_LIMIT = 1000;
+const TABLE_LIMIT_MAX = 10000;
 
 // Resolve a dashboard's EFFECTIVE result-cache TTL (seconds), combining the blob
 // value with the server's advertised policy. Client and server apply the SAME
@@ -88,7 +88,6 @@ export function clampTableLimit(value: number | undefined): number {
 // with the same signature render identically, so panelState is reusable.
 export function execSignature(p: DashboardQueryPanel): string {
   return JSON.stringify([
-    p.viz.type,
     p.query.mode,
     p.query.text,
     p.query.language,
@@ -97,5 +96,6 @@ export function execSignature(p: DashboardQueryPanel): string {
     p.query.limit ?? null,
     p.query.group_by ?? null,
     p.query.translate_limit ?? null,
+    p.query.interval ?? null,
   ]);
 }
