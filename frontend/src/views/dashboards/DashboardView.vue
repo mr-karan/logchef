@@ -391,8 +391,13 @@ function closeEditor() {
 }
 
 async function discardEdit() {
+  const result = await store.cancelEdit();
+  if (!result.success) {
+    if (result.error) showErrorToast(result.error);
+    return false;
+  }
   closeEditor();
-  await store.cancelEdit();
+  return true;
 }
 
 // A refused save opens the conflict dialog: `latest` is set once the user asks to overwrite it.
@@ -424,9 +429,9 @@ async function saveEdit(revision?: number) {
 function saveConflictAsCopy() {
   return runConflictAction(async () => {
     const name = t("common.copyName", { name: store.editName.trim() || store.current?.name || t("ui.dashboard") });
-    closeEditor();
     const result = await store.saveDraftAsCopy(name);
     if (!result.success || !result.data) return;
+    closeEditor();
     conflict.value = null;
     await router.push(`/dashboards/${result.data.id}`);
   });
@@ -447,8 +452,7 @@ function confirmOverwrite() {
 
 function discardForLatest() {
   return runConflictAction(async () => {
-    await discardEdit();
-    conflict.value = null;
+    if (await discardEdit()) conflict.value = null;
   });
 }
 
