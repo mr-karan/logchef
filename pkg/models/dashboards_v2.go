@@ -90,14 +90,18 @@ const (
 )
 
 var (
-	validDashboardPanelKinds     = map[DashboardPanelKind]struct{}{DashboardPanelKindQuery: {}}
-	validDashboardQueryModes     = map[DashboardQueryMode]struct{}{DashboardQueryModeCount: {}, DashboardQueryModeResult: {}}
-	validDashboardQueryLanguages = map[QueryLanguage]struct{}{QueryLanguageLogchefQL: {}, QueryLanguageClickHouseSQL: {}, QueryLanguageLogsQL: {}}
-	validDashboardQueryIntervals = map[string]struct{}{DashboardQueryIntervalAuto: {}}
-	validDashboardVizTypes       = map[DashboardVizType]struct{}{DashboardVizStat: {}, DashboardVizChart: {}, DashboardVizPie: {}, DashboardVizToplist: {}, DashboardVizTable: {}}
-	validDashboardChartMarks     = map[DashboardChartMark]struct{}{DashboardChartMarkLine: {}, DashboardChartMarkArea: {}, DashboardChartMarkBar: {}}
-	validDashboardChartStacks    = map[DashboardChartStack]struct{}{DashboardChartStackNone: {}, DashboardChartStackStacked: {}}
-	validDashboardStatReduces    = map[DashboardStatReduce]struct{}{DashboardStatReduceSum: {}, DashboardStatReduceLast: {}, DashboardStatReduceFirst: {}, DashboardStatReduceAvg: {}, DashboardStatReduceMin: {}, DashboardStatReduceMax: {}}
+	validDashboardPanelKinds        = map[DashboardPanelKind]struct{}{DashboardPanelKindQuery: {}}
+	validDashboardQueryModes        = map[DashboardQueryMode]struct{}{DashboardQueryModeCount: {}, DashboardQueryModeResult: {}}
+	validDashboardQueryLanguages    = map[QueryLanguage]struct{}{QueryLanguageLogchefQL: {}, QueryLanguageClickHouseSQL: {}, QueryLanguageLogsQL: {}}
+	validDashboardQueryIntervals    = map[string]struct{}{DashboardQueryIntervalAuto: {}}
+	validDashboardVizTypes          = map[DashboardVizType]struct{}{DashboardVizStat: {}, DashboardVizChart: {}, DashboardVizPie: {}, DashboardVizToplist: {}, DashboardVizTable: {}}
+	validDashboardChartMarks        = map[DashboardChartMark]struct{}{DashboardChartMarkLine: {}, DashboardChartMarkArea: {}, DashboardChartMarkBar: {}}
+	validDashboardChartStacks       = map[DashboardChartStack]struct{}{DashboardChartStackNone: {}, DashboardChartStackStacked: {}}
+	validDashboardStatReduces       = map[DashboardStatReduce]struct{}{DashboardStatReduceSum: {}, DashboardStatReduceLast: {}, DashboardStatReduceFirst: {}, DashboardStatReduceAvg: {}, DashboardStatReduceMin: {}, DashboardStatReduceMax: {}}
+	validDashboardColumnKinds       = map[string]struct{}{"time": {}, "date": {}, "number": {}, "category": {}, "bool": {}, "other": {}}
+	validDashboardColumnConfidences = map[string]struct{}{"confirmed": {}}
+	validDashboardNumberNotations   = map[string]struct{}{"auto": {}, "standard": {}, "compact": {}}
+	validDashboardNumberUnits       = map[string]struct{}{"none": {}, "percent": {}, "bytes": {}, "duration_ms": {}, "duration_s": {}}
 )
 
 // dashboardPanelsV2 is the schema 2 blob. Optional fields are pointers so
@@ -143,7 +147,7 @@ type dashboardQueryV2 struct {
 type dashboardVizV2 struct {
 	Value          *string                      `json:"value,omitempty"`
 	OrderBy        *string                      `json:"order_by,omitempty"`
-	Columns        map[string]dashboardColumnV2 `json:"columns,omitempty"`
+	Columns        map[string]dashboardColumnV2 `json:"columns,omitzero"`
 	Format         *dashboardNumberFormatV2     `json:"format,omitempty"`
 	Type           DashboardVizType             `json:"type"`
 	Mark           *DashboardChartMark          `json:"mark,omitempty"`
@@ -176,8 +180,8 @@ type DashboardFeature string
 // phase 3 ships, which every schema 2 writer understands.
 const dashboardFeatureBase DashboardFeature = "base"
 
-// dashboardFeatureRules compute the features a blob uses. The table is empty
-// in phase 3. Each phase that adds blob state adds its rule here, its field
+// dashboardFeatureRules compute the features a blob uses. Each phase that
+// adds blob state adds its rule here, its field
 // and enum entries to the origin tables below, and its name to the frontend's
 // DASHBOARD_CLIENT_FEATURES. TestDashboardSchema2FeatureTableComplete keeps the
 // three in step.
@@ -260,14 +264,18 @@ var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
 // dashboardSchema2EnumOrigins maps every accepted enum value, by field path, to
 // the feature that introduces it or the base mark.
 var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
-	"panels.kind":           {string(DashboardPanelKindQuery): dashboardFeatureBase},
-	"panels.query.mode":     {string(DashboardQueryModeCount): dashboardFeatureBase, string(DashboardQueryModeResult): dashboardFeatureBase},
-	"panels.query.language": {string(QueryLanguageLogchefQL): dashboardFeatureBase, string(QueryLanguageClickHouseSQL): dashboardFeatureBase, string(QueryLanguageLogsQL): dashboardFeatureBase},
-	"panels.query.interval": {DashboardQueryIntervalAuto: dashboardFeatureBase},
-	"panels.viz.type":       {string(DashboardVizStat): dashboardFeatureBase, string(DashboardVizChart): dashboardFeatureBase, string(DashboardVizPie): dashboardFeatureBase, string(DashboardVizToplist): dashboardFeatureBase, string(DashboardVizTable): dashboardFeatureBase},
-	"panels.viz.mark":       {string(DashboardChartMarkLine): dashboardFeatureBase, string(DashboardChartMarkArea): dashboardFeatureBase, string(DashboardChartMarkBar): dashboardFeatureBase},
-	"panels.viz.stack":      {string(DashboardChartStackNone): dashboardFeatureBase, string(DashboardChartStackStacked): dashboardFeatureBase},
-	"panels.viz.reduce":     {string(DashboardStatReduceSum): dashboardFeatureBase, "first": "result_frames", "last": "result_frames", "avg": "result_frames", "min": "result_frames", "max": "result_frames"},
+	"panels.kind":                   {string(DashboardPanelKindQuery): dashboardFeatureBase},
+	"panels.query.mode":             {string(DashboardQueryModeCount): dashboardFeatureBase, string(DashboardQueryModeResult): dashboardFeatureBase},
+	"panels.query.language":         {string(QueryLanguageLogchefQL): dashboardFeatureBase, string(QueryLanguageClickHouseSQL): dashboardFeatureBase, string(QueryLanguageLogsQL): dashboardFeatureBase},
+	"panels.query.interval":         {DashboardQueryIntervalAuto: dashboardFeatureBase},
+	"panels.viz.type":               {string(DashboardVizStat): dashboardFeatureBase, string(DashboardVizChart): dashboardFeatureBase, string(DashboardVizPie): dashboardFeatureBase, string(DashboardVizToplist): dashboardFeatureBase, string(DashboardVizTable): dashboardFeatureBase},
+	"panels.viz.mark":               {string(DashboardChartMarkLine): dashboardFeatureBase, string(DashboardChartMarkArea): dashboardFeatureBase, string(DashboardChartMarkBar): dashboardFeatureBase},
+	"panels.viz.stack":              {string(DashboardChartStackNone): dashboardFeatureBase, string(DashboardChartStackStacked): dashboardFeatureBase},
+	"panels.viz.reduce":             {string(DashboardStatReduceSum): dashboardFeatureBase, "first": "result_frames", "last": "result_frames", "avg": "result_frames", "min": "result_frames", "max": "result_frames"},
+	"panels.viz.columns.kind":       {"time": "result_frames", "date": "result_frames", "number": "result_frames", "category": "result_frames", "bool": "result_frames", "other": "result_frames"},
+	"panels.viz.columns.confidence": {"confirmed": "result_frames"},
+	"panels.viz.format.notation":    {"auto": "formats", "standard": "formats", "compact": "formats"},
+	"panels.viz.format.unit":        {"none": "formats", "percent": "formats", "bytes": "formats", "duration_ms": "formats", "duration_s": "formats"},
 }
 
 // KnownDashboardFeatures lists the features this server computes, in the
@@ -646,7 +654,9 @@ func validateDashboardFrameViz(id string, v *dashboardVizV2) error {
 		if n := utf8.RuneCountInString(name); n < 1 || n > 128 {
 			return fmt.Errorf("panel %q has an invalid column name", id)
 		}
-		if !slices.Contains([]string{"time", "date", "number", "category", "bool", "other"}, c.Kind) || c.Confidence != "confirmed" {
+		_, validKind := validDashboardColumnKinds[c.Kind]
+		_, validConfidence := validDashboardColumnConfidences[c.Confidence]
+		if !validKind || !validConfidence {
 			return fmt.Errorf("panel %q has an invalid confirmed column kind", id)
 		}
 	}
@@ -661,11 +671,15 @@ func validateDashboardNumberFormat(id string, v *dashboardVizV2) error {
 	if v.Type != DashboardVizStat {
 		return fmt.Errorf("panel %q has a format only a stat uses in this release", id)
 	}
-	if f.Notation != nil && !slices.Contains([]string{"auto", "standard", "compact"}, *f.Notation) {
-		return fmt.Errorf("panel %q has invalid format.notation", id)
+	if f.Notation != nil {
+		if _, ok := validDashboardNumberNotations[*f.Notation]; !ok {
+			return fmt.Errorf("panel %q has invalid format.notation", id)
+		}
 	}
-	if f.Unit != nil && !slices.Contains([]string{"none", "percent", "bytes", "duration_ms", "duration_s"}, *f.Unit) {
-		return fmt.Errorf("panel %q has invalid format.unit", id)
+	if f.Unit != nil {
+		if _, ok := validDashboardNumberUnits[*f.Unit]; !ok {
+			return fmt.Errorf("panel %q has invalid format.unit", id)
+		}
 	}
 	if f.Decimals != nil && (*f.Decimals < 0 || *f.Decimals > 10) {
 		return fmt.Errorf("panel %q has invalid format.decimals", id)
@@ -705,7 +719,7 @@ func validateDashboardVizOptionsV2(panelID string, v *dashboardVizV2) error {
 			return fmt.Errorf("panel %q has viz.reduce, which only a stat uses", panelID)
 		}
 		if _, ok := validDashboardStatReduces[*v.Reduce]; !ok {
-			return fmt.Errorf("panel %q has invalid viz.reduce %q (allowed: sum)", panelID, *v.Reduce)
+			return fmt.Errorf("panel %q has invalid viz.reduce %q (allowed: last, first, sum, avg, min, max)", panelID, *v.Reduce)
 		}
 	}
 	if v.Donut != nil && v.Type != DashboardVizPie {

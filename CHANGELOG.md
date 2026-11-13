@@ -68,7 +68,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   returns an empty schema 1 blob with `panels_corrupt: true`, `min_schema: 2`
   and `can_edit: false`. A client writes it only when it also sends
   `X-Logchef-Dashboard-Features` with the comma-separated features its code
-  supports (none exist yet, so an empty header is right); a save that would
+  supports (`result_frames` and `formats` in this version); a save that would
   drop a stored feature, or a schema 1 body on a schema 2 dashboard, returns
   409. Any other schema header value returns 400. Dashboards that no schema 2
   client has saved stay schema 1 and keep working for scripts as before.
@@ -112,6 +112,13 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 - Query variables now support `day`, labelled "Date", with a date-only picker
   and `YYYY-MM-DD` literals in SQL, LogsQL, and LogchefQL. The existing `date`
   type is labelled "Date and time" and keeps its output unchanged.
+- Dashboard stats can run SQL aggregates and LogsQL stats queries as written,
+  reduce a value column, and show the selected row's date. The builder offers
+  ClickHouse SQL, confirmed column kinds, and number formats with decimal
+  scaling, notation, units, prefix, and suffix.
+- Dashboard frames preserve wide integers and decimals through stats and
+  tables. Invalid typed cells become NULL with a notice. Date-only values
+  keep their calendar date across timezones. Visual edits reuse the frame.
 - A banner asks you to reload when the server version differs from the version
   that served the page. The check runs on load and on window focus, at most
   every 30 seconds. The banner itself never reloads the page. Its Reload button

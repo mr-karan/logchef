@@ -97,7 +97,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"translate_limit too large", panel(`{"mode":"count","language":"logchefql","text":"x","translate_limit":100001}`, `{"type":"stat"}`), "invalid query.translate_limit"},
 		{"bad viz type", panel(countQ, `{"type":"gauge"}`), "invalid viz.type"},
 		{"table in count mode", panel(countQ, `{"type":"table"}`), "table needs result mode"},
-		{"stat in result mode is a later phase", panel(resultQ, `{"type":"stat"}`), "needs viz.value"},
+		{"result stat needs a value", panel(resultQ, `{"type":"stat"}`), "needs viz.value"},
 		{"pie without group_by", panel(countQ, `{"type":"pie"}`), "needs query.group_by"},
 		{"toplist without group_by", panel(countQ, `{"type":"toplist"}`), "needs query.group_by"},
 		{"mark on stat", panel(countQ, `{"type":"stat","mark":"line"}`), "only a chart uses"},
@@ -105,7 +105,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"stack on stat", panel(countQ, `{"type":"stat","stack":"none"}`), "only a chart uses"},
 		{"bad stack", panel(countQ, `{"type":"chart","stack":"grouped"}`), "invalid viz.stack"},
 		{"reduce on chart", panel(countQ, `{"type":"chart","reduce":"sum"}`), "only a stat uses"},
-		{"reduce last is a later phase", panel(countQ, `{"type":"stat","reduce":"median"}`), "invalid viz.reduce"},
+		{"unknown reducer", panel(countQ, `{"type":"stat","reduce":"median"}`), "invalid viz.reduce"},
 		{"donut on toplist", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":"a"}`, `{"type":"toplist","donut":true}`), "only a pie uses"},
 		{"visible_columns on chart", panel(countQ, `{"type":"chart","visible_columns":["a"]}`), "only a table uses"},
 		{"empty visible_columns", panel(resultQ, `{"type":"table","visible_columns":[]}`), "empty viz.visible_columns"},
@@ -689,14 +689,18 @@ func TestDashboardSchema2FeatureTableComplete(t *testing.T) {
 	}
 
 	enums := map[string]any{
-		"panels.kind":           validDashboardPanelKinds,
-		"panels.query.mode":     validDashboardQueryModes,
-		"panels.query.language": validDashboardQueryLanguages,
-		"panels.query.interval": validDashboardQueryIntervals,
-		"panels.viz.type":       validDashboardVizTypes,
-		"panels.viz.mark":       validDashboardChartMarks,
-		"panels.viz.stack":      validDashboardChartStacks,
-		"panels.viz.reduce":     validDashboardStatReduces,
+		"panels.kind":                   validDashboardPanelKinds,
+		"panels.query.mode":             validDashboardQueryModes,
+		"panels.query.language":         validDashboardQueryLanguages,
+		"panels.query.interval":         validDashboardQueryIntervals,
+		"panels.viz.type":               validDashboardVizTypes,
+		"panels.viz.mark":               validDashboardChartMarks,
+		"panels.viz.stack":              validDashboardChartStacks,
+		"panels.viz.reduce":             validDashboardStatReduces,
+		"panels.viz.columns.kind":       validDashboardColumnKinds,
+		"panels.viz.columns.confidence": validDashboardColumnConfidences,
+		"panels.viz.format.notation":    validDashboardNumberNotations,
+		"panels.viz.format.unit":        validDashboardNumberUnits,
 	}
 	for path, table := range enums {
 		if _, ok := paths[path]; !ok {
@@ -1020,5 +1024,20 @@ func TestDashboardResultFrames(t *testing.T) {
 	client, err := ParseDashboardClient(new("2"), "result_frames,formats")
 	if err != nil || !client.Supports("result_frames") || !client.Supports("formats") {
 		t.Fatalf("client %v: %v", client, err)
+	}
+}
+
+func TestDashboardEmptyColumnKindsKeepFeature(t *testing.T) {
+	raw := v2Blob(v2Layout, strings.Replace(v2TablePanel, `"visible_columns":["a","b"]`, `"columns":{}`, 1))
+	canonical, err := CanonicalDashboardPanels(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, err := DashboardFeatures(canonical)
+	if err != nil || !slices.Equal(features, []string{"result_frames"}) {
+		t.Fatalf("features %v: %v; blob %s", features, err, canonical)
+	}
+	if !slices.Equal(features, DashboardPanelsStoredFeatures(canonical)) {
+		t.Fatalf("stored features disagree with canonical blob %s", canonical)
 	}
 }

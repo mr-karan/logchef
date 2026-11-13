@@ -20,7 +20,6 @@ import {
   type PanelQueryLanguage,
   type CacheDirective,
 } from "@/api/dashboards";
-import { useTeamsStore } from "@/stores/teams";
 import { countFrame, resultFrame, type PanelFrame } from "@/utils/panelFrame";
 import type { QueryStats } from "@/api/explore";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
@@ -426,7 +425,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const buckets = data?.data ?? [];
 
       const frame = countFrame(buckets, data?.granularity ?? null, !!groupBy, data?.notice);
-      return { status: buckets.length || viz === "stat" ? "success" : "empty", frame };
+      return { status: buckets.length ? "success" : "empty", frame };
     }
 
     // Result queries share one frame, independent of the visualization.
@@ -471,7 +470,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const rows = data?.logs ?? [];
     return {
       status: rows.length ? "success" : "empty",
-      frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: useTeamsStore().getTeamSourcesByTeamId(panel.team_id).some((s) => s.id === panel.source_id && s.source_type === "victorialogs"), stats: data?.stats }),
+      frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: data?.generated_query_language === "logsql", stats: data?.stats }),
       stats: data?.stats,
     };
   }

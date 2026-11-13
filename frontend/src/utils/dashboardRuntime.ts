@@ -1,9 +1,7 @@
 import type { DashboardCachePolicy } from "@/api/meta";
 import type { DashboardQueryPanel } from "@/api/dashboards";
 
-// Table panel row cap. The builder's limit option maxes at 1000; a hand-edited
-// or legacy blob could carry anything (a saved limit:100000 would try to render
-// 100k rows), so the runtime clamps into [1, TABLE_LIMIT_MAX] regardless.
+// Result queries default to 1,000 rows and accept up to 10,000.
 const DEFAULT_TABLE_LIMIT = 1000;
 const TABLE_LIMIT_MAX = 10000;
 
@@ -84,8 +82,7 @@ export function clampTableLimit(value: number | undefined): number {
   return Math.min(Math.max(Math.floor(value), 1), TABLE_LIMIT_MAX);
 }
 
-// Signature of the fields that determine a panel's fetched result. Two panels
-// with the same signature render identically, so panelState is reusable.
+// Visualization edits reuse the query result.
 export function execSignature(p: DashboardQueryPanel): string {
   return JSON.stringify([
     p.query.mode,

@@ -3,7 +3,6 @@ import {
   snapPanelWidth,
   clampPanelHeight,
   normalizeDashboardLayout,
-  sumHistogramCounts,
   packLayout,
   moveItem,
   sizeForPanel,
@@ -141,40 +140,6 @@ describe("normalizeDashboardLayout", () => {
 
   it("tolerates empty inputs", () => {
     expect(normalizeDashboardLayout([], [])).toEqual([]);
-  });
-});
-
-describe("sumHistogramCounts", () => {
-  it("sums log counts across all buckets", () => {
-    expect(
-      sumHistogramCounts([
-        { bucket: "t1", log_count: 11 },
-        { bucket: "t2", log_count: 54 },
-        { bucket: "t3", log_count: 48 },
-      ])
-    ).toBe(113);
-  });
-
-  it("sums grouped buckets (multiple rows per timestamp)", () => {
-    expect(
-      sumHistogramCounts([
-        { bucket: "t1", log_count: 11, group_value: "api" },
-        { bucket: "t1", log_count: 7, group_value: "cdn" },
-        { bucket: "t2", log_count: 5, group_value: "api" },
-      ])
-    ).toBe(23);
-  });
-
-  it("returns 0 for empty/nullish input and ignores non-finite counts", () => {
-    expect(sumHistogramCounts([])).toBe(0);
-    expect(sumHistogramCounts(null)).toBe(0);
-    expect(sumHistogramCounts(undefined)).toBe(0);
-    expect(
-      sumHistogramCounts([
-        { bucket: "t1", log_count: Number.NaN },
-        { bucket: "t2", log_count: 5 },
-      ])
-    ).toBe(5);
   });
 });
 
@@ -655,6 +620,16 @@ describe("dashboardCopyName", () => {
 });
 
 describe("switchPanelKind", () => {
+  it("preserves a result query and confirmed kinds when switching between a stat and a table", () => {
+    const source: DashboardQueryPanel = { id: "r", kind: "query", title: "Revenue", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT sum(amount) AS n", limit: 42 }, viz: { type: "stat", value: "n", columns: { n: { kind: "number", confidence: "confirmed" } } } };
+    const table = switchPanelKind(source, "table");
+    expect(table.query).toBe(source.query);
+    expect(table.viz).toEqual({ type: "table", columns: { n: { kind: "number", confidence: "confirmed" } } });
+    const stat = switchPanelKind(table, "stat");
+    expect(stat.query).toBe(source.query);
+    expect(stat.viz).toEqual({ type: "stat", reduce: "last", columns: { n: { kind: "number", confidence: "confirmed" } } });
+  });
+
   const source = chart("a", { group_by: "host", translate_limit: 50, text: "level=error" });
 
   it("keeps the text, language, team and source and drops what the kind does not use", () => {

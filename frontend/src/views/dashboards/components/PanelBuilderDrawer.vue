@@ -26,6 +26,7 @@ import { supportsQueryLanguage } from "@/lib/queryMetadata";
 import { isSuccessResponse } from "@/api/types";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { DashboardQueryPanel } from "@/api/dashboards";
+import { execSignature } from "@/utils/dashboardRuntime";
 import { panelBuilderKind, type PanelBuilderKind } from "@/utils/dashboardPanels";
 import type { DraftPanelPatch } from "@/stores/dashboards";
 
@@ -101,17 +102,24 @@ const supportsLogsql = computed(() =>
   sourceDetail.value ? supportsQueryLanguage(sourceDetail.value, "logsql") : false
 );
 
-// mode is the panel's own two-state toggle: LogchefQL (default) or native
-// LogsQL (VictoriaLogs only). clickhouse-sql native is intentionally never
-// offered here — see PanelEditorSheet's original note, preserved by design.
 const mode = computed<"logchefql" | "native">({
-  get: () => (panel.value?.query.language === "logsql" ? "native" : "logchefql"),
+  get: () => panel.value?.query.language === "logchefql" ? "logchefql" : "native",
   set: (v) => {
-    const language = v === "native" && supportsLogsql.value ? "logsql" : "logchefql";
-    // Only LogchefQL translates, so a translate limit leaves with the language.
+    const language = v === "native" ? supportsLogsql.value ? "logsql" : "clickhouse-sql" : "logchefql";
+    if (language === "clickhouse-sql" && panel.value?.query.mode === "count") {
+      patchPanel({ query: { mode: "result", language, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: { type: "stat", reduce: "last" } });
+      return;
+    }
     patchPanel({ query: language === "logchefql" ? { language } : { language, translate_limit: undefined } });
   },
 });
+function setQueryMode(mode: "count" | "result") {
+  const p = panel.value;
+  if (!p || p.query.mode === mode) return;
+  const { language, text } = p.query;
+  if (mode === "result") patchPanel({ query: { mode, language, text, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: p.viz.type === "table" ? p.viz : { type: "stat", reduce: "last" } });
+  else patchPanel({ query: { mode, language, text, limit: undefined, interval: "auto" }, viz: { type: "stat", reduce: "sum" } });
+}
 
 // SqlMonacoEditor has no LogsQL grammar; feed native queries to the
 // clickhouse-sql editor too, mirroring the explorer's approach for LogsQL.
@@ -149,10 +157,7 @@ async function loadSourceDetail(teamId: number, sourceId: number) {
     sourceDetail.value = teamSources.value.find((s) => s.id === sourceId) ?? null;
   } finally {
     if (requestId !== sourceDetailRequestId) return;
-    // A source that doesn't support LogsQL can't stay in native mode.
-    if (mode.value === "native" && !supportsLogsql.value) {
-      mode.value = "logchefql";
-    }
+    if ((panel.value?.query.language === "logsql" && !supportsLogsql.value) || (panel.value?.query.language === "clickhouse-sql" && supportsLogsql.value)) mode.value = "native";
   }
 }
 
@@ -242,10 +247,7 @@ const previewSignature = computed(() => {
   const p = panel.value;
   if (!p) return "";
   return JSON.stringify({
-    team: p.team_id,
-    source: p.source_id,
-    query: p.query,
-    viz: p.viz,
+    fetch: execSignature(p),
     range: store.effectiveRange,
   });
 });
@@ -383,8 +385,11 @@ function onOpenChange(value: boolean) {
                 @update:source="onSourceChange"
               />
               <div class="flex items-center justify-between shrink-0">
-                <Label class='text-xs text-muted-foreground'>{{ t('ui.query') }}</Label>
-                <div v-if="supportsLogsql" class="flex items-center gap-1 rounded-md border p-0.5">
+                <div class="flex items-center gap-2"><Label class='text-xs text-muted-foreground'>{{ t('ui.query') }}</Label>
+                  <template v-if="panelKind === 'stat' || panelKind === 'table'">
+                    <button v-for="queryMode in (['count', 'result'] as const)" :key="queryMode" type="button" class="rounded border px-2 py-0.5 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :disabled="queryMode === 'count' && (panelKind === 'table' || panel.query.language === 'clickhouse-sql')" :aria-pressed="panel.query.mode === queryMode" @click="setQueryMode(queryMode)">{{ queryMode }}</button>
+                  </template></div>
+                <div v-if="sourceDetail" class="flex items-center gap-1 rounded-md border p-0.5">
                   <button
                     type="button"
                     class="rounded px-2 py-0.5 text-xs"
@@ -399,7 +404,7 @@ function onOpenChange(value: boolean) {
                     :class="mode === 'native' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'"
                     @click="mode = 'native'"
                   >
-                    LogsQL
+                    {{ supportsLogsql ? 'LogsQL' : 'ClickHouse SQL' }}
                   </button>
                 </div>
               </div>
@@ -432,6 +437,7 @@ function onOpenChange(value: boolean) {
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto pl-0.5">
               <Label class='text-xs text-muted-foreground'>{{ t('ui.options') }}</Label>
               <PanelBuilderOptions
+                :frame="previewState?.frame"
                 :query="panel.query"
                 :viz="panel.viz"
                 :field-suggestions="fieldSuggestions"
