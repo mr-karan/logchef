@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { DashboardChartMark, DashboardPanelQuery, DashboardViz } from "@/api/dashboards";
-import { panelBuilderKind, trimDashboardGroupBy, MAX_TABLE_LIMIT } from "@/utils/dashboardPanels";
+import { panelBuilderKind, trimDashboardGroupBy } from "@/utils/dashboardPanels";
 
 const { t } = useI18n();
 
@@ -71,11 +71,12 @@ const columnInput = ref("");
 // larger typed value on every keystroke (native max-clamping only kicks in on
 // step-button use / form validation, not free typing), so clamp explicitly so
 // the panel can never end up with a limit above the enforced max.
+const MAX_BUILDER_TABLE_LIMIT = 1000;
 const LIMIT_MIN = 1;
 function clampLimit(value: unknown): number | undefined {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.min(MAX_TABLE_LIMIT, Math.max(LIMIT_MIN, Math.round(n)));
+  return Math.min(MAX_BUILDER_TABLE_LIMIT, Math.max(LIMIT_MIN, Math.round(n)));
 }
 
 const visibleColumns = computed(() => (props.viz.type === "table" ? props.viz.visible_columns ?? [] : []));
@@ -187,7 +188,7 @@ function removeColumn(name: string) {
         id="panel-limit"
         type="number"
         min="1"
-        :max="MAX_TABLE_LIMIT"
+        :max="MAX_BUILDER_TABLE_LIMIT"
         class="w-32"
         :model-value="query.limit ?? 100"
         @update:model-value="(v) => emit('update:query', { limit: clampLimit(v) })"

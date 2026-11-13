@@ -50,7 +50,7 @@ const isLocked = computed(() => props.panel.locked === true || panelState.value.
 // The title opens the panel's logs in Explorer over the window its shown result
 // ran over, which can lag the dashboard's window while a refresh is queued.
 const exploreLink = computed(() => {
-  if (!props.linkTitle || isLocked.value) return null;
+  if (!props.linkTitle || isLocked.value || panelState.value.status === "unsupported") return null;
   if (props.panel.locked) return null;
   const range = panelState.value.range ?? store.appliedRange ?? store.effectiveRange;
   return { name: "LogExplorer", query: panelExploreQuery(props.panel, range) };
@@ -64,7 +64,7 @@ const chartHeight = computed(() =>
   Math.max(70, props.heightPx - BODY_PADDING_PX - (props.chrome ? HEADER_PX : 0))
 );
 
-const vizType = computed(() => props.panel.viz.type);
+const vizType = computed(() => props.panel.viz?.type);
 
 const typeIcon = computed(() => {
   switch (vizType.value) {
@@ -125,6 +125,11 @@ const columnSubset = computed(() => {
       <div v-if="isLocked" class="dash-panel__message">
         <Lock class="dash-panel__message-icon" />
         <span>{{ t('ui.noAccessToThisSource') }}</span>
+      </div>
+
+      <div v-else-if="panelState.status === 'unsupported'" class="dash-panel__message">
+        <AlertCircle class="dash-panel__message-icon" />
+        <span>{{ t('ui.serverUpdated') }}</span>
       </div>
 
       <!-- Loading -->

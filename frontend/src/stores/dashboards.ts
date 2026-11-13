@@ -11,6 +11,8 @@ import {
   type DashboardPanels,
   type DashboardQueryPanel,
   type DashboardSummary,
+  DASHBOARD_CLIENT_FEATURES,
+  DASHBOARD_PANELS_VERSION,
   type DashboardViz,
   type CreateDashboardRequest,
   type UpdateDashboardRequest,
@@ -73,7 +75,7 @@ const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
 // comes from the server's dashboard_cache.default_ttl_seconds (see meta store);
 // this constant is only the last-resort display fallback.
 export const DEFAULT_DASHBOARD_CACHE_TTL_SECONDS = 600;
-export type PanelStatus = "idle" | "loading" | "success" | "empty" | "error" | "locked";
+export type PanelStatus = "idle" | "loading" | "success" | "empty" | "error" | "locked" | "unsupported";
 
 export interface PanelColumn {
   name: string;
@@ -225,10 +227,16 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const editName = computed(() => state.data.value.editName);
   const editDescription = computed(() => state.data.value.editDescription);
   const previewState = computed(() => state.data.value.previewState);
+  const needsReload = computed(() => {
+    const dashboard = current.value;
+    if (!dashboard || dashboard.corrupt) return false;
+    if (dashboard.panels_corrupt || dashboard.panels.version !== DASHBOARD_PANELS_VERSION) return true;
+    return dashboard.panels.features.some((feature) => !DASHBOARD_CLIENT_FEATURES.includes(feature));
+  });
   // A corrupt dashboard has no panels to edit; its creator repairs it through the API.
   const canEdit = computed(() => {
     const current = state.data.value.current;
-    return current?.can_edit === true && !current.corrupt;
+    return current?.can_edit === true && !current.corrupt && !needsReload.value;
   });
   // Dirty when the working draft diverges from the snapshot taken on entering edit.
   const isDirty = computed(() => {
@@ -568,6 +576,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // combining the blob value with the server's advertised policy (fail-closed
     // to 0 when the server advertises no/disabled/malformed policy).
     if (dashboard.corrupt) return;
+    if (needsReload.value) {
+      // A feature can change query semantics as well as rendering.
+      for (const panel of dashboard.panels.panels) setPanelState(panel.id, { status: "unsupported" });
+      return;
+    }
     const effTtl = resolveEffectiveCacheTtl(dashboard.panels.cache_ttl_seconds, metaStore.dashboardCachePolicy);
     // Send the directive ONLY when caching is actually on.
     const cache: CacheDirective | undefined =
@@ -618,7 +631,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // Edit starts from a fresh read, so the draft and its revision are the latest saved version.
   async function enterEdit() {
     const shown = state.data.value.current;
-    if (!shown || shown.can_edit !== true || state.data.value.isEditing) return;
+    if (!shown || !canEdit.value || state.data.value.isEditing) return;
     const token = ++loadToken;
     const result = await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.get(shown.id),
@@ -627,7 +640,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (token !== loadToken || !result.success || !result.data) return;
     const dashboard = result.data;
     state.data.value.current = dashboard;
-    if (dashboard.can_edit !== true || dashboard.corrupt) return;
+    if (!canEdit.value || dashboard.corrupt) {
+      state.data.value.panelStates = {};
+      await refreshAllPanels();
+      return;
+    }
     const blob: DashboardPanels = dashboard.panels;
     // Snapshot the loaded blob; the draft is an independent clone we mutate.
     state.data.value.editSnapshotJson = stableStringify(blob);
@@ -1005,6 +1022,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     editDescription,
     previewState,
     canEdit,
+    needsReload,
     isDirty,
 
     // getters

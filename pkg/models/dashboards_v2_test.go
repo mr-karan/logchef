@@ -426,6 +426,26 @@ func TestUpgradeDashboardPanels_SizeBound(t *testing.T) {
 		if err := ValidateDashboardPanels(out); err != nil {
 			t.Fatalf("upgraded blob fails schema 2 validation: %v", err)
 		}
+		var before dashboardPanels
+		var after dashboardPanelsV2
+		if err := json.Unmarshal(in, &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(out, &after); err != nil {
+			t.Fatal(err)
+		}
+		for i, p := range before.Panels {
+			q := after.Panels[i]
+			if p.ID != q.ID || p.Title != q.Title || p.Query != q.Query.Text {
+				t.Fatalf("upgrade changed decoded strings: %+v -> %+v", p, q)
+			}
+		}
+		for i, l := range before.Layout {
+			got := after.Tabs[0].Layout[i]
+			if l.ID != got.ID || l.X != got.X || l.Y != got.Y || l.W != got.W || l.H != got.H {
+				t.Fatalf("upgrade changed decoded layout: %+v -> %+v", l, got)
+			}
+		}
 		var probe struct {
 			Panels []json.RawMessage `json:"panels"`
 		}
@@ -476,7 +496,9 @@ func randomV1Blob(rng *rand.Rand) json.RawMessage {
 		return b.String()
 	}
 	optString := func(key string, values ...string) string {
-		switch rng.IntN(4) {
+		switch rng.IntN(5) {
+		case 4:
+			return `"` + key + `":"` + pick(values...) + `","` + key + `":null`
 		case 0:
 			return ""
 		case 1:
@@ -503,7 +525,7 @@ func randomV1Blob(rng *rand.Rand) json.RawMessage {
 		if y == 0 && rng.IntN(3) == 0 {
 			ys = "null"
 		}
-		layouts = append(layouts, fmt.Sprintf(`{"id":"p%d","x":%s,"y":%s,"w":%d,"h":%d,"junk":true}`, i, xs, ys, w, h))
+		layouts = append(layouts, fmt.Sprintf(`{"id":"p%d","x":%s,"y":%s,"w":%d,"h":%d,"id":null,"x":null,"y":null,"w":null,"h":null,"junk":true}`, i, xs, ys, w, h))
 		x += w
 		rowH = max(rowH, h)
 
@@ -572,6 +594,13 @@ func randomV1Blob(rng *rand.Rand) json.RawMessage {
 		}
 		if rng.IntN(4) == 0 {
 			panel += `,"extra":"` + randString() + `"`
+		}
+		if rng.IntN(2) == 0 {
+			for _, key := range []string{"id", "title", "query", "options"} {
+				if key != "options" || typ != "breakdown" {
+					panel += `,"` + key + `":null`
+				}
+			}
 		}
 		panels = append(panels, panel+"}")
 	}
@@ -710,7 +739,9 @@ func TestParseDashboardClient(t *testing.T) {
 		{"absent header is schema 1", nil, "", 1, false},
 		{"explicit 1", str("1"), "", 1, false},
 		{"2", str("2"), "", 2, false},
-		{"2 with whitespace", str(" 2 "), "", 2, false},
+		{"2 with whitespace", str(" \t2\t "), "", 2, false},
+		{"NBSP", str("\u00a02"), "", 0, true},
+		{"EM SPACE", str("2\u2003"), "", 0, true},
 		{"empty value", str(""), "", 0, true},
 		{"zero", str("0"), "", 0, true},
 		{"three", str("3"), "", 0, true},
@@ -849,5 +880,86 @@ func TestRedactDashboardPanelsV2(t *testing.T) {
 	refs, err := DashboardPanelRefs(raw)
 	if err != nil || len(refs) != 2 || refs[1].TeamID != 2 {
 		t.Fatalf("refs = %+v, %v", refs, err)
+	}
+}
+
+func TestUpgradeDashboardPanelsDuplicateNull(t *testing.T) {
+	base := `{"version":1,"layout":[{"id":"p1","x":2,"y":3,"w":6,"h":2}],"panels":[{"id":"p1","title":"a\u0062","type":"table","team_id":1,"source_id":1,"query":"x\u2028","query_language":"logchefql","options":{"columns":["host"],"limit":37}}]}`
+	for _, field := range []string{`"id":"p1"`, `"title":"a\u0062"`, `"query":"x\u2028"`, `"x":2`, `"y":3`, `"w":6`, `"h":2`, `"options":{"columns":["host"],"limit":37}`, `"columns":["host"]`, `"limit":37`} {
+		t.Run(field, func(t *testing.T) {
+			key, _, _ := strings.Cut(field, ":")
+			in := json.RawMessage(strings.ReplaceAll(base, field, field+","+key+":null"))
+			var decoded dashboardPanels
+			if err := json.Unmarshal(in, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			canonical, err := json.Marshal(decoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := upgradeV1(t, string(canonical))
+			got := upgradeV1(t, string(in))
+			var gotValue, wantValue any
+			if err := json.Unmarshal([]byte(got), &gotValue); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(gotValue, wantValue) {
+				t.Fatalf("got %s; want %s", got, want)
+			}
+			if !strings.Contains(got, `a\u0062`) {
+				t.Fatal("raw title token was not retained")
+			}
+		})
+	}
+	t.Run("reused column slice keeps a string when the next array has null", func(t *testing.T) {
+		in := strings.Replace(base, `"columns":["host"]`, `"columns":["host"],"columns":[null]`, 1)
+		if got := upgradeV1(t, in); !strings.Contains(got, `"visible_columns":["host"]`) {
+			t.Fatalf("column lost during upgrade: %s", got)
+		}
+	})
+}
+
+func TestCanonicalDashboardPersistedSize(t *testing.T) {
+	raw := v2Blob(v2Layout, strings.Replace(v2StatPanel, `"text":"x"`, `"text":"`+strings.Repeat("\u2028", 100_000)+`"`, 1))
+	if len(raw) >= MaxDashboardPanelsSizeV2 {
+		t.Fatal("request must fit")
+	}
+	out, err := CanonicalDashboardPanels(raw)
+	if err == nil && (len(out) > MaxDashboardPanelsSizeV2 || ValidateDashboardPanels(out) != nil) {
+		t.Fatalf("stored invalid canonical blob of %d bytes", len(out))
+	}
+}
+
+func TestParseDashboardClientKnownFeature(t *testing.T) {
+	saved := dashboardFeatureRules
+	t.Cleanup(func() { dashboardFeatureRules = saved })
+	dashboardFeatureRules = append(dashboardFeatureRules, struct {
+		name DashboardFeature
+		uses func(*dashboardPanelsV2) bool
+	}{name: "test_feature", uses: func(*dashboardPanelsV2) bool { return true }})
+	for _, tc := range []struct {
+		schema, features string
+		support          bool
+	}{
+		{"2", " \ttest_feature\t,unknown,,test_feature", true},
+		{"2", "TEST_FEATURE", false},
+		{"2", "\u00a0test_feature", false},
+		{"2", "test_feature\u2003", false},
+		{"1", "test_feature", false},
+	} {
+		c, err := ParseDashboardClient(&tc.schema, tc.features)
+		if err != nil || c.Supports("test_feature") != tc.support {
+			t.Fatalf("%+v: %+v %v", tc, c, err)
+		}
+		want := 0
+		if tc.support {
+			want = 1
+		}
+		if len(c.Features) != want {
+			t.Fatalf("features: %v", c.Features)
+		}
 	}
 }

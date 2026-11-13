@@ -4,6 +4,7 @@ import { createPinia } from "pinia";
 import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { i18n } from "@/i18n";
 
+const compatibility = vi.hoisted(() => ({ future: false, stub: false }));
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn() }));
 vi.mock("@/api/apiUtils", () => ({ apiClient: api }));
 vi.mock("../components/PanelBuilderDrawer.vue", () => ({
@@ -222,5 +223,34 @@ describe("DashboardView discard confirmation", () => {
     await settle();
     expect(router.currentRoute.value.path).toBe("/dashboards");
     expect(window.confirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("DashboardView read compatibility", () => {
+  it.each([false, true])("shows reload without an edit entry, stub=%s", async (stub) => {
+    api.get.mockReset().mockImplementation(async () => ({ status: "success", data: {
+      ...dashboard,
+      panels_corrupt: compatibility.stub,
+      min_schema: compatibility.stub ? 2 : undefined,
+      panels: compatibility.stub ? { version: 1, layout: [], panels: [] } : { version: 2, features: compatibility.future ? ["future_feature"] : [], tabs: [{ id: "main", title: "Main", layout: compatibility.future ? [{ id: "p", x: 0, y: 0, w: 6, h: 2 }] : [] }], panels: compatibility.future ? [{ id: "p", title: "New panel", kind: "text" }] : [] },
+    } }));
+    compatibility.future = !stub;
+    compatibility.stub = stub;
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/dashboards/:id", component: DashboardView }] });
+    await router.push("/dashboards/1");
+    const app = createApp(defineComponent({ template: "<router-view />" }));
+    try {
+      app.use(createPinia()).use(i18n).use(router).mount(host);
+      await settle();
+      expect(host.querySelector('[role="status"]')?.textContent).toContain("Reload to continue");
+      expect([...host.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Edit")).toBe(false);
+      expect(host.textContent).not.toContain("This dashboard is empty");
+      if (!stub) expect(host.querySelector(".dash-panel__message")?.textContent).toContain("Reload to continue");
+    } finally {
+      app.unmount(); host.remove(); compatibility.future = false; compatibility.stub = false; vi.unstubAllGlobals();
+    }
   });
 });

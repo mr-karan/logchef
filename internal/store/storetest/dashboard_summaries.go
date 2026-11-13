@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -164,25 +167,11 @@ func seedStaleRows(t *testing.T, ctx context.Context, s store.Store, owner *mode
 // how many rows it wrote.
 func repairStaleRows(t *testing.T, ctx context.Context, s store.Store) int {
 	t.Helper()
-	writes := 0
-	after := 0
-	for {
-		page, err := s.ListStaleDashboardSummaryInputs(ctx, after, 50)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(page) == 0 {
-			return writes
-		}
-		for _, row := range page {
-			n, err := s.RepairDashboardSummary(ctx, row.ID, row.Revision, models.SummarizeDashboardPanels(row.PanelsJSON))
-			if err != nil {
-				t.Fatal(err)
-			}
-			writes += int(n)
-		}
-		after = page[len(page)-1].ID
+	writes, err := core.BackfillDashboardSummaries(ctx, s, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
 	}
+	return writes
 }
 
 func testSummaryBackfill(t *testing.T, ctx context.Context, s store.Store, owner *models.User, hooks SummaryStaleHooks) {

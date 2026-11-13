@@ -21,6 +21,17 @@ const (
 	DashboardUpgradePanelOverhead = 128
 )
 
+// rawStringV1 retains a string token while matching encoding/json's scalar
+// semantics: null leaves an earlier string value intact.
+type rawStringV1 json.RawMessage
+
+func (s *rawStringV1) UnmarshalJSON(raw []byte) error {
+	if !bytes.Equal(raw, jsonNull) {
+		*s = append((*s)[:0], raw...)
+	}
+	return nil
+}
+
 type rawDashboardPanelsV1 struct {
 	Version          int             `json:"version"`
 	Layout           []rawLayoutV1   `json:"layout"`
@@ -30,31 +41,31 @@ type rawDashboardPanelsV1 struct {
 }
 
 type rawLayoutV1 struct {
-	ID json.RawMessage `json:"id"`
-	X  *int            `json:"x"`
-	Y  *int            `json:"y"`
-	W  int             `json:"w"`
-	H  int             `json:"h"`
+	ID rawStringV1 `json:"id"`
+	X  int         `json:"x"`
+	Y  int         `json:"y"`
+	W  int         `json:"w"`
+	H  int         `json:"h"`
 }
 
 type rawPanelV1 struct {
-	ID            json.RawMessage `json:"id"`
-	Title         json.RawMessage `json:"title"`
+	ID            rawStringV1     `json:"id"`
+	Title         rawStringV1     `json:"title"`
 	Type          string          `json:"type"`
 	TeamID        int             `json:"team_id"`
 	SourceID      int             `json:"source_id"`
-	Query         json.RawMessage `json:"query"`
+	Query         rawStringV1     `json:"query"`
 	QueryLanguage QueryLanguage   `json:"query_language"`
 	Options       json.RawMessage `json:"options"`
 }
 
 type rawOptionsV1 struct {
-	Chart         *string           `json:"chart"`
-	Limit         *int              `json:"limit"`
-	Columns       []json.RawMessage `json:"columns"`
-	GroupBy       json.RawMessage   `json:"group_by"`
-	BarMode       *string           `json:"bar_mode"`
-	BreakdownView *string           `json:"breakdown_view"`
+	Chart         *string       `json:"chart"`
+	Limit         *int          `json:"limit"`
+	Columns       []rawStringV1 `json:"columns"`
+	GroupBy       *rawStringV1  `json:"group_by"`
+	BarMode       *string       `json:"bar_mode"`
+	BreakdownView *string       `json:"breakdown_view"`
 }
 
 type rawDashboardPanelsV2 struct {
@@ -160,7 +171,7 @@ func UpgradeDashboardPanels(raw json.RawMessage) (json.RawMessage, error) {
 
 	layout := make([]rawLayoutV2, len(in.Layout))
 	for i, l := range in.Layout {
-		layout[i] = rawLayoutV2{ID: l.ID, X: derefInt(l.X), Y: derefInt(l.Y), W: l.W, H: l.H}
+		layout[i] = rawLayoutV2{ID: json.RawMessage(l.ID), X: l.X, Y: l.Y, W: l.W, H: l.H}
 	}
 	panels := make([]rawPanelV2, len(in.Panels))
 	for i := range in.Panels {
@@ -181,13 +192,6 @@ func UpgradeDashboardPanels(raw json.RawMessage) (json.RawMessage, error) {
 	return encodeJSONNoEscape(out)
 }
 
-func derefInt(v *int) int {
-	if v == nil {
-		return 0
-	}
-	return *v
-}
-
 func upgradeDashboardPanelV1(p *rawPanelV1) (rawPanelV2, error) {
 	var opts rawOptionsV1
 	if len(p.Options) > 0 && !bytes.Equal(p.Options, jsonNull) {
@@ -197,23 +201,23 @@ func upgradeDashboardPanelV1(p *rawPanelV1) (rawPanelV2, error) {
 	}
 	language := NormalizeQueryLanguage(p.QueryLanguage)
 	out := rawPanelV2{
-		ID:       p.ID,
+		ID:       json.RawMessage(p.ID),
 		Kind:     DashboardPanelKindQuery,
-		Title:    rawStringOrEmpty(p.Title),
+		Title:    rawStringOrEmpty(json.RawMessage(p.Title)),
 		TeamID:   p.TeamID,
 		SourceID: p.SourceID,
-		Query:    rawQueryV2{Mode: DashboardQueryModeCount, Language: language, Text: rawStringOrEmpty(p.Query), Interval: DashboardQueryIntervalAuto},
+		Query:    rawQueryV2{Mode: DashboardQueryModeCount, Language: language, Text: rawStringOrEmpty(json.RawMessage(p.Query)), Interval: DashboardQueryIntervalAuto},
 	}
 	switch DashboardPanelType(p.Type) {
 	case DashboardPanelTimeseries:
-		if groupBy := rawStringOrNone(opts.GroupBy); groupBy != nil && strings.TrimSpace(decodeRawString(groupBy)) != "" {
+		if groupBy := rawOptionalStringV1(opts.GroupBy); groupBy != nil && strings.TrimSpace(decodeRawString(groupBy)) != "" {
 			out.Query.GroupBy = groupBy
 		}
 		out.Viz = upgradeChartViz(opts.Chart, opts.BarMode)
 	case DashboardPanelStat:
 		out.Viz = rawVizV2{Type: DashboardVizStat, Reduce: DashboardStatReduceSum}
 	case DashboardPanelBreakdown:
-		out.Query.GroupBy = rawStringOrNone(opts.GroupBy)
+		out.Query.GroupBy = rawOptionalStringV1(opts.GroupBy)
 		if opts.BreakdownView != nil && *opts.BreakdownView == "donut" {
 			donut := true
 			out.Viz = rawVizV2{Type: DashboardVizPie, Donut: &donut}
@@ -261,11 +265,11 @@ func upgradeChartViz(chart, barMode *string) rawVizV2 {
 
 // upgradeVisibleColumns drops null and empty entries, keeps the first of each
 // duplicate name, and returns nil when no name remains.
-func upgradeVisibleColumns(columns []json.RawMessage) []json.RawMessage {
+func upgradeVisibleColumns(columns []rawStringV1) []json.RawMessage {
 	seen := make(map[string]struct{}, len(columns))
 	var out []json.RawMessage
-	for _, raw := range columns {
-		raw = rawStringOrNone(raw)
+	for _, token := range columns {
+		raw := rawStringOrNone(json.RawMessage(token))
 		if raw == nil {
 			continue
 		}
@@ -280,4 +284,11 @@ func upgradeVisibleColumns(columns []json.RawMessage) []json.RawMessage {
 		out = append(out, raw)
 	}
 	return out
+}
+
+func rawOptionalStringV1(raw *rawStringV1) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	return json.RawMessage(*raw)
 }

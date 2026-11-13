@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -854,5 +855,47 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 	}
 	if stored.Name != "d3" || stored.Revision != 2 {
 		t.Fatalf("stored row after the refused update: name %q revision %d, want d3 at revision 2", stored.Name, stored.Revision)
+	}
+}
+
+type dashboardListRaceStore struct {
+	store.StoreOps
+	beforeList func()
+	lists      int
+}
+
+func (s *dashboardListRaceStore) ListDashboardSummaries(ctx context.Context) ([]*models.DashboardSummary, error) {
+	s.lists++
+	s.beforeList()
+	return s.StoreOps.ListDashboardSummaries(ctx)
+}
+func TestDashboardListConcurrentOldWriter(t *testing.T) {
+	for _, continuous := range []bool{false, true} {
+		t.Run(fmt.Sprint(continuous), func(t *testing.T) {
+			db, path := newTestDBWithPath(t)
+			owner := newTestUser(t, db, "race@test.dev", "Owner")
+			team, src := seedTeamWithSource(t, db, "team", owner)
+			d, err := CreateDashboard(t.Context(), db, discardLogger(), owner, &models.CreateDashboardRequest{Name: "race", Panels: panelBlob(team.ID, src.ID)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := openRawSQLite(t, path)
+			race := &dashboardListRaceStore{StoreOps: db}
+			race.beforeList = func() {
+				if continuous || race.lists == 1 {
+					if _, err := raw.ExecContext(t.Context(), "UPDATE dashboards SET revision = revision + 1, name = 'old writer' WHERE id = ?", d.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			rows, err := ListDashboards(t.Context(), race, discardLogger(), owner)
+			if continuous {
+				if !errors.Is(err, ErrDashboardListUnavailable) || race.lists != 3 {
+					t.Fatalf("%d passes, %v", race.lists, err)
+				}
+			} else if err != nil || race.lists != 2 || len(rows) != 1 || rows[0].Stale() || rows[0].Revision != 2 || rows[0].Name != "old writer" {
+				t.Fatalf("%d passes, rows %+v, %v", race.lists, rows, err)
+			}
+		})
 	}
 }
