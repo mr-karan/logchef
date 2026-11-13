@@ -268,7 +268,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let is_victorialogs = source.source_type.eq_ignore_ascii_case("victorialogs");
 
     // Time-range handling differs by engine:
-    //   ClickHouse   — splice a `toDateTime(...) BETWEEN` condition into the
+    //   ClickHouse   — splice a `fromUnixTimestamp64Milli(...) BETWEEN` condition into the
     //                  SQL string (or fill __START__/__END__ placeholders).
     //   VictoriaLogs — leave the LogsQL untouched and pass an absolute RFC3339
     //                  window via the request's start_time/end_time, which the
@@ -424,7 +424,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         query_text: sql,
         limit: args.limit,
         // For ClickHouse, any --since/--from/--to was baked into `sql` as a
-        // literal `toDateTime(..., tz)` condition above, so no window rides
+        // literal time condition above (`fromUnixTimestamp64Milli` for instants, `toDateTime` for wall-clock --from/--to), so no window rides
         // here. For VictoriaLogs, the resolved RFC3339 window is passed
         // through and the server bounds the raw LogsQL query with it.
         timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
@@ -566,7 +566,7 @@ fn wall_clock_to_utc<Tz: chrono::TimeZone>(value: &str, tz: Tz) -> Result<DateTi
         .ok_or_else(|| anyhow::anyhow!("Ambiguous or invalid local time '{}'", value))
 }
 
-/// ClickHouse time-range injection: splices a `toDateTime(...) BETWEEN` filter
+/// ClickHouse time-range injection: splices a `<time expr> BETWEEN` filter (`fromUnixTimestamp64Milli` for instants, `toDateTime` for wall-clock bounds)
 /// into the SQL string, or fills __START__/__END__ placeholders. This path is
 /// ClickHouse-only — VictoriaLogs uses [`vl_time_window`] instead.
 fn apply_clickhouse_time_range(
@@ -679,7 +679,7 @@ fn sql_time_condition(
 fn sql_datetime_expr(value: &str, timezone: &str) -> String {
     if let Ok(instant) = DateTime::parse_from_rfc3339(value) {
         return format!(
-            "fromUnixTimestamp64Milli({}, '{}')",
+            "fromUnixTimestamp64Milli(toInt64({}), '{}')",
             instant.timestamp_millis(),
             sql_string(timezone)
         );

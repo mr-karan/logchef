@@ -608,7 +608,9 @@ impl CollectionQueryContent {
                         )));
                     }
                     (
-                        if supplied.len() == 1 {
+                        if multi && supplied.len() == 1 && supplied[0] == serde_json::Value::String(String::new()) {
+                            serde_json::Value::Array(Vec::new())
+                        } else if supplied.len() == 1 {
                             supplied.remove(0)
                         } else {
                             serde_json::Value::Array(supplied)
@@ -652,6 +654,19 @@ impl CollectionQueryContent {
 mod template_request_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn explicit_empty_override_on_multiselect_sends_empty_list() {
+        let content: CollectionQueryContent = serde_json::from_value(json!({
+            "content": "svc IN ({{x}})",
+            "variables": [{"name":"x", "inputType":"multiselect", "options":["a","b"], "defaultValue":["a"]}]
+        }))
+        .unwrap();
+        assert_eq!(
+            content.query_variables(&["x=".into()]).unwrap()[0].value,
+            json!([])
+        );
+    }
 
     #[test]
     fn only_multiselect_accepts_repeated_overrides() {
