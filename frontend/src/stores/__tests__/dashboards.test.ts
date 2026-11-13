@@ -131,6 +131,21 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.isDirty).toBe(false);
   });
 
+  it("reuses a result frame across visualization and role changes", async () => {
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [{ service: "api", n: 20 }], columns: [{ name: "service", type: "String" }, { name: "n", type: "UInt32" }] } });
+    const store = await loadEditableDashboard();
+    await store.enterEdit();
+    store.upsertDraftPanel({ ...tablePanel(), query: { mode: "result", language: "clickhouse-sql", text: "SELECT service, n" } });
+    await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("success"));
+    const frame = store.getPanelState("p1").frame;
+    for (const kind of ["chart", "breakdown", "stat", "table"] as const) store.switchDraftPanelKind("p1", kind);
+    store.updateDraftPanel("p1", { viz: { type: "chart", x: "service", y: ["n"], mark: "bar", show_values: true, x_scale: "category" } });
+    expect(store.getPanelState("p1").frame).toBe(frame);
+    expect(mocks.logsQuery).toHaveBeenCalledTimes(1);
+    expect(mocks.histogram).not.toHaveBeenCalled();
+    expect(store.editDraft?.panels[0]).toMatchObject({ query: { mode: "result" }, viz: { x: "service", y: ["n"], show_values: true } });
+  });
+
   it("enterEdit snapshots the loaded blob and starts clean", async () => {
     const store = await loadEditableDashboard();
     await store.enterEdit();

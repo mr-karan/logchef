@@ -106,7 +106,15 @@ export function panelBuilderKind(viz: Pick<DashboardViz, "type">): PanelBuilderK
  */
 export function switchPanelKind(panel: DashboardQueryPanel, kind: PanelBuilderKind): DashboardQueryPanel {
   if (panelBuilderKind(panel.viz) === kind) return panel;
-  if (panel.query.language === "clickhouse-sql" && (kind === "chart" || kind === "breakdown")) return panel;
+  if (panel.query.mode === "result") {
+    const columns = panel.viz.columns ? { columns: panel.viz.columns } : {};
+    switch (kind) {
+      case "chart": return { ...panel, viz: { type: "chart", mark: "line", stack: "none", ...columns } };
+      case "breakdown": return { ...panel, viz: { type: "toplist", ...columns } };
+      case "stat": return { ...panel, viz: { type: "stat", reduce: "last", ...columns } };
+      case "table": return { ...panel, viz: { type: "table", ...columns } };
+    }
+  }
   const { language, text } = panel.query;
   const translate = language === "logchefql" && panel.query.translate_limit !== undefined
     ? { translate_limit: panel.query.translate_limit }
@@ -116,12 +124,10 @@ export function switchPanelKind(panel: DashboardQueryPanel, kind: PanelBuilderKi
     case "chart":
       return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "chart", mark: "line", stack: "none" } };
     case "stat":
-      if (panel.query.mode === "result") return { ...panel, viz: { type: "stat", reduce: "last", ...(panel.viz.type === "table" ? { columns: panel.viz.columns } : {}) } };
       return { ...panel, query: { mode: "count", language, text, interval: "auto", ...translate }, viz: { type: "stat", reduce: "sum" } };
     case "breakdown":
       return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "toplist" } };
     case "table":
-      if (panel.query.mode === "result") return { ...panel, viz: { type: "table", ...(panel.viz.type === "stat" ? { columns: panel.viz.columns } : {}) } };
       return { ...panel, query: { mode: "result", language, text }, viz: { type: "table" } };
   }
 }

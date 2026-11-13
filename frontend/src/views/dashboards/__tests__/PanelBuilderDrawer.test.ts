@@ -45,10 +45,17 @@ function button(text: string) {
 }
 const panel: DashboardQueryPanel = { id: "p", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "", interval: "auto" }, viz: { type: "stat", reduce: "min", format: { decimals: 2 } } };
 describe("panel builder mode transitions", () => {
-  it("disables SQL for count charts and explains why", async () => {
-    await mount({ ...panel, viz: { type: "chart" } });
-    expect(button("ClickHouse SQL").disabled).toBe(true);
-    expect(button("ClickHouse SQL").title).toContain("result");
+  it.each(["chart", "pie", "toplist"] as const)("switches count %s to SQL result mode and restores the visualization", async (type) => {
+    const original: DashboardQueryPanel = { ...panel, viz: { type, format: { decimals: 2 } } };
+    const store = await mount(original);
+    expect(button("ClickHouse SQL").disabled).toBe(false);
+    button("ClickHouse SQL").click();
+    await nextTick();
+    expect(store.editDraft?.panels[0]).toMatchObject({ query: { mode: "result", language: "clickhouse-sql" } });
+    expect(button("count").disabled).toBe(true);
+    button("LogchefQL").click();
+    await nextTick();
+    expect(store.editDraft?.panels[0]).toEqual(original);
   });
   it("does not rewrite a LogsQL panel when source details fail", async () => {
     const logs: DashboardQueryPanel = { ...panel, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n" } };
@@ -59,8 +66,8 @@ describe("panel builder mode transitions", () => {
     const store = await mount(panel);
     button("ClickHouse SQL").click();
     await nextTick();
-    expect(button("Time series").disabled).toBe(true);
-    expect(button("Breakdown").disabled).toBe(true);
+    expect(button("Chart").disabled).toBe(false);
+    expect(button("Breakdown").disabled).toBe(false);
     button("LogchefQL").click();
     await nextTick();
     expect(store.editDraft?.panels[0]).toEqual(panel);
@@ -71,4 +78,20 @@ describe("panel builder mode transitions", () => {
     await nextTick();
     expect(store.editDraft?.panels[0].viz).toMatchObject({ type: "stat", format: { decimals: 2 } });
   });
+});
+
+it.each(["chart", "toplist", "pie"] as const)("falls back to LogchefQL for a count LogsQL %s on ClickHouse", async (type) => {
+  const store = await mount({ ...panel, query: { mode: "count", language: "logsql", text: "*", interval: "auto" }, viz: { type } });
+  expect(store.editDraft?.panels[0]).toMatchObject({ query: { mode: "count", language: "logchefql" }, viz: { type } });
+});
+it.each(["Table", "avg"])("keeps the SQL visualization change %s when returning to LogchefQL", async (change) => {
+  const store = await mount(panel);
+  button("ClickHouse SQL").click();
+  await nextTick();
+  button(change).click();
+  await nextTick();
+  const edited = store.editDraft?.panels[0].viz;
+  button("LogchefQL").click();
+  await nextTick();
+  expect(store.editDraft?.panels[0]).toMatchObject({ query: { mode: "result", language: "logchefql" }, viz: edited });
 });
