@@ -172,7 +172,7 @@ func TestErrorResponses(t *testing.T) {
 		{
 			name: "windowed LogchefQL that does not compile", method: http.MethodPost, path: sourcePath + "/logs/windowed",
 			body:   `{"query_language":"logchefql","query_text":"level=",` + window + `}`,
-			status: fiber.StatusBadRequest, contains: `unexpected token "<EOF>"`,
+			status: fiber.StatusBadRequest, contains: "expected a value after `level=`",
 		},
 		{
 			name: "windowed search with a forged cursor", method: http.MethodPost, path: sourcePath + "/logs/windowed",

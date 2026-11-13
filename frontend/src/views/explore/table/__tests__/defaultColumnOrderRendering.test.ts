@@ -59,7 +59,6 @@ function mountTable(data: Record<string, unknown>[] = [], initialColumns = colum
   const app = createApp({ render: () => h(DataTable, {
     columns: state.columns,
     data: state.data,
-    stats: { execution_time_ms: 1, rows_read: state.data.length, bytes_read: 64 },
     sourceId: state.sourceId,
     teamId: 7,
     source: { source_type: 'clickhouse', capabilities: [] },

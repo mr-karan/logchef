@@ -1542,3 +1542,36 @@ func TestBuildFullQueryAcceptsRFC3339(t *testing.T) {
 		})
 	}
 }
+
+func TestParseErrorsNameWhatIsMissing(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		query, code, message string
+		column               int
+	}{
+		{`namespace="app" and msg~`, ErrUnexpectedEnd, "expected a value after `msg~`", 25},
+		{`msg`, ErrUnexpectedEnd, "expected an operator such as = or ~ and a value after `msg`", 4},
+		{`msg="a" and`, ErrUnexpectedEnd, "expected a condition after `and`", 12},
+		{`(msg="a"`, ErrUnexpectedEnd, "expected a closing ) after `(msg=\"a\"`", 9},
+		{`msg="a" status=1`, ErrUnexpectedToken, "expected `and` or `or` before `status`", 9},
+		{`="a"`, ErrUnexpectedToken, "expected a field name, found `=`", 1},
+		{`msg=="a"`, ErrUnexpectedToken, "expected a value after `msg=`, found `=`", 5},
+		{`msg="a" |`, ErrUnexpectedEnd, "expected a field name after `|`", 10},
+		{`msg="abc`, ErrUnterminatedString, `missing closing " for the value at column 5`, 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.query, func(t *testing.T) {
+			t.Parallel()
+			result := Validate(tt.query)
+			if result.Valid || result.Error == nil {
+				t.Fatalf("Validate(%q) is valid, want an error", tt.query)
+			}
+			if result.Error.Code != tt.code || result.Error.Message != tt.message {
+				t.Errorf("Validate(%q) = %s %q, want %s %q", tt.query, result.Error.Code, result.Error.Message, tt.code, tt.message)
+			}
+			if result.Error.Position == nil || result.Error.Position.Column != tt.column {
+				t.Errorf("Validate(%q) position = %+v, want column %d", tt.query, result.Error.Position, tt.column)
+			}
+		})
+	}
+}

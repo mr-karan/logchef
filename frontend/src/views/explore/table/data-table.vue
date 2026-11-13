@@ -14,12 +14,13 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useLocalStorage } from '@vueuse/core'
 import { useColumnState } from '@/composables/useColumnState'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
+import { GripVertical, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater } from '@/lib/utils'
-import type { ColumnInfo, QueryStats } from '@/api/explore'
+import type { ColumnInfo } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
@@ -31,14 +32,18 @@ import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import TableControls from './TableControls.vue'
 import ColumnFilterButton from './ColumnFilterButton.vue'
+import CellContextMenu, { type CellMenuTarget } from './CellContextMenu.vue'
+import ExpandedRowFields from './ExpandedRowFields.vue'
+import { copyText } from '@/utils/clipboard'
+import type { FilterOperator } from '@/utils/logchefql/filters'
 import { usePreferencesStore } from '@/stores/preferences'
+import { isPrimaryMessageField } from './fieldSemantics'
 
 const { t } = useI18n();
 
 interface Props {
     columns: ColumnInfo[]
     data: Record<string, any>[]
-    stats: QueryStats
     sourceId: string
     teamId: number | null
     source?: Pick<Source, 'source_type' | 'capabilities'> | null
@@ -133,10 +138,9 @@ watch(() => props.data, () => {
     }
 });
 
-// Helper function for cell handling
-function formatCellValue(value: any): string {
-    if (value === null || value === undefined) return '';
-    return String(value);
+function cellTitle(value: unknown): string {
+    const text = value === null || value === undefined ? '' : String(value)
+    return `${text}\n\n${t('explore.cellMenuHint')}`
 }
 
 // Get column type from meta data
@@ -305,37 +309,41 @@ const table = useTable({
 
 // Row expansion handler - toggle expand/collapse
 const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
-    // Don't toggle if clicking on an interactive element or cell actions
-    if ((e.target as HTMLElement).closest('.cell-actions, button, a, input, select')) {
+    if ((e.target as HTMLElement).closest('button, a, input, select')) {
         return;
     }
     row.toggleExpanded();
 }
 
-// Cell actions (copy / filter) mount only for the single hovered or focused
-// cell. Hover and focus are tracked with delegated listeners on <tbody>, so a
-// wide result page costs no per-cell listeners or component instances.
-const hoveredCellId = ref<string | null>(null)
-const focusedCellId = ref<string | null>(null)
-const activeCellId = computed(() => focusedCellId.value ?? hoveredCellId.value)
+// Cell actions live in a context menu so they never cover a value or catch an
+// ordinary row click. A right-click outside a cell keeps the browser's menu.
+const menuTarget = ref<CellMenuTarget | null>(null)
 
-function cellIdFromEventTarget(target: EventTarget | null): string | null {
-    if (!(target instanceof Element)) return null
-    return target.closest<HTMLElement>('td[data-cell-id]')?.dataset.cellId ?? null
+function findRenderedCell(cellId: string | undefined) {
+    if (!cellId) return undefined
+    for (const cells of viewportCells.value.values()) {
+        const cell = cells.find(candidate => candidate.id === cellId)
+        if (cell) return cell
+    }
+    return undefined
 }
 
-const onCellPointerOver = (event: MouseEvent) => {
-    hoveredCellId.value = cellIdFromEventTarget(event.target)
-}
-
-const onCellFocusIn = (event: FocusEvent) => {
-    focusedCellId.value = cellIdFromEventTarget(event.target)
-}
-
-// Focus moving between a cell and its action buttons fires focusout followed
-// by focusin in the same task, so clearing here never causes a visible flicker.
-const onCellFocusOut = () => {
-    focusedCellId.value = null
+const onTableContextMenu = (event: MouseEvent) => {
+    const td = event.target instanceof Element ? event.target.closest<HTMLElement>('td[data-cell-id]') : null
+    const cell = findRenderedCell(td?.dataset.cellId)
+    if (!td || !cell) {
+        menuTarget.value = null
+        event.stopPropagation()
+        return
+    }
+    const selection = window.getSelection()
+    const selected = selection?.anchorNode && td.contains(selection.anchorNode) ? selection.toString() : ''
+    menuTarget.value = {
+        field: cell.column.id,
+        value: cell.getValue(),
+        selection: selected,
+        canFilter: props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName.value,
+    }
 }
 
 // Column virtualization: body rows render only the columns under the
@@ -464,28 +472,9 @@ function renderedCells(row: Row<Record<string, any>>) {
     return viewportCells.value.get(row) ?? []
 }
 
-// Copy feedback state
-const copiedCellId = ref<string | null>(null)
-
-// Copy cell value with visual feedback
-const copyCell = (value: any): boolean => {
-    const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)
-    navigator.clipboard.writeText(text)
-    return true
-}
-
-// Handle cell click - copy value with brief visual feedback
-const handleCellClick = (_event: MouseEvent, cell: any) => {
-    const cellId = cell.id
-    copyCell(cell.getValue())
-    
-    // Show brief "copied" feedback
-    copiedCellId.value = cellId
-    setTimeout(() => {
-        if (copiedCellId.value === cellId) {
-            copiedCellId.value = null
-        }
-    }, 1000)
+const copyValue = (value: unknown) => {
+    const text = typeof value === 'object' && value !== null ? JSON.stringify(value, null, 2) : String(value ?? '')
+    copyText(text).catch(error => console.warn('Copy failed', error))
 }
 
 // Initialize default sorting on mount
@@ -583,24 +572,47 @@ const onDragEnd = () => { // No event parameter
 
 // Define emits
 const emit = defineEmits<{
-    (e: 'drill-down', value: { column: string, value: any, operator: string }): void
+    (e: 'drill-down', value: { column: string, value: unknown, operator: FilterOperator }): void
+    (e: 'add-column', value: { field: string, shownColumns: string[] }): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
 }>();
 
-// Function to handle drill-down action with different operators
-const handleDrillDown = (columnName: string, value: any, operator: string = '=') => {
+const handleDrillDown = (value: { column: string, value: unknown, operator: FilterOperator }) => {
     if (props.activeMode !== 'logchefql') return;
-
-    emit('drill-down', { column: columnName, value, operator });
+    emit('drill-down', value);
 };
 
-// Helper to check if a header/cell is the last visible column (for flex-grow)
-const isLastVisibleColumn = (columnId: string): boolean => {
-    if (!table) return false;
-    const visibleColumns = table.getVisibleLeafColumns();
-    if (visibleColumns.length === 0) return false;
-    return visibleColumns[visibleColumns.length - 1].id === columnId;
+const shownColumns = computed(() => visibleLeafColumns.value.map(column => column.id))
+
+// A hidden top-level column is simply shown; a nested key is projected by the query.
+const handleAddColumn = ({ field, nested }: { field: string, nested: boolean }) => {
+    if (!nested) {
+        columnVisibility.value = { ...columnVisibility.value, [field]: true }
+        return
+    }
+    emit('add-column', { field, shownColumns: shownColumns.value })
 };
+
+const detailView = ref<'fields' | 'json'>('fields')
+
+// The message column takes the width left over by the other columns; without
+// one, the last column does.
+const growColumnId = computed(() => {
+    const columns = visibleLeafColumns.value
+    return (columns.find(column => isPrimaryMessageField(column.id)) ?? columns.at(-1))?.id ?? null
+})
+
+// The loaded-rows search can be promoted to a contains filter on the message field.
+const searchQueryField = computed(() => {
+    if (props.activeMode !== 'logchefql') return undefined
+    return props.columns.find(column => isPrimaryMessageField(column.name))?.name
+})
+
+const handleAddSearchToQuery = (field: string, term: string) => {
+    handleDrillDown({ column: field, value: term, operator: '~' })
+}
+
+const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
 
 </script>
 
@@ -613,10 +625,12 @@ const isLastVisibleColumn = (columnId: string): boolean => {
         <TableControls 
             v-if="table"
             :table="table"
-            :stats="stats"
             :is-loading="isLoading"
             :show-reset-columns="true"
+            v-model:wrap="wrapLines"
+            :search-query-field="searchQueryField"
             @update:globalFilter="globalFilter = $event"
+            @add-search-to-query="handleAddSearchToQuery"
             @reset-columns="resetTableStateToDefaults"
         />
 
@@ -629,8 +643,8 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                     ref="scrollContainer"
                     class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;"
                     @scroll.passive="onTableScroll">
-                    <table class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
-                        :data-resizing="isResizing">
+                    <table @contextmenu.capture="onTableContextMenu" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
+                        :data-resizing="isResizing" :data-wrap="wrapLines">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <!-- Check table.getHeaderGroups() exists -->
                             <tr v-if="table.getHeaderGroups().length > 0 && table.getHeaderGroups()[0]"
@@ -645,11 +659,10 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                         header.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
                                         header.column.id === draggingColumnId ? 'opacity-50 bg-primary/10' : '',
                                         header.column.id === dragOverColumnId ? 'border-l-2 border-l-primary' : '',
-                                        isLastVisibleColumn(header.column.id) ? 'last-visible-column' : ''
+                                        header.column.id === growColumnId ? 'grow-column' : ''
                                     ]" :style="{
-                                        width: isLastVisibleColumn(header.column.id) ? undefined : `${header.getSize()}px`,
+                                        width: `${header.getSize()}px`,
                                         minWidth: `${header.column.columnDef.minSize ?? defaultColumn.minSize}px`,
-                                        flex: isLastVisibleColumn(header.column.id) ? '1 1 auto' : undefined,
                                     }" :draggable="header.column.id !== timestampFieldName"
                                     @dragstart="onDragStart($event, header.column.id)"
                                     @dragenter="onDragEnter($event, header.column.id)" @dragover="onDragOver($event)"
@@ -704,11 +717,8 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                             </tr>
                         </thead>
 
-                        <tbody
-                            @mouseover="onCellPointerOver"
-                            @mouseleave="hoveredCellId = null"
-                            @focusin="onCellFocusIn"
-                            @focusout="onCellFocusOut">
+                        <CellContextMenu :target="menuTarget" @filter="handleDrillDown" @copy="copyValue">
+                        <tbody>
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
                                 <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30 h-7" :class="[
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
@@ -727,43 +737,15 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                         class="px-3 py-1 align-middle text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
-                                            copiedCellId === cell.id ? 'bg-emerald-500/10' : '',
-                                            isLastVisibleColumn(cell.column.id) ? 'last-visible-column' : '',
+                                            cell.column.id === growColumnId ? 'grow-column' : '',
                                         ]" :style="{
-                                            width: isLastVisibleColumn(cell.column.id) ? undefined : `${cell.column.getSize()}px`,
+                                            width: `${cell.column.getSize()}px`,
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
-                                            flex: isLastVisibleColumn(cell.column.id) ? '1 1 auto' : undefined,
-                                        }">
+                                            }">
                                         <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
-                                            :title="formatCellValue(cell.getValue())">
+                                            :title="cellTitle(cell.getValue())">
                                             <FlexRender v-if="cell.column.columnDef.cell"
                                                 :render="cell.column.columnDef.cell" :props="cell.getContext()" />
-                                        </div>
-                                        <div v-if="activeCellId === cell.id"
-                                            class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
-                                            <button
-                                                class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                @click.stop="handleCellClick($event, cell)"
-                                                :title="t('ui.copyValue')"
-                                            >
-                                                <Copy class="h-3 w-3" />
-                                            </button>
-                                            <template v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
-                                                <button
-                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
-                                                    :title="t('ui.filterThisValue')"
-                                                >
-                                                    <Equal class="h-3 w-3" />
-                                                </button>
-                                                <button
-                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
-                                                    :title="t('ui.filterThisValue2')"
-                                                >
-                                                    <EqualNot class="h-3 w-3" />
-                                                </button>
-                                            </template>
                                         </div>
                                     </td>
                                     <td v-if="trailingSpacer.span > 0" :colspan="trailingSpacer.span"
@@ -783,6 +765,15 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     <ChevronUp class="h-3 w-3" />
                                                     <span>{{ t('ui.collapse') }}</span>
                                                 </button>
+                                                <div class="ml-auto flex items-center rounded-md bg-muted p-0.5 text-xs" role="group">
+                                                    <button v-for="view in (['fields', 'json'] as const)" :key="view" type="button"
+                                                        class="rounded px-2 py-0.5"
+                                                        :class="detailView === view ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'"
+                                                        :aria-pressed="detailView === view"
+                                                        @click.stop="detailView = view">
+                                                        {{ view === 'fields' ? t('explore.detailFields') : t('explore.detailJson') }}
+                                                    </button>
+                                                </div>
                                                 <Button 
                                                     v-if="supportsLogContext"
                                                     variant="outline" 
@@ -794,12 +785,16 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     {{ t('ui.showContext') }}
                                                 </Button>
                                             </div>
-                                            <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
+                                            <ExpandedRowFields v-if="detailView === 'fields'" :row="row.original"
+                                                :can-filter="props.activeMode === 'logchefql'" :timestamp-field="timestampFieldName"
+                                                :shown-columns="shownColumns" @drill-down="handleDrillDown" @add-column="handleAddColumn" />
+                                            <JsonViewer v-else :value="row.original" :expanded="true" class="text-xs" />
                                         </div>
                                     </td>
                                 </tr>
                             </template>
                         </tbody>
+                        </CellContextMenu>
                     </table>
                 </div>
             </div>
@@ -1063,17 +1058,6 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     cursor: pointer;
 }
 
-/* Exception: action buttons in the floating pill */
-.cell-actions button {
-    cursor: pointer;
-}
-
-/* Cell actions stay outside content flow. */
-.cell-actions {
-    pointer-events: auto;
-    z-index: 5;
-}
-
 /* Style for drop indicator */
 .border-l-primary {
     border-left-color: hsl(var(--primary)) !important;
@@ -1197,12 +1181,23 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     box-shadow: 0 0 0 1px hsl(var(--highlight, 60 90% 55%) / 0.7);
 }
 
-/* Last visible column flex-grow to fill available space when sidebar closes */
-.table-fixed th.last-visible-column,
-.table-fixed td.last-visible-column {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: var(--column-min-width, 50px);
+/* The grow column keeps its measured width as a floor and takes the rest of the row. */
+.table-fixed th.grow-column,
+.table-fixed td.grow-column {
+    flex: 1 0 auto;
+}
+
+.table-fixed[data-wrap="true"] tbody tr {
+    height: auto;
+    max-height: none;
+}
+
+.table-fixed[data-wrap="true"] td,
+.table-fixed[data-wrap="true"] td .cell-content-wrapper,
+.table-fixed[data-wrap="true"] td .cell-content-wrapper :deep(*) {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere;
+    text-overflow: clip !important;
 }
 
 /* Ensure the table row uses flexbox for columns to support flex-grow */
@@ -1225,10 +1220,5 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 .table-fixed th,
 .table-fixed td {
     flex-shrink: 0;
-}
-
-.table-fixed th.last-visible-column,
-.table-fixed td.last-visible-column {
-    flex-shrink: 1;
 }
 </style>

@@ -101,7 +101,7 @@ it('auto-expands a low-cardinality field once and keeps it collapsed after the u
   const pinia = createPinia()
   setActivePinia(pinia)
   useExploreStore().setWindow({ kind: "relative", spec: "15m" })
-  const fields = [{ name: 'level', type: 'Int64' }, { name: 'message', type: 'String' }]
+  const fields = [{ name: 'level', type: 'Int64' }, { name: 'request', type: 'String' }]
   const host = document.createElement('div')
   document.body.appendChild(host)
   const app = createApp({ render: () => h(FieldSideBar, { fields, expanded: true, sourceId: 1, teamId: 1 }) })
@@ -119,10 +119,51 @@ it('auto-expands a low-cardinality field once and keeps it collapsed after the u
     expect(host.textContent).not.toContain('level-a')
 
     // Loading another field must not reopen the one the user closed.
-    trigger('message')?.click()
+    trigger('request')?.click()
     await flush()
-    expect(host.textContent).toContain('message-a')
+    expect(host.textContent).toContain('request-a')
     expect(host.textContent).not.toContain('level-a')
+  } finally {
+    app.unmount()
+  }
+})
+
+it('says a field has too many distinct values instead of listing fragments', async () => {
+  const getFieldValues = vi.spyOn(sourcesApi, 'getFieldValues').mockImplementation(async (_team, _source, fieldName, fieldType) => ({
+    status: 'success',
+    data: {
+      field_name: fieldName, field_type: fieldType, is_low_cardinality: false,
+      values: [{ value: `${fieldName}-fragment`, count: 1 }],
+      total_distinct: 212695,
+    },
+  }))
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useExploreStore().setWindow({ kind: "relative", spec: "15m" })
+  const fields = [{ name: 'msg', type: 'String' }, { name: 'request_id', type: 'String' }]
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp({ render: () => h(FieldSideBar, { fields, expanded: true, sourceId: 1, teamId: 1 }) })
+  app.use(pinia)
+  app.use(i18n)
+  const trigger = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('[data-slot="collapsible-trigger"]')]
+    .find(button => button.textContent?.includes(name))
+  try {
+    app.mount(host)
+    await flush()
+    expect(trigger('msg')?.textContent).toContain('String')
+    expect(trigger('msg')?.textContent).not.toContain('click')
+
+    trigger('msg')?.click()
+    await flush()
+    expect(getFieldValues).not.toHaveBeenCalled()
+    expect(host.querySelector('[data-too-many-values]')?.textContent).toContain('Too many distinct values')
+
+    trigger('request_id')?.click()
+    await flush()
+    expect(getFieldValues).toHaveBeenCalledOnce()
+    expect(host.textContent).not.toContain('request_id-fragment')
+    expect(host.textContent).toContain(`${(212695).toLocaleString()} distinct values: too many to list`)
   } finally {
     app.unmount()
   }

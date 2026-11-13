@@ -30,7 +30,7 @@ import { useFieldValuesLoader } from '@/composables/useFieldValuesLoader'
 import { getNativeQueryLanguageForSource, supportsQueryLanguage, type QueryLanguage } from '@/lib/queryMetadata'
 import { buildSourceFieldGroups, type SourceFieldGroup } from '@/lib/sourceFields'
 import FieldSidebarRow from './FieldSidebarRow.vue'
-import { getCleanType, getTypeColorClass, getTypeIcon, type FieldInfo } from './fieldDisplay'
+import { getCleanType, getTypeColorClass, getTypeIcon, skipsValueLoading, type FieldInfo } from './fieldDisplay'
 
 const { t } = useI18n();
 
@@ -169,7 +169,7 @@ const toggleField = async (field: FieldInfo) => {
 
     // Load values if not already loaded (for click-to-load fields or fields that errored)
     const state = getFieldState(field.name)
-    if ((state.status === 'click-to-load' || state.status === 'idle' || state.status === 'error')
+    if (!skipsValueLoading(field) && (state.status === 'click-to-load' || state.status === 'idle' || state.status === 'error')
         && props.teamId && props.sourceId) {
       await loadField(field.name, field.type)
     }
@@ -191,10 +191,27 @@ const AUTO_EXPAND_THRESHOLD = 6
 // Values describe the results on screen, so they wait for a run that has shown nothing yet.
 const canLoadValues = () => props.expanded && !!props.teamId && !!props.sourceId && (runs.shown !== null || !runs.isRunning)
 
-const resetFieldValues = () => {
+const loadableFields = (fields: FieldInfo[]) => fields.filter(field => !skipsValueLoading(field))
+
+// Fields the user opened stay open across runs and reload their values.
+const reloadFieldValues = () => {
   clearCache()
+  if (!canLoadValues()) return
+  loadPriorityFields(loadableFields(renderedFields.value))
+  for (const field of loadableFields(renderedFields.value)) {
+    if (expandedFields.value.has(field.name) && getFieldState(field.name).status !== 'loading') {
+      loadField(field.name, field.type)
+    }
+  }
+}
+
+// Fields auto-expanded once for this source; a field the user closes stays closed.
+const autoExpanded = new Set<string>()
+
+const resetFieldValues = () => {
   expandedFields.value = new Set()
-  if (canLoadValues()) loadPriorityFields(renderedFields.value)
+  autoExpanded.clear()
+  reloadFieldValues()
 }
 
 // Add filter to query
@@ -207,20 +224,22 @@ const handleFieldClick = (fieldName: string) => {
   emit('field-click', fieldName)
 }
 
-// A new source, a reopened panel or other results on screen invalidate every loaded value.
-watch([() => props.expanded, () => props.teamId, () => props.sourceId, () => runs.shown], resetFieldValues, { immediate: true })
+// A new source or a reopened panel starts over; other results on screen only refresh values.
+watch([() => props.expanded, () => props.teamId, () => props.sourceId], resetFieldValues, { immediate: true })
+watch(() => runs.shown, reloadFieldValues)
 
 // Search and "show more" only add rows: load the new ones, keep the rest.
 watch(renderedFields, (fields) => {
-  if (canLoadValues()) loadPriorityFields(fields)
+  if (canLoadValues()) loadPriorityFields(loadableFields(fields))
 })
 
 // Expand a field with few distinct values once, when its values first arrive,
 // so a field the user collapsed stays collapsed while other fields load.
 watch(fieldValues, (values, previous) => {
   const arrived = Object.keys(values).filter(name =>
-    !previous?.[name] && values[name].total_distinct <= AUTO_EXPAND_THRESHOLD
+    !previous?.[name] && !autoExpanded.has(name) && values[name].total_distinct <= AUTO_EXPAND_THRESHOLD
   )
+  arrived.forEach(name => autoExpanded.add(name))
   if (arrived.length > 0) {
     expandedFields.value = new Set([...expandedFields.value, ...arrived])
   }

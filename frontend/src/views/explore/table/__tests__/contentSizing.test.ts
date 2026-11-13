@@ -39,7 +39,6 @@ function mountTable(data: Record<string, unknown>[]) {
   const app = createApp({ render: () => h(DataTable, {
     columns,
     data: state.data,
-    stats: { execution_time_ms: 1, rows_read: state.data.length, bytes_read: 64 },
     sourceId: 'content-sizing', teamId: 7,
     source: { source_type: 'clickhouse', capabilities: [] },
     timestampField: 'time',

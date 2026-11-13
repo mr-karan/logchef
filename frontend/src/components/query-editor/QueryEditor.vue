@@ -32,13 +32,13 @@
           </TabsList>
         </Tabs>
 
-        <!-- AI Assistant Button -->
-        <TooltipProvider v-if="supportsAiAssistant">
+        <!-- Generate SQL: SQL mode only. Ask Chef in the top bar is the assistant for searching. -->
+        <TooltipProvider v-if="supportsAiAssistant && activeMode === 'clickhouse-sql'">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="showAiDialog = true">
                 <Wand2 class="h-3.5 w-3.5 text-purple-600" />
-                <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.aIAssistant') }}</span>
+                <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.generateSQL') }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -301,6 +301,7 @@
           @submit="$emit('execute')"
           @ready="handleSqlEditorReady"
           @focus-change="editorFocused = $event"
+          @content-height="contentHeight = $event"
         />
 
         <SqlMonacoSkeleton v-else-if="isSqlEditorLoading" />
@@ -525,15 +526,18 @@ const currentPlaceholder = computed(() => {
       : `SELECT * FROM ${props.tableName || "your_table"} WHERE …`;
 });
 
+// Monaco reports wrapped lines in its content height; the line count is the
+// estimate until it does.
+const contentHeight = ref<number | null>(null);
 const editorHeight = computed(() => {
   const content = editorContent.value || "";
   const lines = (content.match(/\n/g) || []).length + 1;
   const baseLineHeight = 20; // Must match Monaco lineHeight
   const padding = 16; // Monaco top+bottom padding (8+8)
-  // Room for three lines, so a typical query and its placeholder read without scrolling.
-  const minHeight = props.activeMode === "logchefql" ? 80 : 90;
+  // A filter starts as one line and grows with its content; SQL starts with room for a short statement.
+  const minHeight = props.activeMode === "logchefql" ? padding + baseLineHeight : 90;
   const maxHeight = 300;
-  const calculatedHeight = padding + lines * baseLineHeight + (lines > 1 ? 0 : 4);
+  const calculatedHeight = contentHeight.value ?? padding + lines * baseLineHeight;
   return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
 });
 

@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/alecthomas/participle/v2"
 
 	"github.com/mr-karan/logchef/internal/queryescape"
 )
@@ -27,7 +29,7 @@ func Translate(query string, schema *Schema) *TranslateResult {
 
 	pq, err := ParseLogchefQL(query)
 	if err != nil {
-		result.Error = convertParticipleError(err)
+		result.Error = convertParticipleError(query, err)
 		return result
 	}
 
@@ -73,7 +75,7 @@ func Validate(query string) *ValidateResult {
 
 	_, err := ParseLogchefQL(query)
 	if err != nil {
-		result.Error = convertParticipleError(err)
+		result.Error = convertParticipleError(query, err)
 		return result
 	}
 
@@ -81,7 +83,7 @@ func Validate(query string) *ValidateResult {
 	return result
 }
 
-func convertParticipleError(err error) *ParseError {
+func convertParticipleError(query string, err error) *ParseError {
 	if err == nil {
 		return nil
 	}
@@ -94,50 +96,103 @@ func convertParticipleError(err error) *ParseError {
 		return pe
 	}
 
-	msg := err.Error()
-	lowerMsg := strings.ToLower(msg)
+	var perr participle.Error
+	if !errors.As(err, &perr) {
+		return &ParseError{Code: ErrUnexpectedToken, Message: err.Error()}
+	}
+	pos := perr.Position()
+	position := &Position{Line: pos.Line, Column: pos.Column}
+
+	if strings.HasPrefix(perr.Message(), "lexer:") {
+		rest := ""
+		if pos.Offset >= 0 && pos.Offset <= len(query) {
+			rest = query[pos.Offset:]
+		}
+		if strings.HasPrefix(rest, `"`) || strings.HasPrefix(rest, "'") {
+			return &ParseError{Code: ErrUnterminatedString, Message: fmt.Sprintf("missing closing %s for the value at column %d", rest[:1], pos.Column), Position: position}
+		}
+		return &ParseError{Code: ErrUnexpectedToken, Message: fmt.Sprintf("unexpected character at column %d", pos.Column), Position: position}
+	}
+
+	var unexpected *participle.UnexpectedTokenError
+	if !errors.As(err, &unexpected) {
+		return &ParseError{Code: ErrUnexpectedToken, Message: perr.Message(), Position: position}
+	}
 
 	code := ErrUnexpectedToken
-	if strings.Contains(lowerMsg, "unterminated") {
-		code = ErrUnterminatedString
-	} else if strings.Contains(lowerMsg, "unexpected") && strings.Contains(lowerMsg, "ident") {
+	if unexpected.Unexpected.EOF() {
+		code = ErrUnexpectedEnd
+	} else if strings.Contains(strings.ToLower(perr.Message()), "ident") {
 		code = ErrMissingBooleanOperator
 	}
-
-	pos := extractPositionFromError(msg)
-
-	return &ParseError{
-		Code:     code,
-		Message:  msg,
-		Position: pos,
-	}
+	return &ParseError{Code: code, Message: describeUnexpectedToken(query, unexpected), Position: position}
 }
 
-func extractPositionFromError(msg string) *Position {
-	before, after, ok := strings.Cut(msg, ":")
-	if !ok {
-		return nil
+// Grammar node names that participle reports, as words a user knows.
+var expectedDescriptions = map[string]string{
+	"PValue":       "a value",
+	"<operator>":   "an operator such as = or ~",
+	"PTerm":        "a condition",
+	"PAndExpr":     "a condition",
+	"POrExpr":      "a condition",
+	"PComparison":  "a condition",
+	"PFieldPath":   "a field name",
+	"PPathSegment": "a field name",
+	"PSelectItem+": "a field name",
+	"PSelectItem":  "a field name",
+	"<rparen>":     "a closing )",
+	"<lparen>":     "an opening (",
+	"<ident>":      "a field name",
+}
+
+var expectedPattern = regexp.MustCompile(`\(expected (.+)\)$`)
+
+// describeUnexpectedToken turns "1:26: unexpected token \"<EOF>\" (expected PValue)"
+// into "expected a value after `msg~`".
+func describeUnexpectedToken(query string, u *participle.UnexpectedTokenError) string {
+	offset := min(max(u.Unexpected.Pos.Offset, 0), len(query))
+	before := strings.Fields(query[:offset])
+	after := ""
+	if len(before) > 0 {
+		after = fmt.Sprintf(" after %#q", before[len(before)-1])
+	}
+	found := ""
+	if !u.Unexpected.EOF() {
+		found = fmt.Sprintf(", found %#q", u.Unexpected.Value)
 	}
 
-	lineStr := before
-	line, err := strconv.Atoi(lineStr)
-	if err != nil {
-		return nil
+	expected := ""
+	if match := expectedPattern.FindStringSubmatch(u.Message()); match != nil {
+		expected = describeExpected(match[1])
 	}
-
-	rest := after
-	before0, _, ok0 := strings.Cut(rest, ":")
-	if !ok0 {
-		return nil
+	if expected == "" {
+		if u.Unexpected.EOF() {
+			return "query ends unexpectedly" + after
+		}
+		if len(before) == 0 {
+			return fmt.Sprintf("expected a field name, found %#q", u.Unexpected.Value)
+		}
+		if u.Unexpected.Type == logchefQLLexer.Symbols()["Ident"] || u.Unexpected.Type == logchefQLLexer.Symbols()["LParen"] {
+			return fmt.Sprintf("expected `and` or `or` before %#q", u.Unexpected.Value)
+		}
+		return fmt.Sprintf("unexpected %#q%s", u.Unexpected.Value, after)
 	}
+	return "expected " + expected + after + found
+}
 
-	colStr := before0
-	col, err := strconv.Atoi(colStr)
-	if err != nil {
-		return nil
+func describeExpected(names string) string {
+	parts := strings.Fields(names)
+	words := make([]string, 0, len(parts))
+	for _, part := range parts {
+		word, ok := expectedDescriptions[part]
+		if !ok {
+			return ""
+		}
+		if !slices.Contains(words, word) {
+			words = append(words, word)
+		}
 	}
-
-	return &Position{Line: line, Column: col}
+	return strings.Join(words, " and ")
 }
 
 func extractFieldsFromAST(node ASTNode) []string {

@@ -68,6 +68,7 @@ const emit = defineEmits<{
   (e: "submit"): void;
   (e: "ready"): void;
   (e: "focus-change", focused: boolean): void;
+  (e: "content-height", height: number): void;
 }>();
 
 type MonacoModule = typeof import("monaco-editor/editor/editor.api.js");
@@ -602,13 +603,19 @@ async function initializeEditor(editor: MonacoEditor) {
     editor.onDidChangeModelContent(scheduleDiagnostics),
     editor.onDidFocusEditorWidget(() => emit("focus-change", true)),
     editor.onDidBlurEditorWidget(() => emit("focus-change", false)),
+    editor.onDidContentSizeChange(({ contentHeight }) => emit("content-height", contentHeight)),
     editor.addAction({
       id: "submit-query",
       get label() { return t('ui.runQuery'); },
       keybindings: [deps.monaco.KeyMod.CtrlCmd | deps.monaco.KeyCode.Enter],
-      run: () => emit("submit"),
+      run: (target) => {
+        // Running from the keyboard must not leave completions open over the results.
+        target.trigger("submit-query", "hideSuggestWidget", null);
+        emit("submit");
+      },
     })
   );
+  emit("content-height", editor.getContentHeight());
 
   nextTick(() => {
     if (props.visible) {

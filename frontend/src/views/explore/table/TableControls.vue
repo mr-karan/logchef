@@ -4,38 +4,41 @@ import { useI18n } from "vue-i18n";
 import { computed } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { RefreshCw, Search, FilterX } from 'lucide-vue-next'
+import { RefreshCw, Search, FilterX, WrapText, ListPlus } from 'lucide-vue-next'
 import DataTablePagination from './data-table-pagination.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import type { Table } from './tableFeatures'
-import type { QueryStats } from '@/api/explore'
 
 const { t } = useI18n();
 
 interface Props {
   table: Table<Record<string, unknown>>
-  stats?: QueryStats
   isLoading?: boolean
+  // Undefined hides the wrap toggle.
+  wrap?: boolean
   showColumnSelector?: boolean
   showResetColumns?: boolean
   showPagination?: boolean
   showSearch?: boolean
-  showStats?: boolean
+  // Field the search term is added to the query on; undefined hides "add to query".
+  searchQueryField?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  stats: undefined,
   isLoading: false,
+  wrap: undefined,
   showColumnSelector: true,
   showResetColumns: false,
   showPagination: true,
   showSearch: true,
-  showStats: true
+  searchQueryField: undefined,
 })
 
 const emit = defineEmits<{
   'update:globalFilter': [value: string]
   'reset-columns': []
+  'update:wrap': [value: boolean]
+  'add-search-to-query': [field: string, term: string]
 }>()
 
 const globalFilter = computed({
@@ -55,6 +58,20 @@ const hasColumnFilters = computed(() => (props.table?.atoms.columnFilters.get()?
 const filteredRowCount = computed(() => props.table?.getFilteredRowModel().rows.length ?? 0)
 const totalRowCount = computed(() => props.table?.getCoreRowModel().rows.length ?? 0)
 
+const pageRange = computed(() => {
+  const { pageIndex, pageSize } = props.table.atoms.pagination.get()
+  const total = filteredRowCount.value
+  const start = total === 0 ? 0 : pageIndex * pageSize + 1
+  return { start, end: Math.min(total, pageIndex * pageSize + pageSize), total }
+})
+
+const searchTerm = computed(() => globalFilter.value.trim())
+
+function addSearchToQuery() {
+  if (!props.searchQueryField || !searchTerm.value) return
+  emit('add-search-to-query', props.searchQueryField, searchTerm.value)
+}
+
 function clearColumnFilters() {
   props.table.resetColumnFilters()
 }
@@ -66,15 +83,13 @@ function clearColumnFilters() {
     <div class="flex items-center gap-2 text-xs text-muted-foreground">
       <RefreshCw v-if="isLoading" class="h-3.5 w-3.5 text-primary animate-spin" />
       <span v-if="isLoading" class='text-primary animate-pulse hidden sm:inline'>{{ t('ui.loading2') }}</span>
-      <template v-else-if="showStats && stats">
-        <span v-if="stats.rows_read !== undefined" :title="t('pages.rowsReadTooltip', { count: stats.rows_read.toLocaleString() })">
-          {{ stats.rows_read.toLocaleString() }} {{ t('ui.rows') }}
-        </span>
-      </template>
+      <span v-else-if="hasRows" data-result-range>
+        {{ t('explore.resultRange', { start: pageRange.start.toLocaleString(), end: pageRange.end.toLocaleString(), total: pageRange.total.toLocaleString() }) }}
+      </span>
 
       <!-- Column filter indicator - client-side filtering of the loaded page only -->
       <template v-if="hasColumnFilters">
-        <span v-if="!isLoading && (stats || showStats)" class="text-muted-foreground/40">·</span>
+        <span v-if="!isLoading && hasRows" class="text-muted-foreground/40">·</span>
         <span
           class="text-primary font-medium"
           :title="t('ui.columnFiltersOnlyNarrowTheRowsAlreadyLoadedOnThisPage')"
@@ -98,6 +113,20 @@ function clearColumnFilters() {
     <div class="flex items-center gap-2">
       <!-- Pagination + Columns -->
       <DataTablePagination v-if="showPagination && hasRows" :table="table" />
+      <slot name="tools" />
+      <Button
+        v-if="wrap !== undefined"
+        variant="ghost"
+        size="sm"
+        class="h-7 px-2 text-xs"
+        :class="wrap ? 'bg-muted text-foreground' : 'text-muted-foreground'"
+        :aria-pressed="wrap"
+        :title="t('explore.wrapLines')"
+        @click="emit('update:wrap', !wrap)"
+      >
+        <WrapText class="h-3.5 w-3.5 mr-1" />
+        {{ t('explore.wrap') }}
+      </Button>
       <DataTableColumnSelector
         v-if="showColumnSelector && table"
         :table="table"
@@ -107,15 +136,30 @@ function clearColumnFilters() {
 
       <div v-if="showSearch" class="h-5 w-px bg-border" />
 
-      <!-- Search -->
-      <div v-if="showSearch" class="relative hidden md:block w-48 lg:w-64">
-        <Search class="absolute left-2 top-1.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          :placeholder="t('ui.search')"
-          :aria-label="t('ui.searchInAllColumns')"
-          v-model="globalFilter"
-          class="pl-8 h-7 text-sm"
-        />
+      <!-- Search: filters the loaded rows only, like the column filters -->
+      <div v-if="showSearch" class="hidden md:flex items-center gap-1">
+        <div class="relative w-48 lg:w-64">
+          <Search class="absolute left-2 top-1.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            :placeholder="t('explore.searchLoadedRows')"
+            :aria-label="t('explore.searchLoadedRows')"
+            :title="t('explore.searchLoadedRowsHint')"
+            v-model="globalFilter"
+            class="pl-8 h-7 text-sm"
+          />
+        </div>
+        <Button
+          v-if="searchQueryField && searchTerm"
+          variant="ghost"
+          size="sm"
+          class="h-7 px-2 text-xs"
+          data-add-search-to-query
+          :title="t('explore.addSearchToQueryHint', { field: searchQueryField, term: searchTerm })"
+          @click="addSearchToQuery"
+        >
+          <ListPlus class="h-3.5 w-3.5 mr-1" />
+          {{ t('explore.addSearchToQuery') }}
+        </Button>
       </div>
     </div>
   </div>

@@ -26,7 +26,6 @@ describe('timestamp cells', () => {
     const app = createApp(DataTable, {
       columns: [{ name: 'timestamp', type }],
       data: [{ timestamp: value }],
-      stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 64 },
       sourceId: `timestamp-render-${type}-${value}`,
       teamId: null,
     })
@@ -70,7 +69,6 @@ it.each(['Date', 'Date32', 'Nullable(Date)', 'Nullable(Date32)'].flatMap(type =>
   const app = createApp(DataTable, {
     columns: [{ name: 'timestamp', type }],
     data: [{ timestamp: value }],
-    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 10 },
     sourceId: 'calendar-date', teamId: null,
   })
   const pinia = createPinia()
@@ -95,7 +93,6 @@ it.each(['date', 'created', 'updated', 'timestamp'])('keeps String %s dates on t
   document.body.appendChild(host)
   const app = createApp(DataTable, {
     columns: [{ name, type: 'String' }], data: [{ [name]: '2024-01-15' }],
-    stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 10 },
     sourceId: 'string-calendar-date', teamId: null,
   })
   const pinia = createPinia()

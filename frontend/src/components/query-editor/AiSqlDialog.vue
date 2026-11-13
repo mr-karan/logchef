@@ -94,7 +94,7 @@ const copyToClipboard = async (text: string) => {
       <DialogHeader class="border-b pb-4">
         <DialogTitle class="flex items-center gap-3">
           <Wand2 class="h-6 w-6 text-purple-600" />
-          <span class='text-xl font-semibold text-foreground'>{{ t('ui.aISQLAssistant') }}</span>
+          <span class='text-xl font-semibold text-foreground'>{{ t('ui.generateSQL') }}</span>
         </DialogTitle>
         <DialogDescription class="text-muted-foreground mt-2">
           {{ t('ui.describeTheDataYouWantToRetrieveInNaturalLanguageAndI') }}

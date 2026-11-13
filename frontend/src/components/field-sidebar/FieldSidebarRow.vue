@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { AlertTriangle, ChevronRight, Loader2, Minus, RefreshCw } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { FieldLoadingState } from '@/composables/useFieldValuesLoader'
-import { formatCount, getCleanType, getTypeColorClass, getTypeIcon, type FieldInfo } from './fieldDisplay'
+import { formatCount, getCleanType, getTypeColorClass, getTypeIcon, hasTooManyValues, type FieldInfo } from './fieldDisplay'
 
 const props = defineProps<{
   field: FieldInfo
@@ -31,6 +31,7 @@ const { t } = useI18n()
 
 const status = computed(() => props.state?.status ?? 'idle')
 const values = computed(() => props.state?.values)
+const tooManyValues = computed(() => hasTooManyValues(props.field, values.value))
 </script>
 
 <template>
@@ -67,15 +68,8 @@ const values = computed(() => props.state?.values)
             {{ values.total_distinct }}
           </Badge>
           <Badge
-            v-else-if="status === 'click-to-load'"
             variant="outline"
             class="text-[9px] h-4 px-1 font-normal flex-shrink-0 text-muted-foreground"
-          >
-            {{ t('ui.click') }}
-          </Badge>
-          <Badge
-            variant="outline"
-            class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
           >
             {{ getCleanType(field.type) }}
           </Badge>
@@ -89,6 +83,10 @@ const values = computed(() => props.state?.values)
               <Skeleton v-for="i in 3" :key="i" class="h-6 w-full" />
             </div>
           </template>
+
+          <p v-else-if="tooManyValues" data-too-many-values class="text-xs text-muted-foreground py-1 px-2">
+            {{ values ? t('explore.tooManyValuesCount', { count: values.total_distinct.toLocaleString() }) : t('explore.tooManyValues') }}
+          </p>
 
           <template v-else-if="status === 'error'">
             <div class="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 py-1 px-2">
