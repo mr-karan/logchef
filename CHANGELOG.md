@@ -174,10 +174,21 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   and `truncation` (`none`, `rows`, `bytes`, `unknown`). A capped query asks
   for one extra row, so `rows` is a proven cut. A source's `max_result_rows`
   setting counts as the configured maximum, and the extra row never passes
-  it, so a result that fills it reports `unknown`. The Explorer and
+  it, so a result that fills it reports `unknown`. So does a result whose own
+  `SETTINGS` let ClickHouse stop it early without an error. The Explorer and
   dashboard panels show the state as a chip and no longer print a limit
   warning when nothing was cut. The older `truncated` and `truncated_reason`
   fields stay.
+- ClickHouse limits in the ClickHouse user's settings profile no longer cut
+  results silently. Logchef sends its own result row and byte limits with
+  every query, and sends every other overflow mode as `throw`, so a profile
+  limit such as `max_rows_to_sort` in break mode now fails the query with an
+  error that names the limit. Histograms fail when their result may be
+  incomplete. Alerts reject query `SETTINGS` that can stop the query early,
+  and live tail rejects a filter that holds them.
+- A source's `max_execution_time` reaches ClickHouse as configured and caps
+  the request's timeout. Before, the driver replaced it with the request's
+  deadline plus 5 seconds.
 - A LogchefQL run no longer bakes the request limit into the SQL it reports
   as `generated_sql`; the limit applies when the query runs. The Explorer's
   Download of a LogchefQL run therefore exports up to the export maximum
