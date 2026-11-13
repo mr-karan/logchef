@@ -4,6 +4,7 @@ import { useElementSize } from "@vueuse/core";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
 import { buildPanelChart, type ChartModel, type ChartViz } from "@/utils/panelCharts";
+import { parseGranularityToMilliseconds } from "@/utils/histogram-chart";
 import { formatNumber } from "@/utils/numberFormat";
 import type { ResolvedWindow } from "@/utils/timeWindow";
 
@@ -92,9 +93,35 @@ function path(index: number, area = false): string {
   return paths.join(" ");
 }
 const ticks = computed(() => Array.from({ length: 4 }, (_, i) => geometry.value.low + (geometry.value.high - geometry.value.low) * i / 3));
+const timeTickFormatter = computed(() => {
+  const rows = model.value.rows;
+  const first = rows[0]?.x ?? 0;
+  const last = rows.at(-1)?.x ?? first;
+  const start = props.count && props.range ? props.range.start : first;
+  const end = props.count && props.range ? props.range.end : last;
+  const steps = rows.slice(1).map((r, i) => r.x - rows[i].x).filter((n) => n > 0);
+  const step = parseGranularityToMilliseconds(props.frame.interval) ?? (steps.length ? Math.min(...steps) : 0);
+  const columnName = props.count ? "time" : props.viz.x;
+  const kind = props.viz.columns?.[columnName ?? ""]?.kind ?? props.frame.columns.find((c) => c.name === columnName)?.kind;
+  const dateOnly = kind === "date" || step >= 86400000;
+  const timeZone = kind === "date" ? "UTC" : preferences.zone;
+  const day = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" });
+  const year = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" });
+  const showDate = dateOnly || day.format(start) !== day.format(end);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    ...(showDate ? { month: "short", day: "numeric" } : {}),
+    ...(year.format(start) !== year.format(end) ? { year: "numeric" } : {}),
+    ...(!dateOnly ? { hour: "2-digit", minute: "2-digit", ...(step < 60000 ? { second: "2-digit" } : {}), hourCycle: "h23" } : {}),
+  });
+});
+function tickLabel(row: ChartModel["rows"][number]): string {
+  if (model.value.time) return timeTickFormatter.value.format(row.x).replaceAll(",", "");
+  return row.label.length > 18 ? row.label.slice(0, 16) + "…" : row.label;
+}
 const xTicks = computed(() => {
   let last = -Infinity;
-  const spacing = horizontal.value ? 20 : 110;
+  const spacing = horizontal.value ? 20 : Math.max(80, ...model.value.rows.map((r) => tickLabel(r).length * 6 + 12));
   return model.value.rows.filter((row) => {
     const position = geometry.value.x(row.x);
     if (position - last < spacing) return false;
@@ -116,7 +143,7 @@ const tooltip = ref("");
           <line :x1="horizontal ? geometry.y(tick) : plot.left" :x2="horizontal ? geometry.y(tick) : plot.right" :y1="horizontal ? plot.top : geometry.y(tick)" :y2="horizontal ? plot.bottom : geometry.y(tick)" />
           <text :x="horizontal ? geometry.y(tick) : plot.left - 5" :y="horizontal ? plot.bottom + 18 : geometry.y(tick) + 3" :text-anchor="horizontal ? 'middle' : 'end'">{{ formatNumber(tick, viz.format, { compact: true }).text }}</text>
         </g>
-        <text v-for="row in xTicks" :key="row.key" class="panel-chart__tick" :x="horizontal ? plot.left - 5 : geometry.x(row.x)" :y="horizontal ? geometry.x(row.x) + 3 : plot.bottom + 18" :text-anchor="horizontal ? 'end' : 'middle'"><title>{{ row.label }}</title>{{ row.label.length > 18 ? row.label.slice(0, 16) + '…' : row.label }}</text>
+        <text v-for="row in xTicks" :key="row.key" class="panel-chart__tick" :x="horizontal ? plot.left - 5 : geometry.x(row.x)" :y="horizontal ? geometry.x(row.x) + 3 : plot.bottom + 18" :text-anchor="horizontal ? 'end' : 'middle'"><title>{{ row.label }}</title>{{ tickLabel(row) }}</text>
         <template v-if="mark !== 'bar'">
           <path v-for="(series, i) in model.series" :key="series.key" :d="path(i, mark === 'area')" :fill="mark === 'area' ? series.color : 'none'" :fill-opacity="0.25" :stroke="series.color" stroke-width="2" />
         </template>
@@ -126,7 +153,7 @@ const tooltip = ref("");
               <title>{{ cell.row.label }} · {{ cell.series.label }}: {{ cell.value.exact }}</title>
               <rect v-if="mark === 'bar'" class="panel-chart__bar" :x="point(cell, i).bx" :y="point(cell, i).by" :width="point(cell, i).width" :height="point(cell, i).height" :fill="cell.series.color" rx="2" />
               <circle v-else :cx="point(cell, i).x" :cy="point(cell, i).y" r="3" :fill="cell.series.color" />
-              <text v-if="viz.show_values && (!stacked || mark !== 'bar' || (horizontal ? point(cell, i).width : point(cell, i).height) >= 12)" class="panel-chart__value" :class="{ 'panel-chart__value--stacked': stacked && mark === 'bar' }" :x="stacked && mark === 'bar' ? point(cell, i).bx + point(cell, i).width / 2 : point(cell, i).x + (horizontal ? 4 : 0)" :y="stacked && mark === 'bar' ? point(cell, i).by + point(cell, i).height / 2 + 3 : point(cell, i).y - (horizontal ? 0 : 5)" :text-anchor="horizontal && !(stacked && mark === 'bar') ? 'start' : 'middle'">{{ cell.value.text }}</text>
+              <text v-if="viz.show_values && (!stacked || mark !== 'bar' || (horizontal ? point(cell, i).width : point(cell, i).height) >= 12)" class="panel-chart__value" :style="stacked && mark === 'bar' ? { fill: cell.series.labelColor } : undefined" :class="{ 'panel-chart__value--stacked': stacked && mark === 'bar' }" :x="stacked && mark === 'bar' ? point(cell, i).bx + point(cell, i).width / 2 : point(cell, i).x + (horizontal ? 4 : 0)" :y="stacked && mark === 'bar' ? point(cell, i).by + point(cell, i).height / 2 + 3 : point(cell, i).y - (horizontal ? 0 : 5)" :text-anchor="horizontal && !(stacked && mark === 'bar') ? 'start' : 'middle'">{{ cell.value.text }}</text>
             </g>
           </template>
         </g>
@@ -145,7 +172,7 @@ const tooltip = ref("");
 .panel-chart__axis line { stroke: var(--border); stroke-opacity: 0.5; }
 .panel-chart__axis text, .panel-chart__tick { fill: var(--muted-foreground); font-size: 10px; }
 .panel-chart__value { fill: var(--foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
-.panel-chart__value--stacked { fill: white; font-size: 9px; }
+.panel-chart__value--stacked { font-size: 9px; }
 .panel-chart__legend { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; font-size: 11px; }
 .panel-chart__legend span { display: inline-flex; align-items: center; gap: 4px; }
 .panel-chart__legend i { width: 8px; height: 8px; border-radius: 2px; }

@@ -229,7 +229,7 @@ function removeColumn(name: string) {
     </div>
   </div>
   <div v-if="viz.type === 'chart'" class="mt-4 space-y-3">
-    <div class="space-y-1"><Label for="chart-scale">X scale</Label><select id="chart-scale" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x_scale ?? 'auto'" @change="setXScale"><option value="auto">Auto</option><option value="time">Time</option><option value="category">Category, query order</option></select></div>
+    <div class="space-y-1"><Label for="chart-scale">X scale</Label><select id="chart-scale" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x_scale ?? 'auto'" @change="setXScale"><option value="auto">Auto, time for dates</option><option value="time">Time, oldest first</option><option value="category">Category, query order</option></select></div>
     <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.show_values ?? false" @change="emit('update:viz', { ...viz, show_values: !viz.show_values })" />Show values</label>
     <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.legend ?? true" @change="emit('update:viz', { ...viz, legend: !(viz.legend ?? true) })" />Show legend</label>
     <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.orientation === 'horizontal'" @change="emit('update:viz', { ...viz, orientation: viz.orientation === 'horizontal' ? 'vertical' : 'horizontal' })" />Horizontal</label>

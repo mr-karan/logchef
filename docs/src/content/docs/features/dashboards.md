@@ -26,24 +26,26 @@ explorer, they can see in a panel.
 
 ## Panel types
 
-- **Time series**: a chart over time, using the same histogram data the explorer
-  draws. You can render it as a line, area, or bars (stacked or grouped), and
-  optionally group by a field to break the series out (for example, 5xx
-  responses split by service).
+- **Chart**: a line, area, or bar chart over a time or category column.
+  Result charts store the X column, ordered Y columns, and an optional series
+  column. Bars can be stacked or grouped and can display values. Count charts
+  use the histogram endpoint and can group by a field.
 - **Stat**: a match count or a computed value from a result column. Run SQL or
   a LogsQL stats query, select the value column, and reduce it with `last`,
   `first`, `sum`, `avg`, `min`, or `max`.
-- **Breakdown**: log counts by a required field over the selected range. Use
-  horizontal bars (default) or a donut for a compact top-category view.
+- **Breakdown**: a toplist or pie chart. Result panels store a label column
+  and a numeric value column. Count panels group matching logs by a field.
+  Toplists keep query order. Pies fold small slices into **Other** only when
+  you set **Fold slices below %**. The remainder retains the sum of those
+  slices, even when it is very small.
 - **Table**: the matching rows, like the explorer results grid. Set a row limit and
   an optional column subset. A `LIMIT` in the query itself also applies, and the
   smaller of the two wins. A panel whose rows were cut shows a chip: **First N
   rows**, **Cut by size** or **May be incomplete**.
 
-Time series and breakdown panels use **count** mode through the histogram
-endpoint. Stats support both **count** and **result** mode. Tables use result
-mode. A result query runs as written, including SQL aggregates and LogsQL stats
-pipes. The default result limit is 1,000 rows, with a maximum of 10,000.
+Charts, breakdowns, and stats support both **count** and **result** mode.
+Count mode uses the histogram endpoint. Tables use result mode. A result
+query runs as written, including SQL aggregates and LogsQL stats pipes. The default result limit is 1,000 rows, with a maximum of 10,000.
 VictoriaLogs' histogram API counts the filter portion and ignores pipes.
 
 Grouped histograms return the top 10 series and combine any remaining series
@@ -62,6 +64,18 @@ result query. Existing SQL count panels continue to work.
 If a viewer lacks access to a panel's source, that panel renders a locked state
 while the rest of the dashboard loads normally, the same pattern used for shared
 collection items.
+
+## Chart axes and colors
+
+**X scale** defaults to **Auto**, which uses a time axis for `time` and `date`
+columns. A time axis draws oldest to newest regardless of query order.
+For example, `ORDER BY date DESC` still draws dates in ascending order with
+`x_scale: "auto"` or `x_scale: "time"`. Choose **Category, query order**
+(`x_scale: "category"`) to keep descending dates or any other query order.
+Time tick labels adapt to the interval and range. Tooltips retain full timestamps.
+
+Series and pie slices use categorical theme colors in light and dark mode.
+These colors are separate from the named palette model for threshold rules.
 
 ## Computed stats and exact values
 

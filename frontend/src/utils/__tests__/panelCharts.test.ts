@@ -99,3 +99,19 @@ it("treats equivalent time instants as duplicate result keys", () => {
   const source = resultFrame({ columns: [{ name: "t", type: "DateTime64" }, { name: "n", type: "UInt32" }], rows: [{ t: "2026-11-10T00:00:00Z", n: 1 }, { t: "2026-11-10T01:00:00+01:00", n: 2 }] });
   expect(() => buildPanelChart(source, { type: "chart", x: "t", y: ["n"] }, false)).toThrow("1 duplicate key(s)");
 });
+
+it("retains the exact real tiny remainder with a categorical color", () => {
+  const source = resultFrame({ columns: [{ name: "method", type: "String" }, { name: "n", type: "UInt64" }], rows: [{ method: "POST", n: "59500" }, { method: "GET", n: "57800" }, { method: "PUT", n: "1" }] });
+  const pie = buildPanelList(source, { type: "pie", label: "method", value: "n", min_slice_percent: 1 }, false);
+  expect(pie.total?.exact).toBe("117,301");
+  expect(pie.items.map((i) => [i.label, i.value.exact])).toEqual([["POST", "59,500"], ["GET", "57,800"], ["Other", "1"]]);
+  expect(pie.items[2].percentage).toBeCloseTo(100 / 117301);
+  expect(pie.items[2].color).toMatch(/^var\(--chart-\d\)$/);
+  expect(new Set(pie.items.map((i) => i.color)).size).toBe(3);
+});
+it("does not invent a remainder when all slices meet the threshold", () => {
+  const source = resultFrame({ columns: [{ name: "method", type: "String" }, { name: "n", type: "Decimal(20,2)" }], rows: [{ method: "GET", n: "0.10" }, { method: "POST", n: "0.20" }] });
+  const pie = buildPanelList(source, { type: "pie", label: "method", value: "n", min_slice_percent: 1 }, false);
+  expect(pie.items.map((i) => i.label)).toEqual(["GET", "POST"]);
+  expect(pie.total?.exact).toBe("0.3");
+});
