@@ -325,9 +325,6 @@ async fn run_collection(
     let variables = content.query_variables(&args.variables);
     let final_query = content.content.clone().unwrap_or_default();
 
-    // Determine time range: every branch below resolves to a concrete UTC
-    // instant range, which resolve_time_range then formats as wall-clock in
-    // the effective timezone (never a mix of the two, which was the bug).
     let (start, end) = if let Some(since) = &args.since {
         // Use override
         let end = Utc::now();
@@ -358,11 +355,6 @@ async fn run_collection(
         let end = Utc::now();
         (end - Duration::minutes(15), end)
     };
-    let time_range = resolve_time_range(
-        TimeInput::Instant { start, end },
-        ctx.defaults.timezone.as_deref(),
-    );
-
     let limit = args.limit.or(content.limit).unwrap_or(100);
 
     eprintln!(
@@ -372,6 +364,10 @@ async fn run_collection(
     );
 
     let response = if collection.query_language == "logchefql" {
+        let time_range = resolve_time_range(
+            TimeInput::Instant { start, end },
+            ctx.defaults.timezone.as_deref(),
+        );
         let request = QueryRequest {
             variables,
             query: final_query,
@@ -390,11 +386,12 @@ async fn run_collection(
             variables,
             query_text: final_query,
             limit: Some(limit),
-            timezone: Some(time_range.timezone),
-            start_time: Some(time_range.start),
-            end_time: Some(time_range.end),
+            timezone: None,
+            start_time: None,
+            end_time: None,
             query_timeout: Some(30),
-        };
+        }
+        .with_time_range(start, end, ctx.defaults.timezone.as_deref());
         client
             .query_sql(team_id, source_id, &request)
             .await

@@ -197,6 +197,21 @@ pub struct SqlQueryRequest {
     pub query_timeout: Option<u32>,
 }
 
+impl SqlQueryRequest {
+    pub fn with_time_range(
+        mut self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        configured_tz: Option<&str>,
+    ) -> Self {
+        let tz = crate::timerange::resolve_timezone(configured_tz);
+        self.start_time = Some(start.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
+        self.end_time = Some(end.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true));
+        self.timezone = Some(tz.to_string());
+        self
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ExportSqlRequest {
     pub raw_sql: String,
