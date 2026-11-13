@@ -182,8 +182,8 @@ func TestQueryLogsAppliesHeadersScopeAndLimit(t *testing.T) {
 		if got := r.Form.Get("query"); got != "level:error | sort by (_time desc)" {
 			t.Fatalf("unexpected query: %q", got)
 		}
-		if got := r.Form.Get("limit"); got != "100" {
-			t.Fatalf("unexpected limit: %q", got)
+		if got := r.Form.Get("limit"); got != "101" {
+			t.Fatalf("unexpected limit: %q, want the request limit plus the probe row", got)
 		}
 		if got := r.Form.Get("start"); got != "2026-04-08T10:00:00Z" {
 			t.Fatalf("unexpected start: %q", got)

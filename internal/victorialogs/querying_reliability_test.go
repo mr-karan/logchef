@@ -13,30 +13,77 @@ import (
 
 // TestResolveQueryLimit covers the ClickHouse-mirroring limit policy: a
 // limit-less call falls back to DefaultLimit (not MaxLimit), any explicit limit
-// is capped at MaxLimit, and the injected/capped flags drive warnings.
+// is capped at MaxLimit, and the source names the bound that won.
 func TestResolveQueryLimit(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name                  string
-		limit, def, max       int
-		wantApplied           int
-		wantAdded, wantCapped bool
+		name            string
+		limit, def, max int
+		wantApplied     int
+		wantSource      models.LimitSource
 	}{
-		{name: "no limit uses default", limit: 0, def: 500, max: 10000, wantApplied: 500, wantAdded: true},
-		{name: "no limit no default falls back", limit: 0, def: 0, max: 10000, wantApplied: defaultQueryLimit, wantAdded: true},
-		{name: "explicit within max", limit: 250, def: 500, max: 10000, wantApplied: 250},
-		{name: "explicit capped at max", limit: 250, def: 500, max: 100, wantApplied: 100, wantCapped: true},
-		{name: "default above max capped", limit: 0, def: 5000, max: 100, wantApplied: 100, wantAdded: true, wantCapped: true},
+		{name: "no limit uses default", limit: 0, def: 500, max: 10000, wantApplied: 500, wantSource: models.LimitSourceDefault},
+		{name: "no limit no default falls back", limit: 0, def: 0, max: 10000, wantApplied: defaultQueryLimit, wantSource: models.LimitSourceDefault},
+		{name: "explicit within max", limit: 250, def: 500, max: 10000, wantApplied: 250, wantSource: models.LimitSourceRequest},
+		{name: "explicit capped at max", limit: 250, def: 500, max: 100, wantApplied: 100, wantSource: models.LimitSourceMax},
+		{name: "default above max capped", limit: 0, def: 5000, max: 100, wantApplied: 100, wantSource: models.LimitSourceMax},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			applied, added, capped := resolveQueryLimit(tc.limit, tc.def, tc.max)
-			if applied != tc.wantApplied || added != tc.wantAdded || capped != tc.wantCapped {
-				t.Fatalf("resolveQueryLimit(%d,%d,%d) = (%d,%t,%t), want (%d,%t,%t)",
-					tc.limit, tc.def, tc.max, applied, added, capped, tc.wantApplied, tc.wantAdded, tc.wantCapped)
+			applied, source := resolveQueryLimit(tc.limit, tc.def, tc.max)
+			if applied != tc.wantApplied || source != tc.wantSource {
+				t.Fatalf("resolveQueryLimit(%d,%d,%d) = (%d,%q), want (%d,%q)",
+					tc.limit, tc.def, tc.max, applied, source, tc.wantApplied, tc.wantSource)
+			}
+		})
+	}
+}
+
+// TestQueryLogsProbesForTruncation sends one row past the limit and reports
+// a row truncation only when that row arrives.
+func TestQueryLogsProbesForTruncation(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		lines          int
+		wantRows       int
+		wantTruncation models.Truncation
+	}{
+		{name: "a row past the limit proves the cut", lines: 4, wantRows: 3, wantTruncation: models.TruncationRows},
+		{name: "a result that fills the limit is complete", lines: 3, wantRows: 3, wantTruncation: models.TruncationNone},
+		{name: "a short result is complete", lines: 2, wantRows: 2, wantTruncation: models.TruncationNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var gotLimit string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				gotLimit = r.Form.Get("limit")
+				for i := range tc.lines {
+					_, _ = w.Write([]byte(`{"_time":"2026-04-08T10:0` + string(rune('0'+i)) + `:00Z","_msg":"ok"}` + "\n"))
+				}
+			}))
+			defer server.Close()
+
+			provider := newTestProvider(server)
+			source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+			result, err := provider.QueryLogs(context.Background(), source, datasource.QueryRequest{RawQuery: "*", Limit: 3, MaxLimit: 1000})
+			if err != nil {
+				t.Fatalf("QueryLogs returned error: %v", err)
+			}
+			if gotLimit != "4" {
+				t.Fatalf("expected the probe limit 4 sent to VL, got %q", gotLimit)
+			}
+			stats := result.Stats
+			if len(result.Logs) != tc.wantRows || stats.RowsReturned != tc.wantRows || stats.LimitApplied != 3 || stats.LimitSource != models.LimitSourceRequest {
+				t.Fatalf("got %d rows, stats %+v", len(result.Logs), stats)
+			}
+			if stats.Truncation != tc.wantTruncation || stats.Truncated != (tc.wantTruncation == models.TruncationRows) {
+				t.Fatalf("truncation = %q (truncated=%t), want %q", stats.Truncation, stats.Truncated, tc.wantTruncation)
 			}
 		})
 	}
@@ -116,8 +163,8 @@ func TestQueryLogsEnforcesResponseByteBudget(t *testing.T) {
 	if len(result.Logs) == 0 || len(result.Logs) >= 5 {
 		t.Fatalf("expected byte budget to truncate rows, got %d of 5", len(result.Logs))
 	}
-	if !result.Stats.Truncated || result.Stats.TruncatedReason != "byte_limit" {
-		t.Fatalf("expected byte_limit truncation, got truncated=%t reason=%q", result.Stats.Truncated, result.Stats.TruncatedReason)
+	if !result.Stats.Truncated || result.Stats.TruncatedReason != "byte_limit" || result.Stats.Truncation != models.TruncationBytes {
+		t.Fatalf("expected byte_limit truncation, got truncated=%t reason=%q state=%q", result.Stats.Truncated, result.Stats.TruncatedReason, result.Stats.Truncation)
 	}
 }
 
@@ -147,8 +194,8 @@ func TestQueryLogsDefaultLimitAndWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryLogs returned error: %v", err)
 	}
-	if gotLimit != "500" {
-		t.Fatalf("expected default limit 500 sent to VL, got %q", gotLimit)
+	if gotLimit != "501" {
+		t.Fatalf("expected default limit 500 plus the probe row sent to VL, got %q", gotLimit)
 	}
 	if !hasWarning(result.Warnings, "LIMIT_APPLIED") {
 		t.Fatalf("expected LIMIT_APPLIED warning, got %+v", result.Warnings)
@@ -164,8 +211,8 @@ func TestQueryLogsDefaultLimitAndWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryLogs (capped) returned error: %v", err)
 	}
-	if gotLimit != "100" {
-		t.Fatalf("expected capped limit 100 sent to VL, got %q", gotLimit)
+	if gotLimit != "101" {
+		t.Fatalf("expected capped limit 100 plus the probe row sent to VL, got %q", gotLimit)
 	}
 	if !hasWarning(result.Warnings, "LIMIT_CAPPED") {
 		t.Fatalf("expected LIMIT_CAPPED warning, got %+v", result.Warnings)
