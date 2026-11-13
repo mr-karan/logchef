@@ -767,6 +767,17 @@ describe("dashboards store — schema 2 request parity", () => {
     expect(mocks.logsQuery.mock.calls[0][2].limit).toBe(100);
   });
 
+  it("keeps a table result's limit source and truncation state, through both table paths", async () => {
+    const stats = { execution_time_ms: 1, rows_read: 2, rows_returned: 1, limit_applied: 1, limit_source: "request", truncation: "rows" };
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [{ n: 1 }], columns: [], stats } });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [{ n: 1 }], columns: [], stats } });
+    const logchefql: DashboardQueryPanel = { ...tablePanel("lq"), query: { mode: "result", language: "logchefql", text: "" } };
+    const sql: DashboardQueryPanel = { ...tablePanel("sql"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1" } };
+    const store = await runPanels(logchefql, sql);
+    expect(store.getPanelState("lq").table?.stats).toMatchObject({ limit_source: "request", truncation: "rows" });
+    expect(store.getPanelState("sql").table?.stats).toMatchObject({ limit_source: "request", truncation: "rows" });
+  });
+
   it("trims U+0085 around a group when building the request and keeps U+FEFF", async () => {
     await runPanels(chartPanel("nel", { group_by: "\u0085service\u0085" }), chartPanel("bom", { group_by: "\ufeff" }));
     const groups = mocks.histogram.mock.calls.map((call) => call[2].group_by);

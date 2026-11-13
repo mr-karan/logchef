@@ -63,6 +63,16 @@ export interface QueryParams {
   variables?: TemplateVariable[]; // Template variables for SQL substitution
 }
 
+/** The bound that set a result's row limit. */
+export type LimitSource = "statement" | "request" | "default" | "max";
+
+/**
+ * Whether rows were cut from a result. `rows` is proven by a row past the
+ * limit, `bytes` by the response budget, `unknown` is a filled cap the server
+ * could not probe past.
+ */
+export type Truncation = "none" | "rows" | "bytes" | "unknown";
+
 export interface QueryStats {
   execution_time_ms: number;
   rows_read: number;
@@ -72,6 +82,8 @@ export interface QueryStats {
   limit_applied?: number;
   truncated?: boolean;
   truncated_reason?: string;
+  limit_source?: LimitSource;
+  truncation?: Truncation;
 }
 
 export interface QueryWarning {

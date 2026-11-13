@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { ChevronUp, ChevronDown, Rows4, TerminalSquare, Download, Braces, Zap } from 'lucide-vue-next'
 import { useExploreRuns } from '@/stores/exploreRuns'
+import { truncationMessage } from '@/utils/truncation'
 import GroupBySelector from './GroupBySelector.vue'
 import StreamPicker from './StreamPicker.vue'
 import {
@@ -49,7 +50,6 @@ const runs = useExploreRuns()
 
 const queryStats = computed(() => runs.results?.stats)
 const isHistogramEligible = computed(() => runs.isHistogramEligible)
-const queryWarnings = computed(() => runs.results?.warnings ?? [])
 
 const formattedQueryTime = computed(() => {
   const executionTimeMs = queryStats.value?.execution_time_ms
@@ -62,13 +62,10 @@ const formattedQueryTime = computed(() => {
   return `${(executionTimeMs / 1000).toFixed(2)}s`
 })
 
+// A cut result shows its truncation state. A cap that cut nothing shows nothing.
 const warningText = computed(() => {
-  if (queryStats.value?.truncated) {
-    return queryStats.value.truncated_reason === 'byte_limit'
-      ? t('ui.responseSizeCapped')
-      : t('ui.resultCapped')
-  }
-  return queryWarnings.value?.[0]?.message || null
+  const message = truncationMessage(queryStats.value)
+  return message ? t(message.key, { count: message.count }, message.count) : null
 })
 </script>
 
