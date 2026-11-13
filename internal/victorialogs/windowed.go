@@ -137,7 +137,7 @@ func (p *Provider) PrepareWindowedQuery(source *models.Source, req datasource.Wi
 		windows = append(windows, datasource.SearchWindow{Index: len(windows), Start: start, End: end})
 		end = start
 	}
-	limit, _ := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
+	limit, limitSource := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
 	req.Limit = limit
 	fingerprintData, err := json.Marshal(struct {
 		Version  int             `json:"version"`
@@ -153,7 +153,7 @@ func (p *Provider) PrepareWindowedQuery(source *models.Source, req datasource.Wi
 		return nil, err
 	}
 	hash := sha256.Sum256(fingerprintData)
-	plan := &datasource.WindowedPlan{Request: req, Windows: windows, Fingerprint: hex.EncodeToString(hash[:]), Concurrency: settings.Concurrency}
+	plan := &datasource.WindowedPlan{Request: req, LimitSource: limitSource, Windows: windows, Fingerprint: hex.EncodeToString(hash[:]), Concurrency: settings.Concurrency}
 	if err := restoreWindowCursor(plan); err != nil {
 		return nil, err
 	}
@@ -357,7 +357,8 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 				index++
 				continue
 			}
-			n := min(len(result.rows), remaining)
+			fit := min(len(result.rows), remaining)
+			n := fit
 			if plan.Request.MaxResponseBytes > 0 {
 				for j, row := range result.rows[:n] {
 					data, err := json.Marshal(row)
@@ -379,6 +380,21 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 			}
 			result.stats.RowsReturned = n
 			result.stats.LimitApplied = plan.Request.Limit
+			result.stats.LimitSource = plan.LimitSource
+			// The last rows event of a page carries the page's truncation. A
+			// window query asks for one row past the limit, so a row left over
+			// proves a cut. A page that fills exactly with older windows still
+			// to search may be incomplete.
+			switch {
+			case result.stats.Truncated || n < fit:
+				result.stats.Truncation = models.TruncationBytes
+			case len(result.rows) > n:
+				result.stats.Truncation = models.TruncationRows
+			case (remaining == n || plan.Request.MaxResponseBytes > 0 && bytesRemaining == 0) && index+1 < last:
+				result.stats.Truncation = models.TruncationUnknown
+			default:
+				result.stats.Truncation = models.TruncationNone
+			}
 			status := datasource.WindowComplete
 			if !exhausted {
 				status = datasource.WindowPartial
@@ -389,7 +405,9 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 						return err
 					}
 				}
-				return emit(datasource.WindowedEvent{Type: datasource.WindowEnd, Cursor: cursor})
+				// The byte budget stopped the page before this window's first
+				// row, so the end event carries the cut.
+				return emit(datasource.WindowedEvent{Type: datasource.WindowEnd, Cursor: cursor, Stats: &result.stats})
 			}
 			if err := emit(datasource.WindowedEvent{Type: datasource.WindowRows, Window: &window, Status: status, Logs: result.rows[:n], Stats: &result.stats, Cursor: cursor}); err != nil {
 				return err

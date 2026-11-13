@@ -32,7 +32,9 @@ type WindowPosition struct {
 }
 
 type WindowedPlan struct {
-	Request     WindowedRequest
+	Request WindowedRequest
+	// LimitSource names the bound that set Request.Limit.
+	LimitSource models.LimitSource
 	Windows     []SearchWindow
 	Index       int
 	Position    WindowPosition

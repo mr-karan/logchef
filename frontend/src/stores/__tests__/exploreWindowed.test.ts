@@ -8,6 +8,7 @@ import { useExploreRuns } from '../exploreRuns';
 import { useContextStore } from '../context';
 import { createWindowedSession } from '../exploreWindowed';
 import type { LogRow, WindowedEvent, WindowedRequest } from '@/api/windowed';
+import type { QueryStats } from '@/api/explore';
 
 const windows = [
   { index: 0, start: '2026-09-01T00:01:00Z', end: '2026-09-01T00:02:00Z' },
@@ -364,6 +365,22 @@ describe('windowed explorer over HTTP', () => {
       expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
       expect(store.complete).toBe(true);
     }
+  });
+
+  // The events TestWindowedPageTruncation checks on the server: the last event of a page with stats has its truncation.
+  it.each([
+    ['a row past the limit', [event({ type: 'rows', window: windows[0], status: 'partial', logs: [row('a'), row('b')], stats: { execution_time_ms: 1, rows_read: 3, bytes_read: 9, limit_source: 'request', truncation: 'rows' }, cursor: 'next' }), event({ type: 'end', cursor: 'next' })], 'rows'],
+    ['a byte cut before the next window', [
+      event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('a')], stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 9, limit_source: 'request', truncation: 'none' } }),
+      event({ type: 'end', cursor: 'second', stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 9, limit_source: 'request', truncation: 'bytes' } }),
+    ], 'bytes'],
+  ] as const)('keeps the truncation state of %s', async (_name, events, truncation) => {
+    respond = req => req.count ? [event({ type: 'end' })] : [event({ type: 'plan', windows }), ...events];
+    const seen: (QueryStats | null)[] = [];
+    const store = createWindowedSession({ teamId: 1, sourceId: 1, request, histogram: false, onRows: (_rows, stats) => seen.push(stats) });
+    sessions.push(store);
+    await store.start();
+    expect(seen.at(-1)).toMatchObject({ limit_source: 'request', truncation, rows_returned: events[0].logs?.length });
   });
 
   // The same rows and calendar buckets as TestIntegrationWindowedCountsUseTimezone, so row and count histograms agree.

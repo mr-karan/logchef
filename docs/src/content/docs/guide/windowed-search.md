@@ -63,6 +63,11 @@ a visible gap and continues to older windows. Failed and skipped windows have
 individual retry controls. A row larger than the response byte limit fails its
 window with a size-limit message.
 
+The results bar shows how each page ended. **First N rows** means a row past
+the page limit exists, **Cut by size** means the response byte limit ended the
+page, and **May be incomplete** means the page filled its limit at a window
+edge with older windows still unsearched. **Load older** continues from there.
+
 When the first page contains every matching row, Logchef builds the histogram
 from those rows. Otherwise, background counts cover the entire selected range.
 The count coverage strip distinguishes counted, pending, and failed windows.

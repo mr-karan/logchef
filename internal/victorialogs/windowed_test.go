@@ -455,6 +455,93 @@ func TestWindowedPageByteBudget(t *testing.T) {
 	}
 }
 
+// TestWindowedPageTruncation checks the truncation state that ends each page,
+// read the way the Explorer reads it: from the last event that has stats.
+func TestWindowedPageTruncation(t *testing.T) {
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Minute)
+	newer := formatAPITime(end.Add(-time.Minute))
+	packedRow := func(at time.Time, message string) []byte {
+		original, err := json.Marshal(map[string]string{"_time": formatAPITime(at), "_msg": message})
+		if err != nil {
+			t.Fatal(err)
+		}
+		packed, err := json.Marshal(map[string]string{"_logchef_row": string(original)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return append(packed, '\n')
+	}
+	serve := func(newerRows, olderRows int, message string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := r.ParseForm(); err != nil {
+				t.Error(err)
+				return
+			}
+			if isBoundaryQuery(r) {
+				return
+			}
+			rows, windowEnd := olderRows, end.Add(-time.Minute)
+			if r.Form.Get("start") == newer {
+				rows, windowEnd = newerRows, end
+			}
+			for i := range rows {
+				_, _ = w.Write(packedRow(windowEnd.Add(-time.Duration(i+1)*time.Second), message))
+			}
+		}))
+	}
+	oneRow := len(packedRow(end, "x"))
+	long := strings.Repeat("y", 100)
+	twoLongRows := 2 * len(packedRow(end, long))
+	for _, tc := range []struct {
+		name                 string
+		message              string
+		newerRows, olderRows int
+		limit, defaultLimit  int
+		maxResponseBytes     int
+		wantRows             int
+		wantSource           models.LimitSource
+		wantTruncation       models.Truncation
+	}{
+		{name: "a row past the limit proves a cut", newerRows: 3, limit: 2, wantRows: 2, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationRows},
+		{name: "a page that fills at a window edge may be incomplete", newerRows: 2, olderRows: 5, limit: 2, wantRows: 2, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationUnknown},
+		{name: "every window searched is complete", newerRows: 1, olderRows: 1, defaultLimit: 10, wantRows: 2, wantSource: models.LimitSourceDefault, wantTruncation: models.TruncationNone},
+		{name: "the reader's byte budget is a byte cut", newerRows: 2, limit: 10, maxResponseBytes: oneRow + 1, wantRows: 1, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationBytes},
+		{name: "the page byte budget inside an older window is a byte cut", message: long, newerRows: 1, olderRows: 2, limit: 10, maxResponseBytes: twoLongRows, wantRows: 2, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationBytes},
+		{name: "the byte budget before the next window's first row is a byte cut", newerRows: 1, olderRows: 1, limit: 10, maxResponseBytes: oneRow, wantRows: 1, wantSource: models.LimitSourceRequest, wantTruncation: models.TruncationBytes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := tc.message
+			if message == "" {
+				message = "x"
+			}
+			server := serve(tc.newerRows, tc.olderRows, message)
+			defer server.Close()
+			provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true, MaxWindowSeconds: 60, Concurrency: 2}})
+			req := datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &start, EndTime: &end, Limit: tc.limit, DefaultLimit: tc.defaultLimit, MaxLimit: 100, MaxResponseBytes: tc.maxResponseBytes}}
+			plan, err := provider.PrepareWindowedQuery(source, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows := 0
+			var last *models.QueryStats
+			if err := provider.StreamWindowedQuery(context.Background(), source, plan, func(event datasource.WindowedEvent) error {
+				rows += len(event.Logs)
+				if event.Stats != nil {
+					last = event.Stats
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if rows != tc.wantRows || last == nil || last.LimitSource != tc.wantSource || last.Truncation != tc.wantTruncation {
+				t.Fatalf("%d rows, last stats %+v, want %d rows, source %q, truncation %q", rows, last, tc.wantRows, tc.wantSource, tc.wantTruncation)
+			}
+		})
+	}
+}
+
 func TestIntegrationOptimizedStreamValues(t *testing.T) {
 	baseURL := integrationBaseURL(t)
 	runID := newTestRunID(t)
