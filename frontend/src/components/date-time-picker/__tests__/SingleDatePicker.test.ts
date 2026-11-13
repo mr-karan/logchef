@@ -72,3 +72,27 @@ it('Today uses UTC display time near midnight in a non-UTC browser zone', async 
   today.click()
   expect(emitted).toEqual(['2026-11-13'])
 })
+
+it('Now uses the display timezone for datetime variables', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-13T00:30:00Z'))
+  const emitted = await open(true, '2026-11-10 12:00:00')
+  const button = [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Now')
+  if (!button) throw new Error('Now missing')
+  button.click()
+  expect(emitted).toEqual(['2026-11-13 00:30:00'])
+})
+
+it('calendar starts in the display month and highlights the display day', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-12-01T00:30:00Z'))
+  await open(false, '')
+  const calendarButton = document.querySelector<HTMLButtonElement>('input + button')
+  if (!calendarButton) throw new Error('calendar button missing')
+  calendarButton.click()
+  await nextTick(); await nextTick()
+  expect(document.querySelector('[data-slot=calendar]')?.textContent).toContain('December')
+  const marked = document.querySelectorAll('[data-slot=calendar-cell-trigger][data-today]')
+  expect(marked.length).toBe(1)
+  expect(marked[0]?.getAttribute('data-value')).toContain('2026-12-01')
+})

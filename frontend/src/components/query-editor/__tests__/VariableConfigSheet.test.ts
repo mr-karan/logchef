@@ -75,3 +75,11 @@ it('seeds day in UTC display time near midnight in a non-UTC browser zone', asyn
   await chooseType('Date')
   expect(store.allVariables[0]?.value).toBe('2026-11-13')
 })
+
+it('seeds datetime in the display timezone', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-13T00:30:00Z'))
+  const store = await mountVariable('day', '')
+  await chooseType('Date and time')
+  expect(store.allVariables[0]?.value).toBe('2026-11-13 00:30:00')
+})
