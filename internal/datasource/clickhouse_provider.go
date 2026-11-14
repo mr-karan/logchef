@@ -207,11 +207,12 @@ func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.So
 		// API responses never include the password, so edit flows send it blank
 		// to mean "keep the existing one". A blank username means auth was
 		// turned off, so the stored password is dropped too. The stored password
-		// is only reused for the same host and username: it must never be sent
-		// to a server the caller just named.
+		// is only reused for the same host, username and TLS setting: it must
+		// never be sent to a server the caller just named, or in plaintext where
+		// it went over TLS.
 		if conn.Password == "" && conn.Username != "" {
-			if conn.Host != source.Connection.Host || conn.Username != source.Connection.Username {
-				return nil, &ValidationError{Field: "connection.password", Message: "Enter the password again: the host or username changed"}
+			if conn.Host != source.Connection.Host || conn.Username != source.Connection.Username || conn.TLSEnable != source.Connection.TLSEnable {
+				return nil, &ValidationError{Field: "connection.password", Message: "Enter the password again: the host, username or TLS setting changed"}
 			}
 			conn.Password = source.Connection.Password
 		}

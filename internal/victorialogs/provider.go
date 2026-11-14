@@ -262,7 +262,9 @@ func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req 
 		// API responses redact credentials, so edit flows send them blank to
 		// mean "keep the existing ones".
 		if prev, prevErr := source.VictoriaLogsConnection(); prevErr == nil {
-			mergeRedactedConnectionSecrets(&conn, prev)
+			if err := mergeRedactedConnectionSecrets(&conn, prev); err != nil {
+				return nil, err
+			}
 		}
 		if err := validateVictoriaLogsConnectionConfig("connection.", conn); err != nil {
 			return nil, err
@@ -431,34 +433,47 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 // Credentials honour the NEW auth mode: only the credential that mode uses is
 // preserved, so switching modes (e.g. bearer->basic->bearer) cannot resurrect a
 // stale token or password, and switching to "none" drops all of them.
-func mergeRedactedConnectionSecrets(conn *models.VictoriaLogsConnectionInfo, prev models.VictoriaLogsConnectionInfo) {
+func mergeRedactedConnectionSecrets(conn *models.VictoriaLogsConnectionInfo, prev models.VictoriaLogsConnectionInfo) error {
+	// A stored secret goes only to the endpoint it was saved for. When
+	// base_url changes, every secret the request leaves blank must be sent
+	// again, so repointing a source cannot leak the old host's credentials.
+	sameEndpoint := conn.BaseURL == prev.BaseURL
+	keep := func(field, current, stored string) (string, error) {
+		if current != "" || stored == "" {
+			return current, nil
+		}
+		if !sameEndpoint {
+			return "", &datasource.ValidationError{Field: field, Message: "Enter the credentials again: the base URL changed"}
+		}
+		return stored, nil
+	}
+	var err error
 	switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
 	case "none":
-		// Auth turned off: drop any stored credentials so repointing base_url
-		// can't leak the previous host's token/password.
+		// Auth turned off: drop any stored credentials.
 		conn.Auth.Username = ""
 		conn.Auth.Password = ""
 		conn.Auth.Token = ""
 	case "basic":
 		// Basic auth never sends a bearer token; keep the password (blank means
 		// "keep existing") and drop any carried-over token.
-		if conn.Auth.Password == "" {
-			conn.Auth.Password = prev.Auth.Password
+		if conn.Auth.Password, err = keep("connection.auth.password", conn.Auth.Password, prev.Auth.Password); err != nil {
+			return err
 		}
 		conn.Auth.Token = ""
 	case "bearer":
-		if conn.Auth.Token == "" {
-			conn.Auth.Token = prev.Auth.Token
+		if conn.Auth.Token, err = keep("connection.auth.token", conn.Auth.Token, prev.Auth.Token); err != nil {
+			return err
 		}
 		conn.Auth.Password = ""
 	default:
 		// Unset/auto-detect mode may use either credential, so preserve
 		// blank-means-keep semantics for both.
-		if conn.Auth.Password == "" {
-			conn.Auth.Password = prev.Auth.Password
+		if conn.Auth.Password, err = keep("connection.auth.password", conn.Auth.Password, prev.Auth.Password); err != nil {
+			return err
 		}
-		if conn.Auth.Token == "" {
-			conn.Auth.Token = prev.Auth.Token
+		if conn.Auth.Token, err = keep("connection.auth.token", conn.Auth.Token, prev.Auth.Token); err != nil {
+			return err
 		}
 	}
 
@@ -469,10 +484,11 @@ func mergeRedactedConnectionSecrets(conn *models.VictoriaLogsConnectionInfo, pre
 		if strings.TrimSpace(value) != "" {
 			continue
 		}
-		if prevValue, ok := prev.Headers[key]; ok {
-			conn.Headers[key] = prevValue
+		if conn.Headers[key], err = keep("connection.headers."+key, "", prev.Headers[key]); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.VictoriaLogsConnectionInfo) error {
