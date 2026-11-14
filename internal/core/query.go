@@ -221,9 +221,6 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
 	}
-	if _, err := ValidateTimezone(req.Timezone); err != nil {
-		return nil, err
-	}
 	timeout, err := resolveQueryTimeout(cfg, req.QueryTimeout)
 	if err != nil {
 		return nil, err
