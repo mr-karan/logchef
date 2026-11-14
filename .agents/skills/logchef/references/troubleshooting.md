@@ -17,6 +17,10 @@
 | `Raw query required` / `cannot be empty` | Give `sql` a query as an arg or pipe via `-`. |
 | `--stream does not support --output <x>` | `--stream` only allows `jsonl`. Use `--output csv` (no `--stream`) for CSV, or drop `--stream`. |
 | `SELECT …` fails on a VictoriaLogs source | `sql` sends **LogsQL** there, not SQL. Use `logchef query` or LogsQL syntax. |
+| `macro {{__interval}} needs an interval` | The query buckets with `{{__interval}}` or `{{__interval_s}}`. Add `--interval 1h` (one of `1s` … `24h`). |
+| `macro {{…}} is not available in LogsQL` / `in ClickHouse SQL` | `{{__time_filter}}` and `{{__timezone}}` are ClickHouse only, `{{__tz_offset}}` is LogsQL only. |
+| `undefined variable: {{name}}` | The query has a `{{name}}` placeholder. Pass `--var name=value`. |
+| `variable name __from is reserved for a built-in macro` | `--var` cannot set a `{{__…}}` macro. Use the time flags and `--interval`. |
 | `Token may be invalid or expired` | Re-authenticate: `logchef auth`. Check with `logchef auth --status` / `auth current`. |
 | `does not offer Logchef OAuth sign-in` | The server has no `auth.oauth`. Ask the admin to enable it, or use an API token: `--token` / `LOGCHEF_AUTH_TOKEN`. |
 | `{"error":{"type":"auth_required",…}}` (with `--output json`/`jsonl`) | The saved sign-in is gone or revoked. Run the command in `error.fix` (for example `logchef auth --context prod`). |

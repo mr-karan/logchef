@@ -65,7 +65,7 @@ source resolve, and prints a fix hint for each problem.
 | `logchef query '<logchefql>'` | **Primary search.** LogchefQL, translated server-side for either backend. |
 | `logchef explain '<query>'` | Show the generated ClickHouse SQL / LogsQL **without running it**. Validate + preview. |
 | `logchef histogram '<query>'` | Counts-over-time buckets. Cheap way to find spikes without pulling rows. |
-| `logchef sql '<native>'` (alias `native`) | Raw **ClickHouse SQL** on CH sources, raw **LogsQL** on VictoriaLogs sources. |
+| `logchef sql '<native>'` (alias `native`) | Raw **ClickHouse SQL** on CH sources, raw **LogsQL** on VictoriaLogs sources. `--var k=v` fills `{{k}}`; `--interval 24h` and the time flags fill the `{{__…}}` time macros of a dashboard panel's query. |
 | `logchef tail '<logchefql>'` | Live follow — native server streaming (SSE), works for both backends; `--poll` for the polling fallback. |
 | `logchef find '<pattern>'` | Which sources contain a service / host / message pattern (ClickHouse **and** VictoriaLogs). |
 | `logchef collections` / `logchef saved-queries` | List/run saved queries (by name, id, or explorer URL; `--var k=v`). |

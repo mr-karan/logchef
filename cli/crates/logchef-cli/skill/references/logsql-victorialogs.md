@@ -48,6 +48,26 @@ An absolute `_time` without an offset is read in the VictoriaLogs **server's**
 local zone, not your Logchef timezone. Always add `+hh:mm` / `-hh:mm`, or use
 `--from` / `--to` instead.
 
+### Time macros and variables
+
+A dashboard panel's LogsQL can use server-side macros. Run it unchanged:
+
+```bash
+logchef sql '* | stats by (_time:{{__interval}} offset {{__tz_offset}}) count() as n | filter n:>{{min}}' \
+  -t platform -S vl-app -s 5d --interval 24h --var min:number=5
+```
+
+| Macro | Renders | Comes from |
+|---|---|---|
+| `{{__from}}`, `{{__to}}` | `"2026-11-05T18:30:00Z"` | `--since` / `--from`+`--to` |
+| `{{__interval}}` | `1d` | `--interval` (`1s` … `24h`) |
+| `{{__interval_s}}` | `86400` | `--interval` |
+| `{{__tz_offset}}` | `19800s`, the UTC offset of your timezone at the start of the range | the configured timezone |
+
+`{{__time_filter}}` and `{{__timezone}}` are ClickHouse only: on VictoriaLogs
+the request's time range already applies. Without `offset {{__tz_offset}}`, a
+`_time:1d` bucket is a UTC day.
+
 ### Pipes
 
 ```
