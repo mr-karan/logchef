@@ -72,7 +72,7 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 	// The poll SQL composes the filter, and SETTINGS in it could end a poll
 	// early without an error. The tail would skip the rest of that page.
 	if clickhouse.SettingsMayCut(buildTailPollSQL(source.GetFullTableName(), source.MetaTSField, strings.TrimSpace(req.Query), time.Time{}, time.Time{})) {
-		return &ValidationError{Field: "query", Message: "the tail filter's SETTINGS can end a poll early without an error. Set every overflow mode to 'throw' and leave out max_result_rows and max_result_bytes"}
+		return &ValidationError{Field: "query", Message: "the tail filter's SETTINGS can end a poll early without an error. Set every overflow mode to 'throw' and leave out max_result_rows, max_result_bytes, limit, offset and skip_unavailable_shards"}
 	}
 
 	interval := req.PollInterval

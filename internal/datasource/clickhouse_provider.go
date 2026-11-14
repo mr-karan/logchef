@@ -609,7 +609,7 @@ func formatAlertQuery(raw string) (string, error) {
 		return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
 	}
 	if clickhouse.SettingsMayCut(query) {
-		return "", &ValidationError{Field: "query", Message: "the alert query's SETTINGS can end it early without an error, so its value may be wrong. Set every overflow mode to 'throw' and leave out max_result_rows and max_result_bytes"}
+		return "", &ValidationError{Field: "query", Message: "the alert query's SETTINGS can end it early without an error, so its value may be wrong. Set every overflow mode to 'throw' and leave out max_result_rows, max_result_bytes, limit, offset and skip_unavailable_shards"}
 	}
 	return query, nil
 }

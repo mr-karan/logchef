@@ -69,8 +69,27 @@ func TestSettingsMayCut(t *testing.T) {
 		{query: "SELECT name FROM system.settings", want: false},
 		{query: "SELECT 1 SETTINGS max_threads = 1, max_block_size = 10", want: false},
 		{query: "SELECT 1 SETTINGS max_rows_to_read = 10", want: false},
-		{query: "SELECT 1 SETTINGS `limit` = 5", want: false},
+		{query: "SELECT 1 SETTINGS `limit` = 5", want: true},
+		{query: `SELECT 1 SETTINGS "offset" = 5`, want: true},
+		{query: "SELECT 1 SETTINGS `LIMIT` = 5", want: true},
+		{query: "SELECT 1 SETTINGS `limit` = 0, `offset` = 0", want: false},
 		{query: "SELECT 1 SETTINGS limit = 5", want: true},
+		{query: "SELECT 1 SETTINGS `li\\x6dit` = 5", want: true},
+		{query: "SELECT 1 SETTINGS read_overflow_mode_leaf = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS timeout_overflow_mode_leaf = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS `read_overflow_mode_leaf` = 'break'", want: true},
+		{query: `SELECT 1 SETTINGS "timeout_overflow_mode_leaf" = 'break'`, want: true},
+		{query: "SELECT 1 SETTINGS READ_OVERFLOW_MODE_LEAF = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS `read\\x5foverflow_mode_leaf` = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS a_future_overflow_mode_variant = 'break'", want: true},
+		{query: "SELECT 1 SETTINGS read_overflow_mode_leaf = 1", want: true},
+		{query: "SELECT 1 SETTINGS read_overflow_mode_leaf = 'throw', timeout_overflow_mode_leaf = 'throw'", want: false},
+		{query: "SELECT 1 SETTINGS skip_unavailable_shards = 1", want: true},
+		{query: "SELECT 1 SETTINGS skip_unavailable_shards = true", want: true},
+		{query: "SELECT 1 SETTINGS skip_unavailable_shards = 0", want: false},
+		{query: "SELECT 1 SETTINGS skip_unavailable_shards = false", want: false},
+		{query: "SELECT 1 SETTINGS max_result_rows = 0", want: false},
+		{query: "SELECT 1 SETTINGS `limit` = 5; SELECT 2 SETTINGS max_threads = 1", want: true},
 		{query: "SELECT 1 SETTINGS sort_overflow_mode = 'throw'", want: false},
 		{query: "SELECT 1 SETTINGS max_result_rows = 5, result_overflow_mode = 'throw'", want: false},
 		{query: "SELECT 1 SETTINGS max_result_rows = 5", want: true},
@@ -145,7 +164,7 @@ func TestThrowModesClickHouse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Close()
-	rows, err := admin.conn.Query(ctx, "SELECT name FROM system.settings WHERE name LIKE '%\\_overflow\\_mode'")
+	rows, err := admin.conn.Query(ctx, "SELECT name FROM system.settings WHERE name LIKE '%overflow\\_mode%'")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +185,7 @@ func TestThrowModesClickHouse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	result, err := client.QueryWithOptions(ctx, "SELECT name, value FROM system.settings WHERE name LIKE '%\\_overflow\\_mode'", QueryOptions{})
+	result, err := client.QueryWithOptions(ctx, "SELECT name, value FROM system.settings WHERE name LIKE '%overflow\\_mode%'", QueryOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

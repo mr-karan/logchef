@@ -47,6 +47,26 @@ func createProfileUser(t *testing.T, addr string, clauses []string) string {
 	return name
 }
 
+// createTestTable creates a table from columns, fills it from a SELECT and
+// drops it when the test ends.
+func createTestTable(t *testing.T, addr, columns, engine, fill string) string {
+	t.Helper()
+	admin, err := NewClient(ClientOptions{Host: addr}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	name := fmt.Sprintf("logchef_test_%d", time.Now().UnixNano())
+	if err := admin.conn.Exec(t.Context(), fmt.Sprintf("CREATE TABLE default.%s (%s) ENGINE = %s", name, columns, engine)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.conn.Exec(context.Background(), "DROP TABLE IF EXISTS default."+name) })
+	if err := admin.conn.Exec(t.Context(), fmt.Sprintf("INSERT INTO default.%s %s", name, fill)); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
 func settingClauses(settings clickhouse.Settings) []string {
 	clauses := make([]string, 0, len(settings))
 	for _, name := range slices.Sorted(maps.Keys(settings)) {
@@ -105,11 +125,18 @@ func TestSQLSettingsMayCutClickHouse(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
+	leaf := "remote('127.0.0.1', default, " + createTestTable(t, addr, "n UInt64", "MergeTree ORDER BY n SETTINGS index_granularity = 10", "SELECT number FROM numbers(10000)") + ")"
 	for _, tc := range []struct {
 		query    string
 		complete int
 		want     models.Truncation
 	}{
+		{query: "SELECT n FROM " + leaf + " SETTINGS max_rows_to_read_leaf = 50, read_overflow_mode_leaf = 'break', max_block_size = 10, max_threads = 1", complete: 100, want: models.TruncationUnknown},
+		{query: "SELECT n FROM " + leaf + " SETTINGS max_rows_to_read_leaf = 50, `read_overflow_mode_leaf` = 'break', max_block_size = 10, max_threads = 1", complete: 100, want: models.TruncationUnknown},
+		{query: "SELECT n FROM " + leaf + " SETTINGS max_rows_to_read_leaf = 50, \"read_overflow_mode_leaf\" = 'break', max_block_size = 10, max_threads = 1", complete: 100, want: models.TruncationUnknown},
+		{query: "SELECT number FROM numbers(1000) SETTINGS `limit` = 5", complete: 100, want: models.TruncationUnknown},
+		{query: "SELECT number FROM numbers(1000) SETTINGS \"offset\" = 995", complete: 100, want: models.TruncationUnknown},
+		{query: "SELECT count() AS shards FROM remote('127.0.0.1:9000,127.0.0.2:1', system.one) SETTINGS skip_unavailable_shards = 1", complete: 1, want: models.TruncationUnknown},
 		{query: "SELECT number FROM numbers(10000) SETTINGS max_result_rows = 5, max_block_size = 10", complete: 100, want: models.TruncationUnknown},
 		{query: "SELECT number FROM numbers(10000) SETTINGS max_result_bytes = 100, max_block_size = 10", complete: 100, want: models.TruncationUnknown},
 		{query: "SELECT number FROM numbers(10000) ORDER BY number DESC SETTINGS max_rows_to_sort = 10, sort_overflow_mode = 'break', max_block_size = 10", complete: 100, want: models.TruncationUnknown},
