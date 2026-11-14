@@ -198,7 +198,7 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	// with the chart at a free width on the first of two tabs.
 	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"type":"stat","reduce":"sum"`, `"type":"chart","x":"day","y":["n"],"show_values":true,"columns":{},"format":{"decimals":2}`, 1)
 	blob = strings.Replace(blob, `"mode":"count"`, `"mode":"result"`, 1)
-	blob = strings.Replace(blob, `,"interval":"auto"`, ``, 1)
+	blob = strings.Replace(blob, `,"interval":"auto"`, `,"interval":"24h","range":"today-6d"`, 1)
 	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p2","kind":"query","title":"Trend","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"clickhouse-sql","text":"SELECT day,n FROM events"},"viz":{"type":"stat","value":"n","order_by":"day","compare":{"mode":"previous_row"},"sparkline":true}},`, team.ID, src.ID), 1)
 	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p2","x":6,"y":0,"w":6,"h":2},`, 1)
 	blob = strings.Replace(blob, `"type":"stat","value":"n"`, `"type":"stat","thresholds":[{"value":null,"color":"green"},{"value":"9007199254740993.01","color":"red"}],"value":"n"`, 1)

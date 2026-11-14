@@ -58,7 +58,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"oversize", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"` + strings.Repeat("x", MaxDashboardPanelsSizeV2) + `","layout":[]}],"panels":[]}`), "exceeds"},
 		{"unknown top-level key", json.RawMessage(`{"version":2,"features":[],"variables":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]}`), `unknown field "variables"`},
 		{"unknown panel key", v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","description":"later","team_id":1,"source_id":1,"query":`+countQ+`,"viz":{"type":"stat"}}`), `unknown field "description"`},
-		{"unknown query key", panel(`{"mode":"count","language":"logchefql","text":"x","range":"today-6d"}`, `{"type":"stat"}`), `unknown field "range"`},
+		{"unknown query key", panel(`{"mode":"count","language":"logchefql","text":"x","offset":"1d"}`, `{"type":"stat"}`), `unknown field "offset"`},
 		{"invalid thresholds", panel(countQ, `{"type":"chart","thresholds":[]}`), `invalid viz.thresholds`},
 		{"comparison needs mode", panel(resultQ, `{"type":"stat","value":"n","compare":{}}`), `invalid compare.mode`},
 		{"null value", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":null}`, `{"type":"stat"}`), "null at panels[0].query.group_by"},
@@ -97,8 +97,13 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"empty language", panel(`{"mode":"count","language":"","text":"x"}`, `{"type":"stat"}`), "invalid query.language"},
 		{"group_by in result mode", panel(`{"mode":"result","language":"clickhouse-sql","text":"x","group_by":"a"}`, `{"type":"table"}`), "only count mode uses"},
 		{"blank group_by", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":" \u0085"}`, `{"type":"chart"}`), "blank query.group_by"},
-		{"interval in result mode", panel(`{"mode":"result","language":"clickhouse-sql","text":"x","interval":"auto"}`, `{"type":"table"}`), "only count mode uses"},
-		{"interval window is a later phase", panel(`{"mode":"count","language":"logchefql","text":"x","interval":"24h"}`, `{"type":"chart"}`), "invalid query.interval"},
+		{"interval outside the windows", panel(`{"mode":"count","language":"logchefql","text":"x","interval":"90m"}`, `{"type":"chart"}`), "invalid query.interval"},
+		{"interval alias", panel(`{"mode":"result","language":"clickhouse-sql","text":"x","interval":"1d"}`, `{"type":"table"}`), "invalid query.interval"},
+		{"empty interval", panel(`{"mode":"count","language":"logchefql","text":"x","interval":""}`, `{"type":"chart"}`), "invalid query.interval"},
+		{"range outside the grammar", panel(`{"mode":"count","language":"logchefql","text":"x","range":"last week"}`, `{"type":"chart"}`), "invalid query.range"},
+		{"calendar range with no days", panel(`{"mode":"count","language":"logchefql","text":"x","range":"today-0d"}`, `{"type":"chart"}`), "invalid query.range"},
+		{"calendar range in hours", panel(`{"mode":"result","language":"clickhouse-sql","text":"x","range":"today-6h"}`, `{"type":"table"}`), "invalid query.range"},
+		{"empty range", panel(`{"mode":"count","language":"logchefql","text":"x","range":""}`, `{"type":"chart"}`), "invalid query.range"},
 		{"limit in count mode", panel(`{"mode":"count","language":"logchefql","text":"x","limit":10}`, `{"type":"stat"}`), "only result mode uses"},
 		{"limit zero", panel(`{"mode":"result","language":"clickhouse-sql","text":"x","limit":0}`, `{"type":"table"}`), "invalid query.limit"},
 		{"limit too large", panel(`{"mode":"result","language":"clickhouse-sql","text":"x","limit":10001}`, `{"type":"table"}`), "invalid query.limit"},
@@ -122,7 +127,8 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"blank visible column", panel(resultQ, `{"type":"table","visible_columns":[""]}`), "empty name"},
 		{"duplicate visible column", panel(resultQ, `{"type":"table","visible_columns":["a","a"]}`), "twice"},
 		{"cache ttl", json.RawMessage(`{"version":2,"features":[],"cache_ttl_seconds":-1,"tabs":[{"id":"a","title":"A","layout":[]}],"panels":[]}`), "cache_ttl_seconds"},
-		{"calendar range is a later phase", json.RawMessage(`{"version":2,"features":[],"default_time_range":"today-6d","tabs":[{"id":"a","title":"A","layout":[]}],"panels":[]}`), "default_time_range"},
+		{"calendar default range with no days", json.RawMessage(`{"version":2,"features":[],"default_time_range":"today-0d","tabs":[{"id":"a","title":"A","layout":[]}],"panels":[]}`), "default_time_range"},
+		{"calendar default range from yesterday", json.RawMessage(`{"version":2,"features":[],"default_time_range":"yesterday-6d","tabs":[{"id":"a","title":"A","layout":[]}],"panels":[]}`), "default_time_range"},
 		{"version 3", json.RawMessage(`{"version":3,"features":[],"tabs":[],"panels":[]}`), "unsupported panels version 3"},
 	}
 	for _, tc := range tests {
@@ -1277,4 +1283,58 @@ func TestDashboardCountCompareDefaultReducer(t *testing.T) {
 	if err := ValidateDashboardPanels(raw); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestDashboardPanelTime covers the phase 14 blob state: fixed intervals in
+// both modes, a panel range, and the calendar form today-<n>d. Each use names
+// the panel_time feature, and the base forms name none.
+func TestDashboardPanelTime(t *testing.T) {
+	withQuery := func(panel, old, new string) string { return strings.Replace(panel, old, new, 1) }
+	dashboardRange := func(value string) json.RawMessage {
+		return json.RawMessage(`{"version":2,"features":[],"default_time_range":"` + value + `","tabs":[{"id":"main","title":"Main","layout":[` + v2Layout + `]}],"panels":[` + v2ChartPanel + `]}`)
+	}
+	for name, tc := range map[string]struct {
+		blob json.RawMessage
+		uses bool
+	}{
+		"count with a fixed interval":    {v2Blob(v2Layout, withQuery(v2ChartPanel, `"interval":"auto"`, `"interval":"24h"`)), true},
+		"count with the shortest window": {v2Blob(v2Layout, withQuery(v2ChartPanel, `"interval":"auto"`, `"interval":"1s"`)), true},
+		"result with a fixed interval":   {v2Blob(v2Layout, withQuery(v2TablePanel, `"limit":100`, `"limit":100,"interval":"1h"`)), true},
+		"result with interval auto":      {v2Blob(v2Layout, withQuery(v2TablePanel, `"limit":100`, `"limit":100,"interval":"auto"`)), true},
+		"a rolling panel range":          {v2Blob(v2Layout, withQuery(v2ChartPanel, `"interval":"auto"`, `"interval":"auto","range":"7d"`)), true},
+		"a calendar panel range":         {v2Blob(v2Layout, withQuery(v2TablePanel, `"limit":100`, `"limit":100,"range":"today-6d"`)), true},
+		"a panel range of today":         {v2Blob(v2Layout, withQuery(v2ChartPanel, `"interval":"auto"`, `"range":"today"`)), true},
+		"a calendar default range":       {dashboardRange("today-10d"), true},
+		"count with interval auto":       {v2Blob(v2Layout, v2ChartPanel), false},
+		"result with no interval":        {v2Blob(v2Layout, v2TablePanel), false},
+		"a default range of today":       {dashboardRange("today"), false},
+		"a rolling default range":        {dashboardRange("7d"), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			canonical, err := CanonicalDashboardPanels(tc.blob)
+			if err != nil {
+				t.Fatalf("a valid blob was refused: %v", err)
+			}
+			features, err := DashboardFeatures(canonical)
+			if err != nil || slices.Contains(features, "panel_time") != tc.uses {
+				t.Fatalf("features %v error %v, want panel_time = %v", features, err, tc.uses)
+			}
+			again, err := CanonicalDashboardPanels(canonical)
+			if err != nil || string(again) != string(canonical) {
+				t.Fatalf("the canonical blob changed on a second pass: %v\n%s\n%s", err, canonical, again)
+			}
+		})
+	}
+	for _, window := range DashboardQueryWindows {
+		blob := v2Blob(v2Layout, withQuery(v2ChartPanel, `"interval":"auto"`, `"interval":"`+window+`"`))
+		if err := ValidateDashboardPanels(blob); err != nil {
+			t.Errorf("window %s: %v", window, err)
+		}
+	}
+	t.Run("schema 1 keeps its range grammar", func(t *testing.T) {
+		blob := json.RawMessage(`{"version":1,"default_time_range":"today-6d","layout":[],"panels":[]}`)
+		if err := ValidateDashboardPanels(blob); err == nil || !strings.Contains(err.Error(), "default_time_range") {
+			t.Fatalf("error = %v, want schema 1 to refuse the calendar form", err)
+		}
+	})
 }
