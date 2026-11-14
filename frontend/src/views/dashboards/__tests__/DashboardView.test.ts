@@ -468,6 +468,7 @@ describe("DashboardView tabs", () => {
     document.body.appendChild(host);
     router = createRouter({ history: createMemoryHistory(), routes: [
       { path: "/", component: { template: "<div>home</div>" } },
+      { path: "/dashboards", component: { template: "<div>dashboard list</div>" } },
       { path: "/dashboards/:id", component: DashboardView },
       { path: "/explore", name: "LogExplorer", component: { template: "<div />" } },
     ] });
@@ -511,6 +512,30 @@ describe("DashboardView tabs", () => {
     await settle();
     expect(cancel).toHaveBeenCalledWith({ leaving: true });
     expect(tabs.queries).toEqual([]);
+  });
+
+  it.each(["deleted", "added"])("discarding to leave with a %s tab reaches the dashboard list", async (change) => {
+    await openAfter("/dashboards/1?tab=today");
+    button("Edit").click();
+    await settle();
+    await settle();
+    const store = useDashboardsStore();
+    store.updateDraftPanel("today", { query: { text: "edited-query" } });
+    if (change === "deleted") store.removeDraftTab("week");
+    else {
+      const id = store.addDraftTab("Scratch");
+      if (id === null) throw new Error("tab was not added");
+      await router.push({ query: { tab: id } });
+    }
+    await settle();
+    await settle();
+    host.querySelector<HTMLElement>('button[aria-label="Back to dashboards"]')?.click();
+    await settle();
+    button("Discard changes").click();
+    await settle();
+    await settle();
+    expect(router.currentRoute.value.path).toBe("/dashboards");
+    expect(store.getPanelState("today").status).toBe("idle");
   });
 
   it("discarding a tab deletion leaves Back working", async () => {
