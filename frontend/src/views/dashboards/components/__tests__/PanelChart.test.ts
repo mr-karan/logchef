@@ -286,10 +286,13 @@ it('falls back to the computed bar fill when the series colour cannot be resolve
 it('stacks negative area values downward from the baseline', async () => {
   const frame = resultFrame({ columns: [{ name: 'x', type: 'String' }, ...['a', 'b', 'c'].map(name => ({ name, type: 'Int32' }))], rows: [{ x: 'bucket', a: 100, b: -50, c: 30 }] });
   const host = await render(frame, { type: 'chart', x: 'x', y: ['a', 'b', 'c'], mark: 'area', show_values: true });
+  await vi.waitFor(() => expect(host.querySelectorAll(`.${Scatter.selectors.point}`)).toHaveLength(3));
   const groups = [...host.querySelectorAll(`.${Scatter.selectors.point}`)];
   expect(groups.map(g => g.querySelector('text')?.textContent)).toEqual(['100', '-50', '30']);
   const [a, b, c] = groups.map(g => Number(g.getAttribute('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1]));
   const tickY = (label: string) => Number([...host.querySelectorAll('.tick')].find(t => t.textContent === label)?.getAttribute('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1]);
+  // The axis can render after the marks under load; wait for the ticks this test reads.
+  await vi.waitFor(() => expect(['0', '50', '-50'].every(label => Number.isFinite(tickY(label)))).toBe(true));
   const zero = tickY('0'), fifty = tickY('50'), minusFifty = tickY('-50');
   // SVG y grows downward: c stacks on a (130), b sits at -50, below the zero baseline.
   expect(c).toBeLessThan(a);
