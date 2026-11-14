@@ -1289,7 +1289,7 @@ func TestDashboardCountCompareDefaultReducer(t *testing.T) {
 // both modes, a panel range, and the calendar form today-<n>d. Each use names
 // the panel_time feature, and the base forms name none.
 func TestDashboardPanelTime(t *testing.T) {
-	withQuery := func(panel, old, new string) string { return strings.Replace(panel, old, new, 1) }
+	withQuery := func(panel, old, replacement string) string { return strings.Replace(panel, old, replacement, 1) }
 	dashboardRange := func(value string) json.RawMessage {
 		return json.RawMessage(`{"version":2,"features":[],"default_time_range":"` + value + `","tabs":[{"id":"main","title":"Main","layout":[` + v2Layout + `]}],"panels":[` + v2ChartPanel + `]}`)
 	}

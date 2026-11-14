@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,13 +41,8 @@ func TestQueryToolsRenderMacrosAndVariables(t *testing.T) {
 		"timezone": "Asia/Kolkata", "variables": variables,
 	}
 	with := func(extra map[string]any) map[string]any {
-		args := map[string]any{}
-		for key, value := range base {
-			args[key] = value
-		}
-		for key, value := range extra {
-			args[key] = value
-		}
+		args := maps.Clone(base)
+		maps.Copy(args, extra)
 		return args
 	}
 
