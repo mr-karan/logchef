@@ -152,8 +152,8 @@ dashboard's backend mix.
 ## Time range and refresh
 
 Every panel on a dashboard shares one **time range**, set from the toolbar (the same
-quick and absolute ranges as the explorer). Changing it re-runs all panels. New
-dashboards default to the last 15 minutes.
+quick and absolute ranges as the explorer). Changing it re-runs the panels of the
+tab on screen. New dashboards default to the last 15 minutes.
 
 Set an **auto-refresh** interval (off, 30 seconds, 1 minute, or 5 minutes) to keep
 a wall-board style view current. There is also a manual refresh button.
@@ -161,6 +161,24 @@ a wall-board style view current. There is also a manual refresh button.
 Panels render correctly for viewers in any timezone: histogram buckets (time series
 panels) align to your local timezone, while table and stat panels use a UTC-anchored
 query internally so their time window doesn't shift for non-UTC viewers.
+
+## Tabs
+
+A dashboard can split its panels over up to 10 **tabs**, for example "Current day"
+and "Last 7 days". Each tab has its own grid, and a panel sits on exactly one tab.
+A dashboard with a single tab shows no tab bar.
+
+The open tab is part of the URL as `tab=<id>`, so a reload or a shared link opens
+on the same tab, and the browser's Back button returns to the previous one. A link
+that names a tab the dashboard no longer has opens the first tab.
+
+Only the tab on screen runs its queries. A tab runs when you first open it, and a
+refresh, a time range change or an auto-refresh tick runs the open tab alone. A tab
+you return to runs again only if a refresh happened while it was hidden. At most
+four panel requests are in flight at a time across tab switches.
+
+The tab bar works from the keyboard: Left and Right move between tabs, Home and End
+jump to the first and last, and Enter or Space opens the focused tab.
 
 ## Result caching
 
@@ -190,7 +208,8 @@ space.
 Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
 
 - **Move a panel**: drag it by its header to a new grid position.
-- **Resize a panel**: drag the handle on its bottom-right corner.
+- **Resize a panel**: drag the handle on its bottom-right corner. A panel can be
+  any width from 2 to 12 columns and from 1 to 12 rows tall.
 - **Add a panel**: click an empty grid slot, or the "+ Add panel" tile. This opens
   the **panel builder**, a full-height drawer where you pick the team and source,
   write the query in the Monaco editor (LogchefQL, or LogsQL for VictoriaLogs)
@@ -198,6 +217,14 @@ Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
   and chart style for time series, a required group-by and horizontal-bar or donut view for breakdowns, and a row limit and optional column subset for tables.
 - **Edit or remove** an existing panel via the pencil / trash icons on its header,
   which reopens the same panel builder drawer.
+- **Add a tab** with **Add tab** next to the tab bar. The menu beside the tab bar
+  renames the open tab, moves it left or right, or deletes it. Deleting a tab
+  deletes its panels and asks first.
+- **Move a panel to another tab** with the arrows icon on its header. The panel
+  keeps its size and lands after the panels that tab already has.
+
+Each tab packs its panels from the top left, and editing one tab never rearranges
+another.
 
 Changes stay local until you **Save**; **Cancel** discards them. Leaving with unsaved
 edits prompts first.
@@ -207,8 +234,8 @@ and asks what to do: **Save as copy** creates a new dashboard from your version,
 **Overwrite with mine** shows when the newer version was saved and replaces it after
 you confirm, and **Discard and load latest** drops your changes and shows theirs.
 
-A dashboard can contain up to 24 panels. Names are limited to 200 characters
-and descriptions to 2,000.
+A dashboard can contain up to 24 panels on up to 10 tabs. Dashboard names are
+limited to 200 characters, descriptions to 2,000 and tab names to 60.
 
 ## Who can edit
 
@@ -232,9 +259,11 @@ request.
 - `X-Logchef-Dashboard-Features` lists, separated by commas, the features the
   script's code supports. A save to a dashboard that uses a feature the script
   did not declare is refused with 409, so a script can never drop state it
-  does not know. No feature exists yet, so an empty value is correct today.
-  Declare what your code supports; never copy a dashboard's stored `features`
-  list into the header.
+  does not know. This version stores `result_frames`, `formats`,
+  `result_charts`, `tabs` (more than one tab) and `free_grid` (a width outside
+  2, 3, 4, 6, 8, 9 and 12, or a height above 6). An empty value is correct for
+  a dashboard that uses none of them. Declare what your code supports; never
+  copy a dashboard's stored `features` list into the header.
 
 `GET /dashboards` returns one summary per dashboard (panel count, panel
 kinds, tab count, revision, edit rights and a corrupt flag) and no panel
