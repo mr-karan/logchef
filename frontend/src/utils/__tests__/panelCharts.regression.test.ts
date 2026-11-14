@@ -76,3 +76,11 @@ it('reuses timestamp formatters across cells in each zone', () => {
     expect(formatter.mock.calls.length).toBeLessThanOrEqual(2);
   } finally { formatter.mockRestore(); }
 });
+
+it('keeps time labels lazy on chart rows independently of formatter caching', () => {
+  const frame = resultFrame({ columns: [{ name: 't', type: 'DateTime64' }, { name: 'n', type: 'Int32' }], rows: [{ t: '2026-11-10T00:00:00Z', n: 1 }] });
+  const model = buildPanelChart(frame, { type: 'chart', x: 't', y: ['n'] }, false);
+  expect(typeof model.rows[0].label).toBe('function');
+  expect(Object.values(model.rows[0]).filter(v => typeof v === 'string')).toEqual([model.rows[0].key]);
+  expect(model.rows[0].label()).toContain('2026');
+});

@@ -20,7 +20,7 @@ export function chartColors(key: string, text: string, other = false, used = new
   const preferred = other ? "var(--panel-chart-other)" : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})`;
   let color = preferred;
   for (let offset = 1; used.has(color) && offset <= 12; offset++) color = `var(--panel-chart-${(Math.abs(hash) + offset) % 12 + 1})`;
-  if (used.has(color)) color = `hsl(${(used.size * 137.508) % 360} 65% 45%)`;
+  if (used.has(color)) color = `hsl(${(used.size * 137.508) % 360} 65% var(--panel-chart-generated-lightness))`;
   used.add(color);
   return { color };
 }
