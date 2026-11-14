@@ -260,7 +260,8 @@ request.
   script's code supports. A save to a dashboard that uses a feature the script
   did not declare is refused with 409, so a script can never drop state it
   does not know. This version stores `result_frames`, `formats`,
-  `result_charts`, `tabs` (more than one tab) and `free_grid` (a width outside
+  `result_charts`, `stat_compare`, `thresholds`, `table_rules`,
+  `column_formats`, `tabs` (more than one tab) and `free_grid` (a width outside
   2, 3, 4, 6, 8, 9 and 12, or a height above 6). An empty value is correct for
   a dashboard that uses none of them. Declare what your code supports; never
   copy a dashboard's stored `features` list into the header.
