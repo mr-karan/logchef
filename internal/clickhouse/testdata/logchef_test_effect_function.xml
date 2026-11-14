@@ -1,0 +1,14 @@
+<functions>
+    <function>
+        <type>executable</type>
+        <name>logchef_test_effect</name>
+        <return_type>UInt64</return_type>
+        <argument>
+            <type>String</type>
+            <name>file</name>
+        </argument>
+        <format>TabSeparated</format>
+        <command>logchef_test_effect.sh</command>
+        <deterministic>true</deterministic>
+    </function>
+</functions>

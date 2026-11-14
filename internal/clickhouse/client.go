@@ -221,14 +221,11 @@ func (c *Client) Close() error {
 // queryResultRows runs a result query and returns its rows and the settings
 // it sent. LogChef owns the settings and the progress and profile callbacks
 // for result queries. Other driver options and callbacks are inherited from
-// the hook context. A rejected SELECT that reported no progress is sent
-// again, as send describes, so the progress counts one run.
+// the hook context.
 func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (rows driver.Rows, settings clickhouse.Settings, err error) {
 	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
 	settings, err = c.send(ctx, func(ctx context.Context) (clickhouse.Settings, error) {
 		return c.resultQuerySettings(ctx, opts)
-	}, func() bool {
-		return progress.silent() && isSelect(query)
 	}, func(ctx context.Context) (err error) {
 		rows, err = c.conn.Query(ctx, query)
 		return err
@@ -241,8 +238,6 @@ func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOp
 func (c *Client) queryOwn(ctx context.Context, timeoutSeconds int, query string, args ...any) (rows driver.Rows, err error) {
 	_, err = c.send(ctx, func(ctx context.Context) (clickhouse.Settings, error) {
 		return c.ownQuerySettings(ctx, timeoutSeconds)
-	}, func() bool {
-		return isSelect(query)
 	}, func(ctx context.Context) (err error) {
 		rows, err = c.conn.Query(ctx, query, args...)
 		return err

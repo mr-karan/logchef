@@ -68,9 +68,7 @@ func recordRowsReturned(ctx context.Context, rows int) {
 // caller processes result rows. For canceled or truncated queries these are
 // only the increments received.
 type queryProgress struct {
-	mu sync.Mutex
-	// reported is set by the first progress or profile packet.
-	reported    bool
+	mu          sync.Mutex
 	rows        uint64
 	bytes       uint64
 	resultBytes uint64
@@ -80,7 +78,6 @@ type queryProgress struct {
 func (p *queryProgress) add(delta *clickhouse.Progress) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.reported = true
 	p.rows += min(delta.Rows, math.MaxUint64-p.rows)
 	p.bytes += min(delta.Bytes, math.MaxUint64-p.bytes)
 }
@@ -90,14 +87,6 @@ func (p *queryProgress) profile(info *clickhouse.ProfileInfo) {
 	defer p.mu.Unlock()
 	p.resultBytes += min(info.Bytes, math.MaxUint64-p.resultBytes)
 	p.profiled = true
-	p.reported = true
-}
-
-// silent reports whether the server sent no progress or profile.
-func (p *queryProgress) silent() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return !p.reported
 }
 
 func (p *queryProgress) end(settings clickhouse.Settings, unsentModes bool, query string) queryEnd {
@@ -748,7 +737,7 @@ func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSe
 		c.logger.Debug("applying DDL query timeout", "timeout_seconds", *timeoutSeconds)
 		_, err := c.send(hookCtx, func(ctx context.Context) (clickhouse.Settings, error) {
 			return c.ownQuerySettings(ctx, *timeoutSeconds)
-		}, func() bool { return false }, func(ctx context.Context) error {
+		}, func(ctx context.Context) error {
 			return c.conn.Exec(ctx, query)
 		})
 		return err
