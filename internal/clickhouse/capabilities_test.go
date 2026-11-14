@@ -351,7 +351,11 @@ func TestSendDoesNotRepeatASelectThatReportedProgressClickHouse(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = probe.Close() })
 	var reported atomic.Bool
-	if _, err := probe.conn.Query(clickhouse.Context(t.Context(), clickhouse.WithProgress(func(*clickhouse.Progress) { reported.Store(true) })), query); !isUnknownSetting(err) {
+	rows, err := probe.conn.Query(clickhouse.Context(t.Context(), clickhouse.WithProgress(func(*clickhouse.Progress) { reported.Store(true) })), query)
+	if err == nil {
+		_ = rows.Close()
+	}
+	if !isUnknownSetting(err) {
 		t.Fatalf("the SELECT returned %v, want code 115 before its header", err)
 	}
 	if !reported.Load() {
