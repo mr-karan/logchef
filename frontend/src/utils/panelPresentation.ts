@@ -22,13 +22,13 @@ export function thresholdColor(value: FrameNumber | null | undefined, steps: Thr
 // A time or date cell matches the text the table shows (viewer zone and time
 // format applied); other cells match their exact digits or raw text, so a
 // thousands separator never hides a digit.
-export function ruleMatches(value: unknown, rule: TableRule, column?: FrameColumn, text?: string): boolean {
+export function ruleMatches(value: unknown, rule: TableRule, column?: FrameColumn, text?: () => string): boolean {
   const empty = value === null || value === undefined || value === "";
   if (rule.op === "empty") return empty;
   if (rule.op === "not_empty") return !empty;
   if (empty) return false;
   if (rule.op === "contains" || rule.op === "not_contains") {
-    const shown = text !== undefined && (column?.kind === "time" || column?.kind === "date") ? text : frameCellText(value, column);
+    const shown = text !== undefined && (column?.kind === "time" || column?.kind === "date") ? text() : frameCellText(value, column);
     const contains = shown.includes(String(rule.value));
     return rule.op === "contains" ? contains : !contains;
   }
@@ -44,7 +44,7 @@ export function ruleMatches(value: unknown, rule: TableRule, column?: FrameColum
   }
 }
 export function tableRuleColor(row: Record<string, unknown>, rules: TableRule[] = [], column?: string, columns: FrameColumn[] = [], display?: (name: string) => string): PaletteColor | undefined {
-  const matches = (name: string, rule: TableRule) => ruleMatches(row[name], rule, columns.find(c => c.name === name), display?.(name));
+  const matches = (name: string, rule: TableRule) => ruleMatches(row[name], rule, columns.find(c => c.name === name), display && (() => display(name)));
   return rules.find(rule => column === undefined
     ? rule.scope === "row" && rule.columns.some(name => matches(name, rule))
     : rule.scope === "cell" && rule.columns.includes(column) && matches(column, rule))?.color;
