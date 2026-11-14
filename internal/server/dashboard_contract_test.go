@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -253,6 +254,91 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 				if after := storedBlob(t, s, id); after != before {
 					t.Fatalf("a refused save changed the row:\n got %s\nwant %s", after, before)
 				}
+			}
+		})
+	}
+}
+
+// TestDashboardTabsAndFreeGridWriteContract runs the stored-row rule of
+// "Client schema contract" for the two features of this phase. The check
+// reads the stored row and the features header and never the request body: a
+// client that declares nothing can write a body with tabs or a free size onto
+// a row that uses neither, cannot write to the row once it uses one, and can
+// write again after a client that knows the feature saved a blob without it.
+func TestDashboardTabsAndFreeGridWriteContract(t *testing.T) {
+	s := newDashboardTestServer(t)
+	creator := mkTestUser(t, s.store, "owner@test.dev", models.UserRoleMember)
+	team, src := mkTestTeam(t, s.store, "team", creator)
+	app := dashboardApp(s, creator)
+	plain := panelBlobV2JSON(team.ID, src.ID)
+
+	for _, tc := range []struct {
+		feature string
+		// uses is the plain blob changed to use the feature and nothing else.
+		uses string
+	}{
+		{"tabs", strings.Replace(plain, `"h":2}]}]`, `"h":2}]},{"id":"week","title":"Last 7 days","layout":[]}]`, 1)},
+		{"free_grid", strings.Replace(plain, `"w":6`, `"w":5`, 1)},
+	} {
+		t.Run(tc.feature, func(t *testing.T) {
+			if tc.uses == plain {
+				t.Fatal("the fixture does not use the feature")
+			}
+			status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"`+tc.feature+`","panels":`+plain+`}`, schema2)
+			if status != http.StatusCreated {
+				t.Fatalf("create: status %d body %v", status, resp)
+			}
+			id := int(resp["data"].(map[string]any)["id"].(float64))
+			path := "/dashboards/" + strconv.Itoa(id)
+			put := func(revision int, panels string, features *string) (int, string) {
+				t.Helper()
+				body := fmt.Sprintf(`{"name":%q,"revision":%d,"panels":%s}`, tc.feature, revision, panels)
+				status, resp, _ := call(t, app, http.MethodPut, path, body, dashboardHeaders{schema: new("2"), features: features})
+				return status, fmt.Sprint(resp["message"])
+			}
+			stored := func() []string {
+				t.Helper()
+				return models.DashboardPanelsStoredFeatures(json.RawMessage(storedBlob(t, s, id)))
+			}
+			var others []string
+			for _, name := range models.KnownDashboardFeatures() {
+				if name != tc.feature {
+					others = append(others, name)
+				}
+			}
+			withoutIt := strings.Join(others, ",")
+
+			// The body is not checked: an undeclared feature may enter the row.
+			if status, message := put(1, tc.uses, nil); status != http.StatusOK {
+				t.Fatalf("a client that declares nothing writes the feature onto a plain row: status %d %s", status, message)
+			}
+			if got := stored(); !slices.Equal(got, []string{tc.feature}) {
+				t.Fatalf("stored features = %v, want [%s]", got, tc.feature)
+			}
+			before := storedBlob(t, s, id)
+
+			// The stored row is checked: without the feature, no write.
+			for _, features := range []*string{nil, &withoutIt} {
+				status, message := put(2, plain, features)
+				if status != http.StatusConflict || !strings.Contains(message, "it uses "+tc.feature+", which this client does not declare") {
+					t.Fatalf("a client without %s on a row that uses it: status %d %s", tc.feature, status, message)
+				}
+				if after := storedBlob(t, s, id); after != before {
+					t.Fatalf("a refused save changed the row:\n got %s\nwant %s", after, before)
+				}
+			}
+
+			// A client that declares the feature may write, and may remove it.
+			if status, message := put(2, plain, &tc.feature); status != http.StatusOK {
+				t.Fatalf("a client that declares %s: status %d %s", tc.feature, status, message)
+			}
+			if got := stored(); len(got) != 0 {
+				t.Fatalf("stored features = %v after the blob stopped using %s, want none", got, tc.feature)
+			}
+
+			// The row uses nothing again, so the older client can save it.
+			if status, message := put(3, plain, nil); status != http.StatusOK {
+				t.Fatalf("a client that declares nothing, after the feature was removed: status %d %s", status, message)
 			}
 		})
 	}

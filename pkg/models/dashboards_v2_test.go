@@ -164,6 +164,9 @@ func TestDashboardTabsAndFreeGrid(t *testing.T) {
 		features []string
 	}{
 		{"one tab with schema 1 sizes", v2Blob(`{"id":"p1","x":0,"y":0,"w":9,"h":6}`, v2StatPanel), []string{}},
+		// The editor sends back the list it loaded. After the last extra tab is
+		// deleted and the panel is back at a preset size, the row reports neither.
+		{"a body that still lists both after it stopped using them", json.RawMessage(strings.Replace(string(v2Blob(v2Layout, v2StatPanel)), `"features":[]`, `"features":["free_grid","tabs"]`, 1)), []string{}},
 		{"ten tabs", v2Tabs(emptyV2Tabs(10), ""), []string{"tabs"}},
 		{"a populated tab next to an empty one", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[]}`, v2StatPanel), []string{"tabs"}},
 		{"the same cells in two tabs do not overlap", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[{"id":"p2","x":0,"y":0,"w":6,"h":2}]}`, v2StatPanel+`,`+p2), []string{"tabs"}},
