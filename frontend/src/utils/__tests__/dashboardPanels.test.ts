@@ -27,6 +27,8 @@ import {
   clampDashboardName,
   dashboardCopyName,
   emptyDashboardPanels,
+  isDashboardRange,
+  resultInterval,
   switchPanelKind,
   trimDashboardGroupBy,
   withTabLayout,
@@ -696,7 +698,7 @@ describe("validatePanelsBlob", () => {
     expect(validatePanelsBlob(withPanel(chart("a", { limit: 10 })))).toMatch(/limit/i);
     expect(validatePanelsBlob(withPanel(chart("a", { language: "clickhouse-sql", translate_limit: 10 })))).toMatch(/translate limit/i);
     expect(validatePanelsBlob(withPanel(chart("a", { translate_limit: 100001 })))).toMatch(/translate limit/i);
-    expect(validatePanelsBlob(withPanel(chart("a", { interval: "24h" as never })))).toMatch(/interval/i);
+    expect(validatePanelsBlob(withPanel(chart("a", { interval: "90m" as never })))).toMatch(/interval/i);
   });
 
   it("checks the visible columns of a table", () => {
@@ -866,4 +868,46 @@ it("rejects previous-row comparison with the count default sum reducer", () => {
   expect(validatePanelsBlob(blobOf([stat]))).toContain("comparison needs first or last reducer");
   stat.viz = { type: "stat", reduce: "last", compare: { mode: "previous_row" } };
   expect(validatePanelsBlob(blobOf([stat]))).toBeNull();
+});
+
+// Phase 14: fixed intervals in both modes, a panel range, and the range grammar.
+describe("panel time validation", () => {
+  function withPanel(p: DashboardQueryPanel): DashboardPanels {
+    return blobOf([p], [{ id: p.id, x: 0, y: 0, w: 6, h: 2 }]);
+  }
+
+  it("accepts every histogram window in count and result mode", () => {
+    for (const interval of ["auto", "1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h", "12h", "24h"] as const) {
+      expect(validatePanelsBlob(withPanel(chart("a", { interval })))).toBeNull();
+      expect(validatePanelsBlob(withPanel(panel("a", { query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", interval } })))).toBeNull();
+    }
+  });
+
+  it.each(["90m", "1d", "", "24H"])("refuses the interval %j", (interval) => {
+    expect(validatePanelsBlob(withPanel(chart("a", { interval: interval as never })))).toMatch(/interval/i);
+  });
+
+  it.each(["15m", "6h", "7d", "2w", "today", "yesterday", "today-6d", "today-9999d"])("accepts the range %s", (range) => {
+    expect(isDashboardRange(range)).toBe(true);
+    expect(validatePanelsBlob(withPanel(chart("a", { range })))).toBeNull();
+  });
+
+  it.each(["", "last week", "today-0d", "today-6h", "today-10000d", "yesterday-6d", "0d", "7 d", "now-7d"])("refuses the range %j", (range) => {
+    expect(isDashboardRange(range)).toBe(false);
+    expect(validatePanelsBlob(withPanel(chart("a", { range })))).toMatch(/time range/i);
+  });
+
+  it("keeps the interval and the range when the panel kind changes", () => {
+    const count = chart("a", { interval: "24h", range: "today-6d" });
+    for (const kind of ["stat", "breakdown", "table", "chart"] as const) {
+      const switched = switchPanelKind({ ...count, viz: kind === "chart" ? { type: "stat", reduce: "sum" } : count.viz }, kind);
+      expect(switched.query).toMatchObject({ interval: "24h", range: "today-6d" });
+    }
+    const auto = switchPanelKind(chart("b"), "table");
+    expect(auto.query).not.toHaveProperty("interval");
+    expect(auto.query).not.toHaveProperty("range");
+    expect(resultInterval("auto")).toEqual({});
+    expect(resultInterval(undefined)).toEqual({});
+    expect(resultInterval("1h")).toEqual({ interval: "1h" });
+  });
 });

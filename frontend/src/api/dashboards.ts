@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats", "tabs", "free_grid"];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats", "tabs", "free_grid", "panel_time"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -52,13 +52,24 @@ export interface DashboardPanelQuery {
   text: string;
   /** Field to group a count by. `count` mode only; omitted when blank. */
   group_by?: string;
-  /** Histogram window. `count` mode only; `auto` is the only value in this release. */
-  interval?: "auto";
+  /**
+   * Bucket size. In `count` mode it is the histogram window, and in `result`
+   * mode it feeds `{{__interval}}`. Absent means `auto`.
+   */
+  interval?: "auto" | PanelInterval;
   /** Row cap for `result` mode. */
   limit?: number;
   /** `count` mode with LogchefQL only: passed as the translate request's limit. */
   translate_limit?: number;
+  /** A rolling or calendar range ("7d", "today-6d") that replaces the dashboard range. */
+  range?: string;
 }
+
+/** A histogram window, the fixed values of `query.interval`. */
+export type PanelInterval =
+  | "1s" | "5s" | "10s" | "15s" | "30s"
+  | "1m" | "5m" | "10m" | "15m" | "30m"
+  | "1h" | "2h" | "3h" | "6h" | "12h" | "24h";
 
 export type ColumnKind = "time" | "date" | "number" | "category" | "bool" | "other";
 export type StatReduce = "last" | "first" | "sum" | "avg" | "min" | "max";
@@ -144,7 +155,7 @@ export interface DashboardPanels {
    */
   cache_ttl_seconds?: number;
   /**
-   * Relative range the dashboard opens with ("15m", "6h", "7d", "today").
+   * Relative range the dashboard opens with ("15m", "6h", "7d", "today", "today-6d").
    * Absent = keep the viewer's current range.
    */
   default_time_range?: string;
@@ -265,6 +276,8 @@ export interface SqlQueryRequestBody {
   start_time?: string;
   end_time?: string;
   timezone?: string;
+  /** The window that `{{__interval}}` renders. */
+  interval?: PanelInterval;
   // See HistogramRequestBody.query_language.
   query_language?: PanelQueryLanguage;
   // Dashboard result-cache directive; omitted when caching is off.

@@ -19,9 +19,15 @@ declare const zoneBrand: unique symbol;
 export type ZoneId = string & { readonly [zoneBrand]: true };
 
 type DurationUnit = "m" | "h" | "d" | "w";
+/**
+ * A calendar range covers whole days in the viewer's zone. `back` widens
+ * "today" to start that many days earlier: `today-6d` is today and the six
+ * dates before it, until now.
+ */
 type RelativeSpec =
   | { kind: "duration"; amount: number; unit: DurationUnit }
-  | { kind: "calendar"; day: "today" | "yesterday" };
+  | { kind: "calendar"; day: "today"; back: number }
+  | { kind: "calendar"; day: "yesterday" };
 
 /** What the user chose. Plain JSON, so dirty checks and keys can stringify it. */
 export type TimeWindow =
@@ -44,6 +50,7 @@ interface WindowLabelMessage {
 const UTC = "UTC" as ZoneId;
 const UNIT_MS: Record<DurationUnit, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
 const DURATION_PATTERN = /^(\d+)([mhdw])$/;
+const CALENDAR_DAYS_PATTERN = /^today-([1-9]\d{0,3})d$/;
 // A century back from any anchor is still a valid Date.
 const MAX_DURATION_MS = 100 * 365.25 * UNIT_MS.d;
 const WALL_CLOCK_PATTERN =
@@ -70,7 +77,10 @@ export function zoneFromPreference(pref: "utc" | "local"): ZoneId {
 }
 
 export function parseRelativeSpec(text: string): RelativeSpec | null {
-  if (text === "today" || text === "yesterday") return { kind: "calendar", day: text };
+  if (text === "today") return { kind: "calendar", day: "today", back: 0 };
+  if (text === "yesterday") return { kind: "calendar", day: "yesterday" };
+  const days = CALENDAR_DAYS_PATTERN.exec(text);
+  if (days) return { kind: "calendar", day: "today", back: Number(days[1]) };
   const match = DURATION_PATTERN.exec(text);
   if (!match) return null;
   const amount = Number(match[1]);
@@ -83,7 +93,14 @@ export function parseRelativeSpec(text: string): RelativeSpec | null {
 export function relativeWindow(text: string): TimeWindow | null {
   const spec = parseRelativeSpec(text);
   if (!spec) return null;
-  return { kind: "relative", spec: spec.kind === "calendar" ? spec.day : `${spec.amount}${spec.unit}` };
+  if (spec.kind === "duration") return { kind: "relative", spec: `${spec.amount}${spec.unit}` };
+  return { kind: "relative", spec: spec.day === "today" && spec.back > 0 ? `today-${spec.back}d` : spec.day };
+}
+
+/** The whole days a calendar spec covers, counting today. Null for a rolling duration or yesterday. */
+export function calendarDayCount(text: string): number | null {
+  const spec = parseRelativeSpec(text);
+  return spec?.kind === "calendar" && spec.day === "today" ? spec.back + 1 : null;
 }
 
 /** The label message for a duration window. Calendar and absolute windows return null; show their range instead. */
@@ -119,7 +136,7 @@ export function resolveWindow(window: TimeWindow, zone: ZoneId, anchor: EpochMs)
   }
   const today = toCalendarDate(fromAbsolute(anchor, zone));
   const startOfToday = startOfDay(today, zone);
-  if (spec.day === "today") return { start: startOfToday, end: anchor, zone };
+  if (spec.day === "today") return { start: startOfDay(today.subtract({ days: spec.back }), zone), end: anchor, zone };
   return { start: startOfDay(today.subtract({ days: 1 }), zone), end: startOfToday, zone };
 }
 

@@ -49,7 +49,7 @@ describe("DashboardPanel truncation chip", () => {
 
   it("floats the chip over the body when the panel has no header", async () => {
     const root = await render(tableState("rows"), false);
-    expect(root.querySelector(".dash-panel__body .dash-panel__chip--overlay")?.textContent).toBe("First 1 row");
+    expect(root.querySelector(".dash-panel__body .dash-panel__chips--overlay .dash-panel__chip")?.textContent).toBe("First 1 row");
     expect(root.querySelectorAll(".dash-panel__chip")).toHaveLength(1);
   });
 

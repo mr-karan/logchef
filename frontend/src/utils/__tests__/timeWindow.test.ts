@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarDayCount,
   epochMs,
   formatInZone,
   formatWallClock,
@@ -193,5 +194,45 @@ describe("timestamp identifier escaping", () => {
     expect(sqlTimeCondition("event`time\\path", window)).toBe(
       "`event\\x60time\\\\path` BETWEEN toDateTime('1970-01-01 00:00:00', 'UTC') AND toDateTime('1970-01-01 00:00:01', 'UTC')",
     );
+  });
+});
+
+// RFC 0003 "Time": today-<n>d runs from the start of the day n days before
+// today until now. It covers today and the n dates before it.
+describe("the calendar form today-<n>d", () => {
+  const anchor = epochMs(Date.parse("2026-11-12T10:15:00Z"));
+
+  it("starts at midnight n days before today and ends now", () => {
+    expect(resolveWindow(relative("today-10d"), UTC, anchor)).toEqual({
+      start: epochMs(Date.parse("2026-11-02T00:00:00Z")), end: anchor, zone: UTC,
+    });
+    // 10:15 UTC is 15:45 on 2026-11-12 in Kolkata, whose midnight is 18:30 UTC.
+    expect(resolveWindow(relative("today-6d"), zone("Asia/Kolkata"), anchor).start).toBe(Date.parse("2026-11-05T18:30:00Z"));
+  });
+
+  it("is not a rolling duration: 10d at the same instant starts mid-day", () => {
+    const rolling = resolveWindow(relative("10d"), UTC, anchor);
+    const calendar = resolveWindow(relative("today-10d"), UTC, anchor);
+    expect(rolling.start).toBe(Date.parse("2026-11-02T10:15:00Z"));
+    expect(calendar.start).toBeLessThan(rolling.start);
+  });
+
+  it("keeps whole local days across a daylight-saving change", () => {
+    // Berlin left summer time on 2026-10-25, so that day has 25 hours.
+    const window = resolveWindow(relative("today-3d"), zone("Europe/Berlin"), epochMs(Date.parse("2026-10-26T12:00:00Z")));
+    expect(window.start).toBe(Date.parse("2026-10-22T22:00:00Z"));
+  });
+
+  it("round-trips its spec and counts its days", () => {
+    expect(relativeWindow("today-6d")).toEqual({ kind: "relative", spec: "today-6d" });
+    expect(calendarDayCount("today-6d")).toBe(7);
+    expect(calendarDayCount("today")).toBe(1);
+    expect(calendarDayCount("yesterday")).toBeNull();
+    expect(calendarDayCount("7d")).toBeNull();
+    expect(windowLabel(relative("today-6d"))).toBeNull();
+  });
+
+  it.each(["today-0d", "today-6", "today-6h", "today-12345d", "yesterday-6d", "today -6d", "Today-6d"])("rejects %s", (text) => {
+    expect(relativeWindow(text)).toBeNull();
   });
 });

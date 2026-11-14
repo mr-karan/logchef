@@ -3,11 +3,17 @@ import {
   classifyPanelError,
   clampTableLimit,
   execSignature,
+  panelTimeBound,
+  PANEL_INTERVALS,
   resolveAppliedRange,
   resolveEffectiveCacheTtl,
+  resolveInterval,
+  resolvePanelRange,
+  zoneOffsetChange,
 } from "../dashboardRuntime";
 import type { DashboardCachePolicy } from "@/api/meta";
 import type { DashboardQueryPanel } from "@/api/dashboards";
+import { epochMs, parseZoneId, type ResolvedWindow, type ZoneId } from "@/utils/timeWindow";
 
 // A well-formed server policy: caching on, 10m default, 1h max.
 const POLICY: DashboardCachePolicy = {
@@ -259,5 +265,133 @@ describe("execSignature", () => {
     ["translate limit", { query: { ...base.query, translate_limit: 5 } }],
   ])("changes when %s changes", (_name, patch) => {
     expect(execSignature({ ...base, ...patch })).not.toBe(execSignature(base));
+  });
+});
+
+function resolved(start: string, end: string, zone = "UTC"): ResolvedWindow {
+  return { start: epochMs(Date.parse(start)), end: epochMs(Date.parse(end)), zone: parseZoneId(zone) as ZoneId };
+}
+
+// RFC 0003 "Macros": `auto` keeps about 100 buckets, and a fixed interval
+// that would give more than 1,000 buckets is raised to the next window.
+describe("resolveInterval", () => {
+  const sevenDays = { start: Date.parse("2026-11-05T18:30:00Z"), end: Date.parse("2026-11-12T18:30:00Z") };
+  const oneHour = { start: Date.parse("2026-11-12T10:00:00Z"), end: Date.parse("2026-11-12T11:00:00Z") };
+
+  it("keeps a fixed interval that fits: 24h buckets on a 7-day range", () => {
+    expect(resolveInterval("24h", sevenDays)).toEqual({ window: "24h", raised: false });
+    expect(resolveInterval("24h", oneHour)).toEqual({ window: "24h", raised: false });
+  });
+
+  it("resolves auto and an absent interval to about 100 buckets", () => {
+    // 7 days / 100 = 6048 s, and the next window up is 2h.
+    expect(resolveInterval("auto", sevenDays)).toEqual({ window: "2h", raised: false });
+    expect(resolveInterval(undefined, sevenDays)).toEqual({ window: "2h", raised: false });
+    // 1 hour / 100 = 36 s, and the next window up is 1m.
+    expect(resolveInterval("auto", oneHour)).toEqual({ window: "1m", raised: false });
+  });
+
+  it("raises a fixed interval to the first window with at most 1,000 buckets", () => {
+    // 7 days is 604,800 s: 10m gives 1,008 buckets and 15m gives 672.
+    expect(resolveInterval("10m", sevenDays)).toEqual({ window: "15m", raised: true });
+    expect(resolveInterval("1s", sevenDays)).toEqual({ window: "15m", raised: true });
+    expect(resolveInterval("15m", sevenDays)).toEqual({ window: "15m", raised: false });
+    // 1,000 buckets exactly is allowed: 1,000 s at 1s.
+    const thousandSeconds = { start: 0, end: 1_000_000 };
+    expect(resolveInterval("1s", thousandSeconds)).toEqual({ window: "1s", raised: false });
+    expect(resolveInterval("1s", { start: 0, end: 1_001_000 })).toEqual({ window: "5s", raised: true });
+  });
+
+  it("stops at the largest window for a range no window fits", () => {
+    const tenYears = { start: 0, end: 10 * 365 * 86_400_000 };
+    expect(resolveInterval("1h", tenYears)).toEqual({ window: "24h", raised: true });
+    expect(resolveInterval("24h", tenYears)).toEqual({ window: "24h", raised: false });
+  });
+
+  it("lists the sixteen histogram windows", () => {
+    expect(PANEL_INTERVALS.map((entry) => entry.window)).toEqual(["1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h", "12h", "24h"]);
+  });
+});
+
+// A panel that sets query.range queries it in place of the dashboard range.
+describe("resolvePanelRange", () => {
+  const nowMs = Date.parse("2026-11-12T10:15:30Z");
+  const dashboardRange = resolved("2026-11-12T10:00:30Z", "2026-11-12T10:15:30Z", "Asia/Kolkata");
+
+  it("follows the dashboard range when the panel sets none", () => {
+    expect(resolvePanelRange({ panelRange: undefined, dashboardRange, nowMs, effTtlSeconds: 0 })).toBe(dashboardRange);
+  });
+
+  it("resolves a calendar range in the dashboard's zone, unsnapped", () => {
+    expect(resolvePanelRange({ panelRange: "today-6d", dashboardRange, nowMs, effTtlSeconds: 600 })).toEqual({
+      start: Date.parse("2026-11-05T18:30:00Z"), end: nowMs, zone: "Asia/Kolkata",
+    });
+  });
+
+  it("resolves a rolling range from now, snapped to the cache bucket when caching is on", () => {
+    expect(resolvePanelRange({ panelRange: "7d", dashboardRange, nowMs, effTtlSeconds: 0 })).toEqual({
+      start: nowMs - 7 * 86_400_000, end: nowMs, zone: "Asia/Kolkata",
+    });
+    const bucketEnd = Date.parse("2026-11-12T10:10:00Z");
+    expect(resolvePanelRange({ panelRange: "7d", dashboardRange, nowMs, effTtlSeconds: 600 })).toEqual({
+      start: bucketEnd - 7 * 86_400_000, end: bucketEnd, zone: "Asia/Kolkata",
+    });
+  });
+
+  it("falls back to the dashboard range for a stored range that does not parse", () => {
+    expect(resolvePanelRange({ panelRange: "last week", dashboardRange, nowMs, effTtlSeconds: 0 })).toBe(dashboardRange);
+  });
+});
+
+// RFC 0003 "Time binding".
+describe("panelTimeBound", () => {
+  it.each([
+    ["LogchefQL", "logchefql", 'level="error"', true],
+    ["LogsQL", "logsql", "error | stats count()", true],
+    ["ClickHouse SQL with its own window", "clickhouse-sql", "SELECT count() FROM logs WHERE ts >= today() - 4", false],
+    ["ClickHouse SQL with the time filter", "clickhouse-sql", "SELECT count() FROM logs WHERE {{__time_filter}}", true],
+    ["ClickHouse SQL with both bounds", "clickhouse-sql", "SELECT count() FROM logs WHERE ts >= {{__from}} AND ts < {{__to}}", true],
+    ["ClickHouse SQL with one bound", "clickhouse-sql", "SELECT count() FROM logs WHERE ts >= {{__from}}", false],
+    ["ClickHouse SQL with only an interval", "clickhouse-sql", "SELECT toStartOfInterval(ts, {{__interval}}) FROM logs", false],
+    ["ClickHouse SQL with the filter in a comment", "clickhouse-sql", "SELECT count() FROM logs -- {{__time_filter}}", false],
+    ["ClickHouse SQL with the filter in a string", "clickhouse-sql", "SELECT '{{__time_filter}}' FROM logs", false],
+  ] as const)("%s", (_name, language, text, bound) => {
+    expect(panelTimeBound({ language, text })).toBe(bound);
+  });
+});
+
+// VictoriaLogs count buckets keep the offset of the range start.
+describe("zoneOffsetChange", () => {
+  it("finds the end of summer time in Berlin", () => {
+    expect(zoneOffsetChange(resolved("2026-10-22T22:00:00Z", "2026-10-27T23:00:00Z", "Europe/Berlin"))).toEqual({
+      at: Date.parse("2026-10-25T01:00:00Z"), beforeMs: 7_200_000, afterMs: 3_600_000,
+    });
+  });
+
+  it("finds the start of summer time in New York", () => {
+    expect(zoneOffsetChange(resolved("2026-03-07T17:00:00Z", "2026-03-10T16:00:00Z", "America/New_York"))).toEqual({
+      at: Date.parse("2026-03-08T07:00:00Z"), beforeMs: -18_000_000, afterMs: -14_400_000,
+    });
+  });
+
+  it("finds the first change of a range that crosses two", () => {
+    expect(zoneOffsetChange(resolved("2026-01-01T00:00:00Z", "2026-12-31T00:00:00Z", "Europe/Berlin"))?.at).toBe(Date.parse("2026-03-29T01:00:00Z"));
+    expect(zoneOffsetChange(resolved("2024-06-01T00:00:00Z", "2026-06-01T00:00:00Z", "Europe/Berlin"))?.at).toBe(Date.parse("2024-10-27T01:00:00Z"));
+  });
+
+  it("finds none in a zone without daylight saving, or in a range between changes", () => {
+    expect(zoneOffsetChange(resolved("2026-10-22T22:00:00Z", "2026-10-27T23:00:00Z", "Asia/Kolkata"))).toBeNull();
+    expect(zoneOffsetChange(resolved("2026-10-22T22:00:00Z", "2026-10-27T23:00:00Z", "UTC"))).toBeNull();
+    expect(zoneOffsetChange(resolved("2026-11-01T00:00:00Z", "2026-11-12T00:00:00Z", "Europe/Berlin"))).toBeNull();
+    expect(zoneOffsetChange(resolved("2026-10-25T01:00:00Z", "2026-10-27T23:00:00Z", "Europe/Berlin"))).toBeNull();
+  });
+});
+
+describe("execSignature and the panel range", () => {
+  it("changes when the range changes, so a preview runs again", () => {
+    const panel: DashboardQueryPanel = { id: "p", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1" }, viz: { type: "table" } };
+    const withRange = { ...panel, query: { ...panel.query, range: "today-6d" } };
+    expect(execSignature(withRange)).not.toBe(execSignature(panel));
+    expect(execSignature({ ...panel, query: { ...panel.query, interval: "24h" } })).not.toBe(execSignature(panel));
   });
 });
