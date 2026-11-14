@@ -40,7 +40,9 @@ it.each(['.light', '.dark'])('keeps palette marks and their labels readable in %
   const colors = [...block.matchAll(/--panel-chart-\d+: (#[0-9a-f]+);/g)].map(m => m[1]);
   const background = selector === '.light' ? 1 : 0.003;
   for (const color of colors) {
-    const l = luminance(color), text = luminance(chartLabelColor(color));
+    const label = chartLabelColor(color);
+    expect(label).toBeDefined();
+    const l = luminance(color), text = luminance(label!);
     expect((Math.max(l, background) + 0.05) / (Math.min(l, background) + 0.05)).toBeGreaterThanOrEqual(3);
     expect((Math.max(l, text) + 0.05) / (Math.min(l, text) + 0.05)).toBeGreaterThanOrEqual(4.5);
   }
@@ -84,4 +86,11 @@ it.each(['.light', '.dark'])('keeps generated colours past twelve series readabl
     const l = luminance(hex);
     expect((Math.max(l, background) + 0.05) / (Math.min(l, background) + 0.05), resolved).toBeGreaterThanOrEqual(3);
   }
+});
+
+it('leaves label colour to CSS when the fill is not a hex colour', () => {
+  expect(chartLabelColor(undefined)).toBeUndefined();
+  expect(chartLabelColor('rgb(0, 0, 0)')).toBeUndefined();
+  expect(chartLabelColor('#fafafa')).toBe('#000000');
+  expect(chartLabelColor('#101010')).toBe('#ffffff');
 });

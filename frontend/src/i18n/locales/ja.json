@@ -958,7 +958,7 @@
   "panelChart.seriesLegend": "系列の凡例",
   "panelChart.sliceLegend": "扇形の凡例",
   "panelChart.toplist": "上位リスト",
-  "panelChart.labelsHidden": "値ラベルを非表示にしました。グラフを広げるか点を減らしてください。",
+  "panelChart.labelsHidden": "一部の値ラベルを非表示にしました。グラフを広げるか点を減らしてください。",
   "panelChart.other": "その他",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(null)",

@@ -958,7 +958,7 @@
   "panelChart.seriesLegend": "Legenda delle serie",
   "panelChart.sliceLegend": "Legenda dei settori",
   "panelChart.toplist": "Classifica",
-  "panelChart.labelsHidden": "Etichette nascoste. Ingrandisci il grafico o mostra meno punti.",
+  "panelChart.labelsHidden": "Alcune etichette dei valori sono nascoste. Ingrandisci il grafico o mostra meno punti.",
   "panelChart.other": "Altro",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(nullo)",

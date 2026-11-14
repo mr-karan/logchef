@@ -1,5 +1,5 @@
 import { ResizeObserver as PolyfillResizeObserver } from '@juggle/resize-observer';
-import { createApp, markRaw, nextTick } from 'vue';
+import { createApp, defineComponent, h, markRaw, nextTick, shallowRef } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useThemeStore } from '@/stores/theme';
@@ -8,11 +8,13 @@ import { countFrame, resultFrame, type PanelFrame } from '@/utils/panelFrame';
 import { suggestViz, type ChartViz } from '@/utils/panelCharts';
 import PanelChart from '../PanelChart.vue';
 import { readFileSync } from 'node:fs';
-import { Crosshair, Scatter, StackedBar, GroupedBar } from '@unovis/ts';
+import { Crosshair, Scatter, StackedBar, GroupedBar, Line, Area } from '@unovis/ts';
+import { show as tooltipShown } from '@unovis/ts/components/tooltip/style';
 markRaw(PolyfillResizeObserver.prototype);
 const cleanups: (() => void)[] = [];
-afterEach(() => { cleanups.splice(0).forEach(f => f()); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-async function render(frame: PanelFrame, viz: ChartViz, count = false, barBox = new DOMRect(0, 0, 80, 30), width = 640) {
+const height = shallowRef(260);
+afterEach(() => { cleanups.splice(0).forEach(f => f()); height.value = 260; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+async function render(frame: PanelFrame, viz: ChartViz, count = false, barBox = new DOMRect(0, 0, 80, 30), width = 640, current = shallowRef(frame)) {
   const css = readFileSync('src/assets/index.css', 'utf8');
   for (const match of css.slice(css.indexOf('.light {')).split('}')[0].matchAll(/(--panel-chart-[\w-]+): (#[0-9a-f]+);/g)) document.documentElement.style.setProperty(match[1], match[2]);
   localStorage.setItem('vueuse-color-scheme', 'light');
@@ -27,7 +29,7 @@ async function render(frame: PanelFrame, viz: ChartViz, count = false, barBox = 
   document.body.append(host);
   const pinia = createPinia();
   setActivePinia(pinia);
-  const app = createApp(PanelChart, { frame, viz, count, height: 260 }).use(pinia).use(i18n);
+  const app = createApp(defineComponent({ setup: () => () => h(PanelChart, { frame: current.value, viz, count, height: height.value }) })).use(pinia).use(i18n);
   app.mount(host);
   cleanups.push(() => { app.unmount(); host.remove(); });
   await nextTick();
@@ -137,7 +139,7 @@ it.each(['line', 'area', 'bar'] as const)('bounds show_values DOM for dense %s c
   if (mark === 'bar') expect(points).toHaveLength(0);
   else { expect(points.length).toBeGreaterThan(0); expect(points.length).toBeLessThanOrEqual(14); }
   expect(host.querySelectorAll('.panel-chart__value')).toHaveLength(0);
-  expect(host.textContent).toContain('Value labels hidden');
+  expect(host.textContent).toContain('Some value labels are hidden');
 });
 
 it('constructs a constant number of time formatters when mounting 1000 rows', async () => {
@@ -158,6 +160,7 @@ it('renders sparse point labels with a halo and retains them during keyboard nav
   await vi.waitFor(() => expect(host.querySelectorAll(`.${Scatter.selectors.point} > text`)).toHaveLength(2));
   const labels = [...host.querySelectorAll(`.${Scatter.selectors.point} > text`)];
   expect(labels.map(e => e.textContent)).toEqual(['10', '20']);
+  expect(host.textContent).not.toContain('Some value labels are hidden');
   expect(labels.every(e => e.classList.contains('panel-chart__point-value'))).toBe(true);
   host.querySelector('.panel-chart__plot')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
   await nextTick();
@@ -247,5 +250,75 @@ it.each(['line', 'area'] as const)('thins dense %s labels across rows and series
 
 it('waits for plot width before announcing hidden labels', async () => {
   const host = await render(source, { type: 'chart', x: 'x', y: ['b'], show_values: true }, false, new DOMRect(), 0);
-  expect(host.textContent).not.toContain('Value labels hidden');
+  expect(host.textContent).not.toContain('Some value labels are hidden');
+});
+
+it('hides the hover readout of the previous frame when the data refreshes', async () => {
+  const frameWith = (q: number) => resultFrame({ columns: [{ name: 'x', type: 'String' }, { name: 'a', type: 'Int32' }], rows: [{ x: 'p', a: 1 }, { x: 'q', a: q }] });
+  const current = shallowRef(frameWith(20));
+  const host = await render(current.value, { type: 'chart', x: 'x', y: ['a'] }, false, undefined, 640, current);
+  host.querySelector('svg')!.dispatchEvent(new MouseEvent('mousemove', { clientX: 470, clientY: 100, bubbles: true }));
+  await vi.waitFor(() => expect(host.querySelector('[role=tooltip]')?.textContent).toContain('qa20'));
+  const wrapper = host.querySelector('[role=tooltip]')!.parentElement!;
+  expect(wrapper.classList.contains(tooltipShown)).toBe(true);
+  current.value = frameWith(99);
+  await vi.waitFor(() => expect(wrapper.classList.contains(tooltipShown)).toBe(false));
+});
+
+it('falls back to the computed bar fill when the series colour cannot be resolved', async () => {
+  const ys = Array.from({ length: 13 }, (_, i) => `s${i}`);
+  const frame = resultFrame({ columns: [{ name: 'x', type: 'String' }, ...ys.map(name => ({ name, type: 'Int32' }))], rows: [Object.fromEntries([['x', 'g'], ...ys.map(name => [name, 5])])] });
+  const computed = window.getComputedStyle;
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+    const style = computed(element, pseudo);
+    if (element.tagName !== 'path') return style;
+    return new Proxy(style, {
+      get: (target, key) => key === 'fill' ? 'rgb(250, 250, 250)' : typeof Reflect.get(target, key) === 'function' ? Reflect.get(target, key).bind(target) : Reflect.get(target, key),
+      set: (target, key, value) => Reflect.set(target, key, value),
+    });
+  });
+  const host = await render(frame, { type: 'chart', x: 'x', y: ys, mark: 'bar', stack: 'none', show_values: true }, false, new DOMRect(0, 0, 40, 30), 2000);
+  await vi.waitFor(() => expect(host.querySelectorAll('.panel-chart__value')).toHaveLength(13));
+  // The 13th series gets a generated hsl() colour with a nested CSS variable, which Unovis cannot parse.
+  expect([...host.querySelectorAll<SVGTextElement>('.panel-chart__value')].at(-1)!.style.fill).toBe('rgb(0, 0, 0)');
+});
+
+it('stacks negative area values downward from the baseline', async () => {
+  const frame = resultFrame({ columns: [{ name: 'x', type: 'String' }, ...['a', 'b', 'c'].map(name => ({ name, type: 'Int32' }))], rows: [{ x: 'bucket', a: 100, b: -50, c: 30 }] });
+  const host = await render(frame, { type: 'chart', x: 'x', y: ['a', 'b', 'c'], mark: 'area', show_values: true });
+  const groups = [...host.querySelectorAll(`.${Scatter.selectors.point}`)];
+  expect(groups.map(g => g.querySelector('text')?.textContent)).toEqual(['100', '-50', '30']);
+  const [a, b, c] = groups.map(g => Number(g.getAttribute('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1]));
+  // SVG y grows downward: c stacks on a (130), b sits below the zero baseline.
+  expect(c).toBeLessThan(a);
+  expect(b).toBeGreaterThan(a);
+  expect(b).toBeGreaterThan(c);
+});
+
+it.each([['line', undefined], ['area', undefined], ['area', 'none']] as const)('draws %s %s paths from the full rows', async (mark, stack) => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['b'], mark, stack });
+  const selector = mark === 'line' ? Line.selectors.linePath : Area.selectors.area;
+  const paths = [...host.querySelectorAll(`.${selector}`)];
+  expect(paths.length).toBeGreaterThan(0);
+  // Without row data Unovis draws a flat placeholder; a real path reaches the top of the y domain for b=20.
+  const ys = paths.flatMap(p => [...(p.getAttribute('d') ?? '').matchAll(/[ML][\d.-]+,([\d.-]+)/g)].map(m => Number(m[1])));
+  expect(Math.min(...ys)).toBeLessThan(50);
+});
+
+it('keeps the live region stable across re-renders of the same bucket', async () => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['a', 'b'] });
+  host.querySelector('.panel-chart__plot')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+  await nextTick();
+  const live = host.querySelector('[aria-live="polite"]')!;
+  const changes: MutationRecord[] = [];
+  const observer = new MutationObserver(records => changes.push(...records));
+  observer.observe(live, { childList: true, subtree: true, characterData: true });
+  height.value = 300;
+  await nextTick();
+  height.value = 320;
+  await nextTick();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  observer.disconnect();
+  expect(live.textContent).toContain('a -30');
+  expect(changes).toHaveLength(0);
 });

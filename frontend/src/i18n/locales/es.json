@@ -958,7 +958,7 @@
   "panelChart.seriesLegend": "Leyenda de series",
   "panelChart.sliceLegend": "Leyenda de sectores",
   "panelChart.toplist": "Lista principal",
-  "panelChart.labelsHidden": "Etiquetas de valores ocultas. Amplía el gráfico o muestra menos puntos.",
+  "panelChart.labelsHidden": "Algunas etiquetas de valores están ocultas. Amplía el gráfico o muestra menos puntos.",
   "panelChart.other": "Otros",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(nulo)",

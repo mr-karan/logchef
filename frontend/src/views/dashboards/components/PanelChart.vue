@@ -3,7 +3,7 @@ import { useElementSize } from "@vueuse/core";
 import { computed, markRaw, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { VisAxis, VisStackedBar, VisGroupedBar, VisLine, VisArea, VisScatter, VisXYContainer, VisCrosshair, VisTooltip } from "@unovis/vue";
-import { Scale, StackedBar, GroupedBar, Scatter, Direction, type Tooltip } from "@unovis/ts";
+import { Scale, StackedBar, GroupedBar, Scatter, Direction, type Crosshair, type Tooltip } from "@unovis/ts";
 import { getStackedData } from "@unovis/ts/utils/data";
 import { getHexValue } from "@unovis/ts/utils/color";
 import { useThemeStore } from "@/stores/theme";
@@ -112,13 +112,19 @@ function xTick(value: number | Date) {
 const yTick = (value: number | Date) => chartValue(Number(value), props.viz.format).text;
 const active = ref<number | null>(null);
 const sharedTooltip = ref<{ component?: Tooltip }>();
+const crosshair = ref<{ component?: Crosshair<ChartRow> }>();
 watch(active, index => {
   if (!horizontal.value) return;
   const tooltipComponent = sharedTooltip.value?.component;
   if (index === null) tooltipComponent?.hide();
   else tooltipComponent?.show(tooltip(model.value.rows[index]), { x: plotWidthAvailable.value / 2, y: chartHeight.value * (index + 0.5) / model.value.rows.length });
 });
-watch(model, () => { active.value = null; });
+// The container no longer receives data, so Unovis does not hide a hover readout of the old frame on refresh.
+watch(model, () => {
+  active.value = null;
+  sharedTooltip.value?.component?.hide();
+  crosshair.value?.component?.hide();
+});
 function keydown(event: KeyboardEvent) {
   if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Escape"].includes(event.key)) return;
   event.preventDefault();
@@ -167,9 +173,12 @@ function barLabels(svg: SVGSVGElement) {
       text.setAttribute('dominant-baseline', 'central');
       text.textContent = value.text;
       bar.parentNode?.append(text);
+      // Unovis cannot resolve a CSS variable nested inside hsl(), so fall back to the fill the browser computed.
       const fill = chartLabelColor(getHexValue(series.color, text) ?? getHexValue(getComputedStyle(bar).fill, bar));
-      text.style.fill = fill;
-      text.style.stroke = fill === '#ffffff' ? '#000000' : '#ffffff';
+      if (fill) {
+        text.style.fill = fill;
+        text.style.stroke = fill === '#ffffff' ? '#000000' : '#ffffff';
+      }
       if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) text.remove();
     });
   });
@@ -196,7 +205,7 @@ function barLabels(svg: SVGSVGElement) {
             <VisScatter v-for="(accessor, i) in labelAccessors" :key="model.series[i].key" :data="pointRows[i]" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />
           </template>
           <VisTooltip ref="sharedTooltip" :triggers="barTooltipTriggers" />
-          <VisCrosshair :data="model.rows" v-if="!horizontal" :duration="0" :x="x" :y="stacked ? undefined : accessors" :yStacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hideWhenFarFromPointer="false" :forceShowAt="active === null ? undefined : model.rows[active]?.x" />
+          <VisCrosshair ref="crosshair" :data="model.rows" v-if="!horizontal" :duration="0" :x="x" :y="stacked ? undefined : accessors" :yStacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hideWhenFarFromPointer="false" :forceShowAt="active === null ? undefined : model.rows[active]?.x" />
         </VisXYContainer>
       </div>
       <div class="sr-only" aria-live="polite" aria-atomic="true">
