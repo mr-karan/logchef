@@ -51,6 +51,9 @@ type AllFieldValuesParams = datasource.AllFieldValuesRequest
 type AllFieldValuesResult = datasource.AllFieldValuesResult
 
 func GetFieldValues(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, params FieldValuesParams) (*FieldValuesResult, error) {
+	if _, err := ValidateTimezone(params.Timezone); err != nil {
+		return nil, err
+	}
 	result, err := ds.GetFieldValues(ctx, src.SourceID(), params)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {
@@ -62,6 +65,9 @@ func GetFieldValues(ctx context.Context, ds *datasource.Service, src access.Auth
 }
 
 func GetAllFieldValues(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, params AllFieldValuesParams) (AllFieldValuesResult, error) {
+	if _, err := ValidateTimezone(params.Timezone); err != nil {
+		return nil, err
+	}
 	result, err := ds.GetAllFieldValues(ctx, src.SourceID(), params)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {

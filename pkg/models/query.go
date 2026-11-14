@@ -109,6 +109,8 @@ type APIQueryRequest struct {
 	StartTime string `json:"start_time,omitempty"`
 	EndTime   string `json:"end_time,omitempty"`
 	Timezone  string `json:"timezone,omitempty"`
+	// Interval is the histogram window that {{__interval}} renders, such as "24h".
+	Interval string `json:"interval,omitempty"`
 	// Variables for template substitution in the query text.
 	// Example: {"name": "from_date", "type": "date", "value": "2026-01-01T00:00:00Z"}
 	Variables []TemplateVariable `json:"variables,omitempty"`
@@ -448,6 +450,11 @@ type CreateExportJobRequest struct {
 	Limit        int                `json:"limit,omitempty"`
 	QueryTimeout *int               `json:"query_timeout,omitempty"`
 	Variables    []TemplateVariable `json:"variables,omitempty"`
+	// The inputs of the built-in macros, as on the query endpoint.
+	StartTime string `json:"start_time,omitempty"`
+	EndTime   string `json:"end_time,omitempty"`
+	Timezone  string `json:"timezone,omitempty"`
+	Interval  string `json:"interval,omitempty"`
 }
 
 // ExportJobOwner identifies a replica and its current process.

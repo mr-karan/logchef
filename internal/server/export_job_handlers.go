@@ -16,8 +16,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
-	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -218,23 +218,14 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 		return
 	}
 
-	vars := make([]template.Variable, len(req.Variables))
-	for i, v := range req.Variables {
-		vars[i] = template.Variable{
-			Name:  v.Name,
-			Type:  template.VariableType(v.Type),
-			Value: v.Value,
-		}
-	}
-	processedSQL, err := template.SubstituteVariables(req.RawSQL, vars)
-	if err != nil {
-		s.failExportJob(queryCtx, jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
-		return
-	}
-
 	source, err := s.store.GetSource(queryCtx, sourceID)
 	if err != nil {
 		s.failExportJob(queryCtx, jobID, "", "Source not found")
+		return
+	}
+	processedSQL, err := core.RenderSourceSQL(source, req)
+	if err != nil {
+		s.failExportJob(queryCtx, jobID, "", err.Error())
 		return
 	}
 	client, err := s.clickhouse.GetConnection(sourceID)

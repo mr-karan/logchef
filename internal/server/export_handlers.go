@@ -16,7 +16,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
-	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -65,18 +64,9 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 			models.ValidationErrorType)
 	}
 
-	vars := make([]template.Variable, len(req.Variables))
-	for i, v := range req.Variables {
-		vars[i] = template.Variable{
-			Name:  v.Name,
-			Type:  template.VariableType(v.Type),
-			Value: v.Value,
-		}
-	}
-	processedSQL, err := template.SubstituteVariables(req.RawSQL, vars)
+	processedSQL, err := core.RenderSourceSQL(source, req)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
 	client, err := s.clickhouse.GetConnection(sourceID)

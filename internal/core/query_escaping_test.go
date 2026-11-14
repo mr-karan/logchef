@@ -68,7 +68,7 @@ func TestPreparedQueriesRoundTripVictoriaLogs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			windowed, err := prepareSQLQuery(cfg, req, template.LogsQL)
+			windowed, err := prepareSQLQuery(cfg, req, templateTarget{dialect: template.LogsQL})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +76,7 @@ func TestPreparedQueriesRoundTripVictoriaLogs(t *testing.T) {
 			for _, text := range []string{`* | generate_sequence 1 | format '{{value}}' as value | fields value`, `* | generate_sequence 1 | format "{{value}}" as value | fields value`} {
 				quotedReq := req
 				quotedReq.QueryText = text
-				quoted, err := prepareSQLQuery(cfg, quotedReq, template.LogsQL)
+				quoted, err := prepareSQLQuery(cfg, quotedReq, templateTarget{dialect: template.LogsQL})
 				if err != nil {
 					t.Fatal(err)
 				}
