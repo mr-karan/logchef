@@ -51,6 +51,34 @@ logchef sql "SELECT count() FROM logs.app
 
 You must include **both** placeholders or neither.
 
+## Time macros and variables (queries copied from a dashboard panel)
+
+A panel's SQL uses server-side macros instead of literal time bounds. Run it
+unchanged: the server fills the macros from the request.
+
+| Macro | Renders | Comes from |
+|---|---|---|
+| `{{__time_filter}}` | `` `ts` >= <from> AND `ts` < <to> `` on the source's timestamp column | `--since` / `--from`+`--to` |
+| `{{__from}}`, `{{__to}}` | `toDateTime64('…', 3, 'UTC')` | `--since` / `--from`+`--to` |
+| `{{__interval}}` | `INTERVAL 1 DAY` | `--interval` |
+| `{{__interval_s}}` | `86400` | `--interval` |
+| `{{__timezone}}` | `'Asia/Kolkata'` | the configured timezone |
+
+```bash
+logchef sql 'SELECT toStartOfInterval(_timestamp, {{__interval}}, {{__timezone}}) AS t, count() AS n
+  FROM logs.app WHERE {{__time_filter}} AND service = {{service}} GROUP BY t ORDER BY t' \
+  -s 7d --interval 24h --var service=api
+```
+
+- `--interval` is one of `1s 5s 10s 15s 30s 1m 5m 10m 15m 30m 1h 2h 3h 6h 12h 24h`.
+- `--var NAME=VALUE` fills `{{NAME}}` as a quoted text literal. `NAME:number=500`
+  and `NAME:date=2026-11-06` send a number or a date. Repeat the flag per variable.
+- With a time macro in the query the text is not rewritten, and the window rides
+  in the request. With no time flag the window is the configured default range.
+- A macro inside a string or a quoted identifier is an error. A missing input
+  fails with the flag to add, for example `macro {{__interval}} needs an interval`.
+- `{{__tz_offset}}` is LogsQL only (see `logsql-victorialogs.md`).
+
 ## Preview without executing
 
 ```bash
@@ -113,8 +141,9 @@ than a client disconnect.
 
 ## Reminders
 
-- `sql` has no parameter binding, and your text runs verbatim. Never splice
-  untrusted text (values copied from log lines, user input) into a query.
+- Outside `{{name}}` placeholders your text runs verbatim. Never splice
+  untrusted text (values copied from log lines, user input) into a query: pass
+  it with `--var`, which the server substitutes as a literal.
 - The table lives at `database.table` — get the exact name from
   `logchef sources` (the `TARGET` column) or `logchef schema`.
 - `sql` does not accept LogchefQL. Filtering-only tasks belong in `logchef query`.
