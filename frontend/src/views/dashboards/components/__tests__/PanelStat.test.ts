@@ -147,3 +147,29 @@ it.each(['green', 'amber', 'red', 'blue', 'purple', 'gray'] as const)('uses the 
   expect(host.querySelector<HTMLElement>('.panel-stat')?.style.backgroundColor).toBe('');
  } finally {app.unmount();host.remove();widthSpy.mockRestore();boundsSpy.mockRestore();}
 });
+
+it('uses the tile foreground for notices and sparkline messages in background mode', async () => {
+ const viz = { type:'stat' as const, value:'n', order_by:'day', sparkline:true, thresholds:[{ value:null, color:'red' as const }], color_mode:'background' as const };
+ const panel: DashboardQueryPanel = { id:'s',kind:'query',title:'',team_id:1,source_id:1,query:{mode:'result',language:'clickhouse-sql',text:'SELECT day,n'},viz };
+ const token = 'var(--panel-red)';
+ const mount = async (rows: Record<string, unknown>[], type: string, confirmed = false) => {
+  const host=document.createElement('div');
+  const frame=resultFrame({columns:[{name:'day',type:'String'},{name:'n',type}],rows});
+  const shown: DashboardQueryPanel = confirmed ? { ...panel, viz: { ...viz, columns: { n: { kind:'number', confidence:'confirmed' }, day: { kind:'date', confidence:'confirmed' } } } } : panel;
+  const app=createApp({render:()=>h(PanelStat,{frame,panel:shown})}).use(createPinia()).use(i18n);
+  app.mount(host);await nextTick();
+  return { host, app };
+ };
+ // A tie on the order column adds a notice; values past 2^53 make the sparkline approximate.
+ const tied = await mount([{day:'2026-11-12',n:'9007199254740993'},{day:'2026-11-12',n:'9007199254740995'}], 'UInt64');
+ try {
+  const notice=tied.host.querySelector<HTMLElement>('[role=status]');
+  expect(notice?.textContent).toBeTruthy();expect(notice?.style.color).toBe(token);
+  const approximate=[...tied.host.querySelectorAll<HTMLElement>('span')].find(e=>e.textContent===i18n.global.t('dashboardBuilder.ApproximateSparkline'));
+  expect(approximate?.style.color).toBe(token);
+ } finally {tied.app.unmount();}
+ const overflow = await mount([{day:'2026-11-12',n:'1e400'}], 'String', true);
+ try {
+  expect(overflow.host.querySelector<HTMLElement>('[role=alert]')?.style.color).toBe(token);
+ } finally {overflow.app.unmount();}
+});
