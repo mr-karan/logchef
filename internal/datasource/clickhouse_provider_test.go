@@ -537,3 +537,56 @@ func TestClickHouseProviderSourceMetadata(t *testing.T) {
 		})
 	}
 }
+
+// TestClassifyActivityError keeps a timeout on an ordinary source retryable:
+// only an opted-in View, which runs under a fixed time limit, turns a timeout
+// into ErrSourceActivityLimitExceeded.
+func TestClassifyActivityError(t *testing.T) {
+	timeout := fmt.Errorf("query: %w", context.DeadlineExceeded)
+	readCap := &ch.Exception{Code: 158, Message: "limit for rows to read exceeded"}
+	tests := []struct {
+		name    string
+		err     error
+		enforce bool
+		limit   bool
+	}{
+		{"timeout on a table source stays a timeout", timeout, false, false},
+		{"timeout on an opted-in View is a limit", timeout, true, true},
+		{"read cap on a table source is a limit", readCap, false, true},
+		{"read cap on an opted-in View is a limit", readCap, true, true},
+		{"other errors pass through", errors.New("boom"), true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyActivityError(tt.err, tt.enforce)
+			if errors.Is(got, ErrSourceActivityLimitExceeded) != tt.limit {
+				t.Fatalf("limit = %v, want %v (%v)", !tt.limit, tt.limit, got)
+			}
+			if !errors.Is(got, tt.err) {
+				t.Fatalf("lost the cause: %v", got)
+			}
+		})
+	}
+}
+
+// TestUpdateSourceNeverSendsStoredPasswordToNewHost refuses to reuse the
+// stored password when the host or username changes, before any connection.
+func TestUpdateSourceNeverSendsStoredPasswordToNewHost(t *testing.T) {
+	provider := NewClickHouseProvider(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for name, conn := range map[string]string{
+		"new host":     `{"host":"other.example:9000","username":"reader","password":"","database":"logs","table_name":"app"}`,
+		"new username": `{"host":"ch.example:9000","username":"admin","password":"","database":"logs","table_name":"app"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			source := &models.Source{
+				SourceType: models.SourceTypeClickHouse,
+				Connection: models.ConnectionInfo{Host: "ch.example:9000", Username: "reader", Password: "stored-secret", Database: "logs", TableName: "app"},
+			}
+			_, err := provider.UpdateSource(context.Background(), source, &models.UpdateSourceRequest{Connection: json.RawMessage(conn)})
+			var validation *ValidationError
+			if !errors.As(err, &validation) || validation.Field != "connection.password" {
+				t.Fatalf("err = %v, want a connection.password validation error", err)
+			}
+		})
+	}
+}
