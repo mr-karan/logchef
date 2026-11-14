@@ -338,6 +338,40 @@ func TestSendRepeatsARejectedSelectClickHouse(t *testing.T) {
 	}
 }
 
+// TestSendDoesNotRepeatASelectThatReportedProgressClickHouse runs a SELECT
+// whose scalar subquery reads rows and then fails with code 115, before the
+// SELECT's header arrives. The read of the server's modes after the failure
+// leaves out one the SELECT sent. The server reported progress, so the
+// SELECT ran in part, and Logchef must not send it again.
+func TestSendDoesNotRepeatASelectThatReportedProgressClickHouse(t *testing.T) {
+	const query = "SELECT (SELECT throwIf(count() > 0, 'Unknown setting', toInt32(115)) FROM numbers(50000000)) SETTINGS allow_custom_error_code_in_throwif = 1, max_block_size = 1000"
+	probe, err := NewClient(ClientOptions{Host: testClickHouseAddr(t)}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = probe.Close() })
+	var reported atomic.Bool
+	if _, err := probe.conn.Query(clickhouse.Context(t.Context(), clickhouse.WithProgress(func(*clickhouse.Progress) { reported.Store(true) })), query); !isUnknownSetting(err) {
+		t.Fatalf("the SELECT returned %v, want code 115 before its header", err)
+	}
+	if !reported.Load() {
+		t.Skip("this ClickHouse server reports no progress before a scalar subquery fails")
+	}
+	client, counter := countedClient(t)
+	rewriteModeReads(client, func(read int64, modes clickhouse.Settings) {
+		if read > 1 {
+			delete(modes, "read_overflow_mode_leaf")
+		}
+	})
+	_, err = client.QueryWithOptions(t.Context(), query, QueryOptions{})
+	if n := counter.queries.Load(); n != 1 {
+		t.Fatalf("the SELECT was sent %d times, want 1", n)
+	}
+	if !isUnknownSetting(err) {
+		t.Fatalf("the SELECT returned %v, want code 115", err)
+	}
+}
+
 // TestSendKeepsTheQueryOwnUnknownSettingClickHouse sends a SELECT whose own
 // SETTINGS name a setting the server does not know, right after a dial. The
 // server's modes read again are the same, so sending it again cannot help:
