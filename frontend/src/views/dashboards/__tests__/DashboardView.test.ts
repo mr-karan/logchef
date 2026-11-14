@@ -46,7 +46,6 @@ function tabDashboard() {
   return { ...dashboard, panels };
 }
 
-import { useDashboardsStore } from "@/stores/dashboards";
 import DashboardView from "../DashboardView.vue";
 import VersionBanner from "@/components/VersionBanner.vue";
 import { useMetaStore } from "@/stores/meta";
