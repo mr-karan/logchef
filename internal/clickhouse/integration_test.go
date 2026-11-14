@@ -173,13 +173,13 @@ func TestNativeJSONCapabilityRetryClickHouse(t *testing.T) {
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	client.flattensJSON(cancelled)
-	if client.flattenedJSON != nil {
+	if client.flattenedJSON.cached() {
 		t.Fatal("failed capability probe was cached")
 	}
 	if _, err := client.Query(ctx, "SELECT 1"); err != nil {
 		t.Fatal(err)
 	}
-	if client.flattenedJSON == nil {
+	if !client.flattenedJSON.cached() {
 		t.Fatal("successful query did not retry capability detection")
 	}
 }

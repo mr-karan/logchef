@@ -16,10 +16,6 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	defer cancel()
 
 	if err := c.conn.Ping(ctx); err != nil {
-		// The server may come back as another version, so probe capabilities again.
-		c.capabilitiesMu.Lock()
-		c.flattenedJSON = nil
-		c.capabilitiesMu.Unlock()
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
 		}

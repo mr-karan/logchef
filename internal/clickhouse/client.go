@@ -9,8 +9,9 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/metrics"
@@ -50,12 +51,12 @@ type Client struct {
 	metrics    *metrics.ClickHouseMetrics
 	// querySettings holds per-source ClickHouse settings applied to every query
 	// context (e.g. max_result_rows, readonly). Nil when the source configures none.
-	querySettings  clickhouse.Settings
-	capabilitiesMu sync.Mutex
-	flattenedJSON  *bool
-	// throwModes are the overflow modes this server knows, sent as throw;
-	// nil until read from the server's version.
-	throwModes clickhouse.Settings
+	querySettings clickhouse.Settings
+	// dials counts the connections the driver dialed; each may reach another server.
+	dials atomic.Uint64
+	// throwModes are the overflow modes the server knows, sent as throw.
+	throwModes    serverFact[clickhouse.Settings]
+	flattenedJSON serverFact[bool]
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -107,6 +108,15 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	}
 
 	const dialTimeout = 10 * time.Second
+	client := &Client{
+		logger:     logger,
+		queryHooks: append([]QueryHook{NewLogQueryHook(logger, false)}, opts.QueryHooks...),
+		sourceID:   opts.SourceID,
+		source:     opts.Source,
+	}
+	client.throwModes = serverFact[clickhouse.Settings]{dials: &client.dials, read: client.readThrowModes}
+	client.flattenedJSON = serverFact[bool]{dials: &client.dials, read: client.readFlattenedJSON}
+	dial := newDialContext(tlsCfg, dialTimeout)
 	options := &clickhouse.Options{
 		Addr: []string{host},
 		Auth: clickhouse.Auth{
@@ -119,7 +129,13 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 			"max_execution_time": 60,
 		},
 		DialTimeout: dialTimeout,
-		DialContext: newDialContext(tlsCfg, dialTimeout),
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			conn, err := dial(ctx, addr)
+			if err == nil {
+				client.dials.Add(1)
+			}
+			return conn, err
+		},
 		Compression: &clickhouse.Compression{
 			Method: clickhouse.CompressionLZ4,
 		},
@@ -143,14 +159,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating clickhouse connection: %w", err)
 	}
-
-	client := &Client{
-		conn:       conn,
-		logger:     logger,
-		queryHooks: append([]QueryHook{NewLogQueryHook(logger, false)}, opts.QueryHooks...),
-		sourceID:   opts.SourceID,
-		source:     opts.Source,
-	}
+	client.conn = conn
 	if len(opts.QuerySettings) > 0 {
 		client.querySettings = maps.Clone(clickhouse.Settings(opts.QuerySettings))
 	}
@@ -209,13 +218,20 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Client) queryResultRows(ctx context.Context, query string, settings clickhouse.Settings, progress *queryProgress) (driver.Rows, error) {
-	if c.flattensJSON(ctx) {
-		settings["output_format_native_use_flattened_dynamic_and_json_serialization"] = 1
+// queryResultRows runs a result query and returns its rows, the settings it
+// sent and whether it left out an overflow mode the server knows. LogChef owns
+// the settings and the progress and profile callbacks for result queries.
+// Other driver options and callbacks are inherited from the hook context.
+func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (rows driver.Rows, settings clickhouse.Settings, unsentModes bool, err error) {
+	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
+	settings, err = c.send(ctx, func(ctx context.Context) (clickhouse.Settings, error) {
+		return c.resultQuerySettings(ctx, opts)
+	}, func(ctx context.Context) (err error) {
+		rows, err = c.conn.Query(ctx, query)
+		return err
+	})
+	if err != nil {
+		return nil, nil, false, err
 	}
-	// LogChef owns the settings and the progress and profile callbacks for
-	// result queries. Other driver options and callbacks are inherited from
-	// the hook context.
-	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(settings), clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
-	return c.conn.Query(ctx, query)
+	return rows, settings, c.modesUnsent(ctx, settings), nil
 }
