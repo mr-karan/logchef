@@ -182,6 +182,23 @@ func (p *ClickHouseProvider) ValidateConnection(ctx context.Context, req *models
 	return &models.ConnectionValidationResult{Message: "Connection successful"}, nil
 }
 
+// keepStoredPassword fills a blank password from storage. API responses never
+// include the password, so edit flows send it blank to mean "keep the existing
+// one". A blank username means auth was turned off, so the stored password is
+// dropped too. The stored password is only reused for the same host, username
+// and TLS setting: it must never be sent to a server the caller just named, or
+// in plaintext where it went over TLS.
+func keepStoredPassword(conn *models.ConnectionInfo, stored models.ConnectionInfo) error {
+	if conn.Password != "" || conn.Username == "" {
+		return nil
+	}
+	if conn.Host != stored.Host || conn.Username != stored.Username || conn.TLSEnable != stored.TLSEnable {
+		return &ValidationError{Field: "connection.password", Message: "Enter the password again: the host, username or TLS setting changed"}
+	}
+	conn.Password = stored.Password
+	return nil
+}
+
 func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.Source, req *models.UpdateSourceRequest) (*SourceUpdateResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
@@ -204,17 +221,8 @@ func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.So
 		if err != nil {
 			return nil, err
 		}
-		// API responses never include the password, so edit flows send it blank
-		// to mean "keep the existing one". A blank username means auth was
-		// turned off, so the stored password is dropped too. The stored password
-		// is only reused for the same host, username and TLS setting: it must
-		// never be sent to a server the caller just named, or in plaintext where
-		// it went over TLS.
-		if conn.Password == "" && conn.Username != "" {
-			if conn.Host != source.Connection.Host || conn.Username != source.Connection.Username || conn.TLSEnable != source.Connection.TLSEnable {
-				return nil, &ValidationError{Field: "connection.password", Message: "Enter the password again: the host, username or TLS setting changed"}
-			}
-			conn.Password = source.Connection.Password
+		if err := keepStoredPassword(&conn, source.Connection); err != nil {
+			return nil, err
 		}
 		if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Database, conn.TableName); err != nil {
 			return nil, err
