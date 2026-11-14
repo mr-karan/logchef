@@ -2,6 +2,7 @@
   "ui.dashboardNeedsReload": "此儀表板為唯讀狀態。請重新載入以使用其較新的功能。",
   "ui.panelNeedsReload": "此面板使用了目前版本無法顯示的功能。",
   "ui.dateAndTime": "日期和時間",
+  "pages.time": "時間",
   "ui.serverUpdated": "Logchef 已更新。請重新載入以繼續。",
   "dashboards.conflict.title": "你編輯期間此儀表板已被變更",
   "dashboards.conflict.description": "有人儲存了較新的版本，因此你的變更未儲存。變更仍保留在這裡。請選擇如何保留它們。",

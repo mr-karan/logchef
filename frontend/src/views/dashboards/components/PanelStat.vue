@@ -44,6 +44,7 @@ const formatted = computed(() => {
   return formatNumber(value, format.value, { compact });
 });
 const thresholdStyle = computed(() => props.panel.viz.type === "stat" ? paletteStyle(thresholdColor(result.value.stat?.value, props.panel.viz.thresholds), props.panel.viz.color_mode === "background") : {});
+const backgroundColor = computed(() => props.panel.viz.type === "stat" && props.panel.viz.color_mode === "background" ? thresholdStyle.value.color : undefined);
 const comparison = computed(() => result.value.stat?.comparison);
 const delta = computed(() => comparison.value ? formatNumber(comparison.value.delta, format.value) : null);
 const percent = computed(() => comparison.value?.percent === null || comparison.value?.percent === undefined ? null : formatNumber(comparison.value.percent, { decimals: 2, suffix: "%" }));
@@ -87,30 +88,30 @@ function keydown(event: KeyboardEvent) {
 
 <template>
   <div ref="container" class="panel-stat" :style="panel.viz.type === 'stat' && panel.viz.color_mode === 'background' ? thresholdStyle : {}">
-    <p v-if="result.error" class="text-xs text-destructive" role="alert">{{ result.error }}</p>
+    <p v-if="result.error" class="text-xs text-destructive" :style="{ color: backgroundColor }" role="alert">{{ result.error }}</p>
     <template v-else>
       <span ref="measure" class="panel-stat__measure" aria-hidden="true">{{ standard?.text }}</span>
       <span class="panel-stat__value" :style="{ color: thresholdStyle.color }" :title="formatted?.exact">{{ formatted?.text ?? (result.stat?.rowLabel ? 'NULL' : 'No data') }}</span>
-      <span v-if="result.stat?.rowLabel" class="text-xs text-muted-foreground">{{ result.stat.rowLabel }}</span>
-      <div v-if="comparison" class="panel-stat__comparison text-xs text-center" :class="deltaClass">
+      <span v-if="result.stat?.rowLabel" class="text-xs text-muted-foreground" :style="{ color: backgroundColor }">{{ result.stat.rowLabel }}</span>
+      <div v-if="comparison" class="panel-stat__comparison text-xs text-center" :class="deltaClass" :style="{ color: backgroundColor }">
         <span :title="delta?.exact">{{ comparison.direction > 0 ? '+' : '' }}{{ delta?.text }}</span>
         <span v-if="percent"> ({{ comparison.direction > 0 ? '+' : '' }}{{ percent.text }})</span>
-        <span class="block text-muted-foreground">{{ t('dashboardBuilder.ComparedWith', { date: comparison.rowLabel }) }}</span>
+        <span class="block text-muted-foreground" :style="{ color: backgroundColor }">{{ t('dashboardBuilder.ComparedWith', { date: comparison.rowLabel }) }}</span>
       </div>
       <template v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length">
         <!-- Messages stay outside role="img": assistive technology treats an image's children as decoration. -->
-        <p v-if="sparkline.error" class="text-xs text-destructive" role="alert">{{ sparkline.error }}</p>
-        <span v-else-if="sparkline.approximate" class="text-xs text-muted-foreground">{{ t('dashboardBuilder.ApproximateSparkline') }}</span>
+        <p v-if="sparkline.error" class="text-xs text-destructive" :style="{ color: backgroundColor }" role="alert">{{ sparkline.error }}</p>
+        <span v-else-if="sparkline.approximate" class="text-xs text-muted-foreground" :style="{ color: backgroundColor }">{{ t('dashboardBuilder.ApproximateSparkline') }}</span>
       </template>
       <div v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length && !sparkline.error" class="panel-stat__sparkline w-full" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark: t('dashboardBuilder.Sparkline') })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
         <VisXYContainer aria-hidden="true" :data="sparkline.rows" :height="48" :duration="0" :margin="{ top: 2, bottom: 2, left: 2, right: 2 }">
-          <VisLine :x="x" :y="y" color="var(--primary)" />
+          <VisLine :x="x" :y="y" :color="backgroundColor ?? 'var(--primary)'" />
           <VisCrosshair ref="crosshair" :x="x" :y="y" :duration="0" :template="sparklineTemplate" :hide-when-far-from-pointer="false" :force-show-at="active === null ? undefined : sparkline.rows[active]?.x" />
           <VisTooltip ref="tooltip" />
         </VisXYContainer>
       </div>
       <div class="sr-only" aria-live="polite" aria-atomic="true"><template v-if="active !== null && sparkline.rows[active]">{{ pointText(sparkline.rows[active]) }}</template></div>
-      <p v-for="notice in result.stat?.notices" :key="notice" class="text-xs text-muted-foreground" role="status">{{ notice }}</p>
+      <p v-for="notice in result.stat?.notices" :key="notice" class="text-xs text-muted-foreground" :style="{ color: backgroundColor }" role="status">{{ notice }}</p>
     </template>
   </div>
 </template>

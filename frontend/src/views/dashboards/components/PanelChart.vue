@@ -31,7 +31,12 @@ const result = computed(() => {
     const thresholdLines = (props.viz.thresholds ?? []).flatMap(step => {
       if (step.value === null) return [];
       const exact = parseExact(step.value);
-      return exact ? [{ color: step.color, ...chartValue(exact, props.viz.format) }] : [];
+      if (!exact) return [];
+      try { return [{ color: step.color, ...chartValue(exact, props.viz.format) }]; }
+      catch {
+        model.notices.push(`Threshold ${step.value} is outside the chart coordinate range and was not drawn.`);
+        return [];
+      }
     });
     const approximateNotice = "Chart coordinates are approximate. Tooltips show exact values.";
     if (thresholdLines.some(line => line.approximate) && !model.notices.includes(approximateNotice)) model.notices.push(approximateNotice);

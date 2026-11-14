@@ -68,7 +68,8 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   returns an empty schema 1 blob with `panels_corrupt: true`, `min_schema: 2`
   and `can_edit: false`. A client writes it only when it also sends
   `X-Logchef-Dashboard-Features` with the comma-separated features its code
-  supports (`result_frames` and `formats` in this version); a save that would
+  supports (`result_frames`, `formats`, `result_charts`, `stat_compare`,
+  `thresholds`, `table_rules` and `column_formats` in this version); a save that would
   drop a stored feature, or a schema 1 body on a schema 2 dashboard, returns
   409. Any other schema header value returns 400. Dashboards that no schema 2
   client has saved stay schema 1 and keep working for scripts as before.
@@ -109,6 +110,9 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   only view, and edit it.
 
 ### Added
+- Dashboard thresholds color stat values or backgrounds and draw chart reference
+  lines. Tables support cell and row rules, visible columns, and number and time
+  formats. Thresholds and numeric rules compare exact values.
 - Query variables now support `day`, labelled "Date", with a date-only picker
   and `YYYY-MM-DD` literals in SQL, LogsQL, and LogchefQL. The existing `date`
   type is labelled "Date and time" and keeps its output unchanged.

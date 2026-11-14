@@ -19,13 +19,13 @@ export function thresholdColor(value: FrameNumber | null | undefined, steps: Thr
   }
   return color;
 }
-export function ruleMatches(value: unknown, rule: TableRule): boolean {
+export function ruleMatches(value: unknown, rule: TableRule, column?: FrameColumn): boolean {
   const empty = value === null || value === undefined || value === "";
   if (rule.op === "empty") return empty;
   if (rule.op === "not_empty") return !empty;
   if (empty) return false;
   if (rule.op === "contains" || rule.op === "not_contains") {
-    const contains = String(value).includes(String(rule.value));
+    const contains = frameCellText(value, column).includes(String(rule.value));
     return rule.op === "contains" ? contains : !contains;
   }
   const left = isExact(value) ? value : parseExact(value), right = parseExact(rule.value);
@@ -39,10 +39,10 @@ export function ruleMatches(value: unknown, rule: TableRule): boolean {
     case "<=": return cmp !== null && cmp <= 0;
   }
 }
-export function tableRuleColor(row: Record<string, unknown>, rules: TableRule[] = [], column?: string): PaletteColor | undefined {
+export function tableRuleColor(row: Record<string, unknown>, rules: TableRule[] = [], column?: string, columns: FrameColumn[] = []): PaletteColor | undefined {
   return rules.find(rule => column === undefined
-    ? rule.scope === "row" && rule.columns.some(name => ruleMatches(row[name], rule))
-    : rule.scope === "cell" && rule.columns.includes(column) && ruleMatches(row[column], rule))?.color;
+    ? rule.scope === "row" && rule.columns.some(name => ruleMatches(row[name], rule, columns.find(c => c.name === name)))
+    : rule.scope === "cell" && rule.columns.includes(column) && ruleMatches(row[column], rule, columns.find(c => c.name === column)))?.color;
 }
 export function formatPanelTime(value: string, kind: "time" | "date", format: TimeFormat = { kind: "time" }, zone = "UTC", locale?: string): string {
   const dateMode = format.date ?? "iso", timeMode = format.time ?? (kind === "date" ? "none" : "seconds");
@@ -55,7 +55,7 @@ export function formatPanelTime(value: string, kind: "time" | "date", format: Ti
 }
 export function formattedTableCell(value: unknown, column?: FrameColumn, format?: ColumnFormat, zone = "UTC", locale?: string): string {
   if (value === null || value === undefined) return "";
-  if ((column?.kind === "time" || column?.kind === "date") && typeof value === "string" && (!format || format.kind === "time")) return formatPanelTime(value, column.kind, format, zone, locale);
+  if ((column?.kind === "time" || column?.kind === "date") && typeof value === "string" && format?.kind === "time") return formatPanelTime(value, column.kind, format, zone, locale);
   if (format && format.kind !== "time" && (isExact(value) || typeof value === "number")) return formatNumber(value, format, { locale }).text;
   return frameCellText(value, column, zone);
 }
