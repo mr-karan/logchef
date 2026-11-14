@@ -1169,7 +1169,6 @@ describe("dashboards store — tabs", () => {
   it.each([
     { change: "query", patch: { query: { text: "a1-edited" } } },
     { change: "source", patch: { source_id: 2 } },
-    { change: "visualization", patch: { viz: { type: "stat" as const } } },
   ])("discard after editing a $change reruns the saved definition", async ({ patch }) => {
     const store = await loadEditableDashboard(tabbed());
     await store.enterEdit();
@@ -1353,5 +1352,45 @@ describe("dashboards store — tabs", () => {
     store.addDraftTab("Scratch");
     await store.cancelEdit();
     expect(store.activeTabId).toBe("today");
+  });
+
+  it("discarding to leave the dashboard reruns nothing", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.updateDraftPanel("a1", { query: { text: "a1-edited" } });
+    await vi.waitFor(() => expect(store.getPanelState("a1").status).toBe("empty"));
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue(ok());
+    await store.cancelEdit({ leaving: true });
+    store.clearCurrent();
+    await tick();
+    expect(requested()).toEqual([]);
+    expect(store.isEditing).toBe(false);
+  });
+
+  it("discarding after a query edit was reverted mid-flight does not leave the panel loading", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    vi.clearAllMocks();
+    mocks.logsQuery.mockImplementation(() => new Promise(() => {}));
+    store.updateDraftPanel("a1", { query: { text: "a1-edited" } });
+    await vi.waitFor(() => expect(requested()).toEqual(["a1-edited"]));
+    store.updateDraftPanel("a1", { query: { text: "a1" } });
+    await vi.waitFor(() => expect(requested()).toEqual(["a1-edited", "a1"]));
+    expect(store.getPanelState("a1").status).toBe("loading");
+    mocks.logsQuery.mockResolvedValue(ok());
+    await store.cancelEdit();
+    await vi.waitFor(() => expect(store.getPanelState("a1").status).toBe("empty"));
+  });
+
+  it("discarding a visualization-only edit sends no request", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.updateDraftPanel("a1", { viz: { type: "table", visible_columns: ["x"] } });
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue(ok());
+    await store.cancelEdit();
+    await tick();
+    expect(requested()).toEqual([]);
   });
 });

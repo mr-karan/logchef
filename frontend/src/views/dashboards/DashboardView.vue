@@ -528,7 +528,7 @@ function confirmDiscard() {
   pendingDiscard.value = null;
   if (action === 'leave') {
     closeEditor();
-    void store.cancelEdit();
+    void store.cancelEdit({ leaving: true });
     router.push("/dashboards");
     return;
   }
