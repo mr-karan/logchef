@@ -1,3 +1,4 @@
+import { validatePresentation } from "./panelPresentation";
 import {
   DASHBOARD_PANELS_VERSION,
   type DashboardLayoutItem,
@@ -389,15 +390,17 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
     return `Panel "${label}" has an unsupported type.`;
   }
   const vizKeys: Record<DashboardVizType, readonly string[]> = {
-    stat: ["compare", "sparkline", "type", "value", "order_by", "reduce", "columns", "format"],
-    chart: ["type", "x", "y", "series", "mark", "stack", "x_scale", "orientation", "show_values", "legend", "columns", "format"],
+    stat: ["thresholds", "color_mode", "compare", "sparkline", "type", "value", "order_by", "reduce", "columns", "format"],
+    chart: ["thresholds", "type", "x", "y", "series", "mark", "stack", "x_scale", "orientation", "show_values", "legend", "columns", "format"],
     pie: ["type", "label", "value", "donut", "min_slice_percent", "columns", "format"],
     toplist: ["type", "label", "value", "max_rows", "columns", "format"],
-    table: ["type", "visible_columns", "columns"],
+    table: ["rules", "column_formats", "type", "visible_columns", "columns"],
   };
   if (Object.keys(viz).some((key) => !vizKeys[viz.type].includes(key))) return `Panel "${label}" has an unsupported visualization option.`;
   if (viz.type === "chart" && viz.mark !== undefined && !["line", "area", "bar"].includes(viz.mark)) return `Panel "${label}" has an invalid chart mark.`;
   if (viz.type === "chart" && viz.stack !== undefined && !["none", "stacked"].includes(viz.stack)) return `Panel "${label}" has an invalid chart stack.`;
+  const presentationError = validatePresentation(viz);
+  if (presentationError) return presentationError;
   const count = query.mode === "count";
   if (count && viz.type === "table") {
     return `Table panel "${label}" needs result mode.`;

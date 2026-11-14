@@ -178,6 +178,8 @@ const columnSubset = computed(() => {
           :frame="panelState.frame"
           :kinds="!panel.locked && panel.viz.type === 'table' ? panel.viz.columns : undefined"
           :column-subset="columnSubset"
+          :rules="!panel.locked && panel.viz.type === 'table' ? panel.viz.rules : undefined"
+          :column-formats="!panel.locked && panel.viz.type === 'table' ? panel.viz.column_formats : undefined"
         />
       </template>
     </div>

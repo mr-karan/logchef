@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare"];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -73,12 +73,23 @@ export interface NumberFormat {
  suffix?: string;
 }
 export interface StatCompare { mode: "none" | "previous_row"; good?: "up" | "down" | "neutral" }
+export type PaletteColor = "green" | "amber" | "red" | "blue" | "purple" | "gray";
+export interface ThresholdStep { value: number | string | null; color: PaletteColor }
+export interface TableRule {
+ columns: string[];
+ op: ">" | ">=" | "<" | "<=" | "=" | "!=" | "contains" | "not_contains" | "empty" | "not_empty";
+ value?: number | string;
+ color: PaletteColor;
+ scope: "cell" | "row";
+}
+export interface TimeFormat { kind: "time"; date?: "iso" | "medium" | "none"; time?: "none" | "minutes" | "seconds" | "millis" }
+export type ColumnFormat = (NumberFormat & { kind?: "number" }) | TimeFormat;
 export type DashboardViz =
-  | { type: "stat"; compare?: StatCompare; sparkline?: boolean; value?: string; order_by?: string; reduce?: StatReduce; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
-  | { type: "chart"; x?: string; y?: string[]; series?: string; mark?: DashboardChartMark; stack?: DashboardChartStack; x_scale?: "auto" | "time" | "category"; orientation?: "horizontal" | "vertical"; show_values?: boolean; legend?: boolean; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
+  | { type: "stat"; thresholds?: ThresholdStep[]; color_mode?: "value" | "background"; compare?: StatCompare; sparkline?: boolean; value?: string; order_by?: string; reduce?: StatReduce; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
+  | { type: "chart"; thresholds?: ThresholdStep[]; x?: string; y?: string[]; series?: string; mark?: DashboardChartMark; stack?: DashboardChartStack; x_scale?: "auto" | "time" | "category"; orientation?: "horizontal" | "vertical"; show_values?: boolean; legend?: boolean; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "pie"; label?: string; value?: string; donut?: boolean; min_slice_percent?: number; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "toplist"; label?: string; value?: string; max_rows?: number; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
-  | { type: "table"; visible_columns?: string[]; columns?: Record<string, ConfirmedColumn> };
+  | { type: "table"; rules?: TableRule[]; column_formats?: Record<string, ColumnFormat>; visible_columns?: string[]; columns?: Record<string, ConfirmedColumn> };
 
 export interface DashboardQueryPanel {
   id: string;

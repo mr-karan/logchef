@@ -109,6 +109,26 @@ frame. It does not rerun the query. Dashboards that use these settings store
 `result_frames` or `formats` features. An older client cannot save over them
 and asks you to reload before editing.
 
+### Thresholds and table formatting
+
+Stat panels can color the value or background using up to ten ordered threshold
+steps. The first step is the base color. Charts draw labeled reference lines
+for each numeric step. Thresholds compare exact decimal values, including
+integers above 2^53. The six palette colors adapt to the viewer’s theme.
+
+Tables support up to twenty rules on selected columns. Rules can highlight
+a cell or its entire row using numeric comparisons, text containment, or empty
+value checks. The first matching rule for each scope wins. Row rules can use
+columns hidden from the table. Select visible columns and individual column
+formats in the panel builder. Number formats preserve exact values. Time formats
+choose ISO or localized dates and minutes, seconds, or milliseconds. Timestamps
+use the viewer’s timezone; calendar dates never shift.
+
+These settings require the `thresholds`, `table_rules`, and `column_formats`
+client features. Older clients can read dashboards with these settings but
+cannot overwrite them.
+
+
 ## Build a VictoriaLogs overview
 
 After connecting a VictoriaLogs source, a compact service-health dashboard is a

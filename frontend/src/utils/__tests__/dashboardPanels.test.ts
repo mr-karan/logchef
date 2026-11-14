@@ -522,7 +522,7 @@ describe("validatePanelsBlob", () => {
       { type: "toplist", label: "service", value: "n", max_rows: 20 },
     ] satisfies DashboardQueryPanel["viz"][]) {
       expect(validatePanelsBlob(withPanel(panel("a", { viz })))).toBeNull();
-      expect(validatePanelsBlob(withPanel(panel("a", { viz: { ...viz, thresholds: [] } as unknown as DashboardQueryPanel["viz"] })))).toMatch(/unsupported visualization option/);
+      expect(validatePanelsBlob(withPanel(panel("a", { viz: { ...viz, thresholds: [] } as unknown as DashboardQueryPanel["viz"] })))).toMatch(viz.type === "chart" ? /Invalid thresholds/ : /unsupported visualization option/);
     }
     expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "chart", x: "day", y: [] } })))).toMatch(/x and y/);
     expect(validatePanelsBlob(withPanel(panel("a", { viz: { type: "chart", x: "day", y: ["n", "n"] } })))).toMatch(/repeats/);

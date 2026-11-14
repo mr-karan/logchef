@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { VisXYContainer, VisLine, VisCrosshair, VisTooltip } from "@unovis/vue";
+import { thresholdColor, paletteStyle } from "@/utils/panelPresentation";
 import { escapeHtml } from "@/lib/html";
 import { chartValue } from "@/utils/panelCharts";
 import { useI18n } from "vue-i18n";
@@ -42,6 +43,7 @@ const formatted = computed(() => {
   const compact = width.value > 0 && measuredWidth.value > width.value - 16;
   return formatNumber(value, format.value, { compact });
 });
+const thresholdStyle = computed(() => props.panel.viz.type === "stat" ? paletteStyle(thresholdColor(result.value.stat?.value, props.panel.viz.thresholds), props.panel.viz.color_mode === "background") : {});
 const comparison = computed(() => result.value.stat?.comparison);
 const delta = computed(() => comparison.value ? formatNumber(comparison.value.delta, format.value) : null);
 const percent = computed(() => comparison.value?.percent === null || comparison.value?.percent === undefined ? null : formatNumber(comparison.value.percent, { decimals: 2, suffix: "%" }));
@@ -84,11 +86,11 @@ function keydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <div ref="container" class="panel-stat">
+  <div ref="container" class="panel-stat" :style="panel.viz.type === 'stat' && panel.viz.color_mode === 'background' ? thresholdStyle : {}">
     <p v-if="result.error" class="text-xs text-destructive" role="alert">{{ result.error }}</p>
     <template v-else>
       <span ref="measure" class="panel-stat__measure" aria-hidden="true">{{ standard?.text }}</span>
-      <span class="panel-stat__value" :title="formatted?.exact">{{ formatted?.text ?? (result.stat?.rowLabel ? 'NULL' : 'No data') }}</span>
+      <span class="panel-stat__value" :style="{ color: thresholdStyle.color }" :title="formatted?.exact">{{ formatted?.text ?? (result.stat?.rowLabel ? 'NULL' : 'No data') }}</span>
       <span v-if="result.stat?.rowLabel" class="text-xs text-muted-foreground">{{ result.stat.rowLabel }}</span>
       <div v-if="comparison" class="panel-stat__comparison text-xs text-center" :class="deltaClass">
         <span :title="delta?.exact">{{ comparison.direction > 0 ? '+' : '' }}{{ delta?.text }}</span>

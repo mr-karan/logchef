@@ -13,8 +13,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import type { ConfirmedColumn } from "@/api/dashboards";
-import { frameWithKinds, frameCellText, type PanelFrame } from "@/utils/panelFrame";
+import type { ConfirmedColumn, ColumnFormat, TableRule } from "@/api/dashboards";
+import { isExact } from "@/utils/exactNumber";
+import { formatNumber } from "@/utils/numberFormat";
+import { formattedTableCell, tableRuleColor, paletteStyle } from "@/utils/panelPresentation";
+import { frameWithKinds, type PanelFrame } from "@/utils/panelFrame";
 
 const { t } = useI18n();
 
@@ -25,6 +28,8 @@ interface Props {
   frame: PanelFrame;
   kinds?: Record<string, ConfirmedColumn>;
   columnSubset?: string[];
+  columnFormats?: Record<string, ColumnFormat>;
+  rules?: TableRule[];
 }
 const preferences = usePreferencesStore();
 const props = defineProps<Props>();
@@ -91,9 +96,18 @@ const displayColumns = computed<string[]>(() => {
 });
 
 function cellValue(row: Record<string, unknown>, column: string): string {
-  return frameCellText(row[column], typedFrame.value.columns.find((c) => c.name === column), preferences.zone);
+  return formattedTableCell(row[column], typedFrame.value.columns.find((c) => c.name === column), props.columnFormats?.[column], preferences.zone);
 }
-const notices = computed(() => [...typedFrame.value.notices, ...(props.columnSubset ?? []).filter((name) => !typedFrame.value.columns.some((c) => c.name === name)).map((name) => `Column "${name}" is missing from the result.`)]);
+function cellTitle(row: Record<string, unknown>, column: string): string {
+  const value = row[column], format = props.columnFormats?.[column];
+  return format?.kind !== "time" && (isExact(value) || typeof value === "number")
+    ? formatNumber(value, format).exact : cellValue(row, column);
+}
+const notices = computed(() => {
+  const names = new Set([...(props.columnSubset ?? []), ...Object.keys(props.columnFormats ?? {}), ...(props.rules ?? []).flatMap(rule => rule.columns)]);
+  const missing = [...names].filter(name => !typedFrame.value.columns.some(c => c.name === name));
+  return [...typedFrame.value.notices, ...missing.map(name => `Column "${name}" is missing from the result.`)];
+});
 
 </script>
 
@@ -114,12 +128,13 @@ const notices = computed(() => [...typedFrame.value.notices, ...(props.columnSub
           </TableRow>
         </TableHeader>
         <TableBody>
-          <TableRow v-for="(row, idx) in pagedRows" :key="idx">
+          <TableRow v-for="(row, idx) in pagedRows" :key="idx" :style="paletteStyle(tableRuleColor(row, rules), true)">
             <TableCell
               v-for="col in displayColumns"
               :key="col"
               class="panel-table__cell"
-              :title="cellValue(row, col)"
+              :style="paletteStyle(tableRuleColor(row, rules, col), true)"
+              :title="cellTitle(row, col)"
             >
               {{ cellValue(row, col) }}
             </TableCell>
