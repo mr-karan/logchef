@@ -395,3 +395,37 @@ fn tail_since_preserves_fallback_instants() {
 fn histogram_since_preserves_fallback_instants() {
     since_across_fallback("histogram", false);
 }
+
+/// A macro inside a comment renders nothing on the server, so it must not stop
+/// the CLI from adding the ClickHouse time condition for --since.
+#[test]
+fn a_commented_macro_keeps_the_since_filter() {
+    let server = FakeServer::start(false);
+    let home = TestHome::new("commented-macro");
+    home.write_config(&config_with(&server.url, json!({"token": PAT})));
+    let mut cmd = home.logchef();
+    cmd.args([
+        "sql",
+        "SELECT * FROM logs /* {{__from}} */",
+        "--since",
+        "2h",
+        "--team",
+        "1",
+        "--source",
+        "2",
+        "--output",
+        "json",
+    ]);
+    let out = run(cmd);
+    assert_success(&out);
+    let state = server.state();
+    let body = &state.native_requests[0];
+    assert!(
+        body["query_text"]
+            .as_str()
+            .unwrap()
+            .contains("fromUnixTimestamp64Milli"),
+        "a macro in a comment dropped the time condition: {body}"
+    );
+    assert!(body.get("start_time").is_none(), "{body}");
+}

@@ -568,13 +568,64 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
 /// — the window must NOT be spliced into the query string. We resolve it to
 /// absolute instants and let the server pass them to VL as `start`/`end`.
 /// Reports whether the query uses a macro that the server renders from the
-/// request's time range. The check reads the text only, so a macro inside a
-/// comment counts too.
+/// request's time range. Like the server's scanner, it ignores `--` and
+/// `/* */` comments: a macro there renders nothing, so treating it as one
+/// would drop the time condition the CLI otherwise adds.
 fn uses_time_macro(sql: &str) -> bool {
-    sql.split("{{").skip(1).any(|rest| {
+    without_sql_comments(sql).split("{{").skip(1).any(|rest| {
         rest.split_once("}}")
             .is_some_and(|(name, _)| TIME_MACROS.contains(&name.trim()))
     })
+}
+
+/// Returns `sql` with `--` line comments and `/* */` block comments removed.
+/// Quoted text ('...', "..." and `...`, with doubled or backslash-escaped
+/// quotes) is kept as is, so a `--` inside a string is not a comment.
+fn without_sql_comments(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' | '"' | '`' => {
+                out.push(c);
+                while let Some(d) = chars.next() {
+                    out.push(d);
+                    if d == '\\' {
+                        if let Some(e) = chars.next() {
+                            out.push(e);
+                        }
+                    } else if d == c {
+                        if chars.peek() == Some(&c) {
+                            out.push(chars.next().unwrap_or(c));
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            '-' if chars.peek() == Some(&'-') => {
+                for d in chars.by_ref() {
+                    if d == '\n' {
+                        out.push('\n');
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut prev = '\0';
+                for d in chars.by_ref() {
+                    if prev == '*' && d == '/' {
+                        break;
+                    }
+                    prev = d;
+                }
+                out.push(' ');
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Parses `--var` values: `name=value` is text, and `name:number=value` or
@@ -1394,8 +1445,19 @@ mod tests {
             "SELECT toStartOfInterval(ts, {{__interval}}, {{__timezone}}) FROM t",
             "SELECT '{{' FROM t WHERE x = '__from'",
             "SELECT * FROM t WHERE ts >= {{__from",
+            "SELECT * FROM logs /* {{__from}} */",
+            "SELECT * FROM logs -- {{__time_filter}}",
+            "SELECT * FROM logs /* a */ WHERE 1 -- {{__to}}\n",
         ] {
             assert!(!uses_time_macro(sql), "{sql}");
+        }
+        for sql in [
+            "SELECT '--' AS dash FROM t WHERE {{__time_filter}}",
+            "SELECT 'it''s /* not */' FROM t WHERE ts >= {{__from}}",
+            "SELECT 1 /* note */ FROM t WHERE {{__time_filter}} -- trailing",
+            "SELECT * FROM t -- note\nWHERE {{__time_filter}}",
+        ] {
+            assert!(uses_time_macro(sql), "{sql}");
         }
     }
 
