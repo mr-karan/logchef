@@ -64,12 +64,21 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"null value", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":null}`, `{"type":"stat"}`), "null at panels[0].query.group_by"},
 		{"trailing data", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]} {}`), "after top-level value"},
 		{"no tabs", json.RawMessage(`{"version":2,"features":[],"tabs":[],"panels":[]}`), "at least one tab"},
-		{"two tabs are a later phase", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"A","layout":[]},{"id":"b","title":"B","layout":[]}],"panels":[]}`), "exceeds the max of 1"},
+		{"eleven tabs", v2Tabs(emptyV2Tabs(11), ""), "exceeds the max of 10"},
+		{"duplicate tab id", v2Tabs(`{"id":"a","title":"A","layout":[]},{"id":"a","title":"B","layout":[]}`, ""), `duplicate tab id "a"`},
+		{"panel placed in two tabs", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[`+v2Layout+`]}`, v2StatPanel), "appears in more than one tab"},
+		{"panel placed in no tab", v2Tabs(`{"id":"a","title":"A","layout":[]},{"id":"b","title":"B","layout":[]}`, v2StatPanel), "no layout entry"},
+		{"second tab places an unknown panel", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[{"id":"ghost","x":0,"y":0,"w":6,"h":2}]}`, v2StatPanel), "does not reference any panel"},
+		{"overlap inside the second tab", v2Tabs(`{"id":"a","title":"A","layout":[]},{"id":"b","title":"B","layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2},{"id":"p2","x":5,"y":1,"w":6,"h":2}]}`, v2StatPanel+`,`+strings.Replace(v2StatPanel, `"id":"p1"`, `"id":"p2"`, 1)), "overlap"},
+		{"second tab without a title", v2Tabs(`{"id":"a","title":"A","layout":[]},{"id":"b","title":"","layout":[]}`, ""), "title of 0 characters"},
 		{"empty tab id", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"","title":"A","layout":[]}],"panels":[]}`), "empty id"},
 		{"empty tab title", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"","layout":[]}],"panels":[]}`), "title of 0 characters"},
 		{"long tab title", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"` + strings.Repeat("é", 61) + `","layout":[]}],"panels":[]}`), "title of 61 characters"},
-		{"bad width", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"A","layout":[{"id":"p1","x":0,"y":0,"w":5,"h":2}]}],"panels":[]}`), "invalid width"},
-		{"bad height", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"A","layout":[{"id":"p1","x":0,"y":0,"w":6,"h":7}]}],"panels":[]}`), "invalid height"},
+		{"width below 2", v2Blob(`{"id":"p1","x":0,"y":0,"w":1,"h":2}`, v2StatPanel), "invalid width 1 (allowed: 2-12)"},
+		{"width above 12", v2Blob(`{"id":"p1","x":0,"y":0,"w":13,"h":2}`, v2StatPanel), "invalid width 13 (allowed: 2-12)"},
+		{"height below 1", v2Blob(`{"id":"p1","x":0,"y":0,"w":6,"h":0}`, v2StatPanel), "invalid height 0 (allowed: 1-12)"},
+		{"height above 12", v2Blob(`{"id":"p1","x":0,"y":0,"w":6,"h":13}`, v2StatPanel), "invalid height 13 (allowed: 1-12)"},
+		{"free width spills off the grid", v2Blob(`{"id":"p1","x":6,"y":0,"w":7,"h":2}`, v2StatPanel), "spills off the grid"},
 		{"overlap", v2Blob(`{"id":"p1","x":0,"y":0,"w":6,"h":2},{"id":"p2","x":3,"y":1,"w":6,"h":2}`, v2StatPanel+`,`+strings.Replace(v2StatPanel, `"id":"p1"`, `"id":"p2"`, 1)), "overlap"},
 		{"panel without layout", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"A","layout":[]}],"panels":[` + v2StatPanel + `]}`), "no layout entry"},
 		{"layout without panel", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"a","title":"A","layout":[` + v2Layout + `]}],"panels":[]}`), "does not reference any panel"},
@@ -126,6 +135,71 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantSub)
 			}
 		})
+	}
+}
+
+// v2Tabs wraps whole tab objects and panels into a schema 2 blob.
+func v2Tabs(tabs, panels string) json.RawMessage {
+	return json.RawMessage(`{"version":2,"features":[],"tabs":[` + tabs + `],"panels":[` + panels + `]}`)
+}
+
+// emptyV2Tabs returns n empty tabs with distinct ids.
+func emptyV2Tabs(n int) string {
+	tabs := make([]string, 0, n)
+	for i := range n {
+		tabs = append(tabs, fmt.Sprintf(`{"id":"t%d","title":"Tab %d","layout":[]}`, i, i))
+	}
+	return strings.Join(tabs, ",")
+}
+
+// TestDashboardTabsAndFreeGrid covers what phase 9 accepts: up to 10 tabs,
+// each with its own grid, and any width from 2 to 12 with up to 12 rows. The
+// features list names tabs and free_grid exactly when the blob uses them, so
+// an older writer cannot save over either.
+func TestDashboardTabsAndFreeGrid(t *testing.T) {
+	p2 := strings.Replace(v2StatPanel, `"id":"p1"`, `"id":"p2"`, 1)
+	for _, tc := range []struct {
+		name     string
+		blob     json.RawMessage
+		features []string
+	}{
+		{"one tab with schema 1 sizes", v2Blob(`{"id":"p1","x":0,"y":0,"w":9,"h":6}`, v2StatPanel), []string{}},
+		{"ten tabs", v2Tabs(emptyV2Tabs(10), ""), []string{"tabs"}},
+		{"a populated tab next to an empty one", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[]}`, v2StatPanel), []string{"tabs"}},
+		{"the same cells in two tabs do not overlap", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[{"id":"p2","x":0,"y":0,"w":6,"h":2}]}`, v2StatPanel+`,`+p2), []string{"tabs"}},
+		{"width 5", v2Blob(`{"id":"p1","x":0,"y":0,"w":5,"h":2}`, v2StatPanel), []string{"free_grid"}},
+		{"width 7", v2Blob(`{"id":"p1","x":5,"y":0,"w":7,"h":2}`, v2StatPanel), []string{"free_grid"}},
+		{"width 10", v2Blob(`{"id":"p1","x":0,"y":0,"w":10,"h":2}`, v2StatPanel), []string{"free_grid"}},
+		{"width 11", v2Blob(`{"id":"p1","x":1,"y":0,"w":11,"h":2}`, v2StatPanel), []string{"free_grid"}},
+		{"height 7", v2Blob(`{"id":"p1","x":0,"y":0,"w":6,"h":7}`, v2StatPanel), []string{"free_grid"}},
+		{"height 12", v2Blob(`{"id":"p1","x":0,"y":0,"w":6,"h":12}`, v2StatPanel), []string{"free_grid"}},
+		{"a free size in the second tab", v2Tabs(`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[{"id":"p2","x":0,"y":0,"w":5,"h":2}]}`, v2StatPanel+`,`+p2), []string{"free_grid", "tabs"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			canonical, err := CanonicalDashboardPanels(tc.blob)
+			if err != nil {
+				t.Fatalf("valid blob rejected: %v", err)
+			}
+			if got := DashboardPanelsStoredFeatures(canonical); !slices.Equal(got, tc.features) {
+				t.Fatalf("stored features = %v, want %v; blob %s", got, tc.features, canonical)
+			}
+		})
+	}
+
+	client, err := ParseDashboardClient(new("2"), "tabs,free_grid")
+	if err != nil || !client.Supports("tabs") || !client.Supports("free_grid") {
+		t.Fatalf("client %v: %v", client, err)
+	}
+}
+
+// TestDashboardSchema1GridUnchanged pins the schema 1 sizes: free widths and
+// tall panels are a schema 2 feature and a schema 1 body still refuses them.
+func TestDashboardSchema1GridUnchanged(t *testing.T) {
+	for _, layout := range []string{`{"id":"p1","x":0,"y":0,"w":5,"h":2}`, `{"id":"p1","x":0,"y":0,"w":6,"h":7}`} {
+		blob := json.RawMessage(`{"version":1,"layout":[` + layout + `],"panels":[{"id":"p1","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}]}`)
+		if err := ValidateDashboardPanels(blob); err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Errorf("schema 1 accepted %s: %v", layout, err)
+		}
 	}
 }
 
@@ -798,6 +872,16 @@ func TestSummarizeDashboardPanels(t *testing.T) {
 			t.Fatalf("summary = %+v, want %+v", got, want)
 		}
 	})
+	t.Run("tabs count every tab, and panels count across them", func(t *testing.T) {
+		second := strings.Replace(strings.Replace(v2StatPanel, `"id":"p1"`, `"id":"p2"`, 1), `"team_id":1`, `"team_id":4`, 1)
+		got := SummarizeDashboardPanels(v2Tabs(
+			`{"id":"a","title":"A","layout":[`+v2Layout+`]},{"id":"b","title":"B","layout":[{"id":"p2","x":0,"y":0,"w":5,"h":9}]},{"id":"c","title":"C","layout":[]}`,
+			v2TablePanel+`,`+second))
+		want := DashboardPanelsSummary{PanelCount: 2, TabCount: 3, PanelTypes: []string{"stat", "table"}, PanelTeamIDs: []int{1, 4}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("summary = %+v, want %+v", got, want)
+		}
+	})
 	t.Run("empty", func(t *testing.T) {
 		got := SummarizeDashboardPanels(EmptyDashboardPanelsJSON())
 		if got.Corrupt || got.PanelCount != 0 || got.TabCount != 1 || got.PanelTypesJSON() != "[]" || got.PanelTeamIDsJSON() != "[]" {
@@ -849,7 +933,7 @@ func TestDashboardPanelsStoredFeatures(t *testing.T) {
 	if got := DashboardPanelsStoredFeatures(json.RawMessage(`{"version":2,"features":["tabs","x"],"unknown":1}`)); !slices.Equal(got, []string{"tabs", "x"}) {
 		t.Fatalf("stored features = %v", got)
 	}
-	if got := DashboardPanelsUnknownFeatures(json.RawMessage(`{"version":2,"features":["tabs"]}`)); !slices.Equal(got, []string{"tabs"}) {
+	if got := DashboardPanelsUnknownFeatures(json.RawMessage(`{"version":2,"features":["tabs","text_panels"]}`)); !slices.Equal(got, []string{"text_panels"}) {
 		t.Fatalf("unknown features = %v", got)
 	}
 	for _, blob := range []string{`{"version":1,"features":["tabs"]}`, `{nope`, `{"version":2}`} {

@@ -499,7 +499,7 @@ func TestBuildDashboardResponseSchemas(t *testing.T) {
 
 	v1 := panelBlob(team.ID, src.ID)
 	v2 := panelBlobV2(team.ID, src.ID)
-	newer := json.RawMessage(strings.Replace(string(v2), `"features":[]`, `"features":["tabs"]`, 1))
+	newer := json.RawMessage(strings.Replace(string(v2), `"features":[]`, `"features":["text_panels"]`, 1))
 	rows := map[string]*models.Dashboard{}
 	for name, blob := range map[string]json.RawMessage{"v1": v1, "v2": v2, "newer": newer} {
 		d := &models.Dashboard{Name: name, PanelsJSON: blob, CreatedBy: &creator.ID}
@@ -600,13 +600,13 @@ func TestUpdateDashboardClientContract(t *testing.T) {
 	}
 
 	// A newer server stored a feature this one does not know.
-	newer := strings.Replace(string(v2), `"features":[]`, `"features":["tabs","formats"]`, 1)
+	newer := strings.Replace(string(v2), `"features":[]`, `"features":["text_panels","formats"]`, 1)
 	raw := openRawSQLite(t, dbPath)
 	if _, err := raw.ExecContext(ctx, "UPDATE dashboards SET panels_json = ? WHERE id = ?", newer, dash.ID); err != nil {
 		t.Fatal(err)
 	}
-	_, err = save(dashboardClient(t, "2", "tabs, formats, made-up"), v2)
-	if !errors.As(err, &stale) || !strings.Contains(stale.Detail, "tabs") {
+	_, err = save(dashboardClient(t, "2", "text_panels, formats, made-up"), v2)
+	if !errors.As(err, &stale) || !strings.Contains(stale.Detail, "text_panels") {
 		t.Fatalf("stored unknown features: err = %v, want DashboardClientStaleError naming them", err)
 	}
 	if got := stored(); got != newer {

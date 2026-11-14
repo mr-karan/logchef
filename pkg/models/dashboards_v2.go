@@ -19,10 +19,14 @@ import (
 // unknown keys, nulls and enum values from later phases are rejected, so a
 // stored key never changes meaning when a later release starts to read it.
 const (
-	DashboardPanelsVersion2    = 2
-	MaxDashboardPanelsSizeV2   = 512 * 1024
-	MaxDashboardTabs           = 1 // 10 from phase 9 (tabs feature)
-	MaxDashboardTabTitleRunes  = 60
+	DashboardPanelsVersion2   = 2
+	MaxDashboardPanelsSizeV2  = 512 * 1024
+	MaxDashboardTabs          = 10
+	MaxDashboardTabTitleRunes = 60
+	// A schema 2 panel is any width from 2 columns to the whole grid and up to
+	// 12 rows tall. Schema 1 keeps its preset widths and 6 rows.
+	MinDashboardPanelWV2       = 2
+	MaxDashboardPanelHV2       = 12
 	MaxDashboardQueryLimit     = 10_000
 	MaxDashboardTranslateLimit = MaxDashboardPanelOptionLimit
 	DashboardMainTabID         = "main"
@@ -292,6 +296,19 @@ var dashboardFeatureRules = []struct {
 		for _, p := range blob.Panels {
 			if p.Viz != nil && (p.Viz.Compare != nil || p.Viz.Sparkline != nil) {
 				return true
+			}
+		}
+		return false
+	}},
+	{"tabs", func(blob *dashboardPanelsV2) bool { return len(blob.Tabs) > 1 }},
+	// A size that the schema 1 grid lacks: a writer from before free sizes
+	// would snap it to a preset width or cut its height to 6 rows.
+	{"free_grid", func(blob *dashboardPanelsV2) bool {
+		for _, tab := range blob.Tabs {
+			for _, l := range tab.Layout {
+				if validateDashboardLayoutSizeV1(l) != nil {
+					return true
+				}
 			}
 		}
 		return false
@@ -657,7 +674,7 @@ func validateDashboardTabs(tabs []dashboardTabV2) (map[string]struct{}, error) {
 		if tab.Layout == nil {
 			return nil, fmt.Errorf("tab %q layout must be an array", tab.ID)
 		}
-		ids, err := validateDashboardLayoutEntries(tab.Layout)
+		ids, err := validateDashboardLayoutEntries(tab.Layout, validateDashboardLayoutSizeV2)
 		if err != nil {
 			return nil, err
 		}
@@ -669,6 +686,17 @@ func validateDashboardTabs(tabs []dashboardTabV2) (map[string]struct{}, error) {
 		}
 	}
 	return layoutIDs, nil
+}
+
+// validateDashboardLayoutSizeV2 holds the schema 2 panel sizes.
+func validateDashboardLayoutSizeV2(l dashboardPanelLayout) error {
+	if l.W < MinDashboardPanelWV2 || l.W > DashboardGridColumns {
+		return fmt.Errorf("layout %q has invalid width %d (allowed: %d-%d)", l.ID, l.W, MinDashboardPanelWV2, DashboardGridColumns)
+	}
+	if l.H < MinDashboardPanelH || l.H > MaxDashboardPanelHV2 {
+		return fmt.Errorf("layout %q has invalid height %d (allowed: %d-%d)", l.ID, l.H, MinDashboardPanelH, MaxDashboardPanelHV2)
+	}
+	return nil
 }
 
 func validateDashboardPanelV2(p *dashboardPanelV2) error {

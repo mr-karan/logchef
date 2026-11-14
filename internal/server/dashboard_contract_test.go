@@ -193,7 +193,8 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	team, src := mkTestTeam(t, s.store, "team", creator)
 	app := dashboardApp(s, creator)
 
-	// The current client stores a chart and a trend using every shipped feature.
+	// The current client stores a chart and a trend using every shipped feature,
+	// with the chart at a free width on the first of two tabs.
 	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"type":"stat","reduce":"sum"`, `"type":"chart","x":"day","y":["n"],"show_values":true,"columns":{},"format":{"decimals":2}`, 1)
 	blob = strings.Replace(blob, `"mode":"count"`, `"mode":"result"`, 1)
 	blob = strings.Replace(blob, `,"interval":"auto"`, ``, 1)
@@ -202,6 +203,7 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	blob = strings.Replace(blob, `"type":"stat","value":"n"`, `"type":"stat","thresholds":[{"value":null,"color":"green"},{"value":"9007199254740993.01","color":"red"}],"value":"n"`, 1)
 	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p3","kind":"query","title":"Table","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"clickhouse-sql","text":"SELECT ts,details FROM events"},"viz":{"type":"table","rules":[{"columns":["details"],"op":"contains","value":"retry","scope":"row","color":"red"}],"column_formats":{"ts":{"kind":"time","time":"seconds"}}}},`, team.ID, src.ID), 1)
 	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p3","x":0,"y":2,"w":12,"h":2},`, 1)
+	blob = strings.Replace(blob, `"w":6,"h":2}]}]`, `"w":5,"h":7}]},{"id":"week","title":"Last 7 days","layout":[]}]`, 1)
 	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, dashboardHeaders{schema: new("2"), features: new(strings.Join(models.KnownDashboardFeatures(), ","))})
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v", status, resp)
@@ -289,14 +291,14 @@ func TestDashboardFeaturesHeader(t *testing.T) {
 	}
 
 	// A newer server stored a feature this one does not know.
-	newer := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"features":[]`, `"features":["tabs"]`, 1)
+	newer := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"features":[]`, `"features":["text_panels"]`, 1)
 	seeded := &models.Dashboard{Name: "newer", PanelsJSON: json.RawMessage(newer), CreatedBy: &creator.ID}
 	if err := s.store.CreateDashboard(context.Background(), seeded); err != nil {
 		t.Fatal(err)
 	}
 	newerPath := "/dashboards/" + strconv.Itoa(seeded.ID)
-	status, resp, _ := call(t, app, http.MethodPut, newerPath, body(1), dashboardHeaders{schema: new("2"), features: new("tabs")})
-	if status != http.StatusConflict || !strings.Contains(fmt.Sprint(resp["message"]), "tabs") {
+	status, resp, _ := call(t, app, http.MethodPut, newerPath, body(1), dashboardHeaders{schema: new("2"), features: new("text_panels")})
+	if status != http.StatusConflict || !strings.Contains(fmt.Sprint(resp["message"]), "text_panels") {
 		t.Fatalf("write to a row with an unknown stored feature: status %d body %v", status, resp)
 	}
 	if got := storedBlob(t, s, seeded.ID); got != newer {
