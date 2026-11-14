@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -125,7 +126,7 @@ func TestResultQuerySettings(t *testing.T) {
 		want   clickhouse.Settings
 	}{
 		{name: "no source settings", opts: QueryOptions{TimeoutSeconds: &timeout, ResultRows: 101},
-			want: clickhouse.Settings{"max_result_rows": 101, "max_result_bytes": 0, "result_overflow_mode": "break", "limit": 0, "offset": 0, "max_execution_time": 30, "sort_overflow_mode": "throw"}},
+			want: clickhouse.Settings{"max_result_rows": 101, "max_result_bytes": 0, "result_overflow_mode": "break", "limit": 0, "offset": 0, "skip_unavailable_shards": 0, "max_execution_time": 30, "sort_overflow_mode": "throw"}},
 		{name: "the source's result caps", source: clickhouse.Settings{"max_result_rows": int64(50), "max_result_bytes": int64(100), "result_overflow_mode": "throw", "readonly": 2},
 			opts: QueryOptions{TimeoutSeconds: &timeout, ResultRows: 101},
 			want: clickhouse.Settings{"max_result_rows": int64(50), "max_result_bytes": int64(100), "result_overflow_mode": "throw", "readonly": 2, "max_execution_time": 30}},
@@ -150,6 +151,22 @@ func TestResultQuerySettings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestOwnQuerySettings checks what Logchef's own queries send, such as a
+// table's metadata: no result cap, the source's included, no row limit,
+// offset or skipped shard, throw modes, and the source's other settings.
+func TestOwnQuerySettings(t *testing.T) {
+	source := clickhouse.Settings{"max_result_rows": int64(1), "max_result_bytes": int64(100), "result_overflow_mode": "break", "readonly": 2, "max_execution_time": 7}
+	got, err := clientWithModes(source, clickhouse.Settings{"sort_overflow_mode": "throw"}).ownQuerySettings(t.Context(), 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := clickhouse.Settings{"max_result_rows": 0, "max_result_bytes": 0, "result_overflow_mode": "throw", "limit": 0, "offset": 0, "skip_unavailable_shards": 0,
+		"sort_overflow_mode": "throw", "readonly": 2, "max_execution_time": 7}
+	if !maps.Equal(got, want) {
+		t.Fatalf("settings %v, want %v", got, want)
 	}
 }
 

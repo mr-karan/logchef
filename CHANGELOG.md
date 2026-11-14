@@ -96,6 +96,9 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   `result_overflow_mode = 'throw'`, with the name quoted or not. To fix such
   an alert, edit its query: set each overflow mode to `'throw'`, remove the
   other settings, and save. The save checks the query again.
+- ClickHouse queries now fail when a shard does not answer, even when the
+  ClickHouse user's settings profile sets `skip_unavailable_shards`. Before,
+  the other shards' rows came back as a complete result.
 
 ### Security
 - Collection links have a kind. A `pin` is a bookmark and grants nothing. A
@@ -191,11 +194,16 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   older `truncated` and `truncated_reason` fields stay.
 - ClickHouse limits in the ClickHouse user's settings profile no longer cut
   results silently. Logchef sends its own result row and byte limits with
-  every query, and sends every other overflow mode as `throw`, so a profile
-  limit such as `max_rows_to_sort` in break mode now fails the query with an
-  error that names the limit. Histograms fail when their result may be
-  incomplete. Alerts reject query `SETTINGS` that can stop the query early,
-  and live tail rejects a filter that holds them.
+  every query, sends `limit`, `offset` and `skip_unavailable_shards` as 0,
+  and sends every other overflow mode as `throw`, so a profile limit such as
+  `max_rows_to_sort` in break mode now fails the query with an error that
+  names the limit. Histograms fail when their result may be incomplete.
+  Alerts reject query `SETTINGS` that can stop the query early, and live
+  tail rejects a filter that holds them.
+- Logchef's own ClickHouse queries for a table's schema, source stats, the
+  table check and table creation read their whole result. Before, a profile
+  `limit = 1` returned one column of a table's schema. The source's
+  `max_result_rows` and `max_result_bytes` no longer apply to them.
 - A source's `max_execution_time` reaches ClickHouse as configured and caps
   the request's timeout. Before, the driver replaced it with the request's
   deadline plus 5 seconds.

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 // Ping checks the connectivity to the ClickHouse server and optionally verifies a table exists.
@@ -43,7 +45,7 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	var exists uint8
 
 	// No need for executeQueryWithHooks here, it's a simple metadata check.
-	err := c.conn.QueryRow(ctx, query, database, table).Scan(&exists)
+	err := c.conn.QueryRow(clickhouse.Context(ctx, clickhouse.WithSettings(neutralSettings())), query, database, table).Scan(&exists)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)

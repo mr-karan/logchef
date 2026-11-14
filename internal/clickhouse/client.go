@@ -235,3 +235,15 @@ func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOp
 	}
 	return rows, settings, c.modesUnsent(ctx, settings), nil
 }
+
+// queryOwn runs one of Logchef's own queries, such as a table's metadata or
+// stats, with ownQuerySettings.
+func (c *Client) queryOwn(ctx context.Context, timeoutSeconds int, query string, args ...any) (rows driver.Rows, err error) {
+	_, err = c.send(ctx, func(ctx context.Context) (clickhouse.Settings, error) {
+		return c.ownQuerySettings(ctx, timeoutSeconds)
+	}, func(ctx context.Context) (err error) {
+		rows, err = c.conn.Query(ctx, query, args...)
+		return err
+	})
+	return rows, err
+}

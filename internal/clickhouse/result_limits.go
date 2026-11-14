@@ -1,6 +1,6 @@
 package clickhouse
 
-// Result limits: the settings Logchef sends with every result query, so no
+// Result limits: the settings Logchef sends with every query, so no
 // ClickHouse limit can end a result without Logchef knowing, and the
 // truncation state a result proves from them.
 
@@ -58,10 +58,9 @@ func neutralSettings() clickhouse.Settings {
 
 // resultQuerySettings returns every setting a result query sends. Logchef
 // owns the result limits: the query's own row bound, no byte cap and break,
-// so a cut at Logchef's bound is one the reader proves, and limit and offset
-// off. A settings profile cannot override them. The source's settings
-// override them, as the operator's caps, and nothing overrides the throw
-// modes or the timeout.
+// so a cut at Logchef's bound is one the reader proves. A settings profile
+// cannot override them. The source's settings override them, as the
+// operator's caps.
 func (c *Client) resultQuerySettings(ctx context.Context, opts QueryOptions) (clickhouse.Settings, error) {
 	modes, err := c.throwModes.get(ctx)
 	if err != nil {
@@ -71,16 +70,37 @@ func (c *Client) resultQuerySettings(ctx context.Context, opts QueryOptions) (cl
 		"max_result_rows":      opts.ResultRows,
 		"max_result_bytes":     0,
 		"result_overflow_mode": "break",
-		"limit":                0,
-		"offset":               0,
 	}
 	maps.Copy(settings, c.querySettings)
 	if c.flattensJSON(ctx) {
 		settings[flattenedJSONSetting] = 1
 	}
+	return c.guarded(settings, modes, opts.TimeoutSeconds), nil
+}
+
+// ownQuerySettings returns every setting one of Logchef's own queries sends,
+// such as a table's metadata or stats. Logchef reads all of that result, so
+// no result cap applies, the source's included.
+func (c *Client) ownQuerySettings(ctx context.Context, timeoutSeconds int) (clickhouse.Settings, error) {
+	modes, err := c.throwModes.get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	settings := clickhouse.Settings{}
+	maps.Copy(settings, c.querySettings)
+	maps.Copy(settings, neutralSettings())
+	return c.guarded(settings, modes, &timeoutSeconds), nil
+}
+
+// guarded adds the settings nothing overrides: throw for every overflow mode
+// in modes, no row limit, offset or skipped shard, and the query's timeout.
+func (c *Client) guarded(settings, modes clickhouse.Settings, timeoutSeconds *int) clickhouse.Settings {
 	maps.Copy(settings, modes)
-	settings["max_execution_time"] = c.queryTimeout(opts.TimeoutSeconds)
-	return settings, nil
+	settings["limit"] = 0
+	settings["offset"] = 0
+	settings["skip_unavailable_shards"] = 0
+	settings["max_execution_time"] = c.queryTimeout(timeoutSeconds)
+	return settings
 }
 
 // queryTimeout is the max_execution_time of a query: the request's, or the
