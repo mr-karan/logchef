@@ -179,6 +179,21 @@ Every other ClickHouse limit that can stop a query early, such as
 `throw` mode. A query that reaches one of those limits fails with an error that
 names it, rather than returning part of the result.
 
+Logchef reads the ClickHouse version again after each new connection, so a
+source keeps these guarantees when its server is upgraded, rolled back or
+replaced. They assume one ClickHouse version behind the source's address at a
+time. With two versions behind it at once, such as during a rolling upgrade
+behind a load balancer, Logchef cannot tell which server answered:
+
+- Every query still sends the row and byte limits, `limit`, `offset` and
+  `skip_unavailable_shards` as 0, and `throw` for every overflow mode that
+  ClickHouse 23.7 already has.
+- A query can fail with an unknown setting error when it reaches the older
+  server. Run it again once the upgrade finishes.
+- `timeout_overflow_mode_leaf`, added in ClickHouse 23.11, can go unsent. If the
+  settings profile on the newer servers sets it to `'break'`, a result cut by
+  `max_execution_time_leaf` can show nothing instead of **May be incomplete**.
+
 ### Export
 
 Export results as CSV: all rows, visible rows, filtered rows, or current page.
