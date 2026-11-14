@@ -452,7 +452,16 @@ fn a_trailing_line_comment_keeps_the_since_filter_live() {
     let out = run(cmd);
     assert_success(&out);
     let state = server.state();
-    let query = state.native_requests[0]["query_text"].as_str().unwrap().to_string();
-    let live = query.split_once('\n').map(|(_, rest)| rest).unwrap_or_default();
-    assert!(live.contains("fromUnixTimestamp64Milli"), "time condition is inside the comment: {query}");
+    let query = state.native_requests[0]["query_text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let live = query
+        .split_once('\n')
+        .map(|(_, rest)| rest)
+        .unwrap_or_default();
+    assert!(
+        live.contains("fromUnixTimestamp64Milli"),
+        "time condition is inside the comment: {query}"
+    );
 }
