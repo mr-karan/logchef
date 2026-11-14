@@ -2234,6 +2234,19 @@ describe("Explorer history navigation", () => {
     };
   }
 
+  // A windowed LogsQL run takes the interval for {{__interval}}: 15 minutes at about
+  // 100 buckets is 9 s, so the next window up, 10s. LogchefQL takes no macro.
+  it.each([
+    ["sends the interval with a windowed LogsQL run", { team: windowedLink.team, source: windowedLink.source, t: windowedLink.t, mode: "native", sql: "* | stats by (_time:{{__interval}} offset {{__tz_offset}}) count() as n" }, "logsql", "10s"],
+    ["sends no interval with a windowed LogchefQL run", windowedLink, "logchefql", undefined],
+  ] as const)("%s", async (_name, link, language, interval) => {
+    await mountExplorer(link, () => streamWindows(() => shownPage));
+    await settle();
+    const request = searchRequests().at(-1);
+    expect(request).toMatchObject({ query_language: language });
+    expect(request?.interval).toBe(interval);
+  });
+
   it("records, filters the sidebar with and replays a windowed Run stopped after it showed rows", async () => {
     const { router, store, nav, rows, pinia } = await mountExplorer(windowedLink, () => streamWindows(() => shownPage));
     await settle();
