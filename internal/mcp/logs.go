@@ -20,6 +20,11 @@ type QueryLogsParams struct {
 	RawSQL       string `json:"raw_sql" jsonschema:"Datasource-native query: ClickHouse SQL or VictoriaLogs LogsQL. Use get_source_schema first to understand available columns. Include WHERE clauses with timestamp filters and ORDER BY and LIMIT clauses."`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Request row limit (1-100 default 100). A smaller LIMIT in raw_sql wins. stats.limit_source names the bound that applied and stats.truncation (none rows bytes unknown) says whether rows were cut"`
 	QueryTimeout *int   `json:"query_timeout,omitempty" jsonschema:"Query timeout in seconds (default 30)"`
+	Timezone     string `json:"timezone,omitempty" jsonschema:"IANA timezone for the {{__timezone}} and {{__tz_offset}} macros (default UTC)"`
+	Interval     string `json:"interval,omitempty" jsonschema:"Bucket size for the {{__interval}} and {{__interval_s}} macros: 1s 5s 10s 15s 30s 1m 5m 10m 15m 30m 1h 2h 3h 6h 12h or 24h"`
+	// Variables fill {{name}} placeholders in raw_sql. The time macros
+	// ({{__from}} {{__to}} {{__time_filter}}) render from start_time and end_time.
+	Variables []models.TemplateVariable `json:"variables,omitempty" jsonschema:"Values for {{name}} placeholders in raw_sql. Each has name and type (text number or date) and value. Built-in macro names such as __from are not variables"`
 }
 
 type GetSourceSchemaParams struct {
@@ -37,6 +42,8 @@ type GetLogHistogramParams struct {
 	GroupBy      string `json:"group_by,omitempty" jsonschema:"Optional field to group histogram data by (e.g. severity_text or service_name)"`
 	Timezone     string `json:"timezone,omitempty" jsonschema:"Timezone for histogram timestamps (default UTC)"`
 	QueryTimeout *int   `json:"query_timeout,omitempty" jsonschema:"Query timeout in seconds (default 30)"`
+	// The window is the interval that {{__interval}} renders in raw_sql.
+	Variables []models.TemplateVariable `json:"variables,omitempty" jsonschema:"Values for {{name}} placeholders in raw_sql. Each has name and type (text number or date) and value"`
 }
 
 type ListSavedQueriesParams struct {
@@ -93,6 +100,7 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 			Limit:        args.Limit,
 			QueryTimeout: args.QueryTimeout,
 			StartTime:    args.StartTime, EndTime: args.EndTime,
+			Timezone: args.Timezone, Interval: args.Interval, Variables: args.Variables,
 		})
 		return runErr
 	})
@@ -150,6 +158,7 @@ func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest
 			Timezone:     args.Timezone,
 			QueryTimeout: args.QueryTimeout,
 			StartTime:    args.StartTime, EndTime: args.EndTime,
+			Variables: args.Variables,
 		})
 		return runErr
 	})
