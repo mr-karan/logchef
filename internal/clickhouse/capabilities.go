@@ -143,12 +143,12 @@ func (c *Client) flattensJSON(ctx context.Context) bool {
 // them. A connection the driver dialed after they were chosen may reach a
 // server that does not know one of them, which rejects the statement with
 // UNKNOWN_SETTING. When the settings read again leave out one the statement
-// sent, a statement that unrun proves did not run is sent once more with
-// them. Any other statement fails with an error that says it was not sent
-// again: UNKNOWN_SETTING alone does not prove the server rejected it before
-// it ran, as throwIf can raise that code from a running INSERT. A setting
-// the statement's own SQL names and the server does not know still fails it
-// with ClickHouse's error.
+// sent, a statement that unrun reports safe to run again is sent once more
+// with them. Any other statement fails with an error that says it was not
+// sent again: UNKNOWN_SETTING alone does not prove the server rejected it
+// before it ran, as throwIf can raise that code from a running INSERT. A
+// setting the statement's own SQL names and the server does not know still
+// fails it with ClickHouse's error.
 func (c *Client) send(ctx context.Context, settingsFor func(context.Context) (clickhouse.Settings, error), unrun func() bool, run func(context.Context) error) (clickhouse.Settings, error) {
 	dials := c.dials.Load()
 	settings, err := settingsFor(ctx)
@@ -179,10 +179,11 @@ func leavesOut(sent, current clickhouse.Settings) bool {
 	return false
 }
 
-// isSelect reports SQL that parses as one SELECT statement. ClickHouse sends
-// a SELECT's header block before it executes the query, so a SELECT that
-// fails before the driver returns its rows was not executed, and a SELECT
-// changes no data either way.
+// isSelect reports SQL that parses as one SELECT statement. A SELECT changes
+// no data. ClickHouse sends its header block, which the driver reads before
+// it returns the rows, before it runs the query. Only scalar subqueries run
+// earlier, during analysis; 26.8 reports their progress, 23.7 and 24.1 do
+// not.
 func isSelect(query string) bool {
 	stmts, err := clickhouseparser.NewParser(query).ParseStmts()
 	if err != nil || len(stmts) != 1 {
