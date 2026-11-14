@@ -82,7 +82,18 @@ function selectValue(event: Event): string {
   return event.target instanceof HTMLSelectElement ? event.target.value : "";
 }
 function setCompareMode(mode: string) {
-  if (props.viz.type === "stat" && (mode === "none" || mode === "previous_row")) emit("update:viz", { ...props.viz, compare: { ...props.viz.compare, mode } });
+  if (props.viz.type !== "stat" || (mode !== "none" && mode !== "previous_row")) return;
+  const viz = { ...props.viz };
+  if (mode === "none") delete viz.compare;
+  else viz.compare = { ...viz.compare, mode };
+  emit("update:viz", viz);
+}
+function toggleSparkline() {
+  if (props.viz.type !== "stat") return;
+  const viz = { ...props.viz };
+  if (viz.sparkline) delete viz.sparkline;
+  else viz.sparkline = true;
+  emit("update:viz", viz);
 }
 function setGood(good: string) {
   if (props.viz.type === "stat" && (good === "up" || good === "down" || good === "neutral")) emit("update:viz", { ...props.viz, compare: { mode: props.viz.compare?.mode ?? "none", good } });
@@ -147,7 +158,7 @@ function setScale(value: unknown) {
         <p class="text-xs text-muted-foreground">{{ t('dashboardBuilder.NeighborWarning') }}</p>
         <p v-if="!['first', 'last'].includes(viz.reduce ?? (query.mode === 'count' ? 'sum' : 'last'))" role="alert" class="text-xs text-amber-600">{{ t('dashboardBuilder.CompareReducerWarning') }}</p>
       </template>
-      <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.sparkline ?? false" @change="emit('update:viz', { ...viz, sparkline: !viz.sparkline })" />{{ t('dashboardBuilder.Sparkline') }}</label>
+      <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.sparkline ?? false" @change="toggleSparkline" />{{ t('dashboardBuilder.Sparkline') }}</label>
       <p v-if="query.mode === 'result' && !viz.order_by && (viz.sparkline || viz.compare?.mode === 'previous_row')" role="alert" class="text-xs text-amber-600">{{ t('dashboardBuilder.CompareOrderWarning') }}</p>
     </template>
     <template v-if="viz.type !== 'table'">

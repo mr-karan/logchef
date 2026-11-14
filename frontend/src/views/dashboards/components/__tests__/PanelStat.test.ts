@@ -71,3 +71,19 @@ it("keeps an exact value visible when sparkline coordinates overflow",async()=>{
  const app=createApp(PanelStat,{frame,panel}).use(createPinia()).use(i18n);
  try {app.mount(host);await nextTick();expect(host.querySelector('.panel-stat__value')?.textContent).not.toBe('No data');expect(host.querySelector('[role=alert]')?.textContent).toContain('outside the chart coordinate range');}finally{app.unmount();}
 });
+
+it("shows a negative delta and percent, red for good up and green for good down", async () => {
+  const panel = ref<DashboardQueryPanel>({ id: "s", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT day, n FROM events" }, viz: { type: "stat", value: "n", order_by: "day", compare: { mode: "previous_row", good: "up" } } });
+  const frame = resultFrame({ columns: [{ name: "day", type: "Date" }, { name: "n", type: "UInt64" }], rows: [{ day: "2026-11-12", n: 50 }, { day: "2026-11-11", n: 100 }] });
+  const host = document.createElement("div");
+  const app = createApp({ render: () => h(PanelStat, { frame, panel: panel.value }) }).use(createPinia()).use(i18n);
+  try {
+    app.mount(host); await nextTick();
+    const delta = host.querySelector(".panel-stat__comparison");
+    expect(delta?.textContent?.trim().startsWith("-50 (-50.00%)")).toBe(true);
+    expect(delta?.className).toContain("text-red-600");
+    if (panel.value.viz.type !== "stat") throw new Error("expected stat");
+    panel.value.viz.compare = { mode: "previous_row", good: "down" }; await nextTick();
+    expect(delta?.className).toContain("text-green-600");
+  } finally { app.unmount(); }
+});

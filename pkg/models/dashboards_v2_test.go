@@ -1180,3 +1180,14 @@ func TestDashboardStatCompare(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardCountCompareDefaultReducer(t *testing.T) {
+	raw := v2Blob(v2Layout, strings.Replace(v2ChartPanel, `{"type":"chart","mark":"bar","stack":"stacked"}`, `{"type":"stat","compare":{"mode":"previous_row"}}`, 1))
+	if err := ValidateDashboardPanels(raw); err == nil || !strings.Contains(err.Error(), "comparison needs first or last reducer") {
+		t.Fatalf("count default sum must reject comparison: %v", err)
+	}
+	raw = json.RawMessage(strings.Replace(string(raw), `"compare":`, `"reduce":"last","compare":`, 1))
+	if err := ValidateDashboardPanels(raw); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -666,7 +666,7 @@ func TestDashboardStatCompareContract(t *testing.T) {
 	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"reduce":"sum"`, `"reduce":"last","compare":{"mode":"previous_row","good":"up"},"sparkline":true`, 1)
 	body := fmt.Sprintf(`{"name":"Trend","panels":%s}`, blob)
 	status, _, _ := call(t, app, http.MethodPost, "/dashboards", body, schema2)
-	if status != http.StatusConflict {
+	if status != http.StatusCreated {
 		t.Fatalf("undeclared create status %d", status)
 	}
 	headers := dashboardHeaders{schema: new("2"), features: new("stat_compare,result_frames")}
@@ -677,7 +677,7 @@ func TestDashboardStatCompareContract(t *testing.T) {
 	}
 	introduction := fmt.Sprintf(`{"name":"Plain","revision":1,"panels":%s}`, blob)
 	status, _, _ = call(t, app, http.MethodPut, fmt.Sprintf("/dashboards/%d", plain.ID), introduction, schema2)
-	if status != http.StatusConflict {
+	if status != http.StatusOK {
 		t.Fatalf("undeclared feature introduction: %d", status)
 	}
 	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", body, headers)
@@ -695,9 +695,11 @@ func TestDashboardStatCompareContract(t *testing.T) {
 		}
 	}
 	update := fmt.Sprintf(`{"name":"Trend","revision":1,"panels":%s}`, blob)
-	status, _, _ = call(t, app, http.MethodPut, path, update, schema2)
-	if status != http.StatusConflict {
-		t.Fatalf("undeclared update %d", status)
+	staleBody := fmt.Sprintf(`{"name":"Trend","revision":1,"panels":%s}`, panelBlobV2JSON(team.ID, src.ID))
+	oldClient := dashboardHeaders{schema: new("2"), features: new("result_frames")}
+	status, resp, _ = call(t, app, http.MethodPut, path, staleBody, oldClient)
+	if status != http.StatusConflict || !strings.Contains(fmt.Sprint(resp), "stat_compare") {
+		t.Fatalf("undeclared update %d %v", status, resp)
 	}
 	status, resp, _ = call(t, app, http.MethodPut, path, update, headers)
 	if status != http.StatusOK {

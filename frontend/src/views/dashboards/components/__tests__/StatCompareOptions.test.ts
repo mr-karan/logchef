@@ -22,5 +22,9 @@ it("edits comparison and sparkline with ordering and reducer warnings",async()=>
   const input=host.querySelector<HTMLInputElement>('input[type=checkbox]');
   if(!input) throw new Error('sparkline control missing');input.dispatchEvent(new Event('change'));await nextTick();
   expect(viz.value.type==='stat' && viz.value.sparkline).toBe(true);
+  input.dispatchEvent(new Event('change')); await nextTick();
+  expect(viz.value).not.toHaveProperty('sparkline');
+  select.value='none'; select.dispatchEvent(new Event('change')); await nextTick();
+  expect(viz.value).not.toHaveProperty('compare');
  } finally {app.unmount();}
 });

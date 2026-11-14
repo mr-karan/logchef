@@ -81,12 +81,6 @@ func (s *Server) handleCreateDashboard(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	if err := core.CheckDashboardWriteFeatures(req.Panels, client); err != nil {
-		if errors.Is(err, core.ErrInvalidDashboard) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		}
-		return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
-	}
 	dashboard, err := core.CreateDashboard(c.Context(), s.store, s.log, user, &req)
 	if err != nil {
 		switch {
