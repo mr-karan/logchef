@@ -119,9 +119,13 @@ function addTab(title: string) {
 }
 
 let pendingTabId: string | null = null;
-// Set while discarding to leave: dropping the draft changes the tabs, and a URL
-// correction then would cancel the navigation away from this dashboard.
+// Set while discarding to leave, so the unsaved-changes guards let this
+// navigation through. The draft stays in place until the navigation settles:
+// unmounting clears it, and a navigation that fails or lands back on a
+// dashboard drops it the normal way. Dropping it first would change the tabs,
+// and the URL correction that follows would cancel the leave.
 let leaving = false;
+let unmounted = false;
 function selectTab(id: string) {
   if (id === queryTab()) return;
   pendingTabId = id;
@@ -143,7 +147,7 @@ watch(
   },
   (shown) => {
     const from = queryTab();
-    if (leaving || shown === undefined || shown === from || (pendingTabId !== null && shown === pendingTabId)) return;
+    if (shown === undefined || shown === from || (pendingTabId !== null && shown === pendingTabId)) return;
     const query = { ...route.query, tab: shown ?? undefined };
     // Showing a new tab from a tab the dashboard still has is a navigation,
     // like a click on a tab. Other changes correct an absent or deleted tab.
@@ -526,14 +530,24 @@ function goBack() {
   router.push("/dashboards");
 }
 
+async function discardAndLeave() {
+  closeEditor();
+  leaving = true;
+  try {
+    await router.push("/dashboards");
+  } catch {
+    // A rejected navigation keeps this view; the draft is dropped below.
+  } finally {
+    leaving = false;
+  }
+  if (!unmounted && store.isEditing) await store.cancelEdit();
+}
+
 function confirmDiscard() {
   const action = pendingDiscard.value;
   pendingDiscard.value = null;
   if (action === 'leave') {
-    closeEditor();
-    leaving = true;
-    void store.cancelEdit({ leaving: true });
-    void router.push("/dashboards").then((failure) => { if (failure) leaving = false; }, () => { leaving = false; });
+    void discardAndLeave();
     return;
   }
   void discardEdit();
@@ -628,6 +642,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  unmounted = true;
   clearRefreshTimer();
   teardownDrag();
   if (resizeObserver) resizeObserver.disconnect();
@@ -635,7 +650,7 @@ onBeforeUnmount(() => {
 });
 
 onBeforeRouteLeave(() => {
-  if (store.isEditing && store.isDirty) {
+  if (!leaving && store.isEditing && store.isDirty) {
     if (!window.confirm(t('dashboards.unsavedLeaveConfirmation'))) {
       return false;
     }
@@ -646,7 +661,7 @@ onBeforeRouteLeave(() => {
 // Parameter navigation reuses the component, so discard the previous dashboard draft.
 onBeforeRouteUpdate((to, from) => {
   if (to.params.id === from.params.id) return true;
-  if (store.isEditing && store.isDirty) {
+  if (!leaving && store.isEditing && store.isDirty) {
     if (!window.confirm(t('dashboards.unsavedLeaveConfirmation'))) {
       return false;
     }

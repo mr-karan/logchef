@@ -510,7 +510,8 @@ describe("DashboardView tabs", () => {
     button("Discard changes").click();
     await settle();
     await settle();
-    expect(cancel).toHaveBeenCalledWith({ leaving: true });
+    expect(router.currentRoute.value.path).toBe("/dashboards");
+    expect(cancel).not.toHaveBeenCalled();
     expect(tabs.queries).toEqual([]);
   });
 
@@ -536,6 +537,50 @@ describe("DashboardView tabs", () => {
     await settle();
     expect(router.currentRoute.value.path).toBe("/dashboards");
     expect(store.getPanelState("today").status).toBe("idle");
+  });
+
+  async function discardAfterEditing() {
+    button("Edit").click();
+    await settle();
+    await settle();
+    const store = useDashboardsStore();
+    store.updateDraftPanel("today", { query: { text: "edited-query" } });
+    store.removeDraftTab("week");
+    await settle();
+    await settle();
+    tabs.queries.length = 0;
+    host.querySelector<HTMLElement>('button[aria-label="Back to dashboards"]')?.click();
+    await settle();
+    button("Discard changes").click();
+    await settle();
+    await settle();
+    await settle();
+    return store;
+  }
+
+  it("a leave that a guard aborts drops the draft and reruns the saved query", async () => {
+    await openAfter("/dashboards/1?tab=today");
+    router.beforeEach((to) => to.path !== "/dashboards");
+    const store = await discardAfterEditing();
+    expect(router.currentRoute.value.path).toBe("/dashboards/1");
+    expect(store.isEditing).toBe(false);
+    expect(tabs.queries).toEqual(["today-query"]);
+  });
+
+  it("a leave redirected back to a dashboard drops the draft and keeps URL corrections", async () => {
+    await openAfter("/dashboards/1?tab=today");
+    router.beforeEach((to) => (to.path === "/dashboards" ? "/dashboards/1?tab=today" : true));
+    const store = await discardAfterEditing();
+    expect(router.currentRoute.value.path).toBe("/dashboards/1");
+    expect(store.isEditing).toBe(false);
+    expect(tabs.queries).toEqual(["today-query"]);
+    button("Edit").click();
+    await settle();
+    await settle();
+    store.removeDraftTab("week");
+    await settle();
+    await settle();
+    expect(shownTab()).toBeUndefined();
   });
 
   it("discarding a tab deletion leaves Back working", async () => {

@@ -731,20 +731,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   // Drops the draft. current.panels was never mutated, so the view reverts to the
-  // last-loaded state, unless a refused save showed that state is stale. A
-  // caller leaving the dashboard passes `leaving` so nothing reruns for a view
-  // that is about to unmount.
-  async function cancelEdit({ leaving = false }: { leaving?: boolean } = {}): Promise<DashboardResult> {
+  // last-loaded state, unless a refused save showed that state is stale.
+  async function cancelEdit(): Promise<DashboardResult> {
     const reloadId = editConflicted ? editDashboardId : null;
     if (reloadId !== null) return await loadDashboard(reloadId, { discardDraft: true });
     abortPreview();
     abortSinglePanels();
     const current = state.data.value.current;
     const draft = state.data.value.editDraft;
-    if (leaving) {
-      resetEdit();
-      return { success: true };
-    }
     if (current && !current.corrupt && draft) {
       const editedById = new Map(draft.panels.map((panel) => [panel.id, panel]));
       for (const saved of current.panels.panels) {
