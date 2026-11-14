@@ -341,7 +341,7 @@ func validateDashboardPanelsV1(raw json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	layoutIDs, err := validateDashboardLayoutEntries(blob.Layout)
+	layoutIDs, err := validateDashboardLayoutEntries(blob.Layout, validateDashboardLayoutSizeV1)
 	if err != nil {
 		return err
 	}
@@ -395,9 +395,21 @@ func validateDashboardPanelEntries(panels []dashboardPanel) (map[string]struct{}
 	return panelIDs, nil
 }
 
-// validateDashboardLayoutEntries validates each layout rect (geometry, on-grid,
-// no overlap) and returns the set of layout ids (finding B3).
-func validateDashboardLayoutEntries(layout []dashboardPanelLayout) (map[string]struct{}, error) {
+// validateDashboardLayoutSizeV1 holds the schema 1 panel sizes: a preset width
+// and 1 to 6 rows.
+func validateDashboardLayoutSizeV1(l dashboardPanelLayout) error {
+	if _, ok := validDashboardPanelWidths[l.W]; !ok {
+		return fmt.Errorf("layout %q has invalid width %d (allowed: 2, 3, 4, 6, 8, 9, 12)", l.ID, l.W)
+	}
+	if l.H < MinDashboardPanelH || l.H > MaxDashboardPanelH {
+		return fmt.Errorf("layout %q has invalid height %d (allowed: %d-%d)", l.ID, l.H, MinDashboardPanelH, MaxDashboardPanelH)
+	}
+	return nil
+}
+
+// validateDashboardLayoutEntries validates each layout rect (the schema's
+// sizes, on-grid, no overlap) and returns the set of layout ids (finding B3).
+func validateDashboardLayoutEntries(layout []dashboardPanelLayout, validateSize func(dashboardPanelLayout) error) (map[string]struct{}, error) {
 	layoutIDs := make(map[string]struct{}, len(layout))
 	for i, l := range layout {
 		if l.ID == "" {
@@ -408,11 +420,8 @@ func validateDashboardLayoutEntries(layout []dashboardPanelLayout) (map[string]s
 		}
 		layoutIDs[l.ID] = struct{}{}
 
-		if _, ok := validDashboardPanelWidths[l.W]; !ok {
-			return nil, fmt.Errorf("layout %q has invalid width %d (allowed: 2, 3, 4, 6, 8, 9, 12)", l.ID, l.W)
-		}
-		if l.H < MinDashboardPanelH || l.H > MaxDashboardPanelH {
-			return nil, fmt.Errorf("layout %q has invalid height %d (allowed: %d-%d)", l.ID, l.H, MinDashboardPanelH, MaxDashboardPanelH)
+		if err := validateSize(l); err != nil {
+			return nil, err
 		}
 		// Position must be on-grid: non-negative and not spilling past the
 		// right edge of the 12-column grid.
