@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -57,7 +58,47 @@ type LogchefQLCompileError struct {
 func (e *LogchefQLCompileError) Error() string { return fmt.Sprintf("compiling LogchefQL: %v", e.Err) }
 func (e *LogchefQLCompileError) Unwrap() error { return e.Err }
 
-func prepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, dialect template.Dialect) (datasource.QueryRequest, error) {
+// templateTarget is what a native query template renders for: the dialect of
+// the source, and the timestamp column that {{__time_filter}} filters on.
+type templateTarget struct {
+	dialect         template.Dialect
+	timestampColumn string
+}
+
+var timezonePattern = regexp.MustCompile(`^[A-Za-z0-9_/+:-]+$`)
+
+// ValidateTimezone checks a request timezone before a provider or a macro sees
+// it: only the characters of an IANA name, and a zone that exists. An empty
+// name means the request sent none and returns nil.
+func ValidateTimezone(name string) (*time.Location, error) {
+	if name == "" {
+		return nil, nil
+	}
+	// "Local" loads the server's own zone, which is not a name a datasource knows.
+	if len(name) > 64 || !timezonePattern.MatchString(name) || name == "Local" {
+		return nil, queryRequestErrorf("invalid timezone %q: use an IANA name such as UTC or Asia/Kolkata", name)
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, queryRequestErrorf("invalid timezone %q: use an IANA name such as UTC or Asia/Kolkata", name)
+	}
+	return location, nil
+}
+
+// requestInterval parses the interval that {{__interval}} renders. An empty
+// value means the request sent none.
+func requestInterval(window string) (template.Interval, error) {
+	if window == "" {
+		return template.Interval{}, nil
+	}
+	interval, ok := template.ParseInterval(window)
+	if !ok {
+		return template.Interval{}, queryRequestErrorf("invalid interval %q: use one of %s", window, strings.Join(template.IntervalWindows(), ", "))
+	}
+	return interval, nil
+}
+
+func prepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, target templateTarget) (datasource.QueryRequest, error) {
 	timeout, err := resolveQueryTimeout(cfg, req.QueryTimeout)
 	if err != nil {
 		return datasource.QueryRequest{}, err
@@ -65,40 +106,72 @@ func prepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, dialect
 	if err := datasource.ValidateStreamFilters(req.ExtraStreamFilters); err != nil {
 		return datasource.QueryRequest{}, &QueryRequestError{Message: err.Error()}
 	}
+	startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
+	if err != nil {
+		return datasource.QueryRequest{}, &QueryRequestError{Message: err.Error()}
+	}
+	location, err := ValidateTimezone(req.Timezone)
+	if err != nil {
+		return datasource.QueryRequest{}, err
+	}
+	interval, err := requestInterval(req.Interval)
+	if err != nil {
+		return datasource.QueryRequest{}, err
+	}
 
-	query, err := dialect.Substitute(req.QueryText, templateVariables(req.Variables))
+	query, err := target.dialect.Substitute(req.QueryText, templateVariables(req.Variables), template.Builtins{
+		From: startTime, To: endTime, Location: location, Interval: interval, TimestampColumn: target.timestampColumn,
+	})
 	if err != nil {
 		return datasource.QueryRequest{}, queryRequestErrorf("Variable substitution failed: %v", err)
 	}
 
-	params := datasource.QueryRequest{
+	return datasource.QueryRequest{
 		ExtraStreamFilters: req.ExtraStreamFilters,
 		RawQuery:           query,
+		StartTime:          startTime,
+		EndTime:            endTime,
 		Timezone:           req.Timezone,
 		Limit:              req.Limit,
 		DefaultLimit:       cfg.DefaultPreviewLimit,
 		MaxLimit:           cfg.MaxPreviewLimit,
 		MaxResponseBytes:   cfg.MaxResponseBytes,
 		QueryTimeout:       timeout,
-	}
-	if req.StartTime != "" || req.EndTime != "" {
-		startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
-		if err != nil {
-			return datasource.QueryRequest{}, &QueryRequestError{Message: err.Error()}
-		}
-		params.StartTime = startTime
-		params.EndTime = endTime
-	}
-	return params, nil
+	}, nil
 }
 
-// PrepareSourceSQLQuery selects template quoting from the source's native dialect.
+// PrepareSourceSQLQuery renders the query template for the source's native
+// dialect and applies the timeout policy.
 func PrepareSourceSQLQuery(ctx context.Context, ds *datasource.Service, cfg config.QueryConfig, src access.AuthorizedSource, req models.APIQueryRequest) (datasource.QueryRequest, error) {
-	dialect, err := nativeTemplateDialect(ctx, ds, src)
+	target, err := nativeTemplateTarget(ctx, ds, src)
 	if err != nil {
 		return datasource.QueryRequest{}, err
 	}
-	return prepareSQLQuery(cfg, req, dialect)
+	return prepareSQLQuery(cfg, req, target)
+}
+
+// RenderSourceSQL renders a ClickHouse SQL template for an export, which
+// carries its own limit and timeout policy.
+func RenderSourceSQL(source *models.Source, req models.CreateExportJobRequest) (string, error) {
+	startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
+	if err != nil {
+		return "", &QueryRequestError{Message: err.Error()}
+	}
+	location, err := ValidateTimezone(req.Timezone)
+	if err != nil {
+		return "", err
+	}
+	interval, err := requestInterval(req.Interval)
+	if err != nil {
+		return "", err
+	}
+	query, err := template.ClickHouseSQL.Substitute(req.RawSQL, templateVariables(req.Variables), template.Builtins{
+		From: startTime, To: endTime, Location: location, Interval: interval, TimestampColumn: source.MetaTSField,
+	})
+	if err != nil {
+		return "", queryRequestErrorf("Variable substitution failed: %v", err)
+	}
+	return query, nil
 }
 
 // RunQuery prepares and runs a raw query with no streaming. One deadline,
@@ -147,6 +220,9 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	}
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
+	}
+	if _, err := ValidateTimezone(req.Timezone); err != nil {
+		return nil, err
 	}
 	timeout, err := resolveQueryTimeout(cfg, req.QueryTimeout)
 	if err != nil {
@@ -206,6 +282,9 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 // CompileLogchefQL compiles a LogchefQL query for src. A query that does not
 // compile is a QueryRequestError that carries the parse error.
 func CompileLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	if _, err := ValidateTimezone(req.Timezone); err != nil {
+		return nil, err
+	}
 	compiled, compileErr := ds.CompileLogchefQL(ctx, src.SourceID(), req)
 	if compiled == nil {
 		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
@@ -272,6 +351,9 @@ type LogchefQLTranslation struct {
 // that does not parse is not an error: the result has Valid=false and Error
 // set, so editors can show it.
 func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (*LogchefQLTranslation, error) {
+	if _, err := ValidateTimezone(req.Timezone); err != nil {
+		return nil, err
+	}
 	if _, err := logchefQLSource(ctx, ds, src); err != nil {
 		return nil, err
 	}
@@ -314,45 +396,53 @@ func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.
 	return translation, nil
 }
 
-func prepareHistogram(req models.APIHistogramRequest, dialect template.Dialect) (HistogramParams, error) {
+func prepareHistogram(req models.APIHistogramRequest, target templateTarget) (HistogramParams, error) {
 	if strings.TrimSpace(req.QueryText) == "" {
 		return HistogramParams{}, &QueryRequestError{Message: "query_text parameter is required"}
 	}
 	if err := datasource.ValidateStreamFilters(req.ExtraStreamFilters); err != nil {
 		return HistogramParams{}, &QueryRequestError{Message: err.Error()}
 	}
-
-	query, err := dialect.Substitute(req.QueryText, templateVariables(req.Variables))
-	if err != nil {
-		return HistogramParams{}, queryRequestErrorf("Variable substitution failed: %v", err)
-	}
-
-	window := req.Window
-	if window == "" {
-		window = "1m"
-	}
-	params := HistogramParams{
-		ExtraStreamFilters: req.ExtraStreamFilters,
-		Window:             window,
-		Query:              query,
-		Timezone:           req.Timezone,
-	}
-
 	startTime, endTime, err := parseHistogramTimeRange(req)
 	if err != nil {
 		return HistogramParams{}, &QueryRequestError{Message: err.Error()}
 	}
-	params.StartTime = startTime
-	params.EndTime = endTime
 	if startTime != nil && endTime.Before(*startTime) {
 		return HistogramParams{}, &QueryRequestError{Message: "start_time must not be after end_time"}
 	}
+	timezone := req.Timezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	location, err := ValidateTimezone(timezone)
+	if err != nil {
+		return HistogramParams{}, err
+	}
+	window := req.Window
+	if window == "" {
+		window = "1m"
+	}
+	// The window is the interval of a histogram. VictoriaLogs also takes
+	// durations outside the macro table, and {{__interval}} then fails as unset.
+	interval, _ := template.ParseInterval(window)
 
+	query, err := target.dialect.Substitute(req.QueryText, templateVariables(req.Variables), template.Builtins{
+		From: startTime, To: endTime, Location: location, Interval: interval, TimestampColumn: target.timestampColumn,
+	})
+	if err != nil {
+		return HistogramParams{}, queryRequestErrorf("Variable substitution failed: %v", err)
+	}
+
+	params := HistogramParams{
+		ExtraStreamFilters: req.ExtraStreamFilters,
+		StartTime:          startTime,
+		EndTime:            endTime,
+		Window:             window,
+		Query:              query,
+		Timezone:           timezone,
+	}
 	if strings.TrimSpace(req.GroupBy) != "" {
 		params.GroupBy = req.GroupBy
-	}
-	if params.Timezone == "" {
-		params.Timezone = "UTC"
 	}
 
 	timeout := req.QueryTimeout
@@ -367,27 +457,27 @@ func prepareHistogram(req models.APIHistogramRequest, dialect template.Dialect) 
 	return params, nil
 }
 
-// PrepareSourceHistogram selects template quoting from the source's native dialect.
+// PrepareSourceHistogram renders the query template for the source's native dialect.
 func PrepareSourceHistogram(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req models.APIHistogramRequest) (HistogramParams, error) {
-	dialect, err := nativeTemplateDialect(ctx, ds, src)
+	target, err := nativeTemplateTarget(ctx, ds, src)
 	if err != nil {
 		return HistogramParams{}, err
 	}
-	return prepareHistogram(req, dialect)
+	return prepareHistogram(req, target)
 }
 
-func nativeTemplateDialect(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource) (template.Dialect, error) {
+func nativeTemplateTarget(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource) (templateTarget, error) {
 	source, err := ds.LoadSource(ctx, src.SourceID())
 	if errors.Is(err, models.ErrNotFound) {
-		return 0, ErrSourceNotFound
+		return templateTarget{}, ErrSourceNotFound
 	}
 	if err != nil {
-		return 0, err
+		return templateTarget{}, err
 	}
 	if source.IsVictoriaLogs() {
-		return template.LogsQL, nil
+		return templateTarget{dialect: template.LogsQL}, nil
 	}
-	return template.ClickHouseSQL, nil
+	return templateTarget{dialect: template.ClickHouseSQL, timestampColumn: source.MetaTSField}, nil
 }
 
 // RunHistogram prepares and runs a histogram. HistogramTimeout covers
