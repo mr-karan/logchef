@@ -172,8 +172,6 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   it only filters rows already loaded.
 - In SQL mode, the disabled time range explains that the query's own dates
   apply and that re-running does not move them forward.
-
-### Changed
 - A query's own `LIMIT` is respected on every surface: the Explorer, dashboard
   panels, the API, the CLI and MCP. The server returns at most the smallest of
   the statement's literal `LIMIT`, the request limit and the configured
