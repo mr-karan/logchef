@@ -69,10 +69,11 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   and `can_edit: false`. A client writes it only when it also sends
   `X-Logchef-Dashboard-Features` with the comma-separated features its code
   supports (`result_frames`, `formats`, `result_charts`, `stat_compare`,
-  `thresholds`, `table_rules` and `column_formats` in this version); a save that would
-  drop a stored feature, or a schema 1 body on a schema 2 dashboard, returns
-  409. Any other schema header value returns 400. Dashboards that no schema 2
-  client has saved stay schema 1 and keep working for scripts as before.
+  `thresholds`, `table_rules`, `column_formats`, `tabs` and `free_grid` in this
+  version); a save that would drop a stored feature, or a schema 1 body on a
+  schema 2 dashboard, returns 409. Any other schema header value returns 400.
+  Dashboards that no schema 2 client has saved stay schema 1 and keep working
+  for scripts as before.
 - `GET /dashboards` returns summaries (`panel_count`, `panel_types`,
   `tab_count`, `corrupt`, `can_edit`, `revision`) and no panel blobs. A script
   that read blobs from the list must read each dashboard with
@@ -116,6 +117,16 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 - Query variables now support `day`, labelled "Date", with a date-only picker
   and `YYYY-MM-DD` literals in SQL, LogsQL, and LogchefQL. The existing `date`
   type is labelled "Date and time" and keeps its output unchanged.
+- Dashboards can have up to 10 tabs. Each tab has its own grid, the open tab
+  is in the URL as `tab=<id>`, and a tab runs its queries when it is first
+  shown. A refresh, a time range change and auto-refresh run only the open
+  tab. In edit mode you can add, rename, reorder and delete tabs and move a
+  panel to another tab. A dashboard with more than one tab stores the `tabs`
+  feature.
+- A dashboard panel can be any width from 2 to 12 columns and up to 12 rows
+  tall (was seven preset widths and 6 rows). A dashboard that uses such a size
+  stores the `free_grid` feature. An older client cannot save over a
+  dashboard with tabs or free sizes and asks you to reload before editing.
 - Dashboard stats can run SQL aggregates and LogsQL stats queries as written,
   reduce a value column, and show the selected row's date. The builder offers
   ClickHouse SQL, confirmed column kinds, and number formats with decimal
