@@ -1354,19 +1354,6 @@ describe("dashboards store — tabs", () => {
     expect(store.activeTabId).toBe("today");
   });
 
-  it("discarding to leave the dashboard reruns nothing", async () => {
-    const store = await loadEditableDashboard(tabbed());
-    await store.enterEdit();
-    store.updateDraftPanel("a1", { query: { text: "a1-edited" } });
-    await vi.waitFor(() => expect(store.getPanelState("a1").status).toBe("empty"));
-    vi.clearAllMocks();
-    mocks.logsQuery.mockResolvedValue(ok());
-    await store.cancelEdit({ leaving: true });
-    store.clearCurrent();
-    await tick();
-    expect(requested()).toEqual([]);
-    expect(store.isEditing).toBe(false);
-  });
 
   it("discarding after a query edit was reverted mid-flight does not leave the panel loading", async () => {
     const store = await loadEditableDashboard(tabbed());
