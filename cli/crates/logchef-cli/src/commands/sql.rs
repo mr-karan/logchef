@@ -3,7 +3,9 @@ use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, SecondsFormat,
 use clap::Args;
 use inquire::{Select, Text};
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, ExportSqlRequest, QueryStats, Source, SqlQueryRequest};
+use logchef_core::api::{
+    Client, Column, ExportSqlRequest, QueryStats, Source, SqlQueryRequest, TemplateVariable,
+};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::config::Context;
 use logchef_core::highlight::{
@@ -19,6 +21,13 @@ use crate::session;
 use crate::ui;
 
 const STREAMING_SQL_MIN_TIMEOUT_SECS: u32 = 120;
+/// The histogram windows, the only bucket sizes the server renders.
+const INTERVALS: [&str; 16] = [
+    "1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h",
+    "12h", "24h",
+];
+/// The macros the server renders from the request's time range.
+const TIME_MACROS: [&str; 4] = ["__from", "__to", "__time_filter", "__tz_offset"];
 const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
 
 #[derive(Args)]
@@ -34,7 +43,13 @@ const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
   logchef sql 'SELECT * FROM logs.app' --since 6h --stream --output jsonl > out.ndjson
 
   # Read the query from stdin, export as CSV
-  echo 'SELECT * FROM logs.app LIMIT 1000' | logchef sql - --output csv > rows.csv")]
+  echo 'SELECT * FROM logs.app LIMIT 1000' | logchef sql - --output csv > rows.csv
+
+  # A query copied from a dashboard panel: the server renders the macros
+  # from --since, --interval and the effective timezone, and fills {{service}}
+  logchef sql 'SELECT toStartOfInterval(ts, {{__interval}}, {{__timezone}}) t, count() n
+    FROM logs.app WHERE {{__time_filter}} AND service = {{service}} GROUP BY t ORDER BY t' \\
+    --since 7d --interval 24h --var service=api")]
 pub struct SqlArgs {
     /// Raw native query to execute. Use SQL for ClickHouse and LogsQL for VictoriaLogs. Use '-' to read from stdin.
     sql: Option<String>,
@@ -63,6 +78,16 @@ pub struct SqlArgs {
     /// HH:MM:SS interpreted as wall-clock in the effective timezone.
     #[arg(long)]
     to: Option<String>,
+
+    /// Bucket size for the {{__interval}} and {{__interval_s}} macros
+    #[arg(long, value_parser = INTERVALS)]
+    interval: Option<String>,
+
+    /// Value for a {{name}} placeholder, substituted by the server as a
+    /// quoted text literal. NAME:number=VALUE and NAME:date=VALUE send a
+    /// number or a date instead. Repeatable.
+    #[arg(long = "var", value_name = "NAME[:TYPE]=VALUE")]
+    variables: Vec<String>,
 
     /// Query timeout in seconds
     #[arg(long, default_value = "30")]
@@ -275,10 +300,23 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     //                  VL provider applies as the query's `start`/`end` bounds
     //                  (see internal/victorialogs/querying.go QueryLogs).
     //                  Splicing ClickHouse SQL into LogsQL would be invalid.
-    let (sql, vl_window) = if is_victorialogs {
-        (sql, vl_time_window(&args, ctx)?)
+    //   Time macros  — on either engine the server renders {{__from}},
+    //                  {{__to}} and {{__time_filter}} from the request's
+    //                  window, so the SQL stays untouched. A macro needs a
+    //                  window, so the default range applies when none is given.
+    let (sql, window) = if uses_time_macro(&sql) {
+        let default_since = ctx.defaults.since.clone();
+        (sql, request_time_window(&args, ctx, Some(&default_since))?)
+    } else if is_victorialogs {
+        (sql, request_time_window(&args, ctx, None)?)
     } else {
         (apply_clickhouse_time_range(&source, sql, &args, ctx)?, None)
+    };
+    let variables = parse_template_variables(&args.variables)?;
+    let timezone = resolve_timezone(ctx.defaults.timezone.as_deref()).to_string();
+    let (start_time, end_time) = match &window {
+        Some((start, end)) => (Some(start.clone()), Some(end.clone())),
+        None => (None, None),
     };
 
     // --dry-run: print resolved query to stdout (clean for piping) and exit.
@@ -307,6 +345,11 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             format: "csv".to_string(),
             limit: args.limit,
             query_timeout: Some(effective_query_timeout_secs),
+            timezone: Some(timezone),
+            start_time,
+            end_time,
+            interval: args.interval,
+            variables,
         };
 
         let job = client
@@ -398,6 +441,11 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             format: format.to_string(),
             limit: args.limit,
             query_timeout: Some(effective_query_timeout_secs),
+            timezone: Some(timezone),
+            start_time,
+            end_time,
+            interval: args.interval,
+            variables,
         };
 
         let mut response = client
@@ -415,21 +463,18 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         return Ok(());
     }
 
-    let (start_time, end_time) = match &vl_window {
-        Some((start, end)) => (Some(start.clone()), Some(end.clone())),
-        None => (None, None),
-    };
     let request = SqlQueryRequest {
-        variables: Vec::new(),
         query_text: sql,
         limit: args.limit,
-        // For ClickHouse, any --since/--from/--to was baked into `sql` as a
-        // literal time condition above (`fromUnixTimestamp64Milli` for instants, `toDateTime` for wall-clock --from/--to), so no window rides
-        // here. For VictoriaLogs, the resolved RFC3339 window is passed
-        // through and the server bounds the raw LogsQL query with it.
-        timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
+        // For plain ClickHouse SQL, any --since/--from/--to was baked into
+        // `sql` as an instant or wall-clock literal condition above, so no
+        // window rides here. For VictoriaLogs and for a query with a time
+        // macro, the resolved RFC3339 window is passed through.
+        timezone: Some(timezone),
         start_time,
         end_time,
+        interval: args.interval,
+        variables,
         query_timeout: Some(args.timeout),
     };
 
@@ -522,8 +567,49 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
 /// (see internal/victorialogs/querying.go QueryLogs), so — unlike ClickHouse
 /// — the window must NOT be spliced into the query string. We resolve it to
 /// absolute instants and let the server pass them to VL as `start`/`end`.
-fn vl_time_window(args: &SqlArgs, ctx: &Context) -> Result<Option<(String, String)>> {
-    if args.since.is_none() && args.from.is_none() && args.to.is_none() {
+/// Reports whether the query uses a macro that the server renders from the
+/// request's time range. The check reads the text only, so a macro inside a
+/// comment counts too.
+fn uses_time_macro(sql: &str) -> bool {
+    sql.split("{{").skip(1).any(|rest| {
+        rest.split_once("}}")
+            .is_some_and(|(name, _)| TIME_MACROS.contains(&name.trim()))
+    })
+}
+
+/// Parses `--var` values: `name=value` is text, and `name:number=value` or
+/// `name:date=value` names another type.
+fn parse_template_variables(vars: &[String]) -> Result<Vec<TemplateVariable>> {
+    vars.iter()
+        .map(|var| {
+            let (key, value) = var
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("--var '{var}' must be NAME=VALUE"))?;
+            let (name, kind) = key.split_once(':').unwrap_or((key, "text"));
+            if name.is_empty() {
+                anyhow::bail!("--var '{var}' must be NAME=VALUE");
+            }
+            if !["text", "number", "date", "day"].contains(&kind) {
+                anyhow::bail!("--var '{var}' has type '{kind}': use text, number, date or day");
+            }
+            Ok(TemplateVariable {
+                name: name.to_string(),
+                var_type: kind.to_string(),
+                value: value.into(),
+                origin: "--var",
+            })
+        })
+        .collect()
+}
+
+/// The window that rides in the request's start_time and end_time. With no
+/// time flag it is `default_since` back from now, or nothing when that is None.
+fn request_time_window(
+    args: &SqlArgs,
+    ctx: &Context,
+    default_since: Option<&str>,
+) -> Result<Option<(String, String)>> {
+    if args.since.is_none() && args.from.is_none() && args.to.is_none() && default_since.is_none() {
         return Ok(None);
     }
 
@@ -536,8 +622,8 @@ fn vl_time_window(args: &SqlArgs, ctx: &Context) -> Result<Option<(String, Strin
         (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
         (None, None) => {
             let end = Utc::now();
-            let start = end - parse_duration(args.since.as_deref().unwrap_or("15m"))?;
-            (start, end)
+            let since = args.since.as_deref().or(default_since).unwrap_or("15m");
+            (end - parse_duration(since)?, end)
         }
     };
 
@@ -1265,7 +1351,7 @@ mod tests {
             "2026-10-19T05:00:00.125Z",
             "*",
         ]);
-        let window = vl_time_window(&args, &context_in("America/New_York")).unwrap();
+        let window = request_time_window(&args, &context_in("America/New_York"), None).unwrap();
         assert_eq!(
             window,
             Some((
@@ -1284,7 +1370,7 @@ mod tests {
             "2026-05-19 09:45:00",
             "*",
         ]);
-        let window = vl_time_window(&args, &context_in("Asia/Kolkata")).unwrap();
+        let window = request_time_window(&args, &context_in("Asia/Kolkata"), None).unwrap();
         assert_eq!(
             window,
             Some((
@@ -1292,5 +1378,134 @@ mod tests {
                 "2026-05-19T04:15:00Z".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn time_macros_are_detected_in_the_query_text() {
+        for sql in [
+            "SELECT * FROM t WHERE {{__time_filter}}",
+            "SELECT * FROM t WHERE ts >= {{ __from }} AND ts < {{__to}}",
+            "* | stats by (_time:1d offset {{__tz_offset}}) count()",
+        ] {
+            assert!(uses_time_macro(sql), "{sql}");
+        }
+        for sql in [
+            "SELECT * FROM t WHERE service = {{service}}",
+            "SELECT toStartOfInterval(ts, {{__interval}}, {{__timezone}}) FROM t",
+            "SELECT '{{' FROM t WHERE x = '__from'",
+            "SELECT * FROM t WHERE ts >= {{__from",
+        ] {
+            assert!(!uses_time_macro(sql), "{sql}");
+        }
+    }
+
+    #[test]
+    fn var_flags_parse_into_typed_template_variables() {
+        let args = sql_args(&[
+            "--var",
+            "service=api=v2",
+            "--var",
+            "status:number=500",
+            "--var",
+            "since:date=2026-11-06",
+            "--var",
+            "empty=",
+            "SELECT 1",
+        ]);
+        let variable = |name: &str, kind: &str, value: &str| TemplateVariable {
+            name: name.into(),
+            var_type: kind.into(),
+            value: value.into(),
+            origin: "--var",
+        };
+        assert_eq!(
+            parse_template_variables(&args.variables).unwrap(),
+            vec![
+                variable("service", "text", "api=v2"),
+                variable("status", "number", "500"),
+                variable("since", "date", "2026-11-06"),
+                variable("empty", "text", ""),
+            ]
+        );
+        for bad in ["service", "=api", "status:int=500"] {
+            assert!(
+                parse_template_variables(&[bad.to_string()]).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn interval_flag_accepts_only_the_histogram_windows() {
+        use clap::Parser as _;
+        assert_eq!(
+            sql_args(&["--interval", "24h", "SELECT 1"]).interval,
+            Some("24h".to_string())
+        );
+        for bad in ["90m", "1d", "auto"] {
+            assert!(
+                SqlCommand::try_parse_from(["sql", "--interval", bad, "SELECT 1"]).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn macro_inputs_serialize_as_the_query_endpoint_reads_them() {
+        let request = SqlQueryRequest {
+            query_text: "SELECT 1".into(),
+            limit: None,
+            timezone: Some("Asia/Kolkata".into()),
+            start_time: Some("2026-11-05T18:30:00Z".into()),
+            end_time: Some("2026-11-12T18:30:00Z".into()),
+            interval: Some("24h".into()),
+            variables: vec![TemplateVariable {
+                name: "service".into(),
+                var_type: "text".into(),
+                value: "api".into(),
+                origin: "--var",
+            }],
+            query_timeout: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({
+                "query_text": "SELECT 1",
+                "timezone": "Asia/Kolkata",
+                "start_time": "2026-11-05T18:30:00Z",
+                "end_time": "2026-11-12T18:30:00Z",
+                "interval": "24h",
+                "variables": [{"name": "service", "type": "text", "value": "api"}],
+            })
+        );
+        let plain = SqlQueryRequest {
+            interval: None,
+            variables: Vec::new(),
+            ..request
+        };
+        let body = serde_json::to_value(&plain).unwrap();
+        assert!(body.get("interval").is_none() && body.get("variables").is_none());
+    }
+
+    #[test]
+    fn a_time_macro_query_gets_the_default_window() {
+        let ctx = context_in("UTC");
+        let args = sql_args(&["SELECT 1"]);
+        assert_eq!(request_time_window(&args, &ctx, None).unwrap(), None);
+
+        let (start, end) = request_time_window(&args, &ctx, Some("2h"))
+            .unwrap()
+            .expect("a window");
+        let span = DateTime::parse_from_rfc3339(&end).unwrap()
+            - DateTime::parse_from_rfc3339(&start).unwrap();
+        assert_eq!(span, ChronoDuration::hours(2));
+
+        let args = sql_args(&["--since", "30m", "SELECT 1"]);
+        let (start, end) = request_time_window(&args, &ctx, Some("2h"))
+            .unwrap()
+            .expect("a window");
+        let span = DateTime::parse_from_rfc3339(&end).unwrap()
+            - DateTime::parse_from_rfc3339(&start).unwrap();
+        assert_eq!(span, ChronoDuration::minutes(30));
     }
 }
