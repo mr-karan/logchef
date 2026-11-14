@@ -12,6 +12,7 @@ import { prepareLogchefQLTemplate } from "@/utils/logchefql/template";
 import { toRfc3339, type ResolvedWindow, type TimeWindow } from "@/utils/timeWindow";
 import { useExploreStore, type RunQuery } from "./explore";
 import { useExploreHistogramStore } from "./exploreHistogram";
+import { calculateOptimalGranularity } from "@/services/HistogramService";
 import { createWindowedSession, type WindowedSession, type Paging } from "./exploreWindowed";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "./teams";
@@ -243,6 +244,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
         start_time: toRfc3339(resolved.start),
         end_time: toRfc3339(resolved.end),
         timezone: resolved.zone,
+        ...(query.mode === "native" ? { interval: calculateOptimalGranularity(toRfc3339(resolved.start), toRfc3339(resolved.end)) } : {}),
         limit,
         query_timeout: timeout,
         variables,
@@ -290,7 +292,9 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
         compilation: { conditions: data.conditions ?? [], fieldsUsed: data.fields_used ?? [] },
       });
     }
-    const response = await exploreApi.getLogs(source.id, { ...common, query_text: query.text, limit: optimizer ? limit : undefined }, teamId, controller.signal);
+    // The interval feeds {{__interval}}, so a panel's query runs here unchanged.
+    const interval = calculateOptimalGranularity(common.start_time, common.end_time);
+    const response = await exploreApi.getLogs(source.id, { ...common, interval, query_text: query.text, limit: optimizer ? limit : undefined }, teamId, controller.signal);
     if (response.status !== "success") throw response;
     const data = response.data;
     if (data && "error" in data) throw new Error(data.details || data.error);

@@ -59,6 +59,7 @@ export interface QueryParams {
   timezone?: string; // User's timezone identifier (e.g., 'America/New_York', 'UTC')
   start_time?: string; // ISO formatted start time
   end_time?: string;   // ISO formatted end time
+  interval?: string;   // Bucket size that {{__interval}} renders, such as "24h"
   query_timeout?: number; // Query timeout in seconds
   variables?: TemplateVariable[]; // Template variables for SQL substitution
 }
