@@ -153,7 +153,8 @@ dashboard's backend mix.
 ## Time range and refresh
 
 Panels on a dashboard share one **time range**, set from the toolbar (the same
-quick and absolute ranges as the explorer). Changing it re-runs panels on the open tab. New dashboards default to the last 15 minutes. In edit mode, the
+quick and absolute ranges as the explorer). Changing it re-runs panels on the
+open tab. New dashboards default to the last 15 minutes. In edit mode, the
 dashboard settings can set the range a dashboard opens with: a quick range, or
 a calendar range such as **Today** or **Last 7 calendar days**.
 
@@ -331,10 +332,10 @@ request.
   did not declare is refused with 409, so a script can never drop state it
   does not know. This version stores `result_frames`, `formats`,
   `result_charts`, `stat_compare`, `thresholds`, `table_rules`,
-  `column_formats`, `tabs` (more than one tab) and `free_grid` (a width outside
-  2, 3, 4, 6, 8, 9 and 12, or a height above 6), and `panel_time` (a fixed panel interval, a panel range,
-  or a calendar default range). An empty value is correct for
-  a dashboard that uses none of them. Declare what your code supports; never
+  `column_formats`, `tabs` (more than one tab), `free_grid` (a width outside
+  2, 3, 4, 6, 8, 9 and 12, or a height above 6), and `panel_time` (a fixed panel
+  interval, a panel range, or a calendar default range). An empty value is
+  correct for a dashboard that uses none of them. Declare what your code supports; never
   copy a dashboard's stored `features` list into the header.
 
 `GET /dashboards` returns one summary per dashboard (panel count, panel
