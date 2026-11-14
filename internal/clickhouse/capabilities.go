@@ -3,6 +3,14 @@ package clickhouse
 // Server capabilities: what Logchef reads from the server behind a client's
 // connections, read again after the driver dials a new connection.
 //
+// A statement's settings come from the last read, so a statement that the
+// driver sends over a connection it dialed to an older server after that read
+// can fail with UNKNOWN_SETTING. That statement fails once, with an error that
+// says the server changed version, and the next statement gets settings read
+// from the new server. Logchef never sends a statement twice: ClickHouse can
+// raise UNKNOWN_SETTING after a statement had effects, even a SELECT, whose
+// analysis runs functions.
+//
 // Logchef assumes one ClickHouse version behind a source's address at a time.
 // The driver does not say which connection, or which server, ran a query, so
 // a capability read and a query may reach different servers. With two
@@ -27,7 +35,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 	"golang.org/x/sync/singleflight"
@@ -139,17 +146,15 @@ func (c *Client) flattensJSON(ctx context.Context) bool {
 	return err == nil && enabled
 }
 
-// send runs a statement with the settings settingsFor returns, and returns
-// them. A connection the driver dialed after they were chosen may reach a
-// server that does not know one of them, which rejects the statement with
-// UNKNOWN_SETTING. When the settings read again leave out one the statement
-// sent, a statement that unrun reports safe to run again is sent once more
-// with them. Any other statement fails with an error that says it was not
-// sent again: UNKNOWN_SETTING alone does not prove the server rejected it
-// before it ran, as throwIf can raise that code from a running INSERT. A
-// setting the statement's own SQL names and the server does not know still
-// fails it with ClickHouse's error.
-func (c *Client) send(ctx context.Context, settingsFor func(context.Context) (clickhouse.Settings, error), unrun func() bool, run func(context.Context) error) (clickhouse.Settings, error) {
+// send runs a statement once with the settings settingsFor returns, and
+// returns them. A connection the driver dialed after they were chosen may
+// reach a server of another version that does not know one of them. When the
+// statement then fails with UNKNOWN_SETTING and the settings read again for
+// that server leave out one it sent, it fails with a QueryError that says the
+// server changed version. That read replaces the capabilities the dial made
+// stale. A setting the statement's own SQL names and the server does not know
+// still fails it with ClickHouse's error.
+func (c *Client) send(ctx context.Context, settingsFor func(context.Context) (clickhouse.Settings, error), run func(context.Context) error) (clickhouse.Settings, error) {
 	dials := c.dials.Load()
 	settings, err := settingsFor(ctx)
 	if err != nil {
@@ -159,14 +164,10 @@ func (c *Client) send(ctx context.Context, settingsFor func(context.Context) (cl
 	if !isUnknownSetting(err) || c.dials.Load() == dials {
 		return settings, err
 	}
-	current, readErr := settingsFor(ctx)
-	switch {
-	case readErr != nil || !leavesOut(settings, current):
-		return settings, err
-	case !unrun():
-		return settings, fmt.Errorf("a new connection reached a ClickHouse server that does not know a setting Logchef sent, and Logchef did not send the statement again because it may have run: check its effects, then run it again: %w", err)
+	if current, readErr := settingsFor(ctx); readErr == nil && leavesOut(settings, current) {
+		return settings, &QueryError{Message: "The ClickHouse server changed version during the query and does not know a setting Logchef sent. Run the query again", Err: err}
 	}
-	return current, run(clickhouse.Context(ctx, clickhouse.WithSettings(current)))
+	return settings, err
 }
 
 // leavesOut reports whether current leaves out a setting that sent has.
@@ -177,20 +178,6 @@ func leavesOut(sent, current clickhouse.Settings) bool {
 		}
 	}
 	return false
-}
-
-// isSelect reports SQL that parses as one SELECT statement. A SELECT changes
-// no data. ClickHouse sends its header block, which the driver reads before
-// it returns the rows, before it runs the query. Only scalar subqueries run
-// earlier, during analysis; 26.8 reports their progress, 23.7 and 24.1 do
-// not.
-func isSelect(query string) bool {
-	stmts, err := clickhouseparser.NewParser(query).ParseStmts()
-	if err != nil || len(stmts) != 1 {
-		return false
-	}
-	_, ok := stmts[0].(*clickhouseparser.SelectQuery)
-	return ok
 }
 
 // modesUnsent reports whether a query that left out an overflow mode, as one

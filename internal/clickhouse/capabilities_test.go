@@ -175,8 +175,9 @@ func TestClientCountsDials(t *testing.T) {
 // that knows timeout_overflow_mode_leaf to one older than 23.11 that does
 // not, and back. The user's settings profile on the newer server sets the
 // mode to break, so the value a query reads shows whether Logchef sent throw.
-// The first query after the move to the older server succeeds, and a later
-// query on the newer server sends the mode again.
+// The first query after the move to the older server fails with an error that
+// says the server changed version, and the next succeeds. After the move
+// back, a later query on the newer server sends the mode again.
 func TestServerVersionChangeClickHouse(t *testing.T) {
 	newer := testClickHouseAddr(t)
 	older := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_OLD_ADDR")
@@ -203,9 +204,10 @@ func TestServerVersionChangeClickHouse(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	const leafQuery = "SELECT value FROM system.settings WHERE name = 'timeout_overflow_mode_leaf'"
 	leafMode := func(t *testing.T) *models.QueryResult {
 		t.Helper()
-		result, err := client.QueryWithOptions(ctx, "SELECT value FROM system.settings WHERE name = 'timeout_overflow_mode_leaf'", QueryOptions{})
+		result, err := client.QueryWithOptions(ctx, leafQuery, QueryOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,10 +228,11 @@ func TestServerVersionChangeClickHouse(t *testing.T) {
 		proxy.start()
 	}
 	move(older)
-	for range 2 {
-		if result := leafMode(t); len(result.Logs) != 0 || result.Stats.Truncation != models.TruncationNone {
-			t.Fatalf("the older server read %v with truncation %q, want no rows and none", result.Logs, result.Stats.Truncation)
-		}
+	if _, err := client.QueryWithOptions(ctx, leafQuery, QueryOptions{}); !failedOnVersionChange(err) {
+		t.Fatalf("the first query on the older server returned %v, want the error that the server changed version", err)
+	}
+	if result := leafMode(t); len(result.Logs) != 0 || result.Stats.Truncation != models.TruncationNone {
+		t.Fatalf("the older server read %v with truncation %q, want no rows and none", result.Logs, result.Stats.Truncation)
 	}
 	move(newer)
 	if result := leafMode(t); result.Stats.Truncation != models.TruncationUnknown {
@@ -238,6 +241,13 @@ func TestServerVersionChangeClickHouse(t *testing.T) {
 	if result := leafMode(t); len(result.Logs) != 1 || result.Logs[0]["value"] != "throw" || result.Stats.Truncation != models.TruncationNone {
 		t.Fatalf("the newer server read %v with truncation %q after the move back, want throw and none", result.Logs, result.Stats.Truncation)
 	}
+}
+
+// failedOnVersionChange reports whether err is the error of a statement that
+// reached a server that does not know a setting Logchef sent.
+func failedOnVersionChange(err error) bool {
+	queryErr, ok := errors.AsType[*QueryError](err)
+	return ok && isUnknownSetting(err) && strings.Contains(queryErr.Message, "server changed version")
 }
 
 // rewriteModeReads passes each read of client's overflow modes, numbered from
@@ -283,8 +293,9 @@ func countedClient(t *testing.T) (*Client, *queryCounter) {
 // TestSendDoesNotRepeatAnInsertClickHouse runs an INSERT that writes rows and
 // then fails with code 115, UNKNOWN_SETTING, raised by throwIf. The read of
 // the server's modes after the failure leaves out one the INSERT sent, as if
-// its new connection had reached an older server. The INSERT may have run,
-// so Logchef must not send it again, and its error must say so.
+// its new connection had reached an older server. The INSERT ran, so
+// Logchef must not send it again, and its error says the server changed
+// version.
 func TestSendDoesNotRepeatAnInsertClickHouse(t *testing.T) {
 	client, counter := countedClient(t)
 	rewriteModeReads(client, func(read int64, modes clickhouse.Settings) {
@@ -309,57 +320,60 @@ func TestSendDoesNotRepeatAnInsertClickHouse(t *testing.T) {
 	if n := counter.queries.Load(); n != 1 {
 		t.Fatalf("the INSERT was sent %d times, want 1", n)
 	}
-	if !isUnknownSetting(err) || !strings.Contains(err.Error(), "did not send the statement again") {
-		t.Fatalf("the INSERT returned %v, want UNKNOWN_SETTING and that Logchef did not send it again", err)
+	if !failedOnVersionChange(err) {
+		t.Fatalf("the INSERT returned %v, want the error that the server changed version", err)
 	}
 }
 
-// TestSendRepeatsARejectedSelectClickHouse has the first read of the
+// TestSendFailsOnceOnAVersionChangeClickHouse has the first read of the
 // server's modes return a setting the server does not know, as a read from a
 // newer server before a new connection reached this one. The server rejects
-// the SELECT before it runs it, the read again leaves the setting out, and
-// Logchef sends the SELECT once more.
-func TestSendRepeatsARejectedSelectClickHouse(t *testing.T) {
+// the SELECT, the read again leaves the setting out, and the SELECT fails
+// once with an error that says the server changed version. The next SELECT
+// gets the settings of that read and succeeds.
+func TestSendFailsOnceOnAVersionChangeClickHouse(t *testing.T) {
 	client, counter := countedClient(t)
 	rewriteModeReads(client, func(read int64, modes clickhouse.Settings) {
 		if read == 1 {
 			modes["logchef_test_unknown_overflow_mode"] = "throw"
 		}
 	})
-	result, err := client.QueryWithOptions(t.Context(), "SELECT number FROM numbers(3)", QueryOptions{})
+	const query = "SELECT number FROM numbers(3)"
+	if _, err := client.QueryWithOptions(t.Context(), query, QueryOptions{}); !failedOnVersionChange(err) {
+		t.Fatalf("the first SELECT returned %v, want the error that the server changed version", err)
+	}
+	if n := counter.queries.Load(); n != 1 {
+		t.Fatalf("the SELECT was sent %d times, want 1", n)
+	}
+	result, err := client.QueryWithOptions(t.Context(), query, QueryOptions{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("the SELECT after the version change failed: %v", err)
 	}
 	if len(result.Logs) != 3 || result.Stats.Truncation != models.TruncationNone {
 		t.Fatalf("the SELECT read %v with truncation %q, want 3 rows and none", result.Logs, result.Stats.Truncation)
 	}
-	if n := counter.queries.Load(); n != 2 {
-		t.Fatalf("the SELECT was sent %d times, want 2", n)
-	}
 }
 
-// TestSendDoesNotRepeatASelectThatReportedProgressClickHouse runs a SELECT
-// whose scalar subquery reads rows and then fails with code 115, before the
-// SELECT's header arrives. The read of the server's modes after the failure
-// leaves out one the SELECT sent. The server reported progress, so the
-// SELECT ran in part, and Logchef must not send it again.
-func TestSendDoesNotRepeatASelectThatReportedProgressClickHouse(t *testing.T) {
-	const query = "SELECT (SELECT throwIf(count() > 0, 'Unknown setting', toInt32(115)) FROM numbers(50000000)) SETTINGS allow_custom_error_code_in_throwif = 1, max_block_size = 1000"
-	probe, err := NewClient(ClientOptions{Host: testClickHouseAddr(t)}, discardLogger())
+// TestSendDoesNotRepeatASelectClickHouse runs a SELECT whose analysis calls
+// an executable function that appends a line to a file, and then fails with
+// code 115 for the setting name built from the function's result. The read
+// of the server's modes after the failure leaves out one the SELECT sent, as
+// if its new connection had reached an older server. The function ran, so
+// Logchef must not send the SELECT again. The function is the testdata
+// fixture: logchef_test_effect_function.xml in the server's config directory
+// and logchef_test_effect.sh in /var/lib/clickhouse/user_scripts.
+func TestSendDoesNotRepeatASelectClickHouse(t *testing.T) {
+	admin, err := NewClient(ClientOptions{Host: testClickHouseAddr(t)}, discardLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = probe.Close() })
-	var reported atomic.Bool
-	rows, err := probe.conn.Query(clickhouse.Context(t.Context(), clickhouse.WithProgress(func(*clickhouse.Progress) { reported.Store(true) })), query)
-	if err == nil {
-		_ = rows.Close()
+	t.Cleanup(func() { _ = admin.Close() })
+	var installed uint64
+	if err := admin.conn.QueryRow(t.Context(), "SELECT count() FROM system.functions WHERE name = 'logchef_test_effect'").Scan(&installed); err != nil {
+		t.Fatal(err)
 	}
-	if !isUnknownSetting(err) {
-		t.Fatalf("the SELECT returned %v, want code 115 before its header", err)
-	}
-	if !reported.Load() {
-		t.Skip("this ClickHouse server reports no progress before a scalar subquery fails")
+	if installed == 0 {
+		t.Skip("install the logchef_test_effect function from testdata on the ClickHouse server to run")
 	}
 	client, counter := countedClient(t)
 	rewriteModeReads(client, func(read int64, modes clickhouse.Settings) {
@@ -367,7 +381,16 @@ func TestSendDoesNotRepeatASelectThatReportedProgressClickHouse(t *testing.T) {
 			delete(modes, "read_overflow_mode_leaf")
 		}
 	})
-	_, err = client.QueryWithOptions(t.Context(), query, QueryOptions{})
+	file := fmt.Sprintf("logchef_test_%d.txt", time.Now().UnixNano())
+	_, err = client.QueryWithOptions(t.Context(), fmt.Sprintf("SELECT getSetting(concat('logchef_test_unknown_', toString(logchef_test_effect('%s'))))", file), QueryOptions{})
+	var effects uint64
+	if err := admin.conn.QueryRow(t.Context(), fmt.Sprintf("SELECT count() FROM file('%s', 'LineAsString')", file)).Scan(&effects); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the function ran %d times", effects)
+	if effects != 1 {
+		t.Fatalf("the function ran %d times, want 1", effects)
+	}
 	if n := counter.queries.Load(); n != 1 {
 		t.Fatalf("the SELECT was sent %d times, want 1", n)
 	}
