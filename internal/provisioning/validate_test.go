@@ -199,6 +199,9 @@ func TestValidateConfig_ClickHouseActivitySettings(t *testing.T) {
 	}{
 		{"allow_view with default caps accepted", map[string]any{"allow_view": true}, false},
 		{"allow_view with positive caps accepted", map[string]any{"allow_view": true, "max_rows_to_read": 5000000, "max_bytes_to_read": 104857600}, false},
+		{"maximum caps accepted", map[string]any{"max_rows_to_read": int64(10_000_000_000), "max_bytes_to_read": int64(1_099_511_627_776)}, false},
+		{"rows above maximum rejected", map[string]any{"max_rows_to_read": int64(10_000_000_001)}, true},
+		{"bytes above maximum rejected", map[string]any{"max_bytes_to_read": int64(1_099_511_627_777)}, true},
 		{"zero max_rows_to_read rejected", map[string]any{"allow_view": true, "max_rows_to_read": 0}, true},
 		{"negative max_bytes_to_read rejected", map[string]any{"allow_view": true, "max_bytes_to_read": -10}, true},
 	}

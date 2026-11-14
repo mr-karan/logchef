@@ -43,7 +43,8 @@ const (
 	// ActivityUnsupportedErrorType indicates a source cannot report recent activity
 	ActivityUnsupportedErrorType ErrorType = "ActivityUnsupported"
 
-	// ActivityLimitExceededErrorType indicates recent activity exceeded execution or scan limits
+	// ActivityLimitExceededErrorType indicates recent activity exceeded scan limits
+	// or an opted-in View activity time limit.
 	ActivityLimitExceededErrorType ErrorType = "ActivityLimitExceeded"
 )
 

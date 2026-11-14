@@ -288,3 +288,16 @@ func TestCapabilityProbeIsItsOwnQueryClickHouse(t *testing.T) {
 		t.Fatalf("the caller's profile callback ran %d times, want 0", n)
 	}
 }
+
+func TestActivityCapsOverrideLooserSourceSettings(t *testing.T) {
+	source := clickhouse.Settings{"max_rows_to_read": int64(500_000_000), "max_bytes_to_read": int64(10 << 30)}
+	client := clientWithModes(source, clickhouse.Settings{"read_overflow_mode": "throw"})
+	overrides := buildIngestionStatsSettings(source, IngestionStatsOptions{EnforceScanLimits: true})
+	got, err := client.ownQuerySettings(t.Context(), 3, overrides)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["max_rows_to_read"] != DefaultViewActivityMaxRowsToRead || got["max_bytes_to_read"] != DefaultViewActivityMaxBytesToRead {
+		t.Fatalf("activity settings = %v, want default activity caps", got)
+	}
+}

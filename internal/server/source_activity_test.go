@@ -35,6 +35,7 @@ func TestSendSourceActivityErrorTypes(t *testing.T) {
 		{"activity unavailable", datasource.ErrSourceActivityUnavailable, http.StatusServiceUnavailable, models.ActivityUnsupportedErrorType},
 		{"operation not supported", fmt.Errorf("inspect: %w", datasource.ErrOperationNotSupported), http.StatusServiceUnavailable, models.ActivityUnsupportedErrorType},
 		{"scan limit exceeded", fmt.Errorf("inspect: %w", datasource.ErrSourceActivityLimitExceeded), http.StatusUnprocessableEntity, models.ActivityLimitExceededErrorType},
+		{"view timeout", fmt.Errorf("%w: %w", datasource.ErrSourceActivityLimitExceeded, context.DeadlineExceeded), http.StatusUnprocessableEntity, models.ActivityLimitExceededErrorType},
 		{"timeout", context.DeadlineExceeded, http.StatusGatewayTimeout, models.GeneralErrorType},
 		{"backend failure", errors.New("connection refused"), http.StatusInternalServerError, models.GeneralErrorType},
 	}
@@ -59,6 +60,9 @@ func TestSendSourceActivityErrorTypes(t *testing.T) {
 			var got Response
 			if err := json.Unmarshal(body, &got); err != nil {
 				t.Fatalf("decode %s: %v", body, err)
+			}
+			if tt.name == "view timeout" && got.Message != "Recent activity query exceeded its time limit" {
+				t.Fatalf("timeout message = %q", got.Message)
 			}
 			if resp.StatusCode != tt.wantStatus || got.ErrorType != string(tt.wantType) {
 				t.Fatalf("got %d %q, want %d %q", resp.StatusCode, got.ErrorType, tt.wantStatus, tt.wantType)

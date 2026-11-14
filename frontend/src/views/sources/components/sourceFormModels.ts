@@ -240,6 +240,16 @@ function parsePositiveIntegerSetting(value: string): number | undefined {
   return parsed;
 }
 
+export function isClickHouseActivityValid(state: ClickHouseActivityFormState): boolean {
+  if (!state.allowView) return true;
+  return [
+    { value: state.maxRowsToRead, max: 10_000_000_000 },
+    { value: state.maxBytesToRead, max: 1_099_511_627_776 },
+  ].every(({ value, max }) => value.trim() === "" || (
+    Number.isSafeInteger(Number(value)) && Number(value) > 0 && Number(value) <= max
+  ));
+}
+
 function buildClickHouseActivity(
   state: ClickHouseActivityFormState
 ): ClickHouseActivityConfig | undefined {
