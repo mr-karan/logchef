@@ -8,7 +8,7 @@ import { countFrame, resultFrame, type PanelFrame } from '@/utils/panelFrame';
 import { suggestViz, type ChartViz } from '@/utils/panelCharts';
 import PanelChart from '../PanelChart.vue';
 import { readFileSync } from 'node:fs';
-import { Crosshair, Scatter, StackedBar, GroupedBar, Line, Area } from '@unovis/ts';
+import { Plotline, Crosshair, Scatter, StackedBar, GroupedBar, Line, Area } from '@unovis/ts';
 import { show as tooltipShown } from '@unovis/ts/components/tooltip/style';
 markRaw(PolyfillResizeObserver.prototype);
 const cleanups: (() => void)[] = [];
@@ -323,4 +323,21 @@ it('keeps the live region stable across re-renders of the same bucket', async ()
   observer.disconnect();
   expect(live.textContent).toContain('a -30');
   expect(changes).toHaveLength(0);
+});
+
+it('draws threshold lines and stretches the axis to include them', async () => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['a'], thresholds: [{ value: null, color: 'green' }, { value: '100', color: 'red' }] });
+  const line = host.querySelector(`.${Plotline.selectors.plotline}`);
+  expect(line).toBeTruthy();
+  expect(line?.getAttribute('style')).toContain('var(--panel-red)');
+  const y = Number(line?.getAttribute('y1'));
+  expect(y).toBeGreaterThanOrEqual(0);
+  expect(y).toBeLessThan(260);
+});
+
+it('keeps the chart when an exact threshold cannot be plotted', async () => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['a'], thresholds: [{ value: null, color: 'green' }, { value: '1e400', color: 'red' }] });
+  expect(host.querySelector('[role=alert]')).toBeNull();
+  expect(host.querySelector('svg')).toBeTruthy();
+  expect(host.textContent).toContain('Threshold 1e400 is outside the chart coordinate range and was not drawn.');
 });

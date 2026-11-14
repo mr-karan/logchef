@@ -10,6 +10,7 @@ import (
 func TestDashboardPresentation(t *testing.T) {
 	for _, tc := range []struct{ viz, feature string }{
 		{`{"type":"stat","thresholds":[{"value":null,"color":"green"},{"value":"9007199254740993.01","color":"red"}],"color_mode":"background"}`, "thresholds"},
+		{`{"type":"stat","color_mode":"value"}`, "thresholds"},
 		{`{"type":"table","rules":[{"columns":["details"],"op":"contains","value":"retry","scope":"row","color":"red"}]}`, "table_rules"},
 		{`{"type":"table","column_formats":{"ts":{"kind":"time","date":"iso","time":"seconds"},"n":{"decimals":2}}}`, "column_formats"},
 	} {
@@ -33,6 +34,7 @@ func TestDashboardPresentation(t *testing.T) {
 		`{"type":"stat","value":"n","thresholds":[{"value":null,"color":"pink"}]}`,
 		`{"type":"stat","value":"n","thresholds":[{"value":null,"color":"red"},{"value":"9007199254740993.01","color":"red"},{"value":"9007199254740993.009","color":"green"}]}`,
 		`{"type":"stat","value":"n","thresholds":[{"value":null,"color":"red"},{"value":"1e401","color":"red"}]}`,
+		`{"type":"stat","value":"n","thresholds":[{"value":null,"color":"green"},{"value":"5","color":"amber"},{"value":"5.0","color":"red"}]}`,
 		`{"type":"table","color_mode":"value"}`,
 		`{"type":"table","rules":[{"columns":["n"],"op":">","value":"NaN","color":"red","scope":"cell"}]}`,
 		`{"type":"table","rules":[{"columns":["n"],"op":"contains","value":"retry","color":"red","scope":"all"}]}`,

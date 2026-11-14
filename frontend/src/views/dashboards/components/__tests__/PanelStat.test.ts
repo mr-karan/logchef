@@ -1,10 +1,15 @@
-import { createApp, h, nextTick, ref } from "vue";
+import { readFileSync } from "node:fs";
+import { Line } from "@unovis/ts";
+import { ResizeObserver as PolyfillResizeObserver } from "@juggle/resize-observer";
+import { createApp, h, markRaw, nextTick, ref } from "vue";
 import { i18n } from "@/i18n";
 import { createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardQueryPanel } from "@/api/dashboards";
 import { resultFrame } from "@/utils/panelFrame";
 import PanelStat from "../PanelStat.vue";
+
+markRaw(PolyfillResizeObserver.prototype);
 
 describe("stat frame rendering", () => {
   const NumberFormat = Intl.NumberFormat;
@@ -100,4 +105,45 @@ it("shows a negative delta and percent, red for good up and green for good down"
     panel.value.viz.compare = { mode: "previous_row", good: "down" }; await nextTick();
     expect(delta?.className).toContain("text-green-600");
   } finally { app.unmount(); }
+});
+
+it.each(['green', 'amber', 'red', 'blue', 'purple', 'gray'] as const)('uses the %s tile foreground for all stat text and sparkline', async color => {
+ const panel = ref<DashboardQueryPanel>({ id:'s',kind:'query',title:'',team_id:1,source_id:1,query:{mode:'result',language:'clickhouse-sql',text:'SELECT day,n'},viz:{type:'stat',value:'n',order_by:'day',compare:{mode:'previous_row',good:'up'},sparkline:true,thresholds:[{value:null,color}],color_mode:'background'} });
+ const frame = resultFrame({columns:[{name:'day',type:'Date'},{name:'n',type:'UInt64'}],rows:[{day:'2026-11-11',n:100},{day:'2026-11-12',n:150}]});
+ const host=document.createElement('div');
+ document.body.append(host);
+ const widthSpy=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(400);
+ const boundsSpy=vi.spyOn(Element.prototype,'getBoundingClientRect').mockReturnValue(new DOMRect(0,0,400,160));
+ const app=createApp({render:()=>h(PanelStat,{frame,panel:panel.value})}).use(createPinia()).use(i18n);
+ try {
+  app.mount(host);await nextTick();
+  const token=`var(--panel-${color})`;
+  expect(host.querySelector<HTMLElement>('.panel-stat')?.style.backgroundColor).toBe(`var(--panel-${color}-background)`);
+  for (const selector of ['.panel-stat__value','.panel-stat__comparison','.panel-stat__comparison .block','.panel-stat > .text-muted-foreground']) {
+   const text=host.querySelector<HTMLElement>(selector);
+   expect(text,selector).toBeTruthy();expect(text?.style.color,selector).toBe(token);
+   const css=readFileSync('src/assets/index.css','utf8');
+   for (const theme of [css.split('.dark {')[0],css.split('.dark {')[1]]) {
+    const luminance=(value: string) => {
+     const name=value.slice(4,-1);
+     const hex=theme.match(new RegExp(`${name}: #([0-9a-f]{6})`))?.[1];
+     if (!hex) throw new Error(`Missing palette token ${name}`);
+     const channels=hex.match(/../g)!.map(c=>parseInt(c,16)/255).map(c=>c<=0.04045?c/12.92:((c+0.055)/1.055)**2.4);
+     return channels[0]*0.2126+channels[1]*0.7152+channels[2]*0.0722;
+    };
+    const fg=luminance(text!.style.color);
+    const bg=luminance(host.querySelector<HTMLElement>('.panel-stat')!.style.backgroundColor);
+    expect((Math.max(fg,bg)+0.05)/(Math.min(fg,bg)+0.05),selector).toBeGreaterThanOrEqual(4.5);
+   }
+  }
+  expect(host.querySelector('.panel-stat__comparison')?.textContent).toContain('+50');
+  await vi.waitFor(() => {
+   const path=host.querySelector<SVGElement>(`.panel-stat__sparkline .${Line.selectors.linePath}`);
+   expect(path?.getAttribute('stroke')).toBe(token);
+  });
+  if(panel.value.viz.type!=='stat') throw new Error('Expected stat');
+  panel.value.viz.color_mode='value';await nextTick();
+  expect(host.querySelector<HTMLElement>('.panel-stat__value')?.style.color).toBe(token);
+  expect(host.querySelector<HTMLElement>('.panel-stat')?.style.backgroundColor).toBe('');
+ } finally {app.unmount();host.remove();widthSpy.mockRestore();boundsSpy.mockRestore();}
 });

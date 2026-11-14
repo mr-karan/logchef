@@ -107,7 +107,11 @@ function clampLimit(value: unknown): number | undefined {
 const visibleColumns = computed(() => (props.viz.type === "table" ? props.viz.visible_columns ?? [] : []));
 
 function setColumns(columns: string[]) {
-  emit("update:viz", columns.length ? { ...props.viz, type: "table", visible_columns: columns } : { type: "table", ...(props.viz.type === "table" ? { columns: props.viz.columns } : {}) });
+  if (props.viz.type !== "table") return;
+  const viz = { ...props.viz };
+  if (columns.length) viz.visible_columns = columns;
+  else delete viz.visible_columns;
+  emit("update:viz", viz);
 }
 
 function addColumn() {

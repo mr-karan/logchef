@@ -74,11 +74,6 @@ function numberField(name: string, field: "decimals" | "scale" | "prefix" | "suf
  if (f?.kind === "time") return;
  setFormat(name, { ...f, [field]: value === "" ? undefined : field === "decimals" || field === "scale" ? Number(value) : String(value) });
 }
-function visible(name: string) {
- if (props.viz.type !== "table") return;
- const current = props.viz.visible_columns ?? props.frame?.columns.map(c => c.name) ?? [];
- emit("update:viz", { ...props.viz, visible_columns: current.includes(name) ? current.filter(n => n !== name) : [...current, name] });
-}
 </script>
 <template>
  <fieldset v-if="viz.type === 'stat' || viz.type === 'chart'" class="space-y-2">
@@ -106,7 +101,7 @@ function visible(name: string) {
   </fieldset>
   <fieldset class="space-y-2"><legend class="text-xs font-medium">{{ t('panelStyle.columnFormats') }}</legend>
    <div v-for="c in frame?.columns ?? []" :key="c.name" class="space-y-1 rounded border p-2">
-    <label class="flex gap-2 text-xs"><input type="checkbox" :checked="!viz.visible_columns || viz.visible_columns.includes(c.name)" @change="visible(c.name)" />{{ c.name }}</label>
+    <span class="text-xs">{{ c.name }}</span>
     <select :aria-label="t('panelStyle.format')" :value="formatFor(c.name)?.kind ?? (formatFor(c.name) ? 'number' : '')" @change="setFormatKind(c.name,$event)"><option value="">{{ t('ui.none') }}</option><option value="number">{{ t('ui.number') }}</option><option value="time">{{ t('pages.time') }}</option></select>
     <template v-if="formatFor(c.name)?.kind === 'time'">
      <select :aria-label="t('ui.date')" :value="timeFor(c.name).date ?? 'iso'" @change="setDate(c.name,$event)"><option v-for="d in dates" :key="d" :value="d">{{ t(`panelStyle.${d}`) }}</option></select>

@@ -52,7 +52,7 @@ describe("translation catalogs", () => {
   });
   it.each(locales.filter(locale => locale.code !== "en"))("translates Explorer link errors in $code", ({ code }) => {
     const messages = catalog(code);
-    for (const key of ["explore.linkOpenFailed", "explore.sourcesChanged", "explore.shareNotFound", "explore.teamAccessDenied", "explore.sourceAccessDenied", "explore.sourceUnavailableFallback", "explore.teamNotFound", "pages.savedQueryNotFound"]) {
+    for (const key of ["explore.linkOpenFailed", "explore.sourcesChanged", "explore.shareNotFound", "explore.teamAccessDenied", "explore.sourceAccessDenied", "explore.sourceUnavailableFallback", "explore.teamNotFound", "pages.savedQueryNotFound", "pages.time"]) {
       expect(messages[key], `${code}:${key}`).toBeDefined();
       expect(messages[key], `${code}:${key}`).not.toBe(english[key]);
     }
@@ -70,7 +70,7 @@ describe("translation catalogs", () => {
 
   it.each(locales)("validates every $code message and interpolation", ({ code }) => {
     const messages = catalog(code);
-    const expectedKeys = Object.keys(english).filter(key => code === "en" || code === "zh-CN" || paletteTitleKeys.has(key) || key === "pages.savedQueryNotFound" || (!key.startsWith("sources.") && !key.startsWith("pages.") && !key.startsWith("routes.") && !key.startsWith("tokens.") && !key.startsWith("access.") && !key.startsWith("admin.") && !key.startsWith("library.")));
+    const expectedKeys = Object.keys(english).filter(key => code === "en" || code === "zh-CN" || paletteTitleKeys.has(key) || key === "pages.savedQueryNotFound" || key === "pages.time" || (!key.startsWith("sources.") && !key.startsWith("pages.") && !key.startsWith("routes.") && !key.startsWith("tokens.") && !key.startsWith("access.") && !key.startsWith("admin.") && !key.startsWith("library.")));
     expect(Object.keys(messages).sort()).toEqual(expectedKeys.sort());
     const translator = createI18n({ legacy: false, locale: code, fallbackLocale: false, flatJson: true, messages: { [code]: { ...messages } } });
     try {
