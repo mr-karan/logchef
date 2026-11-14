@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -423,5 +426,64 @@ func TestUserCanDeleteSavedQuery(t *testing.T) {
 				t.Errorf("UserCanDeleteSavedQuery(%+v, %+v) = %v, want %v", tc.query, tc.user, got, tc.want)
 			}
 		})
+	}
+}
+
+// New saved-query variables may not start with "__", which keeps the prefix
+// free for built-in macros. A variable a stored query already has keeps
+// working, and a macro name is never a variable.
+func TestSavedQueryVariableNamesReserveTheMacroPrefix(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	user := newTestUser(t, db, "macros@example.com", "Macros")
+	src := newTestSource(t, db, "macro-source")
+	content := func(variables ...string) string {
+		items := make([]string, len(variables))
+		for i, name := range variables {
+			items[i] = `{"name":"` + name + `","type":"text","label":"","inputType":"input","value":""}`
+		}
+		return `{"version":1,"limit":100,"content":"SELECT * FROM x WHERE a = {{a}}","variables":[` + strings.Join(items, ",") + `]}`
+	}
+	create := func(variables ...string) error {
+		_, err := CreateSavedQuery(ctx, db, nil, log, src.ID, nil, "q", "", content(variables...),
+			models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, user.ID)
+		return err
+	}
+
+	if err := create("a", "_b"); err != nil {
+		t.Fatalf("plain names: %v", err)
+	}
+	for _, name := range []string{"__tenant", "__from", "__time_filter"} {
+		if err := create("a", name); !errors.Is(err, ErrInvalidQueryContent) {
+			t.Errorf("create with %s: error = %v, want ErrInvalidQueryContent", name, err)
+		}
+	}
+
+	// A query stored before the rule holds a prefixed variable.
+	owner := user.ID
+	stored, err := db.CreateSavedQuery(ctx, src.ID, nil, "old", "", models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, content("a", "__tenant"), &owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := func(variables ...string) error {
+		_, err := UpdateSavedQuery(ctx, db, nil, log, stored.ID, "old", "", content(variables...), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
+		return err
+	}
+	if err := update("a", "__tenant"); err != nil {
+		t.Fatalf("an update that keeps the stored variable: %v", err)
+	}
+	if err := update("a", "__tenant", "__region"); !errors.Is(err, ErrInvalidQueryContent) {
+		t.Errorf("an update that adds a prefixed variable: error = %v", err)
+	}
+	if err := update("a", "__tenant", "__to"); !errors.Is(err, ErrInvalidQueryContent) {
+		t.Errorf("an update that adds a macro name: error = %v", err)
+	}
+}
+
+func TestDashboardIntervalsMatchTheMacroTable(t *testing.T) {
+	if got, want := models.DashboardQueryWindows, template.IntervalWindows(); !slices.Equal(got, want) {
+		t.Fatalf("dashboard windows %v differ from the macro table %v", got, want)
 	}
 }
