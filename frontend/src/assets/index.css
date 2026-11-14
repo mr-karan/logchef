@@ -81,6 +81,19 @@
   --sidebar-border: oklch(0.92 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
   --panel-chart-generated-lightness: 34%;
+  --panel-green: #166534;
+  --panel-green-background: #dcfce7;
+  --panel-amber: #92400e;
+  --panel-amber-background: #fef3c7;
+  --panel-red: #991b1b;
+  --panel-red-background: #fee2e2;
+  --panel-blue: #1e40af;
+  --panel-blue-background: #dbeafe;
+  --panel-purple: #6b21a8;
+  --panel-purple-background: #f3e8ff;
+  --panel-gray: #374151;
+  --panel-gray-background: #f3f4f6;
+
   --panel-chart-1: #2563eb;
   --panel-chart-2: #d97706;
   --panel-chart-3: #0d9488;
@@ -130,6 +143,19 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.552 0.016 285.938);
   --panel-chart-generated-lightness: 65%;
+  --panel-green: #86efac;
+  --panel-green-background: #14532d;
+  --panel-amber: #fde68a;
+  --panel-amber-background: #78350f;
+  --panel-red: #fca5a5;
+  --panel-red-background: #7f1d1d;
+  --panel-blue: #93c5fd;
+  --panel-blue-background: #1e3a8a;
+  --panel-purple: #d8b4fe;
+  --panel-purple-background: #581c87;
+  --panel-gray: #e5e7eb;
+  --panel-gray-background: #374151;
+
   --panel-chart-1: #60a5fa;
   --panel-chart-2: #fbbf24;
   --panel-chart-3: #2dd4bf;

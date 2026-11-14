@@ -199,6 +199,9 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	blob = strings.Replace(blob, `,"interval":"auto"`, ``, 1)
 	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p2","kind":"query","title":"Trend","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"clickhouse-sql","text":"SELECT day,n FROM events"},"viz":{"type":"stat","value":"n","order_by":"day","compare":{"mode":"previous_row"},"sparkline":true}},`, team.ID, src.ID), 1)
 	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p2","x":6,"y":0,"w":6,"h":2},`, 1)
+	blob = strings.Replace(blob, `"type":"stat","value":"n"`, `"type":"stat","thresholds":[{"value":null,"color":"green"},{"value":"9007199254740993.01","color":"red"}],"value":"n"`, 1)
+	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p3","kind":"query","title":"Table","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"clickhouse-sql","text":"SELECT ts,details FROM events"},"viz":{"type":"table","rules":[{"columns":["details"],"op":"contains","value":"retry","scope":"row","color":"red"}],"column_formats":{"ts":{"kind":"time","time":"seconds"}}}},`, team.ID, src.ID), 1)
+	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p3","x":0,"y":2,"w":12,"h":2},`, 1)
 	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, dashboardHeaders{schema: new("2"), features: new(strings.Join(models.KnownDashboardFeatures(), ","))})
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v", status, resp)

@@ -149,28 +149,56 @@ type dashboardQueryV2 struct {
 }
 
 type dashboardVizV2 struct {
-	Compare         *dashboardStatCompareV2      `json:"compare,omitempty"`
-	Sparkline       *bool                        `json:"sparkline,omitempty"`
-	X               *string                      `json:"x,omitempty"`
-	Y               []string                     `json:"y,omitzero"`
-	Series          *string                      `json:"series,omitempty"`
-	Label           *string                      `json:"label,omitempty"`
-	XScale          *string                      `json:"x_scale,omitempty"`
-	Orientation     *string                      `json:"orientation,omitempty"`
-	ShowValues      *bool                        `json:"show_values,omitempty"`
-	Legend          *bool                        `json:"legend,omitempty"`
-	MinSlicePercent *float64                     `json:"min_slice_percent,omitempty"`
-	MaxRows         *int                         `json:"max_rows,omitempty"`
-	Value           *string                      `json:"value,omitempty"`
-	OrderBy         *string                      `json:"order_by,omitempty"`
-	Columns         map[string]dashboardColumnV2 `json:"columns,omitzero"`
-	Format          *dashboardNumberFormatV2     `json:"format,omitempty"`
-	Type            DashboardVizType             `json:"type"`
-	Mark            *DashboardChartMark          `json:"mark,omitempty"`
-	Stack           *DashboardChartStack         `json:"stack,omitempty"`
-	Reduce          *DashboardStatReduce         `json:"reduce,omitempty"`
-	Donut           *bool                        `json:"donut,omitempty"`
-	VisibleColumns  []string                     `json:"visible_columns,omitempty"`
+	Thresholds      []dashboardThresholdV2             `json:"thresholds,omitzero"`
+	ColorMode       *string                            `json:"color_mode,omitempty"`
+	Rules           []dashboardTableRuleV2             `json:"rules,omitzero"`
+	ColumnFormats   map[string]dashboardColumnFormatV2 `json:"column_formats,omitzero"`
+	Compare         *dashboardStatCompareV2            `json:"compare,omitempty"`
+	Sparkline       *bool                              `json:"sparkline,omitempty"`
+	X               *string                            `json:"x,omitempty"`
+	Y               []string                           `json:"y,omitzero"`
+	Series          *string                            `json:"series,omitempty"`
+	Label           *string                            `json:"label,omitempty"`
+	XScale          *string                            `json:"x_scale,omitempty"`
+	Orientation     *string                            `json:"orientation,omitempty"`
+	ShowValues      *bool                              `json:"show_values,omitempty"`
+	Legend          *bool                              `json:"legend,omitempty"`
+	MinSlicePercent *float64                           `json:"min_slice_percent,omitempty"`
+	MaxRows         *int                               `json:"max_rows,omitempty"`
+	Value           *string                            `json:"value,omitempty"`
+	OrderBy         *string                            `json:"order_by,omitempty"`
+	Columns         map[string]dashboardColumnV2       `json:"columns,omitzero"`
+	Format          *dashboardNumberFormatV2           `json:"format,omitempty"`
+	Type            DashboardVizType                   `json:"type"`
+	Mark            *DashboardChartMark                `json:"mark,omitempty"`
+	Stack           *DashboardChartStack               `json:"stack,omitempty"`
+	Reduce          *DashboardStatReduce               `json:"reduce,omitempty"`
+	Donut           *bool                              `json:"donut,omitempty"`
+	VisibleColumns  []string                           `json:"visible_columns,omitempty"`
+}
+
+type dashboardThresholdV2 struct {
+	Value json.RawMessage `json:"value"`
+	Color string          `json:"color"`
+}
+type dashboardTableRuleV2 struct {
+	Columns []string        `json:"columns"`
+	Op      string          `json:"op"`
+	Value   json.RawMessage `json:"value,omitempty"`
+	Color   string          `json:"color"`
+	Scope   string          `json:"scope"`
+}
+type dashboardColumnFormatV2 struct {
+	Kind     *string  `json:"kind,omitempty"`
+	Date     *string  `json:"date,omitempty"`
+	Time     *string  `json:"time,omitempty"`
+	Notation *string  `json:"notation,omitempty"`
+	Decimals *int     `json:"decimals,omitempty"`
+	Grouping *bool    `json:"grouping,omitempty"`
+	Scale    *float64 `json:"scale,omitempty"`
+	Unit     *string  `json:"unit,omitempty"`
+	Prefix   *string  `json:"prefix,omitempty"`
+	Suffix   *string  `json:"suffix,omitempty"`
 }
 
 type dashboardStatCompareV2 struct {
@@ -210,6 +238,30 @@ var dashboardFeatureRules = []struct {
 	name DashboardFeature
 	uses func(*dashboardPanelsV2) bool
 }{
+	{"thresholds", func(blob *dashboardPanelsV2) bool {
+		for _, p := range blob.Panels {
+			if p.Viz != nil && (p.Viz.Thresholds != nil || p.Viz.ColorMode != nil) {
+				return true
+			}
+		}
+		return false
+	}},
+	{"table_rules", func(blob *dashboardPanelsV2) bool {
+		for _, p := range blob.Panels {
+			if p.Viz != nil && p.Viz.Rules != nil {
+				return true
+			}
+		}
+		return false
+	}},
+	{"column_formats", func(blob *dashboardPanelsV2) bool {
+		for _, p := range blob.Panels {
+			if p.Viz != nil && p.Viz.ColumnFormats != nil {
+				return true
+			}
+		}
+		return false
+	}},
 	{"result_frames", func(blob *dashboardPanelsV2) bool {
 		for _, p := range blob.Panels {
 			v := p.Viz
@@ -249,6 +301,28 @@ var dashboardFeatureRules = []struct {
 // dashboardSchema2FieldOrigins maps every JSON path of the schema 2 structs to
 // the feature that an older writer would drop, or the base mark.
 var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
+	"panels.viz.thresholds":              "thresholds",
+	"panels.viz.thresholds.value":        "thresholds",
+	"panels.viz.thresholds.color":        "thresholds",
+	"panels.viz.color_mode":              "thresholds",
+	"panels.viz.rules":                   "table_rules",
+	"panels.viz.rules.columns":           "table_rules",
+	"panels.viz.rules.op":                "table_rules",
+	"panels.viz.rules.value":             "table_rules",
+	"panels.viz.rules.color":             "table_rules",
+	"panels.viz.rules.scope":             "table_rules",
+	"panels.viz.column_formats":          "column_formats",
+	"panels.viz.column_formats.kind":     "column_formats",
+	"panels.viz.column_formats.date":     "column_formats",
+	"panels.viz.column_formats.time":     "column_formats",
+	"panels.viz.column_formats.notation": "column_formats",
+	"panels.viz.column_formats.decimals": "column_formats",
+	"panels.viz.column_formats.grouping": "column_formats",
+	"panels.viz.column_formats.scale":    "column_formats",
+	"panels.viz.column_formats.unit":     "column_formats",
+	"panels.viz.column_formats.prefix":   "column_formats",
+	"panels.viz.column_formats.suffix":   "column_formats",
+
 	"panels.viz.compare":           "stat_compare",
 	"panels.viz.compare.mode":      "stat_compare",
 	"panels.viz.compare.good":      "stat_compare",
@@ -462,7 +536,7 @@ func validateDashboardPanelsV2(raw json.RawMessage) error {
 }
 
 // decodeDashboardPanelsV2 decodes a schema 2 blob strictly: an unknown key, a
-// null anywhere, or trailing data is an error.
+// null outside a threshold base, or trailing data is an error.
 func decodeDashboardPanelsV2(raw json.RawMessage) (*dashboardPanelsV2, error) {
 	if len(raw) > MaxDashboardPanelsSizeV2 {
 		return nil, fmt.Errorf("panels payload is %d bytes, exceeds the %d byte limit", len(raw), MaxDashboardPanelsSizeV2)
@@ -505,6 +579,9 @@ func firstJSONNull(value any, path string) (string, bool) {
 			child := k
 			if path != "" {
 				child = path + "." + k
+			}
+			if k == "value" && strings.HasSuffix(path, ".viz.thresholds[0]") && v[k] == nil {
+				continue
 			}
 			if p, found := firstJSONNull(v[k], child); found {
 				return p, true
@@ -688,6 +765,9 @@ func validateDashboardVizV2(panelID string, q *dashboardQueryV2, v *dashboardViz
 		return err
 	}
 	if err := validateDashboardStatCompare(panelID, q, v); err != nil {
+		return err
+	}
+	if err := validateDashboardPresentation(panelID, v); err != nil {
 		return err
 	}
 	return validateDashboardVizOptionsV2(panelID, v)

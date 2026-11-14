@@ -59,7 +59,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"unknown top-level key", json.RawMessage(`{"version":2,"features":[],"variables":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]}`), `unknown field "variables"`},
 		{"unknown panel key", v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","description":"later","team_id":1,"source_id":1,"query":`+countQ+`,"viz":{"type":"stat"}}`), `unknown field "description"`},
 		{"unknown query key", panel(`{"mode":"count","language":"logchefql","text":"x","range":"today-6d"}`, `{"type":"stat"}`), `unknown field "range"`},
-		{"unknown viz key", panel(countQ, `{"type":"chart","thresholds":[]}`), `unknown field "thresholds"`},
+		{"invalid thresholds", panel(countQ, `{"type":"chart","thresholds":[]}`), `invalid viz.thresholds`},
 		{"comparison needs mode", panel(resultQ, `{"type":"stat","value":"n","compare":{}}`), `invalid compare.mode`},
 		{"null value", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":null}`, `{"type":"stat"}`), "null at panels[0].query.group_by"},
 		{"trailing data", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]} {}`), "after top-level value"},
@@ -1105,7 +1105,7 @@ func TestDashboardResultCharts(t *testing.T) {
 		if err != nil || !slices.Contains(features, "result_charts") {
 			t.Fatalf("features %v: %v", features, err)
 		}
-		for _, future := range []string{`"thresholds":[]`, `"rules":[]`, `"combine":"sum"`} {
+		for _, future := range []string{`"combine":"sum"`} {
 			bad := strings.Replace(string(raw), `"type":`, future+`,"type":`, 1)
 			if err := ValidateDashboardPanels(json.RawMessage(bad)); err == nil || !strings.Contains(err.Error(), "unknown field") {
 				t.Errorf("expected unknown field for %s, got %v", future, err)

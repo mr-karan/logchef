@@ -2,7 +2,7 @@
 import { useElementSize } from "@vueuse/core";
 import { computed, markRaw, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { VisAxis, VisStackedBar, VisGroupedBar, VisLine, VisArea, VisScatter, VisXYContainer, VisCrosshair, VisTooltip } from "@unovis/vue";
+import { VisPlotline, VisAxis, VisStackedBar, VisGroupedBar, VisLine, VisArea, VisScatter, VisXYContainer, VisCrosshair, VisTooltip } from "@unovis/vue";
 import { Scale, StackedBar, GroupedBar, Scatter, Direction, type Crosshair, type Tooltip } from "@unovis/ts";
 import { getStackedData } from "@unovis/ts/utils/data";
 import { getHexValue } from "@unovis/ts/utils/color";
@@ -28,9 +28,16 @@ const result = computed(() => {
   try {
     const model = buildPanelChart(props.frame, props.viz, props.count, preferences.zone);
     markRaw(model.rows);
-    return { model, error: null };
+    const thresholdLines = (props.viz.thresholds ?? []).flatMap(step => {
+      if (step.value === null) return [];
+      const exact = parseExact(step.value);
+      return exact ? [{ color: step.color, ...chartValue(exact, props.viz.format) }] : [];
+    });
+    const approximateNotice = "Chart coordinates are approximate. Tooltips show exact values.";
+    if (thresholdLines.some(line => line.approximate) && !model.notices.includes(approximateNotice)) model.notices.push(approximateNotice);
+    return { model, error: null, thresholdLines };
   }
-  catch (error) { return { model: null, error: error instanceof Error ? error.message : String(error) }; }
+  catch (error) { return { model: null, thresholdLines: [], error: error instanceof Error ? error.message : String(error) }; }
 });
 const emptyModel: ChartModel = { rows: [], series: [], time: false, notices: [] };
 const model = computed(() => result.value.model ?? emptyModel);
@@ -43,6 +50,7 @@ const colors = computed(() => model.value.series.map(s => s.color));
 const plotHost = ref<HTMLElement | null>(null);
 const { height: plotHeight, width: plotWidth } = useElementSize(plotHost);
 const chartHeight = computed(() => Math.max(60, plotHeight.value || props.height - 30));
+const thresholdLines = computed(() => result.value.thresholdLines);
 const extent = computed(() => {
   let low = 0, high = 0;
   for (const row of model.value.rows) {
@@ -54,6 +62,7 @@ const extent = computed(() => {
     }
     if (stacked.value) { low = Math.min(low, negative); high = Math.max(high, positive); }
   }
+  for (const line of thresholdLines.value) { low = Math.min(low, line.coordinate); high = Math.max(high, line.coordinate); }
   return chartTicks(low, high, props.count);
 });
 const domain = computed<[number, number]>(() => [extent.value[0], extent.value.at(-1) ?? 1]);
@@ -204,6 +213,7 @@ function barLabels(svg: SVGSVGElement) {
           <template v-if="viz.show_values && mark !== 'bar'">
             <VisScatter v-for="(accessor, i) in labelAccessors" :key="model.series[i].key" :data="pointRows[i]" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />
           </template>
+          <VisPlotline v-for="(line, i) in thresholdLines" :key="i" :axis="horizontal ? 'x' : 'y'" :value="line.coordinate" :color="`var(--panel-${line.color})`" :label-text="line.exact" :label-color="`var(--panel-${line.color})`" :duration="0" :line-style="[5, 3]" />
           <VisTooltip ref="sharedTooltip" :triggers="barTooltipTriggers" />
           <VisCrosshair ref="crosshair" :data="model.rows" v-if="!horizontal" :duration="0" :x="x" :y="stacked ? undefined : accessors" :yStacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hideWhenFarFromPointer="false" :forceShowAt="active === null ? undefined : model.rows[active]?.x" />
         </VisXYContainer>

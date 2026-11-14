@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PanelPresentationOptions from "./PanelPresentationOptions.vue";
 import { useI18n } from "vue-i18n";
 import { computed } from "vue";
 import type { ColumnKind, DashboardPanelQuery, DashboardViz, NumberFormat, StatCompare, StatReduce } from "@/api/dashboards";
@@ -122,6 +123,7 @@ function setScale(value: unknown) {
 
 <template>
   <div class="space-y-4">
+    <PanelPresentationOptions :viz="viz" :frame="frame" @update:viz="emit('update:viz', $event)" />
     <template v-if="query.mode === 'result' && viz.type === 'chart'">
       <Label for="chart-x">{{ t('dashboardBuilder.XColumn') }}</Label>
       <select id="chart-x" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.x ?? ''" @change="setChartRole('x', selectValue($event))"><option value="">{{ t('dashboardBuilder.SelectColumn') }}</option><option v-for="c in columns" :key="c.name" :value="c.name">{{ c.name }}</option><option v-if="missingX" :value="viz.x">{{ viz.x }} {{ t('dashboardBuilder.Missing') }}</option></select>
