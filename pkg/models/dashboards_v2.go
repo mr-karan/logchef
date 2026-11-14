@@ -99,7 +99,7 @@ var (
 	validDashboardPanelKinds        = map[DashboardPanelKind]struct{}{DashboardPanelKindQuery: {}}
 	validDashboardQueryModes        = map[DashboardQueryMode]struct{}{DashboardQueryModeCount: {}, DashboardQueryModeResult: {}}
 	validDashboardQueryLanguages    = map[QueryLanguage]struct{}{QueryLanguageLogchefQL: {}, QueryLanguageClickHouseSQL: {}, QueryLanguageLogsQL: {}}
-	validDashboardQueryIntervals    = map[string]struct{}{DashboardQueryIntervalAuto: {}}
+	validDashboardQueryIntervals    = dashboardQueryIntervalSet()
 	validDashboardVizTypes          = map[DashboardVizType]struct{}{DashboardVizStat: {}, DashboardVizChart: {}, DashboardVizPie: {}, DashboardVizToplist: {}, DashboardVizTable: {}}
 	validDashboardChartMarks        = map[DashboardChartMark]struct{}{DashboardChartMarkLine: {}, DashboardChartMarkArea: {}, DashboardChartMarkBar: {}}
 	validDashboardChartStacks       = map[DashboardChartStack]struct{}{DashboardChartStackNone: {}, DashboardChartStackStacked: {}}
@@ -111,6 +111,18 @@ var (
 	validDashboardOrientations      = map[string]struct{}{"horizontal": {}, "vertical": {}}
 	validDashboardNumberUnits       = map[string]struct{}{"none": {}, "percent": {}, "bytes": {}, "duration_ms": {}, "duration_s": {}}
 )
+
+// DashboardQueryWindows are the fixed values of query.interval: the histogram
+// windows, which the macro table of internal/template also holds.
+var DashboardQueryWindows = []string{"1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h", "12h", "24h"}
+
+func dashboardQueryIntervalSet() map[string]struct{} {
+	set := map[string]struct{}{DashboardQueryIntervalAuto: {}}
+	for _, window := range DashboardQueryWindows {
+		set[window] = struct{}{}
+	}
+	return set
+}
 
 // dashboardPanelsV2 is the schema 2 blob. Optional fields are pointers so
 // absent is distinguishable from a zero value; a null is rejected separately.
@@ -150,6 +162,8 @@ type dashboardQueryV2 struct {
 	Interval       *string            `json:"interval,omitempty"`
 	Limit          *int               `json:"limit,omitempty"`
 	TranslateLimit *int               `json:"translate_limit,omitempty"`
+	// Range is a rolling or calendar range that replaces the dashboard range.
+	Range *string `json:"range,omitempty"`
 }
 
 type dashboardVizV2 struct {
@@ -313,6 +327,20 @@ var dashboardFeatureRules = []struct {
 		}
 		return false
 	}},
+	// An older writer rejects query.interval in result mode, so that use is
+	// part of the feature even when the value is auto.
+	{"panel_time", func(blob *dashboardPanelsV2) bool {
+		if blob.DefaultTimeRange != nil && dashboardCalendarRangePattern.MatchString(*blob.DefaultTimeRange) {
+			return true
+		}
+		for _, p := range blob.Panels {
+			q := p.Query
+			if q != nil && (q.Range != nil || q.Interval != nil && (*q.Interval != DashboardQueryIntervalAuto || q.Mode == DashboardQueryModeResult)) {
+				return true
+			}
+		}
+		return false
+	}},
 }
 
 // dashboardSchema2FieldOrigins maps every JSON path of the schema 2 structs to
@@ -382,6 +410,7 @@ var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
 	"panels.query.interval":         dashboardFeatureBase,
 	"panels.query.limit":            dashboardFeatureBase,
 	"panels.query.translate_limit":  dashboardFeatureBase,
+	"panels.query.range":            "panel_time",
 	"panels.viz":                    dashboardFeatureBase,
 	"panels.viz.type":               dashboardFeatureBase,
 	"panels.viz.mark":               dashboardFeatureBase,
@@ -415,7 +444,7 @@ var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
 	"panels.kind":                   {string(DashboardPanelKindQuery): dashboardFeatureBase},
 	"panels.query.mode":             {string(DashboardQueryModeCount): dashboardFeatureBase, string(DashboardQueryModeResult): dashboardFeatureBase},
 	"panels.query.language":         {string(QueryLanguageLogchefQL): dashboardFeatureBase, string(QueryLanguageClickHouseSQL): dashboardFeatureBase, string(QueryLanguageLogsQL): dashboardFeatureBase},
-	"panels.query.interval":         {DashboardQueryIntervalAuto: dashboardFeatureBase},
+	"panels.query.interval":         dashboardQueryIntervalOrigins(),
 	"panels.viz.type":               {string(DashboardVizStat): dashboardFeatureBase, string(DashboardVizChart): dashboardFeatureBase, string(DashboardVizPie): dashboardFeatureBase, string(DashboardVizToplist): dashboardFeatureBase, string(DashboardVizTable): dashboardFeatureBase},
 	"panels.viz.mark":               {string(DashboardChartMarkLine): dashboardFeatureBase, string(DashboardChartMarkArea): dashboardFeatureBase, string(DashboardChartMarkBar): dashboardFeatureBase},
 	"panels.viz.stack":              {string(DashboardChartStackNone): dashboardFeatureBase, string(DashboardChartStackStacked): dashboardFeatureBase},
@@ -424,6 +453,14 @@ var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
 	"panels.viz.columns.confidence": {"confirmed": "result_frames"},
 	"panels.viz.format.notation":    {"auto": "formats", "standard": "formats", "compact": "formats"},
 	"panels.viz.format.unit":        {"none": "formats", "percent": "formats", "bytes": "formats", "duration_ms": "formats", "duration_s": "formats"},
+}
+
+func dashboardQueryIntervalOrigins() map[string]DashboardFeature {
+	origins := map[string]DashboardFeature{DashboardQueryIntervalAuto: dashboardFeatureBase}
+	for _, window := range DashboardQueryWindows {
+		origins[window] = "panel_time"
+	}
+	return origins
 }
 
 // KnownDashboardFeatures lists the features this server computes, in the
@@ -618,7 +655,7 @@ func validateDashboardPanelsV2Blob(blob *dashboardPanelsV2) error {
 	if blob.Version != DashboardPanelsVersion2 {
 		return fmt.Errorf("unsupported panels version %d, expected %d", blob.Version, DashboardPanelsVersion2)
 	}
-	if err := validateDashboardSettings(blob.CacheTTLSeconds, blob.DefaultTimeRange); err != nil {
+	if err := validateDashboardSettings(blob.CacheTTLSeconds, blob.DefaultTimeRange, true); err != nil {
 		return err
 	}
 	layoutIDs, err := validateDashboardTabs(blob.Tabs)
@@ -741,12 +778,12 @@ func validateDashboardQueryV2(panelID string, q *dashboardQueryV2) error {
 		}
 	}
 	if q.Interval != nil {
-		if !count {
-			return fmt.Errorf("panel %q has query.interval, which only count mode uses", panelID)
-		}
 		if _, ok := validDashboardQueryIntervals[*q.Interval]; !ok {
-			return fmt.Errorf("panel %q has invalid query.interval %q (allowed: auto)", panelID, *q.Interval)
+			return fmt.Errorf("panel %q has invalid query.interval %q (allowed: auto, %s)", panelID, *q.Interval, strings.Join(DashboardQueryWindows, ", "))
 		}
+	}
+	if q.Range != nil && !validDashboardRange(*q.Range, true) {
+		return fmt.Errorf("panel %q has invalid query.range %q (allowed: a relative range such as 15m, 6h, 7d, today or today-6d)", panelID, *q.Range)
 	}
 	if q.Limit != nil {
 		if count {

@@ -185,6 +185,10 @@ type dashboardPanels struct {
 // a count of minutes, hours, days or weeks, or a calendar day.
 var dashboardTimeRangePattern = regexp.MustCompile(`^([1-9]\d{0,3}[mhdw]|today|yesterday)$`)
 
+// dashboardCalendarRangePattern matches the schema 2 calendar form
+// "today-<n>d": from the start of the day n days before today until now.
+var dashboardCalendarRangePattern = regexp.MustCompile(`^today-[1-9]\d{0,3}d$`)
+
 // dashboardPanelOptions is the validated contract for a panel's `options` blob
 // (finding B8). Fields are pointers/slices so absent is distinguishable from a
 // zero value, and unknown keys are ignored to stay forward-compatible. A field
@@ -329,7 +333,7 @@ func validateDashboardPanelsV1(raw json.RawMessage) error {
 		return fmt.Errorf("unsupported panels version %d, expected %d", blob.Version, DashboardPanelsVersion)
 	}
 
-	if err := validateDashboardSettings(blob.CacheTTLSeconds, blob.DefaultTimeRange); err != nil {
+	if err := validateDashboardSettings(blob.CacheTTLSeconds, blob.DefaultTimeRange, false); err != nil {
 		return err
 	}
 
@@ -349,17 +353,21 @@ func validateDashboardPanelsV1(raw json.RawMessage) error {
 }
 
 // validateDashboardSettings checks the dashboard-wide settings that both
-// schemas share.
-func validateDashboardSettings(cacheTTLSeconds *int, defaultTimeRange *string) error {
+// schemas share. Only schema 2 accepts the calendar form today-<n>d.
+func validateDashboardSettings(cacheTTLSeconds *int, defaultTimeRange *string, calendarRanges bool) error {
 	if cacheTTLSeconds != nil {
 		if *cacheTTLSeconds < 0 || *cacheTTLSeconds > MaxDashboardCacheTTLSeconds {
 			return fmt.Errorf("cache_ttl_seconds %d is out of range (allowed: 0-%d)", *cacheTTLSeconds, MaxDashboardCacheTTLSeconds)
 		}
 	}
-	if defaultTimeRange != nil && !dashboardTimeRangePattern.MatchString(*defaultTimeRange) {
+	if defaultTimeRange != nil && !validDashboardRange(*defaultTimeRange, calendarRanges) {
 		return fmt.Errorf("default_time_range %q is not a relative range such as 15m, 6h, 7d or today", *defaultTimeRange)
 	}
 	return nil
+}
+
+func validDashboardRange(value string, calendarRanges bool) bool {
+	return dashboardTimeRangePattern.MatchString(value) || calendarRanges && dashboardCalendarRangePattern.MatchString(value)
 }
 
 // validateDashboardPanelEntries validates each panel and returns the set of
