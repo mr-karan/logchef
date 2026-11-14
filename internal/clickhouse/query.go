@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"math"
 	"math/big"
 	"net"
@@ -322,11 +321,6 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	return stats, nil
 }
 
-func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions) context.Context {
-	settings := buildQuerySettings(*opts.TimeoutSeconds, nil, c.querySettings)
-	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
-}
-
 // ownQuery derives the context of a query that Logchef runs for itself. It
 // keeps the caller's deadline and credentials, and leaves out the caller's
 // query ID and driver callbacks.
@@ -347,20 +341,6 @@ func resetNullableScanTargets(ptrs []reflect.Value) {
 			ptr.Elem().SetZero()
 		}
 	}
-}
-
-// buildQuerySettings merges, in increasing precedence: the request timeout,
-// LogChef's per-query settings (perQuery), and the per-source operator settings
-// (source). Source settings are applied last so per-source caps, timeouts, and
-// read-only mode override LogChef's automatic defaults. Only settings present in
-// each map are applied.
-func buildQuerySettings(timeoutSeconds int, perQuery, source clickhouse.Settings) clickhouse.Settings {
-	settings := clickhouse.Settings{
-		"max_execution_time": timeoutSeconds,
-	}
-	maps.Copy(settings, perQuery)
-	maps.Copy(settings, source)
-	return settings
 }
 
 // ClickHouse exception codes (see clickhouse-go's lib/proto.Exception.Code)
@@ -751,10 +731,13 @@ func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSe
 	}
 
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: timeoutSeconds})
 		c.logger.Debug("applying DDL query timeout", "timeout_seconds", *timeoutSeconds)
-
-		return c.conn.Exec(hookCtx, query)
+		_, err := c.send(hookCtx, func(ctx context.Context) (clickhouse.Settings, error) {
+			return c.ownQuerySettings(ctx, *timeoutSeconds)
+		}, func(ctx context.Context) error {
+			return c.conn.Exec(ctx, query)
+		})
+		return err
 	})
 
 	if err != nil {

@@ -7,8 +7,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/ClickHouse/clickhouse-go/v2"
-
 	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
@@ -17,16 +15,6 @@ const (
 	tableStatsTimeoutSeconds     = 2
 	ingestionStatsTimeoutSeconds = 3
 )
-
-func (c *Client) statsQueryContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
-	if timeoutSeconds <= 0 {
-		return ctx, func() {}
-	}
-
-	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(buildQuerySettings(timeoutSeconds, nil, c.querySettings)))
-	return queryCtx, cancel
-}
 
 // TableStat represents overall statistics for a ClickHouse table,
 // typically retrieved from system.parts.
@@ -76,10 +64,10 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 		ORDER BY size DESC
 	`, queryescape.ClickHouseString(database), queryescape.ClickHouseString(table))
 
-	queryCtx, cancel := c.statsQueryContext(ctx, tableStatsTimeoutSeconds)
+	queryCtx, cancel := context.WithTimeout(ctx, tableStatsTimeoutSeconds*time.Second)
 	defer cancel()
 
-	rows, err := c.conn.Query(queryCtx, query)
+	rows, err := c.queryOwn(queryCtx, tableStatsTimeoutSeconds, query)
 	if err != nil {
 		return nil, fmt.Errorf("error executing table stats query: %w", err)
 	}
@@ -152,6 +140,7 @@ func ingestionActivityQuery(database, table, timestampField string) (string, err
 		WHERE %s >= anchor - INTERVAL 24 HOUR AND %s <= anchor
 		GROUP BY bucket
 		ORDER BY bucket ASC
+		SETTINGS max_threads = 2
 	`, tsField, tsField, tsField, tsField, qualifiedTable, tsField, tsField), nil
 }
 
@@ -183,8 +172,7 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, ingestionStatsTimeoutSeconds*time.Second)
 	defer cancel()
-	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(buildQuerySettings(ingestionStatsTimeoutSeconds, clickhouse.Settings{"max_threads": 2}, c.querySettings)))
-	rows, err := c.conn.Query(queryCtx, query)
+	rows, err := c.queryOwn(queryCtx, ingestionStatsTimeoutSeconds, query)
 	if err != nil {
 		return nil, activityError(queryCtx, "error executing ingestion activity query", err)
 	}

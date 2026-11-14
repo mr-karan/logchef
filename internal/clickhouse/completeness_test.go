@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,9 @@ func createProfileUser(t *testing.T, addr string, clauses []string) string {
 		t.Skipf("this ClickHouse server does not allow creating users: %v", err)
 	}
 	t.Cleanup(func() { _ = admin.conn.Exec(context.Background(), "DROP USER IF EXISTS "+name) })
+	if err := admin.conn.Exec(t.Context(), "GRANT SELECT, INSERT, CREATE TABLE, REMOTE ON *.* TO "+name); err != nil {
+		t.Fatal(err)
+	}
 	return name
 }
 
@@ -275,6 +279,84 @@ func TestProfileConstantByteCapClickHouse(t *testing.T) {
 			t.Fatalf("%d rows with truncation %q, want an error or a bytes cut", len(result.Logs), result.Stats.Truncation)
 		}
 	}
+}
+
+// TestProfileSkipUnavailableShardsClickHouse lets the settings profile skip
+// a shard that does not answer. Logchef has the query fail instead of
+// counting the shards that did.
+func TestProfileSkipUnavailableShardsClickHouse(t *testing.T) {
+	for where, open := range defaultsClients(t, clickhouse.Settings{"skip_unavailable_shards": 1}) {
+		t.Run(where, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			result, err := open(t).QueryWithOptions(ctx, "SELECT count() AS shards FROM remote('127.0.0.1:9000,127.0.0.2:1', system.one)", QueryOptions{MaxRows: 1000})
+			if err == nil {
+				t.Fatalf("counted %v of 2 shards with truncation %q, want an error", result.Logs, result.Stats.Truncation)
+			}
+		})
+	}
+}
+
+// TestProfileMetadataLimitsClickHouse puts row limits where Logchef does not
+// see them, in the ClickHouse user's settings profile and the connection
+// settings, and a result cap in the source settings. Logchef's own queries,
+// for table metadata, stats, health and DDL, read past each of them.
+func TestProfileMetadataLimitsClickHouse(t *testing.T) {
+	addr := testClickHouseAddr(t)
+	table := createTestTable(t, addr, "ts DateTime, message String, level UInt8, duration Float64", "MergeTree ORDER BY ts",
+		"SELECT now() - INTERVAL (number % 3) HOUR, 'message', 1, 1.5 FROM numbers(30)")
+	admin, err := NewClient(ClientOptions{Host: addr}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	check := func(t *testing.T, client *Client) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		info, err := client.GetTableInfo(ctx, "default", table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(info.Columns) != 4 || len(info.ExtColumns) != 4 || !slices.Equal(info.SortKeys, []string{"ts"}) {
+			t.Errorf("table info has columns %v, extended columns %v and sort keys %v, want 4, 4 and [ts]", info.Columns, info.ExtColumns, info.SortKeys)
+		}
+		if stats, err := client.TableStats(ctx, "default", table); err != nil || stats.Rows != 30 {
+			t.Errorf("table stats %+v (%v), want 30 rows", stats, err)
+		}
+		if ingestion, err := client.IngestionStats(ctx, "default", table, "ts"); err != nil || ingestion.Rows24h != 30 {
+			t.Errorf("ingestion stats %+v (%v), want 30 rows in 24h", ingestion, err)
+		}
+		if err := client.Ping(ctx, "default", table); err != nil {
+			t.Errorf("ping with table check: %v", err)
+		}
+		copied := table + "_copy_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		t.Cleanup(func() { _ = admin.conn.Exec(context.Background(), "DROP TABLE IF EXISTS default."+copied) })
+		if _, err := client.Query(ctx, "CREATE TABLE default."+copied+" ENGINE = MergeTree ORDER BY ts AS SELECT * FROM default."+table); err != nil {
+			t.Fatal(err)
+		}
+		var rows uint64
+		if err := admin.conn.QueryRow(ctx, "SELECT count() FROM default."+copied).Scan(&rows); err != nil || rows != 30 {
+			t.Errorf("CREATE TABLE AS SELECT copied %d rows (%v), want 30", rows, err)
+		}
+	}
+	for _, settings := range []clickhouse.Settings{
+		{"limit": 1},
+		{"offset": 1},
+		{"max_result_rows": 1, "result_overflow_mode": "break"},
+	} {
+		for where, open := range defaultsClients(t, settings) {
+			t.Run(fmt.Sprintf("%v/%s", settings, where), func(t *testing.T) { check(t, open(t)) })
+		}
+	}
+	t.Run("source result cap", func(t *testing.T) {
+		client, err := NewClient(ClientOptions{Host: addr, QuerySettings: map[string]any{"max_result_rows": int64(1), "result_overflow_mode": "break"}}, discardLogger())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = client.Close() })
+		check(t, client)
+	})
 }
 
 // TestHistogramCompletenessClickHouse counts 100000 rows in hourly buckets.
