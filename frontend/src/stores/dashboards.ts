@@ -24,14 +24,22 @@ import { countFrame, resultFrame, type PanelFrame } from "@/utils/panelFrame";
 import type { QueryStats } from "@/api/explore";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import {
-  dashboardLayout,
+  addPanelToTab,
+  dashboardTab,
+  moveItem,
+  movePanelToTab,
   newQueryPanel,
-  reflowPanels,
+  panelTabId,
+  reflowTab,
+  removeTab,
   switchPanelKind,
+  tabLayout,
   trimDashboardGroupBy,
   validatePanelsBlob,
-  withDashboardLayout,
+  validTabTitle,
+  withTabLayout,
   MAX_DASHBOARD_PANELS,
+  MAX_DASHBOARD_TABS,
   type PanelBuilderKind,
 } from "@/utils/dashboardPanels";
 import {
@@ -47,7 +55,7 @@ import { usePreferencesStore } from "@/stores/preferences";
 import { unwrap, type APIErrorResponse } from "@/api/types";
 import { stableStringify } from "@/utils/stableStringify";
 import { isAbortError } from "@/api/error-handler";
-import { runWithConcurrency } from "@/utils/promisePool";
+import { createConcurrencyLimiter } from "@/utils/promisePool";
 import {
   classifyPanelError,
   clampTableLimit,
@@ -59,7 +67,9 @@ import { i18n } from "@/i18n";
 
 // Number of panel fetches allowed in flight at once. A 24-panel dashboard would
 // otherwise fire 24 (or 48, counting the logchefql translate step) requests at
-// once; this keeps the backend from being stampeded on load/refresh.
+// once; this keeps the backend from being stampeded on load/refresh. The limit
+// spans refreshes and tab switches, so a tab shown while another still loads
+// waits for a free slot.
 export const PANEL_FETCH_CONCURRENCY = 4;
 
 // A burst of time-picker emissions (partial date entry, quick-range flips) each
@@ -86,10 +96,23 @@ export interface PanelState {
 }
 
 
+// What one refresh runs its panels with. A tab shown after the refresh began
+// runs with the same range and cache, so every tab shows the same window.
+interface RefreshRun {
+  range: ResolvedWindow;
+  cache?: CacheDirective;
+  signal: AbortSignal;
+  // Panels waiting for a pool slot, so a tab shown twice queues each once.
+  queued: Set<string>;
+}
+
 interface DashboardsState {
   dashboards: DashboardSummary[];
   current: Dashboard | null;
   panelStates: Record<string, PanelState>;
+  // The tab the viewer asked for, from the URL. It may name a tab the shown
+  // blob lacks; `activeTabId` resolves it.
+  requestedTabId: string | null;
   window: TimeWindow;
   // The range actually EXECUTED by the most recent refresh (snapped/moving),
   // for toolbar display. Distinct from `effectiveRange` (the user's SELECTED
@@ -140,6 +163,14 @@ function newPanelId(): string {
     : `p-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// A tab id sits in the URL, so it is short. It only has to be unique in its dashboard.
+function newTabId(taken: ReadonlySet<string>): string {
+  for (;;) {
+    const id = `t${Math.random().toString(36).slice(2, 8)}`;
+    if (!taken.has(id)) return id;
+  }
+}
+
 type DashboardResult = { success: boolean; data?: Dashboard | null; error?: APIErrorResponse };
 
 function refused(message: string): DashboardResult {
@@ -156,6 +187,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     dashboards: [],
     current: null,
     panelStates: {},
+    requestedTabId: null,
     window: DEFAULT_WINDOW,
     appliedRange: null,
     refreshIntervalMs: 0,
@@ -173,6 +205,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // Non-reactive: the controller aborting the in-flight refresh batch.
   let refreshAbort: AbortController | null = null;
+  // Non-reactive: the latest refresh, for a tab that is shown after it began.
+  let refreshRun: RefreshRun | null = null;
+  // One pool for every panel a refresh or a tab switch runs.
+  const limitPanelFetch = createConcurrencyLimiter(PANEL_FETCH_CONCURRENCY);
   // Non-reactive: the controller aborting an in-flight panel preview.
   let previewAbort: AbortController | null = null;
   // Non-reactive: controllers for single-panel executions (add/edit re-renders),
@@ -205,6 +241,17 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const editDescription = computed(() => state.data.value.editDescription);
   const previewState = computed(() => state.data.value.previewState);
   const needsReload = computed(() => (current.value ? dashboardNeedsReload(current.value) : false));
+  // The blob on screen: the draft while editing, else the loaded dashboard.
+  const shownBlob = computed<DashboardPanels | null>(() => {
+    const { editDraft: draft, current } = state.data.value;
+    if (draft) return draft;
+    return current && !current.corrupt ? current.panels : null;
+  });
+  // The tab on screen: the requested one, or the first when the shown blob has no such tab.
+  const activeTabId = computed(() => {
+    const blob = shownBlob.value;
+    return blob ? dashboardTab(blob, state.data.value.requestedTabId)?.id ?? null : null;
+  });
   // A corrupt dashboard has no panels to edit; its creator repairs it through the API.
   const canEdit = computed(() => {
     const current = state.data.value.current;
@@ -511,6 +558,46 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     singlePanelAborts.clear();
   }
 
+  // The panels of the tab on screen that can run. In edit mode the canvas
+  // shows the draft, so these are the draft's panels: the saved ones miss
+  // added or duplicated panels and run stale queries for edited ones. A panel
+  // without a team and source cannot run yet.
+  function activeTabPanels(): DashboardPanel[] {
+    const blob = shownBlob.value;
+    const tabId = activeTabId.value;
+    if (!blob || tabId === null) return [];
+    const placed = new Set(tabLayout(blob, tabId).map((l) => l.id));
+    const panels = (blob.panels ?? []).filter((p) => placed.has(p.id));
+    return state.data.value.editDraft ? panels.filter((p) => p.team_id > 0 && p.source_id > 0) : panels;
+  }
+
+  // Run panels of the tab on screen through the shared pool. A panel whose
+  // tab the viewer left before its turn is dropped without a request: it has
+  // no state, so it runs when its tab is shown again.
+  async function runPanels(panels: DashboardPanel[], run: RefreshRun) {
+    const waiting = panels.filter((panel) => !run.queued.has(panel.id));
+    for (const panel of waiting) run.queued.add(panel.id);
+    await Promise.all(
+      waiting.map((panel) =>
+        limitPanelFetch(async () => {
+          run.queued.delete(panel.id);
+          if (run.signal.aborted || !activeTabPanels().some((p) => p.id === panel.id)) return;
+          await executePanel(panel, run.range, run.signal, run.cache);
+        }),
+      ),
+    );
+  }
+
+  // Show a tab. Its panels that have no result from the latest refresh run
+  // now, so a tab sends its queries on first view and not before.
+  function setActiveTab(tabId: string | null) {
+    state.data.value.requestedTabId = tabId;
+    const run = refreshRun;
+    if (!run || run.signal.aborted || needsReload.value) return;
+    const states = state.data.value.panelStates;
+    void runPanels(activeTabPanels().filter((p) => !states[p.id]), run);
+  }
+
   async function refreshAllPanels() {
     const dashboard = state.data.value.current;
     if (!dashboard) return;
@@ -558,15 +645,17 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Publish what was actually queried for the toolbar to display.
     state.data.value.appliedRange = range;
 
-    // In edit mode the canvas shows the draft, so refresh the draft's panels:
-    // the saved ones miss added or duplicated panels and run stale queries for
-    // edited ones. A panel without a team and source cannot run yet.
-    const draft = state.data.value.editDraft;
-    const panels = draft
-      ? draft.panels.filter((p) => p.team_id > 0 && p.source_id > 0)
-      : (dashboard.panels.panels ?? []);
-    const tasks = panels.map((panel) => () => executePanel(panel, range, signal, cache));
-    await runWithConcurrency(tasks, PANEL_FETCH_CONCURRENCY);
+    // Only the tab on screen runs. A hidden tab's results belong to an earlier
+    // refresh: drop them, so the tab holds no frames while hidden and runs
+    // with this refresh's range when it is shown.
+    const run: RefreshRun = { range, cache, signal, queued: new Set() };
+    refreshRun = run;
+    const panels = activeTabPanels();
+    const shown = new Set(panels.map((p) => p.id));
+    state.data.value.panelStates = Object.fromEntries(
+      Object.entries(state.data.value.panelStates).filter(([id]) => shown.has(id)),
+    );
+    await runPanels(panels, run);
   }
 
   // ---- Edit mode ----------------------------------------------------------
@@ -701,20 +790,27 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (window) setWindow(window);
   }
 
-  // Add or replace a panel in the draft (by id), then reflow the layout so the
-  // grid stays top-left-first with no overlaps. A newly added panel has no layout
-  // entry, so reflowPanels places it in the next free slot at the default size.
+  // Re-pack the tab that places a panel, so its grid stays top-left-first with
+  // no overlaps after a structural edit. Other tabs keep their layouts.
+  function reflowPanelTab(blob: DashboardPanels, panelId: string): DashboardPanels {
+    const tabId = panelTabId(blob, panelId);
+    return tabId === undefined ? blob : reflowTab(blob, tabId);
+  }
+
+  // Add or replace a panel in the draft (by id), then reflow its tab. A new
+  // panel joins the tab on screen in the next free slot at the default size.
   function upsertDraftPanel(panel: DashboardQueryPanel) {
     const draft = state.data.value.editDraft;
-    if (!draft) return;
-    const panels = [...draft.panels];
-    const idx = panels.findIndex((p) => p.id === panel.id);
+    const tabId = activeTabId.value;
+    if (!draft || tabId === null) return;
+    const idx = draft.panels.findIndex((p) => p.id === panel.id);
     if (idx >= 0) {
+      const panels = [...draft.panels];
       panels[idx] = panel;
+      setDraft(reflowPanelTab({ ...draft, panels }, panel.id));
     } else {
-      panels.push(panel);
+      setDraft(addPanelToTab(draft, tabId, panel));
     }
-    setDraft(reflowPanels({ ...draft, panels }));
     executeSinglePanel(panel);
   }
 
@@ -754,7 +850,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (!draft) return;
     const panels = [...draft.panels];
     panels[idx] = merged;
-    setDraft(reflowPanels({ ...draft, panels }));
+    setDraft(reflowPanelTab({ ...draft, panels }, merged.id));
 
     // If anything that affects the executed query/result changed (e.g. a
     // stat→table type switch, a new query/source/limit), the cached panelState
@@ -770,37 +866,41 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   // Create-on-canvas: push a bare panel shell into the draft immediately (so the
-  // canvas reflects it at the next free slot via reflowPanels' default sizing)
-  // and return its id. The caller opens the builder drawer on that id; the panel
-  // query never executes until team_id + source_id are set (the drawer gates
-  // preview on that, and saveEdit validates it before the round-trip).
+  // canvas of the tab on screen reflects it at the next free slot, at the
+  // default size) and return its id. The caller opens the builder drawer on
+  // that id; the panel query never executes until team_id + source_id are set
+  // (the drawer gates preview on that, and saveEdit validates it before the
+  // round-trip).
   function createDraftShell(): string | null {
     const draft = state.data.value.editDraft;
-    if (!draft) return null;
+    const tabId = activeTabId.value;
+    if (!draft || tabId === null) return null;
     const id = newPanelId();
-    const panels = [...draft.panels, newQueryPanel(id, "New panel")];
-    setDraft(reflowPanels({ ...draft, panels }));
+    setDraft(addPanelToTab(draft, tabId, newQueryPanel(id, "New panel")));
     return id;
   }
 
-  // Insert a copy of a draft panel right after the original, at the same size,
-  // and return the copy's id. A finished result is reused, so the canvas shows
-  // the copy without running the query again; otherwise the copy runs its own.
+  // Insert a copy of a draft panel right after the original, in the same tab
+  // and at the same size, and return the copy's id. A finished result is
+  // reused, so the canvas shows the copy without running the query again;
+  // otherwise the copy runs its own.
   function duplicateDraftPanel(id: string, title: string): string | null {
     const draft = state.data.value.editDraft;
     if (!draft || draft.panels.length >= MAX_DASHBOARD_PANELS) return null;
     const idx = draft.panels.findIndex((p) => p.id === id);
-    if (idx < 0) return null;
+    const tabId = panelTabId(draft, id);
+    if (idx < 0 || tabId === undefined) return null;
     const original = draft.panels[idx];
     if (original.locked) return null;
     const copyId = newPanelId();
     const copy: DashboardQueryPanel = { ...JSON.parse(JSON.stringify(original)), id: copyId, title };
     const panels = [...draft.panels];
     panels.splice(idx + 1, 0, copy);
-    const layout = dashboardLayout(draft);
+    const layout = tabLayout(draft, tabId);
     const size = layout.find((l) => l.id === id);
-    const next = size ? [...layout, { id: copyId, x: 0, y: 0, w: size.w, h: size.h }] : layout;
-    setDraft(reflowPanels(withDashboardLayout({ ...draft, panels }, next)));
+    if (!size) return null;
+    const next = [...layout, { id: copyId, x: 0, y: 0, w: size.w, h: size.h }];
+    setDraft(reflowTab(withTabLayout({ ...draft, panels }, tabId, next), tabId));
     const result = state.data.value.panelStates[id];
     if (result && FINISHED_PANEL_STATUSES.has(result.status)) {
       setPanelState(copyId, result);
@@ -812,27 +912,29 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   function removeDraftPanel(id: string) {
     const draft = state.data.value.editDraft;
-    if (!draft) return;
+    const tabId = draft ? panelTabId(draft, id) : undefined;
+    if (!draft || tabId === undefined) return;
     const panels = draft.panels.filter((p) => p.id !== id);
-    const layout = dashboardLayout(draft).filter((l) => l.id !== id);
-    setDraft(reflowPanels(withDashboardLayout({ ...draft, panels }, layout)));
+    const layout = tabLayout(draft, tabId).filter((l) => l.id !== id);
+    setDraft(reflowTab(withTabLayout({ ...draft, panels }, tabId, layout), tabId));
   }
 
   function resizeDraftPanel(id: string, w: number, h: number) {
     const draft = state.data.value.editDraft;
-    if (!draft) return;
-    const current = dashboardLayout(draft);
-    const layout = current.some((l) => l.id === id)
-      ? current.map((l) => (l.id === id ? { ...l, w, h } : l))
-      : [...current, { id, x: 0, y: 0, w, h }];
-    setDraft(reflowPanels(withDashboardLayout(draft, layout)));
+    const tabId = draft ? panelTabId(draft, id) : undefined;
+    if (!draft || tabId === undefined) return;
+    const layout = tabLayout(draft, tabId).map((l) => (l.id === id ? { ...l, w, h } : l));
+    setDraft(reflowTab(withTabLayout(draft, tabId, layout), tabId));
   }
 
-  // Reorder the draft's panels to match `orderedIds` (drag-and-drop result), then
-  // reflow. Ids not present are dropped; panels missing from the list are appended.
+  // Reorder the panels of the tab on screen to match `orderedIds` (drag-and-drop
+  // result), then reflow that tab. A tab's order is the order of its panels in
+  // the panel list, so the tab's panels move to the front in the new order and
+  // the panels of the other tabs follow in the order they had.
   function reorderDraftPanels(orderedIds: string[]) {
     const draft = state.data.value.editDraft;
-    if (!draft) return;
+    const tabId = activeTabId.value;
+    if (!draft || tabId === null) return;
     const byId = new Map(draft.panels.map((p) => [p.id, p]));
     const reordered: DashboardPanel[] = [];
     for (const id of orderedIds) {
@@ -843,7 +945,61 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       }
     }
     for (const leftover of byId.values()) reordered.push(leftover);
-    setDraft(reflowPanels({ ...draft, panels: reordered }));
+    setDraft(reflowTab({ ...draft, panels: reordered }, tabId));
+  }
+
+  // ---- Tabs (edit mode) ---------------------------------------------------
+
+  // Append an empty tab, show it and return its id. Null when the title is
+  // not 1 to 60 characters or the dashboard already has the most tabs.
+  function addDraftTab(title: string): string | null {
+    const draft = state.data.value.editDraft;
+    const stored = validTabTitle(title);
+    if (!draft || stored === null || draft.tabs.length >= MAX_DASHBOARD_TABS) return null;
+    const id = newTabId(new Set(draft.tabs.map((tab) => tab.id)));
+    setDraft({ ...draft, tabs: [...draft.tabs, { id, title: stored, layout: [] }] });
+    setActiveTab(id);
+    return id;
+  }
+
+  function renameDraftTab(tabId: string, title: string): boolean {
+    const draft = state.data.value.editDraft;
+    const stored = validTabTitle(title);
+    if (!draft || stored === null) return false;
+    setDraft({ ...draft, tabs: draft.tabs.map((tab) => (tab.id === tabId ? { ...tab, title: stored } : tab)) });
+    return true;
+  }
+
+  function moveDraftTab(tabId: string, toIndex: number) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
+    const from = draft.tabs.findIndex((tab) => tab.id === tabId);
+    if (from < 0) return;
+    // Pin the tab on screen. With no tab requested it is the first one, and
+    // the move can put another tab first.
+    state.data.value.requestedTabId = activeTabId.value;
+    setDraft({ ...draft, tabs: moveItem(draft.tabs, from, toIndex) });
+  }
+
+  // Delete a tab and the panels it places. A dashboard keeps at least one
+  // tab. When the deleted tab was on screen, the tab that took its position
+  // is shown, or the last tab.
+  function removeDraftTab(tabId: string) {
+    const draft = state.data.value.editDraft;
+    if (!draft || draft.tabs.length <= 1) return;
+    const index = draft.tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) return;
+    const wasActive = activeTabId.value === tabId;
+    const next = removeTab(draft, tabId);
+    setDraft(next);
+    if (wasActive) setActiveTab(next.tabs[Math.min(index, next.tabs.length - 1)].id);
+  }
+
+  // Move a panel to another tab, at its size and with the result it has.
+  function moveDraftPanelToTab(panelId: string, tabId: string) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
+    setDraft(movePanelToTab(draft, panelId, tabId));
   }
 
   // `revision` overrides the edit baseline when the user chooses to overwrite a newer save.
@@ -954,9 +1110,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     abortSinglePanels();
     refreshAbort?.abort();
     refreshAbort = null;
+    refreshRun = null;
     abortPreview();
     state.data.value.current = null;
     state.data.value.panelStates = {};
+    state.data.value.requestedTabId = null;
     state.data.value.appliedRange = null;
     resetEdit();
   }
@@ -975,6 +1133,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     appliedRange,
     refreshIntervalMs,
     effectiveRange,
+    activeTabId,
 
     // edit state
     isEditing,
@@ -999,6 +1158,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     setWindow,
     setRefreshInterval,
     refreshAllPanels,
+    setActiveTab,
     clearCurrent,
 
     // edit mode
@@ -1019,6 +1179,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     removeDraftPanel,
     resizeDraftPanel,
     reorderDraftPanels,
+    addDraftTab,
+    renameDraftTab,
+    moveDraftTab,
+    removeDraftTab,
+    moveDraftPanelToTab,
     previewPanel,
     clearPreview,
     abortPreview,

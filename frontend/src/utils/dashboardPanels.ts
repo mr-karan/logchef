@@ -5,23 +5,23 @@ import {
   type DashboardPanel,
   type DashboardPanels,
   type DashboardQueryPanel,
+  type DashboardTab,
   type DashboardViz,
   type DashboardVizType,
   type PanelQueryLanguage,
 } from "@/api/dashboards";
 
-// The dashboard grid is 12 columns wide. Panel widths are restricted to a small
-// set of presets (mirrors the server-side validation in pkg/models) and
-// heights are clamped to 1..6 rows.
+// The dashboard grid is 12 columns wide. A panel spans 2 to 12 columns and 1 to
+// 12 rows (mirrors the server-side validation in pkg/models).
 const DASHBOARD_GRID_COLUMNS = 12;
-const ALLOWED_PANEL_WIDTHS = [2, 3, 4, 6, 8, 9, 12] as const;
+const MIN_PANEL_WIDTH = 2;
 const MIN_PANEL_HEIGHT = 1;
-const MAX_PANEL_HEIGHT = 6;
+const MAX_PANEL_HEIGHT = 12;
 const DEFAULT_PANEL_WIDTH = 6;
 const DEFAULT_PANEL_HEIGHT = 2;
 export const MAX_DASHBOARD_PANELS = 24;
-export const MAX_DASHBOARD_TABS = 1;
-const MAX_TAB_TITLE_CODE_POINTS = 60;
+export const MAX_DASHBOARD_TABS = 10;
+export const MAX_TAB_TITLE_CODE_POINTS = 60;
 export const MAX_DASHBOARD_NAME_CODE_POINTS = 200;
 export const MAX_DASHBOARD_DESCRIPTION_CODE_POINTS = 2000;
 export const MAX_TABLE_LIMIT = 10000;
@@ -39,15 +39,28 @@ export function emptyDashboardPanels(): DashboardPanels {
   return { version: DASHBOARD_PANELS_VERSION, features: [], tabs: [{ id: "main", title: "Main", layout: [] }], panels: [] };
 }
 
-/** The layout of the tab this release shows: the first one. */
-export function dashboardLayout(blob: Pick<DashboardPanels, "tabs">): DashboardLayoutItem[] {
-  return blob.tabs?.[0]?.layout ?? [];
+/**
+ * The tab a dashboard shows for `tabId`: that tab, or the first one when the
+ * id names none (no `tab` in the URL, or a tab that was deleted).
+ */
+export function dashboardTab(blob: Pick<DashboardPanels, "tabs">, tabId: string | null | undefined): DashboardTab | undefined {
+  const tabs = blob.tabs ?? [];
+  return tabs.find((tab) => tab.id === tabId) ?? tabs[0];
 }
 
-/** The blob with the shown tab's layout replaced; other fields are kept. */
-export function withDashboardLayout(blob: DashboardPanels, layout: DashboardLayoutItem[]): DashboardPanels {
-  const tabs = blob.tabs?.length ? blob.tabs : emptyDashboardPanels().tabs;
-  return { ...blob, tabs: tabs.map((tab, index) => (index === 0 ? { ...tab, layout } : tab)) };
+/** The layout of one tab; empty when the id names no tab. */
+export function tabLayout(blob: Pick<DashboardPanels, "tabs">, tabId: string): DashboardLayoutItem[] {
+  return (blob.tabs ?? []).find((tab) => tab.id === tabId)?.layout ?? [];
+}
+
+/** The id of the tab that places a panel. */
+export function panelTabId(blob: Pick<DashboardPanels, "tabs">, panelId: string): string | undefined {
+  return (blob.tabs ?? []).find((tab) => (tab.layout ?? []).some((l) => l.id === panelId))?.id;
+}
+
+/** The blob with one tab's layout replaced; other tabs and fields are kept. */
+export function withTabLayout(blob: DashboardPanels, tabId: string, layout: DashboardLayoutItem[]): DashboardPanels {
+  return { ...blob, tabs: (blob.tabs ?? []).map((tab) => (tab.id === tabId ? { ...tab, layout } : tab)) };
 }
 
 /**
@@ -141,24 +154,15 @@ interface NormalizedPanel {
   h: number;
 }
 
-/** Snap an arbitrary width to the nearest allowed preset. */
+/** Snap an arbitrary width to whole columns, within the 2..12 a panel may span. */
 export function snapPanelWidth(width: number | undefined): number {
   if (!width || Number.isNaN(width)) {
     return DEFAULT_PANEL_WIDTH;
   }
-  let best: number = ALLOWED_PANEL_WIDTHS[0];
-  let bestDelta = Math.abs(width - best);
-  for (const candidate of ALLOWED_PANEL_WIDTHS) {
-    const delta = Math.abs(width - candidate);
-    if (delta < bestDelta) {
-      best = candidate;
-      bestDelta = delta;
-    }
-  }
-  return best;
+  return Math.min(DASHBOARD_GRID_COLUMNS, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
 }
 
-/** Clamp a height into the allowed 1..6 row range. */
+/** Clamp a height into the allowed 1..12 row range. */
 export function clampPanelHeight(height: number | undefined): number {
   if (!height || Number.isNaN(height)) {
     return DEFAULT_PANEL_HEIGHT;
@@ -167,15 +171,13 @@ export function clampPanelHeight(height: number | undefined): number {
 }
 
 /**
- * Reconcile the stored layout with the panel list and produce a render-ready set
- * of grid placements. The layout blob and the panels list can drift (a panel may
- * lack a layout entry, or a layout entry may point at a deleted panel), so this:
+ * Reconcile one tab's stored layout with the dashboard's panel list and produce
+ * a render-ready set of grid placements. This:
  *
- *  - keeps only layout entries that map to a real panel;
- *  - clamps widths to the allowed presets and heights to 1..6;
+ *  - keeps only the panels that this layout places, so a tab shows its own
+ *    panels and a layout entry that points at a deleted panel is dropped;
+ *  - rounds widths into 2..12 columns and heights into 1..12 rows;
  *  - clamps x so the panel never overflows the 12-column grid;
- *  - assigns a sensible fallback placement to panels missing a layout entry
- *    (flowed onto fresh rows below everything else);
  *  - returns placements sorted top-to-bottom, left-to-right for stable DOM order.
  */
 export function normalizeDashboardLayout(
@@ -190,27 +192,15 @@ export function normalizeDashboardLayout(
   }
 
   const placed: NormalizedPanel[] = [];
-  const unplaced: DashboardPanel[] = [];
-
   for (const panel of panels ?? []) {
     const item = layoutById.get(panel.id);
-    if (!item) {
-      unplaced.push(panel);
-      continue;
-    }
+    if (!item) continue;
     const w = snapPanelWidth(item.w);
     const h = clampPanelHeight(item.h);
     const maxX = DASHBOARD_GRID_COLUMNS - w;
     const x = Math.min(Math.max(0, Math.round(item.x ?? 0)), Math.max(0, maxX));
     const y = Math.max(0, Math.round(item.y ?? 0));
     placed.push({ panel, x, y, w, h });
-  }
-
-  // Flow any layout-less panels onto rows below the tallest placed row.
-  let nextRow = placed.reduce((max, p) => Math.max(max, p.y + p.h), 0);
-  for (const panel of unplaced) {
-    placed.push({ panel, x: 0, y: nextRow, w: DEFAULT_PANEL_WIDTH, h: DEFAULT_PANEL_HEIGHT });
-    nextRow += DEFAULT_PANEL_HEIGHT;
   }
 
   placed.sort((a, b) => (a.y - b.y) || (a.x - b.x));
@@ -220,11 +210,12 @@ export function normalizeDashboardLayout(
 // ---------------------------------------------------------------------------
 // Edit-mode layout math.
 //
-// In edit mode the working state is an ORDERED list of panels; the grid layout
-// (x/y placement) is a pure function of that order plus each panel's size. Every
-// structural edit (reorder, add, remove, resize) re-runs packLayout so the grid
-// always reflows top-left-first into the 12-column grid with no overlaps. Keeping
-// this deterministic and pure is what makes it unit-testable.
+// In edit mode the working state is an ORDERED list of panels; a tab's grid
+// layout (x/y placement) is a pure function of the order of its panels plus
+// each panel's size. Every structural edit (reorder, add, remove, resize, move
+// to another tab) re-runs packLayout on the tab it touched, so that tab always
+// reflows top-left-first into the 12-column grid with no overlaps. Keeping this
+// deterministic and pure is what makes it unit-testable.
 // ---------------------------------------------------------------------------
 
 /** A panel id plus its requested size — the input to the packer. */
@@ -238,8 +229,8 @@ export interface PanelSize {
  * Pack an ordered list of sized panels into the 12-column grid, top-left-first
  * ("shelf" packing): panels flow left→right on a row until the next one no longer
  * fits in the remaining columns, then wrap onto a fresh row below the tallest
- * panel of the row just closed. Widths snap to presets and heights clamp to 1..6.
- * The result feeds directly back into panels_json.layout.
+ * panel of the row just closed. Widths round into 2..12 and heights clamp to
+ * 1..12. The result feeds directly back into the tab's layout.
  */
 export function packLayout(order: PanelSize[]): DashboardLayoutItem[] {
   const items: DashboardLayoutItem[] = [];
@@ -274,31 +265,65 @@ export function moveItem<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * Read the size for a panel from an existing layout, falling back to defaults for
- * panels that have no layout entry yet (e.g. a just-added panel).
+ * The blob with one tab re-packed top-left-first: the tab's panels in their
+ * panel-array order, each at its stored size. This is the single reflow used
+ * after add / remove / resize / reorder. Other tabs keep their layouts, so
+ * editing one tab never rearranges another.
  */
-export function sizeForPanel(layout: DashboardLayoutItem[], id: string): { w: number; h: number } {
-  const item = (layout ?? []).find((l) => l.id === id);
-  return {
-    w: snapPanelWidth(item?.w),
-    h: clampPanelHeight(item?.h),
-  };
+export function reflowTab(blob: DashboardPanels, tabId: string): DashboardPanels {
+  const sizes = new Map(tabLayout(blob, tabId).map((l) => [l.id, l]));
+  const order: PanelSize[] = [];
+  for (const panel of blob.panels ?? []) {
+    const size = sizes.get(panel.id);
+    if (size) order.push({ id: panel.id, w: size.w, h: size.h });
+  }
+  return withTabLayout(blob, tabId, packLayout(order));
 }
 
 /**
- * Rebuild a DashboardPanels blob so its layout is a clean top-left-first packing
- * of `panels` in their current array order, preserving each panel's size (or
- * applying defaults for panels missing a layout entry). This is the single
- * reflow used after add / remove / resize / reorder.
+ * The blob with a panel added to a tab: appended to the panel list, placed last
+ * in that tab at the default size, and the tab re-packed.
  */
-export function reflowPanels(blob: DashboardPanels): DashboardPanels {
-  const layout = dashboardLayout(blob);
-  const order: PanelSize[] = (blob.panels ?? []).map((p) => {
-    const { w, h } = sizeForPanel(layout, p.id);
-    return { id: p.id, w, h };
-  });
-  // Keep the blob's other fields (e.g. cache_ttl_seconds); only the layout changes.
-  return withDashboardLayout({ ...blob, panels: [...(blob.panels ?? [])] }, packLayout(order));
+export function addPanelToTab(blob: DashboardPanels, tabId: string, panel: DashboardPanel): DashboardPanels {
+  const layout = [...tabLayout(blob, tabId), { id: panel.id, x: 0, y: 0, w: DEFAULT_PANEL_WIDTH, h: DEFAULT_PANEL_HEIGHT }];
+  return reflowTab(withTabLayout({ ...blob, panels: [...(blob.panels ?? []), panel] }, tabId, layout), tabId);
+}
+
+/**
+ * The blob with a panel moved to another tab at its current size. It lands last
+ * in the target tab, and both tabs are re-packed. The blob is returned as it
+ * is when the panel is already there or either end is unknown.
+ */
+export function movePanelToTab(blob: DashboardPanels, panelId: string, tabId: string): DashboardPanels {
+  const from = panelTabId(blob, panelId);
+  const panel = (blob.panels ?? []).find((p) => p.id === panelId);
+  const entry = from === undefined ? undefined : tabLayout(blob, from).find((l) => l.id === panelId);
+  if (!panel || !entry || from === undefined || from === tabId || !(blob.tabs ?? []).some((tab) => tab.id === tabId)) {
+    return blob;
+  }
+  // A tab's order is the panel-array order, so the panel goes to the end of
+  // the array to land after the panels the target tab already has.
+  const panels = [...blob.panels.filter((p) => p.id !== panelId), panel];
+  let next = withTabLayout({ ...blob, panels }, from, tabLayout(blob, from).filter((l) => l.id !== panelId));
+  next = withTabLayout(next, tabId, [...tabLayout(next, tabId), entry]);
+  return reflowTab(reflowTab(next, from), tabId);
+}
+
+/** The blob without a tab and without the panels that tab places. */
+export function removeTab(blob: DashboardPanels, tabId: string): DashboardPanels {
+  const removed = new Set(tabLayout(blob, tabId).map((l) => l.id));
+  return {
+    ...blob,
+    tabs: (blob.tabs ?? []).filter((tab) => tab.id !== tabId),
+    panels: (blob.panels ?? []).filter((p) => !removed.has(p.id)),
+  };
+}
+
+/** A tab title as it is stored: trimmed, or null when it is not 1 to 60 characters. */
+export function validTabTitle(title: string): string | null {
+  const trimmed = title.trim();
+  const length = Array.from(trimmed).length;
+  return length >= 1 && length <= MAX_TAB_TITLE_CODE_POINTS ? trimmed : null;
 }
 
 /**
@@ -319,7 +344,7 @@ export function validatePanelsBlob(blob: DashboardPanels): string | null {
   }
   const tabs = blob.tabs ?? [];
   if (tabs.length < 1) return "A dashboard needs at least one tab.";
-  if (tabs.length > MAX_DASHBOARD_TABS) return `A dashboard can have at most ${MAX_DASHBOARD_TABS} tab in this release.`;
+  if (tabs.length > MAX_DASHBOARD_TABS) return `A dashboard can have at most ${MAX_DASHBOARD_TABS} tabs (this one has ${tabs.length}).`;
   const panels = blob.panels ?? [];
   if (panels.length > MAX_DASHBOARD_PANELS) {
     return `A dashboard can have at most ${MAX_DASHBOARD_PANELS} panels (this one has ${panels.length}).`;
@@ -347,10 +372,10 @@ export function validatePanelsBlob(blob: DashboardPanels): string | null {
         return `Duplicate layout id "${l.id}".`;
       }
       seenLayoutIds.add(l.id);
-      if (!(ALLOWED_PANEL_WIDTHS as readonly number[]).includes(l.w)) {
-        return `Panel layout has an invalid width (${l.w}); allowed: ${ALLOWED_PANEL_WIDTHS.join(", ")}.`;
+      if (!Number.isInteger(l.w) || l.w < MIN_PANEL_WIDTH || l.w > DASHBOARD_GRID_COLUMNS) {
+        return `Panel layout has an invalid width (${l.w}); allowed: ${MIN_PANEL_WIDTH}-${DASHBOARD_GRID_COLUMNS}.`;
       }
-      if (l.h < MIN_PANEL_HEIGHT || l.h > MAX_PANEL_HEIGHT) {
+      if (!Number.isInteger(l.h) || l.h < MIN_PANEL_HEIGHT || l.h > MAX_PANEL_HEIGHT) {
         return `Panel layout has an invalid height (${l.h}); allowed: ${MIN_PANEL_HEIGHT}-${MAX_PANEL_HEIGHT}.`;
       }
     }
@@ -639,7 +664,7 @@ export function previewMoveLayout(
 
 /**
  * Snap a resize drag to grid spans: the panel's size at drag start plus the
- * pointer delta, snapped to the allowed width presets and clamped to 1..6 rows.
+ * pointer delta, rounded to whole columns in 2..12 and whole rows in 1..12.
  */
 export function snapResize(
   startW: number,
@@ -672,7 +697,7 @@ export function previewResizeLayout(
 
 /**
  * Where the ghost "+ Add panel" tile goes. Unlike a real panel (which always
- * packs at the default size, see `reflowPanels`), the ghost is a visual
+ * packs at the default size, see `addPanelToTab`), the ghost is a visual
  * affordance for "there's room here" — it fills whatever space is actually
  * left in the current bottom row instead of a fixed phantom size that can
  * land disconnected below everything (e.g. a 6-wide default that doesn't fit
