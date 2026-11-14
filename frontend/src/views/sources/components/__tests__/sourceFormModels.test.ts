@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Source } from "@/api/sources";
 import {
   buildClickHouseConnection,
+  isClickHouseActivityValid,
   buildVictoriaLogsConnection,
   clickHouseFormStateFromSource,
   createDefaultClickHouseFormState,
@@ -93,5 +94,26 @@ describe("ClickHouse view activity settings", () => {
       maxRowsToRead: "10000000",
       maxBytesToRead: "536870912",
     });
+  });
+});
+
+describe("ClickHouse activity bounds", () => {
+  it.each([
+    ["10000000000", "1099511627776", true],
+    ["10000000001", "1", false],
+    ["1", "1099511627777", false],
+    ["0", "1", false],
+    ["1.5", "1", false],
+    ["", "", true],
+  ])("validates %s rows and %s bytes", (maxRowsToRead, maxBytesToRead, valid) => {
+    expect(isClickHouseActivityValid({ allowView: true, maxRowsToRead, maxBytesToRead })).toBe(valid);
+  });
+  it("preserves TLS when activity changes", () => {
+    const state = createDefaultClickHouseFormState();
+    state.tlsEnable = true;
+    state.activity.allowView = true;
+    expect(buildClickHouseConnection(state).tls_enable).toBe(true);
+    state.tlsEnable = false;
+    expect(buildClickHouseConnection(state).tls_enable).toBeUndefined();
   });
 });

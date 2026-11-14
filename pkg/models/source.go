@@ -62,10 +62,10 @@ type ClickHouseActivityConfig struct {
 	// View (Engine == "View") when its underlying query plan is suitable.
 	AllowView bool `json:"allow_view,omitempty"`
 	// MaxRowsToRead caps max_rows_to_read for opted-in view activity queries.
-	// Must be positive when set; nil uses Logchef's finite default cap.
+	// Must be between 1 and 10,000,000,000; nil uses Logchef's finite default cap.
 	MaxRowsToRead *int64 `json:"max_rows_to_read,omitempty"`
 	// MaxBytesToRead caps max_bytes_to_read for opted-in view activity queries.
-	// Must be positive when set; nil uses Logchef's finite default cap.
+	// Must be between 1 and 1 TiB; nil uses Logchef's finite default cap.
 	MaxBytesToRead *int64 `json:"max_bytes_to_read,omitempty"`
 }
 
@@ -78,7 +78,7 @@ func (a *ClickHouseActivityConfig) Normalized() *ClickHouseActivityConfig {
 	return a
 }
 
-// Validate checks that any configured scan bounds are strictly positive
+// Validate checks that configured scan bounds are positive and bounded
 // (0 in ClickHouse disables the cap). A nil receiver is valid.
 func (a *ClickHouseActivityConfig) Validate() error {
 	if a == nil {
@@ -89,6 +89,12 @@ func (a *ClickHouseActivityConfig) Validate() error {
 	}
 	if a.MaxBytesToRead != nil && *a.MaxBytesToRead <= 0 {
 		return fmt.Errorf("max_bytes_to_read must be positive")
+	}
+	if a.MaxRowsToRead != nil && *a.MaxRowsToRead > 10_000_000_000 {
+		return fmt.Errorf("max_rows_to_read must not exceed 10000000000")
+	}
+	if a.MaxBytesToRead != nil && *a.MaxBytesToRead > 1_099_511_627_776 {
+		return fmt.Errorf("max_bytes_to_read must not exceed 1099511627776 (1 TiB)")
 	}
 	return nil
 }

@@ -26,6 +26,7 @@ import {
   createDefaultClickHouseFormState,
   createDefaultVictoriaLogsFormState,
   generateClickHouseSchema,
+  isClickHouseActivityValid,
   serializeConnectionSnapshot,
   sourceTypeFromSource,
   victoriaLogsFormStateFromSource,
@@ -64,6 +65,7 @@ const validationError = ref<string | null>(null);
 const isValidated = ref(false);
 const originalConnectionSnapshot = ref("");
 const hasStoredClickHousePassword = ref(false);
+const originalClickHouseIdentity = ref({ host: "", username: "" });
 
 const currentConnectionSnapshot = computed(() =>
   sourceType.value === "clickhouse"
@@ -130,7 +132,10 @@ const isValid = computed(() => {
     if (state.enableAuth && !state.username.trim()) {
       return false;
     }
-    if (state.enableAuth && (!isEditMode.value || !hasStoredClickHousePassword.value) && !state.password) {
+    const needsPassword = !isEditMode.value || !hasStoredClickHousePassword.value ||
+      state.host.trim() !== originalClickHouseIdentity.value.host ||
+      state.username.trim() !== originalClickHouseIdentity.value.username;
+    if (state.enableAuth && needsPassword && !state.password) {
       return false;
     }
     if (state.tableMode === "connect" && !state.metaTSField.trim()) {
@@ -139,7 +144,7 @@ const isValid = computed(() => {
     if (state.tableMode === "create" && !state.ttlDays.trim()) {
       return false;
     }
-    return true;
+    return isClickHouseActivityValid(state.activity);
   }
 
   const state = victoriaLogsForm.value;
@@ -196,6 +201,10 @@ function prefillFormFromSource(source: Source, isCopy = false) {
 
   if (sourceType.value === "clickhouse") {
     clickHouseForm.value = clickHouseFormStateFromSource(source);
+    originalClickHouseIdentity.value = {
+      host: clickHouseForm.value.host.trim(),
+      username: clickHouseForm.value.username.trim(),
+    };
     hasStoredClickHousePassword.value = !isCopy && Boolean((source.connection as { has_password?: boolean } | undefined)?.has_password);
     victoriaLogsForm.value = createDefaultVictoriaLogsFormState();
     victoriaLogsTTLDays.value = "0";

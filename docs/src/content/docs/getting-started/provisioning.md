@@ -138,7 +138,9 @@ max_rows_to_read = 50000000     # optional positive cap; defaults to 50,000,000
 max_bytes_to_read = 1073741824  # optional positive cap; defaults to 1 GiB
 ```
 
-Opted-in view activity queries run through the view itself with `max_execution_time` capped at 3 seconds and ClickHouse overflow modes forced to `throw`, so exceeding an execution or scan cap fails explicitly rather than returning partial counts.
+Opted-in view activity queries run through the view itself with `max_execution_time` capped at 3 seconds and ClickHouse overflow modes forced to `throw`, so exceeding an execution or scan cap fails explicitly rather than returning partial counts. Timeouts and scan-cap failures return HTTP 422 with error type `ActivityLimitExceeded`. Other activity paths retain HTTP 504 for timeouts.
+
+Activity caps must be positive integers, at most 10,000,000,000 rows and 1 TiB (1,099,511,627,776 bytes). Logchef takes the minimum of the activity caps and the explicit source query settings. It does not discover ClickHouse settings-profile caps, so activity defaults can override a stricter profile limit. Set `max_rows_to_read` and `max_bytes_to_read` explicitly under `[sources.connection.settings]` to stay within a profile limit.
 
 For **VictoriaLogs**, use the native API connection shape:
 

@@ -789,7 +789,7 @@
   "sources.allowViewActivityDescription": "Opt in when this source targets a ClickHouse View backed by timestamp-ordered tables. Queries run through the view with strict execution and scan caps.",
   "sources.activityMaxRowsToRead": "Activity max rows to read",
   "sources.activityMaxBytesToRead": "Activity max bytes to read",
-  "sources.viewActivityLimitsDescription": "Optional positive scan bounds for view activity queries. Defaults to 50,000,000 rows and 1 GiB (1,073,741,824 bytes); exceeding a cap fails explicitly instead of returning partial counts.",
+  "sources.viewActivityLimitsDescription": "Optional positive scan bounds, at most 10,000,000,000 rows and 1 TiB (1,099,511,627,776 bytes). Defaults to 50,000,000 rows and 1 GiB (1,073,741,824 bytes); exceeding a cap fails explicitly instead of returning partial counts. These caps can override stricter ClickHouse profile limits. Set max_rows_to_read and max_bytes_to_read in the source query settings explicitly to stay within a profile limit.",
   "sources.activityViewDisabled": "Recent activity is disabled by default for ClickHouse views. Enable it in the source settings when the view's query plan is suitable.",
   "sources.tableConfiguration": "Table Configuration",
   "sources.tableConfigurationDescription": "Choose whether LogChef should create the table",

@@ -1,6 +1,8 @@
 package clickhouse
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -80,5 +82,18 @@ func TestIsReadLimitExceededError(t *testing.T) {
 	timeoutErr := &clickhouse.Exception{Code: chExceptionTimeoutExceeded, Message: "timeout"}
 	if IsReadLimitExceededError(timeoutErr) {
 		t.Fatal("timeout exception classified as read limit exceeded")
+	}
+}
+
+func TestActivityErrorTimeout(t *testing.T) {
+	for _, err := range []error{context.DeadlineExceeded, &clickhouse.Exception{Code: 159, Message: "timeout"}} {
+		if got := activityError(t.Context(), "activity", err); !errors.Is(got, context.DeadlineExceeded) {
+			t.Fatalf("activityError(%v) = %v, want deadline", err, got)
+		}
+	}
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	if got := activityError(ctx, "activity", context.Canceled); !errors.Is(got, context.DeadlineExceeded) {
+		t.Fatalf("expired activity = %v, want deadline", got)
 	}
 }

@@ -593,7 +593,7 @@ func (p *ClickHouseProvider) InspectSourceActivity(ctx context.Context, source *
 	}
 	stats, err := client.IngestionStatsWithOptions(ctx, database, table, source.MetaTSField, opts)
 	if err != nil {
-		if clickhouse.IsReadLimitExceededError(err) {
+		if clickhouse.IsReadLimitExceededError(err) || (enforceScanLimits && clickhouse.IsTimeoutError(err)) {
 			return nil, fmt.Errorf("%w: %w", ErrSourceActivityLimitExceeded, err)
 		}
 		return nil, err

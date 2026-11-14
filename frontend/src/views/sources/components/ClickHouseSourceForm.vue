@@ -363,6 +363,7 @@ function resetSchema() {
                   :model-value="modelValue.activity.maxRowsToRead"
                   type="number"
                   min="1"
+                  max="10000000000"
                   placeholder="50000000"
                   @update:model-value="(value) => updateActivity({ maxRowsToRead: sanitizePositiveInteger(value) })"
                 />
@@ -375,6 +376,7 @@ function resetSchema() {
                   :model-value="modelValue.activity.maxBytesToRead"
                   type="number"
                   min="1"
+                  max="1099511627776"
                   placeholder="1073741824"
                   @update:model-value="(value) => updateActivity({ maxBytesToRead: sanitizePositiveInteger(value) })"
                 />

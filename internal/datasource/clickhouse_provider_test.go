@@ -450,8 +450,8 @@ func TestInspectSourceViewActivityClickHouse(t *testing.T) {
 	defer slowCallCancel()
 	_, err = provider.InspectSourceActivity(slowCallCtx, slowViewSource)
 	slowElapsed := time.Since(slowStart)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("slow view activity err = %v, want context.DeadlineExceeded", err)
+	if !errors.Is(err, ErrSourceActivityLimitExceeded) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("slow view activity err = %v, want activity limit and deadline errors", err)
 	}
 	if slowElapsed > 2500*time.Millisecond {
 		t.Fatalf("slow view activity took %v with max_execution_time=1, want <2.5s", slowElapsed)
