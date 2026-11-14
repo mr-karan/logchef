@@ -1135,6 +1135,80 @@ describe("dashboards store — tabs", () => {
     expect(requested()).toEqual(["a1"]);
   });
 
+  const ok = () => ({ status: "success", data: { data: [], columns: [] } });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("a duplicated panel's copied result does not rerun on a tab round trip", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    expect(store.duplicateDraftPanel("a1", "copy")).not.toBeNull();
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue(ok());
+    store.setActiveTab("week");
+    await vi.waitFor(() => expect(store.getPanelState("b1").status).toBe("empty"));
+    store.setActiveTab("today");
+    await tick();
+    expect(requested()).toEqual(["b1"]);
+  });
+
+  it("an in-flight single-panel run is not sent twice by a tab round trip", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    vi.clearAllMocks();
+    const finishers: Array<() => void> = [];
+    mocks.logsQuery.mockImplementation(() => new Promise((resolve) => { finishers.push(() => resolve(ok())); }));
+    store.updateDraftPanel("a1", { query: { text: "a1-edited" } });
+    await vi.waitFor(() => expect(requested()).toEqual(["a1-edited"]));
+    store.setActiveTab("week");
+    store.setActiveTab("today");
+    await tick();
+    while (finishers.length) { finishers.shift()?.(); await tick(); }
+    expect(requested().filter((q) => q === "a1-edited")).toHaveLength(1);
+  });
+
+  it.each([
+    { change: "query", patch: { query: { text: "a1-edited" } } },
+    { change: "source", patch: { source_id: 2 } },
+    { change: "visualization", patch: { viz: { type: "stat" as const } } },
+  ])("discard after editing a $change reruns the saved definition", async ({ patch }) => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.updateDraftPanel("a1", patch);
+    await vi.waitFor(() => expect(store.getPanelState("a1").status).toBe("empty"));
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue(ok());
+    await store.cancelEdit();
+    await tick();
+    expect(requested()).toEqual(["a1"]);
+    expect(mocks.logsQuery.mock.lastCall?.slice(0, 2)).toEqual([1, 1]);
+  });
+
+  it("a single-panel run that completed in this refresh is not rerun", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.updateDraftPanel("a1", { query: { text: "a1-edited" } });
+    await vi.waitFor(() => expect(store.getPanelState("a1").status).toBe("empty"));
+    store.setActiveTab("week");
+    await vi.waitFor(() => expect(store.getPanelState("b1").status).toBe("empty"));
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue(ok());
+    store.setActiveTab("today");
+    await tick();
+    expect(requested()).toEqual([]);
+  });
+
+  it("saving a copy sends no restored-panel request for the original", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.moveDraftPanelToTab("a1", "week");
+    await store.refreshAllPanels();
+    vi.clearAllMocks();
+    mocks.create.mockResolvedValue({ status: "success", data: tabbed() });
+    await store.saveDraftAsCopy("Copy");
+    await tick();
+    expect(requested()).toEqual([]);
+  });
+
   it("queues a panel once when its tab is shown again before its turn", async () => {
     const finishers: Array<() => void> = [];
     mocks.logsQuery.mockImplementation(() => new Promise((resolve) => {

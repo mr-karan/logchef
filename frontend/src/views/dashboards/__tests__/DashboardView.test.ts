@@ -46,6 +46,7 @@ function tabDashboard() {
   return { ...dashboard, panels };
 }
 
+import { useDashboardsStore } from "@/stores/dashboards";
 import DashboardView from "../DashboardView.vue";
 import VersionBanner from "@/components/VersionBanner.vue";
 import { useMetaStore } from "@/stores/meta";
@@ -460,6 +461,55 @@ describe("DashboardView tabs", () => {
     await settle();
     expect(tab("Main").getAttribute("aria-selected")).toBe("true");
     expect(shownTab()).toBe("main");
+  });
+
+  async function openAfter(url: string) {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: "/", component: { template: "<div>home</div>" } },
+      { path: "/dashboards/:id", component: DashboardView },
+      { path: "/explore", name: "LogExplorer", component: { template: "<div />" } },
+    ] });
+    await router.push("/");
+    app = createApp(defineComponent({ template: "<router-view />" }));
+    app.use(createPinia()).use(i18n).use(router).mount(host);
+    await router.push(url);
+    await settle();
+    await settle();
+  }
+
+  it("a fresh read with a second tab on Edit leaves Back working", async () => {
+    tabs.tabbed = false;
+    await openAfter("/dashboards/1");
+    expect(shownTab()).toBeUndefined();
+    tabs.tabbed = true;
+    button("Edit").click();
+    await settle();
+    await settle();
+    router.back();
+    await settle();
+    await settle();
+    expect(router.currentRoute.value.path).toBe("/");
+  });
+
+  it("discarding a tab deletion leaves Back working", async () => {
+    await openAfter("/dashboards/1?tab=week");
+    button("Edit").click();
+    await settle();
+    await settle();
+    const store = useDashboardsStore();
+    store.removeDraftTab("week");
+    await settle();
+    await settle();
+    expect(shownTab()).toBeUndefined();
+    await store.cancelEdit();
+    await settle();
+    await settle();
+    router.back();
+    await settle();
+    await settle();
+    expect(router.currentRoute.value.path).toBe("/");
   });
 
   it("adds a tab from the dialog, and asks before it deletes a tab that has panels", async () => {
