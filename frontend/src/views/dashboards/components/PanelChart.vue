@@ -4,6 +4,7 @@ import { computed, markRaw, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { VisAxis, VisStackedBar, VisGroupedBar, VisLine, VisArea, VisScatter, VisXYContainer, VisCrosshair, VisTooltip } from "@unovis/vue";
 import { Scale, StackedBar, GroupedBar, Scatter, Direction, type Tooltip } from "@unovis/ts";
+import { getStackedData } from "@unovis/ts/utils/data";
 import { getHexValue } from "@unovis/ts/utils/color";
 import { useThemeStore } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
@@ -78,12 +79,30 @@ const categoryAngle = computed(() => {
   const space = plotWidthAvailable.value / Math.max(1, model.value.rows.length);
   return model.value.rows.some(row => row.label().length * 6 > space) ? -45 : 0;
 });
-const labelsFit = computed(() => {
-  const rows = model.value.rows.length, series = model.value.series.length;
-  const slots = mark.value === "bar" && !stacked.value ? rows * series : rows;
+const labelCapacity = computed(() => {
   const length = horizontal.value ? chartHeight.value : plotWidthAvailable.value;
   const spacing = mark.value !== "bar" ? 40 : horizontal.value ? 20 : 32;
-  return rows * series <= 500 && slots <= length / spacing;
+  return Math.min(500, Math.floor(length / spacing));
+});
+const labelStride = computed(() => Math.max(1, Math.ceil(model.value.rows.length * model.value.series.length / Math.max(1, labelCapacity.value))));
+const labelsFit = computed(() => {
+  const rows = model.value.rows.length, series = model.value.series.length;
+  const slots = mark.value === "bar" && stacked.value ? rows : rows * series;
+  return rows * series <= 500 && slots <= labelCapacity.value;
+});
+const pointRows = computed(() => model.value.series.map((series, i) => {
+  const count = model.value.series.length;
+  const budget = Math.floor(labelCapacity.value / count) + (i < labelCapacity.value % count ? 1 : 0);
+  const stride = Math.ceil(model.value.rows.length / Math.max(1, budget));
+  return model.value.rows.filter((row, j) => budget > 0 && j % stride === i % stride && row.values.get(series.key));
+}));
+const labelAccessors = computed(() => {
+  if (mark.value !== "area" || !stacked.value) return accessors.value;
+  const tops = getStackedData(model.value.rows, 0, accessors.value);
+  return tops.map(stack => {
+    const coordinates = new Map(model.value.rows.map((row, i) => [row.key, stack[i][1]]));
+    return (row: ChartRow) => coordinates.get(row.key) ?? Number.NaN;
+  });
 });
 const pointLabels = computed(() => model.value.series.map(series => (row: ChartRow) => row.values.get(series.key)?.text ?? ""));
 const pointLabelSelector = `.${Scatter.selectors.point} > text`;
@@ -148,7 +167,7 @@ function barLabels(svg: SVGSVGElement) {
       text.setAttribute('dominant-baseline', 'central');
       text.textContent = value.text;
       bar.parentNode?.append(text);
-      const fill = chartLabelColor(getHexValue(series.color, text));
+      const fill = chartLabelColor(getHexValue(series.color, text) ?? getHexValue(getComputedStyle(bar).fill, bar));
       text.style.fill = fill;
       text.style.stroke = fill === '#ffffff' ? '#000000' : '#ffffff';
       if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) text.remove();
@@ -162,25 +181,31 @@ function barLabels(svg: SVGSVGElement) {
     <p v-if="result.error" role="alert" class="text-xs text-destructive">{{ result.error }}</p>
     <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <template v-else>
-      <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark })" @keydown="keydown" @pointerdown="active = null" @blur="active = null">
-        <VisXYContainer :data="model.rows" :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
+      <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
+        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
           <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="categoryAngle" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
           <VisAxis :type="horizontal ? 'x' : 'y'" :tick-values="extent" tick-text-color="var(--muted-foreground)" :tick-format="yTick" :tick-line="false" :domain-line="false" />
-          <VisStackedBar v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.2" :rounded-corners="2" />
-          <VisGroupedBar v-else-if="mark === 'bar'" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :group-padding="0.2" :bar-padding="0.05" :bar-min-height="0" />
-          <VisLine v-else-if="mark === 'line'" :x="x" :y="accessors" :color="colors" />
-          <VisArea v-else-if="stacked" :x="x" :y="accessors" :color="colors" :opacity="0.35" :line="true" />
+          <VisStackedBar :data="model.rows" v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.2" :rounded-corners="2" />
+          <VisGroupedBar :data="model.rows" v-else-if="mark === 'bar'" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :group-padding="0.2" :bar-padding="0.05" :bar-min-height="0" />
+          <VisLine :data="model.rows" v-else-if="mark === 'line'" :x="x" :y="accessors" :color="colors" />
+          <VisArea :data="model.rows" v-else-if="stacked" :x="x" :y="accessors" :color="colors" :opacity="0.35" :line="true" />
           <template v-else>
-            <VisArea v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :color="colors[i]" :opacity="0.35" :line="true" />
+            <VisArea :data="model.rows" v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :color="colors[i]" :opacity="0.35" :line="true" />
           </template>
-          <template v-if="viz.show_values && labelsFit && mark !== 'bar'">
-            <VisScatter v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />
+          <template v-if="viz.show_values && mark !== 'bar'">
+            <VisScatter v-for="(accessor, i) in labelAccessors" :key="model.series[i].key" :data="pointRows[i]" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />
           </template>
           <VisTooltip ref="sharedTooltip" :triggers="barTooltipTriggers" />
-          <VisCrosshair v-if="!horizontal" :duration="0" :x="x" :y="stacked ? undefined : accessors" :yStacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hideWhenFarFromPointer="false" :forceShowAt="active === null ? undefined : model.rows[active]?.x" />
+          <VisCrosshair :data="model.rows" v-if="!horizontal" :duration="0" :x="x" :y="stacked ? undefined : accessors" :yStacked="stacked ? accessors : undefined" :color="colors" :template="tooltipTemplate" :hideWhenFarFromPointer="false" :forceShowAt="active === null ? undefined : model.rows[active]?.x" />
         </VisXYContainer>
       </div>
-      <p v-if="viz.show_values && !labelsFit" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
+      <div class="sr-only" aria-live="polite" aria-atomic="true">
+        <template v-if="active !== null && model.rows[active]">
+          {{ model.rows[active].label() }}
+          <span v-for="series in model.series" :key="series.key">{{ series.label }} {{ model.rows[active].values.get(series.key)?.exact ?? t('panelChart.null') }}. </span>
+        </template>
+      </div>
+      <p v-if="viz.show_values && plotWidthAvailable > 0 && (mark === 'bar' ? !labelsFit : labelStride > 1)" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
       <div v-if="viz.legend !== false && model.series.length > 1" class="panel-chart__legend" :aria-label="t('panelChart.seriesLegend')"><span v-for="series in model.series" :key="series.key"><i :style="{ background: series.color }" />{{ series.label }}</span></div>
       <p v-for="notice in model.notices" :key="notice" role="status" class="text-xs text-muted-foreground">{{ notice }}</p>
     </template>

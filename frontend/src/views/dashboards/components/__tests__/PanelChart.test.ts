@@ -12,15 +12,15 @@ import { Crosshair, Scatter, StackedBar, GroupedBar } from '@unovis/ts';
 markRaw(PolyfillResizeObserver.prototype);
 const cleanups: (() => void)[] = [];
 afterEach(() => { cleanups.splice(0).forEach(f => f()); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-async function render(frame: PanelFrame, viz: ChartViz, count = false, barBox = new DOMRect(0, 0, 80, 30)) {
+async function render(frame: PanelFrame, viz: ChartViz, count = false, barBox = new DOMRect(0, 0, 80, 30), width = 640) {
   const css = readFileSync('src/assets/index.css', 'utf8');
   for (const match of css.slice(css.indexOf('.light {')).split('}')[0].matchAll(/(--panel-chart-[\w-]+): (#[0-9a-f]+);/g)) document.documentElement.style.setProperty(match[1], match[2]);
   localStorage.setItem('vueuse-color-scheme', 'light');
   localStorage.setItem('logchef_user_preferences', JSON.stringify({ timezone: 'utc' }));
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(640);
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 640, 260));
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width);
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, width, 260));
   Object.defineProperty(SVGElement.prototype, 'getComputedTextLength', { configurable: true, value() { return (this.textContent?.length ?? 0) * 6; } });
   Object.defineProperty(SVGElement.prototype, 'getBBox', { configurable: true, value() { return this.tagName === 'text' ? new DOMRect(0, 0, (this.textContent?.length ?? 0) * 6, 12) : barBox; } });
   const host = document.createElement('div');
@@ -83,9 +83,6 @@ it('rejects duplicate keys', async () => {
 });
 
 it('renders finite horizontal stacked bars with negatives and NULLs', async () => {
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(640);
-  Object.defineProperty(SVGElement.prototype, "getComputedTextLength", { configurable: true, value() { return (this.textContent?.length ?? 0) * 7; } });
-  Object.defineProperty(SVGElement.prototype, "getBBox", { configurable: true, value: () => new DOMRect(0, 0, 40, 12) });
   const host = await render(source, { type: 'chart', x: 'x', y: ['a', 'b'], mark: 'bar', orientation: 'horizontal', show_values: true });
   await vi.waitFor(() => expect(host.querySelector('path[class$="-bar"]')).toBeTruthy());
   const bars = [...host.querySelectorAll<SVGPathElement>('path[class$="-bar"]')];
@@ -136,7 +133,9 @@ it('shows the snapped row when hovering in the right half of an interval', async
 it.each(['line', 'area', 'bar'] as const)('bounds show_values DOM for dense %s charts', async mark => {
   const frame = resultFrame({ columns: [{ name: 'x', type: 'String' }, { name: 'n', type: 'Int32' }], rows: Array.from({ length: mark === 'bar' ? 100 : 1000 }, (_, i) => ({ x: String(i), n: i + 1 })) });
   const host = await render(frame, { type: 'chart', x: 'x', y: ['n'], mark, show_values: true });
-  expect(host.querySelectorAll(`.${Scatter.selectors.point}`)).toHaveLength(0);
+  const points = host.querySelectorAll(`.${Scatter.selectors.point}`);
+  if (mark === 'bar') expect(points).toHaveLength(0);
+  else { expect(points.length).toBeGreaterThan(0); expect(points.length).toBeLessThanOrEqual(14); }
   expect(host.querySelectorAll('.panel-chart__value')).toHaveLength(0);
   expect(host.textContent).toContain('Value labels hidden');
 });
@@ -185,4 +184,68 @@ it('uses the shared tooltip for horizontal keyboard selection', async () => {
   plot.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
   await vi.waitFor(() => expect(host.querySelector('[role=tooltip]')?.textContent).toContain('Total20'));
   expect(host.querySelectorAll('[role=tooltip]')).toHaveLength(1);
+});
+
+it('announces keyboard buckets and formatted series outside the chart image only', async () => {
+  const frame = resultFrame({ columns: source.columns.map(c => ({ name: c.name, type: c.backendType ?? '' })), rows: source.rawRows.map((row, i) => ({ ...row, x: i === 0 ? 'First bucket' : 'Second bucket' })) });
+  const host = await render(frame, { type: 'chart', x: 'x', y: ['a', 'b'], format: { unit: 'percent' } });
+  const live = host.querySelector('[aria-live="polite"]')!;
+  expect(live).not.toBeNull();
+  expect(live.closest('[role="img"]')).toBeNull();
+  expect(live.classList.contains('sr-only')).toBe(true);
+  expect(live.textContent?.trim()).toBe('');
+  const plot = host.querySelector('.panel-chart__plot')!;
+  plot.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+  await nextTick();
+  expect(live.textContent).toContain('First bucket');
+  expect(live.textContent).toContain('a -30%');
+  expect(live.textContent).toContain('b 10%');
+  plot.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  await nextTick();
+  expect(live.textContent).toContain('Second bucket');
+  expect(live.textContent).not.toContain('First bucket');
+  expect(live.textContent).toContain('a NULL');
+  expect(live.textContent).toContain('b 20%');
+  plot.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+  host.querySelector('svg')!.dispatchEvent(new MouseEvent('mousemove', { clientX: 370, clientY: 100, bubbles: true }));
+  await vi.waitFor(() => expect(host.querySelector('[role=tooltip]')?.textContent).toContain('20%'));
+  expect(live.textContent?.trim()).toBe('');
+});
+
+it.each(['pointerdown', 'pointermove', 'pointerenter'])('returns keyboard inspection to the mouse on %s', async event => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['a', 'b'] });
+  const plot = host.querySelector('.panel-chart__plot')!;
+  plot.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home' }));
+  await vi.waitFor(() => expect(host.querySelector('[role=tooltip]')?.textContent).toContain('Total-20'));
+  plot.dispatchEvent(new PointerEvent(event, { bubbles: true }));
+  await nextTick();
+  host.querySelector('svg')!.dispatchEvent(new MouseEvent('mousemove', { clientX: 370, clientY: 100, bubbles: true }));
+  await vi.waitFor(() => expect(host.querySelector('[role=tooltip]')?.textContent).toContain('Total20'));
+});
+
+it.each([['area', undefined, 150], ['area', 'none', 50], ['line', undefined, 50]] as const)('places %s %s labels on the rendered series top', async (mark, stack, top) => {
+  const frame = resultFrame({ columns: [{ name: 'x', type: 'String' }, { name: 'a', type: 'Int32' }, { name: 'b', type: 'Int32' }], rows: [{ x: 'bucket', a: 100, b: 50 }] });
+  const host = await render(frame, { type: 'chart', x: 'x', y: ['a', 'b'], mark, stack, show_values: true });
+  const groups = [...host.querySelectorAll(`.${Scatter.selectors.point}`)];
+  expect(groups.map(g => g.querySelector('text')?.textContent)).toEqual(['100', '50']);
+  const y = (g: Element) => Number(g.getAttribute('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1]);
+  const a = y(groups[0]), b = y(groups[1]);
+  expect(Number.isFinite(b)).toBe(true);
+  if (top === 150) expect(b).toBeLessThan(a);
+  else expect(b).toBeGreaterThan(a);
+});
+
+it.each(['line', 'area'] as const)('thins dense %s labels across rows and series', async mark => {
+  const ys = ['a', 'b', 'c', 'd', 'e'];
+  const frame = resultFrame({ columns: [{ name: 'x', type: 'String' }, ...ys.map(name => ({ name, type: 'Int32' }))], rows: Array.from({ length: 10 }, (_, i) => ({ x: String(i), a: 10, b: 20, c: 30, d: 40, e: 50 })) });
+  const host = await render(frame, { type: 'chart', x: 'x', y: ys, mark, show_values: true });
+  const labels = host.querySelectorAll(`.${Scatter.selectors.point} > text`);
+  expect(labels.length).toBeGreaterThan(0);
+  expect(labels.length).toBeLessThanOrEqual(14);
+  expect(new Set([...labels].map(e => e.textContent)).size).toBe(5);
+});
+
+it('waits for plot width before announcing hidden labels', async () => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['b'], show_values: true }, false, new DOMRect(), 0);
+  expect(host.textContent).not.toContain('Value labels hidden');
 });

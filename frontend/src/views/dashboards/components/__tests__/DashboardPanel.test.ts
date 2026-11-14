@@ -97,6 +97,8 @@ describe("empty stat frames", () => {
 it("shows the empty count state without a phantom group or zero line", async () => {
   const root = await render({ status: "empty", frame: countFrame([], "1h", true) }, true, { ...panel, query: { mode: "count", language: "logchefql", text: "" }, viz: { type: "chart" } });
   expect(root.textContent).toContain("No data for this time range");
+  expect(root.querySelector(".dash-panel__message")?.textContent).toContain("No data for this time range");
+  expect(root.querySelector(".panel-chart")).toBeNull();
   expect(root.querySelector(".panel-chart__plot")).toBeNull();
   expect(root.textContent).not.toContain("(empty)");
 });
