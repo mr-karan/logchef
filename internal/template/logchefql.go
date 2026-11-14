@@ -11,12 +11,9 @@ var logchefQLTemplateToken = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\
 
 // SubstituteLogchefQLVariables formats values using LogchefQL's backslash escapes.
 func SubstituteLogchefQLVariables(query string, variables []Variable) (string, error) {
-	values := make(map[string]Variable, len(variables))
-	for _, variable := range variables {
-		if !validNamePattern.MatchString(variable.Name) {
-			return "", fmt.Errorf("invalid variable name: %s", variable.Name)
-		}
-		values[variable.Name] = variable
+	values, err := variableMap(variables)
+	if err != nil {
+		return "", err
 	}
 	query = processOptionalClauses(query, values, LogchefQL)
 	var substitutionErr error
@@ -24,6 +21,10 @@ func SubstituteLogchefQLVariables(query string, variables []Variable) (string, e
 		quoted := token[0] == '"' || token[0] == '\''
 		return variablePattern.ReplaceAllStringFunc(token, func(match string) string {
 			name := variablePattern.FindStringSubmatch(match)[1]
+			if IsBuiltin(name) {
+				_, substitutionErr = expandMacro(name, 0, Builtins{}, LogchefQL)
+				return match
+			}
 			variable, exists := values[name]
 			if !exists || !isValueProvided(variable.Value) {
 				substitutionErr = fmt.Errorf("variable {{%s}} requires a value", name)

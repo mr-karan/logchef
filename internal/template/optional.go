@@ -24,6 +24,10 @@ func processOptionalClauses(query string, variables map[string]Variable, dialect
 				if optional {
 					provided := true
 					for _, name := range names {
+						// A built-in macro counts as provided.
+						if IsBuiltin(name) {
+							continue
+						}
 						variable, exists := variables[name]
 						if !exists || !isValueProvided(variable.Value) {
 							provided = false
