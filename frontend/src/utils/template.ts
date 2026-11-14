@@ -7,6 +7,14 @@ export interface ExtractedVariable {
 
 const variablePattern = () => /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
+/** The built-in macros. The server renders them from the request, so they are never variables. */
+export const BUILTIN_MACROS = ["__from", "__to", "__time_filter", "__interval", "__interval_s", "__timezone", "__tz_offset"] as const;
+export type BuiltinMacro = (typeof BUILTIN_MACROS)[number];
+
+export function isBuiltinMacro(name: string): name is BuiltinMacro {
+    return (BUILTIN_MACROS as readonly string[]).includes(name);
+}
+
 function quotedOrCommentEnd(query: string, start: number, dialect: TemplateDialect): number {
     const rest = query.slice(start);
     if (dialect === 'clickhouse-sql' && rest.startsWith('$')) {
@@ -75,6 +83,7 @@ export function extractTemplateVariables(query: string, dialect: TemplateDialect
     const collect = (content: string, optional: boolean) => {
         for (const match of content.matchAll(variablePattern())) {
             const name = match[1];
+            if (isBuiltinMacro(name)) continue;
             variables.set(name, optional && (variables.get(name) ?? true));
         }
     };
@@ -121,4 +130,26 @@ export function validateDay(value: unknown): string {
         throw new Error('Invalid day (expected YYYY-MM-DD)');
     }
     return value;
+}
+
+/**
+ * The built-in macros a query uses where the server expands them: outside
+ * comments, strings, quoted identifiers, heredocs and raw strings.
+ */
+export function templateMacros(query: string, dialect: TemplateDialect = 'clickhouse-sql'): Set<BuiltinMacro> {
+    const macros = new Set<BuiltinMacro>();
+    for (let i = 0; i < query.length;) {
+        const end = quotedOrCommentEnd(query, i, dialect);
+        if (end > i) { i = end; continue; }
+        if (query.startsWith('{{', i)) {
+            const match = variablePattern().exec(query.slice(i));
+            if (match?.index === 0) {
+                if (isBuiltinMacro(match[1])) macros.add(match[1]);
+                i += match[0].length;
+                continue;
+            }
+        }
+        i++;
+    }
+    return macros;
 }

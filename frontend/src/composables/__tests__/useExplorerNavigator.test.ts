@@ -2147,6 +2147,28 @@ describe("Explorer history navigation", () => {
     }
   });
 
+  // A panel's SQL runs unchanged here: the server renders its macros from the
+  // run's window, zone and interval, and a macro is never asked for as a variable.
+  it("sends the macro inputs with a SQL run and asks for no macro as a variable", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const sql = "SELECT toStartOfInterval(timestamp, {{__interval}}, {{__timezone}}) AS t, count() AS n FROM logs WHERE {{__time_filter}} GROUP BY t";
+      const { nav } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id), mode: "native", sql, t: "7d" });
+      await nav.run();
+      await settle();
+      const request = native.mock.lastCall?.[1];
+      // 7 days at about 100 buckets is 6048 s, and the next window up is 2h.
+      expect(request).toMatchObject({ query_text: sql, interval: "2h" });
+      expect(Date.parse(request?.end_time ?? "") - Date.parse(request?.start_time ?? "")).toBe(7 * 86_400_000);
+      expect(request?.timezone).toBeTruthy();
+      expect(request?.variables).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["a relative window", { kind: "relative", spec: "1h" } as TimeWindow, idleStart + idle, 3_600_000],
     ["a zoom", { kind: "absolute", start: epochMs(idleStart - 600_000), end: epochMs(idleStart - 300_000) } as TimeWindow, idleStart - 300_000, 300_000],

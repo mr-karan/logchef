@@ -41,6 +41,7 @@ import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
 import { addSelectField, appendCondition, buildCondition, type FilterOperator } from "@/utils/logchefql/filters";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
+import { calculateOptimalGranularity } from "@/services/HistogramService";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
 
 // Type alias for backwards compatibility
@@ -477,6 +478,11 @@ const handleExport = async () => {
       format: "csv",
       query_timeout: queryTimeout,
       variables: shown.variables,
+      // The inputs of the built-in macros, as the run sent them.
+      start_time: toRfc3339(shown.resolved.start),
+      end_time: toRfc3339(shown.resolved.end),
+      timezone: shown.resolved.zone,
+      interval: calculateOptimalGranularity(toRfc3339(shown.resolved.start), toRfc3339(shown.resolved.end)),
     }, currentTeamId.value);
     const job = response.data;
     if (!job?.id) {
