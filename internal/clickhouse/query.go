@@ -90,10 +90,10 @@ func (p *queryProgress) profile(info *clickhouse.ProfileInfo) {
 	p.profiled = true
 }
 
-func (p *queryProgress) end(settings clickhouse.Settings, query string) queryEnd {
+func (p *queryProgress) end(settings clickhouse.Settings, unsentModes bool, query string) queryEnd {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return queryEnd{settings: settings, resultBytes: p.resultBytes, profiled: p.profiled, ownSettingsMayCut: SettingsMayCut(query)}
+	return queryEnd{settings: settings, resultBytes: p.resultBytes, profiled: p.profiled, ownSettingsMayCut: SettingsMayCut(query), unsentModes: unsentModes}
 }
 
 func (p *queryProgress) apply(stats *models.QueryStats) {
@@ -156,17 +156,14 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	truncatedReason := ""
 	var progress queryProgress
 	var settings clickhouse.Settings
+	var unsentModes bool
 
 	// Execute the core query logic within the hook wrapper.
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		var queryErr error
 		queryStartTime = time.Now() // Reset timer before execution
 
-		settings, queryErr = c.resultQuerySettings(hookCtx, opts)
-		if queryErr != nil {
-			return queryErr
-		}
-		rows, queryErr = c.queryResultRows(hookCtx, query, settings, &progress)
+		rows, settings, unsentModes, queryErr = c.queryResultRows(hookCtx, query, opts, &progress)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -238,7 +235,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			Truncated:       truncatedReason != "",
 			TruncatedReason: truncatedReason,
 			LimitSource:     opts.LimitSource,
-			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(settings, query)),
+			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(settings, unsentModes, query)),
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
@@ -265,11 +262,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	var rowsReturned int
 	var progress queryProgress
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		settings, err := c.resultQuerySettings(hookCtx, opts)
-		if err != nil {
-			return err
-		}
-		rows, err := c.queryResultRows(hookCtx, query, settings, &progress)
+		rows, settings, unsentModes, err := c.queryResultRows(hookCtx, query, opts, &progress)
 		if err != nil {
 			return err
 		}
@@ -317,7 +310,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		stats.RowsReturned = rowsReturned
 		stats.LimitApplied = opts.LimitApplied
 		stats.LimitSource = opts.LimitSource
-		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(settings, query))
+		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(settings, unsentModes, query))
 		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
 		return writer.Finish(stats)
 	})
@@ -346,28 +339,6 @@ func ownQuery(ctx context.Context, settings clickhouse.Settings) context.Context
 		clickhouse.WithProfileInfo(nil),
 		clickhouse.WithProfileEvents(nil),
 	)
-}
-
-// flattensJSON reports whether the server takes the flattened native JSON
-// format, probed once per client; older servers must never receive the setting.
-func (c *Client) flattensJSON(ctx context.Context) bool {
-	c.capabilitiesMu.Lock()
-	flattenedJSON := c.flattenedJSON
-	c.capabilitiesMu.Unlock()
-	if flattenedJSON != nil {
-		return *flattenedJSON
-	}
-	var supported uint64
-	probeCtx := ownQuery(ctx, clickhouse.Settings{"max_execution_time": 2})
-	err := c.conn.QueryRow(probeCtx, "SELECT count() FROM system.settings WHERE name = 'output_format_native_use_flattened_dynamic_and_json_serialization'").Scan(&supported)
-	if err != nil {
-		return false
-	}
-	enabled := supported > 0
-	c.capabilitiesMu.Lock()
-	c.flattenedJSON = &enabled
-	c.capabilitiesMu.Unlock()
-	return enabled
 }
 
 func resetNullableScanTargets(ptrs []reflect.Value) {

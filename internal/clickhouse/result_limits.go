@@ -6,7 +6,6 @@ package clickhouse
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"strconv"
 	"strings"
@@ -19,15 +18,13 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// throwModes are the overflow modes of the ClickHouse limits that end a query
-// without an error under break or any. Logchef sends each one as throw, so
-// such a limit in a settings profile fails the query instead of cutting it.
-// A server that does not know a mode fails the query, so since names the
-// first release that has it and its limit.
-var throwModes = []struct {
-	name  string
-	since proto.Version
-}{
+// overflowModes are the overflow modes of the ClickHouse limits that end a query
+// without an error under break or any, except the result mode, whose break
+// Logchef owns. Logchef sends each one as throw, so such a limit in a settings
+// profile fails the query instead of cutting it. A server that does not know a
+// mode fails the query, so since names the first release that has it and its
+// limit.
+var overflowModes = []overflowMode{
 	{name: "read_overflow_mode"},
 	{name: "read_overflow_mode_leaf"},
 	{name: "group_by_overflow_mode"},
@@ -40,33 +37,23 @@ var throwModes = []struct {
 	{name: "timeout_overflow_mode_leaf", since: proto.Version{Major: 23, Minor: 11}},
 }
 
-// throwModeSettings returns throw for each mode in throwModes that the server
-// knows, from its version, read once per client. The read runs on the
-// caller's context: the driver's ServerVersion dials without it, so a server
-// that never answers would hold the query for the whole dial timeout. A failed
-// read fails the query.
-func (c *Client) throwModeSettings(ctx context.Context) (clickhouse.Settings, error) {
-	c.capabilitiesMu.Lock()
-	modes := c.throwModes
-	c.capabilitiesMu.Unlock()
-	if modes != nil {
-		return modes, nil
+type overflowMode struct {
+	name  string
+	since proto.Version
+}
+
+// neutralSettings override the settings profile's row limit, offset and
+// result caps, and make a result cap the profile fixes fail the query. Every
+// supported server knows them, so a query that runs before Logchef knows the
+// server can send them.
+func neutralSettings() clickhouse.Settings {
+	return clickhouse.Settings{
+		"limit":                0,
+		"offset":               0,
+		"max_result_rows":      0,
+		"max_result_bytes":     0,
+		"result_overflow_mode": "throw",
 	}
-	var version string
-	if err := c.conn.QueryRow(ownQuery(ctx, nil), "SELECT version()").Scan(&version); err != nil {
-		return nil, fmt.Errorf("reading the ClickHouse server version: %w", err)
-	}
-	server := proto.ParseVersion(version)
-	modes = make(clickhouse.Settings, len(throwModes))
-	for _, mode := range throwModes {
-		if proto.CheckMinVersion(mode.since, server) {
-			modes[mode.name] = "throw"
-		}
-	}
-	c.capabilitiesMu.Lock()
-	c.throwModes = modes
-	c.capabilitiesMu.Unlock()
-	return modes, nil
 }
 
 // resultQuerySettings returns every setting a result query sends. Logchef
@@ -76,7 +63,7 @@ func (c *Client) throwModeSettings(ctx context.Context) (clickhouse.Settings, er
 // override them, as the operator's caps, and nothing overrides the throw
 // modes or the timeout.
 func (c *Client) resultQuerySettings(ctx context.Context, opts QueryOptions) (clickhouse.Settings, error) {
-	modes, err := c.throwModeSettings(ctx)
+	modes, err := c.throwModes.get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +75,9 @@ func (c *Client) resultQuerySettings(ctx context.Context, opts QueryOptions) (cl
 		"offset":               0,
 	}
 	maps.Copy(settings, c.querySettings)
+	if c.flattensJSON(ctx) {
+		settings[flattenedJSONSetting] = 1
+	}
 	maps.Copy(settings, modes)
 	settings["max_execution_time"] = c.queryTimeout(opts.TimeoutSeconds)
 	return settings, nil
@@ -137,13 +127,17 @@ type queryEnd struct {
 	profiled    bool
 	// ownSettingsMayCut reports SETTINGS in the SQL that can end it early.
 	ownSettingsMayCut bool
+	// unsentModes reports an overflow mode the server knows that the query
+	// did not send as throw.
+	unsentModes bool
 }
 
 // truncation is the state of a result that stopped for reason after rows
 // rows. The reader proves a row or byte cut. A result may be incomplete when
-// its SQL's SETTINGS can end it early, when it fills the reader's cap with no
-// room for a row past it, unless the statement's own LIMIT set the cap, or
-// when a result limit it sent in break mode could have ended it.
+// its SQL's SETTINGS can end it early, when it left an overflow mode the
+// server knows unsent, when it fills the reader's cap with no room for a row
+// past it, unless the statement's own LIMIT set the cap, or when a result
+// limit it sent in break mode could have ended it.
 func (opts QueryOptions) truncation(rows int, reason string, end queryEnd) models.Truncation {
 	switch {
 	case reason == "byte_limit":
@@ -151,6 +145,7 @@ func (opts QueryOptions) truncation(rows int, reason string, end queryEnd) model
 	case reason == "row_limit":
 		return models.TruncationRows
 	case end.ownSettingsMayCut,
+		end.unsentModes,
 		opts.capFilled(rows),
 		end.resultLimitMayHaveCut(rows, opts.LimitSource):
 		return models.TruncationUnknown

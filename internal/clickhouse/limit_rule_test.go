@@ -50,6 +50,7 @@ func TestTruncationState(t *testing.T) {
 			end: queryEnd{settings: clickhouse.Settings{"max_result_bytes": int64(100), "result_overflow_mode": "throw"}}, want: models.TruncationNone},
 		{name: "the query's own SETTINGS may cut", opts: probed, rows: 5, end: queryEnd{settings: breakRows(101).settings, ownSettingsMayCut: true}, want: models.TruncationUnknown},
 		{name: "a proven cut outranks the query's own SETTINGS", opts: probed, rows: 100, reason: "row_limit", end: queryEnd{ownSettingsMayCut: true}, want: models.TruncationRows},
+		{name: "an overflow mode the server knows went unsent", opts: probed, rows: 5, end: queryEnd{settings: breakRows(101).settings, unsentModes: true}, want: models.TruncationUnknown},
 		{name: "no cap is never a cut", opts: QueryOptions{}, rows: 5000, end: breakRows(0), want: models.TruncationNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +139,7 @@ func TestResultQuerySettings(t *testing.T) {
 			want: clickhouse.Settings{"sort_overflow_mode": "throw"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &Client{querySettings: tc.source, throwModes: clickhouse.Settings{"sort_overflow_mode": "throw"}}
+			client := clientWithModes(tc.source, clickhouse.Settings{"sort_overflow_mode": "throw"})
 			got, err := client.resultQuerySettings(t.Context(), tc.opts)
 			if err != nil {
 				t.Fatal(err)
@@ -150,6 +151,15 @@ func TestResultQuerySettings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// clientWithModes returns a client whose server knows modes, with source as
+// its source settings.
+func clientWithModes(source, modes clickhouse.Settings) *Client {
+	client := &Client{querySettings: source}
+	client.throwModes = serverFact[clickhouse.Settings]{dials: &client.dials, read: func(context.Context) (clickhouse.Settings, error) { return modes, nil }}
+	client.flattenedJSON = serverFact[bool]{dials: &client.dials, read: func(context.Context) (bool, error) { return false, nil }}
+	return client
 }
 
 // TestThrowModesClickHouse sets every overflow mode the server knows to break
@@ -254,7 +264,7 @@ func TestCapabilityProbeIsItsOwnQueryClickHouse(t *testing.T) {
 	if _, err := client.QueryWithOptions(ctx, "SELECT 1", QueryOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if client.flattenedJSON == nil {
+	if !client.flattenedJSON.cached() {
 		t.Fatal("the first query did not probe for native JSON")
 	}
 	if n := profiles.Load(); n != 0 {
