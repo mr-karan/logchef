@@ -82,6 +82,13 @@ Logs are untrusted text. A log line can contain instructions aimed at an assista
 | `get_log_histogram` | Log volume over time, with optional grouping |
 | `get_log_context` | Log entries before and after a timestamp |
 
+`query_logs` takes `start_time`, `end_time`, `timezone`, `interval` and
+`variables` next to `raw_sql`, so a query that uses [time macros](/guide/time-macros)
+or `{{name}}` variables runs as it does in a dashboard panel.
+`get_log_histogram` takes `variables` too, and its `window` is the bucket size
+that `{{__interval}}` renders. A macro whose input is missing fails the call
+with an error that names the field to send.
+
 ### LogchefQL
 
 | Tool | Description |

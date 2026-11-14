@@ -19,6 +19,7 @@ self-contained visualization: it points at a team and source, carries its own qu
 (LogchefQL, ClickHouse SQL, or native LogsQL for a VictoriaLogs source), and renders as one of
 the panel types below.
 Panels do not share a query, only the dashboard's time range and refresh interval.
+A panel can also [pin its own range and bucket size](#panel-time).
 
 Panels run through the same team-scoped query endpoints the explorer uses, so a
 dashboard adds no new way to reach log data: whatever a viewer can query in the
@@ -151,9 +152,10 @@ dashboard's backend mix.
 
 ## Time range and refresh
 
-Every panel on a dashboard shares one **time range**, set from the toolbar (the same
-quick and absolute ranges as the explorer). Changing it re-runs the panels of the
-tab on screen. New dashboards default to the last 15 minutes.
+Panels on a dashboard share one **time range**, set from the toolbar (the same
+quick and absolute ranges as the explorer). Changing it re-runs panels on the open tab. New dashboards default to the last 15 minutes. In edit mode, the
+dashboard settings can set the range a dashboard opens with: a quick range, or
+a calendar range such as **Today** or **Last 7 calendar days**.
 
 Set an **auto-refresh** interval (off, 30 seconds, 1 minute, or 5 minutes) to keep
 a wall-board style view current. There is also a manual refresh button.
@@ -179,6 +181,74 @@ four panel requests are in flight at a time across tab switches.
 
 The tab bar works from the keyboard: Left and Right move between tabs, Home and End
 jump to the first and last, and Enter or Space opens the focused tab.
+
+## Panel time
+
+A panel follows the dashboard range unless its query or its settings say
+otherwise. Chips in the panel header show what applies.
+
+| Chip | Meaning |
+| :--- | :--- |
+| **Fixed window** | The query sets its own window, so the time picker does not change it |
+| A range, such as **Last 7 calendar days** | The panel has its own range. Hover for the range and timezone it ran over |
+| A bucket size, such as **24h** | The panel has a fixed bucket size. An amber chip shows the size that ran when the chosen one was raised |
+
+### Which panels follow the time picker
+
+| Query | Follows the time picker |
+| :--- | :--- |
+| LogchefQL | Always |
+| LogsQL | Always |
+| ClickHouse SQL | Only when the text uses `{{__time_filter}}`, or both `{{__from}}` and `{{__to}}` |
+
+A ClickHouse SQL panel without those [time macros](/guide/time-macros) keeps the
+window its SQL sets, for example `WHERE date(ts) >= today() - 10`, and shows
+**Fixed window**. To make it follow the time picker, filter with the macro:
+
+```sql
+SELECT count() AS n FROM default.http WHERE {{__time_filter}}
+```
+
+### A range for one panel
+
+In the panel builder, **Time range** is **Dashboard range** by default. Pick a
+range to make the panel query that range in place of the dashboard's. A "last
+7 days" chart can then sit on a dashboard that opens on today.
+
+A range is rolling or calendar.
+
+| Kind | Example | Window |
+| :--- | :--- | :--- |
+| Rolling | `7d` | Exactly 168 hours that end now. At noon the window starts at noon seven days ago, so the first day is half missing |
+| Calendar | `today`, `yesterday`, `today-6d` | Whole days in the viewer's timezone. `today-6d` runs from the start of the day six days before today until now. It covers today and the 6 dates before it |
+
+**Custom range** accepts `<n>m`, `<n>h`, `<n>d`, `<n>w`, `today`, `yesterday`
+and `today-<n>d`. Setting the range back to **Dashboard range** removes it from
+the panel.
+
+### Bucket size
+
+**Bucket size** is **Auto** by default, which gives about 100 buckets over the
+range. A fixed size is one of `1s`, `5s`, `10s`, `15s`, `30s`, `1m`, `5m`,
+`10m`, `15m`, `30m`, `1h`, `2h`, `3h`, `6h`, `12h` and `24h`.
+
+- In count mode the bucket size is the histogram window. A count chart with
+  `24h` buckets on a 7-day range draws one bar per day.
+- In result mode it feeds `{{__interval}}` in the query.
+- A fixed size that would give more than 1,000 buckets over the range is raised
+  to the next size that fits, and the chip shows the size that ran.
+
+Day buckets need a calendar range. A rolling range starts in the middle of a
+day, so its first bucket is partial. The builder says so when a panel combines
+`24h` with a rolling range.
+
+### Day buckets on VictoriaLogs
+
+A VictoriaLogs count panel buckets with one fixed UTC offset, read at the start
+of the range. When the range crosses a daylight-saving change in the viewer's
+timezone and the bucket is longer than one hour, the panel shows a notice that
+names the change: buckets after it start one hour off local midnight.
+ClickHouse buckets follow the change, so ClickHouse panels show no notice.
 
 ## Result caching
 
@@ -262,7 +332,8 @@ request.
   does not know. This version stores `result_frames`, `formats`,
   `result_charts`, `stat_compare`, `thresholds`, `table_rules`,
   `column_formats`, `tabs` (more than one tab) and `free_grid` (a width outside
-  2, 3, 4, 6, 8, 9 and 12, or a height above 6). An empty value is correct for
+  2, 3, 4, 6, 8, 9 and 12, or a height above 6), and `panel_time` (a fixed panel interval, a panel range,
+  or a calendar default range). An empty value is correct for
   a dashboard that uses none of them. Declare what your code supports; never
   copy a dashboard's stored `features` list into the header.
 
