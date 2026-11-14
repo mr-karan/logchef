@@ -69,7 +69,21 @@ it("keeps an exact value visible when sparkline coordinates overflow",async()=>{
  const panel:DashboardQueryPanel={id:"s",kind:"query",title:"",team_id:1,source_id:1,query:{mode:"result",language:"logsql",text:"*"},viz:{type:"stat",value:"n",order_by:"day",sparkline:true,columns:{n:{kind:"number",confidence:"confirmed"},day:{kind:"date",confidence:"confirmed"}}}};
  const frame=resultFrame({columns:[{name:"day",type:"String"},{name:"n",type:"String"}],rows:[{day:"2026-11-12",n:"1e400"}]});
  const app=createApp(PanelStat,{frame,panel}).use(createPinia()).use(i18n);
- try {app.mount(host);await nextTick();expect(host.querySelector('.panel-stat__value')?.textContent).not.toBe('No data');expect(host.querySelector('[role=alert]')?.textContent).toContain('outside the chart coordinate range');}finally{app.unmount();}
+ try {app.mount(host);await nextTick();expect(host.querySelector('.panel-stat__value')?.textContent).not.toBe('No data');const alert=host.querySelector('[role=alert]');expect(alert?.textContent).toContain('outside the chart coordinate range');expect(alert?.closest('[role=img]')).toBeNull();expect(host.querySelector('[role=img]')).toBeNull();expect(host.querySelector('[tabindex="0"]')).toBeNull();}finally{app.unmount();}
+});
+
+it("keeps the approximate sparkline note outside the chart image",async()=>{
+ const host=document.createElement('div');
+ const panel:DashboardQueryPanel={id:"s",kind:"query",title:"",team_id:1,source_id:1,query:{mode:"result",language:"logsql",text:"*"},viz:{type:"stat",value:"n",order_by:"day",sparkline:true,columns:{n:{kind:"number",confidence:"confirmed"},day:{kind:"date",confidence:"confirmed"}}}};
+ const frame=resultFrame({columns:[{name:"day",type:"String"},{name:"n",type:"UInt64"}],rows:[{day:"2026-11-11",n:"9007199254740993"},{day:"2026-11-12",n:"9007199254740995"}]});
+ const app=createApp(PanelStat,{frame,panel}).use(createPinia()).use(i18n);
+ try {
+  app.mount(host);await nextTick();
+  const note=[...host.querySelectorAll('span')].find(e=>e.textContent===i18n.global.t('dashboardBuilder.ApproximateSparkline'));
+  expect(note).toBeTruthy();
+  expect(note?.closest('[role=img]')).toBeNull();
+  expect(host.querySelector('[role=img]')).not.toBeNull();
+ } finally {app.unmount();}
 });
 
 it("shows a negative delta and percent, red for good up and green for good down", async () => {

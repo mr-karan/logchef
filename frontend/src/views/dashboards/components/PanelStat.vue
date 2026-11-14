@@ -95,10 +95,13 @@ function keydown(event: KeyboardEvent) {
         <span v-if="percent"> ({{ comparison.direction > 0 ? '+' : '' }}{{ percent.text }})</span>
         <span class="block text-muted-foreground">{{ t('dashboardBuilder.ComparedWith', { date: comparison.rowLabel }) }}</span>
       </div>
-      <div v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length" class="panel-stat__sparkline w-full" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark: t('dashboardBuilder.Sparkline') })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
+      <template v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length">
+        <!-- Messages stay outside role="img": assistive technology treats an image's children as decoration. -->
         <p v-if="sparkline.error" class="text-xs text-destructive" role="alert">{{ sparkline.error }}</p>
-        <span v-if="sparkline.approximate" class="text-xs text-muted-foreground">{{ t('dashboardBuilder.ApproximateSparkline') }}</span>
-        <VisXYContainer v-if="!sparkline.error" aria-hidden="true" :data="sparkline.rows" :height="48" :duration="0" :margin="{ top: 2, bottom: 2, left: 2, right: 2 }">
+        <span v-else-if="sparkline.approximate" class="text-xs text-muted-foreground">{{ t('dashboardBuilder.ApproximateSparkline') }}</span>
+      </template>
+      <div v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length && !sparkline.error" class="panel-stat__sparkline w-full" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark: t('dashboardBuilder.Sparkline') })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
+        <VisXYContainer aria-hidden="true" :data="sparkline.rows" :height="48" :duration="0" :margin="{ top: 2, bottom: 2, left: 2, right: 2 }">
           <VisLine :x="x" :y="y" color="var(--primary)" />
           <VisCrosshair ref="crosshair" :x="x" :y="y" :duration="0" :template="sparklineTemplate" :hide-when-far-from-pointer="false" :force-show-at="active === null ? undefined : sparkline.rows[active]?.x" />
           <VisTooltip ref="tooltip" />
