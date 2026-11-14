@@ -52,9 +52,17 @@ func TestEvaluateAlertCompletenessClickHouse(t *testing.T) {
 	if err != nil || result.Logs[0]["value"] != uint64(100000) {
 		t.Fatalf("EvaluateAlert() = %v, %v; want value 100000", result, err)
 	}
-	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: count + " SETTINGS max_rows_to_read = 1000, read_overflow_mode = 'break', max_threads = 1, max_block_size = 100"})
-	if err == nil {
-		t.Fatalf("EvaluateAlert() under SETTINGS that end the query early = %v, want an error", result.Logs)
+	for _, settings := range []string{
+		"max_rows_to_read = 1000, read_overflow_mode = 'break', max_threads = 1, max_block_size = 100",
+		"max_rows_to_read_leaf = 1000, read_overflow_mode_leaf = 'break'",
+		"max_rows_to_read_leaf = 1000, `read_overflow_mode_leaf` = 'break'",
+		"\"offset\" = 1",
+		"skip_unavailable_shards = 1",
+	} {
+		result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: count + " SETTINGS " + settings})
+		if _, ok := errors.AsType[*ValidationError](err); !ok {
+			t.Fatalf("EvaluateAlert() under SETTINGS %s = %v, %v; want a validation error", settings, result, err)
+		}
 	}
 
 	user := fmt.Sprintf("logchef_test_%d", time.Now().UnixNano())
@@ -117,13 +125,19 @@ func TestTailCompletenessClickHouse(t *testing.T) {
 		t.Fatalf("tail emitted %d of 350 rows (%v)", len(seen), err)
 	}
 
-	filterCtx, stopFilter := context.WithTimeout(ctx, 3*time.Second)
-	defer stopFilter()
-	err = provider.TailLogs(filterCtx, source, TailRequest{
-		Query:        "1 = 1) ORDER BY ts SETTINGS max_rows_to_read = 5, read_overflow_mode = 'break' --",
-		PollInterval: 10 * time.Millisecond,
-	}, func([]map[string]any) error { return nil })
-	if _, ok := errors.AsType[*ValidationError](err); !ok {
-		t.Fatalf("TailLogs() with a filter whose SETTINGS end a poll early = %v, want a validation error", err)
+	for _, settings := range []string{
+		"max_rows_to_read = 5, read_overflow_mode = 'break'",
+		"max_rows_to_read_leaf = 5, `read_overflow_mode_leaf` = 'break'",
+		"`limit` = 5",
+	} {
+		filterCtx, stopFilter := context.WithTimeout(ctx, 3*time.Second)
+		err = provider.TailLogs(filterCtx, source, TailRequest{
+			Query:        "1 = 1) ORDER BY ts SETTINGS " + settings + " --",
+			PollInterval: 10 * time.Millisecond,
+		}, func([]map[string]any) error { return nil })
+		stopFilter()
+		if _, ok := errors.AsType[*ValidationError](err); !ok {
+			t.Fatalf("TailLogs() with a filter whose SETTINGS %s end a poll early = %v, want a validation error", settings, err)
+		}
 	}
 }

@@ -86,6 +86,16 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 - Startup fills derived list columns for every existing dashboard on both
   SQLite (migration 000041) and Postgres (000015). The step is idempotent and
   reads each blob once.
+- **Breaking for alerts:** a ClickHouse alert saved before this version whose
+  query `SETTINGS` can stop ClickHouse early without an error records an
+  evaluation error on every run after the upgrade, instead of comparing a
+  value that may be partial. Such `SETTINGS` set an overflow mode such as
+  `read_overflow_mode` or `read_overflow_mode_leaf` to anything but
+  `'throw'`, set `limit`, `offset` or `skip_unavailable_shards` to anything
+  but 0, or set `max_result_rows` or `max_result_bytes` without
+  `result_overflow_mode = 'throw'`, with the name quoted or not. To fix such
+  an alert, edit its query: set each overflow mode to `'throw'`, remove the
+  other settings, and save. The save checks the query again.
 
 ### Security
 - Collection links have a kind. A `pin` is a bookmark and grants nothing. A
@@ -175,10 +185,10 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   for one extra row, so `rows` is a proven cut. A source's `max_result_rows`
   setting counts as the configured maximum, and the extra row never passes
   it, so a result that fills it reports `unknown`. So does a result whose own
-  `SETTINGS` let ClickHouse stop it early without an error. The Explorer and
-  dashboard panels show the state as a chip and no longer print a limit
-  warning when nothing was cut. The older `truncated` and `truncated_reason`
-  fields stay.
+  `SETTINGS` let ClickHouse stop it early without an error, quoted names such
+  as `` `limit` `` included. The Explorer and dashboard panels show the state
+  as a chip and no longer print a limit warning when nothing was cut. The
+  older `truncated` and `truncated_reason` fields stay.
 - ClickHouse limits in the ClickHouse user's settings profile no longer cut
   results silently. Logchef sends its own result row and byte limits with
   every query, and sends every other overflow mode as `throw`, so a profile

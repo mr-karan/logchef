@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -183,9 +184,11 @@ func (end queryEnd) resultLimitMayHaveCut(rows int, source models.LimitSource) b
 
 // SettingsMayCut reports whether a query's own SETTINGS can end it early
 // without an error. They override every setting Logchef sends. An overflow
-// mode other than throw lets its limit cut the query, and a result row or
-// byte limit cuts in Logchef's break mode unless the same SETTINGS make it
-// throw. SQL the parser cannot read may hold either, so it may cut.
+// mode other than throw lets its limit cut the query, a row limit or offset
+// cuts it, a skipped shard leaves out its rows, and a result row or byte
+// limit cuts in Logchef's break mode unless the same SETTINGS make it throw.
+// SQL the parser cannot read, or a setting name Logchef cannot decode, may
+// hold any of them, so it may cut.
 func SettingsMayCut(query string) bool {
 	if !strings.Contains(strings.ToLower(query), "settings") {
 		return false
@@ -197,8 +200,8 @@ func SettingsMayCut(query string) bool {
 	mayCut := false
 	for _, stmt := range stmts {
 		clickhouseparser.Walk(stmt, func(node clickhouseparser.Expr) bool {
-			if clause, ok := node.(*clickhouseparser.SettingsClause); ok {
-				mayCut = settingsClauseMayCut(clause)
+			if clause, ok := node.(*clickhouseparser.SettingsClause); ok && settingsClauseMayCut(clause) {
+				mayCut = true
 			}
 			return !mayCut
 		})
@@ -209,16 +212,49 @@ func SettingsMayCut(query string) bool {
 func settingsClauseMayCut(clause *clickhouseparser.SettingsClause) bool {
 	resultLimit, resultThrows := false, false
 	for _, item := range clause.Items {
-		name := strings.ToLower(item.Name.Name)
+		name, ok := settingName(item.Name)
 		switch {
-		case strings.HasSuffix(name, "_overflow_mode"):
+		case !ok:
+			return true
+		case strings.Contains(name, "overflow_mode"):
 			if value, ok := item.Expr.(*clickhouseparser.StringLiteral); !ok || value.Literal != "throw" {
 				return true
 			}
 			resultThrows = resultThrows || name == "result_overflow_mode"
+		case name == "limit", name == "offset", name == "skip_unavailable_shards":
+			if !isZero(item.Expr) {
+				return true
+			}
 		case name == "max_result_rows", name == "max_result_bytes":
-			resultLimit = true
+			resultLimit = resultLimit || !isZero(item.Expr)
 		}
 	}
 	return resultLimit && !resultThrows
+}
+
+// settingName returns the lower-cased setting name ClickHouse reads from
+// ident, or false when a quoted name holds an escape Logchef does not decode.
+// ClickHouse names are lower case, so lower-casing can only match more names.
+func settingName(ident *clickhouseparser.Ident) (string, bool) {
+	name := ident.Name
+	if ident.QuoteType != clickhouseparser.Unquoted {
+		decoded, ok := decodeQuotedIdentifier(name)
+		if !ok {
+			return "", false
+		}
+		name = decoded
+	}
+	return strings.ToLower(name), true
+}
+
+// isZero reports a setting value that is a literal zero or false.
+func isZero(expr clickhouseparser.Expr) bool {
+	switch value := expr.(type) {
+	case *clickhouseparser.NumberLiteral:
+		number, err := strconv.ParseFloat(value.Literal, 64)
+		return err == nil && number == 0
+	case *clickhouseparser.BoolLiteral:
+		return strings.EqualFold(value.Literal, "false")
+	}
+	return false
 }
