@@ -808,7 +808,7 @@ describe("dashboards store — schema 2 request parity", () => {
     mocks.logsQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [], stats } });
     const logsql: DashboardQueryPanel = { ...tablePanel("vl"), query: { mode: "result", language: "logsql", text: "*" } };
     const store = await runPanels(logsql);
-    expect(store.getPanelState("vl")).toMatchObject({ status: "empty", table: { stats: { truncation: "bytes" } } });
+    expect(store.getPanelState("vl")).toMatchObject({ status: "empty", stats: { truncation: "bytes" } });
   });
 
   it("trims U+0085 around a group when building the request and keeps U+FEFF", async () => {
