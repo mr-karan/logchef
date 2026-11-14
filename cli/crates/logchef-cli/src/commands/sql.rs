@@ -578,54 +578,120 @@ fn uses_time_macro(sql: &str) -> bool {
     })
 }
 
-/// Returns `sql` with `--` line comments and `/* */` block comments removed.
-/// Quoted text ('...', "..." and `...`, with doubled or backslash-escaped
-/// quotes) is kept as is, so a `--` inside a string is not a comment.
-fn without_sql_comments(sql: &str) -> String {
-    let mut out = String::with_capacity(sql.len());
-    let mut chars = sql.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' | '"' | '`' => {
-                out.push(c);
-                while let Some(d) = chars.next() {
-                    out.push(d);
-                    if d == '\\' {
-                        if let Some(e) = chars.next() {
-                            out.push(e);
-                        }
-                    } else if d == c {
-                        if chars.peek() == Some(&c) {
-                            out.push(chars.next().unwrap_or(c));
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-            '-' if chars.peek() == Some(&'-') => {
-                for d in chars.by_ref() {
-                    if d == '\n' {
-                        out.push('\n');
-                        break;
-                    }
-                }
-            }
-            '/' if chars.peek() == Some(&'*') => {
-                chars.next();
-                let mut prev = '\0';
-                for d in chars.by_ref() {
-                    if prev == '*' && d == '/' {
-                        break;
-                    }
-                    prev = d;
-                }
-                out.push(' ');
-            }
-            _ => out.push(c),
+/// Returns the byte offset just past the quoted text, heredoc or comment that
+/// starts at `start`, or None when none starts there. It follows the server's
+/// ClickHouse SQL scanner (`quotedOrCommentEnd` in internal/template), so the
+/// CLI and the server agree on which text is live SQL: `$tag$` heredocs,
+/// `--` and `#` line comments ended by CR or LF, nested `/* */` comments, and
+/// '...', "..." and `...` with doubled or backslash-escaped quotes.
+fn sql_skip_end(sql: &str, start: usize) -> Option<usize> {
+    let bytes = sql.as_bytes();
+    let b = bytes[start];
+    if b == b'$' {
+        let mut j = start + 1;
+        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+            j += 1;
+        }
+        if j < bytes.len() && bytes[j] == b'$' {
+            let delimiter = &sql[start..=j];
+            let content = j + 1;
+            return Some(match sql[content..].find(delimiter) {
+                Some(end) => content + end + delimiter.len(),
+                None => bytes.len(),
+            });
         }
     }
+    if bytes[start..].starts_with(b"--") || b == b'#' {
+        return Some(match sql[start..].find(['\r', '\n']) {
+            Some(end) => start + end,
+            None => bytes.len(),
+        });
+    }
+    if bytes[start..].starts_with(b"/*") {
+        let mut depth = 1;
+        let mut i = start + 2;
+        while i < bytes.len() {
+            if bytes[i..].starts_with(b"/*") {
+                depth += 1;
+                i += 2;
+            } else if bytes[i..].starts_with(b"*/") {
+                depth -= 1;
+                i += 2;
+                if depth == 0 {
+                    return Some(i);
+                }
+            } else {
+                i += 1;
+            }
+        }
+        return Some(bytes.len());
+    }
+    if b == b'\'' || b == b'"' || b == b'`' {
+        let mut i = start + 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' {
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b {
+                if i + 1 < bytes.len() && bytes[i + 1] == b {
+                    i += 2;
+                    continue;
+                }
+                return Some(i + 1);
+            }
+            i += 1;
+        }
+        return Some(bytes.len());
+    }
+    None
+}
+
+/// Reports whether the region `start..end` that `sql_skip_end` skipped is a
+/// comment rather than quoted text or a heredoc.
+fn is_sql_comment(sql: &str, start: usize) -> bool {
+    let rest = &sql.as_bytes()[start..];
+    rest.starts_with(b"--") || rest.starts_with(b"/*") || rest[0] == b'#'
+}
+
+/// Returns `sql` with every comment replaced by a space. Quoted text and
+/// heredocs are kept, so a `--` inside a string is not a comment.
+fn without_sql_comments(sql: &str) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut i = 0;
+    while i < sql.len() {
+        if let Some(end) = sql_skip_end(sql, i) {
+            if is_sql_comment(sql, i) {
+                out.push(' ');
+            } else {
+                out.push_str(&sql[i..end]);
+            }
+            i = end;
+            continue;
+        }
+        let ch = sql[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
     out
+}
+
+/// Reports whether `sql` ends inside a `--` or `#` line comment, so text
+/// appended on the same line would be commented out.
+fn ends_in_line_comment(sql: &str) -> bool {
+    let mut i = 0;
+    let mut last = false;
+    while i < sql.len() {
+        if let Some(end) = sql_skip_end(sql, i) {
+            let rest = &sql.as_bytes()[i..];
+            last = end == sql.len() && (rest.starts_with(b"--") || rest[0] == b'#');
+            i = end.max(i + 1);
+            continue;
+        }
+        last = false;
+        i += sql[i..].chars().next().map_or(1, char::len_utf8);
+    }
+    last
 }
 
 /// Parses `--var` values: `name=value` is text, and `name:number=value` or
@@ -850,10 +916,18 @@ fn inject_sql_condition(sql: &str, condition: &str) -> String {
     };
 
     let (head, tail) = body.split_at(insert_at);
+    let head = head.trim_end();
     let separator = if tail.is_empty() { "" } else { " " };
+    // Text after a line comment on the same line would be commented out.
+    let joiner = if ends_in_line_comment(head) {
+        "\n"
+    } else {
+        " "
+    };
     format!(
-        "{} {} {}{}{}{}",
-        head.trim_end(),
+        "{}{}{} {}{}{}{}",
+        head,
+        joiner,
         connector,
         condition,
         separator,
@@ -876,55 +950,8 @@ fn scan_top_level_clauses(sql: &str) -> (Option<usize>, Option<usize>) {
     while i < bytes.len() {
         let b = bytes[i];
 
-        // Block comment /* ... */
-        if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
-            i += 2;
-            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                i += 1;
-            }
-            i = (i + 2).min(bytes.len());
-            continue;
-        }
-        // Line comment -- ... \n
-        if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
-            i += 2;
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-        // String literal '...'
-        if b == b'\'' {
-            i += 1;
-            while i < bytes.len() {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == b'\'' {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            continue;
-        }
-        // Backtick identifier `...`
-        if b == b'`' {
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'`' {
-                i += 1;
-            }
-            i = (i + 1).min(bytes.len());
-            continue;
-        }
-        // Double-quoted identifier "..."
-        if b == b'"' {
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'"' {
-                i += 1;
-            }
-            i = (i + 1).min(bytes.len());
+        if let Some(end) = sql_skip_end(sql, i) {
+            i = end.max(i + 1);
             continue;
         }
         if b == b'(' {
@@ -1238,6 +1265,26 @@ mod tests {
     }
 
     #[test]
+    fn injects_time_condition_after_a_trailing_line_comment() {
+        assert_eq!(
+            inject_sql_condition("SELECT * FROM logs -- {{__from}}", "X"),
+            "SELECT * FROM logs -- {{__from}}\nWHERE X"
+        );
+        assert_eq!(
+            inject_sql_condition("SELECT * FROM logs # note", "X"),
+            "SELECT * FROM logs # note\nWHERE X"
+        );
+        assert_eq!(
+            inject_sql_condition("SELECT * FROM t -- c\nORDER BY x", "X"),
+            "SELECT * FROM t -- c\nWHERE X ORDER BY x"
+        );
+        assert_eq!(
+            inject_sql_condition("SELECT '-- not a comment' FROM t", "X"),
+            "SELECT '-- not a comment' FROM t WHERE X"
+        );
+    }
+
+    #[test]
     fn injects_time_condition_into_existing_where() {
         let sql = "SELECT count() FROM logs.app WHERE service = 'api' GROUP BY service";
         let out = inject_sql_condition(
@@ -1448,8 +1495,17 @@ mod tests {
             "SELECT * FROM logs /* {{__from}} */",
             "SELECT * FROM logs -- {{__time_filter}}",
             "SELECT * FROM logs /* a */ WHERE 1 -- {{__to}}\n",
+            "SELECT * FROM logs /* outer /* inner */ {{__from}} */",
+            "SELECT * FROM logs # {{__from}}",
         ] {
             assert!(!uses_time_macro(sql), "{sql}");
+        }
+        for sql in [
+            "SELECT $$ -- $$ FROM logs WHERE timestamp >= {{__from}}",
+            "SELECT $tag$ /* $tag$ FROM logs WHERE {{__time_filter}}",
+            "SELECT * FROM logs -- note\rWHERE timestamp >= {{__from}}",
+        ] {
+            assert!(uses_time_macro(sql), "{sql}");
         }
         for sql in [
             "SELECT '--' AS dash FROM t WHERE {{__time_filter}}",
