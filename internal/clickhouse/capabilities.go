@@ -84,6 +84,14 @@ func (f *serverFact[T]) get(ctx context.Context) (T, error) {
 	// The read keeps the first caller's values but not its cancellation, so
 	// a caller that gives up does not fail the others waiting on it.
 	result := f.fill.DoChan(strconv.FormatUint(dial, 10), func() (any, error) {
+		// A caller that saw the value stale can reach here after an earlier
+		// read for the same dial count finished and left the group.
+		f.mu.Lock()
+		value, fresh := f.value, f.known && f.dial == dial
+		f.mu.Unlock()
+		if fresh {
+			return value, nil
+		}
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), capabilityReadTimeout)
 		defer cancel()
 		value, err := f.read(readCtx)
