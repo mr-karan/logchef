@@ -23,6 +23,29 @@ const dashboard = {
 };
 const conflictError = { status: "error", error_type: "ConflictError", message: "modified", statusCode: 409 };
 
+// With `tabbed`, the dashboard has two tabs with one SQL panel each. A panel's
+// query text names its tab, and `queries` records what the view requested.
+const tabs = vi.hoisted(() => ({ tabbed: false, queries: [] as string[] }));
+function tabDashboard() {
+  const sqlPanel = (id: string, title: string) => ({
+    id, kind: "query", title, team_id: 1, source_id: 1,
+    query: { mode: "result", language: "clickhouse-sql", text: `${id}-query`, limit: 10 },
+    viz: { type: "table" },
+  });
+  const panels = tabs.tabbed
+    ? {
+      version: 2,
+      features: ["free_grid", "tabs"],
+      tabs: [
+        { id: "today", title: "Current day", layout: [{ id: "today", x: 0, y: 0, w: 5, h: 2 }] },
+        { id: "week", title: "Last 7 days", layout: [{ id: "week", x: 0, y: 0, w: 7, h: 8 }] },
+      ],
+      panels: [sqlPanel("today", "Orders today"), sqlPanel("week", "Orders this week")],
+    }
+    : { version: 2, features: [], tabs: [{ id: "main", title: "Main", layout: [] }], panels: [] };
+  return { ...dashboard, panels };
+}
+
 import DashboardView from "../DashboardView.vue";
 import VersionBanner from "@/components/VersionBanner.vue";
 import { useMetaStore } from "@/stores/meta";
@@ -267,5 +290,206 @@ describe("DashboardView read compatibility", () => {
     } finally {
       app.unmount(); host.remove(); stamp.remove(); compatibility.future = false; compatibility.stub = false; vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("DashboardView tabs", () => {
+  let app: App;
+  let host: HTMLDivElement;
+  let router: Router;
+
+  async function open(url: string) {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: "/dashboards/:id", component: DashboardView },
+      // A panel title links to its logs in the Explorer.
+      { path: "/explore", name: "LogExplorer", component: { template: "<div />" } },
+    ] });
+    await router.push(url);
+    app = createApp(defineComponent({ template: "<router-view />" }));
+    app.use(createPinia()).use(i18n).use(router).mount(host);
+    await settle();
+    await settle();
+  }
+
+  beforeEach(() => {
+    tabs.tabbed = true;
+    tabs.queries.length = 0;
+    api.get.mockReset().mockImplementation(async () => ({ status: "success", data: tabDashboard() }));
+    api.put.mockReset();
+    api.post.mockReset().mockImplementation(async (_url: string, body: { query_text: string }) => {
+      tabs.queries.push(body.query_text);
+      return { status: "success", data: { data: [], columns: [] } };
+    });
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  });
+
+  afterEach(() => {
+    app.unmount();
+    host.remove();
+    tabs.tabbed = false;
+    vi.unstubAllGlobals();
+  });
+
+  function tab(name: string) {
+    const match = [...host.querySelectorAll<HTMLElement>('[role="tab"]')].find((element) => element.textContent?.trim() === name);
+    if (!match) throw new Error(`tab ${name} was not rendered`);
+    return match;
+  }
+  function button(text: string, root: ParentNode = document) {
+    const match = [...root.querySelectorAll<HTMLElement>('button, [role="menuitem"]')].find((element) => element.textContent?.trim() === text);
+    if (!match) throw new Error(`button ${text} was not rendered`);
+    return match;
+  }
+  async function openTabActions() {
+    const actions = host.querySelector<HTMLElement>('button[aria-label="Actions"]');
+    if (!actions) throw new Error("tab actions were not rendered");
+    actions.focus();
+    actions.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await settle();
+    await settle();
+  }
+  function press(element: HTMLElement, key: string) {
+    element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  }
+  function shownTab() {
+    return router.currentRoute.value.query.tab;
+  }
+
+  it("opens on the tab in the URL after a reload and requests only that tab's panel", async () => {
+    await open("/dashboards/1?tab=week");
+    expect(tab("Last 7 days").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Current day").getAttribute("aria-selected")).toBe("false");
+    expect(host.textContent).toContain("Orders this week");
+    expect(host.textContent).not.toContain("Orders today");
+    expect(tabs.queries).toEqual(["week-query"]);
+    expect(shownTab()).toBe("week");
+    // The free size of the panel reaches the grid: 7 columns, 8 rows.
+    const cell = host.querySelector<HTMLElement>(".dash-cell");
+    expect(cell?.style.gridColumn).toBe("1 / span 7");
+    expect(cell?.style.gridRow).toBe("1 / span 8");
+  });
+
+  it("puts the first tab in the URL when it names none or names a tab that is gone", async () => {
+    await open("/dashboards/1");
+    expect(shownTab()).toBe("today");
+    expect(tabs.queries).toEqual(["today-query"]);
+    app.unmount();
+    host.remove();
+    tabs.queries.length = 0;
+
+    await open("/dashboards/1?tab=deleted");
+    expect(shownTab()).toBe("today");
+    expect(tab("Current day").getAttribute("aria-selected")).toBe("true");
+    expect(tabs.queries).toEqual(["today-query"]);
+  });
+
+  it("is a tablist with a roving tabindex: arrows move focus, Enter shows the tab", async () => {
+    await open("/dashboards/1?tab=today");
+    const list = host.querySelector('[role="tablist"]');
+    expect(list?.getAttribute("aria-label")).toBe("Dashboard tabs");
+    const today = tab("Current day");
+    const week = tab("Last 7 days");
+    const panel = host.querySelector('[role="tabpanel"]');
+    expect(panel?.getAttribute("aria-labelledby")).toBe(today.id);
+    expect(today.getAttribute("aria-controls")).toBe(panel?.id);
+
+    // One tab is in the Tab order at a time, and it follows the focus.
+    today.focus();
+    await settle();
+    expect(today.getAttribute("tabindex")).toBe("0");
+    expect(week.getAttribute("tabindex")).toBe("-1");
+    press(today, "ArrowRight");
+    await settle();
+    expect(document.activeElement).toBe(week);
+    expect(week.getAttribute("tabindex")).toBe("0");
+    expect(today.getAttribute("tabindex")).toBe("-1");
+    // Focus alone runs nothing: the hidden tab has sent no query yet.
+    expect(shownTab()).toBe("today");
+    expect(tabs.queries).toEqual(["today-query"]);
+
+    press(week, "Enter");
+    await settle();
+    await settle();
+    expect(shownTab()).toBe("week");
+    expect(week.getAttribute("aria-selected")).toBe("true");
+    expect(tabs.queries).toEqual(["today-query", "week-query"]);
+
+    press(week, "Home");
+    await settle();
+    expect(document.activeElement).toBe(today);
+  });
+
+  it("shows a clicked tab, and Back returns to the previous one without a new request", async () => {
+    await open("/dashboards/1?tab=today");
+    tab("Last 7 days").dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }));
+    await settle();
+    await settle();
+    expect(shownTab()).toBe("week");
+    expect(host.textContent).toContain("Orders this week");
+
+    router.back();
+    await settle();
+    await settle();
+    expect(shownTab()).toBe("today");
+    expect(tab("Current day").getAttribute("aria-selected")).toBe("true");
+    expect(tabs.queries).toEqual(["today-query", "week-query"]);
+  });
+
+  it("adds a tab from the dialog, and asks before it deletes a tab that has panels", async () => {
+    await open("/dashboards/1?tab=week");
+    button("Edit").click();
+    await settle();
+    await settle();
+
+    button("Add tab").click();
+    await settle();
+    const name = document.querySelector<HTMLInputElement>("#dash-tab-name");
+    if (!name) throw new Error("tab name input was not rendered");
+    expect(button("Add").hasAttribute("disabled")).toBe(true);
+    name.value = "Errors";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    button("Add").click();
+    await settle();
+    await settle();
+    expect(tab("Errors").getAttribute("aria-selected")).toBe("true");
+    const added = shownTab();
+    expect(added).not.toBe("week");
+    // Showing the new tab is a navigation: Back returns to the tab the editor was on.
+    router.back();
+    await settle();
+    await settle();
+    expect(shownTab()).toBe("week");
+    router.forward();
+    await settle();
+    await settle();
+    expect(shownTab()).toBe(added);
+
+    // The new tab is empty: it goes without a question, and the tab that took its place is shown.
+    await openTabActions();
+    button("Delete tab").click();
+    await settle();
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect([...host.querySelectorAll('[role="tab"]')].map((element) => element.textContent?.trim())).toEqual(["Current day", "Last 7 days"]);
+    expect(shownTab()).toBe("week");
+
+    // "Last 7 days" has a panel: deleting it asks first.
+    await openTabActions();
+    button("Delete tab").click();
+    await settle();
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain('Delete tab "Last 7 days"?');
+    expect(dialog?.textContent).toContain("The 1 panel on it is deleted too.");
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(2);
+    button("Delete tab", dialog!).click();
+    await settle();
+    await settle();
+    expect([...host.querySelectorAll('[role="tab"]')].map((element) => element.textContent?.trim())).toEqual(["Current day"]);
+    expect(host.textContent).toContain("Orders today");
+    // One tab is left, so the URL names none.
+    expect(shownTab()).toBeUndefined();
   });
 });

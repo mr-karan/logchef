@@ -5,8 +5,14 @@ import {
   normalizeDashboardLayout,
   packLayout,
   moveItem,
-  sizeForPanel,
-  reflowPanels,
+  reflowTab,
+  addPanelToTab,
+  movePanelToTab,
+  removeTab,
+  dashboardTab,
+  tabLayout,
+  panelTabId,
+  validTabTitle,
   validatePanelsBlob,
   columnTrackWidth,
   pointToCell,
@@ -20,11 +26,10 @@ import {
   copyableDashboardPanels,
   clampDashboardName,
   dashboardCopyName,
-  dashboardLayout,
   emptyDashboardPanels,
   switchPanelKind,
   trimDashboardGroupBy,
-  withDashboardLayout,
+  withTabLayout,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
@@ -57,17 +62,40 @@ function blobOf(panels: DashboardPanel[], layout: DashboardLayoutItem[] = [], re
   return { ...emptyDashboardPanels(), ...rest, panels, tabs: [{ id: "main", title: "Main", layout }] };
 }
 
+/**
+ * A two-tab blob shaped like the corpus dashboard: "today" holds a, b and c,
+ * "week" holds d and e. The panel list interleaves the tabs, so a tab's order
+ * is a subsequence of it.
+ */
+function twoTabs(): DashboardPanels {
+  return {
+    ...emptyDashboardPanels(),
+    panels: [panel("a"), panel("d"), panel("b"), panel("e"), panel("c")],
+    tabs: [
+      { id: "today", title: "Current day", layout: [
+        { id: "a", x: 0, y: 0, w: 3, h: 2 },
+        { id: "b", x: 3, y: 0, w: 5, h: 4 },
+        { id: "c", x: 8, y: 0, w: 4, h: 4 },
+      ] },
+      { id: "week", title: "Last 7 days", layout: [
+        { id: "d", x: 0, y: 0, w: 12, h: 1 },
+        { id: "e", x: 0, y: 1, w: 7, h: 9 },
+      ] },
+    ],
+  };
+}
+
 describe("snapPanelWidth", () => {
-  it("snaps arbitrary widths to the nearest allowed preset", () => {
-    expect(snapPanelWidth(7)).toBe(6); // equidistant 6/8 -> first-wins keeps 6
-    expect(snapPanelWidth(5)).toBe(4); // equidistant 4/6 -> first-wins keeps 4
-    expect(snapPanelWidth(11)).toBe(12);
+  it("keeps every whole width from 2 to 12", () => {
+    for (let w = 2; w <= 12; w++) expect(snapPanelWidth(w)).toBe(w);
+  });
+
+  it("rounds to whole columns and clamps into 2..12", () => {
+    expect(snapPanelWidth(4.4)).toBe(4);
+    expect(snapPanelWidth(4.6)).toBe(5);
     expect(snapPanelWidth(1)).toBe(2);
-    expect(snapPanelWidth(3)).toBe(3);
-    expect(snapPanelWidth(12)).toBe(12);
-    expect(snapPanelWidth(2)).toBe(2);
-    expect(snapPanelWidth(8)).toBe(8);
-    expect(snapPanelWidth(9)).toBe(9);
+    expect(snapPanelWidth(-3)).toBe(2);
+    expect(snapPanelWidth(13)).toBe(12);
   });
 
   it("falls back to a default for missing/invalid widths", () => {
@@ -78,10 +106,12 @@ describe("snapPanelWidth", () => {
 });
 
 describe("clampPanelHeight", () => {
-  it("clamps into the 1..6 range", () => {
+  it("clamps into the 1..12 range", () => {
     expect(clampPanelHeight(0)).toBe(2); // 0 is falsy -> default
     expect(clampPanelHeight(3)).toBe(3);
-    expect(clampPanelHeight(9)).toBe(6);
+    expect(clampPanelHeight(9)).toBe(9);
+    expect(clampPanelHeight(12)).toBe(12);
+    expect(clampPanelHeight(13)).toBe(12);
     expect(clampPanelHeight(-2)).toBe(1);
     expect(clampPanelHeight(undefined)).toBe(2);
   });
@@ -108,13 +138,11 @@ describe("normalizeDashboardLayout", () => {
     expect(result[0].x).toBe(6); // 12 - 6
   });
 
-  it("snaps invalid widths and clamps invalid heights", () => {
-    const result = normalizeDashboardLayout(
-      [panel("a")],
-      [{ id: "a", x: 0, y: 0, w: 7, h: 99 }]
-    );
-    expect(result[0].w).toBe(6);
-    expect(result[0].h).toBe(6);
+  it("keeps a free width and clamps invalid sizes", () => {
+    const free = normalizeDashboardLayout([panel("a")], [{ id: "a", x: 0, y: 0, w: 7, h: 11 }]);
+    expect(free[0]).toMatchObject({ w: 7, h: 11 });
+    const invalid = normalizeDashboardLayout([panel("a")], [{ id: "a", x: 0, y: 0, w: 40, h: 99 }]);
+    expect(invalid[0]).toMatchObject({ w: 12, h: 12 });
   });
 
   it("drops layout entries whose panel no longer exists", () => {
@@ -129,13 +157,12 @@ describe("normalizeDashboardLayout", () => {
     expect(result[0].panel.id).toBe("a");
   });
 
-  it("flows panels with no layout entry onto rows below the placed ones", () => {
-    const panels = [panel("a"), panel("orphan")];
-    const layout: DashboardLayoutItem[] = [{ id: "a", x: 0, y: 0, w: 12, h: 3 }];
-    const result = normalizeDashboardLayout(panels, layout);
-    const orphan = result.find((r) => r.panel.id === "orphan")!;
-    expect(orphan.y).toBe(3); // below the h=3 panel at y=0
-    expect(orphan.x).toBe(0);
+  it("places only the panels of the tab whose layout it is given", () => {
+    const blob = twoTabs();
+    const today = normalizeDashboardLayout(blob.panels, tabLayout(blob, "today"));
+    expect(today.map((r) => r.panel.id)).toEqual(["a", "b", "c"]);
+    const week = normalizeDashboardLayout(blob.panels, tabLayout(blob, "week"));
+    expect(week.map((r) => [r.panel.id, r.x, r.y, r.w, r.h])).toEqual([["d", 0, 0, 12, 1], ["e", 0, 1, 7, 9]]);
   });
 
   it("tolerates empty inputs", () => {
@@ -170,9 +197,22 @@ describe("packLayout", () => {
     expect(layout.find((l) => l.id === "c")).toEqual({ id: "c", x: 0, y: 3, w: 12, h: 2 });
   });
 
-  it("snaps widths and clamps heights before packing", () => {
-    const layout = packLayout([{ id: "a", w: 7, h: 99 }]);
-    expect(layout[0]).toEqual({ id: "a", x: 0, y: 0, w: 6, h: 6 });
+  it("clamps widths and heights before packing", () => {
+    const layout = packLayout([{ id: "a", w: 40, h: 99 }]);
+    expect(layout[0]).toEqual({ id: "a", x: 0, y: 0, w: 12, h: 12 });
+  });
+
+  it("packs free widths side by side and wraps when the next does not fit", () => {
+    const layout = packLayout([
+      { id: "a", w: 5, h: 2 },
+      { id: "b", w: 7, h: 8 },
+      { id: "c", w: 11, h: 1 },
+    ]);
+    expect(layout).toEqual([
+      { id: "a", x: 0, y: 0, w: 5, h: 2 },
+      { id: "b", x: 5, y: 0, w: 7, h: 8 },
+      { id: "c", x: 0, y: 8, w: 11, h: 1 },
+    ]);
   });
 
   it("packs a full-width panel onto its own row", () => {
@@ -299,6 +339,16 @@ describe("snapResize", () => {
   it("clamps a shrink to the minimum height", () => {
     expect(snapResize(6, 2, -300, -240, GEOM)).toEqual({ w: 3, h: 1 });
   });
+  it("stops on any whole column from 2 to 12, and on any row up to 12", () => {
+    const stride = (GEOM.width + GEOM.gap) / 12;
+    const rowStride = GEOM.rowHeight + GEOM.gap;
+    expect(snapResize(6, 2, -stride, 0, GEOM).w).toBe(5);
+    expect(snapResize(6, 2, stride, 0, GEOM).w).toBe(7);
+    expect(snapResize(6, 2, 4.4 * stride, 0, GEOM).w).toBe(10);
+    expect(snapResize(6, 2, -9 * stride, 0, GEOM).w).toBe(2);
+    expect(snapResize(6, 2, 0, 5 * rowStride, GEOM).h).toBe(7);
+    expect(snapResize(6, 2, 0, 40 * rowStride, GEOM).h).toBe(12);
+  });
 });
 
 describe("previewResizeLayout", () => {
@@ -356,28 +406,16 @@ describe("layoutRowCount", () => {
   });
 });
 
-describe("sizeForPanel", () => {
-  it("reads an existing layout entry", () => {
-    const layout: DashboardLayoutItem[] = [{ id: "a", x: 0, y: 0, w: 4, h: 3 }];
-    expect(sizeForPanel(layout, "a")).toEqual({ w: 4, h: 3 });
-  });
-  it("falls back to defaults for a panel with no layout entry", () => {
-    expect(sizeForPanel([], "new")).toEqual({ w: 6, h: 2 });
-  });
-});
-
-describe("reflowPanels", () => {
-  const blob = blobOf;
-
-  it("re-packs layout in panel array order, preserving each panel's size", () => {
+describe("reflowTab", () => {
+  it("re-packs a tab in panel array order, preserving each panel's size", () => {
     const panels = [panel("a"), panel("b"), panel("c")];
     const layout: DashboardLayoutItem[] = [
       { id: "a", x: 6, y: 4, w: 6, h: 2 },
       { id: "b", x: 0, y: 0, w: 4, h: 1 },
       { id: "c", x: 0, y: 9, w: 12, h: 3 },
     ];
-    const out = reflowPanels(blob(panels, layout));
-    expect(dashboardLayout(out)).toEqual([
+    const out = reflowTab(blobOf(panels, layout), "main");
+    expect(tabLayout(out, "main")).toEqual([
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "b", x: 6, y: 0, w: 4, h: 1 },
       { id: "c", x: 0, y: 2, w: 12, h: 3 },
@@ -385,22 +423,10 @@ describe("reflowPanels", () => {
   });
 
   it("keeps the blob's other fields, such as the cache TTL and the tab", () => {
-    const out = reflowPanels(blobOf([panel("a")], [], { cache_ttl_seconds: 0, features: [] }));
+    const out = reflowTab(blobOf([panel("a")], [{ id: "a", x: 3, y: 3, w: 6, h: 2 }], { cache_ttl_seconds: 0, features: [] }), "main");
     expect(out.cache_ttl_seconds).toBe(0);
-    expect(out.tabs.map((t) => t.id)).toEqual(["main"]);
+    expect(out.tabs.map((tab) => [tab.id, tab.title])).toEqual([["main", "Main"]]);
     expect(out.features).toEqual([]);
-  });
-
-  it("places a just-added (layout-less) panel in the first free slot at default size", () => {
-    // a=6-wide occupies the left half of row 0; the appended "new" panel (default
-    // w6 h2) fits in the free right half of that same row.
-    const panels = [panel("a"), panel("new")];
-    const layout: DashboardLayoutItem[] = [{ id: "a", x: 0, y: 0, w: 6, h: 2 }];
-    const out = reflowPanels(blob(panels, layout));
-    expect(dashboardLayout(out)).toEqual([
-      { id: "a", x: 0, y: 0, w: 6, h: 2 },
-      { id: "new", x: 6, y: 0, w: 6, h: 2 },
-    ]);
   });
 
   it("reflows to close the gap after a panel is removed", () => {
@@ -410,8 +436,8 @@ describe("reflowPanels", () => {
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "c", x: 0, y: 4, w: 6, h: 2 },
     ];
-    const out = reflowPanels(blob(panels, layout));
-    expect(dashboardLayout(out)).toEqual([
+    const out = reflowTab(blobOf(panels, layout), "main");
+    expect(tabLayout(out, "main")).toEqual([
       { id: "a", x: 0, y: 0, w: 6, h: 2 },
       { id: "c", x: 6, y: 0, w: 6, h: 2 },
     ]);
@@ -423,11 +449,117 @@ describe("reflowPanels", () => {
       { id: "a", x: 0, y: 0, w: 12, h: 2 }, // widened to full row
       { id: "b", x: 6, y: 0, w: 6, h: 2 },
     ];
-    const out = reflowPanels(blob(panels, layout));
-    expect(dashboardLayout(out)).toEqual([
+    const out = reflowTab(blobOf(panels, layout), "main");
+    expect(tabLayout(out, "main")).toEqual([
       { id: "a", x: 0, y: 0, w: 12, h: 2 },
       { id: "b", x: 0, y: 2, w: 6, h: 2 }, // pushed to its own row
     ]);
+  });
+
+  it("packs each tab from its own panels, in their order in the panel list", () => {
+    // A resize in "week" made e full width: only that tab changes, and it
+    // packs d then e, skipping the panels of "today" between them in the list.
+    const blob = twoTabs();
+    const resized = withTabLayout(blob, "week", [
+      { id: "e", x: 0, y: 1, w: 12, h: 9 },
+      { id: "d", x: 0, y: 0, w: 6, h: 1 },
+    ]);
+    const out = reflowTab(resized, "week");
+    expect(tabLayout(out, "week")).toEqual([
+      { id: "d", x: 0, y: 0, w: 6, h: 1 },
+      { id: "e", x: 0, y: 1, w: 12, h: 9 },
+    ]);
+    expect(tabLayout(out, "today")).toBe(tabLayout(blob, "today"));
+  });
+
+  it("leaves another tab alone even when that tab is not packed", () => {
+    const blob = twoTabs();
+    const loose = withTabLayout(blob, "today", [
+      { id: "a", x: 0, y: 5, w: 3, h: 2 },
+      { id: "b", x: 6, y: 5, w: 5, h: 4 },
+      { id: "c", x: 0, y: 9, w: 4, h: 4 },
+    ]);
+    expect(tabLayout(reflowTab(loose, "week"), "today")).toBe(tabLayout(loose, "today"));
+    expect(tabLayout(reflowTab(loose, "today"), "today")).toEqual([
+      { id: "a", x: 0, y: 0, w: 3, h: 2 },
+      { id: "b", x: 3, y: 0, w: 5, h: 4 },
+      { id: "c", x: 8, y: 0, w: 4, h: 4 },
+    ]);
+  });
+
+  it("returns the blob for a tab it does not have", () => {
+    const blob = twoTabs();
+    expect(reflowTab(blob, "nope").tabs).toEqual(blob.tabs);
+  });
+});
+
+describe("tabs", () => {
+  it("resolves the requested tab, and the first tab for an unknown or absent id", () => {
+    const blob = twoTabs();
+    expect(dashboardTab(blob, "week")?.id).toBe("week");
+    expect(dashboardTab(blob, "deleted")?.id).toBe("today");
+    expect(dashboardTab(blob, null)?.id).toBe("today");
+    expect(dashboardTab({ tabs: [] }, "week")).toBeUndefined();
+  });
+
+  it("finds the tab that places a panel", () => {
+    const blob = twoTabs();
+    expect(panelTabId(blob, "b")).toBe("today");
+    expect(panelTabId(blob, "e")).toBe("week");
+    expect(panelTabId(blob, "ghost")).toBeUndefined();
+  });
+
+  it("adds a panel to one tab in the next free slot at the default size", () => {
+    // "week" ends with e (7 wide, 9 tall) at y=1: the 6-wide default does not
+    // fit in the 5 columns beside it, so it wraps below.
+    const out = addPanelToTab(twoTabs(), "week", panel("new"));
+    expect(out.panels.map((p) => p.id)).toEqual(["a", "d", "b", "e", "c", "new"]);
+    expect(tabLayout(out, "week")).toEqual([
+      { id: "d", x: 0, y: 0, w: 12, h: 1 },
+      { id: "e", x: 0, y: 1, w: 7, h: 9 },
+      { id: "new", x: 0, y: 10, w: 6, h: 2 },
+    ]);
+    expect(tabLayout(out, "today")).toEqual(tabLayout(twoTabs(), "today"));
+  });
+
+  it("moves a panel to the end of another tab at its size and re-packs both", () => {
+    const out = movePanelToTab(twoTabs(), "a", "week");
+    // "today" closes the gap a left: b and c slide to the left edge.
+    expect(tabLayout(out, "today")).toEqual([
+      { id: "b", x: 0, y: 0, w: 5, h: 4 },
+      { id: "c", x: 5, y: 0, w: 4, h: 4 },
+    ]);
+    // a (3 wide) lands after e (7 wide) on the same row.
+    expect(tabLayout(out, "week")).toEqual([
+      { id: "d", x: 0, y: 0, w: 12, h: 1 },
+      { id: "e", x: 0, y: 1, w: 7, h: 9 },
+      { id: "a", x: 7, y: 1, w: 3, h: 2 },
+    ]);
+    expect(out.panels.map((p) => p.id).sort()).toEqual(["a", "b", "c", "d", "e"]);
+    expect(panelTabId(out, "a")).toBe("week");
+  });
+
+  it("does not move a panel to its own tab, to an unknown tab, or an unknown panel", () => {
+    const blob = twoTabs();
+    expect(movePanelToTab(blob, "a", "today")).toBe(blob);
+    expect(movePanelToTab(blob, "a", "nope")).toBe(blob);
+    expect(movePanelToTab(blob, "ghost", "week")).toBe(blob);
+  });
+
+  it("removes a tab together with the panels it places", () => {
+    const out = removeTab(twoTabs(), "today");
+    expect(out.tabs.map((tab) => tab.id)).toEqual(["week"]);
+    expect(out.panels.map((p) => p.id)).toEqual(["d", "e"]);
+    expect(validatePanelsBlob(out)).toBeNull();
+  });
+
+  it("stores a trimmed tab title of 1 to 60 characters", () => {
+    expect(validTabTitle("  Last 7 days ")).toBe("Last 7 days");
+    expect(validTabTitle("   ")).toBeNull();
+    expect(validTabTitle("é".repeat(60))).toBe("é".repeat(60));
+    expect(validTabTitle("é".repeat(61))).toBeNull();
+    // 60 code points, 120 UTF-16 units.
+    expect(validTabTitle("😀".repeat(60))).toBe("😀".repeat(60));
   });
 });
 
@@ -436,7 +568,7 @@ describe("validatePanelsBlob", () => {
     return { ...blobOf([panel("a")], [{ id: "a", x: 0, y: 0, w: 6, h: 2 }]), ...overrides };
   }
   function withLayout(layout: DashboardLayoutItem[]): DashboardPanels {
-    return withDashboardLayout(base(), layout);
+    return withTabLayout(base(), "main", layout);
   }
   function withPanel(p: DashboardQueryPanel): DashboardPanels {
     return blobOf([p], [{ id: p.id, x: 0, y: 0, w: 6, h: 2 }]);
@@ -456,10 +588,22 @@ describe("validatePanelsBlob", () => {
     expect(validatePanelsBlob(base({ version: 1 }))).toMatch(/version/i);
   });
 
-  it("requires exactly one tab in this release", () => {
+  it("accepts 1 to 10 tabs with unique ids and titles of 1 to 60 characters", () => {
+    const tabs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `t${i}`, title: `Tab ${i}`, layout: [] }));
+    expect(validatePanelsBlob(twoTabs())).toBeNull();
+    expect(validatePanelsBlob(base({ tabs: tabs(10), panels: [] }))).toBeNull();
     expect(validatePanelsBlob(base({ tabs: [] }))).toMatch(/at least one tab/i);
-    expect(validatePanelsBlob(base({ tabs: [...base().tabs, { id: "b", title: "B", layout: [] }] }))).toMatch(/at most 1 tab/i);
+    expect(validatePanelsBlob(base({ tabs: tabs(11), panels: [] }))).toMatch(/at most 10 tabs/i);
     expect(validatePanelsBlob(base({ tabs: [{ id: "main", title: "", layout: [] }], panels: [] }))).toMatch(/tab titles/i);
+    expect(validatePanelsBlob(base({ tabs: [{ id: "main", title: "x".repeat(61), layout: [] }], panels: [] }))).toMatch(/tab titles/i);
+    expect(validatePanelsBlob(base({ tabs: [...tabs(1), ...tabs(1)], panels: [] }))).toMatch(/duplicate tab id/i);
+    expect(validatePanelsBlob(base({ tabs: [{ id: "", title: "A", layout: [] }], panels: [] }))).toMatch(/tab is missing an id/i);
+  });
+
+  it("rejects a panel that two tabs place", () => {
+    const blob = twoTabs();
+    const twice = withTabLayout(blob, "week", [...tabLayout(blob, "week"), { id: "a", x: 7, y: 1, w: 3, h: 2 }]);
+    expect(validatePanelsBlob(twice)).toMatch(/duplicate layout id "a"/i);
   });
 
   it("rejects more than 24 panels", () => {
@@ -483,14 +627,21 @@ describe("validatePanelsBlob", () => {
     expect(validatePanelsBlob(withPanel(panel("a", { source_id: 0 })))).toMatch(/source/i);
   });
 
-  it("rejects invalid layout width/height", () => {
-    expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w: 5, h: 2 }]))).toMatch(/width/i);
-    expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w: 6, h: 9 }]))).toMatch(/height/i);
+  it("rejects a layout width outside 2..12 and a height outside 1..12", () => {
+    for (const w of [1, 13, 5.5]) {
+      expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w, h: 2 }]))).toMatch(/width/i);
+    }
+    for (const h of [0, 13, 2.5]) {
+      expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w: 6, h }]))).toMatch(/height/i);
+    }
   });
 
-  it("accepts the finer grid presets (2/8/9-wide panels)", () => {
-    for (const w of [2, 8, 9]) {
+  it("accepts every whole width from 2 to 12 and every height from 1 to 12", () => {
+    for (let w = 2; w <= 12; w++) {
       expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w, h: 2 }]))).toBeNull();
+    }
+    for (let h = 1; h <= 12; h++) {
+      expect(validatePanelsBlob(withLayout([{ id: "a", x: 0, y: 0, w: 6, h }]))).toBeNull();
     }
   });
 
@@ -680,7 +831,7 @@ describe("copyableDashboardPanels", () => {
     const { panels, skipped } = copyableDashboardPanels(blob, anyTeam);
     expect(skipped).toBe(1);
     expect(panels.panels.map((p) => p.id)).toEqual(["a", "c"]);
-    expect(dashboardLayout(panels).map((l) => l.id)).toEqual(["a", "c"]);
+    expect(tabLayout(panels, "main").map((l) => l.id)).toEqual(["a", "c"]);
     expect(panels.cache_ttl_seconds).toBe(60);
     expect(panels.version).toBe(2);
   });

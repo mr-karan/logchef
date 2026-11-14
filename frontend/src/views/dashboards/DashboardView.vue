@@ -16,6 +16,7 @@ import {
   GripVertical,
   Database,
   ChevronDown,
+  ArrowRightLeft,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
@@ -34,12 +36,13 @@ import { showErrorToast } from "@/api/error-handler";
 import { TOAST_DURATION } from "@/lib/constants";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
+import DashboardTabs from "./components/DashboardTabs.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
 import { useDashboardsStore, DEFAULT_DASHBOARD_CACHE_TTL_SECONDS } from "@/stores/dashboards";
 import { useMetaStore } from "@/stores/meta";
 import { usePreferencesStore } from "@/stores/preferences";
 import {
-  dashboardLayout,
+  tabLayout,
   normalizeDashboardLayout,
   cellRect,
   pointToCell,
@@ -95,11 +98,50 @@ const activeBlob = computed(() => {
   return current && !current.corrupt && current.panels.version === 2 ? current.panels : null;
 });
 
+// The grid shows one tab: the one the URL names, or the first.
 const placements = computed(() => {
   const blob = activeBlob.value;
-  if (!blob) return [];
-  return normalizeDashboardLayout(blob.panels ?? [], dashboardLayout(blob));
+  const tabId = store.activeTabId;
+  if (!blob || tabId === null) return [];
+  return normalizeDashboardLayout(blob.panels ?? [], tabLayout(blob, tabId));
 });
+
+function queryTab(): string | null {
+  const tab = route.query.tab;
+  return typeof tab === "string" && tab !== "" ? tab : null;
+}
+
+// A tab switch is a navigation, so Back returns to the previous tab and a
+// reload or a shared link opens on the same one.
+function selectTab(id: string) {
+  if (id !== queryTab()) void router.push({ query: { ...route.query, tab: id } });
+}
+watch(() => route.query.tab, () => store.setActiveTab(queryTab()));
+
+// Keep the URL on the tab that is shown. It differs when the URL names no
+// tab or one the dashboard lacks, and when an edit adds or deletes a tab. A
+// dashboard with a single tab has no `tab` in its URL. Nothing is rewritten
+// before the dashboard has loaded, so a reload keeps its tab.
+watch(
+  () => {
+    const blob = activeBlob.value;
+    if (!blob) return undefined;
+    return blob.tabs.length > 1 ? store.activeTabId : null;
+  },
+  (shown) => {
+    const from = queryTab();
+    if (shown === undefined || shown === from) return;
+    const query = { ...route.query, tab: shown ?? undefined };
+    // Showing a new tab from a tab the dashboard still has is a navigation,
+    // like a click on a tab. Every other case corrects a URL that names no
+    // tab or a tab that is gone, and must not leave that URL in the history.
+    const fromExists = (activeBlob.value?.tabs ?? []).some((tab) => tab.id === from);
+    void (shown !== null && fromExists ? router.push({ query }) : router.replace({ query }));
+  },
+);
+
+// The tabs a panel can move to: every tab but the one on screen.
+const otherTabs = computed(() => (store.editDraft?.tabs ?? []).filter((tab) => tab.id !== store.activeTabId));
 
 // Panel model lookup + draft-start ordering, used by the edit canvas.
 const panelById = computed(() => {
@@ -532,6 +574,8 @@ watch(() => store.refreshIntervalMs, setupRefreshTimer, { immediate: true });
 
 async function load() {
   notFound.value = false;
+  // The tab comes first, so the first refresh runs the tab in the URL and no other.
+  store.setActiveTab(queryTab());
   const result = await store.loadDashboard(dashboardId.value);
   if (!result.success || !store.current) {
     notFound.value = true;
@@ -764,92 +808,6 @@ onBeforeRouteUpdate((to, from) => {
       <Button variant='outline' size="sm" @click="router.push('/dashboards')">{{ t('ui.backToDashboards') }}</Button>
     </div>
 
-    <!-- Edit-mode grid canvas: dot-grid background, absolute-positioned panels,
-         pointer drag-to-move + corner resize, live placeholder, ghost add tile. -->
-    <div
-      v-else-if="dashboard && isEditing"
-      ref="gridEl"
-      class="dash-canvas"
-      :style="{
-        height: `${canvasHeightPx}px`,
-        backgroundSize: dotGridBackgroundSize,
-      }"
-    >
-      <!-- Move placeholder (drop slot) -->
-      <div v-if="movePlaceholder" class="dash-placeholder" :style="rectStylePx(movePlaceholder)" />
-
-      <!-- Panels -->
-      <div
-        v-for="item in renderLayout"
-        :key="item.id"
-        class="dash-item"
-        :class="{
-          'dash-item--dragging': drag && drag.id === item.id,
-          'dash-item--animate': !drag || drag.id !== item.id,
-        }"
-        :style="
-          drag && drag.kind === 'move' && drag.id === item.id
-            ? rectStylePx({ left: drag.visualLeft, top: drag.visualTop, width: drag.visualW, height: drag.visualH })
-            : rectStyle(item)
-        "
-      >
-        <div
-          class="dash-item__header"
-          :title="t('ui.dragToMove')"
-          @pointerdown="beginDrag('move', item.id, $event)"
-        >
-          <GripVertical class="h-3.5 w-3.5 opacity-60 shrink-0" />
-          <span class="dash-item__title">{{ panelById.get(item.id)?.title || "Panel" }}</span>
-          <span class="dash-item__actions">
-            <button class="dash-item__btn" :title="t('ui.editPanel')" @pointerdown.stop @click="openEditPanel(item.id)">
-              <Pencil class="h-3.5 w-3.5" />
-            </button>
-            <button
-              class="dash-item__btn"
-              :title="t('dashboards.duplicatePanel')"
-              :disabled="atPanelLimit"
-              @pointerdown.stop
-              @click="duplicatePanel(item.id)"
-            >
-              <Copy class="h-3.5 w-3.5" />
-            </button>
-            <button
-              class="dash-item__btn dash-item__btn--danger"
-              :title="t('ui.removePanel')"
-              @pointerdown.stop
-              @click="removePanel(item.id)"
-            >
-              <Trash2 class="h-3.5 w-3.5" />
-            </button>
-          </span>
-        </div>
-        <div class="dash-item__body">
-          <DashboardPanel
-            :panel="panelById.get(item.id)!"
-            :height-px="panelPixelHeight(item.h) - 36"
-            :chrome="false"
-          />
-        </div>
-        <!-- SE resize handle -->
-        <span
-          class="dash-item__resize"
-          :title="t('ui.dragToResize')"
-          @pointerdown="beginDrag('resize', item.id, $event)"
-        />
-      </div>
-
-      <!-- Ghost add-panel tile: fills the real remaining space in the bottom row -->
-      <button
-        v-if="addTile"
-        class="dash-addtile"
-        :style="rectStyle(addTile)"
-        @click="openAddPanel"
-      >
-        <Plus class="h-5 w-5" />
-        <span class='text-xs font-medium'>{{ t('ui.addPanel') }}</span>
-      </button>
-    </div>
-
     <!-- Corrupt dashboard: the stored panels fail validation and nothing renders. -->
     <div v-else-if="dashboard && isCorrupt" class="dash-empty">
       <div class="dash-empty__icon">
@@ -863,45 +821,168 @@ onBeforeRouteUpdate((to, from) => {
       </div>
     </div>
 
-    <!-- Empty dashboard (view mode) -->
-    <div v-else-if="dashboard && placements.length === 0 && !store.needsReload" class="dash-empty">
-      <div class="dash-empty__icon">
-        <LayoutDashboard class="h-7 w-7" />
-      </div>
-      <div>
-        <p class='text-base font-semibold'>{{ t('ui.thisDashboardIsEmpty') }}</p>
-        <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-          {{ t('ui.addAPanelToStartVisualizingLogsPickASourceWriteA') }}
-        </p>
-      </div>
-      <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" :disabled="isEnteringEdit" @click="store.enterEdit()">
-        <Plus class="h-4 w-4" />
-        {{ t('ui.addYourFirstPanel') }}
-      </Button>
-    </div>
-
-    <!-- View-mode grid (CSS grid, static) -->
-    <div
-      v-else-if="dashboard"
-      class="dash-grid"
-      :style="{
-        gridTemplateColumns: 'repeat(12, minmax(0, 1fr))',
-        gridAutoRows: `${ROW_HEIGHT_PX}px`,
-        gap: `${GRID_GAP_PX}px`,
-      }"
+    <DashboardTabs
+      v-else-if="dashboard && activeBlob && store.activeTabId"
+      :tabs="activeBlob.tabs"
+      :active-id="store.activeTabId"
+      :editing="isEditing"
+      @select="selectTab"
+      @add="store.addDraftTab"
+      @rename="store.renameDraftTab"
+      @move="store.moveDraftTab"
+      @remove="store.removeDraftTab"
     >
+      <!-- Edit-mode grid canvas: dot-grid background, absolute-positioned panels,
+           pointer drag-to-move + corner resize, live placeholder, ghost add tile. -->
       <div
-        v-for="p in placements"
-        :key="p.panel.id"
-        class="dash-cell"
+        v-if="isEditing"
+        ref="gridEl"
+        class="dash-canvas"
         :style="{
-          gridColumn: `${p.x + 1} / span ${p.w}`,
-          gridRow: `${p.y + 1} / span ${p.h}`,
+          height: `${canvasHeightPx}px`,
+          backgroundSize: dotGridBackgroundSize,
         }"
       >
-        <DashboardPanel :panel="p.panel" :height-px="panelOuterHeight(p.h)" link-title />
+        <!-- Move placeholder (drop slot) -->
+        <div v-if="movePlaceholder" class="dash-placeholder" :style="rectStylePx(movePlaceholder)" />
+
+        <!-- Panels -->
+        <div
+          v-for="item in renderLayout"
+          :key="item.id"
+          class="dash-item"
+          :class="{
+            'dash-item--dragging': drag && drag.id === item.id,
+            'dash-item--animate': !drag || drag.id !== item.id,
+          }"
+          :style="
+            drag && drag.kind === 'move' && drag.id === item.id
+              ? rectStylePx({ left: drag.visualLeft, top: drag.visualTop, width: drag.visualW, height: drag.visualH })
+              : rectStyle(item)
+          "
+        >
+          <div
+            class="dash-item__header"
+            :title="t('ui.dragToMove')"
+            @pointerdown="beginDrag('move', item.id, $event)"
+          >
+            <GripVertical class="h-3.5 w-3.5 opacity-60 shrink-0" />
+            <span class="dash-item__title">{{ panelById.get(item.id)?.title || "Panel" }}</span>
+            <span class="dash-item__actions">
+              <button class="dash-item__btn" :title="t('ui.editPanel')" @pointerdown.stop @click="openEditPanel(item.id)">
+                <Pencil class="h-3.5 w-3.5" />
+              </button>
+              <button
+                class="dash-item__btn"
+                :title="t('dashboards.duplicatePanel')"
+                :disabled="atPanelLimit"
+                @pointerdown.stop
+                @click="duplicatePanel(item.id)"
+              >
+                <Copy class="h-3.5 w-3.5" />
+              </button>
+              <DropdownMenu v-if="otherTabs.length > 0">
+                <DropdownMenuTrigger as-child>
+                  <button
+                    class="dash-item__btn"
+                    :title="t('dashboards.moveToTab')"
+                    :aria-label="t('dashboards.moveToTab')"
+                    @pointerdown.stop
+                  >
+                    <ArrowRightLeft class="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="max-w-64">
+                  <DropdownMenuLabel class="text-xs">{{ t('dashboards.moveToTab') }}</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    v-for="tab in otherTabs"
+                    :key="tab.id"
+                    class="text-xs"
+                    @click="store.moveDraftPanelToTab(item.id, tab.id)"
+                  >
+                    <span class="truncate">{{ tab.title }}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button
+                class="dash-item__btn dash-item__btn--danger"
+                :title="t('ui.removePanel')"
+                @pointerdown.stop
+                @click="removePanel(item.id)"
+              >
+                <Trash2 class="h-3.5 w-3.5" />
+              </button>
+            </span>
+          </div>
+          <div class="dash-item__body">
+            <DashboardPanel
+              :panel="panelById.get(item.id)!"
+              :height-px="panelPixelHeight(item.h) - 36"
+              :chrome="false"
+            />
+          </div>
+          <!-- SE resize handle -->
+          <span
+            class="dash-item__resize"
+            :title="t('ui.dragToResize')"
+            @pointerdown="beginDrag('resize', item.id, $event)"
+          />
+        </div>
+
+        <!-- Ghost add-panel tile: fills the real remaining space in the bottom row -->
+        <button
+          v-if="addTile"
+          class="dash-addtile"
+          :style="rectStyle(addTile)"
+          @click="openAddPanel"
+        >
+          <Plus class="h-5 w-5" />
+          <span class='text-xs font-medium'>{{ t('ui.addPanel') }}</span>
+        </button>
       </div>
-    </div>
+
+      <!-- Empty dashboard or empty tab (view mode) -->
+      <div v-else-if="placements.length === 0 && !store.needsReload" class="dash-empty">
+        <div class="dash-empty__icon">
+          <LayoutDashboard class="h-7 w-7" />
+        </div>
+        <div>
+          <p class='text-base font-semibold'>
+            {{ activeBlob.tabs.length > 1 ? t('dashboards.emptyTab') : t('ui.thisDashboardIsEmpty') }}
+          </p>
+          <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+            {{ t('ui.addAPanelToStartVisualizingLogsPickASourceWriteA') }}
+          </p>
+        </div>
+        <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" :disabled="isEnteringEdit" @click="store.enterEdit()">
+          <Plus class="h-4 w-4" />
+          {{ activeBlob.panels.length > 0 ? t('ui.addPanel') : t('ui.addYourFirstPanel') }}
+        </Button>
+      </div>
+
+      <!-- View-mode grid (CSS grid, static) -->
+      <div
+        v-else
+        class="dash-grid"
+        :style="{
+          gridTemplateColumns: 'repeat(12, minmax(0, 1fr))',
+          gridAutoRows: `${ROW_HEIGHT_PX}px`,
+          gap: `${GRID_GAP_PX}px`,
+        }"
+      >
+        <div
+          v-for="p in placements"
+          :key="p.panel.id"
+          class="dash-cell"
+          :style="{
+            gridColumn: `${p.x + 1} / span ${p.w}`,
+            gridRow: `${p.y + 1} / span ${p.h}`,
+          }"
+        >
+          <DashboardPanel :panel="p.panel" :height-px="panelOuterHeight(p.h)" link-title />
+        </div>
+      </div>
+    </DashboardTabs>
 
     <!-- Panel builder drawer -->
     <PanelBuilderDrawer :open="editorOpen" :panel-id="editingPanelId" @update:open="handleEditorOpenChange" />

@@ -46,7 +46,7 @@ import type { Dashboard, DashboardLockedPanel, DashboardPanel, DashboardPanels, 
 import { epochMs } from "@/utils/timeWindow";
 import { frameCellText, reduceStat } from "@/utils/panelFrame";
 import { usePreferencesStore } from "@/stores/preferences";
-import { dashboardLayout, emptyDashboardPanels } from "@/utils/dashboardPanels";
+import { emptyDashboardPanels, tabLayout } from "@/utils/dashboardPanels";
 
 type ValidDashboard = Extract<Dashboard, { corrupt: false }>;
 
@@ -172,7 +172,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.isDirty).toBe(true);
     expect(store.editDraft?.panels).toHaveLength(1);
     // reflow gave the new panel a layout entry at default size in the first slot.
-    expect(dashboardLayout(store.editDraft!)).toEqual([{ id: "p1", x: 0, y: 0, w: 6, h: 2 }]);
+    expect(tabLayout(store.editDraft!, "main")).toEqual([{ id: "p1", x: 0, y: 0, w: 6, h: 2 }]);
   });
 
   it("cancelEdit discards the draft and reverts to the last-loaded state", async () => {
@@ -216,7 +216,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(copyQuery).toEqual({ mode: "result", language: "logchefql", text: "", limit: 50 });
     const original = store.editDraft?.panels[0];
     expect(copyQuery).not.toBe(original && !original.locked ? original.query : undefined);
-    const copyLayout = dashboardLayout(store.editDraft!).find((l) => l.id === copyId);
+    const copyLayout = tabLayout(store.editDraft!, "main").find((l) => l.id === copyId);
     expect(copyLayout).toMatchObject({ w: 4, h: 3 });
   });
 
@@ -850,9 +850,13 @@ describe("dashboards store — schema 2 request parity", () => {
       features: [...DASHBOARD_CLIENT_FEATURES],
       cache_ttl_seconds: 300,
       default_time_range: "6h",
-      tabs: [{ id: "main", title: "Main", layout: [
-        { id: "c", x: 0, y: 0, w: 6, h: 2 }, { id: "s", x: 6, y: 0, w: 3, h: 2 }, { id: "p", x: 9, y: 0, w: 3, h: 2 }, { id: "t", x: 0, y: 2, w: 12, h: 3 },
-      ] }],
+      // Two tabs, a free width (5, 7) and a free height (9): tabs and free_grid.
+      tabs: [
+        { id: "today", title: "Current day", layout: [
+          { id: "c", x: 0, y: 0, w: 5, h: 2 }, { id: "s", x: 5, y: 0, w: 7, h: 2 }, { id: "p", x: 0, y: 2, w: 3, h: 9 },
+        ] },
+        { id: "week", title: "Last 7 days", layout: [{ id: "t", x: 0, y: 0, w: 12, h: 3 }] },
+      ],
       panels: [
         { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "auto", translate_limit: 50 }, viz: { type: "chart", mark: "bar", stack: "none", legend: false } },
         { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n", order_by: "at", columns: { n: { kind: "number", confidence: "confirmed" }, at: { kind: "time", confidence: "confirmed" } }, reduce: "last", compare: { mode: "previous_row", good: "up" }, sparkline: true, thresholds: [{ value: null, color: "green" }, { value: "100", color: "red" }], color_mode: "background", format: { decimals: 2 } } },
@@ -958,5 +962,286 @@ describe("VictoriaLogs fixed-offset count grids", () => {
       expect(frameCellText(reduceStat(frame, { value: "count", reduce: "min", count: true }).value)).toBe("2");
       expect(frameCellText(reduceStat(frame, { value: "count", reduce: "last", count: true }).value)).toBe(String(2 * times.length));
     }
+  });
+});
+
+describe("dashboards store — tabs", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+  });
+
+  // Each panel sends its id as the query text, so a request names its panel.
+  function sqlPanel(id: string): DashboardQueryPanel {
+    return { ...tablePanel(id), query: { mode: "result", language: "clickhouse-sql", text: id, limit: 50 } };
+  }
+  function requested(): string[] {
+    return mocks.logsQuery.mock.calls.map((call) => call[2].query_text);
+  }
+  /** "today" holds `today` panels a1, a2, ... and "week" holds `week` panels b1, b2, ... */
+  function tabbed(today = 2, week = 1): ValidDashboard {
+    const ids = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i + 1}`);
+    const layout = (list: string[]) => list.map((id, i) => ({ id, x: 0, y: i, w: 12, h: 1 }));
+    const a = ids("a", today);
+    const b = ids("b", week);
+    return makeDashboard({
+      panels: {
+        ...emptyPanels(),
+        tabs: [
+          { id: "today", title: "Current day", layout: layout(a) },
+          { id: "week", title: "Last 7 days", layout: layout(b) },
+        ],
+        panels: [...a, ...b].map(sqlPanel),
+      },
+    });
+  }
+
+  it("a hidden tab sends no request until it is shown, and a shown tab runs once", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    expect(store.activeTabId).toBe("today");
+    expect(requested().sort()).toEqual(["a1", "a2"]);
+    expect(store.getPanelState("b1").status).toBe("idle");
+
+    store.setActiveTab("week");
+    await vi.waitFor(() => expect(store.getPanelState("b1").status).toBe("empty"));
+    expect(requested().sort()).toEqual(["a1", "a2", "b1"]);
+
+    // Both tabs have run in this refresh: going back and forth sends nothing.
+    store.setActiveTab("today");
+    store.setActiveTab("week");
+    await Promise.resolve();
+    expect(requested()).toHaveLength(3);
+    expect(store.getPanelState("a1").status).toBe("empty");
+  });
+
+  it("opens on the tab the URL names, and on the first tab for an id the dashboard lacks", async () => {
+    const store = useDashboardsStore();
+    store.setActiveTab("week");
+    mocks.get.mockResolvedValue({ status: "success", data: tabbed() });
+    await store.loadDashboard(3);
+    expect(store.activeTabId).toBe("week");
+    expect(requested()).toEqual(["b1"]);
+
+    // The view tears the store down before it opens another URL.
+    store.clearCurrent();
+    vi.clearAllMocks();
+    mocks.get.mockResolvedValue({ status: "success", data: tabbed() });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+    store.setActiveTab("deleted");
+    await store.loadDashboard(3);
+    expect(store.activeTabId).toBe("today");
+    expect(requested().sort()).toEqual(["a1", "a2"]);
+  });
+
+  it("a refresh runs only the tab on screen, and a hidden tab runs again when it is shown", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    store.setActiveTab("week");
+    await vi.waitFor(() => expect(store.getPanelState("b1").status).toBe("empty"));
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+
+    await store.refreshAllPanels();
+    expect(requested()).toEqual(["b1"]);
+    // The hidden tab's results came from the earlier refresh and are released.
+    expect(store.getPanelState("a1").status).toBe("idle");
+
+    store.setActiveTab("today");
+    await vi.waitFor(() => expect(store.getPanelState("a2").status).toBe("empty"));
+    expect(requested().sort()).toEqual(["a1", "a2", "b1"]);
+    // The tab ran with the range of the refresh that was on screen.
+    expect(store.getPanelState("a1").range).toEqual(store.appliedRange);
+  });
+
+  it("drops a left tab's queued panels, lets its requests in flight finish, and stays within the pool", async () => {
+    const waiting: Array<{ id: string; finish: () => void }> = [];
+    let inFlight = 0;
+    let peak = 0;
+    mocks.logsQuery.mockImplementation((_team: number, _source: number, body: { query_text: string }) =>
+      new Promise((resolve) => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        waiting.push({ id: body.query_text, finish: () => { inFlight--; resolve({ status: "success", data: { data: [], columns: [] } }); } });
+      }));
+    const finish = async (id: string) => {
+      const index = waiting.findIndex((w) => w.id === id);
+      expect(index, `${id} is in flight`).toBeGreaterThanOrEqual(0);
+      waiting.splice(index, 1)[0].finish();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+
+    mocks.get.mockResolvedValue({ status: "success", data: tabbed(6, 2) });
+    const store = useDashboardsStore();
+    const loading = store.loadDashboard(3);
+    await vi.waitFor(() => expect(requested()).toEqual(["a1", "a2", "a3", "a4"]));
+
+    // a5 and a6 wait for a slot when the viewer leaves their tab.
+    store.setActiveTab("week");
+    await finish("a1");
+    expect(requested()).toEqual(["a1", "a2", "a3", "a4", "b1"]);
+    await finish("a2");
+    await finish("a3");
+    await finish("a4");
+    await finish("b1");
+    await finish("b2");
+    await loading;
+    expect(requested()).toEqual(["a1", "a2", "a3", "a4", "b1", "b2"]);
+    expect(peak).toBe(4);
+    // The four that were in flight kept their results.
+    for (const id of ["a1", "a2", "a3", "a4", "b1", "b2"]) expect(store.getPanelState(id).status).toBe("empty");
+    expect(store.getPanelState("a5").status).toBe("idle");
+
+    // Back on the first tab, only the two dropped panels run.
+    store.setActiveTab("today");
+    await vi.waitFor(() => expect(waiting.map((w) => w.id)).toEqual(["a5", "a6"]));
+    await finish("a5");
+    await finish("a6");
+    expect(requested()).toEqual(["a1", "a2", "a3", "a4", "b1", "b2", "a5", "a6"]);
+  });
+
+  it("queues a panel once when its tab is shown again before its turn", async () => {
+    const finishers: Array<() => void> = [];
+    mocks.logsQuery.mockImplementation(() => new Promise((resolve) => {
+      finishers.push(() => resolve({ status: "success", data: { data: [], columns: [] } }));
+    }));
+    mocks.get.mockResolvedValue({ status: "success", data: tabbed(6, 2) });
+    const store = useDashboardsStore();
+    const loading = store.loadDashboard(3);
+    await vi.waitFor(() => expect(requested()).toHaveLength(4));
+
+    store.setActiveTab("week");
+    store.setActiveTab("today");
+    while (finishers.length) {
+      finishers.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await loading;
+    // The second tab was left before any of its panels got a slot.
+    expect(requested().sort()).toEqual(["a1", "a2", "a3", "a4", "a5", "a6"]);
+  });
+
+  it("adds a tab, shows it, and puts a new panel on it without touching the other tab", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    const before = tabLayout(store.editDraft!, "today");
+
+    const id = store.addDraftTab("  Errors ");
+    expect(id).not.toBeNull();
+    expect(store.activeTabId).toBe(id);
+    expect(store.editDraft?.tabs.map((tab) => tab.title)).toEqual(["Current day", "Last 7 days", "Errors"]);
+    expect(store.isDirty).toBe(true);
+
+    store.upsertDraftPanel(sqlPanel("n1"));
+    expect(tabLayout(store.editDraft!, id!)).toEqual([{ id: "n1", x: 0, y: 0, w: 6, h: 2 }]);
+    expect(tabLayout(store.editDraft!, "today")).toBe(before);
+  });
+
+  it("refuses an eleventh tab and a title that is blank or too long", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    expect(store.addDraftTab("   ")).toBeNull();
+    expect(store.addDraftTab("x".repeat(61))).toBeNull();
+    for (let i = 3; i <= 10; i++) expect(store.addDraftTab(`Tab ${i}`)).not.toBeNull();
+    expect(store.editDraft?.tabs).toHaveLength(10);
+    expect(store.addDraftTab("Tab 11")).toBeNull();
+    expect(store.renameDraftTab("today", "")).toBe(false);
+    expect(store.editDraft?.tabs[0].title).toBe("Current day");
+  });
+
+  it("renames and reorders tabs", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    expect(store.renameDraftTab("week", " Past week ")).toBe(true);
+    store.moveDraftTab("week", 0);
+    expect(store.editDraft?.tabs.map((tab) => [tab.id, tab.title])).toEqual([["week", "Past week"], ["today", "Current day"]]);
+    // The tab on screen follows its id, not its position.
+    expect(store.activeTabId).toBe("today");
+  });
+
+  it("resizes to a free width and height, and reorders, inside one tab only", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    const week = tabLayout(store.editDraft!, "week");
+
+    store.resizeDraftPanel("a1", 5, 9);
+    store.resizeDraftPanel("a2", 7, 2);
+    expect(tabLayout(store.editDraft!, "today")).toEqual([
+      { id: "a1", x: 0, y: 0, w: 5, h: 9 },
+      { id: "a2", x: 5, y: 0, w: 7, h: 2 },
+    ]);
+
+    store.reorderDraftPanels(["a2", "a1"]);
+    expect(tabLayout(store.editDraft!, "today")).toEqual([
+      { id: "a2", x: 0, y: 0, w: 7, h: 2 },
+      { id: "a1", x: 7, y: 0, w: 5, h: 9 },
+    ]);
+    expect(tabLayout(store.editDraft!, "week")).toBe(week);
+    expect(store.editDraft?.panels.map((p) => p.id)).toEqual(["a2", "a1", "b1"]);
+  });
+
+  it("moves a panel to another tab with its result and without a request", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    const result = store.getPanelState("a1");
+    expect(result.status).toBe("empty");
+    const sent = requested().length;
+
+    store.moveDraftPanelToTab("a1", "week");
+    expect(tabLayout(store.editDraft!, "today").map((l) => l.id)).toEqual(["a2"]);
+    expect(tabLayout(store.editDraft!, "week")).toEqual([
+      { id: "b1", x: 0, y: 0, w: 12, h: 1 },
+      { id: "a1", x: 0, y: 1, w: 12, h: 1 },
+    ]);
+    expect(store.getPanelState("a1")).toBe(result);
+
+    // The target tab never ran: showing it runs its own panel, not the moved one.
+    store.setActiveTab("week");
+    await vi.waitFor(() => expect(store.getPanelState("b1").status).toBe("empty"));
+    expect(requested().slice(sent)).toEqual(["b1"]);
+  });
+
+  it("deletes a tab with its panels, and shows the tab that took its place", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+
+    store.removeDraftTab("today");
+    expect(store.editDraft?.tabs.map((tab) => tab.id)).toEqual(["week"]);
+    expect(store.editDraft?.panels.map((p) => p.id)).toEqual(["b1"]);
+    expect(store.activeTabId).toBe("week");
+    await vi.waitFor(() => expect(store.getPanelState("b1").status).toBe("empty"));
+
+    // A dashboard keeps its last tab.
+    store.removeDraftTab("week");
+    expect(store.editDraft?.tabs.map((tab) => tab.id)).toEqual(["week"]);
+  });
+
+  it("saves tab edits with the revision the edit started from, and shows the same tab afterwards", async () => {
+    const dashboard = { ...tabbed(), revision: 7 };
+    const store = await loadEditableDashboard(dashboard);
+    store.setActiveTab("week");
+    await store.enterEdit();
+    expect(store.isDirty).toBe(false);
+    store.renameDraftTab("week", "Past week");
+    store.moveDraftPanelToTab("a2", "week");
+
+    const draft: DashboardPanels = JSON.parse(JSON.stringify(store.editDraft));
+    mocks.update.mockResolvedValue({ status: "success", data: { ...dashboard, revision: 8, panels: { ...draft, features: ["tabs"] } } });
+    const result = await store.saveEdit();
+    expect(result.success).toBe(true);
+    const [, body] = mocks.update.mock.calls[0];
+    expect(body.revision).toBe(7);
+    expect(body.panels.tabs).toEqual([
+      { id: "today", title: "Current day", layout: [{ id: "a1", x: 0, y: 0, w: 12, h: 1 }] },
+      { id: "week", title: "Past week", layout: [{ id: "b1", x: 0, y: 0, w: 12, h: 1 }, { id: "a2", x: 0, y: 1, w: 12, h: 1 }] },
+    ]);
+    expect(store.activeTabId).toBe("week");
+  });
+
+  it("leaves a tab that only the discarded draft had", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.addDraftTab("Scratch");
+    await store.cancelEdit();
+    expect(store.activeTabId).toBe("today");
   });
 });

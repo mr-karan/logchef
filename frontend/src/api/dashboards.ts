@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats"];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats", "tabs", "free_grid"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -148,7 +148,7 @@ export interface DashboardPanels {
    * Absent = keep the viewer's current range.
    */
   default_time_range?: string;
-  /** At least one tab. Each owns its layout; this release shows one. */
+  /** At least one tab, at most 10. Each owns its layout, and a panel sits in exactly one. */
   tabs: DashboardTab[];
   /** Panel definitions, independent of placement. */
   panels: DashboardPanel[];
