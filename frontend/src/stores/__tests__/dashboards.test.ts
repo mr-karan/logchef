@@ -1099,6 +1099,42 @@ describe("dashboards store — tabs", () => {
     expect(requested()).toEqual(["a1", "a2", "a3", "a4", "b1", "b2", "a5", "a6"]);
   });
 
+  it("reruns dropped panels with old results after returning during a later refresh", async () => {
+    const store = await loadEditableDashboard(tabbed(6, 1));
+    vi.clearAllMocks();
+    const finishers: Array<() => void> = [];
+    mocks.logsQuery.mockImplementation(() => new Promise((resolve) => {
+      finishers.push(() => resolve({ status: "success", data: { data: [], columns: [] } }));
+    }));
+    const refreshing = store.refreshAllPanels();
+    await vi.waitFor(() => expect(requested()).toEqual(["a1", "a2", "a3", "a4"]));
+    store.setActiveTab("week");
+    while (finishers.length) {
+      finishers.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await refreshing;
+    expect(requested()).toEqual(["a1", "a2", "a3", "a4", "b1"]);
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+    store.setActiveTab("today");
+    await vi.waitFor(() => expect(requested()).toEqual(["a1", "a2", "a3", "a4", "b1", "a5", "a6"]));
+    expect(store.getPanelState("a6").status).toBe("empty");
+  });
+
+  it("restores a moved panel's result on discard after a refresh hid it", async () => {
+    const store = await loadEditableDashboard(tabbed());
+    await store.enterEdit();
+    store.moveDraftPanelToTab("a1", "week");
+    await store.refreshAllPanels();
+    expect(store.getPanelState("a1").status).toBe("idle");
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+    await store.cancelEdit();
+    await vi.waitFor(() => expect(store.getPanelState("a1").status).toBe("empty"));
+    expect(store.activeTabId).toBe("today");
+    expect(requested()).toEqual(["a1"]);
+  });
+
   it("queues a panel once when its tab is shown again before its turn", async () => {
     const finishers: Array<() => void> = [];
     mocks.logsQuery.mockImplementation(() => new Promise((resolve) => {

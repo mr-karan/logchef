@@ -126,17 +126,18 @@ watch(
   () => {
     const blob = activeBlob.value;
     if (!blob) return undefined;
-    return blob.tabs.length > 1 ? store.activeTabId : null;
+    return { shown: blob.tabs.length > 1 ? store.activeTabId : null, tabCount: blob.tabs.length };
   },
-  (shown) => {
+  (next, previous) => {
+    const shown = next?.shown;
     const from = queryTab();
     if (shown === undefined || shown === from) return;
     const query = { ...route.query, tab: shown ?? undefined };
     // Showing a new tab from a tab the dashboard still has is a navigation,
-    // like a click on a tab. Every other case corrects a URL that names no
-    // tab or a tab that is gone, and must not leave that URL in the history.
+    // like a click on a tab, including adding the second tab when the URL
+    // names none. Other changes correct an absent or deleted tab in the URL.
     const fromExists = (activeBlob.value?.tabs ?? []).some((tab) => tab.id === from);
-    void (shown !== null && fromExists ? router.push({ query }) : router.replace({ query }));
+    void (shown !== null && (fromExists || previous?.tabCount === 1) ? router.push({ query }) : router.replace({ query }));
   },
 );
 
