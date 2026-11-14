@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 
-import { now as zonedNow } from '@internationalized/date'
+import { epochMs, formatWallClock } from '@/utils/timeWindow'
 import { usePreferencesStore } from '@/stores/preferences'
 import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -75,10 +75,8 @@ const updateVariableType = (variable: VariableState) => {
           }
         }
       }
-      const current = zonedNow(preferencesStore.zone).toString().slice(0, 19)
-      variable.value = variable.type === 'day'
-        ? current.slice(0, 10)
-        : current.replace('T', ' ')
+      const current = formatWallClock(epochMs(Date.now()), preferencesStore.zone).slice(0, 19)
+      variable.value = variable.type === 'day' ? current.slice(0, 10) : current
       variable.inputType = 'datepicker'
       break
     }
