@@ -246,6 +246,12 @@ unquoted or inside ordinary string quotes. Template values inside identifier,
 heredoc, or raw string quotes are rejected. LogchefQL variables require a single
 value.
 
+Names that start with `__` are reserved for [time macros](/guide/time-macros).
+SQL and LogsQL queries can use `{{__time_filter}}`, `{{__from}}`, `{{__to}}`,
+`{{__interval}}` and `{{__timezone}}` to follow the time picker. Logchef fills
+them from the selected range, so they never appear as input fields. A new
+variable cannot start with `__`.
+
 ## Query History
 
 The editor dropdown shows your 10 most recent queries per source. Click any to reload it.

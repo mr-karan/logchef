@@ -14,6 +14,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 000013, 000014 and 000015).
 
 ### Upgrade notes
+
 - **Breaking for scripts:** CLI variables are now typed and rendered by the server.
   Pre-quoted values such as `--var "d='2026-11-12'"` must drop their quotes,
   for example `--var d=2026-11-12`.
@@ -69,7 +70,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   and `can_edit: false`. A client writes it only when it also sends
   `X-Logchef-Dashboard-Features` with the comma-separated features its code
   supports (`result_frames`, `formats`, `result_charts`, `stat_compare`,
-  `thresholds`, `table_rules`, `column_formats`, `tabs` and `free_grid` in this
+  `thresholds`, `table_rules`, `column_formats`, `tabs`, `free_grid` and `panel_time` in this
   version); a save that would drop a stored feature, or a schema 1 body on a
   schema 2 dashboard, returns 409. Any other schema header value returns 400.
   Dashboards that no schema 2 client has saved stay schema 1 and keep working
@@ -101,8 +102,21 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 - ClickHouse queries now fail when a shard does not answer, even when the
   ClickHouse user's settings profile sets `skip_unavailable_shards`. Before,
   the other shards' rows came back as a complete result.
+- **Breaking for scripts:** a request variable cannot use the name of a
+  built-in macro (`__from`, `__to`, `__time_filter`, `__interval`,
+  `__interval_s`, `__timezone`, `__tz_offset`). Such a request returns 400. A
+  new saved-query variable cannot start with `__`. A saved query that already
+  has such a variable keeps working, unless the name is one of the macros.
+- `timezone` is validated on every query endpoint: `logs/query`,
+  `logs/histogram`, `logchefql/query`, `logchefql/translate`, the field value
+  endpoints and exports. A name that is not an IANA zone returns 400, where
+  raw queries forwarded it unchecked before.
+- A dashboard with a fixed panel interval, a panel range or a calendar default
+  range uses the `panel_time` feature. A script must declare `panel_time` in
+  `X-Logchef-Dashboard-Features` to save such a dashboard.
 
 ### Security
+
 - Collection links have a kind. A `pin` is a bookmark and grants nothing. A
   `managed` link delegates edit on the saved query to the collection's owners
   and editors. Only the query's creator or a global admin creates, converts or
@@ -111,6 +125,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   only view, and edit it.
 
 ### Added
+
 - Dashboard thresholds color stat values or backgrounds and draw chart reference
   lines. Tables support cell and row rules, visible columns, and number and time
   formats. Thresholds and numeric rules compare exact values.
@@ -127,6 +142,30 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   tall (was seven preset widths and 6 rows). A dashboard that uses such a size
   stores the `free_grid` feature. An older client cannot save over a
   dashboard with tabs or free sizes and asks you to reload before editing.
+- Built-in time macros in ClickHouse SQL and LogsQL: `{{__time_filter}}`,
+  `{{__from}}`, `{{__to}}`, `{{__interval}}`, `{{__interval_s}}`,
+  `{{__timezone}}` and `{{__tz_offset}}`. The server renders them from the
+  request's `start_time`, `end_time`, `timezone` and the new `interval`
+  field, so one query follows any time range. They work in the Explorer's
+  SQL mode, in dashboard panels, in exports, from the CLI and from MCP. A
+  macro whose input is missing returns 400.
+- A dashboard panel can set its own bucket size (`query.interval`): auto, or a
+  fixed window from `1s` to `24h`. A count panel can show 24-hour buckets on a
+  7-day range. A fixed size that would give more than 1,000 buckets is raised
+  and the panel shows the size it used.
+- A dashboard panel can pin its own time range (`query.range`), rolling or
+  calendar, in place of the dashboard range.
+- The calendar range `today-<n>d`, for a panel range and for a dashboard's
+  default range. `today-6d` runs from the start of the day six days ago until
+  now, in the viewer's timezone.
+- Panels show chips: **Fixed window** for ClickHouse SQL that sets its own
+  window and ignores the time picker, the panel's own range, and its bucket
+  size. A VictoriaLogs count panel names a daylight-saving change inside its
+  range, because its buckets keep the offset of the range start.
+- `logchef sql` gains `--interval` and a repeatable `--var NAME=VALUE`, and
+  sends the time window with a query that uses a time macro. The MCP tool
+  `query_logs` gains `timezone`, `interval` and `variables`, and
+  `get_log_histogram` gains `variables`.
 - Dashboard stats can run SQL aggregates and LogsQL stats queries as written,
   reduce a value column, and show the selected row's date. The builder offers
   ClickHouse SQL, confirmed column kinds, and number formats with decimal
@@ -172,6 +211,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   `raw_panels_json` from `GET /dashboards/:id` for repair; other users get 403.
 
 ### Changed
+
 - Every link, member and team-share write runs in one transaction under the
   collection's lock. A write the database cannot serialize answers 503 with
   `Retry-After: 1`; nothing is written and the client retries.
@@ -245,6 +285,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   instead of stopping at the preview limit.
 
 ### Fixed
+
 - Dashboard saves use an atomic revision check so two edits from the same
   revision cannot overwrite each other, including saves within one second.
 - Editing a dashboard starts from the latest saved version, and leaving the
@@ -254,6 +295,7 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 - Expanded fields in the Fields panel stay open when a query runs.
 - Group By no longer shifts sideways when the fast-filter hint appears.
 - Cmd/Ctrl+Enter closes the autocomplete popup before the results load.
+
 
 ## [2.6.1] - 2026-10-29
 

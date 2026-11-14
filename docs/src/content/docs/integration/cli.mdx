@@ -337,6 +337,8 @@ logchef sql 'level:="error" | fields _time, _msg, service'
 | `--since` | `-s` | Apply a relative time range (e.g., "15m", "1h", "24h") | |
 | `--from` | | Apply an absolute start time (`YYYY-MM-DD HH:MM:SS`) | |
 | `--to` | | Apply an absolute end time (`YYYY-MM-DD HH:MM:SS`) | |
+| `--interval` | | Bucket size for the `{{__interval}}` and `{{__interval_s}}` macros: `1s` to `24h` | |
+| `--var` | | Value for a `{{name}}` placeholder (`NAME=VALUE`, or `NAME:number=VALUE`, `NAME:date=VALUE`). Repeatable | |
 | `--timeout` | | Query timeout in seconds | 30 |
 | `--limit` | | Request row limit. A smaller `LIMIT` in the query wins | (from config) |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `csv`, `msg`) | `text` |
@@ -388,6 +390,16 @@ logchef sql "SELECT level, count() AS count FROM logs.app GROUP BY level" --sinc
 # Place the time expressions explicitly
 logchef sql "SELECT * FROM logs.app WHERE _timestamp BETWEEN __START__ AND __END__" --since 1h
 
+# A query copied from a dashboard panel: the server fills the time macros
+# from --since, --interval and your timezone, and {{service}} from --var
+logchef sql 'SELECT toStartOfInterval(_timestamp, {{__interval}}, {{__timezone}}) AS t, count() AS n
+  FROM logs.app WHERE {{__time_filter}} AND service = {{service}} GROUP BY t ORDER BY t' \
+  --since 7d --interval 24h --var service=api
+
+# The same on VictoriaLogs, with a number variable
+logchef sql '* | stats by (_time:{{__interval}} offset {{__tz_offset}}) count() as n | filter n:>{{min}}' \
+  --since 5d --interval 24h --var min:number=5
+
 # Read a native query from stdin (useful for complex queries)
 cat query.sql | logchef sql -
 
@@ -422,6 +434,10 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 :::tip[When to use `sql` vs `query`]
 - Use `query` (LogchefQL) for quick filtering across supported sources with convenient time flags (`--since 1h`)
 - Use `sql` when you need full control over the source's native query language
+:::
+
+:::note[Time macros and variables]
+A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros). With no time flag the window is the configured default range. `{{__interval}}` and `{{__interval_s}}` need `--interval`, and the server refuses the query without it. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
 :::
 
 :::note[Auto-injected time predicate]
