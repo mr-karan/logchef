@@ -583,6 +583,27 @@ describe("DashboardView tabs", () => {
     expect(shownTab()).toBeUndefined();
   });
 
+  it("a double click on Discard still leaves the dashboard", async () => {
+    await openAfter("/dashboards/1?tab=today");
+    button("Edit").click();
+    await settle();
+    await settle();
+    const store = useDashboardsStore();
+    store.updateDraftPanel("today", { query: { text: "edited-query" } });
+    store.removeDraftTab("week");
+    await settle();
+    await settle();
+    host.querySelector<HTMLElement>('button[aria-label="Back to dashboards"]')?.click();
+    await settle();
+    const discard = button("Discard changes");
+    discard.click();
+    discard.click();
+    await settle();
+    await settle();
+    await settle();
+    expect(router.currentRoute.value.path).toBe("/dashboards");
+  });
+
   it("discarding a tab deletion leaves Back working", async () => {
     await openAfter("/dashboards/1?tab=week");
     button("Edit").click();

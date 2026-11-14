@@ -545,6 +545,8 @@ async function discardAndLeave() {
 
 function confirmDiscard() {
   const action = pendingDiscard.value;
+  // A second confirm (a double click) arrives after the first cleared the action.
+  if (action === null) return;
   pendingDiscard.value = null;
   if (action === 'leave') {
     void discardAndLeave();
