@@ -1430,6 +1430,16 @@ describe("panel time", () => {
     expect(store.getPanelState("bound").range).toMatchObject({ start: Date.parse("2026-10-01T00:00:00Z") });
   });
 
+  it("reads a dashboard that stores the panel_time feature, so it runs and stays editable", async () => {
+    const pinned = sql("pinned", { range: "today-6d" });
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ panels: { ...panelsWith([pinned], [{ id: "pinned", x: 0, y: 0, w: 12, h: 1 }]), features: ["panel_time"] } }) });
+    const store = useDashboardsStore();
+    await store.loadDashboard(3);
+    expect(store.needsReload).toBe(false);
+    expect(store.canEdit).toBe(true);
+    await vi.waitFor(() => expect(store.getPanelState("pinned").status).toBe("success"));
+  });
+
   it("sends a count panel's fixed interval as the histogram window: 24h on a 7-day range", async () => {
     const store = await load(chartPanel("days", { language: "logsql", text: "*", interval: "24h" }));
     store.setWindow(absolute("2026-11-05T18:30:00Z", "2026-11-12T18:30:00Z"));
