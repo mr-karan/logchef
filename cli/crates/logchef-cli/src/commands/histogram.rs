@@ -168,6 +168,8 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
         timezone: Some(range.timezone.clone()),
         limit: Some(100),
         query_timeout: Some(args.timeout),
+        // The translate step above has already substituted LogchefQL variables.
+        variables: Vec::new(),
     };
 
     let response = client

@@ -189,10 +189,14 @@ pub struct SqlQueryRequest {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timezone: Option<String>,
+    /// With `end_time`, the range of `{{__from}}`, `{{__to}}` and `{{__time_filter}}`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_time: Option<String>,
+    /// The bucket size that `{{__interval}}` renders, such as `24h`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_timeout: Option<u32>,
 }
@@ -209,6 +213,7 @@ impl SqlQueryRequest {
         let tz = crate::timerange::resolve_timezone(configured_tz);
         Self {
             query_text,
+            interval: None,
             variables,
             limit,
             query_timeout,
@@ -227,6 +232,16 @@ pub struct ExportSqlRequest {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_timeout: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<TemplateVariable>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,6 +362,8 @@ pub struct HistogramRequest {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_timeout: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<TemplateVariable>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -559,7 +576,7 @@ pub struct CollectionVariable {
     pub options: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TemplateVariable {
     pub name: String,
     #[serde(rename = "type")]
@@ -805,6 +822,7 @@ mod template_request_tests {
             {"name": "optional", "type": "text", "value": null}
         ]);
         let native = SqlQueryRequest {
+            interval: None,
             query_text: content.content.clone().unwrap(),
             variables: content.query_variables(&[]).unwrap(),
             limit: None,

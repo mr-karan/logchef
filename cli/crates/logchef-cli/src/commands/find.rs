@@ -185,6 +185,7 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
                 timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
                 start_time: None,
                 end_time: None,
+                interval: None,
                 query_timeout: Some(args.timeout),
             };
             let response = match client.query_sql(team.id, source.id, &request).await {
@@ -421,6 +422,7 @@ async fn fetch_samples(
             timezone: None,
             start_time: None,
             end_time: None,
+            interval: None,
             query_timeout: Some(timeout),
         };
         let response = match client.query_sql(team_id, source_id, &request).await {
@@ -531,6 +533,7 @@ async fn vl_fetch_samples(
             timezone: None,
             start_time: None,
             end_time: None,
+            interval: None,
             query_timeout: Some(timeout),
         };
         let response = match client.query_sql(team_id, source_id, &request).await {
