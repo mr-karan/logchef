@@ -958,7 +958,7 @@
   "panelChart.seriesLegend": "श्रृंखला संकेत",
   "panelChart.sliceLegend": "खंड संकेत",
   "panelChart.toplist": "शीर्ष सूची",
-  "panelChart.labelsHidden": "मान लेबल छिपाए गए। चार्ट बड़ा करें या कम बिंदु दिखाएँ।",
+  "panelChart.labelsHidden": "कुछ मान लेबल छिपाए गए हैं। चार्ट बड़ा करें या कम बिंदु दिखाएँ।",
   "panelChart.other": "अन्य",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(शून्य)",

@@ -1698,7 +1698,7 @@
   "panelChart.seriesLegend": "系列图例",
   "panelChart.sliceLegend": "扇区图例",
   "panelChart.toplist": "排行榜",
-  "panelChart.labelsHidden": "数值标签已隐藏。请放大图表或减少数据点。",
+  "panelChart.labelsHidden": "部分数值标签已隐藏。请放大图表或减少数据点。",
   "panelChart.other": "其他",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(空值)",

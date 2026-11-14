@@ -958,7 +958,7 @@
   "panelChart.seriesLegend": "Reihenlegende",
   "panelChart.sliceLegend": "Segmentlegende",
   "panelChart.toplist": "Rangliste",
-  "panelChart.labelsHidden": "Wertbeschriftungen ausgeblendet. Diagramm vergrößern oder weniger Punkte anzeigen.",
+  "panelChart.labelsHidden": "Einige Wertbeschriftungen sind ausgeblendet. Diagramm vergrößern oder weniger Punkte anzeigen.",
   "panelChart.other": "Andere",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(null)",

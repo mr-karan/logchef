@@ -958,7 +958,7 @@
   "panelChart.seriesLegend": "Legenda das séries",
   "panelChart.sliceLegend": "Legenda das fatias",
   "panelChart.toplist": "Lista de maiores",
-  "panelChart.labelsHidden": "Rótulos ocultos. Amplie o gráfico ou mostre menos pontos.",
+  "panelChart.labelsHidden": "Alguns rótulos de valores estão ocultos. Amplie o gráfico ou mostre menos pontos.",
   "panelChart.other": "Outros",
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(nulo)",
