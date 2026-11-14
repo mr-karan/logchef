@@ -11,6 +11,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -154,7 +155,9 @@ func resolveSavedQueryMetadata(ctx context.Context, ds *datasource.Service, sour
 // update. It parses the envelope ONCE and then verifies the inner content
 // matches the resolved query language, so a mismatched pair can never be
 // persisted from either the API or the UI, on either create or update.
-func validateSavedQueryFields(queryContentJSON string, language models.QueryLanguage) error {
+//
+// storedContentJSON is the content the query has now, empty for a new query.
+func validateSavedQueryFields(queryContentJSON string, language models.QueryLanguage, storedContentJSON string) error {
 	if queryContentJSON == "" {
 		return nil
 	}
@@ -165,7 +168,35 @@ func validateSavedQueryFields(queryContentJSON string, language models.QueryLang
 	if parsed == nil {
 		return nil
 	}
+	if err := validateSavedQueryVariableNames(parsed.Variables, storedContentJSON); err != nil {
+		return err
+	}
 	return ValidateContentMatchesLanguage(parsed.Content, language)
+}
+
+// validateSavedQueryVariableNames keeps the "__" prefix free for built-in
+// macros. A new variable may not start with it. A variable that the stored
+// query already has keeps working, unless it is a macro name.
+func validateSavedQueryVariableNames(variables []models.SavedQueryVariable, storedContentJSON string) error {
+	stored := map[string]struct{}{}
+	var storedContent models.SavedQueryContent
+	if json.Unmarshal([]byte(storedContentJSON), &storedContent) == nil {
+		for _, variable := range storedContent.Variables {
+			stored[variable.Name] = struct{}{}
+		}
+	}
+	for _, variable := range variables {
+		if !template.HasBuiltinPrefix(variable.Name) {
+			continue
+		}
+		if template.IsBuiltin(variable.Name) {
+			return fmt.Errorf("%w: variable name %q is a built-in macro", ErrInvalidQueryContent, variable.Name)
+		}
+		if _, kept := stored[variable.Name]; !kept {
+			return fmt.Errorf("%w: variable name %q starts with %s, which is reserved for built-in macros", ErrInvalidQueryContent, variable.Name, template.BuiltinPrefix)
+		}
+	}
+	return nil
 }
 
 // CreateSavedQuery persists a new saved query owned by the supplied creator.
@@ -174,7 +205,7 @@ func CreateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Ser
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSavedQueryFields(queryContentJSON, queryLanguage); err != nil {
+	if err := validateSavedQueryFields(queryContentJSON, queryLanguage, ""); err != nil {
 		log.Warn("invalid saved query create payload", "error", err, "source_id", sourceID, "name", name)
 		return nil, err
 	}
@@ -230,7 +261,7 @@ func UpdateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Ser
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSavedQueryFields(queryContentJSON, queryLanguage); err != nil {
+	if err := validateSavedQueryFields(queryContentJSON, queryLanguage, existing.QueryContent); err != nil {
 		log.Warn("invalid saved query update payload", "error", err, "query_id", queryID)
 		return nil, err
 	}
