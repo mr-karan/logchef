@@ -102,8 +102,9 @@ interface RefreshRun {
   range: ResolvedWindow;
   cache?: CacheDirective;
   signal: AbortSignal;
-  // Panels waiting for a pool slot, so a tab shown twice queues each once.
+  // Queued and in-flight panels, so a tab shown twice queues each once.
   queued: Set<string>;
+  completed: Set<string>;
 }
 
 interface DashboardsState {
@@ -573,16 +574,20 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // Run panels of the tab on screen through the shared pool. A panel whose
   // tab the viewer left before its turn is dropped without a request: it has
-  // no state, so it runs when its tab is shown again.
+  // no completion in this run, so it runs when its tab is shown again.
   async function runPanels(panels: DashboardPanel[], run: RefreshRun) {
     const waiting = panels.filter((panel) => !run.queued.has(panel.id));
     for (const panel of waiting) run.queued.add(panel.id);
     await Promise.all(
       waiting.map((panel) =>
         limitPanelFetch(async () => {
-          run.queued.delete(panel.id);
-          if (run.signal.aborted || !activeTabPanels().some((p) => p.id === panel.id)) return;
-          await executePanel(panel, run.range, run.signal, run.cache);
+          try {
+            if (run.signal.aborted || !activeTabPanels().some((p) => p.id === panel.id)) return;
+            await executePanel(panel, run.range, run.signal, run.cache);
+            if (!run.signal.aborted) run.completed.add(panel.id);
+          } finally {
+            run.queued.delete(panel.id);
+          }
         }),
       ),
     );
@@ -595,7 +600,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const run = refreshRun;
     if (!run || run.signal.aborted || needsReload.value) return;
     const states = state.data.value.panelStates;
-    void runPanels(activeTabPanels().filter((p) => !states[p.id]), run);
+    void runPanels(activeTabPanels().filter((p) => !run.completed.has(p.id) || !states[p.id]), run);
   }
 
   async function refreshAllPanels() {
@@ -648,7 +653,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Only the tab on screen runs. A hidden tab's results belong to an earlier
     // refresh: drop them, so the tab holds no frames while hidden and runs
     // with this refresh's range when it is shown.
-    const run: RefreshRun = { range, cache, signal, queued: new Set() };
+    const run: RefreshRun = { range, cache, signal, queued: new Set(), completed: new Set() };
     refreshRun = run;
     const panels = activeTabPanels();
     const shown = new Set(panels.map((p) => p.id));
@@ -668,7 +673,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     singlePanelAborts.get(panel.id)?.abort();
     const controller = new AbortController();
     singlePanelAborts.set(panel.id, controller);
+    const run = refreshRun;
+    run?.completed.delete(panel.id);
     void executePanel(panel, effectiveRange.value, controller.signal).finally(() => {
+      if (!controller.signal.aborted) run?.completed.add(panel.id);
       if (singlePanelAborts.get(panel.id) === controller) {
         singlePanelAborts.delete(panel.id);
       }
@@ -730,6 +738,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     abortPreview();
     abortSinglePanels();
     resetEdit();
+    setActiveTab(state.data.value.requestedTabId);
     return { success: true };
   }
 
@@ -755,6 +764,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       abortPreview();
       abortSinglePanels();
       resetEdit();
+      setActiveTab(state.data.value.requestedTabId);
     }
     return result;
   }

@@ -437,6 +437,31 @@ describe("DashboardView tabs", () => {
     expect(tabs.queries).toEqual(["today-query", "week-query"]);
   });
 
+  it("returns to the original single tab with Back after adding a second tab", async () => {
+    tabs.tabbed = false;
+    await open("/dashboards/1");
+    expect(shownTab()).toBeUndefined();
+    button("Edit").click();
+    await settle();
+    await settle();
+    button("Add tab").click();
+    await settle();
+    const name = document.querySelector<HTMLInputElement>("#dash-tab-name");
+    if (!name) throw new Error("tab name input was not rendered");
+    name.value = "Errors";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    button("Add").click();
+    await settle();
+    await settle();
+    expect(tab("Errors").getAttribute("aria-selected")).toBe("true");
+    router.back();
+    await settle();
+    await settle();
+    expect(tab("Main").getAttribute("aria-selected")).toBe("true");
+    expect(shownTab()).toBe("main");
+  });
+
   it("adds a tab from the dialog, and asks before it deletes a tab that has panels", async () => {
     await open("/dashboards/1?tab=week");
     button("Edit").click();
