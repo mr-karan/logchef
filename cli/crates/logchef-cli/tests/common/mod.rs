@@ -437,15 +437,13 @@ fn route(
             "POST",
             "/api/v1/teams/1/sources/2/logs/query" | "/api/v1/teams/1/sources/2/logchefql/query",
         ) => {
-            state
-                .lock()
-                .unwrap()
-                .native_requests
+            let mut s = state.lock().unwrap();
+            s.native_requests
                 .push(serde_json::from_str(&req.body).unwrap());
             (
                 200,
                 serde_json::json!({"status": "success", "data": {
-                    "logs": state.lock().unwrap().query_logs.clone(), "columns": [], "stats": {"execution_time_ms": 1, "rows_read": 0, "bytes_read": 0}
+                    "logs": s.query_logs.clone(), "columns": [], "stats": query_stats_or_default(&s.query_stats)
                 }}),
             )
         }
@@ -526,18 +524,6 @@ fn route(
                 }}),
             )
         }
-        ("GET", "/api/v1/teams/1/sources/2") => (
-            200,
-            serde_json::json!({"status": "success", "data": {"id": 2, "name": "app", "source_type": "clickhouse"}}),
-        ),
-        ("POST", "/api/v1/teams/1/sources/2/logs/query") => (
-            200,
-            serde_json::json!({"status": "success", "data": {
-                "logs": [{"n": 1}],
-                "columns": [{"name": "n", "type": "UInt64"}],
-                "stats": state.lock().unwrap().query_stats,
-            }}),
-        ),
         _ => (
             404,
             serde_json::json!({"status": "error", "message": "not found"}),
@@ -628,4 +614,13 @@ pub fn stdout(out: &Output) -> String {
 pub fn mode(path: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+/// The stats a test set with `query_stats`, or the default a plain query reports.
+fn query_stats_or_default(stats: &serde_json::Value) -> serde_json::Value {
+    if stats.is_null() {
+        serde_json::json!({"execution_time_ms": 1, "rows_read": 0, "bytes_read": 0})
+    } else {
+        stats.clone()
+    }
 }

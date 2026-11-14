@@ -9,6 +9,7 @@ use common::*;
 fn sql_json(name: &str, stats: serde_json::Value) -> serde_json::Value {
     let server = FakeServer::start(false);
     server.state().query_stats = stats;
+    server.state().query_logs = vec![serde_json::json!({"n": 1})];
     let home = TestHome::new(name);
     home.write_config(&config_with(
         &server.url,
