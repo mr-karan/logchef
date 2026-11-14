@@ -119,6 +119,9 @@ function addTab(title: string) {
 }
 
 let pendingTabId: string | null = null;
+// Set while discarding to leave: dropping the draft changes the tabs, and a URL
+// correction then would cancel the navigation away from this dashboard.
+let leaving = false;
 function selectTab(id: string) {
   if (id === queryTab()) return;
   pendingTabId = id;
@@ -140,7 +143,7 @@ watch(
   },
   (shown) => {
     const from = queryTab();
-    if (shown === undefined || shown === from || (pendingTabId !== null && shown === pendingTabId)) return;
+    if (leaving || shown === undefined || shown === from || (pendingTabId !== null && shown === pendingTabId)) return;
     const query = { ...route.query, tab: shown ?? undefined };
     // Showing a new tab from a tab the dashboard still has is a navigation,
     // like a click on a tab. Other changes correct an absent or deleted tab.
@@ -528,8 +531,9 @@ function confirmDiscard() {
   pendingDiscard.value = null;
   if (action === 'leave') {
     closeEditor();
+    leaving = true;
     void store.cancelEdit({ leaving: true });
-    router.push("/dashboards");
+    void router.push("/dashboards").then((failure) => { if (failure) leaving = false; }, () => { leaving = false; });
     return;
   }
   void discardEdit();
