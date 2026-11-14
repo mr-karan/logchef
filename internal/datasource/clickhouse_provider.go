@@ -206,8 +206,13 @@ func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.So
 		}
 		// API responses never include the password, so edit flows send it blank
 		// to mean "keep the existing one". A blank username means auth was
-		// turned off, so the stored password is dropped too.
+		// turned off, so the stored password is dropped too. The stored password
+		// is only reused for the same host and username: it must never be sent
+		// to a server the caller just named.
 		if conn.Password == "" && conn.Username != "" {
+			if conn.Host != source.Connection.Host || conn.Username != source.Connection.Username {
+				return nil, &ValidationError{Field: "connection.password", Message: "Enter the password again: the host or username changed"}
+			}
 			conn.Password = source.Connection.Password
 		}
 		if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Database, conn.TableName); err != nil {
@@ -593,12 +598,20 @@ func (p *ClickHouseProvider) InspectSourceActivity(ctx context.Context, source *
 	}
 	stats, err := client.IngestionStatsWithOptions(ctx, database, table, source.MetaTSField, opts)
 	if err != nil {
-		if clickhouse.IsReadLimitExceededError(err) || (enforceScanLimits && clickhouse.IsTimeoutError(err)) {
-			return nil, fmt.Errorf("%w: %w", ErrSourceActivityLimitExceeded, err)
-		}
-		return nil, err
+		return nil, classifyActivityError(err, enforceScanLimits)
 	}
 	return mapActivityStats(stats), nil
+}
+
+// classifyActivityError maps a cap on an activity query to
+// ErrSourceActivityLimitExceeded. A timeout counts as a cap only for an
+// opted-in View, which runs under a fixed time limit; on other sources it stays
+// a timeout, which callers report as retryable.
+func classifyActivityError(err error, enforceScanLimits bool) error {
+	if clickhouse.IsReadLimitExceededError(err) || (enforceScanLimits && clickhouse.IsTimeoutError(err)) {
+		return fmt.Errorf("%w: %w", ErrSourceActivityLimitExceeded, err)
+	}
+	return err
 }
 
 func canInspectSourceActivity(source *models.Source, info *clickhouse.TableInfo) (allow, enforceScanLimits bool) {
