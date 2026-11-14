@@ -168,45 +168,49 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 	var substitutionErr error
 	result := variablePattern.ReplaceAllStringFunc(token, func(match string) string {
 		name := variablePattern.FindStringSubmatch(match)[1]
+		var rendered string
+		var err error
 		if IsBuiltin(name) {
-			expansion, err := expandMacro(name, quote, builtins, dialect)
-			if err != nil {
-				substitutionErr = err
-				return match
-			}
-			return expansion
+			rendered, err = expandMacro(name, quote, builtins, dialect)
+		} else {
+			rendered, err = renderVariable(name, quote, variables, dialect)
 		}
-		variable, exists := variables[name]
-		if !exists {
-			substitutionErr = fmt.Errorf("undefined variable: {{%s}}", name)
-			return match
-		}
-		if !isValueProvided(variable.Value) {
-			substitutionErr = fmt.Errorf("variable {{%s}} requires a value", name)
-			return match
-		}
-		if quote != 0 && (quote == '`' || quote == '$' || dialect == ClickHouseSQL && quote == '"') {
-			substitutionErr = fmt.Errorf("variable %s: template values cannot be used inside identifier or raw-string quotes", name)
-			return match
-		}
-		if quote != 0 && isArrayValue(variable.Value) {
-			substitutionErr = fmt.Errorf("variable %s: array values must be outside quotes", name)
-			return match
-		}
-		formatted, err := formatValue(variable, dialect)
 		if err != nil {
-			substitutionErr = fmt.Errorf("variable %s: %w", name, err)
+			substitutionErr = err
 			return match
 		}
-		if quote != 0 && variable.Type != TypeNumber {
-			formatted = formatted[1 : len(formatted)-1]
-			if dialect == LogsQL && quote == '\'' {
-				formatted = strings.NewReplacer(`\"`, `"`, "'", "\\'").Replace(formatted)
-			}
-		}
-		return formatted
+		return rendered
 	})
 	return result, substitutionErr
+}
+
+// renderVariable formats one request variable for the place that holds it.
+// quote is the quote character of its token, or 0 in an expression.
+func renderVariable(name string, quote byte, variables map[string]Variable, dialect Dialect) (string, error) {
+	variable, exists := variables[name]
+	if !exists {
+		return "", fmt.Errorf("undefined variable: {{%s}}", name)
+	}
+	if !isValueProvided(variable.Value) {
+		return "", fmt.Errorf("variable {{%s}} requires a value", name)
+	}
+	if quote != 0 && (quote == '`' || quote == '$' || dialect == ClickHouseSQL && quote == '"') {
+		return "", fmt.Errorf("variable %s: template values cannot be used inside identifier or raw-string quotes", name)
+	}
+	if quote != 0 && isArrayValue(variable.Value) {
+		return "", fmt.Errorf("variable %s: array values must be outside quotes", name)
+	}
+	formatted, err := formatValue(variable, dialect)
+	if err != nil {
+		return "", fmt.Errorf("variable %s: %w", name, err)
+	}
+	if quote != 0 && variable.Type != TypeNumber {
+		formatted = formatted[1 : len(formatted)-1]
+		if dialect == LogsQL && quote == '\'' {
+			formatted = strings.NewReplacer(`\"`, `"`, "'", "\\'").Replace(formatted)
+		}
+	}
+	return formatted, nil
 }
 
 func formatValue(v Variable, dialect Dialect) (string, error) {

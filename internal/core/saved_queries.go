@@ -181,19 +181,20 @@ func validateSavedQueryVariableNames(variables []models.SavedQueryVariable, stor
 	stored := map[string]struct{}{}
 	var storedContent models.SavedQueryContent
 	if json.Unmarshal([]byte(storedContentJSON), &storedContent) == nil {
-		for _, variable := range storedContent.Variables {
-			stored[variable.Name] = struct{}{}
+		for i := range storedContent.Variables {
+			stored[storedContent.Variables[i].Name] = struct{}{}
 		}
 	}
-	for _, variable := range variables {
-		if !template.HasBuiltinPrefix(variable.Name) {
+	for i := range variables {
+		name := variables[i].Name
+		if !template.HasBuiltinPrefix(name) {
 			continue
 		}
-		if template.IsBuiltin(variable.Name) {
-			return fmt.Errorf("%w: variable name %q is a built-in macro", ErrInvalidQueryContent, variable.Name)
+		if template.IsBuiltin(name) {
+			return fmt.Errorf("%w: variable name %q is a built-in macro", ErrInvalidQueryContent, name)
 		}
-		if _, kept := stored[variable.Name]; !kept {
-			return fmt.Errorf("%w: variable name %q starts with %s, which is reserved for built-in macros", ErrInvalidQueryContent, variable.Name, template.BuiltinPrefix)
+		if _, kept := stored[name]; !kept {
+			return fmt.Errorf("%w: variable name %q starts with %s, which is reserved for built-in macros", ErrInvalidQueryContent, name, template.BuiltinPrefix)
 		}
 	}
 	return nil
