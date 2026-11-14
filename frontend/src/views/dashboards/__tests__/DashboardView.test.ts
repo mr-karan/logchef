@@ -493,6 +493,26 @@ describe("DashboardView tabs", () => {
     expect(router.currentRoute.value.path).toBe("/");
   });
 
+  it("discarding to leave drops the draft without rerunning panels", async () => {
+    await openAfter("/dashboards/1?tab=today");
+    button("Edit").click();
+    await settle();
+    await settle();
+    const store = useDashboardsStore();
+    store.updateDraftPanel("today", { query: { text: "edited-query" } });
+    await settle();
+    await settle();
+    const cancel = vi.spyOn(store, "cancelEdit");
+    tabs.queries.length = 0;
+    host.querySelector<HTMLElement>('button[aria-label="Back to dashboards"]')?.click();
+    await settle();
+    button("Discard changes").click();
+    await settle();
+    await settle();
+    expect(cancel).toHaveBeenCalledWith({ leaving: true });
+    expect(tabs.queries).toEqual([]);
+  });
+
   it("discarding a tab deletion leaves Back working", async () => {
     await openAfter("/dashboards/1?tab=week");
     button("Edit").click();
