@@ -294,12 +294,6 @@ func TestSendDoesNotRepeatAnInsertClickHouse(t *testing.T) {
 	})
 	file := fmt.Sprintf("logchef_test_%d.tsv", time.Now().UnixNano())
 	_, err := client.Query(t.Context(), fmt.Sprintf("INSERT INTO FUNCTION file('%s', 'TSV', 'n UInt64') SELECT number FROM numbers(1000000) WHERE throwIf(number = 500000, 'Unknown setting', toInt32(115)) = 0 SETTINGS max_block_size = 1000, max_threads = 1, allow_custom_error_code_in_throwif = 1", file))
-	if !isUnknownSetting(err) || !strings.Contains(err.Error(), "did not send the statement again") {
-		t.Fatalf("the INSERT returned %v, want UNKNOWN_SETTING and that Logchef did not send it again", err)
-	}
-	if n := counter.queries.Load(); n != 1 {
-		t.Fatalf("the INSERT was sent %d times, want 1", n)
-	}
 	// One run writes at most the 500000 rows before the row that throws.
 	var written uint64
 	if err := client.conn.QueryRow(t.Context(), fmt.Sprintf("SELECT count() FROM file('%s', 'TSV', 'n UInt64')", file)).Scan(&written); err != nil {
@@ -311,6 +305,12 @@ func TestSendDoesNotRepeatAnInsertClickHouse(t *testing.T) {
 	}
 	if written > 500000 {
 		t.Fatalf("the file holds %d rows: the INSERT ran twice", written)
+	}
+	if n := counter.queries.Load(); n != 1 {
+		t.Fatalf("the INSERT was sent %d times, want 1", n)
+	}
+	if !isUnknownSetting(err) || !strings.Contains(err.Error(), "did not send the statement again") {
+		t.Fatalf("the INSERT returned %v, want UNKNOWN_SETTING and that Logchef did not send it again", err)
 	}
 }
 
