@@ -141,6 +141,8 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	var queryDuration time.Duration
 
 	timeout := c.queryTimeout(opts.TimeoutSeconds)
+	// The query's context ends with its rows, before the modes check.
+	callerCtx := ctx
 	// Bound the Go context by the timeout too — max_execution_time only limits
 	// ClickHouse-side execution, not a stalled network read or driver hang.
 	ctx, cancel := withQueryTimeout(ctx, timeout)
@@ -166,14 +168,13 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	truncatedReason := ""
 	var progress queryProgress
 	var settings clickhouse.Settings
-	var unsentModes bool
 
 	// Execute the core query logic within the hook wrapper.
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		var queryErr error
 		queryStartTime = time.Now() // Reset timer before execution
 
-		rows, settings, unsentModes, queryErr = c.queryResultRows(hookCtx, query, opts, &progress)
+		rows, settings, queryErr = c.queryResultRows(hookCtx, query, opts, &progress)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -245,7 +246,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			Truncated:       truncatedReason != "",
 			TruncatedReason: truncatedReason,
 			LimitSource:     opts.LimitSource,
-			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(settings, unsentModes, query)),
+			Truncation:      opts.truncation(len(resultData), truncatedReason, progress.end(settings, c.modesUnsent(callerCtx, settings), query)),
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
@@ -258,6 +259,8 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 // retaining the full result set in memory.
 func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOptions, writer RowStreamWriter) (models.QueryStats, error) {
 	start := time.Now()
+	// The query's context ends with its rows, before the modes check.
+	callerCtx := ctx
 	// Bound the Go context by the timeout (backstop for network/driver stalls
 	// beyond ClickHouse's max_execution_time). Safe to cancel on return: rows
 	// are fully consumed within this call.
@@ -272,7 +275,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	var rowsReturned int
 	var progress queryProgress
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		rows, settings, unsentModes, err := c.queryResultRows(hookCtx, query, opts, &progress)
+		rows, settings, err := c.queryResultRows(hookCtx, query, opts, &progress)
 		if err != nil {
 			return err
 		}
@@ -320,7 +323,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		stats.RowsReturned = rowsReturned
 		stats.LimitApplied = opts.LimitApplied
 		stats.LimitSource = opts.LimitSource
-		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(settings, unsentModes, query))
+		stats.Truncation = opts.truncation(rowsReturned, stats.TruncatedReason, progress.end(settings, c.modesUnsent(callerCtx, settings), query))
 		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
 		return writer.Finish(stats)
 	})

@@ -218,13 +218,12 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
-// queryResultRows runs a result query and returns its rows, the settings it
-// sent and whether it left out an overflow mode the server knows. LogChef owns
-// the settings and the progress and profile callbacks for result queries.
-// Other driver options and callbacks are inherited from the hook context. A
-// rejected SELECT that reported no progress is sent again, as send
-// describes, so the progress counts one run.
-func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (rows driver.Rows, settings clickhouse.Settings, unsentModes bool, err error) {
+// queryResultRows runs a result query and returns its rows and the settings
+// it sent. LogChef owns the settings and the progress and profile callbacks
+// for result queries. Other driver options and callbacks are inherited from
+// the hook context. A rejected SELECT that reported no progress is sent
+// again, as send describes, so the progress counts one run.
+func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (rows driver.Rows, settings clickhouse.Settings, err error) {
 	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add), clickhouse.WithProfileInfo(progress.profile))
 	settings, err = c.send(ctx, func(ctx context.Context) (clickhouse.Settings, error) {
 		return c.resultQuerySettings(ctx, opts)
@@ -234,10 +233,7 @@ func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOp
 		rows, err = c.conn.Query(ctx, query)
 		return err
 	})
-	if err != nil {
-		return nil, nil, false, err
-	}
-	return rows, settings, c.modesUnsent(ctx, settings), nil
+	return rows, settings, err
 }
 
 // queryOwn runs one of Logchef's own queries, such as a table's metadata or

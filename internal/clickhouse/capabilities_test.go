@@ -352,3 +352,69 @@ func TestSendKeepsTheQueryOwnUnknownSettingClickHouse(t *testing.T) {
 		t.Fatalf("the SELECT was sent %d times, want 1", n)
 	}
 }
+
+// poolFiller holds each result query's rows until every connection of the
+// pool holds one.
+type poolFiller struct {
+	driver.Conn
+	waiting atomic.Int64
+	full    chan struct{}
+}
+
+func (c *poolFiller) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	rows, err := c.Conn.Query(ctx, query, args...)
+	if c.waiting.Add(-1) == 0 {
+		close(c.full)
+	}
+	select {
+	case <-c.full:
+	case <-ctx.Done():
+	}
+	return rows, err
+}
+
+// TestModesCheckWaitsForResultRowsClickHouse fills the client's pool with
+// result queries that each hold their rows, with server modes that lack
+// timeout_overflow_mode_leaf, as on a server older than 23.11. The new
+// connections make the modes stale, and reading them again takes a pool
+// connection, so a query that checked its modes while it held its rows would
+// wait for a connection that none of them gives back.
+func TestModesCheckWaitsForResultRowsClickHouse(t *testing.T) {
+	client, err := NewClient(ClientOptions{Host: testClickHouseAddr(t)}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	rewriteModeReads(client, func(_ int64, modes clickhouse.Settings) {
+		delete(modes, "timeout_overflow_mode_leaf")
+	})
+	// The first read dials the first connection, which makes it stale; the
+	// second keeps.
+	for range 2 {
+		if _, err := client.resultQuerySettings(t.Context(), QueryOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pool := client.conn.Stats().MaxOpenConns
+	filler := &poolFiller{Conn: client.conn, full: make(chan struct{})}
+	filler.waiting.Store(int64(pool))
+	client.conn = filler
+	dials := client.dials.Load()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var group sync.WaitGroup
+	for range pool {
+		group.Go(func() {
+			if _, err := client.QueryWithOptions(ctx, "SELECT number FROM numbers(1000000000)", QueryOptions{MaxRows: 1}); err != nil {
+				t.Errorf("a one-row query failed: %v", err)
+			}
+		})
+	}
+	group.Wait()
+	if client.dials.Load() == dials {
+		t.Fatal("the queries dialed no connection, so the modes never went stale")
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("%d queries that hold their rows waited out their deadline", pool)
+	}
+}

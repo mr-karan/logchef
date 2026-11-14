@@ -181,7 +181,9 @@ func isSelect(query string) bool {
 // modesUnsent reports whether a query that left out an overflow mode, as one
 // its server did not know, ran on a server that knows it: the driver may have
 // dialed a newer server after the modes were read. That mode's limit could
-// then cut the result.
+// then cut the result. Call it after the query released its rows: reading
+// the modes again takes a pool connection, and queries that wait for one
+// while they hold theirs can take the whole pool.
 func (c *Client) modesUnsent(ctx context.Context, settings clickhouse.Settings) bool {
 	if !slices.ContainsFunc(overflowModes, func(mode overflowMode) bool { return settings[mode.name] == nil }) {
 		return false
