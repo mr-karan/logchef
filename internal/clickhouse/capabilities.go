@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 	"golang.org/x/sync/singleflight"
@@ -124,22 +125,57 @@ func (c *Client) flattensJSON(ctx context.Context) bool {
 	return err == nil && enabled
 }
 
-// send runs do with the settings settingsFor returns. A connection the driver
-// dialed after the settings were chosen may reach a server that does not know
-// one of them. ClickHouse then rejects the query before it runs, so it is sent
-// once more with settings read from that server.
-func (c *Client) send(ctx context.Context, settingsFor func(context.Context) (clickhouse.Settings, error), do func(context.Context) error) (clickhouse.Settings, error) {
-	for retried := false; ; retried = true {
-		dials := c.dials.Load()
-		settings, err := settingsFor(ctx)
-		if err != nil {
-			return nil, err
-		}
-		err = do(clickhouse.Context(ctx, clickhouse.WithSettings(settings)))
-		if retried || !isUnknownSetting(err) || c.dials.Load() == dials {
-			return settings, err
+// send runs a statement with the settings settingsFor returns, and returns
+// them. A connection the driver dialed after they were chosen may reach a
+// server that does not know one of them, which rejects the statement with
+// UNKNOWN_SETTING. When the settings read again leave out one the statement
+// sent, a statement that unrun proves did not run is sent once more with
+// them. Any other statement fails with an error that says it was not sent
+// again: UNKNOWN_SETTING alone does not prove the server rejected it before
+// it ran, as throwIf can raise that code from a running INSERT. A setting
+// the statement's own SQL names and the server does not know still fails it
+// with ClickHouse's error.
+func (c *Client) send(ctx context.Context, settingsFor func(context.Context) (clickhouse.Settings, error), unrun func() bool, run func(context.Context) error) (clickhouse.Settings, error) {
+	dials := c.dials.Load()
+	settings, err := settingsFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	err = run(clickhouse.Context(ctx, clickhouse.WithSettings(settings)))
+	if !isUnknownSetting(err) || c.dials.Load() == dials {
+		return settings, err
+	}
+	current, readErr := settingsFor(ctx)
+	switch {
+	case readErr != nil || !leavesOut(settings, current):
+		return settings, err
+	case !unrun():
+		return settings, fmt.Errorf("a new connection reached a ClickHouse server that does not know a setting Logchef sent, and Logchef did not send the statement again because it may have run: check its effects, then run it again: %w", err)
+	}
+	return current, run(clickhouse.Context(ctx, clickhouse.WithSettings(current)))
+}
+
+// leavesOut reports whether current leaves out a setting that sent has.
+func leavesOut(sent, current clickhouse.Settings) bool {
+	for name := range sent {
+		if _, ok := current[name]; !ok {
+			return true
 		}
 	}
+	return false
+}
+
+// isSelect reports SQL that parses as one SELECT statement. ClickHouse sends
+// a SELECT's header block before it executes the query, so a SELECT that
+// fails before the driver returns its rows was not executed, and a SELECT
+// changes no data either way.
+func isSelect(query string) bool {
+	stmts, err := clickhouseparser.NewParser(query).ParseStmts()
+	if err != nil || len(stmts) != 1 {
+		return false
+	}
+	_, ok := stmts[0].(*clickhouseparser.SelectQuery)
+	return ok
 }
 
 // modesUnsent reports whether a query that left out an overflow mode, as one

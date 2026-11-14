@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 func (f *serverFact[T]) cached() bool {
@@ -235,5 +237,118 @@ func TestServerVersionChangeClickHouse(t *testing.T) {
 	}
 	if result := leafMode(t); len(result.Logs) != 1 || result.Logs[0]["value"] != "throw" || result.Stats.Truncation != models.TruncationNone {
 		t.Fatalf("the newer server read %v with truncation %q after the move back, want throw and none", result.Logs, result.Stats.Truncation)
+	}
+}
+
+// rewriteModeReads passes each read of client's overflow modes, numbered from
+// 1, to rewrite, as if new connections had reached servers of other versions.
+func rewriteModeReads(client *Client, rewrite func(read int64, modes clickhouse.Settings)) {
+	read := client.throwModes.read
+	var reads atomic.Int64
+	client.throwModes.read = func(ctx context.Context) (clickhouse.Settings, error) {
+		modes, err := read(ctx)
+		if err == nil {
+			rewrite(reads.Add(1), modes)
+		}
+		return modes, err
+	}
+}
+
+// queryCounter counts the statements a client sends with Query.
+type queryCounter struct {
+	driver.Conn
+	queries atomic.Int64
+}
+
+func (c *queryCounter) Query(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	c.queries.Add(1)
+	return c.Conn.Query(ctx, query, args...)
+}
+
+// countedClient returns a new client whose Query calls counter counts. Its
+// first lookup of the server's modes dials its first connection, so a
+// statement it sends first runs after a dial.
+func countedClient(t *testing.T) (*Client, *queryCounter) {
+	t.Helper()
+	client, err := NewClient(ClientOptions{Host: testClickHouseAddr(t)}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	counter := &queryCounter{Conn: client.conn}
+	client.conn = counter
+	return client, counter
+}
+
+// TestSendDoesNotRepeatAnInsertClickHouse runs an INSERT that writes rows and
+// then fails with code 115, UNKNOWN_SETTING, raised by throwIf. The read of
+// the server's modes after the failure leaves out one the INSERT sent, as if
+// its new connection had reached an older server. The INSERT may have run,
+// so Logchef must not send it again, and its error must say so.
+func TestSendDoesNotRepeatAnInsertClickHouse(t *testing.T) {
+	client, counter := countedClient(t)
+	rewriteModeReads(client, func(read int64, modes clickhouse.Settings) {
+		if read > 1 {
+			delete(modes, "read_overflow_mode_leaf")
+		}
+	})
+	file := fmt.Sprintf("logchef_test_%d.tsv", time.Now().UnixNano())
+	_, err := client.Query(t.Context(), fmt.Sprintf("INSERT INTO FUNCTION file('%s', 'TSV', 'n UInt64') SELECT number FROM numbers(1000000) WHERE throwIf(number = 500000, 'Unknown setting', toInt32(115)) = 0 SETTINGS max_block_size = 1000, max_threads = 1, allow_custom_error_code_in_throwif = 1", file))
+	if !isUnknownSetting(err) || !strings.Contains(err.Error(), "did not send the statement again") {
+		t.Fatalf("the INSERT returned %v, want UNKNOWN_SETTING and that Logchef did not send it again", err)
+	}
+	if n := counter.queries.Load(); n != 1 {
+		t.Fatalf("the INSERT was sent %d times, want 1", n)
+	}
+	// One run writes at most the 500000 rows before the row that throws.
+	var written uint64
+	if err := client.conn.QueryRow(t.Context(), fmt.Sprintf("SELECT count() FROM file('%s', 'TSV', 'n UInt64')", file)).Scan(&written); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the file holds %d rows", written)
+	if written == 0 {
+		t.Fatal("the INSERT wrote no rows before it failed, so a second run would not show")
+	}
+	if written > 500000 {
+		t.Fatalf("the file holds %d rows: the INSERT ran twice", written)
+	}
+}
+
+// TestSendRepeatsARejectedSelectClickHouse has the first read of the
+// server's modes return a setting the server does not know, as a read from a
+// newer server before a new connection reached this one. The server rejects
+// the SELECT before it runs it, the read again leaves the setting out, and
+// Logchef sends the SELECT once more.
+func TestSendRepeatsARejectedSelectClickHouse(t *testing.T) {
+	client, counter := countedClient(t)
+	rewriteModeReads(client, func(read int64, modes clickhouse.Settings) {
+		if read == 1 {
+			modes["logchef_test_unknown_overflow_mode"] = "throw"
+		}
+	})
+	result, err := client.QueryWithOptions(t.Context(), "SELECT number FROM numbers(3)", QueryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Logs) != 3 || result.Stats.Truncation != models.TruncationNone {
+		t.Fatalf("the SELECT read %v with truncation %q, want 3 rows and none", result.Logs, result.Stats.Truncation)
+	}
+	if n := counter.queries.Load(); n != 2 {
+		t.Fatalf("the SELECT was sent %d times, want 2", n)
+	}
+}
+
+// TestSendKeepsTheQueryOwnUnknownSettingClickHouse sends a SELECT whose own
+// SETTINGS name a setting the server does not know, right after a dial. The
+// server's modes read again are the same, so sending it again cannot help:
+// it fails once, with ClickHouse's error.
+func TestSendKeepsTheQueryOwnUnknownSettingClickHouse(t *testing.T) {
+	client, counter := countedClient(t)
+	_, err := client.QueryWithOptions(t.Context(), "SELECT 1 SETTINGS logchef_test_no_such_setting = 1", QueryOptions{})
+	if !isUnknownSetting(err) || !strings.Contains(err.Error(), "logchef_test_no_such_setting") {
+		t.Fatalf("the SELECT returned %v, want ClickHouse's unknown setting error", err)
+	}
+	if n := counter.queries.Load(); n != 1 {
+		t.Fatalf("the SELECT was sent %d times, want 1", n)
 	}
 }
