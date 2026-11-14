@@ -200,6 +200,14 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   names the limit. Histograms fail when their result may be incomplete.
   Alerts reject query `SETTINGS` that can stop the query early, and live
   tail rejects a filter that holds them.
+- Logchef reads the ClickHouse version again after each new connection, so
+  these guarantees hold when a source's server is upgraded, rolled back or
+  replaced. They assume one ClickHouse version behind a source's address at a
+  time. With two at once, such as during a rolling upgrade behind a load
+  balancer, a query can fail with an unknown setting error, and
+  `timeout_overflow_mode_leaf` (ClickHouse 23.11 and later) can go unsent, so
+  a newer server's profile that sets it to `'break'` can cut a result that
+  reports `truncation: none`. Every other limit stays enforced.
 - Logchef's own ClickHouse queries for a table's schema, source stats, the
   table check and table creation read their whole result. Before, a profile
   `limit = 1` returned one column of a table's schema. The source's

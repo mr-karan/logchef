@@ -2,6 +2,20 @@ package clickhouse
 
 // Server capabilities: what Logchef reads from the server behind a client's
 // connections, read again after the driver dials a new connection.
+//
+// Logchef assumes one ClickHouse version behind a source's address at a time.
+// The driver does not say which connection, or which server, ran a query, so
+// a capability read and a query may reach different servers. With two
+// versions behind one address at once, as during a rolling upgrade behind a
+// load balancer, every query still sends limit, offset and
+// skip_unavailable_shards as 0, Logchef's result limits, and throw for every
+// overflow mode that all supported versions know. Only the settings a version
+// may lack follow the last read: timeout_overflow_mode_leaf, from 23.11, and
+// the flattened JSON format. A query that sends one of them to a server
+// without it can fail with UNKNOWN_SETTING. A query that leaves out
+// timeout_overflow_mode_leaf, because the last read reached an older server,
+// can be cut on a newer server whose settings profile sets that mode to
+// break, and its truncation can still read none.
 
 import (
 	"context"
