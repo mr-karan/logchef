@@ -709,3 +709,10 @@ describe("SQL result kind boundary", () => {
     expect(switched.viz.type).toBe(kind === "chart" ? "chart" : "toplist");
   });
 });
+
+it("rejects previous-row comparison with the count default sum reducer", () => {
+  const stat = chart("count", {}, { viz: { type: "stat", compare: { mode: "previous_row" } } });
+  expect(validatePanelsBlob(blobOf([stat]))).toContain("comparison needs first or last reducer");
+  stat.viz = { type: "stat", reduce: "last", compare: { mode: "previous_row" } };
+  expect(validatePanelsBlob(blobOf([stat]))).toBeNull();
+});

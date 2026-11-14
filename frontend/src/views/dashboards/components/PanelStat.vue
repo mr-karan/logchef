@@ -3,9 +3,9 @@ import { VisXYContainer, VisLine, VisCrosshair, VisTooltip } from "@unovis/vue";
 import { escapeHtml } from "@/lib/html";
 import { chartValue } from "@/utils/panelCharts";
 import { useI18n } from "vue-i18n";
-import type { StatPoint } from "@/utils/panelFrame";
+import type { CrosshairConfigInterface, Crosshair, Tooltip } from "@unovis/ts";
 import { usePreferencesStore } from "@/stores/preferences";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import type { DashboardQueryPanel } from "@/api/dashboards";
 import { frameWithKinds, reduceStat, type PanelFrame } from "@/utils/panelFrame";
@@ -62,7 +62,25 @@ const sparkline = computed(() => {
 type PlotPoint = (typeof sparkline.value.rows)[number];
 const x = (point: PlotPoint) => point.x;
 const y = (point: PlotPoint) => point.plot?.coordinate ?? Number.NaN;
-const sparklineTemplate = (rows: StatPoint[]) => rows.map(point => escapeHtml(`${point.label}: ${point.value === null ? "NULL" : formatNumber(point.value, format.value).exact}`)).join("<br>");
+const pointText = (point: PlotPoint) => `${point.label}: ${point.value === null ? "NULL" : formatNumber(point.value, format.value).exact}`;
+const sparklineTemplate: NonNullable<CrosshairConfigInterface<PlotPoint>["template"]> = point => escapeHtml(pointText(point));
+const active = ref<number | null>(null);
+const crosshair = ref<{ component?: Crosshair<PlotPoint> }>();
+const tooltip = ref<{ component?: Tooltip }>();
+watch(sparkline, () => {
+  active.value = null;
+  tooltip.value?.component?.hide();
+  crosshair.value?.component?.hide();
+});
+function keydown(event: KeyboardEvent) {
+  if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Escape"].includes(event.key)) return;
+  event.preventDefault();
+  const last = sparkline.value.rows.length - 1;
+  if (event.key === "Escape") active.value = null;
+  else if (event.key === "Home") active.value = 0;
+  else if (event.key === "End") active.value = last;
+  else active.value = Math.max(0, Math.min(last, (active.value ?? 0) + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1)));
+}
 </script>
 
 <template>
@@ -77,22 +95,23 @@ const sparklineTemplate = (rows: StatPoint[]) => rows.map(point => escapeHtml(`$
         <span v-if="percent"> ({{ comparison.direction > 0 ? '+' : '' }}{{ percent.text }})</span>
         <span class="block text-muted-foreground">{{ t('dashboardBuilder.ComparedWith', { date: comparison.rowLabel }) }}</span>
       </div>
-      <div v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length" class="panel-stat__sparkline w-full" :aria-label="t('dashboardBuilder.Sparkline')">
+      <div v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length" class="panel-stat__sparkline w-full" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark: t('dashboardBuilder.Sparkline') })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
         <p v-if="sparkline.error" class="text-xs text-destructive" role="alert">{{ sparkline.error }}</p>
         <span v-if="sparkline.approximate" class="text-xs text-muted-foreground">{{ t('dashboardBuilder.ApproximateSparkline') }}</span>
-        <VisXYContainer v-if="!sparkline.error" :data="sparkline.rows" :height="48" :margin="{ top: 2, bottom: 2, left: 2, right: 2 }">
+        <VisXYContainer v-if="!sparkline.error" aria-hidden="true" :data="sparkline.rows" :height="48" :duration="0" :margin="{ top: 2, bottom: 2, left: 2, right: 2 }">
           <VisLine :x="x" :y="y" color="var(--primary)" />
-          <VisCrosshair :template="sparklineTemplate" />
-          <VisTooltip />
+          <VisCrosshair ref="crosshair" :x="x" :y="y" :duration="0" :template="sparklineTemplate" :hide-when-far-from-pointer="false" :force-show-at="active === null ? undefined : sparkline.rows[active]?.x" />
+          <VisTooltip ref="tooltip" />
         </VisXYContainer>
       </div>
+      <div class="sr-only" aria-live="polite" aria-atomic="true"><template v-if="active !== null && sparkline.rows[active]">{{ pointText(sparkline.rows[active]) }}</template></div>
       <p v-for="notice in result.stat?.notices" :key="notice" class="text-xs text-muted-foreground" role="status">{{ notice }}</p>
     </template>
   </div>
 </template>
 
 <style scoped>
-.panel-stat { display: flex; flex-direction: column; gap: 0.5rem; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 0.5rem; container-type: inline-size; overflow: hidden; position: relative; }
+.panel-stat { --vis-tooltip-background-color: var(--popover); --vis-tooltip-text-color: var(--popover-foreground); --vis-tooltip-border-color: var(--border); display: flex; flex-direction: column; gap: 0.5rem; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 0.5rem; container-type: inline-size; overflow: hidden; position: relative; }
 .panel-stat__value { font-size: clamp(1.75rem, 6cqw, 3rem); font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--foreground); letter-spacing: -0.02em; overflow-wrap: anywhere; }
 .panel-stat__measure { position: absolute; visibility: hidden; white-space: nowrap; font-size: 1.75rem; font-weight: 650; }
 </style>
