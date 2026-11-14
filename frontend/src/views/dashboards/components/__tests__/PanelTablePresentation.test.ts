@@ -10,3 +10,17 @@ it('highlights the first matching row and keeps unformatted timestamp precision'
  const app=createApp({render:()=>h(PanelTable,{frame,rules:[{columns:['details'],op:'contains',value:'retry',scope:'row',color:'red'},{columns:['n'],op:'contains',value:'50',scope:'cell',color:'blue'}]})}).use(createPinia()).use(i18n);
  try {app.mount(host);await nextTick();expect(host.querySelector<HTMLElement>('tbody tr')?.style.backgroundColor).toBe('var(--panel-red-background)');expect(host.textContent).toContain('.123456');expect(host.querySelector<HTMLElement>('tbody td:last-child')?.style.backgroundColor).toBe('var(--panel-blue-background)');} finally {app.unmount();}
 });
+
+it('matches a time rule against the timestamp the table shows, and a number rule against its digits', async () => {
+ const frame=resultFrame({columns:[{name:'ts',type:'DateTime64(6)'},{name:'n',type:'UInt64'}],rows:[{ts:'2026-11-12T23:05:09.123456Z',n:'1500'}]});
+ const host=document.createElement('div');
+ localStorage.setItem('logchef_user_preferences', JSON.stringify({ timezone: 'utc' }));
+ // A medium date format shows the month name ("Nov"), which the raw ISO text never contains.
+ const app=createApp({render:()=>h(PanelTable,{frame,columnFormats:{ts:{kind:'time',date:'medium'},n:{kind:'number',decimals:0}},rules:[{columns:['ts'],op:'contains',value:'Nov',scope:'row',color:'red'},{columns:['n'],op:'contains',value:'50',scope:'cell',color:'blue'}]})}).use(createPinia()).use(i18n);
+ try {
+  app.mount(host);await nextTick();
+  expect(host.textContent).toContain('Nov');
+  expect(host.querySelector<HTMLElement>('tbody tr')?.style.backgroundColor).toBe('var(--panel-red-background)');
+  expect(host.querySelector<HTMLElement>('tbody td:last-child')?.style.backgroundColor).toBe('var(--panel-blue-background)');
+ } finally {app.unmount();}
+});

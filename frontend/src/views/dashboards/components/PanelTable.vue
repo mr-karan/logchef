@@ -128,12 +128,12 @@ const notices = computed(() => {
           </TableRow>
         </TableHeader>
         <TableBody>
-          <TableRow v-for="(row, idx) in pagedRows" :key="idx" :style="paletteStyle(tableRuleColor(row, rules, undefined, typedFrame.columns), true)">
+          <TableRow v-for="(row, idx) in pagedRows" :key="idx" :style="paletteStyle(tableRuleColor(row, rules, undefined, typedFrame.columns, name => cellValue(row, name)), true)">
             <TableCell
               v-for="col in displayColumns"
               :key="col"
               class="panel-table__cell"
-              :style="paletteStyle(tableRuleColor(row, rules, col, typedFrame.columns), true)"
+              :style="paletteStyle(tableRuleColor(row, rules, col, typedFrame.columns, name => cellValue(row, name)), true)"
               :title="cellTitle(row, col)"
             >
               {{ cellValue(row, col) }}
