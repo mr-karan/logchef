@@ -429,3 +429,30 @@ fn a_commented_macro_keeps_the_since_filter() {
     );
     assert!(body.get("start_time").is_none(), "{body}");
 }
+
+/// A trailing line comment must not swallow the time condition the CLI adds.
+#[test]
+fn a_trailing_line_comment_keeps_the_since_filter_live() {
+    let server = FakeServer::start(false);
+    let home = TestHome::new("trailing-comment");
+    home.write_config(&config_with(&server.url, json!({"token": PAT})));
+    let mut cmd = home.logchef();
+    cmd.args([
+        "sql",
+        "SELECT * FROM logs -- {{__from}}",
+        "--since",
+        "2h",
+        "--team",
+        "1",
+        "--source",
+        "2",
+        "--output",
+        "json",
+    ]);
+    let out = run(cmd);
+    assert_success(&out);
+    let state = server.state();
+    let query = state.native_requests[0]["query_text"].as_str().unwrap().to_string();
+    let live = query.split_once('\n').map(|(_, rest)| rest).unwrap_or_default();
+    assert!(live.contains("fromUnixTimestamp64Milli"), "time condition is inside the comment: {query}");
+}
