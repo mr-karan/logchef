@@ -981,3 +981,39 @@ func TestHealthLockWaitRespectsCallerContext(t *testing.T) {
 		t.Error("health lock waiter ignored caller deadline")
 	}
 }
+
+// A repointed source must not carry the old host's secrets: the new server
+// would receive them during validation.
+func TestUpdateSourceNeverSendsStoredSecretsToNewBaseURL(t *testing.T) {
+	t.Parallel()
+
+	var leaked atomic.Bool
+	newServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Api-Key") != "" {
+			leaked.Store(true)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer newServer.Close()
+	provider := newTestProvider(newServer)
+
+	for name, conn := range map[string]models.VictoriaLogsConnectionInfo{
+		"bearer token":   {BaseURL: newServer.URL, Auth: models.VictoriaLogsAuth{Mode: "bearer"}},
+		"basic password": {BaseURL: newServer.URL, Auth: models.VictoriaLogsAuth{Mode: "basic", Username: "user"}},
+		"custom header":  {BaseURL: newServer.URL, Headers: map[string]string{"X-Api-Key": ""}},
+	} {
+		source := mustSource(t, models.VictoriaLogsConnectionInfo{
+			BaseURL: "https://old.example",
+			Auth:    models.VictoriaLogsAuth{Mode: conn.Auth.Mode, Username: "user", Password: "old-pass", Token: "old-token"},
+			Headers: map[string]string{"X-Api-Key": "old-key"},
+		})
+		_, err := provider.UpdateSource(context.Background(), source, &models.UpdateSourceRequest{Connection: mustJSON(t, conn)})
+		var validation *datasource.ValidationError
+		if !errors.As(err, &validation) || !strings.Contains(validation.Message, "base URL changed") {
+			t.Fatalf("%s: err = %v, want a credentials-again validation error", name, err)
+		}
+	}
+	if leaked.Load() {
+		t.Fatal("the new base URL received a stored secret")
+	}
+}

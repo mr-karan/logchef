@@ -570,17 +570,19 @@ func TestClassifyActivityError(t *testing.T) {
 }
 
 // TestUpdateSourceNeverSendsStoredPasswordToNewHost refuses to reuse the
-// stored password when the host or username changes, before any connection.
+// stored password when the host, username or TLS setting changes, before any
+// connection.
 func TestUpdateSourceNeverSendsStoredPasswordToNewHost(t *testing.T) {
 	provider := NewClickHouseProvider(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	for name, conn := range map[string]string{
-		"new host":     `{"host":"other.example:9000","username":"reader","password":"","database":"logs","table_name":"app"}`,
-		"new username": `{"host":"ch.example:9000","username":"admin","password":"","database":"logs","table_name":"app"}`,
+		"new host":       `{"host":"other.example:9000","username":"reader","password":"","database":"logs","table_name":"app","tls_enable":true}`,
+		"new username":   `{"host":"ch.example:9000","username":"admin","password":"","database":"logs","table_name":"app","tls_enable":true}`,
+		"TLS turned off": `{"host":"ch.example:9000","username":"reader","password":"","database":"logs","table_name":"app","tls_enable":false}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			source := &models.Source{
 				SourceType: models.SourceTypeClickHouse,
-				Connection: models.ConnectionInfo{Host: "ch.example:9000", Username: "reader", Password: "stored-secret", Database: "logs", TableName: "app"},
+				Connection: models.ConnectionInfo{Host: "ch.example:9000", Username: "reader", Password: "stored-secret", Database: "logs", TableName: "app", TLSEnable: true},
 			}
 			_, err := provider.UpdateSource(context.Background(), source, &models.UpdateSourceRequest{Connection: json.RawMessage(conn)})
 			var validation *ValidationError
