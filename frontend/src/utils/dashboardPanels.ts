@@ -9,6 +9,8 @@ import {
   type DashboardViz,
   type DashboardVizType,
   type PanelQueryLanguage,
+  type DashboardPanelQuery,
+  type PanelInterval,
 } from "@/api/dashboards";
 
 // The dashboard grid is 12 columns wide. A panel spans 2 to 12 columns and 1 to
@@ -134,17 +136,34 @@ export function switchPanelKind(panel: DashboardQueryPanel, kind: PanelBuilderKi
     ? { translate_limit: panel.query.translate_limit }
     : {};
   const groupBy = panel.query.group_by !== undefined ? { group_by: panel.query.group_by } : {};
+  // The interval and the range belong to the query, whatever draws it.
+  const interval = panel.query.interval ?? "auto";
+  const range = panel.query.range !== undefined ? { range: panel.query.range } : {};
   switch (kind) {
     case "chart":
-      return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "chart", mark: "line", stack: "none" } };
+      return { ...panel, query: { mode: "count", language, text, ...groupBy, interval, ...translate, ...range }, viz: { type: "chart", mark: "line", stack: "none" } };
     case "stat":
-      return { ...panel, query: { mode: "count", language, text, interval: "auto", ...translate }, viz: { type: "stat", reduce: "sum" } };
+      return { ...panel, query: { mode: "count", language, text, interval, ...translate, ...range }, viz: { type: "stat", reduce: "sum" } };
     case "breakdown":
-      return { ...panel, query: { mode: "count", language, text, ...groupBy, interval: "auto", ...translate }, viz: { type: "toplist" } };
+      return { ...panel, query: { mode: "count", language, text, ...groupBy, interval, ...translate, ...range }, viz: { type: "toplist" } };
     case "table":
-      return { ...panel, query: { mode: "result", language, text }, viz: { type: "table" } };
+      return { ...panel, query: { mode: "result", language, text, ...resultInterval(interval), ...range }, viz: { type: "table" } };
   }
 }
+
+/** A result query stores only a fixed interval: `auto` is its default, so the key is left out. */
+export function resultInterval(interval: DashboardPanelQuery["interval"]): { interval?: PanelInterval } {
+  return interval === undefined || interval === "auto" ? {} : { interval };
+}
+
+/** The range grammar of `query.range` and `default_time_range`, as the server checks it. */
+const DASHBOARD_RANGE_PATTERN = /^([1-9]\d{0,3}[mhdw]|today|yesterday|today-[1-9]\d{0,3}d)$/;
+
+export function isDashboardRange(value: string): boolean {
+  return DASHBOARD_RANGE_PATTERN.test(value);
+}
+
+const PANEL_INTERVAL_VALUES: readonly string[] = ["auto", "1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h", "12h", "24h"];
 
 interface NormalizedPanel {
   panel: DashboardPanel;
@@ -483,8 +502,11 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
   if ((viz.type === "pie" || viz.type === "toplist") && count && query.group_by === undefined) {
     return `Breakdown panel "${label}" requires a group-by field.`;
   }
-  if (query.interval !== undefined && (!count || query.interval !== "auto")) {
+  if (query.interval !== undefined && !PANEL_INTERVAL_VALUES.includes(query.interval)) {
     return `Panel "${label}" has an unsupported interval.`;
+  }
+  if (query.range !== undefined && !isDashboardRange(query.range)) {
+    return `Panel "${label}" has an invalid time range.`;
   }
   if (query.limit !== undefined) {
     if (count) return `Panel "${label}" cannot limit a count query.`;

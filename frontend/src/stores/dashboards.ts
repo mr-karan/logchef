@@ -13,6 +13,7 @@ import {
   type DashboardSummary,
   dashboardNeedsReload,
   type DashboardViz,
+  type PanelInterval,
   type CreateDashboardRequest,
   type UpdateDashboardRequest,
   type HistogramRequestBody,
@@ -22,7 +23,6 @@ import {
 } from "@/api/dashboards";
 import { countFrame, resultFrame, type PanelFrame } from "@/utils/panelFrame";
 import type { QueryStats } from "@/api/explore";
-import { calculateOptimalGranularity } from "@/services/HistogramService";
 import {
   addPanelToTab,
   dashboardTab,
@@ -44,7 +44,7 @@ import {
 } from "@/utils/dashboardPanels";
 import {
   epochMs,
-  parseRelativeSpec,
+  formatInZone,
   relativeWindow,
   resolveWindow,
   toRfc3339,
@@ -60,9 +60,13 @@ import {
   classifyPanelError,
   clampTableLimit,
   execSignature,
-  resolveAppliedRange,
   resolveEffectiveCacheTtl,
+  resolveExecutedRange,
+  resolveInterval,
+  resolvePanelRange,
+  zoneOffsetChange,
 } from "@/utils/dashboardRuntime";
+import { parseGranularityToMilliseconds } from "@/utils/histogram-chart";
 import { i18n } from "@/i18n";
 
 // Number of panel fetches allowed in flight at once. A 24-panel dashboard would
@@ -93,12 +97,17 @@ export interface PanelState {
   error?: string;
   range?: ResolvedWindow;
   querySignature?: string;
+  /** The window the query ran with, and whether a fixed interval was raised to fit the range. */
+  interval?: PanelInterval;
+  intervalRaised?: boolean;
 }
 
 
 // What one refresh runs its panels with. A tab shown after the refresh began
 // runs with the same range and cache, so every tab shows the same window.
 interface RefreshRun {
+  nowMs: number;
+  effTtl: number;
   range: ResolvedWindow;
   cache?: CacheDirective;
   signal: AbortSignal;
@@ -278,13 +287,33 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // the unsnapped base range in the preference zone, then delegates the
   // snap/moving-window decision to the pure resolveAppliedRange.
   function computeAppliedRange(nowMs: number, effTtlSeconds: number): ResolvedWindow {
-    const window = state.data.value.window;
-    const { start, end, zone } = resolveWindow(window, preferencesStore.zone, epochMs(nowMs));
-    // today/yesterday are calendar-boundary presets — never snapped.
-    const kind =
-      window.kind === "absolute" ? "absolute" : parseRelativeSpec(window.spec)?.kind === "calendar" ? "calendar" : "rolling";
-    const applied = resolveAppliedRange({ kind, baseStart: start, baseEnd: end, durationMs: end - start, effTtlSeconds, nowMs });
-    return { start: epochMs(applied.start), end: epochMs(applied.end), zone };
+    return resolveExecutedRange(state.data.value.window, preferencesStore.zone, nowMs, effTtlSeconds);
+  }
+
+  // A panel that pins its own range queries it in place of the dashboard range.
+  function panelRange(panel: DashboardPanel, dashboardRange: ResolvedWindow, nowMs: number, effTtlSeconds: number): ResolvedWindow {
+    if (panel.locked) return dashboardRange;
+    return resolvePanelRange({ panelRange: panel.query.range, dashboardRange, nowMs, effTtlSeconds });
+  }
+
+  // VictoriaLogs keeps the UTC offset of the range start for every count
+  // bucket. After a daylight-saving change inside the range, a bucket longer
+  // than one hour sits off local midnight, and the panel says so.
+  function fixedOffsetNotice(range: ResolvedWindow, window: string): string | null {
+    const step = parseGranularityToMilliseconds(window);
+    if (!step || step <= 3_600_000) return null;
+    const change = zoneOffsetChange(range);
+    if (!change) return null;
+    const offset = (ms: number) => {
+      const minutes = Math.abs(ms) / 60_000;
+      return `UTC${ms < 0 ? "-" : "+"}${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    };
+    return i18n.global.t("dashboards.fixedOffsetNotice", {
+      zone: range.zone,
+      at: formatInZone(change.at, range.zone, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }, i18n.global.locale.value),
+      before: offset(change.beforeMs),
+      after: offset(change.afterMs),
+    });
   }
 
   function getPanelState(panelId: string): PanelState {
@@ -455,7 +484,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         return { status: "error", error: "Breakdown panels require a group-by field." };
       }
       const { query: queryText, language: nativeLanguage } = await resolveNativeQuery(panel, range, signal);
-      const window = calculateOptimalGranularity(startIso, endIso);
+      const { window, raised } = resolveInterval(panel.query.interval, range);
 
       // query_language is advisory today (the native endpoints interpret
       // query_text by source type) but is sent so a VictoriaLogs source runs
@@ -475,7 +504,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const buckets = data?.data ?? [];
 
       const frame = countFrame(buckets, data?.granularity ?? window, !!groupBy, data?.notice, range, nativeLanguage === "logsql" ? "fixed-offset" : "calendar");
-      return { status: buckets.length ? "success" : "empty", frame };
+      const offsetNotice = nativeLanguage === "logsql" ? fixedOffsetNotice(range, window) : null;
+      if (offsetNotice) frame.notices.push(offsetNotice);
+      return { status: buckets.length ? "success" : "empty", frame, interval: window, intervalRaised: raised };
     }
 
     // Result queries share one frame, independent of the visualization.
@@ -484,12 +515,15 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // the logs/query endpoint. Only LogchefQL takes the compile path below;
     // routing a logsql panel there used to break VictoriaLogs tables (#119 A4).
     if (panel.query.language === "clickhouse-sql" || panel.query.language === "logsql") {
+      // The interval feeds {{__interval}}. The server ignores it in a query without the macro.
+      const { window, raised } = resolveInterval(panel.query.interval, range);
       const sqlBody: SqlQueryRequestBody = {
         query_text: panel.query.text,
         limit,
         start_time: startIso,
         end_time: endIso,
         timezone: range.zone,
+        interval: window,
         query_language: panel.query.language,
         ...(cache ? { cache } : {}),
       };
@@ -500,6 +534,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         status: rows.length ? "success" : "empty",
         frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: panel.query.language === "logsql", stats: data?.stats }),
         stats: data?.stats,
+        interval: window,
+        intervalRaised: raised,
       };
     }
 
@@ -583,7 +619,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         limitPanelFetch(async () => {
           try {
             if (run.signal.aborted || !activeTabPanels().some((p) => p.id === panel.id)) return;
-            await executePanel(panel, run.range, run.signal, run.cache);
+            await executePanel(panel, panelRange(panel, run.range, run.nowMs, run.effTtl), run.signal, run.cache);
             if (!run.signal.aborted) run.completed.add(panel.id);
           } finally {
             run.queued.delete(panel.id);
@@ -653,7 +689,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Only the tab on screen runs. A hidden tab's results belong to an earlier
     // refresh: drop them, so the tab holds no frames while hidden and runs
     // with this refresh's range when it is shown.
-    const run: RefreshRun = { range, cache, signal, queued: new Set(), completed: new Set() };
+    const run: RefreshRun = { range, nowMs, effTtl, cache, signal, queued: new Set(), completed: new Set() };
     refreshRun = run;
     const panels = activeTabPanels();
     const shown = new Set(panels.map((p) => p.id));
@@ -675,7 +711,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     singlePanelAborts.set(panel.id, controller);
     const run = refreshRun;
     run?.completed.delete(panel.id);
-    void executePanel(panel, effectiveRange.value, controller.signal).finally(() => {
+    void executePanel(panel, panelRange(panel, effectiveRange.value, Date.now(), 0), controller.signal).finally(() => {
       if (!controller.signal.aborted) run?.completed.add(panel.id);
       if (singlePanelAborts.get(panel.id) === controller) {
         singlePanelAborts.delete(panel.id);
@@ -1097,7 +1133,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const querySignature = execSignature(panel);
     state.data.value.previewState = { status: "loading" };
     try {
-      const range = effectiveRange.value;
+      const range = panelRange(panel, effectiveRange.value, Date.now(), 0);
       const result = await fetchPanelFrame(panel, range, signal);
       if (signal.aborted) return;
       if (result.frame) markRaw(result.frame);

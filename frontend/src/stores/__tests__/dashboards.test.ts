@@ -849,7 +849,7 @@ describe("dashboards store — schema 2 request parity", () => {
       version: 2,
       features: [...DASHBOARD_CLIENT_FEATURES],
       cache_ttl_seconds: 300,
-      default_time_range: "6h",
+      default_time_range: "today-6d",
       // Two tabs, a free width (5, 7) and a free height (9): tabs and free_grid.
       tabs: [
         { id: "today", title: "Current day", layout: [
@@ -858,10 +858,10 @@ describe("dashboards store — schema 2 request parity", () => {
         { id: "week", title: "Last 7 days", layout: [{ id: "t", x: 0, y: 0, w: 12, h: 3 }] },
       ],
       panels: [
-        { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "auto", translate_limit: 50 }, viz: { type: "chart", mark: "bar", stack: "none", legend: false } },
+        { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "24h", translate_limit: 50, range: "today-6d" }, viz: { type: "chart", mark: "bar", stack: "none", legend: false } },
         { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n", order_by: "at", columns: { n: { kind: "number", confidence: "confirmed" }, at: { kind: "time", confidence: "confirmed" } }, reduce: "last", compare: { mode: "previous_row", good: "up" }, sparkline: true, thresholds: [{ value: null, color: "green" }, { value: "100", color: "red" }], color_mode: "background", format: { decimals: 2 } } },
         { id: "p", kind: "query", title: "pie", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "", group_by: "host", interval: "auto" }, viz: { type: "pie", donut: true } },
-        { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 100 }, viz: { type: "table", visible_columns: ["message", "host"], rules: [{ columns: ["message"], op: "contains", value: "retry", scope: "row", color: "red" }], column_formats: { host: { kind: "number", decimals: 2 } }, columns: { host: { kind: "category", confidence: "confirmed" } } } },
+        { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1 FROM logs WHERE {{__time_filter}}", limit: 100, interval: "1h", range: "7d" }, viz: { type: "table", visible_columns: ["message", "host"], rules: [{ columns: ["message"], op: "contains", value: "retry", scope: "row", color: "red" }], column_formats: { host: { kind: "number", decimals: 2 } }, columns: { host: { kind: "category", confidence: "confirmed" } } } },
       ],
     };
     const store = await loadEditableDashboard(makeDashboard({ panels: JSON.parse(JSON.stringify(fixture)) }));
@@ -1379,5 +1379,118 @@ describe("dashboards store — tabs", () => {
     await store.cancelEdit();
     await tick();
     expect(requested()).toEqual([]);
+  });
+});
+
+// Phase 14: a panel follows the dashboard range unless it pins its own, and
+// its bucket size is the interval it chose.
+describe("panel time", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [{ n: 1 }], columns: [{ name: "n", type: "UInt64" }] } });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "24h" } });
+    mocks.translate.mockResolvedValue({ status: "success", data: { valid: true, generated_query: "*", generated_query_language: "logsql" } });
+  });
+  afterEach(() => { vi.useRealTimers(); resetLocalTimeZone(); });
+
+  const sql = (id: string, query: Partial<DashboardQueryPanel["query"]> = {}): DashboardQueryPanel => ({
+    id, kind: "query", title: id, team_id: 1, source_id: 1,
+    query: { mode: "result", language: "clickhouse-sql", text: "SELECT count() AS n FROM logs WHERE {{__time_filter}}", ...query },
+    viz: { type: "stat", value: "n", reduce: "last" },
+  });
+  const absolute = (start: string, end: string) => ({ kind: "absolute", start: epochMs(Date.parse(start)), end: epochMs(Date.parse(end)) }) as const;
+
+  async function load(...panels: DashboardQueryPanel[]) {
+    const layout = panels.map((p, i) => ({ id: p.id, x: 0, y: i, w: 12, h: 1 }));
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ panels: panelsWith(panels, layout) }) });
+    const store = useDashboardsStore();
+    usePreferencesStore().preferences.timezone = "utc";
+    await store.loadDashboard(3);
+    return store;
+  }
+  const requestFor = (mock: typeof mocks.logsQuery, text: string) => mock.mock.calls.map((call) => call[2]).filter((body) => body.query_text === text).at(-1);
+
+  it("moves a bound panel with the time picker and leaves a pinned panel on its own range", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-12T10:15:00Z"));
+    const pinnedText = "SELECT count() AS n FROM logs WHERE {{__time_filter}} AND 1";
+    const store = await load(sql("bound"), sql("pinned", { text: pinnedText, range: "today-6d" }));
+
+    const boundText = sql("bound").query.text;
+    expect(requestFor(mocks.logsQuery, boundText)).toMatchObject({ start_time: "2026-11-12T10:00:00.000Z", end_time: "2026-11-12T10:15:00.000Z" });
+    // today-6d: from midnight six days before today until now.
+    expect(requestFor(mocks.logsQuery, pinnedText)).toMatchObject({ start_time: "2026-11-06T00:00:00.000Z", end_time: "2026-11-12T10:15:00.000Z", timezone: "UTC" });
+    expect(store.getPanelState("pinned").range).toEqual({ start: Date.parse("2026-11-06T00:00:00Z"), end: Date.parse("2026-11-12T10:15:00Z"), zone: "UTC" });
+
+    store.setWindow(absolute("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"));
+    await store.refreshAllPanels();
+    expect(requestFor(mocks.logsQuery, boundText)).toMatchObject({ start_time: "2026-10-01T00:00:00.000Z", end_time: "2026-10-02T00:00:00.000Z" });
+    expect(requestFor(mocks.logsQuery, pinnedText)).toMatchObject({ start_time: "2026-11-06T00:00:00.000Z", end_time: "2026-11-12T10:15:00.000Z" });
+    expect(store.getPanelState("bound").range).toMatchObject({ start: Date.parse("2026-10-01T00:00:00Z") });
+  });
+
+  it("sends a count panel's fixed interval as the histogram window: 24h on a 7-day range", async () => {
+    const store = await load(chartPanel("days", { language: "logsql", text: "*", interval: "24h" }));
+    store.setWindow(absolute("2026-11-05T18:30:00Z", "2026-11-12T18:30:00Z"));
+    await store.refreshAllPanels();
+    expect(mocks.histogram.mock.lastCall?.[2]).toMatchObject({ window: "24h", start_time: "2026-11-05T18:30:00.000Z", end_time: "2026-11-12T18:30:00.000Z" });
+    expect(store.getPanelState("days")).toMatchObject({ interval: "24h", intervalRaised: false });
+  });
+
+  it("raises a fixed interval that would give more than 1,000 buckets and says which one it used", async () => {
+    const store = await load(chartPanel("fine", { language: "logsql", text: "*", interval: "10m" }));
+    store.setWindow(absolute("2026-11-05T18:30:00Z", "2026-11-12T18:30:00Z"));
+    await store.refreshAllPanels();
+    expect(mocks.histogram.mock.lastCall?.[2].window).toBe("15m");
+    expect(store.getPanelState("fine")).toMatchObject({ interval: "15m", intervalRaised: true });
+  });
+
+  it("sends a result panel's interval for {{__interval}}, resolved from auto when it sets none", async () => {
+    const store = await load(sql("auto"), sql("fixed", { text: "SELECT 2", interval: "24h" }));
+    store.setWindow(absolute("2026-11-05T18:30:00Z", "2026-11-12T18:30:00Z"));
+    await store.refreshAllPanels();
+    // 7 days / 100 buckets = 6048 s, and the next window up is 2h.
+    expect(requestFor(mocks.logsQuery, sql("auto").query.text).interval).toBe("2h");
+    expect(requestFor(mocks.logsQuery, "SELECT 2").interval).toBe("24h");
+  });
+
+  describe("the daylight-saving notice on VictoriaLogs count panels", () => {
+    // Berlin left summer time at 01:00 UTC on 2026-10-25.
+    const crossing = absolute("2026-10-22T22:00:00Z", "2026-10-27T23:00:00Z");
+    async function notices(panel: DashboardQueryPanel, window: ReturnType<typeof absolute>, zone = "Europe/Berlin") {
+      setLocalTimeZone(zone);
+      usePreferencesStore().preferences.timezone = "local";
+      const store = useDashboardsStore();
+      store.setWindow(window);
+      mocks.histogram.mockResolvedValue({ status: "success", data: { data: [{ bucket: "2026-10-25T22:00:00Z", log_count: 3 }], granularity: panel.query.interval } });
+      await store.previewPanel(panel);
+      return store.previewState?.frame?.notices ?? [];
+    }
+
+    it("names the change when the range crosses it and the bucket is longer than one hour", async () => {
+      const shown = await notices(chartPanel("vl", { language: "logsql", text: "*", interval: "24h" }), crossing);
+      expect(shown).toHaveLength(1);
+      expect(shown[0]).toContain("Europe/Berlin changed from UTC+02:00 to UTC+01:00");
+      expect(shown[0]).toContain("Oct 25, 2026");
+      expect(shown[0]).toContain("do not start at local midnight");
+    });
+
+    it("shows on a LogchefQL count panel that compiles to LogsQL", async () => {
+      expect(await notices(chartPanel("vl", { language: "logchefql", text: "level=error", interval: "6h" }), crossing)).toHaveLength(1);
+    });
+
+    it.each([
+      ["a bucket of one hour", chartPanel("vl", { language: "logsql", text: "*", interval: "1h" }), crossing, "Europe/Berlin"],
+      ["a range after the change", chartPanel("vl", { language: "logsql", text: "*", interval: "24h" }), absolute("2026-11-01T00:00:00Z", "2026-11-08T00:00:00Z"), "Europe/Berlin"],
+      ["a zone without daylight saving", chartPanel("vl", { language: "logsql", text: "*", interval: "24h" }), crossing, "Asia/Kolkata"],
+    ] as const)("stays quiet for %s", async (_name, panel, window, zone) => {
+      expect(await notices(panel, window, zone)).toEqual([]);
+    });
+
+    it("stays quiet on ClickHouse, whose buckets follow the change", async () => {
+      mocks.translate.mockResolvedValue({ status: "success", data: { valid: true, full_sql: "SELECT 1", generated_query_language: "clickhouse-sql" } });
+      expect(await notices(chartPanel("ch", { language: "logchefql", text: "level=error", interval: "24h" }), crossing)).toEqual([]);
+    });
   });
 });

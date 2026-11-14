@@ -59,7 +59,8 @@ import {
 } from "@/utils/dashboardPanels";
 import type { Dashboard, DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
 import { QUICK_RANGES } from "@/lib/quickRanges";
-import { epochMs, formatInZone, windowLabel } from "@/utils/timeWindow";
+import { epochMs, formatInZone } from "@/utils/timeWindow";
+import { CALENDAR_RANGES, relativeRangeLabel } from "@/utils/rangeLabel";
 
 const { t, locale } = useI18n();
 
@@ -253,9 +254,10 @@ function selectCacheTtl(seconds: number) {
 // Unset means viewers keep whatever range they already have.
 const defaultTimeRange = computed(() => store.editDraft?.default_time_range ?? null);
 function rangeLabel(spec: string): string {
-  const label = windowLabel({ kind: "relative", spec });
+  const label = relativeRangeLabel(spec);
   return label ? t(label.key, { count: label.count }, label.count) : spec;
 }
+const DEFAULT_RANGES: readonly string[] = [...QUICK_RANGES, ...CALENDAR_RANGES];
 const defaultTimeRangeLabel = computed(() => {
   const value = defaultTimeRange.value;
   return value ? rangeLabel(value) : t("dashboards.defaultRangeNone");
@@ -767,7 +769,7 @@ onBeforeRouteUpdate((to, from) => {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                v-for="range in QUICK_RANGES"
+                v-for="range in DEFAULT_RANGES"
                 :key="range"
                 class="text-xs"
                 :class="{ 'font-semibold': range === defaultTimeRange }"

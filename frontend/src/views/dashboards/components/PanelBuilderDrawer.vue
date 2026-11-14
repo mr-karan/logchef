@@ -19,6 +19,7 @@ import SqlMonacoEditor from "@/components/query-editor/SqlMonacoEditor.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import DashboardPanel from "./DashboardPanel.vue";
 import PanelBuilderOptions from "./PanelBuilderOptions.vue";
+import PanelTimeOptions from "./PanelTimeOptions.vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useDashboardsStore } from "@/stores/dashboards";
 import { sourcesApi, asClickHouseConnection, type Source } from "@/api/sources";
@@ -27,7 +28,7 @@ import { isSuccessResponse } from "@/api/types";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { DashboardQueryPanel, DashboardViz } from "@/api/dashboards";
 import { execSignature } from "@/utils/dashboardRuntime";
-import { panelBuilderKind, type PanelBuilderKind } from "@/utils/dashboardPanels";
+import { panelBuilderKind, resultInterval, type PanelBuilderKind } from "@/utils/dashboardPanels";
 import { suggestViz, withSuggestedRoles } from "@/utils/panelCharts";
 import type { DraftPanelPatch } from "@/stores/dashboards";
 
@@ -125,7 +126,7 @@ const mode = computed<"logchefql" | "native">({
     if (language === "clickhouse-sql" && panel.value?.query.mode === "count") {
       suggestNextVisualization = true;
       previousCountPanel = panel.value;
-      patchPanel({ query: { mode: "result", language, interval: undefined, group_by: undefined, translate_limit: undefined }, viz: { type: "stat", reduce: "last", ...(panel.value.viz.type === "stat" ? { format: panel.value.viz.format } : {}) } });
+      patchPanel({ query: { mode: "result", language, interval: resultInterval(panel.value.query.interval).interval, group_by: undefined, translate_limit: undefined }, viz: { type: "stat", reduce: "last", ...(panel.value.viz.type === "stat" ? { format: panel.value.viz.format } : {}) } });
       return;
     }
     patchPanel({ query: language === "logchefql" ? { language } : { language, translate_limit: undefined } });
@@ -142,7 +143,8 @@ function setQueryMode(mode: "count" | "result") {
   else if (viz.type === "stat") { delete viz.value; delete viz.order_by; viz.reduce = mode === "count" ? "sum" : "last"; }
   else if (viz.type !== "table") { delete viz.label; delete viz.value; }
   delete viz.columns;
-  patchPanel({ query: mode === "result" ? { mode, language, text, interval: undefined, group_by: undefined, translate_limit: undefined } : { mode, language, text, limit: undefined, interval: "auto" }, viz });
+  // A fixed bucket size stays with the query. `auto` is stored by name only in count mode.
+  patchPanel({ query: mode === "result" ? { mode, language, text, interval: resultInterval(p.query.interval).interval, group_by: undefined, translate_limit: undefined } : { mode, language, text, limit: undefined, interval: p.query.interval ?? "auto" }, viz });
 }
 
 function setVisualization(viz: DashboardViz) {
@@ -478,6 +480,11 @@ function onOpenChange(value: boolean) {
                 :field-suggestions="fieldSuggestions"
                 @update:query="(patch) => patchPanel({ query: patch })"
                 @update:viz="setVisualization"
+              />
+              <PanelTimeOptions
+                :query="panel.query"
+                :dashboard-window="store.window"
+                @update:query="(patch) => patchPanel({ query: patch })"
               />
             </div>
           </div>

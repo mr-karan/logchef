@@ -10,6 +10,7 @@ import PanelStat from "./PanelStat.vue";
 import PanelPie from "./PanelPie.vue";
 import PanelTopList from "./PanelTopList.vue";
 import PanelTable from "./PanelTable.vue";
+import PanelTimeChips from "./PanelTimeChips.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 import { panelExploreQuery } from "@/utils/panelExplore";
@@ -68,6 +69,10 @@ const chartHeight = computed(() =>
 
 const vizType = computed(() => props.panel.viz?.type);
 
+// The panel whose time chips to show. A panel from a newer blob has a shape
+// this build cannot read, so nothing about its query is shown.
+const timePanel = computed(() => (props.panel.locked || panelState.value.status === "unsupported" ? null : props.panel));
+
 // A cut result says so on every visualization, and so does an empty one: a
 // byte budget can stop the reader before its first row. A cap that cut
 // nothing is silent.
@@ -111,11 +116,14 @@ const columnSubset = computed(() => {
         :title="t('dashboards.openPanelInExplorer')"
       >{{ panel.title || "Untitled" }}</RouterLink>
       <span v-else class="dash-panel__title" :title="panel.title">{{ panel.title || "Untitled" }}</span>
-      <span
-        v-if="truncationText"
-        class="dash-panel__chip dash-panel__chip--header border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-        :title="truncationText"
-      >{{ truncationText }}</span>
+      <span v-if="timePanel || truncationText" class="dash-panel__chips dash-panel__chips--header">
+        <PanelTimeChips v-if="timePanel" :panel="timePanel" :state="panelState" />
+        <span
+          v-if="truncationText"
+          class="dash-panel__chip border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          :title="truncationText"
+        >{{ truncationText }}</span>
+      </span>
       <Lock
         v-if="isLocked"
         class="dash-panel__lock"
@@ -126,11 +134,14 @@ const columnSubset = computed(() => {
     <div class="dash-panel__body">
       <!-- Without the header (edit mode, preview) the chip floats over the
            body's top-right corner instead. -->
-      <span
-        v-if="!chrome && truncationText"
-        class="dash-panel__chip dash-panel__chip--overlay border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-        :title="truncationText"
-      >{{ truncationText }}</span>
+      <span v-if="!chrome && (timePanel || truncationText)" class="dash-panel__chips dash-panel__chips--overlay">
+        <PanelTimeChips v-if="timePanel" :panel="timePanel" :state="panelState" />
+        <span
+          v-if="truncationText"
+          class="dash-panel__chip border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          :title="truncationText"
+        >{{ truncationText }}</span>
+      </span>
       <!-- Locked: viewer lacks source access. Covers both the server-redacted
            panel (panel.locked) and the query-time AuthorizationError path
            (panelState.status === 'locked'), unified via isLocked. -->
@@ -268,13 +279,19 @@ const columnSubset = computed(() => {
   white-space: nowrap;
   flex-shrink: 0;
 }
-.dash-panel__chip--header {
+.dash-panel__chips {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+.dash-panel__chips--header {
   margin-left: auto;
 }
-.dash-panel__chip--header + .dash-panel__lock {
+.dash-panel__chips--header + .dash-panel__lock {
   margin-left: 0;
 }
-.dash-panel__chip--overlay {
+.dash-panel__chips--overlay {
   position: absolute;
   top: 0.4rem;
   right: 0.5rem;
