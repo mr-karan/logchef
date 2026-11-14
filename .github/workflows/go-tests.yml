@@ -75,8 +75,10 @@ jobs:
           cache: true
       - name: Start VictoriaLogs
         run: |
+          # The bucket alignment test ingests a fixed range that crosses a
+          # daylight-saving change, which the default 7 day retention drops.
           docker run -d --name victorialogs -p 9428:9428 \
-            victoriametrics/victoria-logs:v1.51.0
+            victoriametrics/victoria-logs:v1.51.0 -retentionPeriod=100y
       - name: Wait for VictoriaLogs health
         run: |
           for i in $(seq 1 30); do
