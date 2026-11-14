@@ -389,7 +389,7 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
     return `Panel "${label}" has an unsupported type.`;
   }
   const vizKeys: Record<DashboardVizType, readonly string[]> = {
-    stat: ["type", "value", "order_by", "reduce", "columns", "format"],
+    stat: ["compare", "sparkline", "type", "value", "order_by", "reduce", "columns", "format"],
     chart: ["type", "x", "y", "series", "mark", "stack", "x_scale", "orientation", "show_values", "legend", "columns", "format"],
     pie: ["type", "label", "value", "donut", "min_slice_percent", "columns", "format"],
     toplist: ["type", "label", "value", "max_rows", "columns", "format"],
@@ -421,6 +421,13 @@ function validatePanel(p: DashboardPanel, seen: Set<string>): string | null {
     if (!count && !viz.value) return `Panel "${label}" needs a value column.`;
     if (count && (viz.value !== undefined || viz.order_by !== undefined)) return `Panel "${label}" cannot use result roles in count mode.`;
     if (viz.reduce !== undefined && !["last", "first", "sum", "avg", "min", "max"].includes(viz.reduce)) return `Panel "${label}" has an invalid reducer.`;
+    if (viz.sparkline !== undefined && typeof viz.sparkline !== "boolean") return `Panel "${label}" has an invalid sparkline.`;
+    if (viz.compare !== undefined) {
+      const c = viz.compare;
+      if (!c || typeof c !== "object" || Object.keys(c).some(k => !["mode", "good"].includes(k)) || !["none", "previous_row"].includes(c.mode) || (c.good !== undefined && !["up", "down", "neutral"].includes(c.good))) return `Panel "${label}" has an invalid comparison.`;
+      if (c.mode === "previous_row" && !["first", "last"].includes(viz.reduce ?? (count ? "sum" : "last"))) return `Panel "${label}" comparison needs first or last reducer.`;
+    }
+    if (!count && !viz.order_by && (viz.sparkline || viz.compare?.mode === "previous_row")) return `Panel "${label}" comparison or sparkline needs order_by.`;
     for (const role of [viz.value, viz.order_by]) {
       if (role !== undefined && (Array.from(role).length < 1 || Array.from(role).length > 128)) return `Panel "${label}" has an invalid column role.`;
     }

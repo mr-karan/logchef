@@ -193,11 +193,13 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	team, src := mkTestTeam(t, s.store, "team", creator)
 	app := dashboardApp(s, creator)
 
-	// The current client stores a result chart using every shipped feature.
+	// The current client stores a chart and a trend using every shipped feature.
 	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"type":"stat","reduce":"sum"`, `"type":"chart","x":"day","y":["n"],"show_values":true,"columns":{},"format":{"decimals":2}`, 1)
 	blob = strings.Replace(blob, `"mode":"count"`, `"mode":"result"`, 1)
 	blob = strings.Replace(blob, `,"interval":"auto"`, ``, 1)
-	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, schema2)
+	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p2","kind":"query","title":"Trend","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"clickhouse-sql","text":"SELECT day,n FROM events"},"viz":{"type":"stat","value":"n","order_by":"day","compare":{"mode":"previous_row"},"sparkline":true}},`, team.ID, src.ID), 1)
+	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p2","x":6,"y":0,"w":6,"h":2},`, 1)
+	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, dashboardHeaders{schema: new("2"), features: new(strings.Join(models.KnownDashboardFeatures(), ","))})
 	if status != http.StatusCreated {
 		t.Fatalf("create: status %d body %v", status, resp)
 	}
@@ -653,5 +655,52 @@ func TestDashboardListRepairExhaustedHTTP(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" || race.passes != 3 {
 		t.Fatalf("status %d, headers %v, passes %d", resp.StatusCode, resp.Header, race.passes)
+	}
+}
+
+func TestDashboardStatCompareContract(t *testing.T) {
+	s := newDashboardTestServer(t)
+	creator := mkTestUser(t, s.store, "trend@test.dev", models.UserRoleMember)
+	team, src := mkTestTeam(t, s.store, "trend", creator)
+	app := dashboardApp(s, creator)
+	blob := strings.Replace(panelBlobV2JSON(team.ID, src.ID), `"reduce":"sum"`, `"reduce":"last","compare":{"mode":"previous_row","good":"up"},"sparkline":true`, 1)
+	body := fmt.Sprintf(`{"name":"Trend","panels":%s}`, blob)
+	status, _, _ := call(t, app, http.MethodPost, "/dashboards", body, schema2)
+	if status != http.StatusConflict {
+		t.Fatalf("undeclared create status %d", status)
+	}
+	headers := dashboardHeaders{schema: new("2"), features: new("stat_compare,result_frames")}
+
+	plain, err := core.CreateDashboard(context.Background(), s.store, s.log, creator, &models.CreateDashboardRequest{Name: "Plain", Panels: json.RawMessage(panelBlobV2JSON(team.ID, src.ID))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	introduction := fmt.Sprintf(`{"name":"Plain","revision":1,"panels":%s}`, blob)
+	status, _, _ = call(t, app, http.MethodPut, fmt.Sprintf("/dashboards/%d", plain.ID), introduction, schema2)
+	if status != http.StatusConflict {
+		t.Fatalf("undeclared feature introduction: %d", status)
+	}
+	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", body, headers)
+	if status != http.StatusCreated {
+		t.Fatalf("declared create %d %v", status, resp)
+	}
+	data := resp["data"].(map[string]any)
+	id := int(data["id"].(float64))
+	path := fmt.Sprintf("/dashboards/%d", id)
+	for _, h := range []dashboardHeaders{schema2, headers} {
+		status, resp, _ = call(t, app, http.MethodGet, path, "", h)
+		data = resp["data"].(map[string]any)
+		if status != http.StatusOK || data["can_edit"] != (h.features != nil) {
+			t.Fatalf("read status %d data %v", status, data)
+		}
+	}
+	update := fmt.Sprintf(`{"name":"Trend","revision":1,"panels":%s}`, blob)
+	status, _, _ = call(t, app, http.MethodPut, path, update, schema2)
+	if status != http.StatusConflict {
+		t.Fatalf("undeclared update %d", status)
+	}
+	status, resp, _ = call(t, app, http.MethodPut, path, update, headers)
+	if status != http.StatusOK {
+		t.Fatalf("declared update %d %v", status, resp)
 	}
 }

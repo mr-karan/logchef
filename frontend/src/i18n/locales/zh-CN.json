@@ -1703,5 +1703,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(空值)",
   "panelChart.emptyCategory": "(空)",
-  "panelChart.allZero": "所有值均为零。"
+  "panelChart.allZero": "所有值均为零。",
+  "dashboardBuilder.Comparison": "比较",
+  "dashboardBuilder.PreviousRow": "上一行",
+  "dashboardBuilder.GoodDirection": "改善方向",
+  "dashboardBuilder.Good_up": "上升",
+  "dashboardBuilder.Good_down": "下降",
+  "dashboardBuilder.Good_neutral": "中性",
+  "dashboardBuilder.Sparkline": "迷你折线图",
+  "dashboardBuilder.NeighborWarning": "比较相邻行，而非日历周期。不会补齐缺失日期。",
+  "dashboardBuilder.CompareReducerWarning": "比较需要选择第一行或最后一行。",
+  "dashboardBuilder.CompareOrderWarning": "请为比较或迷你折线图设置排序列。",
+  "dashboardBuilder.ComparedWith": "与 {date} 比较",
+  "dashboardBuilder.ApproximateSparkline": "近似坐标"
 }

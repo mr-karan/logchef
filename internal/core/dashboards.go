@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -377,6 +378,11 @@ func BuildDashboardResponse(ctx context.Context, db store.StoreOps, log *slog.Lo
 	if err != nil {
 		return nil, fmt.Errorf("failed to redact dashboard panels: %w", err)
 	}
+	for _, feature := range models.DashboardPanelsStoredFeatures(panels) {
+		if !client.Supports(feature) {
+			resp.CanEdit = false
+		}
+	}
 	resp.Panels = redacted
 	return resp, nil
 }
@@ -452,6 +458,21 @@ func dashboardWriteContract(existing *models.Dashboard, client models.DashboardC
 	return nil
 }
 
+// CheckDashboardWriteFeatures requires the client to understand stat comparison before introducing it.
+func CheckDashboardWriteFeatures(raw json.RawMessage, client models.DashboardClient) error {
+	if schema, _ := models.DashboardPanelsSchema(raw); schema != models.DashboardPanelsVersion2 {
+		return nil
+	}
+	features, err := models.DashboardFeatures(raw)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
+	}
+	if slices.Contains(features, "stat_compare") && !client.Supports("stat_compare") {
+		return &DashboardClientStaleError{Detail: "stat_compare must be declared to write comparison or sparkline"}
+	}
+	return nil
+}
+
 // UpdateDashboard authorizes and saves against the client revision in one
 // transaction, applying the client schema contract before the
 // compare-and-swap so a stale write cannot slip in between a newer save and
@@ -485,6 +506,9 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 			return ErrDashboardForbidden
 		}
 		if err := dashboardWriteContract(existing, client, stored); err != nil {
+			return err
+		}
+		if err := CheckDashboardWriteFeatures(stored, client); err != nil {
 			return err
 		}
 		if err := verifyDashboardPanelRefs(ctx, tx, user, stored); err != nil {

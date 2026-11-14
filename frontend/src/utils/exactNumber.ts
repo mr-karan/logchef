@@ -79,3 +79,14 @@ export function exactString(value: ExactNumber, decimals?: number): string {
   if (decimals !== undefined) fraction = fraction.padEnd(decimals, "0");
   return (negative ? "-" : "") + whole + (fraction ? "." + fraction : "");
 }
+
+export function subtractExact(a: ExactNumber, b: ExactNumber): ExactNumber {
+  return addExact(a, { ...b, coefficient: -b.coefficient });
+}
+
+export function ratioExact(a: ExactNumber, b: ExactNumber): number {
+  const left = (a.coefficient < 0n ? -a.coefficient : a.coefficient).toString();
+  const right = (b.coefficient < 0n ? -b.coefficient : b.coefficient).toString();
+  const sign = (a.coefficient < 0n) !== (b.coefficient < 0n) ? -1 : 1;
+  return sign * (Number(left.slice(0, 16)) / Number(right.slice(0, 16))) * 10 ** (left.length - Math.min(16, left.length) - right.length + Math.min(16, right.length) + b.scale - a.scale);
+}

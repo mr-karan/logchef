@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { VisXYContainer, VisLine, VisCrosshair, VisTooltip } from "@unovis/vue";
+import { escapeHtml } from "@/lib/html";
+import { chartValue } from "@/utils/panelCharts";
+import { useI18n } from "vue-i18n";
+import type { StatPoint } from "@/utils/panelFrame";
 import { usePreferencesStore } from "@/stores/preferences";
 import { computed, ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
@@ -6,6 +11,7 @@ import type { DashboardQueryPanel } from "@/api/dashboards";
 import { frameWithKinds, reduceStat, type PanelFrame } from "@/utils/panelFrame";
 import { formatNumber } from "@/utils/numberFormat";
 
+const { t } = useI18n();
 const preferences = usePreferencesStore();
 const props = defineProps<{ frame: PanelFrame; panel: DashboardQueryPanel }>();
 const container = ref<HTMLElement>();
@@ -20,7 +26,7 @@ const result = computed(() => {
   const viz = props.panel.viz;
   if (viz.type !== "stat") return { error: "Invalid stat visualization" };
   try {
-    return { stat: reduceStat(typedFrame.value, { value: props.panel.query.mode === "count" ? "count" : viz.value ?? "", reduce: viz.reduce ?? (props.panel.query.mode === "count" ? "sum" : "last"), orderBy: viz.order_by, count: props.panel.query.mode === "count", zone: preferences.zone }) };
+    return { stat: reduceStat(typedFrame.value, { value: props.panel.query.mode === "count" ? "count" : viz.value ?? "", reduce: viz.reduce ?? (props.panel.query.mode === "count" ? "sum" : "last"), orderBy: viz.order_by, count: props.panel.query.mode === "count", zone: preferences.zone, compare: viz.compare, sparkline: viz.sparkline }) };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Unable to read stat" };
   }
@@ -36,6 +42,27 @@ const formatted = computed(() => {
   const compact = width.value > 0 && measuredWidth.value > width.value - 16;
   return formatNumber(value, format.value, { compact });
 });
+const comparison = computed(() => result.value.stat?.comparison);
+const delta = computed(() => comparison.value ? formatNumber(comparison.value.delta, format.value) : null);
+const percent = computed(() => comparison.value?.percent === null || comparison.value?.percent === undefined ? null : formatNumber(comparison.value.percent, { decimals: 2, suffix: "%" }));
+const deltaClass = computed(() => {
+  const good = props.panel.viz.type === "stat" ? props.panel.viz.compare?.good ?? "neutral" : "neutral";
+  const direction = comparison.value?.direction ?? 0;
+  return !direction || good === "neutral" ? "text-muted-foreground" : (direction > 0) === (good === "up") ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+});
+const points = computed(() => result.value.stat?.points ?? []);
+const sparkline = computed(() => {
+  try {
+    const rows = points.value.map(point => ({ ...point, plot: point.value === null ? null : chartValue(point.value) }));
+    return { rows, approximate: rows.some(point => point.plot?.approximate), error: null };
+  } catch (error) {
+    return { rows: [], approximate: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+type PlotPoint = (typeof sparkline.value.rows)[number];
+const x = (point: PlotPoint) => point.x;
+const y = (point: PlotPoint) => point.plot?.coordinate ?? Number.NaN;
+const sparklineTemplate = (rows: StatPoint[]) => rows.map(point => escapeHtml(`${point.label}: ${point.value === null ? "NULL" : formatNumber(point.value, format.value).exact}`)).join("<br>");
 </script>
 
 <template>
@@ -45,6 +72,20 @@ const formatted = computed(() => {
       <span ref="measure" class="panel-stat__measure" aria-hidden="true">{{ standard?.text }}</span>
       <span class="panel-stat__value" :title="formatted?.exact">{{ formatted?.text ?? (result.stat?.rowLabel ? 'NULL' : 'No data') }}</span>
       <span v-if="result.stat?.rowLabel" class="text-xs text-muted-foreground">{{ result.stat.rowLabel }}</span>
+      <div v-if="comparison" class="panel-stat__comparison text-xs text-center" :class="deltaClass">
+        <span :title="delta?.exact">{{ comparison.direction > 0 ? '+' : '' }}{{ delta?.text }}</span>
+        <span v-if="percent"> ({{ comparison.direction > 0 ? '+' : '' }}{{ percent.text }})</span>
+        <span class="block text-muted-foreground">{{ t('dashboardBuilder.ComparedWith', { date: comparison.rowLabel }) }}</span>
+      </div>
+      <div v-if="panel.viz.type === 'stat' && panel.viz.sparkline && points.length" class="panel-stat__sparkline w-full" :aria-label="t('dashboardBuilder.Sparkline')">
+        <p v-if="sparkline.error" class="text-xs text-destructive" role="alert">{{ sparkline.error }}</p>
+        <span v-if="sparkline.approximate" class="text-xs text-muted-foreground">{{ t('dashboardBuilder.ApproximateSparkline') }}</span>
+        <VisXYContainer v-if="!sparkline.error" :data="sparkline.rows" :height="48" :margin="{ top: 2, bottom: 2, left: 2, right: 2 }">
+          <VisLine :x="x" :y="y" color="var(--primary)" />
+          <VisCrosshair :template="sparklineTemplate" />
+          <VisTooltip />
+        </VisXYContainer>
+      </div>
       <p v-for="notice in result.stat?.notices" :key="notice" class="text-xs text-muted-foreground" role="status">{{ notice }}</p>
     </template>
   </div>

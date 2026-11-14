@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import { computed } from "vue";
-import type { ColumnKind, DashboardPanelQuery, DashboardViz, NumberFormat, StatReduce } from "@/api/dashboards";
+import type { ColumnKind, DashboardPanelQuery, DashboardViz, NumberFormat, StatCompare, StatReduce } from "@/api/dashboards";
 import { suggestKind, type PanelFrame } from "@/utils/panelFrame";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,8 @@ const missingX = computed(() => {
 });
 const enumLabels: Record<string, string> = {"time": "pages.time", "date": "ui.date", "number": "ui.number", "category": "dashboardBuilder.Category", "bool": "dashboardBuilder.Bool", "other": "dashboardBuilder.Other", "first": "dashboardBuilder.First", "last": "dashboardBuilder.Last", "sum": "dashboardBuilder.Sum", "avg": "dashboardBuilder.Avg", "min": "dashboardBuilder.Min", "max": "dashboardBuilder.Max", "auto": "dashboardBuilder.Auto", "standard": "dashboardBuilder.Standard", "compact": "ui.compact", "none": "ui.none", "percent": "dashboardBuilder.Percent", "bytes": "dashboardBuilder.Bytes", "duration_ms": "dashboardBuilder.DurationMs", "duration_s": "dashboardBuilder.DurationS"};
 const kinds: ColumnKind[] = ["time", "date", "number", "category", "bool", "other"];
+const compareModes: StatCompare["mode"][] = ["none", "previous_row"];
+const compareGoods: NonNullable<StatCompare["good"]>[] = ["up", "down", "neutral"];
 const reducers: StatReduce[] = ["last", "first", "sum", "avg", "min", "max"];
 const notations: NonNullable<NumberFormat["notation"]>[] = ["auto", "standard", "compact"];
 const units: NonNullable<NumberFormat["unit"]>[] = ["none", "percent", "bytes", "duration_ms", "duration_s"];
@@ -79,6 +81,12 @@ function moveY(index: number, direction: number) {
 function selectValue(event: Event): string {
   return event.target instanceof HTMLSelectElement ? event.target.value : "";
 }
+function setCompareMode(mode: string) {
+  if (props.viz.type === "stat" && (mode === "none" || mode === "previous_row")) emit("update:viz", { ...props.viz, compare: { ...props.viz.compare, mode } });
+}
+function setGood(good: string) {
+  if (props.viz.type === "stat" && (good === "up" || good === "down" || good === "neutral")) emit("update:viz", { ...props.viz, compare: { mode: props.viz.compare?.mode ?? "none", good } });
+}
 function setReduce(reduce: StatReduce) {
   if (props.viz.type === "stat") emit("update:viz", { ...props.viz, reduce });
 }
@@ -129,6 +137,18 @@ function setScale(value: unknown) {
         <div class="flex flex-wrap gap-1"><button v-for="reduce in reducers" :key="reduce" type="button" class="rounded border px-2 py-1 text-xs aria-pressed:bg-primary aria-pressed:text-primary-foreground" :aria-pressed="(viz.reduce ?? (query.mode === 'count' ? 'sum' : 'last')) === reduce" @click="setReduce(reduce)">{{ t(enumLabels[reduce]) }}</button></div>
       </div>
       <p v-if="query.mode === 'result' && !viz.order_by && (viz.reduce ?? 'last') !== 'sum' && ['first', 'last'].includes(viz.reduce ?? 'last') && (frame?.rows.length ?? 0) > 1" class="text-xs text-amber-600">{{ t('dashboardBuilder.SetOrderByToSelectTheFirstOrLastRowChronologically') }}</p>
+    </template>
+    <template v-if="viz.type === 'stat'">
+      <Label for="stat-compare">{{ t('dashboardBuilder.Comparison') }}</Label>
+      <select id="stat-compare" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.compare?.mode ?? 'none'" @change="setCompareMode(selectValue($event))"><option v-for="mode in compareModes" :key="mode" :value="mode">{{ t(mode === 'none' ? 'ui.none' : 'dashboardBuilder.PreviousRow') }}</option></select>
+      <template v-if="viz.compare?.mode === 'previous_row'">
+        <Label for="stat-good">{{ t('dashboardBuilder.GoodDirection') }}</Label>
+        <select id="stat-good" class="w-full rounded border bg-background p-1.5 text-xs" :value="viz.compare.good ?? 'neutral'" @change="setGood(selectValue($event))"><option v-for="good in compareGoods" :key="good" :value="good">{{ t(`dashboardBuilder.Good_${good}`) }}</option></select>
+        <p class="text-xs text-muted-foreground">{{ t('dashboardBuilder.NeighborWarning') }}</p>
+        <p v-if="!['first', 'last'].includes(viz.reduce ?? (query.mode === 'count' ? 'sum' : 'last'))" role="alert" class="text-xs text-amber-600">{{ t('dashboardBuilder.CompareReducerWarning') }}</p>
+      </template>
+      <label class="flex items-center gap-2 text-xs"><input type="checkbox" :checked="viz.sparkline ?? false" @change="emit('update:viz', { ...viz, sparkline: !viz.sparkline })" />{{ t('dashboardBuilder.Sparkline') }}</label>
+      <p v-if="query.mode === 'result' && !viz.order_by && (viz.sparkline || viz.compare?.mode === 'previous_row')" role="alert" class="text-xs text-amber-600">{{ t('dashboardBuilder.CompareOrderWarning') }}</p>
     </template>
     <template v-if="viz.type !== 'table'">
       <fieldset class="space-y-3 rounded border p-3"><legend class="px-1 text-xs">{{ t('dashboardBuilder.NumberFormat') }}</legend>

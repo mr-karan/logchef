@@ -854,8 +854,8 @@ describe("dashboards store — schema 2 request parity", () => {
         { id: "c", x: 0, y: 0, w: 6, h: 2 }, { id: "s", x: 6, y: 0, w: 3, h: 2 }, { id: "p", x: 9, y: 0, w: 3, h: 2 }, { id: "t", x: 0, y: 2, w: 12, h: 3 },
       ] }],
       panels: [
-        { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "auto", translate_limit: 50 }, viz: { type: "chart", mark: "bar", stack: "none" } },
-        { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n", order_by: "at", columns: { n: { kind: "number", confidence: "confirmed" }, at: { kind: "time", confidence: "confirmed" } }, reduce: "last", format: { decimals: 2 } } },
+        { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "auto", translate_limit: 50 }, viz: { type: "chart", mark: "bar", stack: "none", legend: false } },
+        { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n", order_by: "at", columns: { n: { kind: "number", confidence: "confirmed" }, at: { kind: "time", confidence: "confirmed" } }, reduce: "last", compare: { mode: "previous_row", good: "up" }, sparkline: true, format: { decimals: 2 } } },
         { id: "p", kind: "query", title: "pie", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "", group_by: "host", interval: "auto" }, viz: { type: "pie", donut: true } },
         { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1", limit: 100 }, viz: { type: "table", visible_columns: ["message", "host"], columns: { host: { kind: "category", confidence: "confirmed" } } } },
       ],

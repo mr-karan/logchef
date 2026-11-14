@@ -1,8 +1,8 @@
 import { histogramBucketBounds, type BucketAlignment, type ResolvedWindow } from "./timeWindow";
 import { fillBucketGaps, parseGranularityToMilliseconds } from "./histogram-chart";
-import type { ColumnKind, ConfirmedColumn, StatReduce } from "@/api/dashboards";
+import type { ColumnKind, ConfirmedColumn, StatCompare, StatReduce } from "@/api/dashboards";
 import type { HistogramDataPoint, QueryStats, Truncation, LimitSource } from "@/api/explore";
-import { addExact, averageExact, compareExact, exactString, isExact, parseExact, type FrameNumber, type ExactNumber } from "./exactNumber";
+import { subtractExact, ratioExact, addExact, averageExact, compareExact, exactString, isExact, parseExact, type FrameNumber, type ExactNumber } from "./exactNumber";
 
 export interface FrameColumn {
   name: string;
@@ -163,7 +163,11 @@ export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"
   return String(value);
 }
 
+export interface StatPoint { x: number; value: FrameNumber | null; label: string }
+export interface StatComparison { delta: FrameNumber; percent: number | null; rowLabel: string; direction: number }
 export interface ReducedStat {
+  comparison?: StatComparison;
+  points?: StatPoint[];
   value: FrameNumber | null;
   rowLabel: string | null;
   notices: string[];
@@ -189,7 +193,7 @@ function compareText(a: string, b: string): number {
   return left.length - right.length;
 }
 
-export function reduceStat(frame: PanelFrame, options: { value: string; reduce: StatReduce; orderBy?: string; count: boolean; zone?: string }): ReducedStat {
+export function reduceStat(frame: PanelFrame, options: { value: string; reduce: StatReduce; orderBy?: string; count: boolean; zone?: string; compare?: StatCompare; sparkline?: boolean }): ReducedStat {
   if (!frame.rows.length && !frame.columns.length) return { value: options.count ? parseExact(0) : null, rowLabel: null, notices: frame.notices };
   const column = frame.columns.find((c) => c.name === options.value);
   if (!column) throw new Error(`Column "${options.value}" is missing from the result.`);
@@ -215,7 +219,7 @@ export function reduceStat(frame: PanelFrame, options: { value: string; reduce: 
     if (!order) throw new Error(`Column "${options.orderBy}" is missing from the result.`);
   }
   if (!rows.length && options.count) return { value: parseExact(0), rowLabel: null, notices };
-  if (options.reduce === "first" || options.reduce === "last") {
+  if (options.reduce === "first" || options.reduce === "last" || options.sparkline) {
     if (order) {
       const key = order;
       const before = rows.length;
@@ -229,8 +233,32 @@ export function reduceStat(frame: PanelFrame, options: { value: string; reduce: 
       const tied = rows.filter((r) => compareCells(r[order.name], selected[order.name], order) === 0).length;
       if (tied > 1) notices.push(`${tied} rows share the selected order value. Group the query by "${order.name}".`);
     }
+    const points = rows.map((row, i): StatPoint => {
+      const cell = row[column.name];
+      return {
+        x: order && (order.kind === "time" || order.kind === "date") ? Date.parse(String(row[order.name])) : i,
+        value: isExact(cell) || typeof cell === "number" ? cell : null,
+        label: order ? frameCellText(row[order.name], order, options.zone) : "",
+      };
+    });
     const value = selected?.[column.name];
-    return { value: isExact(value) || typeof value === "number" ? value : null, rowLabel: selected && order ? frameCellText(selected[order.name], order, options.zone) : null, notices };
+    const neighbor = options.reduce === "first" ? rows[1] : rows.at(-2);
+    const previous = neighbor?.[column.name];
+    let comparison: StatComparison | undefined;
+    if (options.compare?.mode === "previous_row" && neighbor && order) {
+      let delta: FrameNumber | undefined;
+      let percent: number | null = null;
+      if (isExact(value) && isExact(previous)) {
+        delta = subtractExact(value, previous);
+        if (previous.coefficient !== 0n) percent = ratioExact(delta, { ...previous, coefficient: previous.coefficient < 0n ? -previous.coefficient : previous.coefficient }) * 100;
+      } else if (typeof value === "number" && typeof previous === "number") {
+        delta = value - previous;
+        if (previous !== 0) percent = delta / Math.abs(previous) * 100;
+      }
+      if (delta !== undefined) comparison = { delta, percent: percent !== null && Number.isFinite(percent) ? percent : null, rowLabel: frameCellText(neighbor[order.name], order, options.zone), direction: isExact(delta) ? compareExact(delta, { kind: "exact", coefficient: 0n, scale: 0 }) : Math.sign(delta) };
+    }
+    if (options.reduce !== "first" && options.reduce !== "last") return { ...reduceStat(frame, { ...options, sparkline: false }), points, notices };
+    return { comparison, points, value: isExact(value) || typeof value === "number" ? value : null, rowLabel: selected && order ? frameCellText(selected[order.name], order, options.zone) : null, notices };
   }
   const values = rows.map((r) => r[column.name]).filter((v): v is FrameNumber => isExact(v) || typeof v === "number");
   if (!values.length) return { value: options.count && !rows.length ? parseExact(0) : null, rowLabel: null, notices };
