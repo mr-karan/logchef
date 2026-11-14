@@ -59,12 +59,12 @@ func isValueProvided(value any) bool {
 
 // SubstituteVariables formats template values as ClickHouse SQL literals.
 func SubstituteVariables(sql string, variables []Variable) (string, error) {
-	return substituteVariables(sql, variables, ClickHouseSQL)
+	return substituteVariables(sql, variables, Builtins{}, ClickHouseSQL)
 }
 
 // SubstituteLogsQLVariables formats template values as LogsQL literals.
 func SubstituteLogsQLVariables(query string, variables []Variable) (string, error) {
-	return substituteVariables(query, variables, LogsQL)
+	return substituteVariables(query, variables, Builtins{}, LogsQL)
 }
 
 // Dialect selects the query language used to scan template syntax.
@@ -79,31 +79,49 @@ const (
 	LogchefQL
 )
 
-// Substitute formats template values and removes optional blocks for this dialect.
-func (dialect Dialect) Substitute(query string, variables []Variable) (string, error) {
+// Substitute formats template values, expands built-in macros and removes
+// optional blocks for this dialect. LogchefQL rejects every macro, because its
+// compiler always applies the time range.
+func (dialect Dialect) Substitute(query string, variables []Variable, builtins Builtins) (string, error) {
 	if dialect == LogchefQL {
 		return SubstituteLogchefQLVariables(query, variables)
 	}
-	return substituteVariables(query, variables, dialect)
+	return substituteVariables(query, variables, builtins, dialect)
 }
 
-func substituteVariables(sql string, variables []Variable, dialect Dialect) (string, error) {
-	// Build lookup map and validate names.
+// variableMap indexes the request variables by name. A built-in name is
+// rejected, so a caller cannot replace a macro.
+func variableMap(variables []Variable) (map[string]Variable, error) {
 	varMap := make(map[string]Variable, len(variables))
 	for _, v := range variables {
 		if !validNamePattern.MatchString(v.Name) {
-			return "", fmt.Errorf("invalid variable name: %s", v.Name)
+			return nil, fmt.Errorf("invalid variable name: %s", v.Name)
+		}
+		if IsBuiltin(v.Name) {
+			return nil, reservedNameError(v.Name)
 		}
 		varMap[v.Name] = v
 	}
-
-	// Process optional clauses first - removes blocks with missing variables
-	sql = processOptionalClauses(sql, varMap, dialect)
-
-	return substituteTemplateTokens(sql, varMap, dialect)
+	return varMap, nil
 }
 
-func substituteTemplateTokens(query string, variables map[string]Variable, dialect Dialect) (string, error) {
+func substituteVariables(sql string, variables []Variable, builtins Builtins, dialect Dialect) (string, error) {
+	varMap, err := variableMap(variables)
+	if err != nil {
+		return "", err
+	}
+
+	// Optional blocks resolve first, on the template text only, so a value
+	// never opens or closes one.
+	sql = processOptionalClauses(sql, varMap, dialect)
+
+	return substituteTemplateTokens(sql, varMap, builtins, dialect)
+}
+
+// substituteTemplateTokens walks the query once. Each expansion is appended to
+// the output and never scanned again, so a value that holds template text
+// stays that text.
+func substituteTemplateTokens(query string, variables map[string]Variable, builtins Builtins, dialect Dialect) (string, error) {
 	var result strings.Builder
 	start := 0
 	for i := 0; i < len(query); {
@@ -112,14 +130,14 @@ func substituteTemplateTokens(query string, variables map[string]Variable, diale
 			i++
 			continue
 		}
-		plain, err := substituteVariableTokens(query[start:i], 0, variables, dialect)
+		plain, err := substituteVariableTokens(query[start:i], 0, variables, builtins, dialect)
 		if err != nil {
 			return "", err
 		}
 		result.WriteString(plain)
 		token := query[i:end]
 		if token[0] == '\'' || token[0] == '"' || token[0] == '`' || token[0] == '$' {
-			token, err = substituteVariableTokens(token, token[0], variables, dialect)
+			token, err = substituteVariableTokens(token, token[0], variables, builtins, dialect)
 			if err != nil {
 				return "", err
 			}
@@ -127,7 +145,7 @@ func substituteTemplateTokens(query string, variables map[string]Variable, diale
 		result.WriteString(token)
 		i, start = end, end
 	}
-	tail, err := substituteVariableTokens(query[start:], 0, variables, dialect)
+	tail, err := substituteVariableTokens(query[start:], 0, variables, builtins, dialect)
 	if err != nil {
 		return "", err
 	}
@@ -135,7 +153,7 @@ func substituteTemplateTokens(query string, variables map[string]Variable, diale
 	return result.String(), nil
 }
 
-func substituteVariableTokens(token string, quote byte, variables map[string]Variable, dialect Dialect) (string, error) {
+func substituteVariableTokens(token string, quote byte, variables map[string]Variable, builtins Builtins, dialect Dialect) (string, error) {
 	if quote != 0 {
 		for _, match := range variablePattern.FindAllStringIndex(token, -1) {
 			backslashes := 0
@@ -150,6 +168,14 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 	var substitutionErr error
 	result := variablePattern.ReplaceAllStringFunc(token, func(match string) string {
 		name := variablePattern.FindStringSubmatch(match)[1]
+		if IsBuiltin(name) {
+			expansion, err := expandMacro(name, quote, builtins, dialect)
+			if err != nil {
+				substitutionErr = err
+				return match
+			}
+			return expansion
+		}
 		variable, exists := variables[name]
 		if !exists {
 			substitutionErr = fmt.Errorf("undefined variable: {{%s}}", name)
