@@ -373,6 +373,9 @@ func TestSendDoesNotRepeatASelectClickHouse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if installed == 0 {
+		if os.Getenv("LOGCHEF_TEST_CLICKHOUSE_UDF") != "" {
+			t.Fatal("LOGCHEF_TEST_CLICKHOUSE_UDF is set but the server has no logchef_test_effect function")
+		}
 		t.Skip("install the logchef_test_effect function from testdata on the ClickHouse server to run")
 	}
 	client, counter := countedClient(t)
