@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -260,5 +261,70 @@ func TestRenderSourceSQLMacros(t *testing.T) {
 	_, err = RenderSourceSQL(source, models.CreateExportJobRequest{RawSQL: "SELECT * FROM logs WHERE {{__time_filter}}"})
 	if !isQueryRequestError(err) || !strings.Contains(err.Error(), "needs a time range") {
 		t.Fatalf("error = %v, want the missing range error", err)
+	}
+}
+
+// The source decides what a macro renders: a ClickHouse source filters on its
+// own timestamp column, and a VictoriaLogs source gets the LogsQL forms.
+func TestMacrosRenderForTheStoredSource(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	admin := &models.User{Email: "macro-admin@example.com", FullName: "Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	if err := db.CreateUser(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	team, err := CreateTeam(ctx, db, log, "macro-team", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorize := func(source *models.Source) access.AuthorizedSource {
+		t.Helper()
+		if err := db.CreateSource(ctx, source); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.AddTeamSource(ctx, team.ID, source.ID); err != nil {
+			t.Fatal(err)
+		}
+		src, err := access.AuthorizeTeamSource(ctx, db, access.SessionPrincipal(admin), team.ID, source.ID, models.TokenScopeLogsRead)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return src
+	}
+	clickhouse := authorize(&models.Source{
+		Name: "macro_ch", SourceType: models.SourceTypeClickHouse, MetaTSField: "event_time",
+		Connection: models.ConnectionInfo{Host: "ch:9000", Username: "default", Database: "default", TableName: "macro_ch"},
+	})
+	victoriaLogs := authorize(&models.Source{
+		Name: "macro_vl", SourceType: models.SourceTypeVictoriaLogs, MetaTSField: "_time",
+		ConnectionConfig: json.RawMessage(`{"base_url":"http://vl:9428"}`),
+	})
+	ds := datasource.NewService(db, log)
+	const start, end = "2026-11-05T18:30:00Z", "2026-11-12T18:30:00Z"
+	const sqlFilter = "`event_time` >= toDateTime64('2026-11-05 18:30:00.000', 3, 'UTC') AND `event_time` < toDateTime64('2026-11-12 18:30:00.000', 3, 'UTC')"
+	const logsqlRange = `_time:["2026-11-05T18:30:00Z", "2026-11-12T18:30:00Z")`
+
+	query, err := PrepareSourceSQLQuery(ctx, ds, macroQueryConfig, clickhouse, models.APIQueryRequest{QueryText: "SELECT 1 WHERE {{__time_filter}}", StartTime: start, EndTime: end})
+	if err != nil || query.RawQuery != "SELECT 1 WHERE "+sqlFilter {
+		t.Fatalf("ClickHouse query %q error %v", query.RawQuery, err)
+	}
+	histogram, err := PrepareSourceHistogram(ctx, ds, clickhouse, models.APIHistogramRequest{QueryText: "SELECT 1 WHERE {{__time_filter}}", StartTime: start, EndTime: end})
+	if err != nil || histogram.Query != "SELECT 1 WHERE "+sqlFilter {
+		t.Fatalf("ClickHouse histogram %q error %v", histogram.Query, err)
+	}
+
+	query, err = PrepareSourceSQLQuery(ctx, ds, macroQueryConfig, victoriaLogs, models.APIQueryRequest{QueryText: "_time:[{{__from}}, {{__to}})", StartTime: start, EndTime: end})
+	if err != nil || query.RawQuery != logsqlRange {
+		t.Fatalf("VictoriaLogs query %q error %v", query.RawQuery, err)
+	}
+	histogram, err = PrepareSourceHistogram(ctx, ds, victoriaLogs, models.APIHistogramRequest{QueryText: "_time:[{{__from}}, {{__to}})", StartTime: start, EndTime: end})
+	if err != nil || histogram.Query != logsqlRange {
+		t.Fatalf("VictoriaLogs histogram %q error %v", histogram.Query, err)
+	}
+	_, err = PrepareSourceSQLQuery(ctx, ds, macroQueryConfig, victoriaLogs, models.APIQueryRequest{QueryText: "{{__time_filter}}", StartTime: start, EndTime: end})
+	if !isQueryRequestError(err) || !strings.Contains(err.Error(), "not available in LogsQL") {
+		t.Fatalf("error = %v, want the LogsQL rejection", err)
 	}
 }

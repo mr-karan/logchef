@@ -480,6 +480,16 @@ func TestSavedQueryVariableNamesReserveTheMacroPrefix(t *testing.T) {
 	if err := update("a", "__tenant", "__to"); !errors.Is(err, ErrInvalidQueryContent) {
 		t.Errorf("an update that adds a macro name: error = %v", err)
 	}
+
+	// A stored variable named after a macro never rendered, so it is not kept.
+	shadow, err := db.CreateSavedQuery(ctx, src.ID, nil, "shadow", "", models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, content("a", "__from"), &owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = UpdateSavedQuery(ctx, db, nil, log, shadow.ID, "shadow", "", content("a", "__from"), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
+	if !errors.Is(err, ErrInvalidQueryContent) {
+		t.Errorf("an update that keeps a stored macro name: error = %v", err)
+	}
 }
 
 func TestDashboardIntervalsMatchTheMacroTable(t *testing.T) {
