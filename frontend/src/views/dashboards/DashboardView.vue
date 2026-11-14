@@ -113,8 +113,18 @@ function queryTab(): string | null {
 
 // A tab switch is a navigation, so Back returns to the previous tab and a
 // reload or a shared link opens on the same one.
+function addTab(title: string) {
+  const id = store.addDraftTab(title);
+  if (id !== null) selectTab(id);
+}
+
+let pendingTabId: string | null = null;
 function selectTab(id: string) {
-  if (id !== queryTab()) void router.push({ query: { ...route.query, tab: id } });
+  if (id === queryTab()) return;
+  pendingTabId = id;
+  void router.push({ query: { ...route.query, tab: id } }).finally(() => {
+    if (pendingTabId === id) pendingTabId = null;
+  });
 }
 watch(() => route.query.tab, () => store.setActiveTab(queryTab()));
 
@@ -126,18 +136,16 @@ watch(
   () => {
     const blob = activeBlob.value;
     if (!blob) return undefined;
-    return { shown: blob.tabs.length > 1 ? store.activeTabId : null, tabCount: blob.tabs.length };
+    return blob.tabs.length > 1 ? store.activeTabId : null;
   },
-  (next, previous) => {
-    const shown = next?.shown;
+  (shown) => {
     const from = queryTab();
-    if (shown === undefined || shown === from) return;
+    if (shown === undefined || shown === from || (pendingTabId !== null && shown === pendingTabId)) return;
     const query = { ...route.query, tab: shown ?? undefined };
     // Showing a new tab from a tab the dashboard still has is a navigation,
-    // like a click on a tab, including adding the second tab when the URL
-    // names none. Other changes correct an absent or deleted tab in the URL.
+    // like a click on a tab. Other changes correct an absent or deleted tab.
     const fromExists = (activeBlob.value?.tabs ?? []).some((tab) => tab.id === from);
-    void (shown !== null && (fromExists || previous?.tabCount === 1) ? router.push({ query }) : router.replace({ query }));
+    void (shown !== null && fromExists ? router.push({ query }) : router.replace({ query }));
   },
 );
 
@@ -828,7 +836,7 @@ onBeforeRouteUpdate((to, from) => {
       :active-id="store.activeTabId"
       :editing="isEditing"
       @select="selectTab"
-      @add="store.addDraftTab"
+      @add="addTab"
       @rename="store.renameDraftTab"
       @move="store.moveDraftTab"
       @remove="store.removeDraftTab"

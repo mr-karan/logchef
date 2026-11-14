@@ -600,7 +600,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const run = refreshRun;
     if (!run || run.signal.aborted || needsReload.value) return;
     const states = state.data.value.panelStates;
-    void runPanels(activeTabPanels().filter((p) => !run.completed.has(p.id) || !states[p.id]), run);
+    void runPanels(activeTabPanels().filter((p) => !singlePanelAborts.has(p.id) && (!run.completed.has(p.id) || !states[p.id])), run);
   }
 
   async function refreshAllPanels() {
@@ -737,6 +737,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (reloadId !== null) return await loadDashboard(reloadId, { discardDraft: true });
     abortPreview();
     abortSinglePanels();
+    const current = state.data.value.current;
+    const draft = state.data.value.editDraft;
+    if (current && !current.corrupt && draft) {
+      const editedById = new Map(draft.panels.map((panel) => [panel.id, panel]));
+      for (const saved of current.panels.panels) {
+        const edited = editedById.get(saved.id);
+        if (!saved.locked && edited && !edited.locked &&
+          (execSignature(saved) !== execSignature(edited) || stableStringify(saved.viz) !== stableStringify(edited.viz))) {
+          delete state.data.value.panelStates[saved.id];
+          refreshRun?.completed.delete(saved.id);
+        }
+      }
+    }
     resetEdit();
     setActiveTab(state.data.value.requestedTabId);
     return { success: true };
@@ -764,7 +777,6 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       abortPreview();
       abortSinglePanels();
       resetEdit();
-      setActiveTab(state.data.value.requestedTabId);
     }
     return result;
   }
@@ -914,6 +926,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const result = state.data.value.panelStates[id];
     if (result && FINISHED_PANEL_STATUSES.has(result.status)) {
       setPanelState(copyId, result);
+      if (refreshRun?.completed.has(id)) refreshRun.completed.add(copyId);
     } else if (copy.team_id > 0 && copy.source_id > 0) {
       executeSinglePanel(copy);
     }
