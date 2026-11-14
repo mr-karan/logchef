@@ -289,10 +289,12 @@ it('stacks negative area values downward from the baseline', async () => {
   const groups = [...host.querySelectorAll(`.${Scatter.selectors.point}`)];
   expect(groups.map(g => g.querySelector('text')?.textContent)).toEqual(['100', '-50', '30']);
   const [a, b, c] = groups.map(g => Number(g.getAttribute('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1]));
-  // SVG y grows downward: c stacks on a (130), b sits below the zero baseline.
+  const tickY = (label: string) => Number([...host.querySelectorAll('.tick')].find(t => t.textContent === label)?.getAttribute('transform')?.match(/translate\([^,]+,\s*([^)]+)\)/)?.[1]);
+  const zero = tickY('0'), fifty = tickY('50'), minusFifty = tickY('-50');
+  // SVG y grows downward: c stacks on a (130), b sits at -50, below the zero baseline.
   expect(c).toBeLessThan(a);
-  expect(b).toBeGreaterThan(a);
-  expect(b).toBeGreaterThan(c);
+  expect(b).toBeGreaterThan(zero);
+  expect(Math.abs(b - minusFifty)).toBeLessThan(Math.abs(b - fifty));
 });
 
 it.each([['line', undefined], ['area', undefined], ['area', 'none']] as const)('draws %s %s paths from the full rows', async (mark, stack) => {
