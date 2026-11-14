@@ -963,5 +963,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(शून्य)",
   "panelChart.emptyCategory": "(खाली)",
-  "panelChart.allZero": "सभी मान शून्य हैं।"
+  "panelChart.allZero": "सभी मान शून्य हैं।",
+  "dashboardBuilder.Comparison": "तुलना",
+  "dashboardBuilder.PreviousRow": "पिछली पंक्ति",
+  "dashboardBuilder.GoodDirection": "सुधार की दिशा",
+  "dashboardBuilder.Good_up": "वृद्धि",
+  "dashboardBuilder.Good_down": "कमी",
+  "dashboardBuilder.Good_neutral": "तटस्थ",
+  "dashboardBuilder.Sparkline": "लघु रेखा चार्ट",
+  "dashboardBuilder.NeighborWarning": "पास की पंक्तियों की तुलना होती है, कैलेंडर अवधियों की नहीं। छूटे हुए दिन नहीं भरे जाते।",
+  "dashboardBuilder.CompareReducerWarning": "तुलना के लिए पहली या अंतिम पंक्ति चुनें।",
+  "dashboardBuilder.CompareOrderWarning": "तुलना या लघु चार्ट के लिए क्रम वाला कॉलम चुनें।",
+  "dashboardBuilder.ComparedWith": "{date} से तुलना",
+  "dashboardBuilder.ApproximateSparkline": "अनुमानित निर्देशांक"
 }

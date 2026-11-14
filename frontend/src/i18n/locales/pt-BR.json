@@ -963,5 +963,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(nulo)",
   "panelChart.emptyCategory": "(vazio)",
-  "panelChart.allZero": "Todos os valores são zero."
+  "panelChart.allZero": "Todos os valores são zero.",
+  "dashboardBuilder.Comparison": "Comparação",
+  "dashboardBuilder.PreviousRow": "Linha anterior",
+  "dashboardBuilder.GoodDirection": "Direção de melhoria",
+  "dashboardBuilder.Good_up": "Aumento",
+  "dashboardBuilder.Good_down": "Redução",
+  "dashboardBuilder.Good_neutral": "Neutro",
+  "dashboardBuilder.Sparkline": "Minigráfico",
+  "dashboardBuilder.NeighborWarning": "Compara linhas vizinhas, não períodos do calendário. Dias ausentes não são preenchidos.",
+  "dashboardBuilder.CompareReducerWarning": "A comparação exige o primeiro ou o último valor.",
+  "dashboardBuilder.CompareOrderWarning": "Defina uma coluna de ordenação para a comparação ou o minigráfico.",
+  "dashboardBuilder.ComparedWith": "Comparado com {date}",
+  "dashboardBuilder.ApproximateSparkline": "Coordenadas aproximadas"
 }

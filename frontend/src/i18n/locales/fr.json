@@ -963,5 +963,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(nul)",
   "panelChart.emptyCategory": "(vide)",
-  "panelChart.allZero": "Toutes les valeurs sont nulles."
+  "panelChart.allZero": "Toutes les valeurs sont nulles.",
+  "dashboardBuilder.Comparison": "Comparaison",
+  "dashboardBuilder.PreviousRow": "Ligne précédente",
+  "dashboardBuilder.GoodDirection": "Sens de l’amélioration",
+  "dashboardBuilder.Good_up": "Hausse",
+  "dashboardBuilder.Good_down": "Baisse",
+  "dashboardBuilder.Good_neutral": "Neutre",
+  "dashboardBuilder.Sparkline": "Courbe miniature",
+  "dashboardBuilder.NeighborWarning": "Compare les lignes voisines, pas les périodes calendaires. Les jours manquants ne sont pas ajoutés.",
+  "dashboardBuilder.CompareReducerWarning": "La comparaison nécessite le premier ou le dernier résultat.",
+  "dashboardBuilder.CompareOrderWarning": "Choisissez une colonne de tri pour la comparaison ou la courbe.",
+  "dashboardBuilder.ComparedWith": "Comparé au {date}",
+  "dashboardBuilder.ApproximateSparkline": "Coordonnées approximatives"
 }

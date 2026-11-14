@@ -90,6 +90,8 @@ const (
 )
 
 var (
+	validDashboardCompareModes      = map[string]struct{}{"none": {}, "previous_row": {}}
+	validDashboardCompareGood       = map[string]struct{}{"up": {}, "down": {}, "neutral": {}}
 	validDashboardPanelKinds        = map[DashboardPanelKind]struct{}{DashboardPanelKindQuery: {}}
 	validDashboardQueryModes        = map[DashboardQueryMode]struct{}{DashboardQueryModeCount: {}, DashboardQueryModeResult: {}}
 	validDashboardQueryLanguages    = map[QueryLanguage]struct{}{QueryLanguageLogchefQL: {}, QueryLanguageClickHouseSQL: {}, QueryLanguageLogsQL: {}}
@@ -147,6 +149,8 @@ type dashboardQueryV2 struct {
 }
 
 type dashboardVizV2 struct {
+	Compare         *dashboardStatCompareV2      `json:"compare,omitempty"`
+	Sparkline       *bool                        `json:"sparkline,omitempty"`
 	X               *string                      `json:"x,omitempty"`
 	Y               []string                     `json:"y,omitzero"`
 	Series          *string                      `json:"series,omitempty"`
@@ -167,6 +171,11 @@ type dashboardVizV2 struct {
 	Reduce          *DashboardStatReduce         `json:"reduce,omitempty"`
 	Donut           *bool                        `json:"donut,omitempty"`
 	VisibleColumns  []string                     `json:"visible_columns,omitempty"`
+}
+
+type dashboardStatCompareV2 struct {
+	Mode string  `json:"mode"`
+	Good *string `json:"good,omitempty"`
 }
 
 type dashboardColumnV2 struct {
@@ -227,11 +236,23 @@ var dashboardFeatureRules = []struct {
 		}
 		return false
 	}},
+	{"stat_compare", func(blob *dashboardPanelsV2) bool {
+		for _, p := range blob.Panels {
+			if p.Viz != nil && (p.Viz.Compare != nil || p.Viz.Sparkline != nil) {
+				return true
+			}
+		}
+		return false
+	}},
 }
 
 // dashboardSchema2FieldOrigins maps every JSON path of the schema 2 structs to
 // the feature that an older writer would drop, or the base mark.
 var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
+	"panels.viz.compare":           "stat_compare",
+	"panels.viz.compare.mode":      "stat_compare",
+	"panels.viz.compare.good":      "stat_compare",
+	"panels.viz.sparkline":         "stat_compare",
 	"panels.viz.x":                 "result_charts",
 	"panels.viz.y":                 "result_charts",
 	"panels.viz.series":            "result_charts",
@@ -296,6 +317,8 @@ var dashboardSchema2FieldOrigins = map[string]DashboardFeature{
 // dashboardSchema2EnumOrigins maps every accepted enum value, by field path, to
 // the feature that introduces it or the base mark.
 var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
+	"panels.viz.compare.mode":       {"none": "stat_compare", "previous_row": "stat_compare"},
+	"panels.viz.compare.good":       {"up": "stat_compare", "down": "stat_compare", "neutral": "stat_compare"},
 	"panels.viz.x_scale":            {"auto": "result_charts", "time": "result_charts", "category": "result_charts"},
 	"panels.viz.orientation":        {"horizontal": "result_charts", "vertical": "result_charts"},
 	"panels.kind":                   {string(DashboardPanelKindQuery): dashboardFeatureBase},
@@ -664,7 +687,42 @@ func validateDashboardVizV2(panelID string, q *dashboardQueryV2, v *dashboardViz
 	if err := validateDashboardFrameViz(panelID, v); err != nil {
 		return err
 	}
+	if err := validateDashboardStatCompare(panelID, q, v); err != nil {
+		return err
+	}
 	return validateDashboardVizOptionsV2(panelID, v)
+}
+
+func validateDashboardStatCompare(panelID string, q *dashboardQueryV2, v *dashboardVizV2) error {
+	if v.Compare != nil || v.Sparkline != nil {
+		if v.Type != DashboardVizStat {
+			return fmt.Errorf("panel %q uses stat comparison options on another visualization", panelID)
+		}
+		if v.Compare != nil {
+			if !dashboardEnumContains(validDashboardCompareModes, v.Compare.Mode) {
+				return fmt.Errorf("panel %q has invalid compare.mode", panelID)
+			}
+			if v.Compare.Good != nil && !dashboardEnumContains(validDashboardCompareGood, *v.Compare.Good) {
+				return fmt.Errorf("panel %q has invalid compare.good", panelID)
+			}
+			if v.Compare.Mode == "previous_row" {
+				reduce := DashboardStatReduceLast
+				if q.Mode == DashboardQueryModeCount {
+					reduce = DashboardStatReduceSum
+				}
+				if v.Reduce != nil {
+					reduce = *v.Reduce
+				}
+				if reduce != DashboardStatReduceFirst && reduce != DashboardStatReduceLast {
+					return fmt.Errorf("panel %q comparison needs first or last reducer", panelID)
+				}
+			}
+		}
+		if q.Mode == DashboardQueryModeResult && v.OrderBy == nil && ((v.Sparkline != nil && *v.Sparkline) || (v.Compare != nil && v.Compare.Mode == "previous_row")) {
+			return fmt.Errorf("panel %q comparison or sparkline needs order_by", panelID)
+		}
+	}
+	return nil
 }
 
 func validateDashboardRequiredRoles(id string, v *dashboardVizV2) error {

@@ -1703,5 +1703,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(null)",
   "panelChart.emptyCategory": "(empty)",
-  "panelChart.allZero": "All values are zero."
+  "panelChart.allZero": "All values are zero.",
+  "dashboardBuilder.Comparison": "Comparison",
+  "dashboardBuilder.PreviousRow": "Previous row",
+  "dashboardBuilder.GoodDirection": "Improvement direction",
+  "dashboardBuilder.Good_up": "Increase",
+  "dashboardBuilder.Good_down": "Decrease",
+  "dashboardBuilder.Good_neutral": "Neutral",
+  "dashboardBuilder.Sparkline": "Sparkline",
+  "dashboardBuilder.NeighborWarning": "Compares neighboring rows, not calendar periods. Missing days are not filled.",
+  "dashboardBuilder.CompareReducerWarning": "Comparison requires the first or last reducer.",
+  "dashboardBuilder.CompareOrderWarning": "Set an order column for comparison or a sparkline.",
+  "dashboardBuilder.ComparedWith": "Compared with {date}",
+  "dashboardBuilder.ApproximateSparkline": "Approximate coordinates"
 }

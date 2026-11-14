@@ -1,4 +1,5 @@
 import { createApp, h, nextTick, ref } from "vue";
+import { i18n } from "@/i18n";
 import { createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardQueryPanel } from "@/api/dashboards";
@@ -17,7 +18,7 @@ describe("stat frame rendering", () => {
     const panel = ref<DashboardQueryPanel>({ id: "s", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT n" }, viz: { type: "stat", value: "n" } });
     const host = document.createElement("div");
     const frame = resultFrame({ columns: [{ name: "n", type: "UInt64" }], rows: [{ n: "9007199254740993" }] });
-    const app = createApp({ render: () => h(PanelStat, { frame, panel: panel.value }) }).use(createPinia());
+    const app = createApp({ render: () => h(PanelStat, { frame, panel: panel.value }) }).use(createPinia()).use(i18n);
     try {
       app.mount(host);
       await nextTick();
@@ -33,7 +34,7 @@ describe("stat frame rendering", () => {
     const host = document.createElement("div");
     const panel: DashboardQueryPanel = { id: "s", kind: "query", title: "", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count()" }, viz: { type: "stat", value: "n", order_by: "day", columns: { n: { kind: "number", confidence: "confirmed" }, day: { kind: "date", confidence: "confirmed" } } } };
     const frame = resultFrame({ columns: [{ name: "n", type: "String" }, { name: "day", type: "String" }], rows: [{ n: "5", day: "2026-11-10" }, { n: "6", day: "2026-11-12" }, { n: "", day: "2026-11-12" }], untyped: true });
-    const app = createApp(PanelStat, { frame, panel }).use(createPinia());
+    const app = createApp(PanelStat, { frame, panel }).use(createPinia()).use(i18n);
     try {
       app.mount(host);
       await nextTick();
@@ -42,4 +43,31 @@ describe("stat frame rendering", () => {
       expect(host.textContent).toContain("2 rows share");
     } finally { app.unmount(); }
   });
+});
+
+it("renders scaled exact deltas, both dates and improvement colors", async () => {
+ const panel = ref<DashboardQueryPanel>({id:"s",kind:"query",title:"",team_id:1,source_id:1,query:{mode:"result",language:"clickhouse-sql",text:"SELECT day, n FROM events"},viz:{type:"stat",value:"n",order_by:"day",compare:{mode:"previous_row",good:"up"},format:{scale:0.1,decimals:2,suffix:" M"}}});
+ const frame = resultFrame({columns:[{name:"day",type:"Date"},{name:"n",type:"Decimal(30,2)"}],rows:[{day:"2026-11-12",n:"9007199254740994.02"},{day:"2026-11-09",n:"9007199254740993.01"}]});
+ const host = document.createElement("div");
+ const app = createApp({render:()=>h(PanelStat,{frame,panel:panel.value})}).use(createPinia()).use(i18n);
+ try {
+  app.mount(host); await nextTick();
+  const delta=host.querySelector('.panel-stat__comparison');
+  expect(delta?.textContent).toContain('+0.10 M');
+  expect(delta?.textContent).toContain('2026-11-09'); expect(host.textContent).toContain('2026-11-12');
+  expect(delta?.className).toContain('text-green-600');
+  if(panel.value.viz.type!=="stat") throw new Error("expected stat");
+  panel.value.viz.compare={mode:"previous_row",good:"down"}; await nextTick();
+  expect(delta?.className).toContain('text-red-600');
+  panel.value.viz.compare={mode:"previous_row",good:"neutral"}; await nextTick();
+  expect(delta?.className).toContain('text-muted-foreground');
+ } finally {app.unmount();}
+});
+
+it("keeps an exact value visible when sparkline coordinates overflow",async()=>{
+ const host=document.createElement('div');
+ const panel:DashboardQueryPanel={id:"s",kind:"query",title:"",team_id:1,source_id:1,query:{mode:"result",language:"logsql",text:"*"},viz:{type:"stat",value:"n",order_by:"day",sparkline:true,columns:{n:{kind:"number",confidence:"confirmed"},day:{kind:"date",confidence:"confirmed"}}}};
+ const frame=resultFrame({columns:[{name:"day",type:"String"},{name:"n",type:"String"}],rows:[{day:"2026-11-12",n:"1e400"}]});
+ const app=createApp(PanelStat,{frame,panel}).use(createPinia()).use(i18n);
+ try {app.mount(host);await nextTick();expect(host.querySelector('.panel-stat__value')?.textContent).not.toBe('No data');expect(host.querySelector('[role=alert]')?.textContent).toContain('outside the chart coordinate range');}finally{app.unmount();}
 });

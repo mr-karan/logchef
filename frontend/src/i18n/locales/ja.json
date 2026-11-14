@@ -963,5 +963,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(null)",
   "panelChart.emptyCategory": "(空)",
-  "panelChart.allZero": "すべての値がゼロです。"
+  "panelChart.allZero": "すべての値がゼロです。",
+  "dashboardBuilder.Comparison": "比較",
+  "dashboardBuilder.PreviousRow": "前の行",
+  "dashboardBuilder.GoodDirection": "改善の方向",
+  "dashboardBuilder.Good_up": "増加",
+  "dashboardBuilder.Good_down": "減少",
+  "dashboardBuilder.Good_neutral": "中立",
+  "dashboardBuilder.Sparkline": "スパークライン",
+  "dashboardBuilder.NeighborWarning": "暦の期間ではなく隣接する行を比較します。欠けている日は補完されません。",
+  "dashboardBuilder.CompareReducerWarning": "比較には最初または最後の値を選択してください。",
+  "dashboardBuilder.CompareOrderWarning": "比較やスパークラインには並べ替え列を設定してください。",
+  "dashboardBuilder.ComparedWith": "{date} と比較",
+  "dashboardBuilder.ApproximateSparkline": "近似座標"
 }

@@ -60,7 +60,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"unknown panel key", v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","description":"later","team_id":1,"source_id":1,"query":`+countQ+`,"viz":{"type":"stat"}}`), `unknown field "description"`},
 		{"unknown query key", panel(`{"mode":"count","language":"logchefql","text":"x","range":"today-6d"}`, `{"type":"stat"}`), `unknown field "range"`},
 		{"unknown viz key", panel(countQ, `{"type":"chart","thresholds":[]}`), `unknown field "thresholds"`},
-		{"comparison is a later phase", panel(resultQ, `{"type":"stat","value":"n","compare":{}}`), `unknown field "compare"`},
+		{"comparison needs mode", panel(resultQ, `{"type":"stat","value":"n","compare":{}}`), `invalid compare.mode`},
 		{"null value", panel(`{"mode":"count","language":"logchefql","text":"x","group_by":null}`, `{"type":"stat"}`), "null at panels[0].query.group_by"},
 		{"trailing data", json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]} {}`), "after top-level value"},
 		{"no tabs", json.RawMessage(`{"version":2,"features":[],"tabs":[],"panels":[]}`), "at least one tab"},
@@ -690,6 +690,8 @@ func TestDashboardSchema2FeatureTableComplete(t *testing.T) {
 	}
 
 	enums := map[string]any{
+		"panels.viz.compare.mode":       validDashboardCompareModes,
+		"panels.viz.compare.good":       validDashboardCompareGood,
 		"panels.viz.x_scale":            validDashboardXScales,
 		"panels.viz.orientation":        validDashboardOrientations,
 		"panels.kind":                   validDashboardPanelKinds,
@@ -1103,7 +1105,7 @@ func TestDashboardResultCharts(t *testing.T) {
 		if err != nil || !slices.Contains(features, "result_charts") {
 			t.Fatalf("features %v: %v", features, err)
 		}
-		for _, future := range []string{`"compare":{}`, `"sparkline":true`, `"thresholds":[]`, `"rules":[]`, `"combine":"sum"`} {
+		for _, future := range []string{`"thresholds":[]`, `"rules":[]`, `"combine":"sum"`} {
 			bad := strings.Replace(string(raw), `"type":`, future+`,"type":`, 1)
 			if err := ValidateDashboardPanels(json.RawMessage(bad)); err == nil || !strings.Contains(err.Error(), "unknown field") {
 				t.Errorf("expected unknown field for %s, got %v", future, err)
@@ -1147,6 +1149,34 @@ func TestDashboardCountChartFormats(t *testing.T) {
 		features, err := DashboardFeatures(canonical)
 		if err != nil || !slices.Contains(features, "result_charts") {
 			t.Fatalf("%s features %v: %v", viz, features, err)
+		}
+	}
+}
+
+func TestDashboardStatCompare(t *testing.T) {
+	for _, options := range []string{`"compare":{"mode":"none"}`, `"compare":{"mode":"previous_row","good":"down"}`, `"sparkline":true`, `"sparkline":false`} {
+		raw := v2Blob(v2Layout, strings.Replace(v2TablePanel, `{"type":"table","visible_columns":["a","b"]}`, `{"type":"stat","value":"n","order_by":"day","reduce":"last",`+options+`}`, 1))
+		canonical, err := CanonicalDashboardPanels(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		features, err := DashboardFeatures(canonical)
+		if err != nil || !slices.Contains(features, "stat_compare") {
+			t.Fatalf("features %v: %v", features, err)
+		}
+	}
+	for _, viz := range []string{
+		`{"type":"stat","value":"n","compare":{"mode":"previous_period"}}`,
+		`{"type":"stat","value":"n","compare":{"mode":"none","good":"bad"}}`,
+		`{"type":"stat","value":"n","compare":{"mode":"previous_row"}}`,
+		`{"type":"stat","value":"n","order_by":"day","reduce":"sum","compare":{"mode":"previous_row"}}`,
+		`{"type":"stat","value":"n","sparkline":true}`,
+		`{"type":"table","sparkline":false}`,
+		`{"type":"stat","value":"n","compare":{"mode":"none","extra":1}}`,
+	} {
+		raw := v2Blob(v2Layout, strings.Replace(v2TablePanel, `{"type":"table","visible_columns":["a","b"]}`, viz, 1))
+		if err := ValidateDashboardPanels(raw); err == nil {
+			t.Errorf("accepted %s", viz)
 		}
 	}
 }

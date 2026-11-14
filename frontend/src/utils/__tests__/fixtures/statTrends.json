@@ -1,0 +1,37 @@
+[
+  {
+    "card": 268,
+    "sql": "SELECT date(timestamp) AS day, sum(JSONExtractFloat(payload, 'amount')) / 10000000 AS n FROM events WHERE date(timestamp) >= today() - 4 AND service = 'worker' AND message = 'processed' GROUP BY day",
+    "compare": "previous_row"
+  },
+  {
+    "card": 270,
+    "sql": "SELECT date(timestamp) AS day, count(JSONExtractFloat(payload, 'amount')) AS n FROM events WHERE date(timestamp) >= today() - 4 AND service = 'worker' AND message = 'processed' GROUP BY day",
+    "compare": "previous_row"
+  },
+  {
+    "card": 271,
+    "sql": "WITH pool AS (SELECT JSONExtractString(payload, 'id') AS event_id, JSONExtractString(payload, 'active') AS active, JSONExtractFloat(payload, 'amount') AS amount, date(timestamp) AS day FROM events WHERE date(timestamp) >= today() - 4 AND service = 'worker' AND message = 'processed') SELECT day, count(DISTINCT event_id) AS n FROM pool WHERE active = 'true' AND amount != 0 GROUP BY day ORDER BY day ASC",
+    "compare": "previous_row"
+  },
+  {
+    "card": 274,
+    "sql": "WITH pool AS (SELECT date(timestamp) AS day, sum(JSONExtractFloat(payload, 'amount')) / 10000000 AS n FROM events WHERE date(timestamp) >= today() - 4 AND service = 'worker' AND message = 'processed' GROUP BY day) SELECT * FROM pool",
+    "compare": "previous_row"
+  },
+  {
+    "card": 275,
+    "sql": "WITH pool AS (SELECT date(timestamp) AS day, count(JSONExtractFloat(payload, 'amount')) AS n FROM events WHERE date(timestamp) >= today() - 4 AND service = 'worker' AND message = 'processed' GROUP BY day) SELECT * FROM pool",
+    "compare": "previous_row"
+  },
+  {
+    "card": 302,
+    "sql": "SELECT date(timestamp) AS day, sum(JSONExtractFloat(payload, 'amount')) / 10000000 AS n FROM events WHERE date(timestamp) >= today() - 3 AND service = 'worker' AND message = 'processed' GROUP BY day",
+    "compare": "previous_row"
+  },
+  {
+    "card": 584,
+    "sql": "SELECT date(timestamp) AS day, count(DISTINCT JSONExtractString(payload, 'client')) AS n FROM events WHERE service = 'worker' AND message = 'processed' AND date(timestamp) = (SELECT max(date(timestamp)) FROM events WHERE service = 'worker' AND message = 'processed') GROUP BY day",
+    "compare": "none"
+  }
+]

@@ -36,6 +36,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("CollectionLinks", func(t *testing.T) { testCollectionLinks(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
+	t.Run("DashboardStatCompare", func(t *testing.T) { testDashboardStatCompare(t, ctx, s) })
 	t.Run("DashboardRevisions", func(t *testing.T) { testDashboardRevisions(t, ctx, s) })
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })

@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts"];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -72,8 +72,9 @@ export interface NumberFormat {
  prefix?: string;
  suffix?: string;
 }
+export interface StatCompare { mode: "none" | "previous_row"; good?: "up" | "down" | "neutral" }
 export type DashboardViz =
-  | { type: "stat"; value?: string; order_by?: string; reduce?: StatReduce; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
+  | { type: "stat"; compare?: StatCompare; sparkline?: boolean; value?: string; order_by?: string; reduce?: StatReduce; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "chart"; x?: string; y?: string[]; series?: string; mark?: DashboardChartMark; stack?: DashboardChartStack; x_scale?: "auto" | "time" | "category"; orientation?: "horizontal" | "vertical"; show_values?: boolean; legend?: boolean; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "pie"; label?: string; value?: string; donut?: boolean; min_slice_percent?: number; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }
   | { type: "toplist"; label?: string; value?: string; max_rows?: number; columns?: Record<string, ConfirmedColumn>; format?: NumberFormat }

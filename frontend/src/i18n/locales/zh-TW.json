@@ -963,5 +963,17 @@
   "panelChart.null": "NULL",
   "panelChart.nullCategory": "(空值)",
   "panelChart.emptyCategory": "(空)",
-  "panelChart.allZero": "所有值皆為零。"
+  "panelChart.allZero": "所有值皆為零。",
+  "dashboardBuilder.Comparison": "比較",
+  "dashboardBuilder.PreviousRow": "上一列",
+  "dashboardBuilder.GoodDirection": "改善方向",
+  "dashboardBuilder.Good_up": "上升",
+  "dashboardBuilder.Good_down": "下降",
+  "dashboardBuilder.Good_neutral": "中性",
+  "dashboardBuilder.Sparkline": "迷你折線圖",
+  "dashboardBuilder.NeighborWarning": "比較相鄰列，而非日曆週期。不會補齊缺少的日期。",
+  "dashboardBuilder.CompareReducerWarning": "比較需要選擇第一列或最後一列。",
+  "dashboardBuilder.CompareOrderWarning": "請為比較或迷你折線圖設定排序欄。",
+  "dashboardBuilder.ComparedWith": "與 {date} 比較",
+  "dashboardBuilder.ApproximateSparkline": "近似座標"
 }
