@@ -179,10 +179,21 @@ func TestLogchefQLQueryReturnsAggregation(t *testing.T) {
 	}
 }
 
-// A provider that cannot compile the pipe answers AGGREGATION_NOT_SUPPORTED on
-// the paths that opt in, and the log-row paths answer AGGREGATION_NOT_ALLOWED.
+// The paths that opt in compile and run the pipe on VictoriaLogs, and the
+// log-row paths answer AGGREGATION_NOT_ALLOWED.
 func TestLogchefQLAggregationPaths(t *testing.T) {
 	s, source := newAggregationTestServer(t, victorialogs.NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil))), models.SourceTypeVictoriaLogs)
+	var gotQuery string
+	vl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.FormValue("query")
+		// VictoriaLogs leaves out a key whose value is empty.
+		_, _ = io.WriteString(w, "{\"__lc_v0\":\"3\",\"service\":\"api\"}\n{\"__lc_v0\":\"1\"}\n")
+	}))
+	t.Cleanup(vl.Close)
+	source.ConnectionConfig = json.RawMessage(`{"base_url":"` + vl.URL + `"}`)
+	if err := s.store.UpdateSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
 	app := fiber.New()
 	user, src := authorizeTestSource(t, s.store, source.ID)
 	base := fmt.Sprintf("/teams/%d/sources/%d", src.TeamID(), source.ID)
@@ -200,10 +211,28 @@ func TestLogchefQLAggregationPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("query answers not supported", func(t *testing.T) {
-		status, _, body := postJSON(t, app, base+"/logchefql/query", `{"query":"x=1 | count()",`+timeRange+`}`)
-		if status != http.StatusBadRequest || body["message"] != "aggregations are not supported for this source type" {
+	t.Run("query runs the aggregation", func(t *testing.T) {
+		status, _, body := postJSON(t, app, base+"/logchefql/query", `{"query":"x=1 | count() by service",`+timeRange+`}`)
+		if status != http.StatusOK {
 			t.Fatalf("status=%d body=%v", status, body)
+		}
+		if want := "x:=1 | stats by (service) count() as __lc_v0 | sort by (__lc_v0 desc, service)"; gotQuery != want {
+			t.Fatalf("VictoriaLogs query=%q, want %q", gotQuery, want)
+		}
+		data, _ := body["data"].(map[string]any)
+		wantLogs := []any{
+			map[string]any{"service": "api", "count": "3"},
+			map[string]any{"service": "", "count": "1"},
+		}
+		wantColumns := []any{
+			map[string]any{"name": "service", "type": "String"},
+			map[string]any{"name": "count", "type": "UInt64"},
+		}
+		if !reflect.DeepEqual(data["logs"], wantLogs) || !reflect.DeepEqual(data["columns"], wantColumns) {
+			t.Fatalf("logs=%v columns=%v, want %v %v", data["logs"], data["columns"], wantLogs, wantColumns)
+		}
+		if agg, _ := data["aggregation"].(map[string]any); agg["shape"] != "grouped" {
+			t.Fatalf("aggregation=%v, want grouped", data["aggregation"])
 		}
 	})
 
@@ -215,11 +244,32 @@ func TestLogchefQLAggregationPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("translate answers not supported", func(t *testing.T) {
+	t.Run("query rejects too many buckets as ClickHouse does", func(t *testing.T) {
+		// 90 days at 1h gives 2160 buckets.
+		wideRange := `"start_time":"2026-08-17T00:00:00Z","end_time":"2026-11-15T00:00:00Z","timezone":"UTC"`
+		status, _, body := postJSON(t, app, base+"/logchefql/query", `{"query":"x=1 | count() by time(1h)",`+wideRange+`}`)
+		want := "1h over this range gives 2160 buckets. The maximum is 1000. Use 3h or longer"
+		if status != http.StatusBadRequest || body["message"] != want {
+			t.Fatalf("status=%d body=%v, want 400 %q", status, body, want)
+		}
+	})
+
+	t.Run("translate compiles", func(t *testing.T) {
 		status, _, body := postJSON(t, app, base+"/logchefql/translate", `{"query":"x=1 | count()"}`)
 		data, _ := body["data"].(map[string]any)
+		if status != http.StatusOK || data["valid"] != true || data["generated_query"] != "x:=1 | stats count() as __lc_v0" {
+			t.Fatalf("status=%d body=%v", status, body)
+		}
+		if agg, _ := data["aggregation"].(map[string]any); agg["shape"] != "scalar" {
+			t.Fatalf("aggregation=%v, want scalar", data["aggregation"])
+		}
+	})
+
+	t.Run("translate rejects time with no interval", func(t *testing.T) {
+		status, _, body := postJSON(t, app, base+"/logchefql/translate", `{"query":"x=1 | count() by time"}`)
+		data, _ := body["data"].(map[string]any)
 		parseErr, _ := data["error"].(map[string]any)
-		if status != http.StatusOK || data["valid"] != false || parseErr["code"] != logchefql.ErrAggregationNotSupported {
+		if status != http.StatusOK || data["valid"] != false || parseErr["message"] != "this query buckets by time, so the request needs an interval" {
 			t.Fatalf("status=%d body=%v", status, body)
 		}
 		if _, present := data["aggregation"]; present {

@@ -68,10 +68,9 @@ func newTestRunID(t *testing.T) string {
 func ingestFixtures(t *testing.T, baseURL, runID string, base time.Time, rows []fixtureRow) {
 	t.Helper()
 
-	var body bytes.Buffer
-	encoder := json.NewEncoder(&body) // Encode writes a trailing newline: exactly the stream+json framing.
-	for _, row := range rows {
-		record := map[string]any{
+	records := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		records[i] = map[string]any{
 			"_time":       base.Add(row.offset).Format(time.RFC3339),
 			"_msg":        row.msg,
 			"level":       row.level,
@@ -79,6 +78,18 @@ func ingestFixtures(t *testing.T, baseURL, runID string, base time.Time, rows []
 			"duration_ms": row.durationMs,
 			"test_run":    runID,
 		}
+	}
+	ingestRecords(t, baseURL, records)
+}
+
+// ingestRecords pushes records via the jsonline insert API. Each record needs
+// _time and _msg.
+func ingestRecords(t *testing.T, baseURL string, records []map[string]any) {
+	t.Helper()
+
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body) // Encode writes a trailing newline: exactly the stream+json framing.
+	for _, record := range records {
 		if err := encoder.Encode(record); err != nil {
 			t.Fatalf("encode fixture: %v", err)
 		}
