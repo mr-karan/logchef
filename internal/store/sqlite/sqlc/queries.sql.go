@@ -318,6 +318,62 @@ func (q *Queries) ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOA
 	return i, err
 }
 
+const clearSavedViewScopeDefault = `-- name: ClearSavedViewScopeDefault :many
+UPDATE saved_views
+SET is_default = 0
+WHERE source_id = ?1
+  AND scope = ?2
+  AND COALESCE(user_id, 0) = ?3
+  AND COALESCE(team_id, 0) = ?4
+  AND is_default = 1
+  AND id != ?5
+RETURNING id, managed
+`
+
+type ClearSavedViewScopeDefaultParams struct {
+	SourceID int64         `json:"source_id"`
+	Scope    string        `json:"scope"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+	KeepID   int64         `json:"keep_id"`
+}
+
+type ClearSavedViewScopeDefaultRow struct {
+	ID      int64 `json:"id"`
+	Managed int64 `json:"managed"`
+}
+
+// Clear the default of one scope and source, except on keep_id. The partial
+// unique index leaves at most one row. A NULL owner column compares as 0.
+func (q *Queries) ClearSavedViewScopeDefault(ctx context.Context, arg ClearSavedViewScopeDefaultParams) ([]ClearSavedViewScopeDefaultRow, error) {
+	rows, err := q.query(ctx, q.clearSavedViewScopeDefaultStmt, clearSavedViewScopeDefault,
+		arg.SourceID,
+		arg.Scope,
+		arg.UserID,
+		arg.TeamID,
+		arg.KeepID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClearSavedViewScopeDefaultRow{}
+	for rows.Next() {
+		var i ClearSavedViewScopeDefaultRow
+		if err := rows.Scan(&i.ID, &i.Managed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const completeExportJob = `-- name: CompleteExportJob :one
 UPDATE export_jobs
 SET
@@ -460,6 +516,34 @@ type CountCollectionTeamAccessParams struct {
 // A non-zero count grants the user the collection Member role.
 func (q *Queries) CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error) {
 	row := q.queryRow(ctx, q.countCollectionTeamAccessStmt, countCollectionTeamAccess, arg.CollectionID, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSavedViewsInScope = `-- name: CountSavedViewsInScope :one
+SELECT COUNT(*) FROM saved_views
+WHERE source_id = ?1
+  AND scope = ?2
+  AND COALESCE(user_id, 0) = ?3
+  AND COALESCE(team_id, 0) = ?4
+`
+
+type CountSavedViewsInScopeParams struct {
+	SourceID int64         `json:"source_id"`
+	Scope    string        `json:"scope"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+}
+
+// A NULL owner column compares as 0.
+func (q *Queries) CountSavedViewsInScope(ctx context.Context, arg CountSavedViewsInScopeParams) (int64, error) {
+	row := q.queryRow(ctx, q.countSavedViewsInScopeStmt, countSavedViewsInScope,
+		arg.SourceID,
+		arg.Scope,
+		arg.UserID,
+		arg.TeamID,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -934,6 +1018,61 @@ func (q *Queries) CreateSavedQuery(ctx context.Context, arg CreateSavedQueryPara
 	return id, err
 }
 
+const createSavedView = `-- name: CreateSavedView :one
+
+INSERT INTO saved_views (source_id, scope, user_id, team_id, name, description, definition, is_default, managed, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at
+`
+
+type CreateSavedViewParams struct {
+	SourceID    int64         `json:"source_id"`
+	Scope       string        `json:"scope"`
+	UserID      sql.NullInt64 `json:"user_id"`
+	TeamID      sql.NullInt64 `json:"team_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Definition  string        `json:"definition"`
+	IsDefault   int64         `json:"is_default"`
+	Managed     int64         `json:"managed"`
+	CreatedBy   sql.NullInt64 `json:"created_by"`
+}
+
+// Saved views -----------------------------------------------------------------
+// Insert a view; a name or default taken in its scope fails a unique index.
+func (q *Queries) CreateSavedView(ctx context.Context, arg CreateSavedViewParams) (SavedView, error) {
+	row := q.queryRow(ctx, q.createSavedViewStmt, createSavedView,
+		arg.SourceID,
+		arg.Scope,
+		arg.UserID,
+		arg.TeamID,
+		arg.Name,
+		arg.Description,
+		arg.Definition,
+		arg.IsDefault,
+		arg.Managed,
+		arg.CreatedBy,
+	)
+	var i SavedView
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Scope,
+		&i.UserID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Definition,
+		&i.IsDefault,
+		&i.Managed,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :exec
 
 INSERT INTO sessions (id, user_id, expires_at, created_at)
@@ -1225,6 +1364,18 @@ DELETE FROM saved_queries WHERE id = ?
 func (q *Queries) DeleteSavedQuery(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.deleteSavedQueryStmt, deleteSavedQuery, id)
 	return err
+}
+
+const deleteSavedView = `-- name: DeleteSavedView :one
+DELETE FROM saved_views WHERE id = ?
+RETURNING id
+`
+
+func (q *Queries) DeleteSavedView(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.deleteSavedViewStmt, deleteSavedView, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -1923,6 +2074,32 @@ func (q *Queries) GetSavedQuery(ctx context.Context, id int64) (SavedQuery, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CreatedFromTeamID,
+	)
+	return i, err
+}
+
+const getSavedView = `-- name: GetSavedView :one
+SELECT id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at FROM saved_views WHERE id = ?
+`
+
+func (q *Queries) GetSavedView(ctx context.Context, id int64) (SavedView, error) {
+	row := q.queryRow(ctx, q.getSavedViewStmt, getSavedView, id)
+	var i SavedView
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Scope,
+		&i.UserID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Definition,
+		&i.IsDefault,
+		&i.Managed,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -3341,6 +3518,49 @@ func (q *Queries) ListInterruptedExportJobs(ctx context.Context, arg ListInterru
 	return items, nil
 }
 
+const listManagedSavedViews = `-- name: ListManagedSavedViews :many
+SELECT id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at FROM saved_views WHERE managed = 1
+ORDER BY source_id, name, id
+`
+
+func (q *Queries) ListManagedSavedViews(ctx context.Context) ([]SavedView, error) {
+	rows, err := q.query(ctx, q.listManagedSavedViewsStmt, listManagedSavedViews)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SavedView{}
+	for rows.Next() {
+		var i SavedView
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Scope,
+			&i.UserID,
+			&i.TeamID,
+			&i.Name,
+			&i.Description,
+			&i.Definition,
+			&i.IsDefault,
+			&i.Managed,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listManagedSources = `-- name: ListManagedSources :many
 SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
 `
@@ -3726,6 +3946,63 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 			&i.UpdatedAt,
 			&i.CreatedBy,
 			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSavedViews = `-- name: ListSavedViews :many
+SELECT id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at FROM saved_views
+WHERE source_id = ?1
+  AND (
+    (scope = 'personal' AND user_id = ?2)
+    OR (scope = 'team' AND team_id = ?3)
+    OR scope = 'source'
+  )
+ORDER BY CASE scope WHEN 'personal' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, name, id
+`
+
+type ListSavedViewsParams struct {
+	SourceID int64         `json:"source_id"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+}
+
+// The caller's personal views, the team's views and the source views of one
+// source, personal first, then team, then source, each by name.
+func (q *Queries) ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error) {
+	rows, err := q.query(ctx, q.listSavedViewsStmt, listSavedViews, arg.SourceID, arg.UserID, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SavedView{}
+	for rows.Next() {
+		var i SavedView
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Scope,
+			&i.UserID,
+			&i.TeamID,
+			&i.Name,
+			&i.Description,
+			&i.Definition,
+			&i.IsDefault,
+			&i.Managed,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4950,6 +5227,23 @@ func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuth
 	return err
 }
 
+const setSavedViewDefaultFlag = `-- name: SetSavedViewDefaultFlag :one
+UPDATE saved_views SET is_default = ? WHERE id = ?
+RETURNING id
+`
+
+type SetSavedViewDefaultFlagParams struct {
+	IsDefault int64 `json:"is_default"`
+	ID        int64 `json:"id"`
+}
+
+func (q *Queries) SetSavedViewDefaultFlag(ctx context.Context, arg SetSavedViewDefaultFlagParams) (int64, error) {
+	row := q.queryRow(ctx, q.setSavedViewDefaultFlagStmt, setSavedViewDefaultFlag, arg.IsDefault, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const setSourceManaged = `-- name: SetSourceManaged :exec
 UPDATE sources SET managed = ?, secret_ref = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
 `
@@ -5417,6 +5711,54 @@ func (q *Queries) UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryPara
 		arg.ID,
 	)
 	return err
+}
+
+const updateSavedView = `-- name: UpdateSavedView :one
+UPDATE saved_views
+SET name = ?,
+    description = ?,
+    definition = ?,
+    revision = revision + 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ? AND revision = ?
+RETURNING id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at
+`
+
+type UpdateSavedViewParams struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Definition  string `json:"definition"`
+	ID          int64  `json:"id"`
+	Revision    int64  `json:"revision"`
+}
+
+// Compare-and-swap on the caller's revision; no row means missing or stale.
+func (q *Queries) UpdateSavedView(ctx context.Context, arg UpdateSavedViewParams) (SavedView, error) {
+	row := q.queryRow(ctx, q.updateSavedViewStmt, updateSavedView,
+		arg.Name,
+		arg.Description,
+		arg.Definition,
+		arg.ID,
+		arg.Revision,
+	)
+	var i SavedView
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Scope,
+		&i.UserID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Definition,
+		&i.IsDefault,
+		&i.Managed,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateSource = `-- name: UpdateSource :exec

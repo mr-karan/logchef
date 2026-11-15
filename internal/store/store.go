@@ -1,6 +1,6 @@
 // Package store defines the backend-agnostic contract for logchef's application
 // metadata — users, teams, sources, sessions, saved queries, collections,
-// alerts, background jobs, API tokens, system settings, export jobs, user preferences, query
+// saved views, alerts, background jobs, API tokens, system settings, export jobs, user preferences, query
 // shares and OAuth authorization state. (Log data lives in ClickHouse and is not part of this contract.)
 //
 // Concrete implementations live in sub-packages — store/sqlite (the default,
@@ -98,6 +98,45 @@ type SavedQueryStore interface {
 	ListSavedQueriesForUser(ctx context.Context, userID models.UserID) ([]*models.SavedQuery, error)
 	ListSavedQueriesForUserBySource(ctx context.Context, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error)
 	ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, error)
+}
+
+// SavedViewStore persists saved Explorer views (RFC 0007). Scope, visibility
+// and edit rules live in core; these methods are the raw persistence surface.
+// A name is unique, and at most one view is the default, per scope, owner and
+// source; a write that breaks either returns models.ErrConflict.
+type SavedViewStore interface {
+	// CreateSavedView inserts view with its IsDefault and Managed flags as
+	// given and fills ID, Revision and the timestamps.
+	CreateSavedView(ctx context.Context, view *models.SavedView) error
+	// GetSavedView returns models.ErrNotFound when no view has the id.
+	GetSavedView(ctx context.Context, id models.SavedViewID) (*models.SavedView, error)
+	// ListSavedViews returns, in one query, userID's personal views, teamID's
+	// team views and the source views of sourceID: personal first, then team,
+	// then source, each ordered by name (bytewise) and id.
+	ListSavedViews(ctx context.Context, sourceID models.SourceID, userID models.UserID, teamID models.TeamID) ([]*models.SavedView, error)
+	// UpdateSavedView writes name, description and definition with a
+	// compare-and-swap on view.Revision, the revision the caller loaded. On
+	// success view holds the stored row with the next revision. A stale
+	// revision changes no row and returns models.ErrConflict; a missing row
+	// returns models.ErrNotFound. Scope, owner and flags never change here.
+	UpdateSavedView(ctx context.Context, view *models.SavedView) error
+	// DeleteSavedView returns models.ErrNotFound when no view has the id.
+	DeleteSavedView(ctx context.Context, id models.SavedViewID) error
+	// SetSavedViewDefault clears the default of the view's scope, owner and
+	// source and sets it on the view, in one transaction (inside WithTx it
+	// joins the caller's). It returns the view that lost the flag, or nil. A
+	// caller that must not clear a managed default calls it inside WithTx and
+	// returns an error to roll back. A concurrent swap that committed another
+	// default first returns models.ErrConflict.
+	SetSavedViewDefault(ctx context.Context, id models.SavedViewID) (*models.ClearedSavedViewDefault, error)
+	// ClearSavedViewDefault clears the view's default flag. It returns
+	// models.ErrNotFound when no view has the id.
+	ClearSavedViewDefault(ctx context.Context, id models.SavedViewID) error
+	// CountSavedViewsInScope counts the views of one scope of one source.
+	CountSavedViewsInScope(ctx context.Context, key models.SavedViewScopeKey) (int, error)
+	// ListManagedSavedViews returns every view that provisioning owns,
+	// ordered by source, name (bytewise) and id.
+	ListManagedSavedViews(ctx context.Context) ([]*models.SavedView, error)
 }
 
 // CollectionStore persists collections (curated groups of saved queries) plus
@@ -441,6 +480,7 @@ type StoreOps interface {
 	UserStore
 	SourceStore
 	SavedQueryStore
+	SavedViewStore
 	CollectionStore
 	DashboardStore
 	AlertStore

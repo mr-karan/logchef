@@ -47,6 +47,12 @@ func TestOAuthConformance(t *testing.T) {
 	storetest.RunOAuth(t, opener(sqlitetest.Path(t)))
 }
 
+// TestSavedViewDefaultRace runs two default swaps from two store instances
+// on one file; the second writer waits on SQLite's lock.
+func TestSavedViewDefaultRace(t *testing.T) {
+	storetest.RunSavedViewDefaultRace(t, opener(sqlitetest.Path(t)))
+}
+
 // TestCollectionLinkRaces runs the link races with two store instances on
 // one file, so the second writer waits on SQLite's lock, not on Go.
 func TestCollectionLinkRaces(t *testing.T) {

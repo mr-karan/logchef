@@ -51,6 +51,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.claimOAuthAuthRequestDecisionStmt, err = db.PrepareContext(ctx, claimOAuthAuthRequestDecision); err != nil {
 		return nil, fmt.Errorf("error preparing query ClaimOAuthAuthRequestDecision: %w", err)
 	}
+	if q.clearSavedViewScopeDefaultStmt, err = db.PrepareContext(ctx, clearSavedViewScopeDefault); err != nil {
+		return nil, fmt.Errorf("error preparing query ClearSavedViewScopeDefault: %w", err)
+	}
 	if q.completeExportJobStmt, err = db.PrepareContext(ctx, completeExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query CompleteExportJob: %w", err)
 	}
@@ -65,6 +68,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.countCollectionTeamAccessStmt, err = db.PrepareContext(ctx, countCollectionTeamAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountCollectionTeamAccess: %w", err)
+	}
+	if q.countSavedViewsInScopeStmt, err = db.PrepareContext(ctx, countSavedViewsInScope); err != nil {
+		return nil, fmt.Errorf("error preparing query CountSavedViewsInScope: %w", err)
 	}
 	if q.countSharedCollectionEditAccessStmt, err = db.PrepareContext(ctx, countSharedCollectionEditAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountSharedCollectionEditAccess: %w", err)
@@ -98,6 +104,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createSavedQueryStmt, err = db.PrepareContext(ctx, createSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSavedQuery: %w", err)
+	}
+	if q.createSavedViewStmt, err = db.PrepareContext(ctx, createSavedView); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateSavedView: %w", err)
 	}
 	if q.createSessionStmt, err = db.PrepareContext(ctx, createSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSession: %w", err)
@@ -152,6 +161,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteSavedQueryStmt, err = db.PrepareContext(ctx, deleteSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSavedQuery: %w", err)
+	}
+	if q.deleteSavedViewStmt, err = db.PrepareContext(ctx, deleteSavedView); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSavedView: %w", err)
 	}
 	if q.deleteSessionStmt, err = db.PrepareContext(ctx, deleteSession); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSession: %w", err)
@@ -230,6 +242,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getSavedQueryStmt, err = db.PrepareContext(ctx, getSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSavedQuery: %w", err)
+	}
+	if q.getSavedViewStmt, err = db.PrepareContext(ctx, getSavedView); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSavedView: %w", err)
 	}
 	if q.getSessionStmt, err = db.PrepareContext(ctx, getSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSession: %w", err)
@@ -345,6 +360,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listInterruptedExportJobsStmt, err = db.PrepareContext(ctx, listInterruptedExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query ListInterruptedExportJobs: %w", err)
 	}
+	if q.listManagedSavedViewsStmt, err = db.PrepareContext(ctx, listManagedSavedViews); err != nil {
+		return nil, fmt.Errorf("error preparing query ListManagedSavedViews: %w", err)
+	}
 	if q.listManagedSourcesStmt, err = db.PrepareContext(ctx, listManagedSources); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedSources: %w", err)
 	}
@@ -365,6 +383,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listSavedQueriesForUserBySourceStmt, err = db.PrepareContext(ctx, listSavedQueriesForUserBySource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSavedQueriesForUserBySource: %w", err)
+	}
+	if q.listSavedViewsStmt, err = db.PrepareContext(ctx, listSavedViews); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSavedViews: %w", err)
 	}
 	if q.listServiceAccountsStmt, err = db.PrepareContext(ctx, listServiceAccounts); err != nil {
 		return nil, fmt.Errorf("error preparing query ListServiceAccounts: %w", err)
@@ -486,6 +507,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.setOAuthAuthRequestGrantStmt, err = db.PrepareContext(ctx, setOAuthAuthRequestGrant); err != nil {
 		return nil, fmt.Errorf("error preparing query SetOAuthAuthRequestGrant: %w", err)
 	}
+	if q.setSavedViewDefaultFlagStmt, err = db.PrepareContext(ctx, setSavedViewDefaultFlag); err != nil {
+		return nil, fmt.Errorf("error preparing query SetSavedViewDefaultFlag: %w", err)
+	}
 	if q.setSourceManagedStmt, err = db.PrepareContext(ctx, setSourceManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query SetSourceManaged: %w", err)
 	}
@@ -536,6 +560,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateSavedQueryStmt, err = db.PrepareContext(ctx, updateSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSavedQuery: %w", err)
+	}
+	if q.updateSavedViewStmt, err = db.PrepareContext(ctx, updateSavedView); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateSavedView: %w", err)
 	}
 	if q.updateSourceStmt, err = db.PrepareContext(ctx, updateSource); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSource: %w", err)
@@ -617,6 +644,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing claimOAuthAuthRequestDecisionStmt: %w", cerr)
 		}
 	}
+	if q.clearSavedViewScopeDefaultStmt != nil {
+		if cerr := q.clearSavedViewScopeDefaultStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing clearSavedViewScopeDefaultStmt: %w", cerr)
+		}
+	}
 	if q.completeExportJobStmt != nil {
 		if cerr := q.completeExportJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing completeExportJobStmt: %w", cerr)
@@ -640,6 +672,11 @@ func (q *Queries) Close() error {
 	if q.countCollectionTeamAccessStmt != nil {
 		if cerr := q.countCollectionTeamAccessStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countCollectionTeamAccessStmt: %w", cerr)
+		}
+	}
+	if q.countSavedViewsInScopeStmt != nil {
+		if cerr := q.countSavedViewsInScopeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countSavedViewsInScopeStmt: %w", cerr)
 		}
 	}
 	if q.countSharedCollectionEditAccessStmt != nil {
@@ -695,6 +732,11 @@ func (q *Queries) Close() error {
 	if q.createSavedQueryStmt != nil {
 		if cerr := q.createSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createSavedQueryStmt: %w", cerr)
+		}
+	}
+	if q.createSavedViewStmt != nil {
+		if cerr := q.createSavedViewStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createSavedViewStmt: %w", cerr)
 		}
 	}
 	if q.createSessionStmt != nil {
@@ -785,6 +827,11 @@ func (q *Queries) Close() error {
 	if q.deleteSavedQueryStmt != nil {
 		if cerr := q.deleteSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSavedQueryStmt: %w", cerr)
+		}
+	}
+	if q.deleteSavedViewStmt != nil {
+		if cerr := q.deleteSavedViewStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSavedViewStmt: %w", cerr)
 		}
 	}
 	if q.deleteSessionStmt != nil {
@@ -915,6 +962,11 @@ func (q *Queries) Close() error {
 	if q.getSavedQueryStmt != nil {
 		if cerr := q.getSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSavedQueryStmt: %w", cerr)
+		}
+	}
+	if q.getSavedViewStmt != nil {
+		if cerr := q.getSavedViewStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSavedViewStmt: %w", cerr)
 		}
 	}
 	if q.getSessionStmt != nil {
@@ -1107,6 +1159,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listInterruptedExportJobsStmt: %w", cerr)
 		}
 	}
+	if q.listManagedSavedViewsStmt != nil {
+		if cerr := q.listManagedSavedViewsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listManagedSavedViewsStmt: %w", cerr)
+		}
+	}
 	if q.listManagedSourcesStmt != nil {
 		if cerr := q.listManagedSourcesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedSourcesStmt: %w", cerr)
@@ -1140,6 +1197,11 @@ func (q *Queries) Close() error {
 	if q.listSavedQueriesForUserBySourceStmt != nil {
 		if cerr := q.listSavedQueriesForUserBySourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSavedQueriesForUserBySourceStmt: %w", cerr)
+		}
+	}
+	if q.listSavedViewsStmt != nil {
+		if cerr := q.listSavedViewsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSavedViewsStmt: %w", cerr)
 		}
 	}
 	if q.listServiceAccountsStmt != nil {
@@ -1342,6 +1404,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing setOAuthAuthRequestGrantStmt: %w", cerr)
 		}
 	}
+	if q.setSavedViewDefaultFlagStmt != nil {
+		if cerr := q.setSavedViewDefaultFlagStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setSavedViewDefaultFlagStmt: %w", cerr)
+		}
+	}
 	if q.setSourceManagedStmt != nil {
 		if cerr := q.setSourceManagedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setSourceManagedStmt: %w", cerr)
@@ -1425,6 +1492,11 @@ func (q *Queries) Close() error {
 	if q.updateSavedQueryStmt != nil {
 		if cerr := q.updateSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSavedQueryStmt: %w", cerr)
+		}
+	}
+	if q.updateSavedViewStmt != nil {
+		if cerr := q.updateSavedViewStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateSavedViewStmt: %w", cerr)
 		}
 	}
 	if q.updateSourceStmt != nil {
@@ -1525,11 +1597,13 @@ type Queries struct {
 	authenticateOAuthAccessTokenStmt      *sql.Stmt
 	claimJobsStmt                         *sql.Stmt
 	claimOAuthAuthRequestDecisionStmt     *sql.Stmt
+	clearSavedViewScopeDefaultStmt        *sql.Stmt
 	completeExportJobStmt                 *sql.Stmt
 	consumeOAuthAuthCodeStmt              *sql.Stmt
 	consumeOAuthRefreshTokenStmt          *sql.Stmt
 	countAdminUsersStmt                   *sql.Stmt
 	countCollectionTeamAccessStmt         *sql.Stmt
+	countSavedViewsInScopeStmt            *sql.Stmt
 	countSharedCollectionEditAccessStmt   *sql.Stmt
 	countUserSessionsStmt                 *sql.Stmt
 	createAPITokenStmt                    *sql.Stmt
@@ -1541,6 +1615,7 @@ type Queries struct {
 	createOAuthGrantStmt                  *sql.Stmt
 	createQueryShareStmt                  *sql.Stmt
 	createSavedQueryStmt                  *sql.Stmt
+	createSavedViewStmt                   *sql.Stmt
 	createSessionStmt                     *sql.Stmt
 	createSourceStmt                      *sql.Stmt
 	createTeamStmt                        *sql.Stmt
@@ -1559,6 +1634,7 @@ type Queries struct {
 	deleteJobStmt                         *sql.Stmt
 	deleteQueryShareStmt                  *sql.Stmt
 	deleteSavedQueryStmt                  *sql.Stmt
+	deleteSavedViewStmt                   *sql.Stmt
 	deleteSessionStmt                     *sql.Stmt
 	deleteSourceStmt                      *sql.Stmt
 	deleteSystemSettingStmt               *sql.Stmt
@@ -1585,6 +1661,7 @@ type Queries struct {
 	getPersonalCollectionStmt             *sql.Stmt
 	getQueryShareStmt                     *sql.Stmt
 	getSavedQueryStmt                     *sql.Stmt
+	getSavedViewStmt                      *sql.Stmt
 	getSessionStmt                        *sql.Stmt
 	getSourceStmt                         *sql.Stmt
 	getSourceByIdentityKeyStmt            *sql.Stmt
@@ -1623,6 +1700,7 @@ type Queries struct {
 	listDashboardSummariesStmt            *sql.Stmt
 	listExpiredExportJobPathsStmt         *sql.Stmt
 	listInterruptedExportJobsStmt         *sql.Stmt
+	listManagedSavedViewsStmt             *sql.Stmt
 	listManagedSourcesStmt                *sql.Stmt
 	listManagedTeamsStmt                  *sql.Stmt
 	listOAuthGrantsForUserStmt            *sql.Stmt
@@ -1630,6 +1708,7 @@ type Queries struct {
 	listQueryHistoryStmt                  *sql.Stmt
 	listSavedQueriesForUserStmt           *sql.Stmt
 	listSavedQueriesForUserBySourceStmt   *sql.Stmt
+	listSavedViewsStmt                    *sql.Stmt
 	listServiceAccountsStmt               *sql.Stmt
 	listSharedCollectionPinsStmt          *sql.Stmt
 	listSourceTeamsStmt                   *sql.Stmt
@@ -1670,6 +1749,7 @@ type Queries struct {
 	saveOAuthAuthCodeStmt                 *sql.Stmt
 	setCollectionItemKindStmt             *sql.Stmt
 	setOAuthAuthRequestGrantStmt          *sql.Stmt
+	setSavedViewDefaultFlagStmt           *sql.Stmt
 	setSourceManagedStmt                  *sql.Stmt
 	setTeamManagedStmt                    *sql.Stmt
 	setUserManagedStmt                    *sql.Stmt
@@ -1687,6 +1767,7 @@ type Queries struct {
 	updateDashboardStmt                   *sql.Stmt
 	updateExportJobRunningStmt            *sql.Stmt
 	updateSavedQueryStmt                  *sql.Stmt
+	updateSavedViewStmt                   *sql.Stmt
 	updateSourceStmt                      *sql.Stmt
 	updateTeamStmt                        *sql.Stmt
 	updateTeamMemberRoleStmt              *sql.Stmt
@@ -1712,11 +1793,13 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		authenticateOAuthAccessTokenStmt:      q.authenticateOAuthAccessTokenStmt,
 		claimJobsStmt:                         q.claimJobsStmt,
 		claimOAuthAuthRequestDecisionStmt:     q.claimOAuthAuthRequestDecisionStmt,
+		clearSavedViewScopeDefaultStmt:        q.clearSavedViewScopeDefaultStmt,
 		completeExportJobStmt:                 q.completeExportJobStmt,
 		consumeOAuthAuthCodeStmt:              q.consumeOAuthAuthCodeStmt,
 		consumeOAuthRefreshTokenStmt:          q.consumeOAuthRefreshTokenStmt,
 		countAdminUsersStmt:                   q.countAdminUsersStmt,
 		countCollectionTeamAccessStmt:         q.countCollectionTeamAccessStmt,
+		countSavedViewsInScopeStmt:            q.countSavedViewsInScopeStmt,
 		countSharedCollectionEditAccessStmt:   q.countSharedCollectionEditAccessStmt,
 		countUserSessionsStmt:                 q.countUserSessionsStmt,
 		createAPITokenStmt:                    q.createAPITokenStmt,
@@ -1728,6 +1811,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createOAuthGrantStmt:                  q.createOAuthGrantStmt,
 		createQueryShareStmt:                  q.createQueryShareStmt,
 		createSavedQueryStmt:                  q.createSavedQueryStmt,
+		createSavedViewStmt:                   q.createSavedViewStmt,
 		createSessionStmt:                     q.createSessionStmt,
 		createSourceStmt:                      q.createSourceStmt,
 		createTeamStmt:                        q.createTeamStmt,
@@ -1746,6 +1830,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteJobStmt:                         q.deleteJobStmt,
 		deleteQueryShareStmt:                  q.deleteQueryShareStmt,
 		deleteSavedQueryStmt:                  q.deleteSavedQueryStmt,
+		deleteSavedViewStmt:                   q.deleteSavedViewStmt,
 		deleteSessionStmt:                     q.deleteSessionStmt,
 		deleteSourceStmt:                      q.deleteSourceStmt,
 		deleteSystemSettingStmt:               q.deleteSystemSettingStmt,
@@ -1772,6 +1857,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getPersonalCollectionStmt:             q.getPersonalCollectionStmt,
 		getQueryShareStmt:                     q.getQueryShareStmt,
 		getSavedQueryStmt:                     q.getSavedQueryStmt,
+		getSavedViewStmt:                      q.getSavedViewStmt,
 		getSessionStmt:                        q.getSessionStmt,
 		getSourceStmt:                         q.getSourceStmt,
 		getSourceByIdentityKeyStmt:            q.getSourceByIdentityKeyStmt,
@@ -1810,6 +1896,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listDashboardSummariesStmt:            q.listDashboardSummariesStmt,
 		listExpiredExportJobPathsStmt:         q.listExpiredExportJobPathsStmt,
 		listInterruptedExportJobsStmt:         q.listInterruptedExportJobsStmt,
+		listManagedSavedViewsStmt:             q.listManagedSavedViewsStmt,
 		listManagedSourcesStmt:                q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                  q.listManagedTeamsStmt,
 		listOAuthGrantsForUserStmt:            q.listOAuthGrantsForUserStmt,
@@ -1817,6 +1904,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listQueryHistoryStmt:                  q.listQueryHistoryStmt,
 		listSavedQueriesForUserStmt:           q.listSavedQueriesForUserStmt,
 		listSavedQueriesForUserBySourceStmt:   q.listSavedQueriesForUserBySourceStmt,
+		listSavedViewsStmt:                    q.listSavedViewsStmt,
 		listServiceAccountsStmt:               q.listServiceAccountsStmt,
 		listSharedCollectionPinsStmt:          q.listSharedCollectionPinsStmt,
 		listSourceTeamsStmt:                   q.listSourceTeamsStmt,
@@ -1857,6 +1945,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		saveOAuthAuthCodeStmt:                 q.saveOAuthAuthCodeStmt,
 		setCollectionItemKindStmt:             q.setCollectionItemKindStmt,
 		setOAuthAuthRequestGrantStmt:          q.setOAuthAuthRequestGrantStmt,
+		setSavedViewDefaultFlagStmt:           q.setSavedViewDefaultFlagStmt,
 		setSourceManagedStmt:                  q.setSourceManagedStmt,
 		setTeamManagedStmt:                    q.setTeamManagedStmt,
 		setUserManagedStmt:                    q.setUserManagedStmt,
@@ -1874,6 +1963,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateDashboardStmt:                   q.updateDashboardStmt,
 		updateExportJobRunningStmt:            q.updateExportJobRunningStmt,
 		updateSavedQueryStmt:                  q.updateSavedQueryStmt,
+		updateSavedViewStmt:                   q.updateSavedViewStmt,
 		updateSourceStmt:                      q.updateSourceStmt,
 		updateTeamStmt:                        q.updateTeamStmt,
 		updateTeamMemberRoleStmt:              q.updateTeamMemberRoleStmt,

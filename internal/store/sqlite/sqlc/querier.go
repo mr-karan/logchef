@@ -32,6 +32,9 @@ type Querier interface {
 	// Record the first decision on a pending, unexpired request. Zero rows means
 	// the request is unknown, expired or already decided.
 	ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOAuthAuthRequestDecisionParams) (OauthAuthRequest, error)
+	// Clear the default of one scope and source, except on keep_id. The partial
+	// unique index leaves at most one row. A NULL owner column compares as 0.
+	ClearSavedViewScopeDefault(ctx context.Context, arg ClearSavedViewScopeDefaultParams) ([]ClearSavedViewScopeDefaultRow, error)
 	// Mark an export job as complete and return its ID
 	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
 	// Single-use consumption. Exactly one concurrent caller gets the row.
@@ -43,6 +46,8 @@ type Querier interface {
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.
 	CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error)
+	// A NULL owner column compares as 0.
+	CountSavedViewsInScope(ctx context.Context, arg CountSavedViewsInScopeParams) (int64, error)
 	// Count shared (non-personal) collections that manage the given saved query
 	// and in which the user is an owner or editor. A non-zero count means the
 	// user has delegated edit rights on that query. A pin grants nothing.
@@ -74,6 +79,9 @@ type Querier interface {
 	// Saved Queries (cross-team, source-scoped)
 	// Insert a new saved query and return its id
 	CreateSavedQuery(ctx context.Context, arg CreateSavedQueryParams) (int64, error)
+	// Saved views -----------------------------------------------------------------
+	// Insert a view; a name or default taken in its scope fails a unique index.
+	CreateSavedView(ctx context.Context, arg CreateSavedViewParams) (SavedView, error)
 	// Sessions
 	// Create a new session
 	CreateSession(ctx context.Context, arg CreateSessionParams) error
@@ -110,6 +118,7 @@ type Querier interface {
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	// Delete a saved query
 	DeleteSavedQuery(ctx context.Context, id int64) error
+	DeleteSavedView(ctx context.Context, id int64) (int64, error)
 	// Delete a session by ID
 	DeleteSession(ctx context.Context, id string) error
 	// Delete a source by ID
@@ -154,6 +163,7 @@ type Querier interface {
 	GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error)
 	// Look up one saved query by id
 	GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error)
+	GetSavedView(ctx context.Context, id int64) (SavedView, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -233,6 +243,7 @@ type Querier interface {
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, before string) ([]sql.NullString, error)
 	ListInterruptedExportJobs(ctx context.Context, arg ListInterruptedExportJobsParams) ([]ListInterruptedExportJobsRow, error)
+	ListManagedSavedViews(ctx context.Context) ([]SavedView, error)
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
@@ -250,6 +261,9 @@ type Querier interface {
 	ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error)
 	// List saved queries for a specific source, scoped to a user that has access to it
 	ListSavedQueriesForUserBySource(ctx context.Context, arg ListSavedQueriesForUserBySourceParams) ([]ListSavedQueriesForUserBySourceRow, error)
+	// The caller's personal views, the team's views and the source views of one
+	// source, personal first, then team, then source, each by name.
+	ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error)
 	// List service principals
 	ListServiceAccounts(ctx context.Context) ([]User, error)
 	// Every pin in a shared collection, oldest first, with the query's creator and
@@ -323,6 +337,7 @@ type Querier interface {
 	// other kind.
 	SetCollectionItemKind(ctx context.Context, arg SetCollectionItemKindParams) (int64, error)
 	SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error
+	SetSavedViewDefaultFlag(ctx context.Context, arg SetSavedViewDefaultFlagParams) (int64, error)
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error
 	// Mark a team as managed/unmanaged
@@ -358,6 +373,8 @@ type Querier interface {
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
 	// Update a saved query's mutable fields
 	UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryParams) error
+	// Compare-and-swap on the caller's revision; no row means missing or stale.
+	UpdateSavedView(ctx context.Context, arg UpdateSavedViewParams) (SavedView, error)
 	// Update an existing source
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) error
 	// Update a team

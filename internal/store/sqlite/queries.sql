@@ -1510,3 +1510,70 @@ WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
 
 -- name: DeleteClaimedJob :execrows
 DELETE FROM jobs WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- Saved views -----------------------------------------------------------------
+
+-- name: CreateSavedView :one
+-- Insert a view; a name or default taken in its scope fails a unique index.
+INSERT INTO saved_views (source_id, scope, user_id, team_id, name, description, definition, is_default, managed, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: GetSavedView :one
+SELECT * FROM saved_views WHERE id = ?;
+
+-- name: ListSavedViews :many
+-- The caller's personal views, the team's views and the source views of one
+-- source, personal first, then team, then source, each by name.
+SELECT * FROM saved_views
+WHERE source_id = sqlc.arg(source_id)
+  AND (
+    (scope = 'personal' AND user_id = sqlc.arg(user_id))
+    OR (scope = 'team' AND team_id = sqlc.arg(team_id))
+    OR scope = 'source'
+  )
+ORDER BY CASE scope WHEN 'personal' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, name, id;
+
+-- name: UpdateSavedView :one
+-- Compare-and-swap on the caller's revision; no row means missing or stale.
+UPDATE saved_views
+SET name = ?,
+    description = ?,
+    definition = ?,
+    revision = revision + 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ? AND revision = ?
+RETURNING *;
+
+-- name: DeleteSavedView :one
+DELETE FROM saved_views WHERE id = ?
+RETURNING id;
+
+-- name: ClearSavedViewScopeDefault :many
+-- Clear the default of one scope and source, except on keep_id. The partial
+-- unique index leaves at most one row. A NULL owner column compares as 0.
+UPDATE saved_views
+SET is_default = 0
+WHERE source_id = sqlc.arg(source_id)
+  AND scope = sqlc.arg(scope)
+  AND COALESCE(user_id, 0) = sqlc.arg(user_id)
+  AND COALESCE(team_id, 0) = sqlc.arg(team_id)
+  AND is_default = 1
+  AND id != sqlc.arg(keep_id)
+RETURNING id, managed;
+
+-- name: SetSavedViewDefaultFlag :one
+UPDATE saved_views SET is_default = ? WHERE id = ?
+RETURNING id;
+
+-- name: CountSavedViewsInScope :one
+-- A NULL owner column compares as 0.
+SELECT COUNT(*) FROM saved_views
+WHERE source_id = sqlc.arg(source_id)
+  AND scope = sqlc.arg(scope)
+  AND COALESCE(user_id, 0) = sqlc.arg(user_id)
+  AND COALESCE(team_id, 0) = sqlc.arg(team_id);
+
+-- name: ListManagedSavedViews :many
+SELECT * FROM saved_views WHERE managed = 1
+ORDER BY source_id, name, id;
