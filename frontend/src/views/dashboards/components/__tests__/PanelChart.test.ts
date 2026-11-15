@@ -151,9 +151,19 @@ it('constructs a constant number of time formatters when mounting 1000 rows', as
 });
 
 it('hides labels that do not fit a narrow bar', async () => {
-  const host = await render(source, { type: 'chart', x: 'x', y: ['a', 'b'], mark: 'bar', stack: 'none', show_values: true }, false, new DOMRect(0, 0, 10, 30));
+  const host = await render(source, { type: 'chart', x: 'x', y: ['a', 'b'], mark: 'bar', stack: 'none', show_values: true }, false, new DOMRect(0, 0, 4, 30));
   expect(host.querySelectorAll(`.${GroupedBar.selectors.bar}`)).toHaveLength(4);
   expect(host.querySelectorAll('.panel-chart__value')).toHaveLength(0);
+});
+it('places grouped bar values past the bar end in the text colour', async () => {
+  const host = await render(source, { type: 'chart', x: 'x', y: ['a', 'b'], mark: 'bar', stack: 'none', show_values: true }, false, new DOMRect(0, 20, 80, 30));
+  await vi.waitFor(() => expect(host.querySelectorAll('.panel-chart__value')).toHaveLength(3));
+  const labels = [...host.querySelectorAll<SVGTextElement>('.panel-chart__value')];
+  const byText = Object.fromEntries(labels.map(e => [e.textContent, e]));
+  // Positive values sit 4px above the bar top, the negative one 4px below the bar bottom.
+  expect(byText['10'].getAttribute('y')).toBe('16');
+  expect(byText['-30'].getAttribute('y')).toBe('54');
+  expect(labels.every(e => e.style.fill === '' && e.style.stroke === '')).toBe(true);
 });
 it('renders sparse point labels with a halo and retains them during keyboard navigation', async () => {
   const host = await render(source, { type: 'chart', x: 'x', y: ['b'], mark: 'line', show_values: true });
@@ -277,7 +287,7 @@ it('falls back to the computed bar fill when the series colour cannot be resolve
       set: (target, key, value) => Reflect.set(target, key, value),
     });
   });
-  const host = await render(frame, { type: 'chart', x: 'x', y: ys, mark: 'bar', stack: 'none', show_values: true }, false, new DOMRect(0, 0, 40, 30), 2000);
+  const host = await render(frame, { type: 'chart', x: 'x', y: ys, mark: 'bar', show_values: true }, false, new DOMRect(0, 0, 40, 30), 2000);
   await vi.waitFor(() => expect(host.querySelectorAll('.panel-chart__value')).toHaveLength(13));
   // The 13th series gets a generated hsl() colour with a nested CSS variable, which Unovis cannot parse.
   expect([...host.querySelectorAll<SVGTextElement>('.panel-chart__value')].at(-1)!.style.fill).toBe('rgb(0, 0, 0)');

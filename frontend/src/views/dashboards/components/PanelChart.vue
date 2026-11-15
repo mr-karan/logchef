@@ -181,18 +181,34 @@ function barLabels(svg: SVGSVGElement) {
       const box = bar.getBBox();
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('class', 'panel-chart__value');
+      text.textContent = value.text;
+      bar.parentNode?.append(text);
+      if (!stacked.value) {
+        // Grouped bars carry their value just past the bar end, in the text colour.
+        const negative = value.coordinate < 0;
+        if (horizontal.value) {
+          text.setAttribute('x', String(negative ? box.x - 4 : box.x + box.width + 4));
+          text.setAttribute('y', String(box.y + box.height / 2));
+          text.setAttribute('text-anchor', negative ? 'end' : 'start');
+          text.setAttribute('dominant-baseline', 'central');
+          if (box.height < 10) text.remove();
+        } else {
+          text.setAttribute('x', String(box.x + box.width / 2));
+          text.setAttribute('y', String(negative ? box.y + box.height + 4 : box.y - 4));
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('dominant-baseline', negative ? 'hanging' : 'auto');
+          if (text.getComputedTextLength() > box.width + 6) text.remove();
+        }
+        return;
+      }
+      // Stacked segments keep the value centred inside, in black or white for contrast with the fill.
       text.setAttribute('x', String(box.x + box.width / 2));
       text.setAttribute('y', String(box.y + box.height / 2));
       text.setAttribute('text-anchor', 'middle');
       text.setAttribute('dominant-baseline', 'central');
-      text.textContent = value.text;
-      bar.parentNode?.append(text);
       // Unovis cannot resolve a CSS variable nested inside hsl(), so fall back to the fill the browser computed.
       const fill = chartLabelColor(getHexValue(series.color, text) ?? getHexValue(getComputedStyle(bar).fill, bar));
-      if (fill) {
-        text.style.fill = fill;
-        text.style.stroke = fill === '#ffffff' ? '#000000' : '#ffffff';
-      }
+      if (fill) text.style.fill = fill;
       if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) text.remove();
     });
   });
@@ -205,11 +221,11 @@ function barLabels(svg: SVGSVGElement) {
     <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <template v-else>
       <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
-        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
+        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: horizontal && !stacked && viz.show_values ? 44 : 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
           <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="categoryAngle" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
           <VisAxis :type="horizontal ? 'x' : 'y'" :tick-values="extent" tick-text-color="var(--muted-foreground)" :tick-format="yTick" :tick-line="false" :domain-line="false" />
-          <VisStackedBar :data="model.rows" v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.2" :rounded-corners="2" />
-          <VisGroupedBar :data="model.rows" v-else-if="mark === 'bar'" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :group-padding="0.2" :bar-padding="0.05" :bar-min-height="0" />
+          <VisStackedBar :data="model.rows" v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.3" :bar-max-width="40" :rounded-corners="3" />
+          <VisGroupedBar :data="model.rows" v-else-if="mark === 'bar'" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :group-padding="0.3" :bar-padding="0.1" :group-max-width="96" :rounded-corners="3" :bar-min-height="0" />
           <VisLine :data="model.rows" v-else-if="mark === 'line'" :x="x" :y="accessors" :color="colors" />
           <VisArea :data="model.rows" v-else-if="stacked" :x="x" :y="accessors" :color="colors" :opacity="0.35" :line="true" />
           <template v-else>
@@ -237,13 +253,18 @@ function barLabels(svg: SVGSVGElement) {
 </template>
 
 <style>
-.panel-chart { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; --vis-tooltip-padding: 0px; --vis-tooltip-background-color: transparent; --vis-tooltip-border-color: transparent; --vis-tooltip-shadow-color: transparent; --vis-axis-tick-label-color: var(--muted-foreground); --vis-axis-grid-color: var(--border); --vis-crosshair-line-stroke-color: var(--muted-foreground); }
+.panel-chart { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; --vis-tooltip-padding: 0px; --vis-tooltip-background-color: transparent; --vis-tooltip-border-color: transparent; --vis-tooltip-shadow-color: transparent; --vis-axis-tick-label-color: var(--muted-foreground); --vis-axis-tick-label-font-size: 11px; --vis-axis-grid-color: var(--border); --vis-axis-domain-color: var(--border); --vis-crosshair-line-stroke-color: var(--muted-foreground); --vis-stacked-bar-stroke-color: var(--background); --vis-stacked-bar-stroke-width: 1px; }
 .panel-chart__plot { flex: 1 1 0; min-height: 60px; min-width: 200px; overflow: hidden; }
-.panel-chart__value, .panel-chart text.panel-chart__point-value { fill: var(--foreground); stroke: var(--background); stroke-width: 2px; stroke-linejoin: round; font-weight: 650; paint-order: stroke; font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }
-.panel-chart__legend { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: 11px; }
+.panel-chart__value { fill: var(--foreground); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; pointer-events: none; }
+/* Line and area labels cross the marks, so they keep a halo in the background colour. */
+.panel-chart text.panel-chart__point-value { fill: var(--foreground); stroke: var(--background); stroke-width: 3px; stroke-linejoin: round; paint-order: stroke; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; pointer-events: none; }
+.panel-chart__legend { flex-shrink: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; padding-top: 6px; font-size: 11px; color: var(--muted-foreground); }
 .panel-chart__legend span { display: inline-flex; align-items: center; gap: 4px; }
 .panel-chart__legend i, .panel-chart__tooltip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
-.panel-chart__tooltip { min-width: 160px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; }
+.panel-chart__tooltip { min-width: 160px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 11px; font-variant-numeric: tabular-nums; box-shadow: 0 4px 16px rgb(0 0 0 / 0.12); }
+.panel-chart__tooltip > strong { font-weight: 600; }
 .panel-chart__tooltip-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 4px; }
+.panel-chart__tooltip-row > span { color: var(--muted-foreground); }
+.panel-chart__tooltip-row > strong { font-weight: 600; }
 .panel-chart__total { border-top: 1px solid var(--border); padding-top: 4px; }
 </style>
