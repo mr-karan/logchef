@@ -269,6 +269,23 @@ type SavedQuery struct {
 	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
 }
 
+type SavedView struct {
+	ID          int64         `json:"id"`
+	SourceID    int64         `json:"source_id"`
+	Scope       string        `json:"scope"`
+	UserID      sql.NullInt64 `json:"user_id"`
+	TeamID      sql.NullInt64 `json:"team_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Definition  string        `json:"definition"`
+	IsDefault   int64         `json:"is_default"`
+	Managed     int64         `json:"managed"`
+	Revision    int64         `json:"revision"`
+	CreatedBy   sql.NullInt64 `json:"created_by"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+}
+
 type Session struct {
 	ID        string    `json:"id"`
 	UserID    int64     `json:"user_id"`

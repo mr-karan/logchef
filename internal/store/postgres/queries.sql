@@ -1498,3 +1498,71 @@ WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
 
 -- name: DeleteClaimedJob :execrows
 DELETE FROM jobs WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- Saved views -----------------------------------------------------------------
+
+-- name: CreateSavedView :one
+-- Insert a view; a name or default taken in its scope fails a unique index.
+INSERT INTO saved_views (source_id, scope, user_id, team_id, name, description, definition, is_default, managed, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING *;
+
+-- name: GetSavedView :one
+SELECT * FROM saved_views WHERE id = $1;
+
+-- name: ListSavedViews :many
+-- The caller's personal views, the team's views and the source views of one
+-- source, personal first, then team, then source, each by name. COLLATE "C"
+-- orders names by bytes, as SQLite does.
+SELECT * FROM saved_views
+WHERE source_id = sqlc.arg(source_id)
+  AND (
+    (scope = 'personal' AND user_id = sqlc.arg(user_id))
+    OR (scope = 'team' AND team_id = sqlc.arg(team_id))
+    OR scope = 'source'
+  )
+ORDER BY CASE scope WHEN 'personal' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, name COLLATE "C", id;
+
+-- name: UpdateSavedView :one
+-- Compare-and-swap on the caller's revision; no row means missing or stale.
+UPDATE saved_views
+SET name = $1,
+    description = $2,
+    definition = $3,
+    revision = revision + 1,
+    updated_at = now()
+WHERE id = $4 AND revision = $5
+RETURNING *;
+
+-- name: DeleteSavedView :one
+DELETE FROM saved_views WHERE id = $1
+RETURNING id;
+
+-- name: ClearSavedViewScopeDefault :many
+-- Clear the default of one scope and source, except on keep_id. The partial
+-- unique index leaves at most one row. A NULL owner column compares as 0.
+UPDATE saved_views
+SET is_default = FALSE
+WHERE source_id = sqlc.arg(source_id)
+  AND scope = sqlc.arg(scope)
+  AND COALESCE(user_id, 0) = sqlc.arg(user_id)::BIGINT
+  AND COALESCE(team_id, 0) = sqlc.arg(team_id)::BIGINT
+  AND is_default
+  AND id <> sqlc.arg(keep_id)
+RETURNING id, managed;
+
+-- name: SetSavedViewDefaultFlag :one
+UPDATE saved_views SET is_default = $1 WHERE id = $2
+RETURNING id;
+
+-- name: CountSavedViewsInScope :one
+-- A NULL owner column compares as 0.
+SELECT COUNT(*) FROM saved_views
+WHERE source_id = sqlc.arg(source_id)
+  AND scope = sqlc.arg(scope)
+  AND COALESCE(user_id, 0) = sqlc.arg(user_id)::BIGINT
+  AND COALESCE(team_id, 0) = sqlc.arg(team_id)::BIGINT;
+
+-- name: ListManagedSavedViews :many
+SELECT * FROM saved_views WHERE managed
+ORDER BY source_id, name COLLATE "C", id;

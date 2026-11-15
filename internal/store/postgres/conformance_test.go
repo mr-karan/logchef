@@ -48,6 +48,12 @@ func TestOAuthConformance(t *testing.T) {
 	storetest.RunOAuth(t, opener(dsn))
 }
 
+// TestSavedViewDefaultRace runs two default swaps from two pools; the second
+// waits on the first's row or index lock.
+func TestSavedViewDefaultRace(t *testing.T) {
+	storetest.RunSavedViewDefaultRace(t, opener(postgrestest.DSN(t)))
+}
+
 // TestCollectionLinkRaces runs the link races with two pools, so the second
 // writer waits on the collection row lock.
 func TestCollectionLinkRaces(t *testing.T) {

@@ -268,6 +268,23 @@ type SavedQuery struct {
 	EditorMode        string             `json:"editor_mode"`
 }
 
+type SavedView struct {
+	ID          int64              `json:"id"`
+	SourceID    int64              `json:"source_id"`
+	Scope       string             `json:"scope"`
+	UserID      pgtype.Int8        `json:"user_id"`
+	TeamID      pgtype.Int8        `json:"team_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Definition  string             `json:"definition"`
+	IsDefault   bool               `json:"is_default"`
+	Managed     bool               `json:"managed"`
+	Revision    int64              `json:"revision"`
+	CreatedBy   pgtype.Int8        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Session struct {
 	ID        string             `json:"id"`
 	UserID    int64              `json:"user_id"`
