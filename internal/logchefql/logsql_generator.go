@@ -84,6 +84,9 @@ func isSafeLogsQLFieldName(name string) bool {
 
 type LogsQLTranslateOptions struct {
 	DefaultTimestampField string
+	// AllowAggregation accepts an aggregation pipe. Leave it false on a path
+	// that needs log rows, and the query fails with AGGREGATION_NOT_ALLOWED.
+	AllowAggregation bool
 }
 
 type LogsQLTranslateResult struct {
@@ -119,13 +122,15 @@ func TranslateToLogsQL(query string, options *LogsQLTranslateOptions) *LogsQLTra
 		return result
 	}
 
-	pq, err := ParseLogchefQL(query)
-	if err != nil {
-		result.Error = convertParticipleError(query, err)
+	ast, perr := parseQuery(query)
+	if perr == nil {
+		perr = checkAggregationAllowed(ast, options != nil && options.AllowAggregation)
+	}
+	if perr != nil {
+		result.Error = perr
 		return result
 	}
 
-	ast := ConvertToAST(pq)
 	generator := NewLogsQLGenerator(options)
 	logsql, genErr := generator.Generate(ast)
 	if genErr != nil {
@@ -184,6 +189,10 @@ func (g *LogsQLGenerator) visitQuery(node *QueryNode) (string, *ParseError) {
 		if strings.TrimSpace(query) != "" {
 			whereQuery = query
 		}
+	}
+
+	if node.Aggregate != nil {
+		return "", errAggregationNotSupported(node.Aggregate)
 	}
 
 	if len(node.Select) == 0 {

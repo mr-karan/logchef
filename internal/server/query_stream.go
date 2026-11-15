@@ -30,6 +30,9 @@ type queryStreamConfig struct {
 	generatedLanguage models.QueryLanguage
 	conditions        []logchefql.FilterCondition
 	fieldsUsed        []string
+	// aggregation describes an aggregated LogchefQL result. Nil for log rows,
+	// and then the response has no aggregation key.
+	aggregation *logchefql.AggregationInfo
 }
 
 // queryStreamWriter incrementally writes a success envelope
@@ -199,6 +202,11 @@ func (w *queryStreamWriter) closeEnvelope(stats models.QueryStats, streamErr err
 		}
 		if err := w.writeJSONField("generated_query_language", w.cfg.generatedLanguage); err != nil {
 			return err
+		}
+		if w.cfg.aggregation != nil {
+			if err := w.writeJSONField("aggregation", w.cfg.aggregation); err != nil {
+				return err
+			}
 		}
 	}
 

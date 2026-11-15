@@ -274,6 +274,7 @@ func TestComputeKeyDeterministicAndDistinct(t *testing.T) {
 		func(k *KeyInput) { k.EffTTLSeconds = 60 },
 		func(k *KeyInput) { k.Language = "logsql" },
 		func(k *KeyInput) { k.FinalizedQuery = "SELECT 2" },
+		func(k *KeyInput) { k.ResultColumns = []string{"count"} },
 		func(k *KeyInput) { k.CanonicalStart = "2026-02-01T00:00:00Z" },
 		func(k *KeyInput) { k.CanonicalEnd = "2026-02-02T00:00:00Z" },
 		func(k *KeyInput) { k.Timezone = "Asia/Kolkata" },
@@ -300,5 +301,19 @@ func TestComputeKeyDeterministicAndDistinct(t *testing.T) {
 	b.CanonicalStart = "bc"
 	if ComputeKey(a) == ComputeKey(b) {
 		t.Error("adjacent fields collided; length-prefixing is broken")
+	}
+
+	// Two aliases that compile to one query text, and a column list that a
+	// different split would encode the same way, keep distinct keys.
+	for _, pair := range [][2][]string{
+		{{"time", "errors"}, {"time", "failures"}},
+		{{"ab", "c"}, {"a", "bc"}},
+		{{"a"}, {"a", ""}},
+	} {
+		x, y := base, base
+		x.ResultColumns, y.ResultColumns = pair[0], pair[1]
+		if ComputeKey(x) == ComputeKey(y) {
+			t.Errorf("result columns %q and %q share a key", pair[0], pair[1])
+		}
 	}
 }

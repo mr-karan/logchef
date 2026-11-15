@@ -247,9 +247,10 @@ func readQueryRows(body io.Reader, maxResponseBytes, maxRows int) (logs []map[st
 // into LogsQL for this provider. Both the field-values call sites (via
 // compileQueryForVictoriaLogs) and the LogchefQLCompiler interface method wrap
 // it.
-func translateLogchefQLToLogsQL(queryText string, source *models.Source) *logchefql.LogsQLTranslateResult {
+func translateLogchefQLToLogsQL(queryText string, source *models.Source, allowAggregation bool) *logchefql.LogsQLTranslateResult {
 	return logchefql.TranslateToLogsQL(queryText, &logchefql.LogsQLTranslateOptions{
 		DefaultTimestampField: source.MetaTSField,
+		AllowAggregation:      allowAggregation,
 	})
 }
 
@@ -263,7 +264,7 @@ func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage
 		}
 		return query, nil
 	case models.QueryLanguageLogchefQL:
-		result := translateLogchefQLToLogsQL(queryText, source)
+		result := translateLogchefQLToLogsQL(queryText, source, false)
 		if !result.Valid {
 			if result.Error != nil {
 				return "", result.Error
@@ -279,7 +280,7 @@ func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage
 // CompileLogchefQL compiles a LogchefQL query into a LogsQL query. The time
 // range is not baked into the query; callers pass it to QueryLogs separately.
 func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
-	result := translateLogchefQLToLogsQL(req.Query, source)
+	result := translateLogchefQLToLogsQL(req.Query, source, req.AllowAggregation)
 	compiled := &datasource.CompiledLogchefQL{
 		Language:   models.QueryLanguageLogsQL,
 		Valid:      result.Valid,

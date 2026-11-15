@@ -16,6 +16,7 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -590,5 +591,18 @@ func TestUpdateSourceNeverSendsStoredPasswordToNewHost(t *testing.T) {
 				t.Fatalf("err = %v, want a connection.password validation error", err)
 			}
 		})
+	}
+}
+
+// Live tail compiles with no opt-in and must reject an aggregation; the query
+// endpoint opts in and reads that the generator cannot compile it yet.
+func TestCompileLogchefQLAggregationOptIn(t *testing.T) {
+	provider := &ClickHouseProvider{}
+	source := &models.Source{Columns: []models.ColumnInfo{{Name: "x", Type: "UInt8"}}}
+	for allow, want := range map[bool]string{false: logchefql.ErrAggregationNotAllowed, true: logchefql.ErrAggregationNotSupported} {
+		compiled, err := provider.CompileLogchefQL(context.Background(), source, LogchefQLCompileRequest{Query: "x=1 | count()", AllowAggregation: allow})
+		if err == nil || compiled == nil || compiled.Valid || compiled.Error == nil || compiled.Error.Code != want {
+			t.Fatalf("allow=%v: compiled=%+v err=%v, want %s", allow, compiled, err, want)
+		}
 	}
 }

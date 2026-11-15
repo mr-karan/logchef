@@ -1,8 +1,14 @@
 package victorialogs
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // TestFormatTimezoneOffset asserts formatTimezoneOffset returns a
@@ -45,5 +51,23 @@ func TestFormatTimezoneOffset(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Field values and live tail need log rows, so they reject an aggregation;
+// a compile that opts in reads that the generator cannot compile it yet.
+func TestLogchefQLAggregationOptIn(t *testing.T) {
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, MetaTSField: "_time"}
+	_, err := compileQueryForVictoriaLogs("x=1 | count()", models.QueryLanguageLogchefQL, source)
+	if parseErr, ok := errors.AsType[*logchefql.ParseError](err); !ok || parseErr.Code != logchefql.ErrAggregationNotAllowed {
+		t.Fatalf("field values error=%v, want %s", err, logchefql.ErrAggregationNotAllowed)
+	}
+
+	provider := &Provider{}
+	for allow, want := range map[bool]string{false: logchefql.ErrAggregationNotAllowed, true: logchefql.ErrAggregationNotSupported} {
+		compiled, err := provider.CompileLogchefQL(context.Background(), source, datasource.LogchefQLCompileRequest{Query: "x=1 | count()", AllowAggregation: allow})
+		if err == nil || compiled == nil || compiled.Valid || compiled.Error == nil || compiled.Error.Code != want {
+			t.Fatalf("allow=%v: compiled=%+v err=%v, want %s", allow, compiled, err, want)
+		}
 	}
 }

@@ -380,6 +380,9 @@ func (q previewQuery) bufferedResponse(result *models.QueryResult, queryID strin
 		resp["generated_query_language"] = q.cfg.generatedLanguage
 		resp["conditions"] = q.cfg.conditions
 		resp["fields_used"] = q.cfg.fieldsUsed
+		if q.cfg.aggregation != nil {
+			resp["aggregation"] = q.cfg.aggregation
+		}
 	}
 	return resp
 }

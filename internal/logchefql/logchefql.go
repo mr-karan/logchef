@@ -13,8 +13,21 @@ import (
 	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
-// Translate parses a LogchefQL query and returns the SQL translation with metadata.
+// TranslateOptions opts a caller into query shapes that the default denies.
+type TranslateOptions struct {
+	// AllowAggregation accepts an aggregation pipe. Leave it false on a path
+	// that needs log rows, and the query fails with AGGREGATION_NOT_ALLOWED.
+	AllowAggregation bool
+}
+
+// Translate parses a LogchefQL query and returns the SQL translation with
+// metadata. It rejects an aggregation.
 func Translate(query string, schema *Schema) *TranslateResult {
+	return TranslateWithOptions(query, schema, TranslateOptions{})
+}
+
+// TranslateWithOptions is Translate with the opt-ins of opts.
+func TranslateWithOptions(query string, schema *Schema, opts TranslateOptions) *TranslateResult {
 	result := &TranslateResult{
 		Valid:      false,
 		Conditions: []FilterCondition{},
@@ -27,13 +40,16 @@ func Translate(query string, schema *Schema) *TranslateResult {
 		return result
 	}
 
-	pq, err := ParseLogchefQL(query)
-	if err != nil {
-		result.Error = convertParticipleError(query, err)
+	ast, perr := parseQuery(query)
+	if perr == nil {
+		perr = checkAggregationAllowed(ast, opts.AllowAggregation)
+	}
+	if perr != nil {
+		result.Error = perr
 		return result
 	}
 
-	return translateAST(ConvertToAST(pq), schema)
+	return translateAST(ast, schema)
 }
 
 func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
@@ -46,6 +62,10 @@ func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
 	sql, genErr := generator.Generate(ast)
 	if genErr != nil {
 		result.Error = genErr
+		return result
+	}
+	if agg := AggregationOf(ast); agg != nil {
+		result.Error = errAggregationNotSupported(agg)
 		return result
 	}
 	selectClause := ""
@@ -64,7 +84,8 @@ func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
 	return result
 }
 
-// Validate checks if a LogchefQL query is syntactically valid.
+// Validate checks the syntax of a LogchefQL query and the rules of its
+// aggregation. It knows no source and applies no deny rule.
 func Validate(query string) *ValidateResult {
 	result := &ValidateResult{Valid: false}
 
@@ -73,9 +94,8 @@ func Validate(query string) *ValidateResult {
 		return result
 	}
 
-	_, err := ParseLogchefQL(query)
-	if err != nil {
-		result.Error = convertParticipleError(query, err)
+	if _, perr := parseQuery(query); perr != nil {
+		result.Error = perr
 		return result
 	}
 
@@ -143,6 +163,14 @@ var expectedDescriptions = map[string]string{
 	"<rparen>":     "a closing )",
 	"<lparen>":     "an opening (",
 	"<ident>":      "a field name",
+	"PAggregate":   "a field name",
+	"PAggItem":     "a function such as count()",
+	"PAlias":       "a name",
+	"PGroupKey":    "a field name or time",
+	"PWindow":      "a window such as 5m",
+	"PWindowUnit":  "a window such as 5m",
+	"PSort":        "a column name",
+	"PLimit":       "a number",
 }
 
 var expectedPattern = regexp.MustCompile(`\(expected (.+)\)$`)
@@ -180,8 +208,27 @@ func describeUnexpectedToken(query string, u *participle.UnexpectedTokenError) s
 	return "expected " + expected + after + found
 }
 
+// describeExpected names what the grammar expected. Participle reports the
+// rest of a sequence too, as in "PGroupKey (<comma> PGroupKey)*", so when the
+// whole text does not map, only its first element is named: a single node,
+// or the alternatives of a leading group.
 func describeExpected(names string) string {
-	parts := strings.Fields(names)
+	if words := describeExpectedNames(strings.Fields(names)); words != "" {
+		return words
+	}
+	names = strings.TrimSpace(names)
+	if rest, ok := strings.CutPrefix(names, "("); ok {
+		group, _, found := strings.Cut(rest, ")")
+		if !found {
+			return ""
+		}
+		return describeExpectedNames(strings.FieldsFunc(group, func(r rune) bool { return r == '|' || r == ' ' }))
+	}
+	first, _, _ := strings.Cut(names, " ")
+	return describeExpectedNames([]string{first})
+}
+
+func describeExpectedNames(parts []string) string {
 	words := make([]string, 0, len(parts))
 	for _, part := range parts {
 		word, ok := expectedDescriptions[part]
