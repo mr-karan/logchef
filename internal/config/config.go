@@ -38,6 +38,19 @@ type Config struct {
 	DashboardCache DashboardCacheConfig `koanf:"dashboard_cache"`
 	Provisioning   ProvisioningConfig   `koanf:"provisioning"`
 	Demo           DemoConfig           `koanf:"demo"`
+	Audit          AuditConfig          `koanf:"audit"`
+}
+
+// AuditConfig bounds the audit_events table and controls the audit log line.
+// It lives in the config file, not in system_settings, so an admin session
+// cannot shorten the retention from the UI.
+type AuditConfig struct {
+	// RetentionDays deletes events older than this many days; 0 keeps every event.
+	RetentionDays int `koanf:"retention_days"`
+	// MaxRows deletes the oldest events above this count; 0 removes the bound.
+	MaxRows int `koanf:"max_rows"`
+	// LogEvents writes each event as one "audit" JSON log line.
+	LogEvents bool `koanf:"log_events"`
 }
 
 // DemoConfig controls the public-demo safety mode. When ReadOnly is enabled,
@@ -506,6 +519,10 @@ const (
 
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
+
+	defaultAuditRetentionDays = 365
+	defaultAuditMaxRows       = 1_000_000
+	defaultAuditLogEvents     = true
 
 	// Opt-in: the per-IP auth limiter needs the real client IP, which requires
 	// trusted-proxy / X-Forwarded-For config when running behind a reverse proxy
@@ -1005,6 +1022,11 @@ func defaultConfig() Config {
 			DefaultTTL:        defaultSharesDefaultTTL,
 			MaxQueryTextBytes: defaultSharesMaxQueryTextBytes,
 		},
+		Audit: AuditConfig{
+			RetentionDays: defaultAuditRetentionDays,
+			MaxRows:       defaultAuditMaxRows,
+			LogEvents:     defaultAuditLogEvents,
+		},
 		RateLimit: RateLimitConfig{
 			Enabled:               defaultRateLimitEnabled,
 			AuthPerIPPerMinute:    defaultRateLimitAuthPerIPPerMinute,
@@ -1120,6 +1142,14 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	}
 	if cfg.Shares.MaxQueryTextBytes <= 0 {
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+
+	// Zero disables an audit bound; only a negative value is invalid.
+	if cfg.Audit.RetentionDays < 0 {
+		cfg.Audit.RetentionDays = defaultAuditRetentionDays
+	}
+	if cfg.Audit.MaxRows < 0 {
+		cfg.Audit.MaxRows = defaultAuditMaxRows
 	}
 
 	if strings.TrimSpace(cfg.Server.ProxyHeader) == "" {

@@ -162,6 +162,11 @@ max_entry_bytes = 0
 max_entries = 0
 max_concurrent_fills = 0
 
+[audit]
+retention_days = 0
+max_rows = 0
+log_events = false
+
 [oidc]
 ` + goldenOIDCKeys + `
 `
@@ -184,6 +189,10 @@ max_global = -3
 
 [rate_limit]
 auth_global_per_minute = -1
+
+[audit]
+retention_days = -1
+max_rows = -1
 
 [oidc]
 ` + goldenOIDCKeys + `scopes = []
