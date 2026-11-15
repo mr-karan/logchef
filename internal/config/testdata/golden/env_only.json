@@ -91,6 +91,10 @@
     "WebhookAllowedHosts": null,
     "WebhookAllowlist": {}
   },
+  "Jobs": {
+    "Enabled": true,
+    "PollInterval": 2000000000
+  },
   "Query": {
     "MaxLimit": 0,
     "DefaultPreviewLimit": 1000,

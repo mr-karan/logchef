@@ -53,6 +53,12 @@ func TestCollectionLinkRaces(t *testing.T) {
 	storetest.RunCollectionLinkRaces(t, opener(sqlitetest.Path(t)))
 }
 
+// TestJobs runs the job claim and takeover tests with two store instances on
+// one file, so a claim waits on SQLite's write lock, not on Go.
+func TestJobs(t *testing.T) {
+	storetest.RunJobs(t, opener(sqlitetest.Path(t)), false)
+}
+
 func opener(path string) storetest.Opener {
 	return func(t *testing.T) store.Store {
 		t.Helper()

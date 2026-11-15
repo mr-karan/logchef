@@ -1,6 +1,6 @@
 // Package store defines the backend-agnostic contract for logchef's application
 // metadata — users, teams, sources, sessions, saved queries, collections,
-// alerts, API tokens, system settings, export jobs, user preferences, query
+// alerts, background jobs, API tokens, system settings, export jobs, user preferences, query
 // shares and OAuth authorization state. (Log data lives in ClickHouse and is not part of this contract.)
 //
 // Concrete implementations live in sub-packages — store/sqlite (the default,
@@ -199,6 +199,42 @@ type AlertStore interface {
 	PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error
 }
 
+// JobStore persists the background jobs that internal/jobs schedules and
+// leases. Every time comparison uses the database clock, so clock skew
+// between replicas does not matter. The methods that take a lease token
+// change a job only while that token is current, that is, while no later
+// claim exists; they report whether a row changed.
+type JobStore interface {
+	// UpsertJob creates the job due now, or updates its definition. An
+	// update that changes the schedule makes the job due now; any other
+	// update keeps its next run and its lease.
+	UpsertJob(ctx context.Context, def models.JobDefinition) error
+	// DeleteJob removes the job. A missing job is not an error.
+	DeleteJob(ctx context.Context, kind, key string) error
+	// GetJob returns models.ErrNotFound when the job does not exist.
+	GetJob(ctx context.Context, kind, key string) (*models.ScheduledJob, error)
+	// KickJob makes the job due now. It returns models.ErrNotFound when the
+	// job does not exist.
+	KickJob(ctx context.Context, kind, key string) error
+	// ClaimJobs leases to owner up to limit enabled jobs of kind that are
+	// due and not leased, oldest due first. Each claim raises the job's lease
+	// token and sets LastStartedAt to the claim time. On Postgres concurrent
+	// claims receive disjoint jobs and skip a job whose row a transaction
+	// holds through HoldJob.
+	ClaimJobs(ctx context.Context, kind, owner string, lease time.Duration, limit int) ([]*models.ScheduledJob, error)
+	// HoldJob reports whether token is current. Inside WithTx a true result
+	// keeps the job row locked until the transaction ends, so no claim can
+	// raise the token before the transaction commits.
+	HoldJob(ctx context.Context, id, token int64) (bool, error)
+	// FinishJob records a run's outcome and clears the lease. It sets the
+	// next run only while the job's schedule equals the one in res.
+	FinishJob(ctx context.Context, id, token int64, res models.JobRunResult) (bool, error)
+	// ReleaseJob clears the lease and keeps the next run and the last outcome.
+	ReleaseJob(ctx context.Context, id, token int64) (bool, error)
+	// DeleteClaimedJob deletes the job.
+	DeleteClaimedJob(ctx context.Context, id, token int64) (bool, error)
+}
+
 // QueryHistoryStore persists per-user query execution history. Recording is
 // best-effort (callers fire-and-forget on the query path) and self-pruning:
 // RecordQueryHistory caps each user's history at models.QueryHistoryPerUserCap.
@@ -384,7 +420,7 @@ type OAuthStore interface {
 // callback receives, and what consumers should accept when they don't manage
 // the connection lifecycle themselves.
 //
-// It composes one interface per domain; together they cover all 15 metadata
+// It composes one interface per domain; together they cover all 16 metadata
 // domains. Every method speaks pkg/models types — no sqlc or driver types leak
 // through.
 type StoreOps interface {
@@ -396,6 +432,7 @@ type StoreOps interface {
 	CollectionStore
 	DashboardStore
 	AlertStore
+	JobStore
 	QueryHistoryStore
 	ExportJobStore
 	QueryShareStore

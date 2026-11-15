@@ -1385,3 +1385,98 @@ RETURNING id;
 
 -- name: MarkAlertResolved :exec
 UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+
+-- Jobs (internal/jobs). Every time comparison uses the database clock.
+
+-- name: UpsertJob :exec
+-- A new job is due now. A changed schedule makes an existing job due now;
+-- otherwise its next run and lease are kept.
+INSERT INTO jobs (
+    kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled,
+    next_run_at, created_at, updated_at
+) VALUES (
+    sqlc.arg(kind), sqlc.arg(key), sqlc.arg(schedule_kind), sqlc.arg(schedule_expr),
+    sqlc.arg(timezone), sqlc.arg(misfire), sqlc.arg(grace_seconds), sqlc.arg(enabled),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+)
+ON CONFLICT (kind, key) DO UPDATE SET
+    next_run_at = CASE
+        WHEN jobs.schedule_kind = excluded.schedule_kind
+         AND jobs.schedule_expr = excluded.schedule_expr
+         AND jobs.timezone = excluded.timezone
+        THEN jobs.next_run_at
+        ELSE excluded.next_run_at
+    END,
+    schedule_kind = excluded.schedule_kind,
+    schedule_expr = excluded.schedule_expr,
+    timezone = excluded.timezone,
+    misfire = excluded.misfire,
+    grace_seconds = excluded.grace_seconds,
+    enabled = excluded.enabled,
+    updated_at = excluded.updated_at;
+
+-- name: DeleteJob :exec
+DELETE FROM jobs WHERE kind = sqlc.arg(kind) AND key = sqlc.arg(key);
+
+-- name: GetJob :one
+SELECT * FROM jobs WHERE kind = sqlc.arg(kind) AND key = sqlc.arg(key);
+
+-- name: KickJob :execrows
+UPDATE jobs
+SET next_run_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE kind = sqlc.arg(kind) AND key = sqlc.arg(key);
+
+-- name: ClaimJobs :many
+-- SQLite has one writer, so this statement needs no row locks.
+-- last_started_at is the database clock at the claim.
+UPDATE jobs
+SET lease_owner = sqlc.arg(owner),
+    lease_token = lease_token + 1,
+    lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(sqlc.arg(lease_modifier) AS TEXT)),
+    last_started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+    SELECT j.id FROM jobs j
+    WHERE j.enabled = 1
+      AND j.kind = sqlc.arg(kind)
+      AND j.next_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      AND (j.lease_expires_at IS NULL OR j.lease_expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    ORDER BY j.next_run_at
+    LIMIT sqlc.arg(max_jobs)
+)
+RETURNING *;
+
+-- name: HoldJob :execrows
+UPDATE jobs
+SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- name: FinishJob :execrows
+-- The next run applies only while the job keeps the schedule the run used,
+-- so a schedule change made during the run is not overwritten.
+UPDATE jobs
+SET next_run_at = CASE
+        WHEN schedule_kind = sqlc.arg(schedule_kind)
+         AND schedule_expr = sqlc.arg(schedule_expr)
+         AND timezone = sqlc.arg(timezone)
+        THEN CAST(sqlc.arg(next_run_at) AS TEXT)
+        ELSE next_run_at
+    END,
+    last_status = sqlc.arg(last_status),
+    last_error = sqlc.narg(last_error),
+    last_finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- name: ReleaseJob :execrows
+UPDATE jobs
+SET lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- name: DeleteClaimedJob :execrows
+DELETE FROM jobs WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);

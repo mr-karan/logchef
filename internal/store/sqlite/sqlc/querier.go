@@ -25,6 +25,9 @@ type Querier interface {
 	// Add a data source to a team; linking an already linked source is a no-op.
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
+	// SQLite has one writer, so this statement needs no row locks.
+	// last_started_at is the database clock at the claim.
+	ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, error)
 	// Record the first decision on a pending, unexpired request. Zero rows means
 	// the request is unknown, expired or already decided.
 	ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOAuthAuthRequestDecisionParams) (OauthAuthRequest, error)
@@ -85,6 +88,7 @@ type Querier interface {
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
+	DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
 	DeleteCollection(ctx context.Context, id int64) error
 	// Delete a dashboard; RETURNING lets callers detect not-found.
@@ -99,6 +103,7 @@ type Querier interface {
 	DeleteExpiredOAuthRefreshFamilies(ctx context.Context, now int64) error
 	// Delete all sessions whose expiry is at or before the given time
 	DeleteExpiredSessions(ctx context.Context, expiresAt time.Time) error
+	DeleteJob(ctx context.Context, arg DeleteJobParams) error
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	// Delete a saved query
@@ -116,6 +121,9 @@ type Querier interface {
 	DeleteUserSessions(ctx context.Context, userID int64) error
 	// Mark an export job as failed and return its ID
 	FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error)
+	// The next run applies only while the job keeps the schedule the run used,
+	// so a schedule change made during the run is not overwritten.
+	FinishJob(ctx context.Context, arg FinishJobParams) (int64, error)
 	// Get an API token by ID
 	GetAPIToken(ctx context.Context, id int64) (ApiToken, error)
 	// Get an API token by its hash (for authentication)
@@ -132,6 +140,7 @@ type Querier interface {
 	GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
+	GetJob(ctx context.Context, arg GetJobParams) (Job, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
 	GetOAuthAuthCodeState(ctx context.Context, codeHash sql.NullString) (GetOAuthAuthCodeStateRow, error)
 	GetOAuthAuthRequest(ctx context.Context, id string) (OauthAuthRequest, error)
@@ -169,6 +178,7 @@ type Querier interface {
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
 	// Get a team ID that the user belongs to and that has access to the source
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
+	HoldJob(ctx context.Context, arg HoldJobParams) (int64, error)
 	// Query stats daily rollup -----------------------------------------------------
 	// Upsert one executed query into the non-pruned daily rollup: add 1 to
 	// query_count and the given duration to total_duration_ms for the composite key.
@@ -187,6 +197,7 @@ type Querier interface {
 	IsSourceManaged(ctx context.Context, id int64) (int64, error)
 	// Check if a team is managed
 	IsTeamManaged(ctx context.Context, id int64) (int64, error)
+	KickJob(ctx context.Context, arg KickJobParams) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
@@ -278,6 +289,7 @@ type Querier interface {
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error)
+	ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error)
 	// Remove a link of either kind
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) (int64, error)
 	// Remove a member from a collection
@@ -350,6 +362,10 @@ type Querier interface {
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	// Record a login without rewriting the rest of the user row
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
+	// Jobs (internal/jobs). Every time comparison uses the database clock.
+	// A new job is due now. A changed schedule makes an existing job due now;
+	// otherwise its next run and lease are kept.
+	UpsertJob(ctx context.Context, arg UpsertJobParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// Insert or update user preferences
 	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error

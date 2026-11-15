@@ -104,6 +104,25 @@ func SetDashboardCacheEntries(n int) {
 	metrics.GetOrCreateGauge("logchef_dashboard_cache_entries", nil).Set(float64(n))
 }
 
+// RecordJobRun counts one claimed job run. result is "ok", "error",
+// "skipped", "lost" or "deferred".
+func RecordJobRun(kind, result string) {
+	labels := fmt.Sprintf(`logchef_jobs_runs_total{kind=%q,result=%q}`, kind, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// ObserveJobRunDuration records how long a job handler ran.
+func ObserveJobRunDuration(kind string, d time.Duration) {
+	labels := fmt.Sprintf(`logchef_jobs_run_duration_seconds{kind=%q}`, kind)
+	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
+}
+
+// ObserveJobScheduleLag records how long after its due time a job was claimed.
+func ObserveJobScheduleLag(kind string, d time.Duration) {
+	labels := fmt.Sprintf(`logchef_jobs_schedule_lag_seconds{kind=%q}`, kind)
+	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
+}
+
 func IncrementActiveRequests() {
 	metrics.GetOrCreateGauge("logchef_http_active_requests", nil).Inc()
 }
