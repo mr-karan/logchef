@@ -163,45 +163,71 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
-    <article class="version" id="unreleased">
+    <article class="version" id="v2.7.0">
       <div class="version-header">
-        <a class="version-tag unreleased" href="#unreleased">Unreleased</a>
+        <a class="version-tag" href="#v2.7.0">v2.7.0</a>
+        <span class="version-date">Nov 15, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.7.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
+      <p class="release-kicker">Dashboards that answer the question</p>
       <p class="release-intro">
-        The Explorer is easier to read and harder to misuse. The message column gets the room, counters say what they count, and cell and row actions build useful filters.
+        <strong>Panels run SQL as written and show the result the way it reads best</strong>: stats with comparisons and sparklines, charts, toplists and tables with rules, across tabs. Time macros let one query follow any range, a query's own <code>LIMIT</code> is respected everywhere, and a result ClickHouse could have cut says so.
       </p>
+
+      <ul class="release-highlights">
+        <li><strong>Charts from any result</strong>Map result columns to bars, lines, areas, pies and toplists, with value labels, stacking and exact tooltips.</li>
+        <li><strong>Stats that compare</strong>A stat shows the change from the previous row, coloured good or bad, with a sparkline. Thresholds colour values and draw reference lines.</li>
+        <li><strong>One query, any range</strong><code>{"{{__time_filter}}"}</code>, <code>{"{{__interval}}"}</code> and the other time macros render from the picker in panels, the Explorer, the CLI and MCP.</li>
+        <li><strong>No silent cuts</strong>Every result reports whether it was cut and by what. ClickHouse profile limits fail loudly instead of trimming results.</li>
+      </ul>
+
+      <aside class="upgrade-note">
+        <strong>Before upgrading:</strong> back up the metadata database. Startup runs three migrations on each store (SQLite 000039 to 000041, Postgres 000013 to 000015). Dashboard PUTs must send <code>revision</code>, schema 2 dashboards need the client schema headers, CLI <code>--var</code> values drop their quotes, and ClickHouse alerts whose <code>SETTINGS</code> can stop a query early record an evaluation error until fixed. Reload open tabs after the upgrade. The <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md">CHANGELOG</a> lists every upgrade note.
+      </aside>
+
+      <div class="change-section">
+        <div class="change-type security">Security</div>
+        <ul class="change-list">
+          <li><strong>Collection links have a kind</strong>: A pin is a bookmark and grants nothing. Only a managed link, which only the query's creator or an admin can make, lets the collection's editors edit the query.</li>
+          <li><strong>Stored secrets stay with their endpoint</strong>: A source edit asks for the password or token again when the host, username, TLS setting or base URL changes.</li>
+        </ul>
+      </div>
 
       <div class="change-section">
         <div class="change-type added">Added</div>
         <ul class="change-list">
-          <li><strong>Cell menu</strong>: Right-click a cell to copy it or filter on it. Long values, such as a message, get a contains filter (<code>msg~"..."</code>) instead of an exact match on the whole line.</li>
-          <li><strong>Field actions in the expanded row</strong>: Every field, nested JSON keys included, has filter, exclude and Add as column. Nested keys use the dotted syntax, for example <code>msg.http.status</code>.</li>
-          <li><strong>Wrap</strong>: A toggle shows long values on several lines.</li>
-          <li><strong>Compact view</strong>: Timestamps show milliseconds, and one optional prefix field, such as <code>job_name</code>, shows before each line.</li>
-          <li><strong>Add to query</strong>: The loaded-rows search can turn its term into a contains filter on the message field.</li>
+          <li><strong>Result charts</strong>: Bars, lines, areas, pies and toplists from result columns, with suggested roles and confirmed column kinds.</li>
+          <li><strong>Stat comparison and sparklines</strong>, with exact deltas and percentages.</li>
+          <li><strong>Thresholds and table rules</strong>: Colour stat values or backgrounds, draw chart reference lines, and colour table cells or rows. Number and time formats per column.</li>
+          <li><strong>Tabs and free sizes</strong>: Up to 10 tabs, each with its own grid, and panels from 2 to 12 columns wide and up to 12 rows tall.</li>
+          <li><strong>Time macros</strong>: <code>{"{{__time_filter}}"}</code>, <code>{"{{__from}}"}</code>, <code>{"{{__to}}"}</code>, <code>{"{{__interval}}"}</code>, <code>{"{{__interval_s}}"}</code>, <code>{"{{__timezone}}"}</code> and <code>{"{{__tz_offset}}"}</code>. A panel can set its own bucket size and its own range, including calendar ranges such as <code>today-6d</code>.</li>
+          <li><strong>The <code>day</code> variable</strong>: A date-only picker with <code>YYYY-MM-DD</code> literals.</li>
+          <li><strong>Safe saves</strong>: Two edits from the same revision cannot overwrite each other. A conflict offers save as copy, overwrite, or load theirs. A banner asks you to reload after a server upgrade.</li>
+          <li><strong>Recent activity on ClickHouse views</strong>: Opt in per source, with time, row and byte caps that fail loudly.</li>
+          <li><strong>Explorer</strong>: A cell menu to copy or filter, field actions for nested JSON keys in the expanded row, a Wrap toggle, a prefix field in compact view, and Add to query from the loaded-rows search.</li>
+          <li><strong>CLI and MCP</strong>: <code>logchef sql --interval</code> and <code>--var</code>. MCP <code>query_logs</code> gains <code>timezone</code>, <code>interval</code> and <code>variables</code>.</li>
         </ul>
       </div>
 
       <div class="change-section">
         <div class="change-type changed">Changed</div>
         <ul class="change-list">
-          <li>The message column takes the width left over by the other columns.</li>
-          <li>Scanned rows move to the stats strip as "N scanned". The table and compact views show "Showing 1–50 of 100 rows", like the JSON view.</li>
-          <li>LogchefQL syntax errors read as plain sentences, such as "expected a value after <code>msg~</code>", in the UI, the API and the CLI. Results from the previous run are dimmed while an error shows.</li>
-          <li>High-cardinality fields in the Fields panel say there are too many distinct values instead of listing fragments, and every field shows its type badge.</li>
-          <li>The query toolbar's AI Assistant is now Generate SQL and appears only in SQL mode. Ask Chef is the assistant for Search mode.</li>
-          <li>The filter editor starts at one line and grows with its content. The histogram hint moved into a tooltip.</li>
-          <li>The search box beside pagination is labelled Search loaded rows. In SQL mode, the disabled time range explains that the query's own dates apply.</li>
+          <li><strong>The LIMIT rule</strong>: The server returns at most the smallest of the query's own <code>LIMIT</code>, the request limit and the configured maximum, on every surface. Stats report <code>limit_source</code> and <code>truncation</code>, shown as a chip.</li>
+          <li><strong>ClickHouse limits fail loudly</strong>: Logchef sends its own result limits and sets every overflow mode to throw, so a profile limit fails the query with an error that names it. A shard that does not answer fails the query.</li>
+          <li><strong>Dashboard list</strong>: Summaries instead of panel blobs, so the list loads fast with many dashboards.</li>
+          <li><strong>Explorer</strong>: The message column takes the spare width, scanned rows move to the stats strip, LogchefQL errors read as sentences, and Generate SQL appears only in SQL mode.</li>
         </ul>
       </div>
 
       <div class="change-section">
         <div class="change-type fixed">Fixed</div>
         <ul class="change-list">
-          <li>A click on a cell expands the row instead of putting the whole escaped log line into the editor, and no icons cover the value.</li>
-          <li>Expanded fields in the Fields panel stay open when a query runs, and Group By no longer shifts when the fast-filter hint appears.</li>
-          <li>Cmd/Ctrl+Enter closes the autocomplete popup.</li>
+          <li>Editing a dashboard starts from the latest saved version, and leaving with unsaved edits asks first.</li>
+          <li>A click on a cell expands the row instead of putting the escaped log line into the editor.</li>
+          <li>Expanded fields stay open when a query runs, Group By no longer shifts, and Cmd/Ctrl+Enter closes the autocomplete popup.</li>
+          <li><code>logchef sql</code> ignores time macros inside comments and never puts its added condition inside a trailing comment.</li>
         </ul>
       </div>
     </article>
@@ -210,7 +236,6 @@ const unreleasedShots = [
       <div class="version-header">
         <a class="version-tag" href="#v2.6.1">v2.6.1</a>
         <span class="version-date">Oct 29, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.6.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
