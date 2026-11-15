@@ -139,8 +139,9 @@ the metadata database first, and read the upgrade notes.
 
 - Result charts: a panel maps result columns to roles and draws bars, lines,
   areas, pies and toplists from them, with category or time scales, stacking,
-  value labels and legends. Suggested roles come from a preview, and a guessed
-  column kind stays unconfirmed until the author picks it.
+  value labels and legends. Value labels sit above grouped bars and inside
+  stacked segments. Suggested roles come from a preview, and a guessed column
+  kind stays unconfirmed until the author picks it.
 - Stat panels can compare the selected row with the previous one, colour the
   change as good or bad, and draw a sparkline of the series. Deltas and
   percentages use exact arithmetic.
