@@ -1566,3 +1566,102 @@ WHERE source_id = sqlc.arg(source_id)
 -- name: ListManagedSavedViews :many
 SELECT * FROM saved_views WHERE managed
 ORDER BY source_id, name COLLATE "C", id;
+
+-- Audit events
+
+-- name: InsertAuditEvent :exec
+INSERT INTO audit_events (
+    id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label,
+    auth_method, credential_id, client_id, target_type, target_id, target_label,
+    team_id, source_id, ip, user_agent, http_method, route, status, changes, detail
+) VALUES (
+    sqlc.arg(id), sqlc.arg(occurred_at), sqlc.arg(action), sqlc.arg(outcome),
+    sqlc.arg(reason), sqlc.arg(actor_type), sqlc.narg(actor_id), sqlc.arg(actor_label),
+    sqlc.arg(auth_method), sqlc.arg(credential_id), sqlc.arg(client_id), sqlc.arg(target_type),
+    sqlc.arg(target_id), sqlc.arg(target_label), sqlc.narg(team_id), sqlc.narg(source_id),
+    sqlc.arg(ip), sqlc.arg(user_agent), sqlc.arg(http_method), sqlc.arg(route),
+    sqlc.arg(status), sqlc.arg(changes), sqlc.arg(detail)
+);
+
+-- name: ListAuditEventsDesc :many
+-- Newest first. An empty text argument or a NULL argument disables its
+-- filter; a NULL cursor_at starts at the newest event.
+SELECT * FROM audit_events
+WHERE (sqlc.narg(from_at)::timestamptz IS NULL OR occurred_at >= sqlc.narg(from_at))
+  AND (sqlc.narg(to_at)::timestamptz IS NULL OR occurred_at < sqlc.narg(to_at))
+  AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action))
+  AND (sqlc.arg(action_prefix)::text = '' OR left(action, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+  AND (sqlc.narg(actor_id)::bigint IS NULL OR actor_id = sqlc.narg(actor_id))
+  AND (sqlc.arg(auth_method)::text = '' OR auth_method = sqlc.arg(auth_method))
+  AND (sqlc.arg(credential_id)::text = '' OR credential_id = sqlc.arg(credential_id))
+  AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type))
+  AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id))
+  AND (sqlc.narg(team_id)::bigint IS NULL OR team_id = sqlc.narg(team_id))
+  AND (sqlc.narg(source_id)::bigint IS NULL OR source_id = sqlc.narg(source_id))
+  AND (sqlc.arg(outcome)::text = '' OR outcome = sqlc.arg(outcome))
+  AND (sqlc.narg(cursor_at)::timestamptz IS NULL
+    OR occurred_at < sqlc.narg(cursor_at)
+    OR (occurred_at = sqlc.narg(cursor_at) AND id < sqlc.arg(cursor_id)::text))
+ORDER BY occurred_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: ListAuditEventsAsc :many
+-- Oldest first, with the same filters as ListAuditEventsDesc.
+SELECT * FROM audit_events
+WHERE (sqlc.narg(from_at)::timestamptz IS NULL OR occurred_at >= sqlc.narg(from_at))
+  AND (sqlc.narg(to_at)::timestamptz IS NULL OR occurred_at < sqlc.narg(to_at))
+  AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action))
+  AND (sqlc.arg(action_prefix)::text = '' OR left(action, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+  AND (sqlc.narg(actor_id)::bigint IS NULL OR actor_id = sqlc.narg(actor_id))
+  AND (sqlc.arg(auth_method)::text = '' OR auth_method = sqlc.arg(auth_method))
+  AND (sqlc.arg(credential_id)::text = '' OR credential_id = sqlc.arg(credential_id))
+  AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type))
+  AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id))
+  AND (sqlc.narg(team_id)::bigint IS NULL OR team_id = sqlc.narg(team_id))
+  AND (sqlc.narg(source_id)::bigint IS NULL OR source_id = sqlc.narg(source_id))
+  AND (sqlc.arg(outcome)::text = '' OR outcome = sqlc.arg(outcome))
+  AND (sqlc.narg(cursor_at)::timestamptz IS NULL
+    OR occurred_at > sqlc.narg(cursor_at)
+    OR (occurred_at = sqlc.narg(cursor_at) AND id > sqlc.arg(cursor_id)::text))
+ORDER BY occurred_at ASC, id ASC
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: CountAuditEvents :one
+-- Counts the events that match the filters, stopping at max_rows.
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM audit_events
+    WHERE (sqlc.narg(from_at)::timestamptz IS NULL OR occurred_at >= sqlc.narg(from_at))
+      AND (sqlc.narg(to_at)::timestamptz IS NULL OR occurred_at < sqlc.narg(to_at))
+      AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action))
+      AND (sqlc.arg(action_prefix)::text = '' OR left(action, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+      AND (sqlc.narg(actor_id)::bigint IS NULL OR actor_id = sqlc.narg(actor_id))
+      AND (sqlc.arg(auth_method)::text = '' OR auth_method = sqlc.arg(auth_method))
+      AND (sqlc.arg(credential_id)::text = '' OR credential_id = sqlc.arg(credential_id))
+      AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type))
+      AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id))
+      AND (sqlc.narg(team_id)::bigint IS NULL OR team_id = sqlc.narg(team_id))
+      AND (sqlc.narg(source_id)::bigint IS NULL OR source_id = sqlc.narg(source_id))
+      AND (sqlc.arg(outcome)::text = '' OR outcome = sqlc.arg(outcome))
+    LIMIT sqlc.arg(max_rows)::bigint
+) AS matched;
+
+-- name: GetAuditPruneBoundary :one
+-- The newest event beyond the keep_rows newest ones.
+SELECT occurred_at, id
+FROM audit_events
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1 OFFSET sqlc.arg(keep_rows)::bigint;
+
+-- name: PruneAuditEvents :execrows
+-- Deletes up to batch_size of the oldest events that are older than before or
+-- at or below the row-count boundary. A NULL argument disables its rule.
+DELETE FROM audit_events
+WHERE id IN (
+    SELECT id FROM audit_events
+    WHERE (sqlc.narg(before)::timestamptz IS NOT NULL AND occurred_at < sqlc.narg(before))
+       OR (sqlc.narg(bound_at)::timestamptz IS NOT NULL
+           AND (occurred_at < sqlc.narg(bound_at)
+             OR (occurred_at = sqlc.narg(bound_at) AND id <= sqlc.arg(bound_id)::text)))
+    ORDER BY occurred_at ASC, id ASC
+    LIMIT sqlc.arg(batch_size)::bigint
+);

@@ -52,6 +52,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("LockMembershipWrites", func(t *testing.T) { testLockMembershipWrites(t, ctx, s) })
 	t.Run("WithTxNoNesting", func(t *testing.T) { testWithTxNoNesting(t, ctx, s) })
 	t.Run("ConcurrentAdminRemovals", func(t *testing.T) { testConcurrentAdminRemovals(t, s) })
+	t.Run("Audit", func(t *testing.T) { testAudit(t, ctx, s) })
 }
 
 // --- helpers ---
