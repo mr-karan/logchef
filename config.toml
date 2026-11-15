@@ -202,6 +202,13 @@ max_concurrent_global = 5
 artifact_ttl = "24h"
 formats = ["csv", "ndjson"]
 
+[jobs]
+# Background job runner. Every replica polls the metadata database for due
+# jobs, and a claim with a lease makes one replica run each tick. A replica
+# with enabled = false serves HTTP and claims nothing.
+enabled = true
+poll_interval = "2s"
+
 [tail]
 # Live tail (SSE) streams. ClickHouse polls on poll_interval; VictoriaLogs
 # streams natively. Guardrails are mandatory: admission limits, a hard session

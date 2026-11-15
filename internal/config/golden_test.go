@@ -102,6 +102,10 @@ evaluation_interval = "0s"
 default_lookback = "0s"
 history_limit = 0
 
+[jobs]
+enabled = false
+poll_interval = "0s"
+
 [ai]
 enabled = false
 base_url = ""

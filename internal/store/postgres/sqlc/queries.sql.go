@@ -176,6 +176,82 @@ func (q *Queries) AuthenticateOAuthAccessToken(ctx context.Context, arg Authenti
 	return i, err
 }
 
+const claimJobs = `-- name: ClaimJobs :many
+UPDATE jobs
+SET lease_owner = $1,
+    lease_token = lease_token + 1,
+    lease_expires_at = now() + make_interval(secs => $2::double precision),
+    last_started_at = now(),
+    updated_at = now()
+WHERE id IN (
+    SELECT j.id FROM jobs j
+    WHERE j.enabled
+      AND j.kind = $3
+      AND j.next_run_at <= now()
+      AND (j.lease_expires_at IS NULL OR j.lease_expires_at < now())
+    ORDER BY j.next_run_at
+    LIMIT $4
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled, next_run_at, lease_owner, lease_token, lease_expires_at, last_started_at, last_finished_at, last_status, last_error, created_at, updated_at
+`
+
+type ClaimJobsParams struct {
+	Owner        pgtype.Text `json:"owner"`
+	LeaseSeconds float64     `json:"lease_seconds"`
+	Kind         string      `json:"kind"`
+	MaxJobs      int32       `json:"max_jobs"`
+}
+
+// Concurrent claims from several replicas receive disjoint rows. SKIP LOCKED
+// also passes over a job whose handler holds its row through jobs.Hold, so
+// the token cannot rise before that handler commits.
+// last_started_at is the database clock at the claim.
+func (q *Queries) ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, error) {
+	rows, err := q.db.Query(ctx, claimJobs,
+		arg.Owner,
+		arg.LeaseSeconds,
+		arg.Kind,
+		arg.MaxJobs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Key,
+			&i.ScheduleKind,
+			&i.ScheduleExpr,
+			&i.Timezone,
+			&i.Misfire,
+			&i.GraceSeconds,
+			&i.Enabled,
+			&i.NextRunAt,
+			&i.LeaseOwner,
+			&i.LeaseToken,
+			&i.LeaseExpiresAt,
+			&i.LastStartedAt,
+			&i.LastFinishedAt,
+			&i.LastStatus,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimOAuthAuthRequestDecision = `-- name: ClaimOAuthAuthRequestDecision :one
 UPDATE oauth_auth_requests
 SET decided_at = $1::timestamptz, user_id = $2, denied = $3
@@ -972,6 +1048,23 @@ func (q *Queries) DeleteAlert(ctx context.Context, id int64) (int64, error) {
 	return id_2, err
 }
 
+const deleteClaimedJob = `-- name: DeleteClaimedJob :execrows
+DELETE FROM jobs WHERE id = $1 AND lease_token = $2
+`
+
+type DeleteClaimedJobParams struct {
+	ID         int64 `json:"id"`
+	LeaseToken int64 `json:"lease_token"`
+}
+
+func (q *Queries) DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteClaimedJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteCollection = `-- name: DeleteCollection :exec
 DELETE FROM collections WHERE id = $1
 `
@@ -1050,6 +1143,20 @@ DELETE FROM sessions WHERE expires_at <= $1
 // Delete all sessions whose expiry is at or before the given time
 func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, deleteExpiredSessions, expiresAt)
+	return err
+}
+
+const deleteJob = `-- name: DeleteJob :exec
+DELETE FROM jobs WHERE kind = $1 AND key = $2
+`
+
+type DeleteJobParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) DeleteJob(ctx context.Context, arg DeleteJobParams) error {
+	_, err := q.db.Exec(ctx, deleteJob, arg.Kind, arg.Key)
 	return err
 }
 
@@ -1168,6 +1275,54 @@ func (q *Queries) FailExportJob(ctx context.Context, arg FailExportJobParams) (s
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const finishJob = `-- name: FinishJob :execrows
+UPDATE jobs
+SET next_run_at = CASE
+        WHEN schedule_kind = $1
+         AND schedule_expr = $2
+         AND timezone = $3
+        THEN $4
+        ELSE next_run_at
+    END,
+    last_status = $5,
+    last_error = $6,
+    last_finished_at = now(),
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = now()
+WHERE id = $7 AND lease_token = $8
+`
+
+type FinishJobParams struct {
+	ScheduleKind string             `json:"schedule_kind"`
+	ScheduleExpr string             `json:"schedule_expr"`
+	Timezone     string             `json:"timezone"`
+	NextRunAt    pgtype.Timestamptz `json:"next_run_at"`
+	LastStatus   pgtype.Text        `json:"last_status"`
+	LastError    pgtype.Text        `json:"last_error"`
+	ID           int64              `json:"id"`
+	LeaseToken   int64              `json:"lease_token"`
+}
+
+// The next run applies only while the job keeps the schedule the run used,
+// so a schedule change made during the run is not overwritten.
+func (q *Queries) FinishJob(ctx context.Context, arg FinishJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishJob,
+		arg.ScheduleKind,
+		arg.ScheduleExpr,
+		arg.Timezone,
+		arg.NextRunAt,
+		arg.LastStatus,
+		arg.LastError,
+		arg.ID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
@@ -1465,6 +1620,42 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 		&i.UpdatedAt,
 		&i.OwnerInstanceID,
 		&i.OwnerProcessID,
+	)
+	return i, err
+}
+
+const getJob = `-- name: GetJob :one
+SELECT id, kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled, next_run_at, lease_owner, lease_token, lease_expires_at, last_started_at, last_finished_at, last_status, last_error, created_at, updated_at FROM jobs WHERE kind = $1 AND key = $2
+`
+
+type GetJobParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, getJob, arg.Kind, arg.Key)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Key,
+		&i.ScheduleKind,
+		&i.ScheduleExpr,
+		&i.Timezone,
+		&i.Misfire,
+		&i.GraceSeconds,
+		&i.Enabled,
+		&i.NextRunAt,
+		&i.LeaseOwner,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.LastStartedAt,
+		&i.LastFinishedAt,
+		&i.LastStatus,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1994,6 +2185,24 @@ func (q *Queries) GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSo
 	return team_id, err
 }
 
+const holdJob = `-- name: HoldJob :execrows
+UPDATE jobs SET updated_at = now()
+WHERE id = $1 AND lease_token = $2
+`
+
+type HoldJobParams struct {
+	ID         int64 `json:"id"`
+	LeaseToken int64 `json:"lease_token"`
+}
+
+func (q *Queries) HoldJob(ctx context.Context, arg HoldJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, holdJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const incrementQueryStats = `-- name: IncrementQueryStats :exec
 
 INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
@@ -2208,6 +2417,24 @@ func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (bool, error) {
 	var managed bool
 	err := row.Scan(&managed)
 	return managed, err
+}
+
+const kickJob = `-- name: KickJob :execrows
+UPDATE jobs SET next_run_at = now(), updated_at = now()
+WHERE kind = $1 AND key = $2
+`
+
+type KickJobParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) KickJob(ctx context.Context, arg KickJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, kickJob, arg.Kind, arg.Key)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
@@ -4154,6 +4381,24 @@ func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterru
 	return items, nil
 }
 
+const releaseJob = `-- name: ReleaseJob :execrows
+UPDATE jobs SET lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+WHERE id = $1 AND lease_token = $2
+`
+
+type ReleaseJobParams struct {
+	ID         int64 `json:"id"`
+	LeaseToken int64 `json:"lease_token"`
+}
+
+func (q *Queries) ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const removeCollectionItem = `-- name: RemoveCollectionItem :execrows
 DELETE FROM collection_items WHERE collection_id = $1 AND saved_query_id = $2
 `
@@ -5057,6 +5302,61 @@ type UpdateUserLastLoginParams struct {
 // Record a login without rewriting the rest of the user row
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
 	_, err := q.db.Exec(ctx, updateUserLastLogin, arg.ID, arg.LastLoginAt)
+	return err
+}
+
+const upsertJob = `-- name: UpsertJob :exec
+
+INSERT INTO jobs (
+    kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled,
+    next_run_at, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    now(), now(), now()
+)
+ON CONFLICT (kind, key) DO UPDATE SET
+    next_run_at = CASE
+        WHEN jobs.schedule_kind = excluded.schedule_kind
+         AND jobs.schedule_expr = excluded.schedule_expr
+         AND jobs.timezone = excluded.timezone
+        THEN jobs.next_run_at
+        ELSE excluded.next_run_at
+    END,
+    schedule_kind = excluded.schedule_kind,
+    schedule_expr = excluded.schedule_expr,
+    timezone = excluded.timezone,
+    misfire = excluded.misfire,
+    grace_seconds = excluded.grace_seconds,
+    enabled = excluded.enabled,
+    updated_at = excluded.updated_at
+`
+
+type UpsertJobParams struct {
+	Kind         string `json:"kind"`
+	Key          string `json:"key"`
+	ScheduleKind string `json:"schedule_kind"`
+	ScheduleExpr string `json:"schedule_expr"`
+	Timezone     string `json:"timezone"`
+	Misfire      string `json:"misfire"`
+	GraceSeconds int64  `json:"grace_seconds"`
+	Enabled      bool   `json:"enabled"`
+}
+
+// Jobs (internal/jobs). Every time comparison uses the database clock.
+// A new job is due now. A changed schedule makes an existing job due now;
+// otherwise its next run and lease are kept.
+func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
+	_, err := q.db.Exec(ctx, upsertJob,
+		arg.Kind,
+		arg.Key,
+		arg.ScheduleKind,
+		arg.ScheduleExpr,
+		arg.Timezone,
+		arg.Misfire,
+		arg.GraceSeconds,
+		arg.Enabled,
+	)
 	return err
 }
 

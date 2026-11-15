@@ -42,6 +42,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.authenticateOAuthAccessTokenStmt, err = db.PrepareContext(ctx, authenticateOAuthAccessToken); err != nil {
 		return nil, fmt.Errorf("error preparing query AuthenticateOAuthAccessToken: %w", err)
 	}
+	if q.claimJobsStmt, err = db.PrepareContext(ctx, claimJobs); err != nil {
+		return nil, fmt.Errorf("error preparing query ClaimJobs: %w", err)
+	}
 	if q.claimOAuthAuthRequestDecisionStmt, err = db.PrepareContext(ctx, claimOAuthAuthRequestDecision); err != nil {
 		return nil, fmt.Errorf("error preparing query ClaimOAuthAuthRequestDecision: %w", err)
 	}
@@ -111,6 +114,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteAlertStmt, err = db.PrepareContext(ctx, deleteAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlert: %w", err)
 	}
+	if q.deleteClaimedJobStmt, err = db.PrepareContext(ctx, deleteClaimedJob); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteClaimedJob: %w", err)
+	}
 	if q.deleteCollectionStmt, err = db.PrepareContext(ctx, deleteCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteCollection: %w", err)
 	}
@@ -131,6 +137,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteExpiredSessionsStmt, err = db.PrepareContext(ctx, deleteExpiredSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredSessions: %w", err)
+	}
+	if q.deleteJobStmt, err = db.PrepareContext(ctx, deleteJob); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteJob: %w", err)
 	}
 	if q.deleteQueryShareStmt, err = db.PrepareContext(ctx, deleteQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteQueryShare: %w", err)
@@ -159,6 +168,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.failExportJobStmt, err = db.PrepareContext(ctx, failExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query FailExportJob: %w", err)
 	}
+	if q.finishJobStmt, err = db.PrepareContext(ctx, finishJob); err != nil {
+		return nil, fmt.Errorf("error preparing query FinishJob: %w", err)
+	}
 	if q.getAPITokenStmt, err = db.PrepareContext(ctx, getAPIToken); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAPIToken: %w", err)
 	}
@@ -185,6 +197,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getExportJobStmt, err = db.PrepareContext(ctx, getExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query GetExportJob: %w", err)
+	}
+	if q.getJobStmt, err = db.PrepareContext(ctx, getJob); err != nil {
+		return nil, fmt.Errorf("error preparing query GetJob: %w", err)
 	}
 	if q.getLatestUnresolvedAlertHistoryStmt, err = db.PrepareContext(ctx, getLatestUnresolvedAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLatestUnresolvedAlertHistory: %w", err)
@@ -249,6 +264,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUserTeamForSourceStmt, err = db.PrepareContext(ctx, getUserTeamForSource); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUserTeamForSource: %w", err)
 	}
+	if q.holdJobStmt, err = db.PrepareContext(ctx, holdJob); err != nil {
+		return nil, fmt.Errorf("error preparing query HoldJob: %w", err)
+	}
 	if q.incrementQueryStatsStmt, err = db.PrepareContext(ctx, incrementQueryStats); err != nil {
 		return nil, fmt.Errorf("error preparing query IncrementQueryStats: %w", err)
 	}
@@ -272,6 +290,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.isTeamManagedStmt, err = db.PrepareContext(ctx, isTeamManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query IsTeamManaged: %w", err)
+	}
+	if q.kickJobStmt, err = db.PrepareContext(ctx, kickJob); err != nil {
+		return nil, fmt.Errorf("error preparing query KickJob: %w", err)
 	}
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
@@ -408,6 +429,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.reapInterruptedExportJobsStmt, err = db.PrepareContext(ctx, reapInterruptedExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query ReapInterruptedExportJobs: %w", err)
 	}
+	if q.releaseJobStmt, err = db.PrepareContext(ctx, releaseJob); err != nil {
+		return nil, fmt.Errorf("error preparing query ReleaseJob: %w", err)
+	}
 	if q.removeCollectionItemStmt, err = db.PrepareContext(ctx, removeCollectionItem); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveCollectionItem: %w", err)
 	}
@@ -516,6 +540,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateUserLastLoginStmt, err = db.PrepareContext(ctx, updateUserLastLogin); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateUserLastLogin: %w", err)
 	}
+	if q.upsertJobStmt, err = db.PrepareContext(ctx, upsertJob); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertJob: %w", err)
+	}
 	if q.upsertSystemSettingStmt, err = db.PrepareContext(ctx, upsertSystemSetting); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertSystemSetting: %w", err)
 	}
@@ -558,6 +585,11 @@ func (q *Queries) Close() error {
 	if q.authenticateOAuthAccessTokenStmt != nil {
 		if cerr := q.authenticateOAuthAccessTokenStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing authenticateOAuthAccessTokenStmt: %w", cerr)
+		}
+	}
+	if q.claimJobsStmt != nil {
+		if cerr := q.claimJobsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing claimJobsStmt: %w", cerr)
 		}
 	}
 	if q.claimOAuthAuthRequestDecisionStmt != nil {
@@ -675,6 +707,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteAlertStmt: %w", cerr)
 		}
 	}
+	if q.deleteClaimedJobStmt != nil {
+		if cerr := q.deleteClaimedJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteClaimedJobStmt: %w", cerr)
+		}
+	}
 	if q.deleteCollectionStmt != nil {
 		if cerr := q.deleteCollectionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteCollectionStmt: %w", cerr)
@@ -708,6 +745,11 @@ func (q *Queries) Close() error {
 	if q.deleteExpiredSessionsStmt != nil {
 		if cerr := q.deleteExpiredSessionsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteExpiredSessionsStmt: %w", cerr)
+		}
+	}
+	if q.deleteJobStmt != nil {
+		if cerr := q.deleteJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteJobStmt: %w", cerr)
 		}
 	}
 	if q.deleteQueryShareStmt != nil {
@@ -755,6 +797,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing failExportJobStmt: %w", cerr)
 		}
 	}
+	if q.finishJobStmt != nil {
+		if cerr := q.finishJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing finishJobStmt: %w", cerr)
+		}
+	}
 	if q.getAPITokenStmt != nil {
 		if cerr := q.getAPITokenStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAPITokenStmt: %w", cerr)
@@ -798,6 +845,11 @@ func (q *Queries) Close() error {
 	if q.getExportJobStmt != nil {
 		if cerr := q.getExportJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getExportJobStmt: %w", cerr)
+		}
+	}
+	if q.getJobStmt != nil {
+		if cerr := q.getJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getJobStmt: %w", cerr)
 		}
 	}
 	if q.getLatestUnresolvedAlertHistoryStmt != nil {
@@ -905,6 +957,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUserTeamForSourceStmt: %w", cerr)
 		}
 	}
+	if q.holdJobStmt != nil {
+		if cerr := q.holdJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing holdJobStmt: %w", cerr)
+		}
+	}
 	if q.incrementQueryStatsStmt != nil {
 		if cerr := q.incrementQueryStatsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing incrementQueryStatsStmt: %w", cerr)
@@ -943,6 +1000,11 @@ func (q *Queries) Close() error {
 	if q.isTeamManagedStmt != nil {
 		if cerr := q.isTeamManagedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing isTeamManagedStmt: %w", cerr)
+		}
+	}
+	if q.kickJobStmt != nil {
+		if cerr := q.kickJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing kickJobStmt: %w", cerr)
 		}
 	}
 	if q.listAPITokensForUserStmt != nil {
@@ -1170,6 +1232,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing reapInterruptedExportJobsStmt: %w", cerr)
 		}
 	}
+	if q.releaseJobStmt != nil {
+		if cerr := q.releaseJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing releaseJobStmt: %w", cerr)
+		}
+	}
 	if q.removeCollectionItemStmt != nil {
 		if cerr := q.removeCollectionItemStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeCollectionItemStmt: %w", cerr)
@@ -1350,6 +1417,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateUserLastLoginStmt: %w", cerr)
 		}
 	}
+	if q.upsertJobStmt != nil {
+		if cerr := q.upsertJobStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertJobStmt: %w", cerr)
+		}
+	}
 	if q.upsertSystemSettingStmt != nil {
 		if cerr := q.upsertSystemSettingStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertSystemSettingStmt: %w", cerr)
@@ -1410,6 +1482,7 @@ type Queries struct {
 	addTeamMemberStmt                     *sql.Stmt
 	addTeamSourceStmt                     *sql.Stmt
 	authenticateOAuthAccessTokenStmt      *sql.Stmt
+	claimJobsStmt                         *sql.Stmt
 	claimOAuthAuthRequestDecisionStmt     *sql.Stmt
 	completeExportJobStmt                 *sql.Stmt
 	consumeOAuthAuthCodeStmt              *sql.Stmt
@@ -1433,6 +1506,7 @@ type Queries struct {
 	createUserStmt                        *sql.Stmt
 	deleteAPITokenStmt                    *sql.Stmt
 	deleteAlertStmt                       *sql.Stmt
+	deleteClaimedJobStmt                  *sql.Stmt
 	deleteCollectionStmt                  *sql.Stmt
 	deleteDashboardStmt                   *sql.Stmt
 	deleteExpiredExportJobsStmt           *sql.Stmt
@@ -1440,6 +1514,7 @@ type Queries struct {
 	deleteExpiredOAuthAuthRequestsStmt    *sql.Stmt
 	deleteExpiredOAuthRefreshFamiliesStmt *sql.Stmt
 	deleteExpiredSessionsStmt             *sql.Stmt
+	deleteJobStmt                         *sql.Stmt
 	deleteQueryShareStmt                  *sql.Stmt
 	deleteSavedQueryStmt                  *sql.Stmt
 	deleteSessionStmt                     *sql.Stmt
@@ -1449,6 +1524,7 @@ type Queries struct {
 	deleteUserStmt                        *sql.Stmt
 	deleteUserSessionsStmt                *sql.Stmt
 	failExportJobStmt                     *sql.Stmt
+	finishJobStmt                         *sql.Stmt
 	getAPITokenStmt                       *sql.Stmt
 	getAPITokenByHashStmt                 *sql.Stmt
 	getAlertStmt                          *sql.Stmt
@@ -1458,6 +1534,7 @@ type Queries struct {
 	getCollectionMemberStmt               *sql.Stmt
 	getDashboardStmt                      *sql.Stmt
 	getExportJobStmt                      *sql.Stmt
+	getJobStmt                            *sql.Stmt
 	getLatestUnresolvedAlertHistoryStmt   *sql.Stmt
 	getOAuthAuthCodeStateStmt             *sql.Stmt
 	getOAuthAuthRequestStmt               *sql.Stmt
@@ -1479,6 +1556,7 @@ type Queries struct {
 	getUserByEmailStmt                    *sql.Stmt
 	getUserPreferencesStmt                *sql.Stmt
 	getUserTeamForSourceStmt              *sql.Stmt
+	holdJobStmt                           *sql.Stmt
 	incrementQueryStatsStmt               *sql.Stmt
 	insertAlertHistoryStmt                *sql.Stmt
 	insertOAuthAccessTokenStmt            *sql.Stmt
@@ -1487,6 +1565,7 @@ type Queries struct {
 	interruptAlertDeliveriesStmt          *sql.Stmt
 	isSourceManagedStmt                   *sql.Stmt
 	isTeamManagedStmt                     *sql.Stmt
+	kickJobStmt                           *sql.Stmt
 	listAPITokensForUserStmt              *sql.Stmt
 	listActiveAlertsDueStmt               *sql.Stmt
 	listAlertHistoryStmt                  *sql.Stmt
@@ -1532,6 +1611,7 @@ type Queries struct {
 	pruneQueryHistoryForUserStmt          *sql.Stmt
 	queryVolumeByDayStmt                  *sql.Stmt
 	reapInterruptedExportJobsStmt         *sql.Stmt
+	releaseJobStmt                        *sql.Stmt
 	removeCollectionItemStmt              *sql.Stmt
 	removeCollectionMemberStmt            *sql.Stmt
 	removeCollectionPinStmt               *sql.Stmt
@@ -1568,6 +1648,7 @@ type Queries struct {
 	updateTeamMemberRoleStmt              *sql.Stmt
 	updateUserStmt                        *sql.Stmt
 	updateUserLastLoginStmt               *sql.Stmt
+	upsertJobStmt                         *sql.Stmt
 	upsertSystemSettingStmt               *sql.Stmt
 	upsertUserPreferencesStmt             *sql.Stmt
 	userHasSourceAccessStmt               *sql.Stmt
@@ -1583,6 +1664,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		addTeamMemberStmt:                     q.addTeamMemberStmt,
 		addTeamSourceStmt:                     q.addTeamSourceStmt,
 		authenticateOAuthAccessTokenStmt:      q.authenticateOAuthAccessTokenStmt,
+		claimJobsStmt:                         q.claimJobsStmt,
 		claimOAuthAuthRequestDecisionStmt:     q.claimOAuthAuthRequestDecisionStmt,
 		completeExportJobStmt:                 q.completeExportJobStmt,
 		consumeOAuthAuthCodeStmt:              q.consumeOAuthAuthCodeStmt,
@@ -1606,6 +1688,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createUserStmt:                        q.createUserStmt,
 		deleteAPITokenStmt:                    q.deleteAPITokenStmt,
 		deleteAlertStmt:                       q.deleteAlertStmt,
+		deleteClaimedJobStmt:                  q.deleteClaimedJobStmt,
 		deleteCollectionStmt:                  q.deleteCollectionStmt,
 		deleteDashboardStmt:                   q.deleteDashboardStmt,
 		deleteExpiredExportJobsStmt:           q.deleteExpiredExportJobsStmt,
@@ -1613,6 +1696,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteExpiredOAuthAuthRequestsStmt:    q.deleteExpiredOAuthAuthRequestsStmt,
 		deleteExpiredOAuthRefreshFamiliesStmt: q.deleteExpiredOAuthRefreshFamiliesStmt,
 		deleteExpiredSessionsStmt:             q.deleteExpiredSessionsStmt,
+		deleteJobStmt:                         q.deleteJobStmt,
 		deleteQueryShareStmt:                  q.deleteQueryShareStmt,
 		deleteSavedQueryStmt:                  q.deleteSavedQueryStmt,
 		deleteSessionStmt:                     q.deleteSessionStmt,
@@ -1622,6 +1706,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteUserStmt:                        q.deleteUserStmt,
 		deleteUserSessionsStmt:                q.deleteUserSessionsStmt,
 		failExportJobStmt:                     q.failExportJobStmt,
+		finishJobStmt:                         q.finishJobStmt,
 		getAPITokenStmt:                       q.getAPITokenStmt,
 		getAPITokenByHashStmt:                 q.getAPITokenByHashStmt,
 		getAlertStmt:                          q.getAlertStmt,
@@ -1631,6 +1716,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getCollectionMemberStmt:               q.getCollectionMemberStmt,
 		getDashboardStmt:                      q.getDashboardStmt,
 		getExportJobStmt:                      q.getExportJobStmt,
+		getJobStmt:                            q.getJobStmt,
 		getLatestUnresolvedAlertHistoryStmt:   q.getLatestUnresolvedAlertHistoryStmt,
 		getOAuthAuthCodeStateStmt:             q.getOAuthAuthCodeStateStmt,
 		getOAuthAuthRequestStmt:               q.getOAuthAuthRequestStmt,
@@ -1652,6 +1738,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserByEmailStmt:                    q.getUserByEmailStmt,
 		getUserPreferencesStmt:                q.getUserPreferencesStmt,
 		getUserTeamForSourceStmt:              q.getUserTeamForSourceStmt,
+		holdJobStmt:                           q.holdJobStmt,
 		incrementQueryStatsStmt:               q.incrementQueryStatsStmt,
 		insertAlertHistoryStmt:                q.insertAlertHistoryStmt,
 		insertOAuthAccessTokenStmt:            q.insertOAuthAccessTokenStmt,
@@ -1660,6 +1747,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		interruptAlertDeliveriesStmt:          q.interruptAlertDeliveriesStmt,
 		isSourceManagedStmt:                   q.isSourceManagedStmt,
 		isTeamManagedStmt:                     q.isTeamManagedStmt,
+		kickJobStmt:                           q.kickJobStmt,
 		listAPITokensForUserStmt:              q.listAPITokensForUserStmt,
 		listActiveAlertsDueStmt:               q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                  q.listAlertHistoryStmt,
@@ -1705,6 +1793,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneQueryHistoryForUserStmt:          q.pruneQueryHistoryForUserStmt,
 		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,
 		reapInterruptedExportJobsStmt:         q.reapInterruptedExportJobsStmt,
+		releaseJobStmt:                        q.releaseJobStmt,
 		removeCollectionItemStmt:              q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:            q.removeCollectionMemberStmt,
 		removeCollectionPinStmt:               q.removeCollectionPinStmt,
@@ -1741,6 +1830,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateTeamMemberRoleStmt:              q.updateTeamMemberRoleStmt,
 		updateUserStmt:                        q.updateUserStmt,
 		updateUserLastLoginStmt:               q.updateUserLastLoginStmt,
+		upsertJobStmt:                         q.upsertJobStmt,
 		upsertSystemSettingStmt:               q.upsertSystemSettingStmt,
 		upsertUserPreferencesStmt:             q.upsertUserPreferencesStmt,
 		userHasSourceAccessStmt:               q.userHasSourceAccessStmt,

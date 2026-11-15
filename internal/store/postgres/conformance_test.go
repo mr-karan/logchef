@@ -55,6 +55,12 @@ func TestCollectionLinkRaces(t *testing.T) {
 	storetest.RunCollectionLinkRaces(t, opener(dsn))
 }
 
+// TestJobs runs the job claim and takeover tests with separate pools, like
+// separate replicas.
+func TestJobs(t *testing.T) {
+	storetest.RunJobs(t, opener(postgrestest.DSN(t)), true)
+}
+
 func opener(dsn string) storetest.Opener {
 	return func(t *testing.T) store.Store {
 		t.Helper()

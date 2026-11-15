@@ -29,6 +29,7 @@ type Config struct {
 	Logging        LoggingConfig        `koanf:"logging"`
 	AI             AIConfig             `koanf:"ai"`
 	Alerts         AlertsConfig         `koanf:"alerts"`
+	Jobs           JobsConfig           `koanf:"jobs"`
 	Query          QueryConfig          `koanf:"query"`
 	Export         ExportConfig         `koanf:"export"`
 	Tail           TailConfig           `koanf:"tail"`
@@ -424,6 +425,13 @@ func (c AIConfig) AskChefEnabled() bool {
 	return false
 }
 
+// JobsConfig controls the background job runner. A replica with Enabled
+// false serves HTTP and claims no jobs.
+type JobsConfig struct {
+	Enabled      bool          `koanf:"enabled"`
+	PollInterval time.Duration `koanf:"poll_interval"`
+}
+
 // AlertsConfig controls scheduling and webhook network access for alert rules.
 // SMTP and other delivery settings are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
@@ -454,6 +462,9 @@ const (
 	defaultAlertsEvaluationInterval = time.Minute
 	defaultAlertsDefaultLookback    = 5 * time.Minute
 	defaultAlertsHistoryLimit       = 50
+
+	defaultJobsEnabled      = true
+	defaultJobsPollInterval = 2 * time.Second
 
 	defaultAIEnabled     = true
 	defaultAIBaseURL     = "https://api.openai.com/v1"
@@ -943,6 +954,10 @@ func defaultConfig() Config {
 			DefaultLookback:    defaultAlertsDefaultLookback,
 			HistoryLimit:       defaultAlertsHistoryLimit,
 		},
+		Jobs: JobsConfig{
+			Enabled:      defaultJobsEnabled,
+			PollInterval: defaultJobsPollInterval,
+		},
 		AI: AIConfig{
 			Enabled:     defaultAIEnabled,
 			BaseURL:     defaultAIBaseURL,
@@ -1065,6 +1080,10 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	}
 	if len(cfg.Export.Formats) == 0 {
 		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
+	}
+
+	if cfg.Jobs.PollInterval <= 0 {
+		cfg.Jobs.PollInterval = defaultJobsPollInterval
 	}
 
 	if cfg.Tail.PollInterval <= 0 {

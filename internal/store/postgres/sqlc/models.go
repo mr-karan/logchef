@@ -133,6 +133,28 @@ type ExportJob struct {
 	OwnerProcessID  string             `json:"owner_process_id"`
 }
 
+type Job struct {
+	ID             int64              `json:"id"`
+	Kind           string             `json:"kind"`
+	Key            string             `json:"key"`
+	ScheduleKind   string             `json:"schedule_kind"`
+	ScheduleExpr   string             `json:"schedule_expr"`
+	Timezone       string             `json:"timezone"`
+	Misfire        string             `json:"misfire"`
+	GraceSeconds   int64              `json:"grace_seconds"`
+	Enabled        bool               `json:"enabled"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	LeaseOwner     pgtype.Text        `json:"lease_owner"`
+	LeaseToken     int64              `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	LastStartedAt  pgtype.Timestamptz `json:"last_started_at"`
+	LastFinishedAt pgtype.Timestamptz `json:"last_finished_at"`
+	LastStatus     pgtype.Text        `json:"last_status"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OauthAccessToken struct {
 	IDHash    string             `json:"id_hash"`
 	GrantID   int64              `json:"grant_id"`
