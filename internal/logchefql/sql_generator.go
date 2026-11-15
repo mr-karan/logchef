@@ -696,7 +696,7 @@ func aggregationOrder(node *AggregationNode, info *AggregationInfo, ref func(str
 const maxBuckets = 1000
 
 // checkBuckets rejects a time range that the bucket window cuts into more
-// than maxBuckets buckets, and names the smallest window that fits.
+// than maxBuckets buckets.
 func (a *SQLAggregation) checkBuckets(start, end timeBound) *ParseError {
 	if a.interval.Window == "" {
 		return nil
@@ -709,8 +709,22 @@ func (a *SQLAggregation) checkBuckets(start, end timeBound) *ParseError {
 	if err != nil {
 		return err
 	}
+	return CheckBuckets(a.interval.Window, from, to)
+}
+
+// CheckBuckets rejects a range from..to that window cuts into more than
+// maxBuckets buckets, and names the smallest window that fits. Every log
+// backend runs it, so the limit and its message are the same on each.
+func CheckBuckets(window string, from, to time.Time) *ParseError {
+	interval, ok := template.ParseInterval(window)
+	if !ok {
+		return &ParseError{
+			Code:    ErrInvalidAggregation,
+			Message: fmt.Sprintf("invalid interval %q: use one of %s", window, strings.Join(template.IntervalWindows(), ", ")),
+		}
+	}
 	span := to.Sub(from)
-	buckets := bucketCount(span, a.interval)
+	buckets := bucketCount(span, interval)
 	if buckets <= maxBuckets {
 		return nil
 	}
@@ -723,7 +737,7 @@ func (a *SQLAggregation) checkBuckets(start, end timeBound) *ParseError {
 	}
 	return &ParseError{
 		Code:    ErrInvalidAggregation,
-		Message: fmt.Sprintf("%s over this range gives %d buckets. The maximum is %d. %s", a.interval.Window, buckets, maxBuckets, advice),
+		Message: fmt.Sprintf("%s over this range gives %d buckets. The maximum is %d. %s", interval.Window, buckets, maxBuckets, advice),
 	}
 }
 

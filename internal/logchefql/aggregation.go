@@ -399,14 +399,3 @@ func checkAggregationAllowed(ast ASTNode, allow bool) *ParseError {
 		Position: &pos,
 	}
 }
-
-// errAggregationNotSupported is the answer of a generator that does not
-// compile aggregations yet.
-func errAggregationNotSupported(agg *AggregationNode) *ParseError {
-	pos := agg.pos
-	return &ParseError{
-		Code:     ErrAggregationNotSupported,
-		Message:  "aggregations are not supported for this source type",
-		Position: &pos,
-	}
-}

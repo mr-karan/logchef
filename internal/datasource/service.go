@@ -382,7 +382,7 @@ type CompiledLogchefQL struct {
 	// otherwise; the LogsQL query for VictoriaLogs.
 	Query string
 	// FilterOnly is the WHERE-clause-only SQL for ClickHouse; for VictoriaLogs
-	// it mirrors Query.
+	// it is Query without its aggregation pipes.
 	FilterOnly string
 	Language   models.QueryLanguage
 	Valid      bool

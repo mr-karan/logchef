@@ -888,7 +888,7 @@ func TestProviderSourceMetadata(t *testing.T) {
 		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogsQL}},
 		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
 		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
-		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "live_tail", "ai_sql_generation"}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "live_tail", "ai_sql_generation", "logchefql_aggregation"}},
 		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, false},
 	}
 	for _, tt := range tests {
