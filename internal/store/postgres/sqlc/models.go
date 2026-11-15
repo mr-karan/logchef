@@ -78,6 +78,32 @@ type ApiToken struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AuditEvent struct {
+	ID           string             `json:"id"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	Action       string             `json:"action"`
+	Outcome      string             `json:"outcome"`
+	Reason       string             `json:"reason"`
+	ActorType    string             `json:"actor_type"`
+	ActorID      pgtype.Int8        `json:"actor_id"`
+	ActorLabel   string             `json:"actor_label"`
+	AuthMethod   string             `json:"auth_method"`
+	CredentialID string             `json:"credential_id"`
+	ClientID     string             `json:"client_id"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	TargetLabel  string             `json:"target_label"`
+	TeamID       pgtype.Int8        `json:"team_id"`
+	SourceID     pgtype.Int8        `json:"source_id"`
+	Ip           string             `json:"ip"`
+	UserAgent    string             `json:"user_agent"`
+	HttpMethod   string             `json:"http_method"`
+	Route        string             `json:"route"`
+	Status       int32              `json:"status"`
+	Changes      []byte             `json:"changes"`
+	Detail       []byte             `json:"detail"`
+}
+
 type Collection struct {
 	ID          int64              `json:"id"`
 	Name        string             `json:"name"`

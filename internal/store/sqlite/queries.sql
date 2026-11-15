@@ -1577,3 +1577,102 @@ WHERE source_id = sqlc.arg(source_id)
 -- name: ListManagedSavedViews :many
 SELECT * FROM saved_views WHERE managed = 1
 ORDER BY source_id, name, id;
+
+-- Audit events
+
+-- name: InsertAuditEvent :exec
+INSERT INTO audit_events (
+    id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label,
+    auth_method, credential_id, client_id, target_type, target_id, target_label,
+    team_id, source_id, ip, user_agent, http_method, route, status, changes, detail
+) VALUES (
+    sqlc.arg(id), CAST(sqlc.arg(occurred_at) AS TEXT), sqlc.arg(action), sqlc.arg(outcome),
+    sqlc.arg(reason), sqlc.arg(actor_type), sqlc.narg(actor_id), sqlc.arg(actor_label),
+    sqlc.arg(auth_method), sqlc.arg(credential_id), sqlc.arg(client_id), sqlc.arg(target_type),
+    sqlc.arg(target_id), sqlc.arg(target_label), sqlc.narg(team_id), sqlc.narg(source_id),
+    sqlc.arg(ip), sqlc.arg(user_agent), sqlc.arg(http_method), sqlc.arg(route),
+    sqlc.arg(status), sqlc.arg(changes), sqlc.arg(detail)
+);
+
+-- name: ListAuditEventsDesc :many
+-- Newest first. An empty text argument or a NULL ID argument disables its
+-- filter; cursor_id = '' starts at the newest event.
+SELECT * FROM audit_events
+WHERE (CAST(sqlc.arg(from_at) AS TEXT) = '' OR occurred_at >= CAST(sqlc.arg(from_at) AS TEXT))
+  AND (CAST(sqlc.arg(to_at) AS TEXT) = '' OR occurred_at < CAST(sqlc.arg(to_at) AS TEXT))
+  AND (CAST(sqlc.arg(action) AS TEXT) = '' OR action = sqlc.arg(action))
+  AND (CAST(sqlc.arg(action_prefix) AS TEXT) = '' OR substr(action, 1, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+  AND (CAST(sqlc.narg(actor_id) AS INTEGER) IS NULL OR actor_id = CAST(sqlc.narg(actor_id) AS INTEGER))
+  AND (CAST(sqlc.arg(auth_method) AS TEXT) = '' OR auth_method = sqlc.arg(auth_method))
+  AND (CAST(sqlc.arg(credential_id) AS TEXT) = '' OR credential_id = sqlc.arg(credential_id))
+  AND (CAST(sqlc.arg(target_type) AS TEXT) = '' OR target_type = sqlc.arg(target_type))
+  AND (CAST(sqlc.arg(target_id) AS TEXT) = '' OR target_id = sqlc.arg(target_id))
+  AND (CAST(sqlc.narg(team_id) AS INTEGER) IS NULL OR team_id = CAST(sqlc.narg(team_id) AS INTEGER))
+  AND (CAST(sqlc.narg(source_id) AS INTEGER) IS NULL OR source_id = CAST(sqlc.narg(source_id) AS INTEGER))
+  AND (CAST(sqlc.arg(outcome) AS TEXT) = '' OR outcome = sqlc.arg(outcome))
+  AND (CAST(sqlc.arg(cursor_id) AS TEXT) = ''
+    OR occurred_at < CAST(sqlc.arg(cursor_at) AS TEXT)
+    OR (occurred_at = CAST(sqlc.arg(cursor_at) AS TEXT) AND id < sqlc.arg(cursor_id)))
+ORDER BY occurred_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);
+
+-- name: ListAuditEventsAsc :many
+-- Oldest first, with the same filters as ListAuditEventsDesc.
+SELECT * FROM audit_events
+WHERE (CAST(sqlc.arg(from_at) AS TEXT) = '' OR occurred_at >= CAST(sqlc.arg(from_at) AS TEXT))
+  AND (CAST(sqlc.arg(to_at) AS TEXT) = '' OR occurred_at < CAST(sqlc.arg(to_at) AS TEXT))
+  AND (CAST(sqlc.arg(action) AS TEXT) = '' OR action = sqlc.arg(action))
+  AND (CAST(sqlc.arg(action_prefix) AS TEXT) = '' OR substr(action, 1, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+  AND (CAST(sqlc.narg(actor_id) AS INTEGER) IS NULL OR actor_id = CAST(sqlc.narg(actor_id) AS INTEGER))
+  AND (CAST(sqlc.arg(auth_method) AS TEXT) = '' OR auth_method = sqlc.arg(auth_method))
+  AND (CAST(sqlc.arg(credential_id) AS TEXT) = '' OR credential_id = sqlc.arg(credential_id))
+  AND (CAST(sqlc.arg(target_type) AS TEXT) = '' OR target_type = sqlc.arg(target_type))
+  AND (CAST(sqlc.arg(target_id) AS TEXT) = '' OR target_id = sqlc.arg(target_id))
+  AND (CAST(sqlc.narg(team_id) AS INTEGER) IS NULL OR team_id = CAST(sqlc.narg(team_id) AS INTEGER))
+  AND (CAST(sqlc.narg(source_id) AS INTEGER) IS NULL OR source_id = CAST(sqlc.narg(source_id) AS INTEGER))
+  AND (CAST(sqlc.arg(outcome) AS TEXT) = '' OR outcome = sqlc.arg(outcome))
+  AND (CAST(sqlc.arg(cursor_id) AS TEXT) = ''
+    OR occurred_at > CAST(sqlc.arg(cursor_at) AS TEXT)
+    OR (occurred_at = CAST(sqlc.arg(cursor_at) AS TEXT) AND id > sqlc.arg(cursor_id)))
+ORDER BY occurred_at ASC, id ASC
+LIMIT sqlc.arg(row_limit);
+
+-- name: CountAuditEvents :one
+-- Counts the events that match the filters, stopping at max_rows.
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM audit_events
+    WHERE (CAST(sqlc.arg(from_at) AS TEXT) = '' OR occurred_at >= CAST(sqlc.arg(from_at) AS TEXT))
+      AND (CAST(sqlc.arg(to_at) AS TEXT) = '' OR occurred_at < CAST(sqlc.arg(to_at) AS TEXT))
+      AND (CAST(sqlc.arg(action) AS TEXT) = '' OR action = sqlc.arg(action))
+      AND (CAST(sqlc.arg(action_prefix) AS TEXT) = '' OR substr(action, 1, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+      AND (CAST(sqlc.narg(actor_id) AS INTEGER) IS NULL OR actor_id = CAST(sqlc.narg(actor_id) AS INTEGER))
+      AND (CAST(sqlc.arg(auth_method) AS TEXT) = '' OR auth_method = sqlc.arg(auth_method))
+      AND (CAST(sqlc.arg(credential_id) AS TEXT) = '' OR credential_id = sqlc.arg(credential_id))
+      AND (CAST(sqlc.arg(target_type) AS TEXT) = '' OR target_type = sqlc.arg(target_type))
+      AND (CAST(sqlc.arg(target_id) AS TEXT) = '' OR target_id = sqlc.arg(target_id))
+      AND (CAST(sqlc.narg(team_id) AS INTEGER) IS NULL OR team_id = CAST(sqlc.narg(team_id) AS INTEGER))
+      AND (CAST(sqlc.narg(source_id) AS INTEGER) IS NULL OR source_id = CAST(sqlc.narg(source_id) AS INTEGER))
+      AND (CAST(sqlc.arg(outcome) AS TEXT) = '' OR outcome = sqlc.arg(outcome))
+    LIMIT sqlc.arg(max_rows)
+);
+
+-- name: GetAuditPruneBoundary :one
+-- The newest event beyond the keep_rows newest ones.
+SELECT CAST(occurred_at AS TEXT) AS occurred_at_text, id
+FROM audit_events
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1 OFFSET sqlc.arg(keep_rows);
+
+-- name: PruneAuditEvents :execrows
+-- Deletes up to batch_size of the oldest events that are older than before or
+-- at or below the row-count boundary. An empty argument disables its rule.
+DELETE FROM audit_events
+WHERE id IN (
+    SELECT id FROM audit_events
+    WHERE (CAST(sqlc.arg(before) AS TEXT) <> '' AND occurred_at < CAST(sqlc.arg(before) AS TEXT))
+       OR (CAST(sqlc.arg(bound_id) AS TEXT) <> ''
+           AND (occurred_at < CAST(sqlc.arg(bound_at) AS TEXT)
+             OR (occurred_at = CAST(sqlc.arg(bound_at) AS TEXT) AND id <= sqlc.arg(bound_id))))
+    ORDER BY occurred_at ASC, id ASC
+    LIMIT sqlc.arg(batch_size)
+);

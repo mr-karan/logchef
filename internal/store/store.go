@@ -1,7 +1,7 @@
 // Package store defines the backend-agnostic contract for logchef's application
 // metadata — users, teams, sources, sessions, saved queries, collections,
 // saved views, alerts, background jobs, API tokens, system settings, export jobs, user preferences, query
-// shares and OAuth authorization state. (Log data lives in ClickHouse and is not part of this contract.)
+// shares, OAuth authorization state and audit events. (Log data lives in ClickHouse and is not part of this contract.)
 //
 // Concrete implementations live in sub-packages — store/sqlite (the default,
 // single-binary backend) and store/postgres (for multi-replica deployments) —
@@ -466,6 +466,24 @@ type OAuthStore interface {
 	DeleteExpiredOAuthRows(ctx context.Context, now time.Time) error
 }
 
+// AuditStore persists audit events. It has no update and no delete by ID:
+// events leave the table only through PruneAuditEvents.
+type AuditStore interface {
+	// InsertAuditEvent stores e and sets e.OccurredAt to the stored value,
+	// UTC at models.AuditTimePrecision.
+	InsertAuditEvent(ctx context.Context, e *models.AuditEvent) error
+	// ListAuditEvents returns up to f.Limit events that match f, ordered by
+	// occurred_at then id, after f.Cursor when it is set.
+	ListAuditEvents(ctx context.Context, f models.AuditFilter) ([]models.AuditEvent, error)
+	// CountAuditEvents counts the events that match f, stopping at maxRows. It
+	// ignores f.Cursor, f.Ascending and f.Limit.
+	CountAuditEvents(ctx context.Context, f models.AuditFilter, maxRows int) (int, error)
+	// PruneAuditEvents deletes up to batch of the oldest events that are
+	// older than before or beyond the keepRows newest, and returns how many
+	// it deleted. A zero before or keepRows disables that rule.
+	PruneAuditEvents(ctx context.Context, before time.Time, keepRows, batch int) (int, error)
+}
+
 // StoreOps is the full set of data operations across every domain, with no
 // lifecycle (Close) or transaction control (WithTx). It is what a WithTx
 // callback receives, and what consumers should accept when they don't manage
@@ -493,6 +511,7 @@ type StoreOps interface {
 	SettingsStore
 	TokenStore
 	OAuthStore
+	AuditStore
 }
 
 // Store is the complete metadata contract a backend (store/sqlite,

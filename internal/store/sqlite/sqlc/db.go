@@ -66,6 +66,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countAdminUsersStmt, err = db.PrepareContext(ctx, countAdminUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAdminUsers: %w", err)
 	}
+	if q.countAuditEventsStmt, err = db.PrepareContext(ctx, countAuditEvents); err != nil {
+		return nil, fmt.Errorf("error preparing query CountAuditEvents: %w", err)
+	}
 	if q.countCollectionTeamAccessStmt, err = db.PrepareContext(ctx, countCollectionTeamAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountCollectionTeamAccess: %w", err)
 	}
@@ -201,6 +204,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAlertHistoryEntryStmt, err = db.PrepareContext(ctx, getAlertHistoryEntry); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAlertHistoryEntry: %w", err)
 	}
+	if q.getAuditPruneBoundaryStmt, err = db.PrepareContext(ctx, getAuditPruneBoundary); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAuditPruneBoundary: %w", err)
+	}
 	if q.getCollectionStmt, err = db.PrepareContext(ctx, getCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query GetCollection: %w", err)
 	}
@@ -294,6 +300,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
 	}
+	if q.insertAuditEventStmt, err = db.PrepareContext(ctx, insertAuditEvent); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertAuditEvent: %w", err)
+	}
 	if q.insertOAuthAccessTokenStmt, err = db.PrepareContext(ctx, insertOAuthAccessToken); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertOAuthAccessToken: %w", err)
 	}
@@ -335,6 +344,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listAllSavedQueriesStmt, err = db.PrepareContext(ctx, listAllSavedQueries); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllSavedQueries: %w", err)
+	}
+	if q.listAuditEventsAscStmt, err = db.PrepareContext(ctx, listAuditEventsAsc); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAuditEventsAsc: %w", err)
+	}
+	if q.listAuditEventsDescStmt, err = db.PrepareContext(ctx, listAuditEventsDesc); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAuditEventsDesc: %w", err)
 	}
 	if q.listCollectionEditorsStmt, err = db.PrepareContext(ctx, listCollectionEditors); err != nil {
 		return nil, fmt.Errorf("error preparing query ListCollectionEditors: %w", err)
@@ -449,6 +464,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.pruneAlertHistoryStmt, err = db.PrepareContext(ctx, pruneAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneAlertHistory: %w", err)
+	}
+	if q.pruneAuditEventsStmt, err = db.PrepareContext(ctx, pruneAuditEvents); err != nil {
+		return nil, fmt.Errorf("error preparing query PruneAuditEvents: %w", err)
 	}
 	if q.pruneExpiredQuerySharesStmt, err = db.PrepareContext(ctx, pruneExpiredQueryShares); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneExpiredQueryShares: %w", err)
@@ -667,6 +685,11 @@ func (q *Queries) Close() error {
 	if q.countAdminUsersStmt != nil {
 		if cerr := q.countAdminUsersStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countAdminUsersStmt: %w", cerr)
+		}
+	}
+	if q.countAuditEventsStmt != nil {
+		if cerr := q.countAuditEventsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countAuditEventsStmt: %w", cerr)
 		}
 	}
 	if q.countCollectionTeamAccessStmt != nil {
@@ -894,6 +917,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAlertHistoryEntryStmt: %w", cerr)
 		}
 	}
+	if q.getAuditPruneBoundaryStmt != nil {
+		if cerr := q.getAuditPruneBoundaryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAuditPruneBoundaryStmt: %w", cerr)
+		}
+	}
 	if q.getCollectionStmt != nil {
 		if cerr := q.getCollectionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getCollectionStmt: %w", cerr)
@@ -1049,6 +1077,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
 		}
 	}
+	if q.insertAuditEventStmt != nil {
+		if cerr := q.insertAuditEventStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertAuditEventStmt: %w", cerr)
+		}
+	}
 	if q.insertOAuthAccessTokenStmt != nil {
 		if cerr := q.insertOAuthAccessTokenStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing insertOAuthAccessTokenStmt: %w", cerr)
@@ -1117,6 +1150,16 @@ func (q *Queries) Close() error {
 	if q.listAllSavedQueriesStmt != nil {
 		if cerr := q.listAllSavedQueriesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllSavedQueriesStmt: %w", cerr)
+		}
+	}
+	if q.listAuditEventsAscStmt != nil {
+		if cerr := q.listAuditEventsAscStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAuditEventsAscStmt: %w", cerr)
+		}
+	}
+	if q.listAuditEventsDescStmt != nil {
+		if cerr := q.listAuditEventsDescStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAuditEventsDescStmt: %w", cerr)
 		}
 	}
 	if q.listCollectionEditorsStmt != nil {
@@ -1307,6 +1350,11 @@ func (q *Queries) Close() error {
 	if q.pruneAlertHistoryStmt != nil {
 		if cerr := q.pruneAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing pruneAlertHistoryStmt: %w", cerr)
+		}
+	}
+	if q.pruneAuditEventsStmt != nil {
+		if cerr := q.pruneAuditEventsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing pruneAuditEventsStmt: %w", cerr)
 		}
 	}
 	if q.pruneExpiredQuerySharesStmt != nil {
@@ -1602,6 +1650,7 @@ type Queries struct {
 	consumeOAuthAuthCodeStmt              *sql.Stmt
 	consumeOAuthRefreshTokenStmt          *sql.Stmt
 	countAdminUsersStmt                   *sql.Stmt
+	countAuditEventsStmt                  *sql.Stmt
 	countCollectionTeamAccessStmt         *sql.Stmt
 	countSavedViewsInScopeStmt            *sql.Stmt
 	countSharedCollectionEditAccessStmt   *sql.Stmt
@@ -1647,6 +1696,7 @@ type Queries struct {
 	getAPITokenByHashStmt                 *sql.Stmt
 	getAlertStmt                          *sql.Stmt
 	getAlertHistoryEntryStmt              *sql.Stmt
+	getAuditPruneBoundaryStmt             *sql.Stmt
 	getCollectionStmt                     *sql.Stmt
 	getCollectionItemLinkStmt             *sql.Stmt
 	getCollectionMemberStmt               *sql.Stmt
@@ -1678,6 +1728,7 @@ type Queries struct {
 	holdJobStmt                           *sql.Stmt
 	incrementQueryStatsStmt               *sql.Stmt
 	insertAlertHistoryStmt                *sql.Stmt
+	insertAuditEventStmt                  *sql.Stmt
 	insertOAuthAccessTokenStmt            *sql.Stmt
 	insertOAuthRefreshTokenStmt           *sql.Stmt
 	insertQueryHistoryStmt                *sql.Stmt
@@ -1692,6 +1743,8 @@ type Queries struct {
 	listAlertsBySourceStmt                *sql.Stmt
 	listAlertsForUserStmt                 *sql.Stmt
 	listAllSavedQueriesStmt               *sql.Stmt
+	listAuditEventsAscStmt                *sql.Stmt
+	listAuditEventsDescStmt               *sql.Stmt
 	listCollectionEditorsStmt             *sql.Stmt
 	listCollectionItemsStmt               *sql.Stmt
 	listCollectionMembersStmt             *sql.Stmt
@@ -1730,6 +1783,7 @@ type Queries struct {
 	markAlertResolvedStmt                 *sql.Stmt
 	markAlertTriggeredStmt                *sql.Stmt
 	pruneAlertHistoryStmt                 *sql.Stmt
+	pruneAuditEventsStmt                  *sql.Stmt
 	pruneExpiredQuerySharesStmt           *sql.Stmt
 	pruneQueryHistoryForUserStmt          *sql.Stmt
 	queryVolumeByDayStmt                  *sql.Stmt
@@ -1798,6 +1852,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		consumeOAuthAuthCodeStmt:              q.consumeOAuthAuthCodeStmt,
 		consumeOAuthRefreshTokenStmt:          q.consumeOAuthRefreshTokenStmt,
 		countAdminUsersStmt:                   q.countAdminUsersStmt,
+		countAuditEventsStmt:                  q.countAuditEventsStmt,
 		countCollectionTeamAccessStmt:         q.countCollectionTeamAccessStmt,
 		countSavedViewsInScopeStmt:            q.countSavedViewsInScopeStmt,
 		countSharedCollectionEditAccessStmt:   q.countSharedCollectionEditAccessStmt,
@@ -1843,6 +1898,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAPITokenByHashStmt:                 q.getAPITokenByHashStmt,
 		getAlertStmt:                          q.getAlertStmt,
 		getAlertHistoryEntryStmt:              q.getAlertHistoryEntryStmt,
+		getAuditPruneBoundaryStmt:             q.getAuditPruneBoundaryStmt,
 		getCollectionStmt:                     q.getCollectionStmt,
 		getCollectionItemLinkStmt:             q.getCollectionItemLinkStmt,
 		getCollectionMemberStmt:               q.getCollectionMemberStmt,
@@ -1874,6 +1930,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		holdJobStmt:                           q.holdJobStmt,
 		incrementQueryStatsStmt:               q.incrementQueryStatsStmt,
 		insertAlertHistoryStmt:                q.insertAlertHistoryStmt,
+		insertAuditEventStmt:                  q.insertAuditEventStmt,
 		insertOAuthAccessTokenStmt:            q.insertOAuthAccessTokenStmt,
 		insertOAuthRefreshTokenStmt:           q.insertOAuthRefreshTokenStmt,
 		insertQueryHistoryStmt:                q.insertQueryHistoryStmt,
@@ -1888,6 +1945,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAlertsBySourceStmt:                q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:                 q.listAlertsForUserStmt,
 		listAllSavedQueriesStmt:               q.listAllSavedQueriesStmt,
+		listAuditEventsAscStmt:                q.listAuditEventsAscStmt,
+		listAuditEventsDescStmt:               q.listAuditEventsDescStmt,
 		listCollectionEditorsStmt:             q.listCollectionEditorsStmt,
 		listCollectionItemsStmt:               q.listCollectionItemsStmt,
 		listCollectionMembersStmt:             q.listCollectionMembersStmt,
@@ -1926,6 +1985,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAlertResolvedStmt:                 q.markAlertResolvedStmt,
 		markAlertTriggeredStmt:                q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:                 q.pruneAlertHistoryStmt,
+		pruneAuditEventsStmt:                  q.pruneAuditEventsStmt,
 		pruneExpiredQuerySharesStmt:           q.pruneExpiredQuerySharesStmt,
 		pruneQueryHistoryForUserStmt:          q.pruneQueryHistoryForUserStmt,
 		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,

@@ -43,6 +43,8 @@ type Querier interface {
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
+	// Counts the events that match the filters, stopping at max_rows.
+	CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error)
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.
 	CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error)
@@ -141,6 +143,8 @@ type Querier interface {
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAlert(ctx context.Context, id int64) (Alert, error)
 	GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryEntryParams) (AlertHistory, error)
+	// The newest event beyond the keep_rows newest ones.
+	GetAuditPruneBoundary(ctx context.Context, keepRows int64) (GetAuditPruneBoundaryRow, error)
 	// Look up a collection by id with direct member, shared team, and item counts
 	GetCollection(ctx context.Context, id int64) (GetCollectionRow, error)
 	// Read one link row
@@ -197,6 +201,8 @@ type Querier interface {
 	IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
+	// Audit events
+	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) error
 	// Insert only while the grant is active, so a token is never issued under a
 	// grant revoked a moment earlier.
 	InsertOAuthAccessToken(ctx context.Context, arg InsertOAuthAccessTokenParams) (int64, error)
@@ -224,6 +230,11 @@ type Querier interface {
 	// surface only. The handler MUST authorize the caller as a global admin before
 	// calling this. Rows the caller cannot run are marked non-runnable in Go.
 	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
+	// Oldest first, with the same filters as ListAuditEventsDesc.
+	ListAuditEventsAsc(ctx context.Context, arg ListAuditEventsAscParams) ([]AuditEvent, error)
+	// Newest first. An empty text argument or a NULL ID argument disables its
+	// filter; cursor_id = '' starts at the newest event.
+	ListAuditEventsDesc(ctx context.Context, arg ListAuditEventsDescParams) ([]AuditEvent, error)
 	ListCollectionEditors(ctx context.Context, collectionIds []int64) ([]ListCollectionEditorsRow, error)
 	// List items in a collection with saved-query details
 	ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error)
@@ -301,6 +312,9 @@ type Querier interface {
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	// Keeps every open episode and the newest N closed rows.
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
+	// Deletes up to batch_size of the oldest events that are older than before or
+	// at or below the row-count boundary. An empty argument disables its rule.
+	PruneAuditEvents(ctx context.Context, arg PruneAuditEventsParams) (int64, error)
 	// Delete expired query shares
 	PruneExpiredQueryShares(ctx context.Context, expiresAt time.Time) error
 	// Delete a user's history rows beyond the newest `offset` (the per-user cap),

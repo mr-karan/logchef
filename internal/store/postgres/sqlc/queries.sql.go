@@ -496,6 +496,63 @@ func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams
 	return count, err
 }
 
+const countAuditEvents = `-- name: CountAuditEvents :one
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM audit_events
+    WHERE ($1::timestamptz IS NULL OR occurred_at >= $1)
+      AND ($2::timestamptz IS NULL OR occurred_at < $2)
+      AND ($3::text = '' OR action = $3)
+      AND ($4::text = '' OR left(action, length($4)) = $4)
+      AND ($5::bigint IS NULL OR actor_id = $5)
+      AND ($6::text = '' OR auth_method = $6)
+      AND ($7::text = '' OR credential_id = $7)
+      AND ($8::text = '' OR target_type = $8)
+      AND ($9::text = '' OR target_id = $9)
+      AND ($10::bigint IS NULL OR team_id = $10)
+      AND ($11::bigint IS NULL OR source_id = $11)
+      AND ($12::text = '' OR outcome = $12)
+    LIMIT $13::bigint
+) AS matched
+`
+
+type CountAuditEventsParams struct {
+	FromAt       pgtype.Timestamptz `json:"from_at"`
+	ToAt         pgtype.Timestamptz `json:"to_at"`
+	Action       string             `json:"action"`
+	ActionPrefix string             `json:"action_prefix"`
+	ActorID      pgtype.Int8        `json:"actor_id"`
+	AuthMethod   string             `json:"auth_method"`
+	CredentialID string             `json:"credential_id"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	TeamID       pgtype.Int8        `json:"team_id"`
+	SourceID     pgtype.Int8        `json:"source_id"`
+	Outcome      string             `json:"outcome"`
+	MaxRows      int64              `json:"max_rows"`
+}
+
+// Counts the events that match the filters, stopping at max_rows.
+func (q *Queries) CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditEvents,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.ActorID,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Outcome,
+		arg.MaxRows,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCollectionTeamAccess = `-- name: CountCollectionTeamAccess :one
 SELECT COUNT(*)
 FROM collection_teams ct
@@ -1619,6 +1676,26 @@ func (q *Queries) GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryE
 	return i, err
 }
 
+const getAuditPruneBoundary = `-- name: GetAuditPruneBoundary :one
+SELECT occurred_at, id
+FROM audit_events
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1 OFFSET $1::bigint
+`
+
+type GetAuditPruneBoundaryRow struct {
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+	ID         string             `json:"id"`
+}
+
+// The newest event beyond the keep_rows newest ones.
+func (q *Queries) GetAuditPruneBoundary(ctx context.Context, keepRows int64) (GetAuditPruneBoundaryRow, error) {
+	row := q.db.QueryRow(ctx, getAuditPruneBoundary, keepRows)
+	var i GetAuditPruneBoundaryRow
+	err := row.Scan(&i.OccurredAt, &i.ID)
+	return i, err
+}
+
 const getCollection = `-- name: GetCollection :one
 SELECT
     c.id,
@@ -2496,6 +2573,78 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 	return i, err
 }
 
+const insertAuditEvent = `-- name: InsertAuditEvent :exec
+
+INSERT INTO audit_events (
+    id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label,
+    auth_method, credential_id, client_id, target_type, target_id, target_label,
+    team_id, source_id, ip, user_agent, http_method, route, status, changes, detail
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15, $16,
+    $17, $18, $19, $20,
+    $21, $22, $23
+)
+`
+
+type InsertAuditEventParams struct {
+	ID           string             `json:"id"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	Action       string             `json:"action"`
+	Outcome      string             `json:"outcome"`
+	Reason       string             `json:"reason"`
+	ActorType    string             `json:"actor_type"`
+	ActorID      pgtype.Int8        `json:"actor_id"`
+	ActorLabel   string             `json:"actor_label"`
+	AuthMethod   string             `json:"auth_method"`
+	CredentialID string             `json:"credential_id"`
+	ClientID     string             `json:"client_id"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	TargetLabel  string             `json:"target_label"`
+	TeamID       pgtype.Int8        `json:"team_id"`
+	SourceID     pgtype.Int8        `json:"source_id"`
+	Ip           string             `json:"ip"`
+	UserAgent    string             `json:"user_agent"`
+	HttpMethod   string             `json:"http_method"`
+	Route        string             `json:"route"`
+	Status       int32              `json:"status"`
+	Changes      []byte             `json:"changes"`
+	Detail       []byte             `json:"detail"`
+}
+
+// Audit events
+func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) error {
+	_, err := q.db.Exec(ctx, insertAuditEvent,
+		arg.ID,
+		arg.OccurredAt,
+		arg.Action,
+		arg.Outcome,
+		arg.Reason,
+		arg.ActorType,
+		arg.ActorID,
+		arg.ActorLabel,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.ClientID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TargetLabel,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Ip,
+		arg.UserAgent,
+		arg.HttpMethod,
+		arg.Route,
+		arg.Status,
+		arg.Changes,
+		arg.Detail,
+	)
+	return err
+}
+
 const insertOAuthAccessToken = `-- name: InsertOAuthAccessToken :execrows
 INSERT INTO oauth_access_tokens (id_hash, grant_id, expires_at, created_at)
 SELECT $1, g.id, $2::timestamptz, $3::timestamptz
@@ -3002,6 +3151,207 @@ func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQuerie
 			&i.UpdatedAt,
 			&i.CreatedBy,
 			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventsAsc = `-- name: ListAuditEventsAsc :many
+SELECT id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label, auth_method, credential_id, client_id, target_type, target_id, target_label, team_id, source_id, ip, user_agent, http_method, route, status, changes, detail FROM audit_events
+WHERE ($1::timestamptz IS NULL OR occurred_at >= $1)
+  AND ($2::timestamptz IS NULL OR occurred_at < $2)
+  AND ($3::text = '' OR action = $3)
+  AND ($4::text = '' OR left(action, length($4)) = $4)
+  AND ($5::bigint IS NULL OR actor_id = $5)
+  AND ($6::text = '' OR auth_method = $6)
+  AND ($7::text = '' OR credential_id = $7)
+  AND ($8::text = '' OR target_type = $8)
+  AND ($9::text = '' OR target_id = $9)
+  AND ($10::bigint IS NULL OR team_id = $10)
+  AND ($11::bigint IS NULL OR source_id = $11)
+  AND ($12::text = '' OR outcome = $12)
+  AND ($13::timestamptz IS NULL
+    OR occurred_at > $13
+    OR (occurred_at = $13 AND id > $14::text))
+ORDER BY occurred_at ASC, id ASC
+LIMIT $15::bigint
+`
+
+type ListAuditEventsAscParams struct {
+	FromAt       pgtype.Timestamptz `json:"from_at"`
+	ToAt         pgtype.Timestamptz `json:"to_at"`
+	Action       string             `json:"action"`
+	ActionPrefix string             `json:"action_prefix"`
+	ActorID      pgtype.Int8        `json:"actor_id"`
+	AuthMethod   string             `json:"auth_method"`
+	CredentialID string             `json:"credential_id"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	TeamID       pgtype.Int8        `json:"team_id"`
+	SourceID     pgtype.Int8        `json:"source_id"`
+	Outcome      string             `json:"outcome"`
+	CursorAt     pgtype.Timestamptz `json:"cursor_at"`
+	CursorID     string             `json:"cursor_id"`
+	RowLimit     int64              `json:"row_limit"`
+}
+
+// Oldest first, with the same filters as ListAuditEventsDesc.
+func (q *Queries) ListAuditEventsAsc(ctx context.Context, arg ListAuditEventsAscParams) ([]AuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditEventsAsc,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.ActorID,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Outcome,
+		arg.CursorAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditEvent{}
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.Action,
+			&i.Outcome,
+			&i.Reason,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorLabel,
+			&i.AuthMethod,
+			&i.CredentialID,
+			&i.ClientID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetLabel,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Ip,
+			&i.UserAgent,
+			&i.HttpMethod,
+			&i.Route,
+			&i.Status,
+			&i.Changes,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventsDesc = `-- name: ListAuditEventsDesc :many
+SELECT id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label, auth_method, credential_id, client_id, target_type, target_id, target_label, team_id, source_id, ip, user_agent, http_method, route, status, changes, detail FROM audit_events
+WHERE ($1::timestamptz IS NULL OR occurred_at >= $1)
+  AND ($2::timestamptz IS NULL OR occurred_at < $2)
+  AND ($3::text = '' OR action = $3)
+  AND ($4::text = '' OR left(action, length($4)) = $4)
+  AND ($5::bigint IS NULL OR actor_id = $5)
+  AND ($6::text = '' OR auth_method = $6)
+  AND ($7::text = '' OR credential_id = $7)
+  AND ($8::text = '' OR target_type = $8)
+  AND ($9::text = '' OR target_id = $9)
+  AND ($10::bigint IS NULL OR team_id = $10)
+  AND ($11::bigint IS NULL OR source_id = $11)
+  AND ($12::text = '' OR outcome = $12)
+  AND ($13::timestamptz IS NULL
+    OR occurred_at < $13
+    OR (occurred_at = $13 AND id < $14::text))
+ORDER BY occurred_at DESC, id DESC
+LIMIT $15::bigint
+`
+
+type ListAuditEventsDescParams struct {
+	FromAt       pgtype.Timestamptz `json:"from_at"`
+	ToAt         pgtype.Timestamptz `json:"to_at"`
+	Action       string             `json:"action"`
+	ActionPrefix string             `json:"action_prefix"`
+	ActorID      pgtype.Int8        `json:"actor_id"`
+	AuthMethod   string             `json:"auth_method"`
+	CredentialID string             `json:"credential_id"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	TeamID       pgtype.Int8        `json:"team_id"`
+	SourceID     pgtype.Int8        `json:"source_id"`
+	Outcome      string             `json:"outcome"`
+	CursorAt     pgtype.Timestamptz `json:"cursor_at"`
+	CursorID     string             `json:"cursor_id"`
+	RowLimit     int64              `json:"row_limit"`
+}
+
+// Newest first. An empty text argument or a NULL argument disables its
+// filter; a NULL cursor_at starts at the newest event.
+func (q *Queries) ListAuditEventsDesc(ctx context.Context, arg ListAuditEventsDescParams) ([]AuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditEventsDesc,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.ActorID,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Outcome,
+		arg.CursorAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditEvent{}
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.Action,
+			&i.Outcome,
+			&i.Reason,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorLabel,
+			&i.AuthMethod,
+			&i.CredentialID,
+			&i.ClientID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetLabel,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Ip,
+			&i.UserAgent,
+			&i.HttpMethod,
+			&i.Route,
+			&i.Status,
+			&i.Changes,
+			&i.Detail,
 		); err != nil {
 			return nil, err
 		}
@@ -4635,6 +4985,41 @@ type PruneAlertHistoryParams struct {
 func (q *Queries) PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error {
 	_, err := q.db.Exec(ctx, pruneAlertHistory, arg.AlertID, arg.AlertID_2, arg.Limit)
 	return err
+}
+
+const pruneAuditEvents = `-- name: PruneAuditEvents :execrows
+DELETE FROM audit_events
+WHERE id IN (
+    SELECT id FROM audit_events
+    WHERE ($1::timestamptz IS NOT NULL AND occurred_at < $1)
+       OR ($2::timestamptz IS NOT NULL
+           AND (occurred_at < $2
+             OR (occurred_at = $2 AND id <= $3::text)))
+    ORDER BY occurred_at ASC, id ASC
+    LIMIT $4::bigint
+)
+`
+
+type PruneAuditEventsParams struct {
+	Before    pgtype.Timestamptz `json:"before"`
+	BoundAt   pgtype.Timestamptz `json:"bound_at"`
+	BoundID   string             `json:"bound_id"`
+	BatchSize int64              `json:"batch_size"`
+}
+
+// Deletes up to batch_size of the oldest events that are older than before or
+// at or below the row-count boundary. A NULL argument disables its rule.
+func (q *Queries) PruneAuditEvents(ctx context.Context, arg PruneAuditEventsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneAuditEvents,
+		arg.Before,
+		arg.BoundAt,
+		arg.BoundID,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const pruneExpiredQueryShares = `-- name: PruneExpiredQueryShares :exec
