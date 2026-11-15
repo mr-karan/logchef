@@ -1,14 +1,20 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	"io"
 	"io/fs"
+	"log/slog"
 	"path/filepath"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/store/storetest"
 )
 
 // preDatasourceVersion is the last schema version before the multi-datasource
@@ -167,6 +173,58 @@ func TestCollectionTeamsUpgradeFromV33(t *testing.T) {
 	// with foreign_keys enabled; here we only check the new relation exists.
 	mustExec(t, db, `INSERT INTO collection_teams (collection_id, team_id, added_by) VALUES (1, 1, 1)`)
 	assertRow(t, db, `SELECT collection_id || '/' || team_id FROM collection_teams`, "1/1")
+}
+
+// alertInstancesVersion is the migration that adds alert_instances and
+// rebuilds alerts and alert_history (RFC 0006 unit A1).
+const alertInstancesVersion = 43
+
+// TestAlertInstancesUpgrade seeds alert history at the version before
+// alertInstancesVersion, then opens the database through New, which runs the
+// production migration path (a dedicated connection on the bare file path,
+// foreign keys off). The alerts and alert_history rebuild must keep every
+// history row; PRAGMA foreign_key_check alone would not show a cascade delete.
+func TestAlertInstancesUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	m := newMigrator(t, raw)
+	if err := m.Migrate(alertInstancesVersion - 1); err != nil {
+		t.Fatalf("migrate to v%d: %v", alertInstancesVersion-1, err)
+	}
+	for _, query := range storetest.AlertInstancesUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	// Rows above the surviving ids were deleted; their ids must stay retired.
+	mustExec(t, raw, `UPDATE sqlite_sequence SET seq = 1000 WHERE name IN ('alerts', 'alert_history')`)
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckAlertInstancesUpgrade(t, db)
+
+	// The first tick opened an episode for the quiet rule after the retired ids.
+	history, err := db.ListAlertHistory(context.Background(), 5, 1)
+	if err != nil || len(history) != 1 || history[0].ID <= 1000 {
+		t.Fatalf("newest history of alert 5 = %+v, %v; want an id above 1000", history, err)
+	}
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	assertRow(t, check, `SELECT seq FROM sqlite_sequence WHERE name = 'alerts'`, "1000")
+	assertRow(t, check, `SELECT count(*) FROM sqlite_master WHERE name = 'alert_sequences_saved'`, "0")
 }
 
 func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {

@@ -24,6 +24,7 @@ type Querier interface {
 	// Team Sources
 	// Add a data source to a team; linking an already linked source is a no-op.
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
+	AdvanceAlertEvalSeq(ctx context.Context, arg AdvanceAlertEvalSeqParams) (int64, error)
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
 	// Concurrent claims from several replicas receive disjoint rows. SKIP LOCKED
 	// also passes over a job whose handler holds its row through jobs.Hold, so
@@ -91,6 +92,7 @@ type Querier interface {
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
+	DeleteAlertInstances(ctx context.Context, alertID int64) error
 	DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
 	DeleteCollection(ctx context.Context, id int64) error
@@ -207,6 +209,8 @@ type Querier interface {
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
+	// Alert instance queries
+	ListAlertInstances(ctx context.Context, alertID int64) ([]AlertInstance, error)
 	// List alerts for one source
 	ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error)
 	// List every alert the user can see (any source attached to any of their teams)
@@ -283,8 +287,10 @@ type Querier interface {
 	// Hold a transaction-scoped advisory lock
 	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
+	MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error)
 	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
+	// Keeps every open episode and the newest N closed rows.
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares
 	PruneExpiredQueryShares(ctx context.Context, expiresAt pgtype.Timestamptz) error
@@ -367,6 +373,7 @@ type Querier interface {
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	// Record a login without rewriting the rest of the user row
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
+	UpsertAlertInstance(ctx context.Context, arg UpsertAlertInstanceParams) error
 	// Jobs (internal/jobs). Every time comparison uses the database clock.
 	// A new job is due now. A changed schedule makes an existing job due now;
 	// otherwise its next run and lease are kept.

@@ -192,11 +192,23 @@ type AlertStore interface {
 	// entry with that ID.
 	GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error)
 	RecoverAlertDeliveries(ctx context.Context) error
-	// ResolveAlertHistory resolves every unresolved firing entry of the alert that owns historyID.
+	// ResolveAlertHistory resolves every unresolved firing entry of the alert
+	// that owns historyID, deletes the alert's instances and advances its
+	// eval_seq, so an evaluation that read the old state commits nothing.
 	ResolveAlertHistory(ctx context.Context, historyID int64, message string) error
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)
+	// PruneAlertHistory keeps every open episode and the newest keep closed entries.
 	PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error
+	// AdvanceAlertEvalSeq increments eval_seq (models.Alert.EvalSeq) when it
+	// still equals seq, and returns models.ErrConflict when another writer
+	// advanced it first. UpdateAlert and ResolveAlertHistory advance it too.
+	AdvanceAlertEvalSeq(ctx context.Context, alertID models.AlertID, seq int64) error
+	ListAlertInstances(ctx context.Context, alertID models.AlertID) ([]*models.AlertInstance, error)
+	UpsertAlertInstance(ctx context.Context, instance *models.AlertInstance) error
+	// MarkAlertInstanceNotified sets notified on the instance whose open
+	// episode is historyID, and returns models.ErrNotFound when there is none.
+	MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error
 }
 
 // JobStore persists the background jobs that internal/jobs schedules and

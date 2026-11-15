@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Alert state moves to a per-rule instance table (SQLite migration 000043,
+  Postgres 000017). Back up the metadata database first, and stop every old
+  replica before a new one starts: the migration rebuilds the SQLite `alerts`
+  and `alert_history` tables. A firing rule keeps its open episode and sends
+  no second firing message after the upgrade. A delivery retry that was
+  pending or interrupted at upgrade time is dropped; the later resolved
+  message still goes out. When a rule has more than one open history row, the
+  newest stays open and the older ones close as "superseded at upgrade".
+
 ## [2.7.0] - 2026-11-15
 
 Dashboards grow up. Panels run SQL as written and show the result as stats

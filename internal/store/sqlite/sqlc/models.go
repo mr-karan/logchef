@@ -35,6 +35,9 @@ type Alert struct {
 	CreatedBy            sql.NullInt64  `json:"created_by"`
 	CreatedAt            time.Time      `json:"created_at"`
 	UpdatedAt            time.Time      `json:"updated_at"`
+	GroupByJson          sql.NullString `json:"group_by_json"`
+	NoDataPolicy         string         `json:"no_data_policy"`
+	EvalSeq              int64          `json:"eval_seq"`
 }
 
 type AlertHistory struct {
@@ -47,6 +50,20 @@ type AlertHistory struct {
 	Message     sql.NullString  `json:"message"`
 	PayloadJson sql.NullString  `json:"payload_json"`
 	CreatedAt   time.Time       `json:"created_at"`
+	GroupKey    string          `json:"group_key"`
+	GroupJson   sql.NullString  `json:"group_json"`
+}
+
+type AlertInstance struct {
+	AlertID    int64           `json:"alert_id"`
+	GroupKey   string          `json:"group_key"`
+	GroupJson  string          `json:"group_json"`
+	State      string          `json:"state"`
+	Value      sql.NullFloat64 `json:"value"`
+	StateSince time.Time       `json:"state_since"`
+	LastSeenAt sql.NullTime    `json:"last_seen_at"`
+	HistoryID  sql.NullInt64   `json:"history_id"`
+	Notified   int64           `json:"notified"`
 }
 
 type ApiToken struct {

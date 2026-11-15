@@ -42,6 +42,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
+	t.Run("AlertInstances", func(t *testing.T) { testAlertInstances(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
 	t.Run("Provisioning", func(t *testing.T) { testProvisioning(t, ctx, s) })
@@ -1144,13 +1145,14 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	if err != nil || latest.ID != entry.ID || latest.Payload["delivery_attempts"] != float64(3) {
 		t.Fatalf("unresolved history after pruning = %+v, %v; want firing entry %d with 3 attempts", latest, err, entry.ID)
 	}
+	// Every open episode survives pruning; only closed rows count toward keep.
 	history, err := s.ListAlertHistory(ctx, alertID, 10)
-	if err != nil || len(history) != keep+1 {
-		t.Fatalf("history after pruning = %d entries, %v; want the firing entry and %d recent entries", len(history), err, keep)
+	if err != nil || len(history) != len(legacyIDs)+1+keep {
+		t.Fatalf("history after pruning = %d entries, %v; want %d open episodes and %d closed entries", len(history), err, len(legacyIDs)+1, keep)
 	}
 	for _, id := range legacyIDs {
-		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); !models.IsNotFound(err) {
-			t.Errorf("legacy duplicate %d after pruning error = %v, want not found", id, err)
+		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); err != nil {
+			t.Errorf("open episode %d after pruning error = %v, want kept", id, err)
 		}
 	}
 	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved"); err != nil {
@@ -1165,10 +1167,10 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	if latest, err := s.GetLatestUnresolvedAlertHistory(ctx, alertID); !models.IsNotFound(err) {
 		t.Errorf("unresolved history after resolution = %+v, %v; want not found", latest, err)
 	}
-	t.Run("RecentDuplicates", func(t *testing.T) { testRecentDuplicatePruning(t, ctx, s, alertID) })
+	t.Run("OpenEpisodesOutliveLimit", func(t *testing.T) { testOpenEpisodePruning(t, ctx, s, alertID) })
 }
 
-func testRecentDuplicatePruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+func testOpenEpisodePruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
 	t.Helper()
 	var ids []int64
 	for range 3 {
@@ -1182,9 +1184,11 @@ func testRecentDuplicatePruning(t *testing.T, ctx context.Context, s store.Store
 	if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
 		t.Fatal(err)
 	}
-	recent, err := s.ListAlertHistory(ctx, alertID, 10)
-	if err != nil || len(recent) != keep || recent[0].ID != ids[2] || recent[1].ID != ids[1] {
-		t.Fatalf("recent duplicate history = %+v, %v; want the newest %d entries", recent, err, keep)
+	// Three open episodes outlive a limit of two.
+	for _, id := range ids {
+		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); err != nil {
+			t.Errorf("open episode %d after pruning to %d error = %v, want kept", id, keep, err)
+		}
 	}
 }
 
