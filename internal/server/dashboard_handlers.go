@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -93,6 +94,8 @@ func (s *Server) handleCreateDashboard(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create dashboard", models.GeneralErrorType)
 		}
 	}
+	auditTarget(c, audit.DashboardTarget(dashboard.ID, dashboard.Name))
+	auditDetail(c, "revision", dashboard.Revision)
 	return s.sendDashboard(c, fiber.StatusCreated, user, client, dashboard)
 }
 
@@ -176,6 +179,8 @@ func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update dashboard", models.GeneralErrorType)
 		}
 	}
+	auditTarget(c, audit.DashboardTarget(updated.ID, updated.Name))
+	auditDetail(c, "revision", updated.Revision)
 	return s.sendDashboard(c, fiber.StatusOK, user, client, updated)
 }
 
@@ -208,5 +213,6 @@ func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete dashboard", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.DashboardTarget(existing.ID, existing.Name))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Dashboard deleted"})
 }

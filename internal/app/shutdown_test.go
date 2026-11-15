@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/server"
@@ -56,7 +57,7 @@ func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
 	ds.Register(victorialogs.NewProvider(log))
 	manager := alerts.NewManager(alerts.Options{DB: db, Datasources: ds, Logger: log, Config: config.AlertsConfig{Enabled: true}})
 	cfg := &config.Config{}
-	a := &App{Logger: log, SQLite: db, Alerts: manager, server: server.New(server.ServerOptions{Config: cfg, SQLite: db, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})}
+	a := &App{Logger: log, SQLite: db, Alerts: manager, server: server.New(server.ServerOptions{Config: cfg, SQLite: db, Audit: audit.New(audit.Options{Store: db, Logger: log}), Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})}
 	evaluationCtx, cancelEvaluation := context.WithTimeout(context.Background(), time.Second)
 	defer cancelEvaluation()
 	manager.Start(evaluationCtx)

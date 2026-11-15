@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -70,6 +71,7 @@ func (s *Server) handleCreateTeam(c fiber.Ctx) error {
 	if actor := currentUser(c); actor != nil {
 		s.log.Info("team.create", "actor", actor.Email, "team", team.Name, "team_id", team.ID)
 	}
+	auditTarget(c, audit.TeamTarget(team))
 	return SendSuccess(c, fiber.StatusCreated, team)
 }
 
@@ -116,11 +118,13 @@ func (s *Server) handleUpdateTeam(c fiber.Ctx) error {
 	}
 
 	// Fetch and return updated team.
+	auditTarget(c, audit.TeamIDTarget(teamID))
 	updatedTeam, err := core.GetTeam(c.Context(), s.store, teamID)
 	if err != nil {
 		s.log.Error("failed to fetch updated team after successful update", "error", err, "team_id", teamID)
 		return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team updated successfully, but failed to fetch result"})
 	}
+	auditTarget(c, audit.TeamTarget(updatedTeam))
 	return SendSuccess(c, fiber.StatusOK, updatedTeam)
 }
 
@@ -141,6 +145,7 @@ func (s *Server) handleDeleteTeam(c fiber.Ctx) error {
 		s.log.Error("failed to delete team", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to delete team")
 	}
+	auditTarget(c, audit.TeamIDTarget(teamID))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team deleted successfully"})
 }
 
@@ -202,6 +207,8 @@ func (s *Server) handleAddTeamMember(c fiber.Ctx) error {
 	if actor := currentUser(c); actor != nil {
 		s.log.Info("team.member.add", "actor", actor.Email, "team_id", teamID, "member_id", req.UserID, "role", req.Role)
 	}
+	auditTarget(c, audit.TeamMemberTarget(teamID, req.UserID))
+	auditDetail(c, "role", req.Role)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member added successfully"})
 }
 
@@ -226,6 +233,7 @@ func (s *Server) handleRemoveTeamMember(c fiber.Ctx) error {
 		s.log.Error("failed to remove team member", "error", err, "team_id", teamID, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team member")
 	}
+	auditTarget(c, audit.TeamMemberTarget(teamID, userID))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member removed successfully"})
 }
 
@@ -334,6 +342,7 @@ func (s *Server) handleLinkSourceToTeam(c fiber.Ctx) error {
 		s.log.Error("failed to add team source", "error", err, "team_id", teamID, "source_id", req.SourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to link source to team")
 	}
+	auditTarget(c, audit.TeamSourceTarget(teamID, req.SourceID))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source linked to team successfully"})
 }
 
@@ -359,5 +368,6 @@ func (s *Server) handleUnlinkSourceFromTeam(c fiber.Ctx) error {
 		s.log.Error("failed to remove team source", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team source link")
 	}
+	auditTarget(c, audit.TeamSourceTarget(teamID, sourceID))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source unlinked from team successfully"})
 }

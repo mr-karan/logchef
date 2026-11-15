@@ -368,7 +368,7 @@ func TestLegacySettingsRemainSensitive(t *testing.T) {
 		}
 	}
 	cfg := &config.Config{Auth: config.AuthConfig{APITokenSecret: authzTestTokenSecret}}
-	s := New(ServerOptions{Config: cfg, SQLite: db, Logger: logger, FS: http.Dir(t.TempDir())})
+	s := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), Logger: logger, FS: http.Dir(t.TempDir())})
 	t.Cleanup(func() { _ = s.Shutdown(ctx) })
 	e := &collectionRouteEnv{t: t, s: s, cfg: cfg}
 	admin := mkTestUser(t, db, "legacy-admin@example.com", models.UserRoleAdmin)

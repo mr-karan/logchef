@@ -25,6 +25,7 @@ func TestExplorerRequestHeaders(t *testing.T) {
 	s := New(ServerOptions{
 		Config: cfg,
 		SQLite: db,
+		Audit:  testAuditRecorder(t, db),
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		FS: http.FS(fstest.MapFS{
 			"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>Explorer</body></html>`)},

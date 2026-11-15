@@ -26,6 +26,7 @@ func TestVisibilityLoadersStopAfterNotFound(t *testing.T) {
 	s := New(ServerOptions{
 		Config:      cfg,
 		SQLite:      db,
+		Audit:       testAuditRecorder(t, db),
 		Datasources: datasource.NewService(db, logger),
 		Logger:      logger,
 		FS:          http.Dir(t.TempDir()),

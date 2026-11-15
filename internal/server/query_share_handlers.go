@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -93,6 +94,8 @@ func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create share link", models.GeneralErrorType)
 	}
 
+	auditTarget(c, audit.QueryShareTarget(share))
+	auditDetail(c, "expires_at", share.ExpiresAt)
 	return SendSuccess(c, fiber.StatusCreated, queryShareResponse(share, buildQueryShareURL(c, s.config.Server.FrontendURL, token)))
 }
 
@@ -180,6 +183,7 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete share link", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.QueryShareTarget(share))
 	return c.SendStatus(fiber.StatusNoContent)
 }
 

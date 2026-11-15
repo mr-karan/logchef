@@ -86,6 +86,7 @@ func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServ
 	srv := New(ServerOptions{
 		Config:      cfg,
 		SQLite:      db,
+		Audit:       testAuditRecorder(t, db),
 		Datasources: datasources,
 		OAuth:       oauthServer,
 		FS:          http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}}),

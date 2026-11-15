@@ -68,6 +68,7 @@ func TestAuthRateLimitTrustsOnlyConfiguredProxy(t *testing.T) {
 					},
 				},
 				SQLite: db,
+				Audit:  testAuditRecorder(t, db),
 				FS: http.FS(fstest.MapFS{
 					"index.html": {Data: []byte(`<base href="/" />`)},
 				}),

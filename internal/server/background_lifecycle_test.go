@@ -83,7 +83,7 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = replicaDB.Close() })
 			}
-			replicaB := New(ServerOptions{Config: testOAuthConfig(), SQLite: replicaDB, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+			replicaB := New(ServerOptions{Config: testOAuthConfig(), SQLite: replicaDB, Audit: testAuditRecorder(t, replicaDB), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 			t.Cleanup(func() { _ = replicaB.Shutdown(ctx) })
 			fresh := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: time.Now().Add(time.Hour), CreatedAt: time.Now(), UpdatedAt: time.Now()}
 			if err := replicaDB.CreateExportJob(ctx, fresh); err != nil {
@@ -96,7 +96,7 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 			_ = partial.Close()
 			t.Cleanup(func() { _ = os.Remove(partial.Name()) })
 			for range 2 {
-				srv := New(ServerOptions{Config: testOAuthConfig(), SQLite: db, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+				srv := New(ServerOptions{Config: testOAuthConfig(), SQLite: db, Audit: testAuditRecorder(t, db), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 				stale := *fresh
 				stale.ID = uuid.NewString()
 				stale.UpdatedAt = time.Now().UTC().Add(-2 * time.Hour)
@@ -164,7 +164,7 @@ func TestStartupReapsOnlyPreviousInstanceProcess(t *testing.T) {
 			newReplica := func(instance string) *Server {
 				cfg := testOAuthConfig()
 				cfg.Export.InstanceID = instance
-				srv := New(ServerOptions{Config: cfg, SQLite: db, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+				srv := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 				t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 				return srv
 			}
@@ -318,7 +318,7 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	ds.Register(datasource.NewClickHouseProvider(manager, log))
 	cfg := testOAuthConfig()
 	cfg.Export = config.ExportConfig{MaxRows: 10000000, DefaultTimeoutSeconds: 60, MaxTimeoutSeconds: 60, MaxConcurrentPerUser: 1, MaxConcurrentGlobal: 1, ArtifactTTL: time.Hour, Formats: []string{"csv"}}
-	srv := New(ServerOptions{Config: cfg, SQLite: db, ClickHouse: manager, Datasources: ds, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+	srv := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), ClickHouse: manager, Datasources: ds, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 	t.Cleanup(func() {
 		select {
 		case <-srv.stop:

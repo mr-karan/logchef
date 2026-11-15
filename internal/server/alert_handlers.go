@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -138,6 +139,7 @@ func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 		s.log.Error("failed to create alert", "source_id", req.SourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create alert", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.AlertTarget(alert))
 	return SendSuccess(c, fiber.StatusCreated, alert)
 }
 
@@ -177,6 +179,7 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update alert", models.GeneralErrorType)
 		}
 	}
+	auditTarget(c, audit.AlertTarget(updated))
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
@@ -196,6 +199,7 @@ func (s *Server) handleDeleteAlert(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete alert", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.AlertTarget(alert))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert deleted"})
 }
 
@@ -230,6 +234,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 		}
 	}
+	auditTarget(c, audit.AlertTarget(alert))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert resolved"})
 }
 

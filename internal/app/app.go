@@ -218,6 +218,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		Logger:        a.Logger,
 		BuildInfo:     a.BuildInfo,
 		Version:       a.Version,
+		Audit:         a.Audit,
 	}
 	if a.Config.AI.AskChefEnabled() {
 		if a.Config.AI.Provider == ai.ProviderBedrock {

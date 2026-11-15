@@ -85,6 +85,7 @@ func newAskChefEnv(t *testing.T, cfg *config.Config, chat askchef.ChatModel) *as
 	srv := New(ServerOptions{
 		Config:      cfg,
 		SQLite:      db,
+		Audit:       testAuditRecorder(t, db),
 		Datasources: datasources,
 		FS:          http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}}),
 		Logger:      log,
