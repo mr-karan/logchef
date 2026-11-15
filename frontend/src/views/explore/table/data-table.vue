@@ -15,6 +15,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useLocalStorage } from '@vueuse/core'
 import { useColumnState } from '@/composables/useColumnState'
+import { sortingForResult, type SavedViewLayout, type TableViewSeed } from '@/lib/savedViewLayout'
 import { Button } from '@/components/ui/button'
 import { GripVertical, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -46,6 +47,7 @@ interface Props {
     data: Record<string, any>[]
     sourceId: string
     teamId: number | null
+    viewSeed?: TableViewSeed | null // The saved view the layout and sort start from
     source?: Pick<Source, 'source_type' | 'capabilities'> | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
@@ -117,7 +119,7 @@ const tableColumns = computed<CustomColumnDef[]>(() => props.columns.length ? cr
     props.regexHighlights,
 ) : [])
 
-const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults } = useColumnState({
+const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults, workingLayout } = useColumnState({
     columns: tableColumns,
     defaultOrder: () => props.data.length ? getDefaultColumnOrder(tableColumns.value, props.data) : null,
     teamId: () => props.teamId,
@@ -125,6 +127,8 @@ const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableS
     source: () => props.source,
     timestampField: timestampFieldName,
     severityField: severityFieldName,
+    seed: () => props.viewSeed,
+    sorting,
 })
 
 function cellTitle(value: unknown): string {
@@ -240,6 +244,12 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     window.addEventListener('touchcancel', onEnd, { once: true });
 }
 
+// With a view, the sort skips entries on columns this result lacks; the
+// working copy keeps them.
+const effectiveSorting = computed(() => props.viewSeed
+    ? sortingForResult(sorting.value, tableColumns.value.map(column => column.id).filter((id): id is string => Boolean(id)), timestampFieldName.value)
+    : sorting.value)
+
 // Initialize table
 const table = useTable({
     features: logTableFeatures,
@@ -252,7 +262,7 @@ const table = useTable({
     },
     state: {
         get sorting() {
-            return sorting.value
+            return effectiveSorting.value
         },
         get expanded() {
             return expanded.value
@@ -276,7 +286,9 @@ const table = useTable({
     },
     // Keep columnOrder handling separate using onColumnOrderChange
     // Do NOT set initialState.columnOrder here as it might conflict with the reactive ref
-    onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
+    onSortingChange: updaterOrValue => {
+        sorting.value = typeof updaterOrValue === 'function' ? updaterOrValue(effectiveSorting.value) : updaterOrValue
+    },
     onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
@@ -464,8 +476,10 @@ const copyValue = (value: unknown) => {
 
 // Initialize default sorting on mount
 onMounted(() => {
-    // Initialize default sort by timestamp if available
-    if (timestampFieldName.value) {
+    // Initialize default sort by timestamp if available. With a view, the
+    // column state already restored or seeded the sort, and an empty one is
+    // the user's choice.
+    if (timestampFieldName.value && !props.viewSeed) {
         // Check if the column exists in the initial order derived from state/defaults
         if (columnOrder.value.includes(timestampFieldName.value)) {
             if (!sorting.value || sorting.value.length === 0) {
@@ -562,7 +576,12 @@ const emit = defineEmits<{
     (e: 'apply-column-filter', value: { column: string, operator: FilterOperator, value: string | number }): void
     (e: 'clear-column-filter', column: string): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
+    (e: 'working-layout', value: SavedViewLayout): void
 }>();
+
+watch(workingLayout, layout => {
+    if (layout) emit('working-layout', layout)
+}, { deep: true, immediate: true })
 
 const handleDrillDown = (value: { column: string, value: unknown, operator: FilterOperator }) => {
     if (props.activeMode !== 'logchefql') return;
