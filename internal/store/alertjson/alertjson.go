@@ -29,3 +29,16 @@ func Decode[T any](raw string) (T, error) {
 	err := json.Unmarshal([]byte(raw), &out)
 	return out, err
 }
+
+// EncodeGroup returns the JSON object of an instance's group labels. The
+// column is NOT NULL, so an ungrouped instance stores "{}".
+func EncodeGroup(group map[string]string) (string, error) {
+	if len(group) == 0 {
+		return "{}", nil
+	}
+	b, err := json.Marshal(group)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}

@@ -39,6 +39,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.addTeamSourceStmt, err = db.PrepareContext(ctx, addTeamSource); err != nil {
 		return nil, fmt.Errorf("error preparing query AddTeamSource: %w", err)
 	}
+	if q.advanceAlertEvalSeqStmt, err = db.PrepareContext(ctx, advanceAlertEvalSeq); err != nil {
+		return nil, fmt.Errorf("error preparing query AdvanceAlertEvalSeq: %w", err)
+	}
 	if q.authenticateOAuthAccessTokenStmt, err = db.PrepareContext(ctx, authenticateOAuthAccessToken); err != nil {
 		return nil, fmt.Errorf("error preparing query AuthenticateOAuthAccessToken: %w", err)
 	}
@@ -113,6 +116,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteAlertStmt, err = db.PrepareContext(ctx, deleteAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlert: %w", err)
+	}
+	if q.deleteAlertInstancesStmt, err = db.PrepareContext(ctx, deleteAlertInstances); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAlertInstances: %w", err)
 	}
 	if q.deleteClaimedJobStmt, err = db.PrepareContext(ctx, deleteClaimedJob); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteClaimedJob: %w", err)
@@ -303,6 +309,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAlertHistoryStmt, err = db.PrepareContext(ctx, listAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertHistory: %w", err)
 	}
+	if q.listAlertInstancesStmt, err = db.PrepareContext(ctx, listAlertInstances); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertInstances: %w", err)
+	}
 	if q.listAlertsBySourceStmt, err = db.PrepareContext(ctx, listAlertsBySource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertsBySource: %w", err)
 	}
@@ -407,6 +416,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
+	}
+	if q.markAlertInstanceNotifiedStmt, err = db.PrepareContext(ctx, markAlertInstanceNotified); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkAlertInstanceNotified: %w", err)
 	}
 	if q.markAlertResolvedStmt, err = db.PrepareContext(ctx, markAlertResolved); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertResolved: %w", err)
@@ -540,6 +552,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateUserLastLoginStmt, err = db.PrepareContext(ctx, updateUserLastLogin); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateUserLastLogin: %w", err)
 	}
+	if q.upsertAlertInstanceStmt, err = db.PrepareContext(ctx, upsertAlertInstance); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertAlertInstance: %w", err)
+	}
 	if q.upsertJobStmt, err = db.PrepareContext(ctx, upsertJob); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertJob: %w", err)
 	}
@@ -580,6 +595,11 @@ func (q *Queries) Close() error {
 	if q.addTeamSourceStmt != nil {
 		if cerr := q.addTeamSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing addTeamSourceStmt: %w", cerr)
+		}
+	}
+	if q.advanceAlertEvalSeqStmt != nil {
+		if cerr := q.advanceAlertEvalSeqStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing advanceAlertEvalSeqStmt: %w", cerr)
 		}
 	}
 	if q.authenticateOAuthAccessTokenStmt != nil {
@@ -705,6 +725,11 @@ func (q *Queries) Close() error {
 	if q.deleteAlertStmt != nil {
 		if cerr := q.deleteAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAlertStmt: %w", cerr)
+		}
+	}
+	if q.deleteAlertInstancesStmt != nil {
+		if cerr := q.deleteAlertInstancesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAlertInstancesStmt: %w", cerr)
 		}
 	}
 	if q.deleteClaimedJobStmt != nil {
@@ -1022,6 +1047,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAlertHistoryStmt: %w", cerr)
 		}
 	}
+	if q.listAlertInstancesStmt != nil {
+		if cerr := q.listAlertInstancesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertInstancesStmt: %w", cerr)
+		}
+	}
 	if q.listAlertsBySourceStmt != nil {
 		if cerr := q.listAlertsBySourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAlertsBySourceStmt: %w", cerr)
@@ -1195,6 +1225,11 @@ func (q *Queries) Close() error {
 	if q.markAlertEvaluatedStmt != nil {
 		if cerr := q.markAlertEvaluatedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing markAlertEvaluatedStmt: %w", cerr)
+		}
+	}
+	if q.markAlertInstanceNotifiedStmt != nil {
+		if cerr := q.markAlertInstanceNotifiedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markAlertInstanceNotifiedStmt: %w", cerr)
 		}
 	}
 	if q.markAlertResolvedStmt != nil {
@@ -1417,6 +1452,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateUserLastLoginStmt: %w", cerr)
 		}
 	}
+	if q.upsertAlertInstanceStmt != nil {
+		if cerr := q.upsertAlertInstanceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertAlertInstanceStmt: %w", cerr)
+		}
+	}
 	if q.upsertJobStmt != nil {
 		if cerr := q.upsertJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertJobStmt: %w", cerr)
@@ -1481,6 +1521,7 @@ type Queries struct {
 	addCollectionTeamStmt                 *sql.Stmt
 	addTeamMemberStmt                     *sql.Stmt
 	addTeamSourceStmt                     *sql.Stmt
+	advanceAlertEvalSeqStmt               *sql.Stmt
 	authenticateOAuthAccessTokenStmt      *sql.Stmt
 	claimJobsStmt                         *sql.Stmt
 	claimOAuthAuthRequestDecisionStmt     *sql.Stmt
@@ -1506,6 +1547,7 @@ type Queries struct {
 	createUserStmt                        *sql.Stmt
 	deleteAPITokenStmt                    *sql.Stmt
 	deleteAlertStmt                       *sql.Stmt
+	deleteAlertInstancesStmt              *sql.Stmt
 	deleteClaimedJobStmt                  *sql.Stmt
 	deleteCollectionStmt                  *sql.Stmt
 	deleteDashboardStmt                   *sql.Stmt
@@ -1569,6 +1611,7 @@ type Queries struct {
 	listAPITokensForUserStmt              *sql.Stmt
 	listActiveAlertsDueStmt               *sql.Stmt
 	listAlertHistoryStmt                  *sql.Stmt
+	listAlertInstancesStmt                *sql.Stmt
 	listAlertsBySourceStmt                *sql.Stmt
 	listAlertsForUserStmt                 *sql.Stmt
 	listAllSavedQueriesStmt               *sql.Stmt
@@ -1604,6 +1647,7 @@ type Queries struct {
 	listUsersForProvisioningStmt          *sql.Stmt
 	lockCollectionStmt                    *sql.Stmt
 	markAlertEvaluatedStmt                *sql.Stmt
+	markAlertInstanceNotifiedStmt         *sql.Stmt
 	markAlertResolvedStmt                 *sql.Stmt
 	markAlertTriggeredStmt                *sql.Stmt
 	pruneAlertHistoryStmt                 *sql.Stmt
@@ -1648,6 +1692,7 @@ type Queries struct {
 	updateTeamMemberRoleStmt              *sql.Stmt
 	updateUserStmt                        *sql.Stmt
 	updateUserLastLoginStmt               *sql.Stmt
+	upsertAlertInstanceStmt               *sql.Stmt
 	upsertJobStmt                         *sql.Stmt
 	upsertSystemSettingStmt               *sql.Stmt
 	upsertUserPreferencesStmt             *sql.Stmt
@@ -1663,6 +1708,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		addCollectionTeamStmt:                 q.addCollectionTeamStmt,
 		addTeamMemberStmt:                     q.addTeamMemberStmt,
 		addTeamSourceStmt:                     q.addTeamSourceStmt,
+		advanceAlertEvalSeqStmt:               q.advanceAlertEvalSeqStmt,
 		authenticateOAuthAccessTokenStmt:      q.authenticateOAuthAccessTokenStmt,
 		claimJobsStmt:                         q.claimJobsStmt,
 		claimOAuthAuthRequestDecisionStmt:     q.claimOAuthAuthRequestDecisionStmt,
@@ -1688,6 +1734,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createUserStmt:                        q.createUserStmt,
 		deleteAPITokenStmt:                    q.deleteAPITokenStmt,
 		deleteAlertStmt:                       q.deleteAlertStmt,
+		deleteAlertInstancesStmt:              q.deleteAlertInstancesStmt,
 		deleteClaimedJobStmt:                  q.deleteClaimedJobStmt,
 		deleteCollectionStmt:                  q.deleteCollectionStmt,
 		deleteDashboardStmt:                   q.deleteDashboardStmt,
@@ -1751,6 +1798,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAPITokensForUserStmt:              q.listAPITokensForUserStmt,
 		listActiveAlertsDueStmt:               q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                  q.listAlertHistoryStmt,
+		listAlertInstancesStmt:                q.listAlertInstancesStmt,
 		listAlertsBySourceStmt:                q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:                 q.listAlertsForUserStmt,
 		listAllSavedQueriesStmt:               q.listAllSavedQueriesStmt,
@@ -1786,6 +1834,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUsersForProvisioningStmt:          q.listUsersForProvisioningStmt,
 		lockCollectionStmt:                    q.lockCollectionStmt,
 		markAlertEvaluatedStmt:                q.markAlertEvaluatedStmt,
+		markAlertInstanceNotifiedStmt:         q.markAlertInstanceNotifiedStmt,
 		markAlertResolvedStmt:                 q.markAlertResolvedStmt,
 		markAlertTriggeredStmt:                q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:                 q.pruneAlertHistoryStmt,
@@ -1830,6 +1879,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateTeamMemberRoleStmt:              q.updateTeamMemberRoleStmt,
 		updateUserStmt:                        q.updateUserStmt,
 		updateUserLastLoginStmt:               q.updateUserLastLoginStmt,
+		upsertAlertInstanceStmt:               q.upsertAlertInstanceStmt,
 		upsertJobStmt:                         q.upsertJobStmt,
 		upsertSystemSettingStmt:               q.upsertSystemSettingStmt,
 		upsertUserPreferencesStmt:             q.upsertUserPreferencesStmt,

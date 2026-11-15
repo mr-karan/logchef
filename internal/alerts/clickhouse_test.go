@@ -54,6 +54,12 @@ func TestManagerEvaluatesNumericTypesClickHouse(t *testing.T) {
 		t.Run(expression, func(t *testing.T) {
 			alert.Query = "SELECT " + expression + " AS value"
 			alert.ThresholdValue = 0.5
+			// The previous case's resolve advanced eval_seq; evaluate the current rule.
+			stored, err := manager.db.GetAlert(t.Context(), alert.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			alert.EvalSeq = stored.EvalSeq
 			if err := manager.evaluateAlert(t.Context(), alert); err != nil {
 				t.Fatal(err)
 			}

@@ -214,6 +214,9 @@ func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, messag
 	if err := s.q.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: text(message)}); err != nil {
 		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
 	}
+	if err := s.q.DeleteAlertInstances(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to delete alert instances: %w", err)
+	}
 	if err := s.q.MarkAlertResolved(ctx, alertID); err != nil {
 		return fmt.Errorf("failed to mark alert resolved: %w", err)
 	}
@@ -259,7 +262,7 @@ func (s *Store) ListAlertHistory(ctx context.Context, alertID models.AlertID, li
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries and the newest unresolved firing.
+// PruneAlertHistory keeps every open episode and the newest keep closed entries.
 func (s *Store) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -372,6 +375,7 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 		GeneratorURL:      textStr(row.GeneratorUrl),
 		IsActive:          row.IsActive,
 		LastState:         models.AlertState(row.LastState),
+		EvalSeq:           row.EvalSeq,
 		LastEvaluatedAt:   tsPtr(row.LastEvaluatedAt),
 		LastTriggeredAt:   tsPtr(row.LastTriggeredAt),
 		CreatedBy:         userIDPtr(row.CreatedBy),
@@ -448,6 +452,89 @@ func float8FromPtr(v *float64) pgtype.Float8 {
 func (s *Store) RecoverAlertDeliveries(ctx context.Context) error {
 	if err := s.q.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
 		return fmt.Errorf("failed to recover alert deliveries: %w", err)
+	}
+	return nil
+}
+
+// AdvanceAlertEvalSeq increments eval_seq when it still equals seq.
+func (s *Store) AdvanceAlertEvalSeq(ctx context.Context, alertID models.AlertID, seq int64) error {
+	if _, err := s.q.AdvanceAlertEvalSeq(ctx, sqlc.AdvanceAlertEvalSeqParams{ID: int64(alertID), EvalSeq: seq}); err != nil {
+		if notFound(err) {
+			return models.ErrConflict
+		}
+		return fmt.Errorf("failed to advance alert eval_seq: %w", err)
+	}
+	return nil
+}
+
+// ListAlertInstances returns the alert's instances ordered by group key.
+func (s *Store) ListAlertInstances(ctx context.Context, alertID models.AlertID) ([]*models.AlertInstance, error) {
+	rows, err := s.q.ListAlertInstances(ctx, int64(alertID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert instances: %w", err)
+	}
+	instances := make([]*models.AlertInstance, 0, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		group, err := alertjson.Decode[map[string]string](row.GroupJson)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode alert instance group: %w", err)
+		}
+		instance := &models.AlertInstance{
+			AlertID:    models.AlertID(row.AlertID),
+			GroupKey:   row.GroupKey,
+			Group:      group,
+			State:      models.AlertInstanceState(row.State),
+			StateSince: row.StateSince.Time,
+			LastSeenAt: tsPtr(row.LastSeenAt),
+			Notified:   row.Notified,
+		}
+		if row.Value.Valid {
+			value := row.Value.Float64
+			instance.Value = &value
+		}
+		if row.HistoryID.Valid {
+			historyID := row.HistoryID.Int64
+			instance.HistoryID = &historyID
+		}
+		instances = append(instances, instance)
+	}
+	return instances, nil
+}
+
+// UpsertAlertInstance inserts or replaces the instance of (alert, group).
+func (s *Store) UpsertAlertInstance(ctx context.Context, instance *models.AlertInstance) error {
+	groupJSON, err := alertjson.EncodeGroup(instance.Group)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert instance group: %w", err)
+	}
+	if err := s.q.UpsertAlertInstance(ctx, sqlc.UpsertAlertInstanceParams{
+		AlertID:    int64(instance.AlertID),
+		GroupKey:   instance.GroupKey,
+		GroupJson:  groupJSON,
+		State:      string(instance.State),
+		Value:      float8FromPtr(instance.Value),
+		StateSince: ts(instance.StateSince),
+		LastSeenAt: tsFromPtr(instance.LastSeenAt),
+		HistoryID:  int8FromPtr(instance.HistoryID),
+		Notified:   instance.Notified,
+	}); err != nil {
+		return fmt.Errorf("failed to upsert alert instance: %w", err)
+	}
+	return nil
+}
+
+// MarkAlertInstanceNotified sets notified on the instance whose open episode is historyID.
+func (s *Store) MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error {
+	if _, err := s.q.MarkAlertInstanceNotified(ctx, sqlc.MarkAlertInstanceNotifiedParams{
+		AlertID:   int64(alertID),
+		GroupKey:  groupKey,
+		HistoryID: int8Val(historyID),
+	}); err != nil {
+		if notFound(err) {
+			return models.ErrNotFound
+		}
+		return fmt.Errorf("failed to mark alert instance notified: %w", err)
 	}
 	return nil
 }

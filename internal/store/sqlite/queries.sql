@@ -618,6 +618,7 @@ SET name = ?,
     webhook_urls_json = ?,
     generator_url = ?,
     is_active = ?,
+    eval_seq = eval_seq + 1,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 RETURNING id;
@@ -654,6 +655,40 @@ WHERE is_active = 1
         last_evaluated_at IS NULL
         OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds')
       );
+
+-- name: AdvanceAlertEvalSeq :one
+UPDATE alerts
+SET eval_seq = eval_seq + 1
+WHERE id = sqlc.arg(id) AND eval_seq = sqlc.arg(eval_seq)
+RETURNING id;
+
+-- Alert instance queries
+
+-- name: ListAlertInstances :many
+SELECT * FROM alert_instances
+WHERE alert_id = ?
+ORDER BY group_key;
+
+-- name: UpsertAlertInstance :exec
+INSERT INTO alert_instances (alert_id, group_key, group_json, state, value, state_since, last_seen_at, history_id, notified)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (alert_id, group_key) DO UPDATE SET
+    group_json = excluded.group_json,
+    state = excluded.state,
+    value = excluded.value,
+    state_since = excluded.state_since,
+    last_seen_at = excluded.last_seen_at,
+    history_id = excluded.history_id,
+    notified = excluded.notified;
+
+-- name: MarkAlertInstanceNotified :one
+UPDATE alert_instances
+SET notified = 1
+WHERE alert_id = ? AND group_key = ? AND history_id = ?
+RETURNING alert_id;
+
+-- name: DeleteAlertInstances :exec
+DELETE FROM alert_instances WHERE alert_id = ?;
 
 -- Alert history queries
 
@@ -714,19 +749,14 @@ ORDER BY triggered_at DESC, id DESC
 LIMIT ?;
 
 -- name: PruneAlertHistory :exec
+-- Keeps every open episode and the newest N closed rows.
 DELETE FROM alert_history AS target
 WHERE target.alert_id = ?
-  AND target.id NOT IN (
-    SELECT active.id
-    FROM alert_history AS active
-    WHERE active.alert_id = ? AND active.status = 'triggered'
-    ORDER BY active.triggered_at DESC, active.id DESC
-    LIMIT 1
-  )
+  AND target.status <> 'triggered'
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
-    WHERE keep.alert_id = ?
+    WHERE keep.alert_id = ? AND keep.status <> 'triggered'
     ORDER BY keep.triggered_at DESC, keep.id DESC
     LIMIT ?
  );
@@ -1384,7 +1414,7 @@ WHERE id IN (SELECT value FROM json_each(CAST(sqlc.arg(ids_json) AS TEXT)))
 RETURNING id;
 
 -- name: MarkAlertResolved :exec
-UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+UPDATE alerts SET last_state = 'resolved', eval_seq = eval_seq + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
 
 -- Jobs (internal/jobs). Every time comparison uses the database clock.
 

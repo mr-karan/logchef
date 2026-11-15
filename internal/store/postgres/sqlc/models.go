@@ -34,6 +34,9 @@ type Alert struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	QueryLanguage        string             `json:"query_language"`
 	EditorMode           string             `json:"editor_mode"`
+	GroupByJson          pgtype.Text        `json:"group_by_json"`
+	NoDataPolicy         string             `json:"no_data_policy"`
+	EvalSeq              int64              `json:"eval_seq"`
 }
 
 type AlertHistory struct {
@@ -46,6 +49,20 @@ type AlertHistory struct {
 	Message     pgtype.Text        `json:"message"`
 	PayloadJson pgtype.Text        `json:"payload_json"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	GroupKey    string             `json:"group_key"`
+	GroupJson   pgtype.Text        `json:"group_json"`
+}
+
+type AlertInstance struct {
+	AlertID    int64              `json:"alert_id"`
+	GroupKey   string             `json:"group_key"`
+	GroupJson  string             `json:"group_json"`
+	State      string             `json:"state"`
+	Value      pgtype.Float8      `json:"value"`
+	StateSince pgtype.Timestamptz `json:"state_since"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	HistoryID  pgtype.Int8        `json:"history_id"`
+	Notified   bool               `json:"notified"`
 }
 
 type ApiToken struct {

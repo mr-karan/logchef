@@ -229,6 +229,9 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 	if err := db.writeQueries.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: nullString(message)}); err != nil {
 		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
 	}
+	if err := db.writeQueries.DeleteAlertInstances(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to delete alert instances: %w", err)
+	}
 	if err := db.writeQueries.MarkAlertResolved(ctx, alertID); err != nil {
 		return fmt.Errorf("failed to mark alert resolved: %w", err)
 	}
@@ -276,7 +279,7 @@ func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limi
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries and the newest unresolved firing.
+// PruneAlertHistory keeps every open episode and the newest keep closed entries.
 func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -284,7 +287,6 @@ func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, kee
 	if err := db.writeQueries.PruneAlertHistory(ctx, sqlc.PruneAlertHistoryParams{
 		AlertID:   int64(alertID),
 		AlertID_2: int64(alertID),
-		AlertID_3: int64(alertID),
 		Limit:     int64(keep),
 	}); err != nil {
 		return fmt.Errorf("failed to prune alert history: %w", err)
@@ -415,6 +417,7 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 		GeneratorURL:      row.GeneratorUrl.String,
 		IsActive:          row.IsActive == 1,
 		LastState:         models.AlertState(row.LastState),
+		EvalSeq:           row.EvalSeq,
 		CreatedAt:         row.CreatedAt,
 		UpdatedAt:         row.UpdatedAt,
 	}
@@ -471,6 +474,97 @@ func nullFloat64(value *float64) sql.NullFloat64 {
 func (db *DB) RecoverAlertDeliveries(ctx context.Context) error {
 	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
 		return fmt.Errorf("failed to recover alert deliveries: %w", err)
+	}
+	return nil
+}
+
+// AdvanceAlertEvalSeq increments eval_seq when it still equals seq.
+func (db *DB) AdvanceAlertEvalSeq(ctx context.Context, alertID models.AlertID, seq int64) error {
+	if _, err := db.writeQueries.AdvanceAlertEvalSeq(ctx, sqlc.AdvanceAlertEvalSeqParams{ID: int64(alertID), EvalSeq: seq}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrConflict
+		}
+		return fmt.Errorf("failed to advance alert eval_seq: %w", err)
+	}
+	return nil
+}
+
+// ListAlertInstances returns the alert's instances ordered by group key.
+func (db *DB) ListAlertInstances(ctx context.Context, alertID models.AlertID) ([]*models.AlertInstance, error) {
+	rows, err := db.readQueries.ListAlertInstances(ctx, int64(alertID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert instances: %w", err)
+	}
+	instances := make([]*models.AlertInstance, 0, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		group, err := alertjson.Decode[map[string]string](row.GroupJson)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode alert instance group: %w", err)
+		}
+		instance := &models.AlertInstance{
+			AlertID:    models.AlertID(row.AlertID),
+			GroupKey:   row.GroupKey,
+			Group:      group,
+			State:      models.AlertInstanceState(row.State),
+			StateSince: row.StateSince,
+			Notified:   row.Notified == 1,
+		}
+		if row.Value.Valid {
+			value := row.Value.Float64
+			instance.Value = &value
+		}
+		if row.LastSeenAt.Valid {
+			seen := row.LastSeenAt.Time
+			instance.LastSeenAt = &seen
+		}
+		if row.HistoryID.Valid {
+			historyID := row.HistoryID.Int64
+			instance.HistoryID = &historyID
+		}
+		instances = append(instances, instance)
+	}
+	return instances, nil
+}
+
+// UpsertAlertInstance inserts or replaces the instance of (alert, group).
+func (db *DB) UpsertAlertInstance(ctx context.Context, instance *models.AlertInstance) error {
+	groupJSON, err := alertjson.EncodeGroup(instance.Group)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert instance group: %w", err)
+	}
+	params := sqlc.UpsertAlertInstanceParams{
+		AlertID:    int64(instance.AlertID),
+		GroupKey:   instance.GroupKey,
+		GroupJson:  groupJSON,
+		State:      string(instance.State),
+		Value:      nullFloat64(instance.Value),
+		StateSince: instance.StateSince.UTC(),
+		Notified:   boolToInt(instance.Notified),
+	}
+	if instance.LastSeenAt != nil {
+		params.LastSeenAt = sql.NullTime{Time: instance.LastSeenAt.UTC(), Valid: true}
+	}
+	if instance.HistoryID != nil {
+		params.HistoryID = sql.NullInt64{Int64: *instance.HistoryID, Valid: true}
+	}
+	if err := db.writeQueries.UpsertAlertInstance(ctx, params); err != nil {
+		return fmt.Errorf("failed to upsert alert instance: %w", err)
+	}
+	return nil
+}
+
+// MarkAlertInstanceNotified sets notified on the instance whose open episode is historyID.
+func (db *DB) MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error {
+	if _, err := db.writeQueries.MarkAlertInstanceNotified(ctx, sqlc.MarkAlertInstanceNotifiedParams{
+		AlertID:   int64(alertID),
+		GroupKey:  groupKey,
+		HistoryID: sql.NullInt64{Int64: historyID, Valid: true},
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
+		}
+		return fmt.Errorf("failed to mark alert instance notified: %w", err)
 	}
 	return nil
 }

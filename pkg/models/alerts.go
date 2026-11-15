@@ -140,6 +140,33 @@ type Alert struct {
 	CreatedBy         *UserID                `json:"created_by,omitempty"`
 	CreatedAt         time.Time              `json:"created_at"`
 	UpdatedAt         time.Time              `json:"updated_at"`
+	// EvalSeq is read with the rest of the rule. An evaluation commits only
+	// while the stored value still equals it.
+	EvalSeq int64 `json:"-"`
+}
+
+// AlertInstanceState is the state of one group of a rule.
+type AlertInstanceState string
+
+const (
+	AlertInstanceStateOK     AlertInstanceState = "ok"
+	AlertInstanceStateFiring AlertInstanceState = "firing"
+)
+
+// AlertInstance holds the state of one group of a rule. An ungrouped rule has
+// one instance with an empty GroupKey.
+type AlertInstance struct {
+	AlertID    AlertID            `json:"alert_id"`
+	GroupKey   string             `json:"group_key"`
+	Group      map[string]string  `json:"group"`
+	State      AlertInstanceState `json:"state"`
+	Value      *float64           `json:"value,omitempty"`
+	StateSince time.Time          `json:"state_since"`
+	LastSeenAt *time.Time         `json:"last_seen_at,omitempty"`
+	HistoryID  *int64             `json:"history_id,omitempty"`
+	// Notified reports that the firing notification of the open episode is
+	// settled: delivered, or out of delivery attempts.
+	Notified bool `json:"-"`
 }
 
 // AlertHistoryEntry captures individual trigger or resolution events for an alert.
