@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -31,6 +32,9 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	if user == nil {
 		return sendMissingUser(c)
 	}
+
+	auditTarget(c, audit.ExportSourceTarget(teamID, sourceID))
+	auditDetail(c, "mode", "job")
 
 	exp, ok := s.prepareExport(c, sourceID, "csv", "failed to get source for export job")
 	if !ok {
@@ -91,6 +95,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create export job", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.ExportJobTarget(job, teamID))
 
 	runReq := req
 	runReq.Format = format
@@ -130,6 +135,7 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
+	auditTarget(c, audit.ExportJobTarget(job, src.TeamID()))
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
 	}

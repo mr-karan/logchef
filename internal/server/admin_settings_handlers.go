@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -167,6 +168,7 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	}
 
 	s.log.Info("setting updated", "key", key, "user", user.Email)
+	auditTarget(c, audit.SettingTarget(key))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "setting updated successfully", "key": key})
 }
 
@@ -195,6 +197,7 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 	}
 
 	s.log.Info("setting deleted", "key", key, "user", user.Email)
+	auditTarget(c, audit.SettingTarget(key))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "setting deleted successfully"})
 }
 
@@ -443,6 +446,9 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "SMTP is not configured. Please configure smtp_host, smtp_port, and smtp_from in settings.")
 	}
 
+	auditTarget(c, audit.SettingTestTarget("email"))
+	auditDetail(c, "kind", "email")
+
 	// Create email sender
 	sender := alerts.NewEmailSender(smtpConfig)
 
@@ -505,6 +511,9 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
+	auditTarget(c, audit.SettingTestTarget("webhook"))
+	auditDetail(c, "kind", "webhook")
+	auditSecretDetail(c, "webhook_url", webhookURL)
 
 	// Build test notification
 	notification := alerts.AlertNotification{

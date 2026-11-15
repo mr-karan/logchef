@@ -36,6 +36,7 @@ func newSPATestServer(t *testing.T, frontendURL string) *Server {
 		Version: `v2.7.0-"<test>`,
 		Config:  &config.Config{Server: config.ServerConfig{FrontendURL: frontendURL}},
 		SQLite:  store,
+		Audit:   testAuditRecorder(t, store),
 		FS:      http.FS(ui),
 		Logger:  logger,
 	})

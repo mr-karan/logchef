@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	core "github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -167,6 +168,7 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create saved query", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.SavedQueryTarget(created))
 	return SendSuccess(c, fiber.StatusCreated, created)
 }
 
@@ -238,6 +240,7 @@ func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update saved query", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.SavedQueryTarget(updated))
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
@@ -254,6 +257,7 @@ func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
 	if delErr := core.DeleteSavedQuery(c.Context(), s.store, s.log, query.ID); delErr != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete saved query", models.GeneralErrorType)
 	}
+	auditTarget(c, audit.SavedQueryTarget(query))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Saved query deleted successfully"})
 }
 

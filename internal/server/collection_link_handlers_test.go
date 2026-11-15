@@ -300,6 +300,7 @@ func TestCollectionItemRoutesBusy(t *testing.T) {
 	s := New(ServerOptions{
 		Config: cfg,
 		SQLite: busyStore{Store: db},
+		Audit:  testAuditRecorder(t, db),
 		FS:     http.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/" />`)}}),
 		Logger: logger,
 	})

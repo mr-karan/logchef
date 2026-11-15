@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -66,6 +67,7 @@ func (s *Server) handleCreateSource(c fiber.Ctx) error {
 		}
 		s.log.Info("source.create", attrs...)
 	}
+	auditTarget(c, audit.SourceTarget(createdSource))
 	return SendSuccess(c, fiber.StatusCreated, createdSource.ToResponse())
 }
 
@@ -91,6 +93,7 @@ func (s *Server) handleDeleteSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error deleting source", models.DatabaseErrorType)
 	}
 
+	auditTarget(c, audit.SourceIDTarget(sourceID))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
 }
 
@@ -128,6 +131,7 @@ func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error updating source", models.DatabaseErrorType)
 	}
 
+	auditTarget(c, audit.SourceTarget(updatedSource))
 	return SendSuccess(c, fiber.StatusOK, updatedSource.ToResponse())
 }
 

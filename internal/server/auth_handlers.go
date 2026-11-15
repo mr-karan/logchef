@@ -162,6 +162,7 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 			errCode = "auth_error"
 		}
 		finalURL = fmt.Sprintf("%s/auth/login?error=%s", targetURL, errCode)
+		auditSignInFailure(c, "", "oidc", errCode)
 		level := slog.LevelWarn
 		if errCode == "auth_error" {
 			level = slog.LevelError
@@ -270,6 +271,8 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		"role", loginUser.Role,
 	)
 
+	auditSession(c, loginUser, "oidc")
+
 	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
 	// a transient failure here must not block login.
 	if _, err := core.EnsurePersonalCollection(c.Context(), s.store, s.log, loginUser); err != nil {
@@ -296,6 +299,12 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 func (s *Server) handleLogout(c fiber.Ctx) error {
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr != "" {
+		// A sign-out records its user, so read the session before revoking it.
+		if session, err := core.ValidateSession(c.Context(), s.store, s.log, models.SessionID(sessionIDStr)); err == nil {
+			if user, err := core.GetUser(c.Context(), s.store, session.UserID); err == nil {
+				auditSession(c, user, "")
+			}
+		}
 		// Attempt to revoke the session in the database.
 		if err := core.RevokeSession(c.Context(), s.store, s.log, models.SessionID(sessionIDStr)); err != nil {
 			// Log error but proceed with cookie deletion anyway.
@@ -378,6 +387,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 	}
 
 	invalid := func() error {
+		auditSignInFailure(c, req.Email, "local", "invalid_credentials")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
 	}
 	if len(req.Email) > models.MaxEmailLength {
@@ -401,6 +411,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 	if !auth.VerifyLocalPassword(user.PasswordHash, req.Password) {
 		return invalid()
 	}
+	auditSession(c, user, "local")
 
 	session, err := core.CreateSession(c.Context(), s.store, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
 	if err != nil {

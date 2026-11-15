@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -39,6 +40,8 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 	if user == nil {
 		return sendMissingUser(c)
 	}
+	auditTarget(c, audit.ExportSourceTarget(teamID, sourceID))
+	auditDetail(c, "mode", "stream")
 
 	exp, ok := s.prepareExport(c, sourceID, inferExportFormatFromAccept(c.Get("Accept")), "failed to get source for export")
 	if !ok {

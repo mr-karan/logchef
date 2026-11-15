@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -65,8 +66,13 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 	if err := json.Unmarshal(c.Body(), &body); err != nil || body.Approve == nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, `Body must be {"approve": true} or {"approve": false}`, models.ValidationErrorType)
 	}
+	requestID := models.OAuthAuthRequestID(c.Params("requestID"))
+	auditTarget(c, audit.OAuthConsentTarget(requestID))
+	if !*body.Approve {
+		auditAction(c, audit.OAuthConsentDeny)
+	}
 	user := currentUser(c)
-	redirectURL, err := s.oauth.Decide(c.Context(), models.OAuthAuthRequestID(c.Params("requestID")), user, *body.Approve)
+	redirectURL, err := s.oauth.Decide(c.Context(), requestID, user, *body.Approve)
 	switch {
 	case errors.Is(err, oauth.ErrRequestNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
@@ -106,6 +112,7 @@ func (s *Server) handleRevokeConnectedApp(c fiber.Ctx) error {
 		s.log.Error("failed to revoke connected app", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to revoke connected app")
 	}
+	auditTarget(c, audit.OAuthGrantTarget(models.OAuthGrantID(id)))
 	s.log.Info("connected app revoked", "user_id", user.ID, "grant_id", id)
 	return c.SendStatus(fiber.StatusNoContent)
 }
