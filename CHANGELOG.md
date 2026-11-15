@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This release makes dashboard saves atomic and closes a hole in collection
-links: pinning someone else's saved query into a collection no longer gives the
-collection's owners and editors the right to edit it. Startup runs three database
-migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
-000013, 000014 and 000015).
+## [2.7.0] - 2026-11-15
+
+Dashboards grow up. Panels run SQL as written and show the result as stats
+with comparisons and sparklines, bar, line, area and pie charts, toplists, or
+tables with rules and formats, across tabs and free grid sizes. Built-in time
+macros let one query follow any time range. A query's own `LIMIT` is respected
+everywhere, and results that ClickHouse could have cut say so. Saves are
+atomic, collection links no longer grant edit by accident, and the Explorer is
+easier to read. Startup runs three database migrations on each metadata store
+(SQLite 000039, 000040 and 000041, Postgres 000013, 000014 and 000015): back up
+the metadata database first, and read the upgrade notes.
 
 ### Upgrade notes
 
@@ -123,9 +129,26 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
   removes a managed link; any participant pins and unpins. Before this change
   any participant could create a shared collection, pin a query they could
   only view, and edit it.
+- A source edit asks for stored secrets again when the endpoint or transport
+  changes. A ClickHouse password is reused only for the same host, username
+  and TLS setting, and VictoriaLogs credentials only for the same base URL.
+  Before, an edit could send a stored secret to a new server, or over
+  plaintext after TLS was turned off, including through a direct API call.
 
 ### Added
 
+- Result charts: a panel maps result columns to roles and draws bars, lines,
+  areas, pies and toplists from them, with category or time scales, stacking,
+  value labels and legends. Suggested roles come from a preview, and a guessed
+  column kind stays unconfirmed until the author picks it.
+- Stat panels can compare the selected row with the previous one, colour the
+  change as good or bad, and draw a sparkline of the series. Deltas and
+  percentages use exact arithmetic.
+- ClickHouse sources backed by an ordinary view can opt in to Recent activity
+  (`connection.activity.allow_view`). The query runs through the view with a
+  3-second limit and row and byte caps (50 million rows and 1 GiB by default),
+  and fails with "source activity limit exceeded" instead of returning partial
+  counts. View sources no longer show zero storage totals.
 - Dashboard thresholds color stat values or backgrounds and draw chart reference
   lines. Tables support cell and row rules, visible columns, and number and time
   formats. Thresholds and numeric rules compare exact values.
@@ -295,6 +318,10 @@ migrations on each metadata store (SQLite 000039, 000040 and 000041, Postgres
 - Expanded fields in the Fields panel stay open when a query runs.
 - Group By no longer shifts sideways when the fast-filter hint appears.
 - Cmd/Ctrl+Enter closes the autocomplete popup before the results load.
+- `logchef sql` reads SQL the way the server does. A time macro inside a
+  comment no longer turns off the `--since` condition, and when the SQL ends
+  in a line comment the added condition goes on a new line instead of inside
+  the comment.
 
 
 ## [2.6.1] - 2026-10-29
@@ -1979,7 +2006,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.6.1...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/mr-karan/logchef/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/mr-karan/logchef/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/mr-karan/logchef/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/mr-karan/logchef/compare/v2.4.0...v2.5.0
