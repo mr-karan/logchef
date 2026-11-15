@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, nextTick, reactive, type EffectScope } from 'vue'
+import { effectScope, nextTick, reactive, ref, type EffectScope } from 'vue'
+import type { SortingState } from '@tanstack/vue-table'
+import type { TableViewSeed } from '@/lib/savedViewLayout'
 import type { Source } from '@/api/sources'
 import type { ColumnDef } from '@/views/explore/table/tableFeatures'
 import { COLUMN_VISIBILITY_VERSION } from '@/views/explore/table/defaultColumnVisibility'
@@ -438,4 +440,177 @@ it('retains the complete automatic order through subset results and reloads', as
   await persist()
   expect(state.columnOrder.value).toEqual(original)
   expect(setup().columnOrder.value).toEqual(original)
+})
+
+const viewKey = 'logchef-viewState-7-source-a'
+
+function setupView(seed: TableViewSeed | null, columns: ColumnDef<Record<string, unknown>>[] = [{ id: 'message' }, { id: 'timestamp' }, { id: 'status' }]) {
+  const input = reactive<{ columns: ColumnDef<Record<string, unknown>>[], seed: TableViewSeed | null }>({ columns, seed })
+  const sorting = ref<SortingState>([])
+  const scope = effectScope()
+  scopes.push(scope)
+  const state = scope.run(() => useColumnState({
+    columns: () => input.columns,
+    defaultOrder: () => getDefaultColumnOrder(input.columns, [Object.fromEntries(input.columns.map(column => [column.id, 'x']))]),
+    teamId: 7,
+    sourceId: 'source-a',
+    source: { source_type: 'clickhouse' },
+    timestampField: 'timestamp',
+    severityField: 'severity',
+    seed: () => input.seed,
+    sorting,
+  }))
+  if (!state) throw new Error('Column state scope did not run')
+  return { input, sorting, ...state }
+}
+
+function view(revision = 1, definition: Partial<TableViewSeed['definition']> = {}): TableViewSeed {
+  return {
+    viewId: 12,
+    revision,
+    definition: { version: 1, columns: [{ name: 'status', width: 120 }, { name: 'message' }], sort: [{ column: 'status', desc: false }], ...definition },
+  }
+}
+
+describe('useColumnState with a view seed', () => {
+  it('seeds order, visibility, widths and sort from the view and stores them under the view key', async () => {
+    localStorage.setItem(storageKey, JSON.stringify({ columnOrder: ['status', 'message', 'timestamp'], columnVisibility: { status: false } }))
+    const before = localStorage.getItem(storageKey)
+    const state = setupView(view())
+    expect(state.columnOrder.value).toEqual(['timestamp', 'status', 'message'])
+    expect(state.columnVisibility.value).toEqual({ timestamp: false, status: true, message: true })
+    expect(state.columnSizing.value).toEqual({ status: 120 })
+    expect(state.sorting.value).toEqual([{ id: 'status', desc: false }])
+    expect(state.workingLayout.value).toEqual({ columns: [{ name: 'status', width: 120 }, { name: 'message' }], sort: [{ column: 'status', desc: false }] })
+    await persist()
+    expect(localStorage.getItem(storageKey)).toBe(before)
+    expect(JSON.parse(localStorage.getItem(viewKey) ?? '{}')).toMatchObject({
+      viewId: 12, revision: 1, columnSizing: { status: 120 }, sorting: [{ id: 'status', desc: false }],
+    })
+  })
+
+  it('restores a stored working copy of the same view and revision', async () => {
+    const first = setupView(view())
+    first.columnSizing.value = { ...first.columnSizing.value, message: 333 }
+    first.sorting.value = [{ id: 'message', desc: true }]
+    await persist()
+    scopes.splice(0).forEach(scope => scope.stop())
+
+    const second = setupView(view())
+    expect(second.columnSizing.value).toEqual({ status: 120, message: 333 })
+    expect(second.sorting.value).toEqual([{ id: 'message', desc: true }])
+  })
+
+  it('discards a stored working copy of another revision and seeds from the view', async () => {
+    const first = setupView(view(1))
+    first.columnSizing.value = { ...first.columnSizing.value, message: 333 }
+    await persist()
+    scopes.splice(0).forEach(scope => scope.stop())
+
+    const second = setupView(view(2, { columns: [{ name: 'message', width: 400 }] }))
+    expect(second.columnSizing.value).toEqual({ message: 400 })
+    expect(second.columnVisibility.value).toEqual({ timestamp: false, message: true, status: false })
+    await persist()
+    expect(JSON.parse(localStorage.getItem(viewKey) ?? '{}')).toMatchObject({ revision: 2, columnSizing: { message: 400 } })
+  })
+
+  it('hides result columns the view does not name and keeps absent view columns in place', async () => {
+    const state = setupView(view(1, { columns: [{ name: 'gone' }, { name: 'status' }] }))
+    state.input.columns = [...state.input.columns, { id: 'host' }]
+    await nextTick()
+    expect(state.columnVisibility.value.host).toBe(false)
+    expect(state.columnOrder.value.slice(0, 3)).toEqual(['timestamp', 'gone', 'status'])
+    expect(state.workingLayout.value?.columns).toEqual([{ name: 'gone' }, { name: 'status' }])
+  })
+
+  it('shows the automatic layout for a result with none of the view columns, without storing it', async () => {
+    const state = setupView(view())
+    await persist()
+    const stored = localStorage.getItem(viewKey)
+    state.input.columns = [{ id: 'timestamp' }, { id: 'count' }]
+    await nextTick()
+    expect(state.columnVisibility.value).toMatchObject({ timestamp: true, count: true })
+    expect(state.workingLayout.value?.columns).toEqual([{ name: 'status', width: 120 }, { name: 'message' }])
+    await persist()
+    expect(localStorage.getItem(viewKey)).toBe(stored)
+
+    state.input.columns = [{ id: 'message' }, { id: 'timestamp' }, { id: 'status' }]
+    await nextTick()
+    expect(state.columnVisibility.value).toMatchObject({ timestamp: false, status: true, message: true })
+    expect(state.columnSizing.value).toEqual({ status: 120 })
+  })
+
+  it('starts a view without columns from the layout with no view, and leaves the sort alone without a sort', () => {
+    localStorage.setItem(storageKey, JSON.stringify({
+      columnOrder: ['status', 'message', 'timestamp'], orderSource: 'explicit', columnVisibility: { status: false },
+      columnSizing: { message: 210 }, visibilityVersion: COLUMN_VISIBILITY_VERSION, sizingVersion: COLUMN_SIZING_VERSION,
+    }))
+    const state = setupView(null)
+    state.sorting.value = [{ id: 'timestamp', desc: true }]
+    state.input.seed = { viewId: 3, revision: 1, definition: { version: 1, display_mode: 'compact' } }
+    return nextTick().then(() => {
+      expect(state.columnOrder.value).toEqual(['timestamp', 'status', 'message'])
+      expect(state.columnVisibility.value.status).toBe(false)
+      expect(state.columnSizing.value).toEqual({ message: 210 })
+      expect(state.sorting.value).toEqual([{ id: 'timestamp', desc: true }])
+    })
+  })
+
+  it('returns to the untouched layout with no view when the seed goes away', async () => {
+    const state = setupView(null)
+    state.columnSizing.value = { message: 250 }
+    await persist()
+    state.input.seed = view()
+    await nextTick()
+    state.columnSizing.value = { ...state.columnSizing.value, status: 500 }
+    await persist()
+    state.input.seed = null
+    await nextTick()
+    expect(state.columnSizing.value).toEqual({ message: 250 })
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? '{}').columnSizing).toEqual({ message: 250 })
+  })
+
+  it('reseeds from the view on reset', async () => {
+    const state = setupView(view())
+    state.columnSizing.value = { message: 999 }
+    state.sorting.value = []
+    await persist()
+    state.resetTableStateToDefaults()
+    expect(state.columnSizing.value).toEqual({ status: 120 })
+    expect(state.sorting.value).toEqual([{ id: 'status', desc: false }])
+  })
+
+  it('saves an edit made in the same tick as leaving a view to the view, not to the layout with no view', async () => {
+    const state = setupView(null)
+    state.columnSizing.value = { message: 222 }
+    await persist()
+    state.input.seed = view()
+    await nextTick()
+    state.columnSizing.value = { ...state.columnSizing.value, status: 555 }
+    state.input.seed = null
+    await persist()
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? '{}').columnSizing).toEqual({ message: 222 })
+    expect(JSON.parse(localStorage.getItem(viewKey) ?? '{}').columnSizing).toEqual({ status: 555 })
+    expect(state.columnSizing.value).toEqual({ message: 222 })
+  })
+
+  it('saves an edit made in the same tick as picking a view to the layout with no view, and seeds the view', async () => {
+    const state = setupView(null)
+    await persist()
+    state.columnSizing.value = { message: 222 }
+    state.input.seed = view()
+    await persist()
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? '{}').columnSizing).toEqual({ message: 222 })
+    expect(state.columnSizing.value).toEqual({ status: 120 })
+    expect(JSON.parse(localStorage.getItem(viewKey) ?? '{}').columnSizing).toEqual({ status: 120 })
+  })
+
+  it('starts a view without a sort at timestamp descending when the table has no sort', () => {
+    const state = setupView(view(1, { sort: undefined }))
+    expect(state.sorting.value).toEqual([{ id: 'timestamp', desc: true }])
+  })
+
+  it('reports no working layout without a view', () => {
+    expect(setupView(null).workingLayout.value).toBeNull()
+  })
 })
