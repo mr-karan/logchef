@@ -200,6 +200,12 @@ type LogchefQLQueryRequest struct {
 	Limit              int                       `json:"limit"`         // Result limit
 	QueryTimeout       *int                      `json:"query_timeout"` // Optional timeout in seconds
 	Variables          []models.TemplateVariable `json:"variables,omitempty"`
+	// Interval is the bucket window of a `by time` key that has no window
+	// of its own, one of the histogram windows.
+	Interval string `json:"interval,omitempty"`
+	// AllowAggregation accepts an aggregation pipe. A caller that needs log
+	// rows leaves it false. Never read from a request body.
+	AllowAggregation bool `json:"-"`
 }
 
 // PreparedLogchefQL is a LogchefQL query compiled into the source's native
@@ -225,6 +231,9 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	if err != nil {
 		return nil, err
 	}
+	if _, err := requestInterval(req.Interval); err != nil {
+		return nil, err
+	}
 
 	source, err := logchefQLSource(ctx, ds, src)
 	if err != nil {
@@ -246,10 +255,12 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	// for a cut, and the SQL that the histogram and the export reuse carries
 	// no limit of its own.
 	compiled, err := CompileLogchefQL(ctx, ds, src, datasource.LogchefQLCompileRequest{
-		Query:     query,
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
-		Timezone:  req.Timezone,
+		Query:            query,
+		StartTime:        req.StartTime,
+		EndTime:          req.EndTime,
+		Timezone:         req.Timezone,
+		Interval:         req.Interval,
+		AllowAggregation: req.AllowAggregation,
 	})
 	if err != nil {
 		return nil, err
@@ -264,6 +275,7 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 		MaxLimit:           cfg.MaxPreviewLimit,
 		MaxResponseBytes:   cfg.MaxResponseBytes,
 		QueryTimeout:       timeout,
+		Aggregation:        compiled.Aggregation,
 	}
 	if compiled.Language == models.QueryLanguageLogsQL {
 		startTime, endTime, err := ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
@@ -342,15 +354,22 @@ type LogchefQLTranslation struct {
 	Error          *logchefql.ParseError
 	Conditions     []logchefql.FilterCondition
 	FieldsUsed     []string
+	// Aggregation describes the result of an aggregated query. Nil for a
+	// query that returns log rows.
+	Aggregation *logchefql.AggregationInfo
 }
 
 // TranslateLogchefQL compiles a LogchefQL query without running it. A query
 // that does not parse is not an error: the result has Valid=false and Error
-// set, so editors can show it.
+// set, so editors can show it. It accepts an aggregation.
 func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (*LogchefQLTranslation, error) {
 	if _, err := ValidateTimezone(req.Timezone); err != nil {
 		return nil, err
 	}
+	if _, err := requestInterval(req.Interval); err != nil {
+		return nil, err
+	}
+	req.AllowAggregation = true
 	if _, err := logchefQLSource(ctx, ds, src); err != nil {
 		return nil, err
 	}
@@ -381,6 +400,7 @@ func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.
 		Error:          compiled.Error,
 		Conditions:     compiled.Conditions,
 		FieldsUsed:     compiled.FieldsUsed,
+		Aggregation:    compiled.Aggregation,
 	}
 	if compiled.Language == models.QueryLanguageClickHouseSQL {
 		translation.SQL = compiled.FilterOnly

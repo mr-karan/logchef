@@ -1078,7 +1078,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 	// The service resolves cached column types before translation.
 	schema := buildLogchefQLSchema(source)
 
-	translateResult := logchefql.Translate(req.Query, schema)
+	translateResult := logchefql.TranslateWithOptions(req.Query, schema, logchefql.TranslateOptions{AllowAggregation: req.AllowAggregation})
 	compiled := &CompiledLogchefQL{
 		Language:   models.QueryLanguageClickHouseSQL,
 		Valid:      translateResult.Valid,

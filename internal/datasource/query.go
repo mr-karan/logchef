@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -20,6 +21,10 @@ type QueryRequest struct {
 	MaxLimit           int
 	MaxResponseBytes   int
 	QueryTimeout       *int
+	// Aggregation describes the result of a compiled LogchefQL aggregation:
+	// the column names, order and types, and the query's own limit. Nil for
+	// a query that returns log rows.
+	Aggregation *logchefql.AggregationInfo
 }
 
 type HistogramRequest struct {

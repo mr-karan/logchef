@@ -59,6 +59,9 @@ const (
 	CapabilityLogContext       Capability = "log_context"
 	CapabilityExports          Capability = "exports"
 	CapabilityLiveTail         Capability = "live_tail"
+	// CapabilityLogchefQLAggregation says that the provider compiles the
+	// LogchefQL aggregation pipe.
+	CapabilityLogchefQLAggregation Capability = "logchefql_aggregation"
 )
 
 // Descriptor is the static feature set of a provider.
@@ -363,6 +366,12 @@ type LogchefQLCompileRequest struct {
 	EndTime   string
 	Timezone  string
 	Limit     int
+	// Interval is the request interval, the bucket window of a `by time`
+	// key that has no window of its own.
+	Interval string
+	// AllowAggregation accepts an aggregation pipe. The default rejects it
+	// with AGGREGATION_NOT_ALLOWED, for callers that need log rows.
+	AllowAggregation bool
 }
 
 // CompiledLogchefQL is the result of compiling LogchefQL into a provider's
@@ -380,6 +389,9 @@ type CompiledLogchefQL struct {
 	Error      *logchefql.ParseError
 	Conditions []logchefql.FilterCondition
 	FieldsUsed []string
+	// Aggregation describes the result of an aggregated query. Nil for a
+	// query that returns log rows.
+	Aggregation *logchefql.AggregationInfo
 }
 
 // LogchefQLCompiler is an optional interface for providers that can compile

@@ -38,7 +38,7 @@ const (
 
 // keyVersion is bumped when the canonical cache-key encoding changes so old
 // entries can never collide with new ones.
-const keyVersion = 1
+const keyVersion = 2
 
 // sweepInterval is the cadence of the background expiry sweep. TTL is primarily
 // enforced lazily on Get; the sweep just reclaims memory from entries that are
@@ -288,7 +288,8 @@ type KeyInput struct {
 	SourceRevision   int64 // source.UpdatedAt unix-nanos; invalidates on source change
 	EffTTLSeconds    int64
 	Language         string
-	FinalizedQuery   string // exact executable query, AFTER substitution + compilation
+	FinalizedQuery   string   // exact executable query, AFTER substitution + compilation
+	ResultColumns    []string // output column names of a LogchefQL aggregation, in order
 	CanonicalStart   string
 	CanonicalEnd     string
 	Timezone         string
@@ -312,6 +313,10 @@ func ComputeKey(in KeyInput) [32]byte {
 	writeInt(h, in.EffTTLSeconds)
 	writeStr(h, in.Language)
 	writeStr(h, in.FinalizedQuery)
+	writeInt(h, int64(len(in.ResultColumns)))
+	for _, name := range in.ResultColumns {
+		writeStr(h, name)
+	}
 	writeStr(h, in.CanonicalStart)
 	writeStr(h, in.CanonicalEnd)
 	writeStr(h, in.Timezone)

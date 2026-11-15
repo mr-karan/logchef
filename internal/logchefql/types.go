@@ -98,10 +98,12 @@ type GroupNode struct {
 
 func (g *GroupNode) nodeType() string { return "group" }
 
-// QueryNode represents the top-level query with optional WHERE and SELECT
+// QueryNode represents the top-level query with an optional WHERE and one
+// optional pipe: a field selection or an aggregation, never both.
 type QueryNode struct {
-	Where  ASTNode       `json:"where,omitempty"`
-	Select []SelectField `json:"select,omitempty"`
+	Where     ASTNode          `json:"where,omitempty"`
+	Select    []SelectField    `json:"select,omitempty"`
+	Aggregate *AggregationNode `json:"aggregate,omitempty"`
 }
 
 func (q *QueryNode) nodeType() string { return "query" }
@@ -136,6 +138,13 @@ const (
 	ErrInvalidIdentifier      = "INVALID_IDENTIFIER"
 	ErrQueryTooLong           = "QUERY_TOO_LONG"
 	ErrQueryTooDeeplyNested   = "QUERY_TOO_DEEPLY_NESTED"
+	ErrInvalidAggregation     = "INVALID_AGGREGATION"
+	// ErrAggregationNotAllowed rejects an aggregation on a path that needs
+	// log rows (live tail, windowed search, field values).
+	ErrAggregationNotAllowed = "AGGREGATION_NOT_ALLOWED"
+	// ErrAggregationNotSupported rejects an aggregation that the source's
+	// provider cannot compile.
+	ErrAggregationNotSupported = "AGGREGATION_NOT_SUPPORTED"
 )
 
 // ColumnInfo represents column metadata from the schema

@@ -1,10 +1,12 @@
 package clickhouse
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -113,5 +115,13 @@ func testFieldValuesMemoryJSONFilter(t *testing.T, columnType string) {
 	}
 	if result.TotalDistinct != 1 || len(result.Values) != 1 || result.Values[0].Value != "info" || result.Values[0].Count != 1 {
 		t.Fatalf("filtered enum values = %+v, want one info value", result)
+	}
+}
+
+func TestFieldValueFilterRejectsAggregation(t *testing.T) {
+	_, err := buildLogchefQLConditionsSQL("x=1 | count()", nil)
+	parseErr, ok := errors.AsType[*logchefql.ParseError](err)
+	if !ok || parseErr.Code != logchefql.ErrAggregationNotAllowed {
+		t.Fatalf("error=%v, want %s", err, logchefql.ErrAggregationNotAllowed)
 	}
 }

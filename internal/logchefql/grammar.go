@@ -41,15 +41,77 @@ var logchefQLLexer = lexer.MustSimple([]lexer.SimpleRule{
 
 	{Name: "Dot", Pattern: `\.`},
 
+	{Name: "Comma", Pattern: `,`},
+
 	{Name: "Number", Pattern: `[-+]?[0-9]*\.?[0-9]+`},
 
 	{Name: "Ident", Pattern: `@?[a-zA-Z_][a-zA-Z0-9_:@-]*`},
 })
 
-// PQuery is the top-level query with optional WHERE clause and optional SELECT (pipe)
+// PQuery is the top-level query: an optional WHERE clause and one optional
+// pipe. A pipe whose first item is `name(` is an aggregation, any other pipe
+// selects fields. `name(` after a pipe was a parse error before aggregations,
+// so no older query changes meaning.
 type PQuery struct {
-	Where  *POrExpr       `parser:"@@?"`
-	Select []*PSelectItem `parser:"( Pipe @@+ )?"`
+	Where     *POrExpr       `parser:"@@?"`
+	Aggregate *PAggregate    `parser:"( Pipe ( @@"`
+	Select    []*PSelectItem `parser:"| @@+ ) )?"`
+}
+
+// PAggregate is `item, ... [by key, ...] [| sort name [asc|desc]] [| limit n]`.
+type PAggregate struct {
+	Pos   lexer.Position
+	Items []*PAggItem  `parser:"@@ ( Comma @@ )*"`
+	By    []*PGroupKey `parser:"( 'by':Ident @@ ( Comma @@ )* )?"`
+	Sort  *PSort       `parser:"( Pipe 'sort':Ident @@ )?"`
+	Limit *PLimit      `parser:"( Pipe 'limit':Ident @@ )?"`
+}
+
+type PAggItem struct {
+	Pos   lexer.Position
+	Func  string      `parser:"@Ident LParen"`
+	Field *PFieldPath `parser:"@@? RParen"`
+	Alias *PAlias     `parser:"( 'as':Ident @@ )?"`
+}
+
+// PGroupKey is the time bucket or a field. A field named time is written
+// "time", and a nested path under it ("time.x") is still a field.
+type PGroupKey struct {
+	Pos    lexer.Position
+	Time   bool        `parser:"( @'time':Ident (?! Dot )"`
+	Window *PWindow    `parser:"  ( LParen @@ RParen )?"`
+	Field  *PFieldPath `parser:"| @@ )"`
+	Alias  *PAlias     `parser:"( 'as':Ident @@ )?"`
+}
+
+// PAlias accepts a leading digit so that `as 2xx` reaches validation and
+// gets its message there, not a grammar error.
+type PAlias struct {
+	Pos  lexer.Position
+	Name string `parser:"@( Ident | Number Ident? )"`
+}
+
+// PWindow is a window such as 5m, which lexes as a Number then an Ident.
+type PWindow struct {
+	Pos    lexer.Position
+	Number string       `parser:"@Number"`
+	Unit   *PWindowUnit `parser:"@@"`
+}
+
+type PWindowUnit struct {
+	Pos   lexer.Position
+	Value string `parser:"@Ident"`
+}
+
+type PSort struct {
+	Pos   lexer.Position
+	Field *PFieldPath `parser:"@@"`
+	Order string      `parser:"( @'asc':Ident | @'desc':Ident )?"`
+}
+
+type PLimit struct {
+	Pos   lexer.Position
+	Value string `parser:"@Number"`
 }
 
 // POrExpr handles OR precedence (lowest)
@@ -181,6 +243,14 @@ func checkQueryLimits(input string) *ParseError {
 func ConvertToAST(pq *PQuery) ASTNode {
 	if pq == nil {
 		return nil
+	}
+
+	if pq.Aggregate != nil {
+		var whereClause ASTNode
+		if pq.Where != nil {
+			whereClause = convertOrExpr(pq.Where)
+		}
+		return &QueryNode{Where: whereClause, Aggregate: convertAggregate(pq.Aggregate)}
 	}
 
 	if len(pq.Select) > 0 {
