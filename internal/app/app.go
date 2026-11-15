@@ -10,6 +10,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
@@ -40,6 +41,7 @@ type App struct {
 	BuildInfo    string
 	Version      string
 	Alerts       *alerts.Manager
+	Audit        *audit.Recorder
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -96,6 +98,13 @@ func (a *App) Initialize(ctx context.Context) error {
 			return fmt.Errorf("failed to initialize sqlite: %w", err)
 		}
 	}
+
+	a.Audit = audit.New(audit.Options{
+		Store:        a.SQLite,
+		Logger:       a.Logger,
+		LogEvents:    a.Config.Audit.LogEvents,
+		DemoReadOnly: a.Config.Demo.ReadOnly,
+	})
 
 	// Initialize admin users based on configuration.
 	if err := core.InitAdminUsers(ctx, a.SQLite, a.Logger, a.Config.Auth.AdminEmails); err != nil {

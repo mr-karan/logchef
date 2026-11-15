@@ -158,5 +158,10 @@
     "ReadOnly": false,
     "ShowLoginCredentials": false,
     "ProvisioningToken": ""
+  },
+  "Audit": {
+    "RetentionDays": 0,
+    "MaxRows": 0,
+    "LogEvents": false
   }
 }

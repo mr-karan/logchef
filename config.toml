@@ -225,6 +225,14 @@ max_rows_per_sec = 100
 default_ttl = "720h"
 max_query_text_bytes = 1048576
 
+[audit]
+# Configuration changes, sign-ins and exports are stored in audit_events.
+# 0 disables a bound. Each event is also written as one JSON log line with
+# msg "audit", so a log shipper can keep a copy off the host.
+retention_days = 365
+max_rows = 1000000
+log_events = true
+
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access
 # -----------------------------------------------------------------------------

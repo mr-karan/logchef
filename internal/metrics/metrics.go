@@ -191,3 +191,22 @@ func DetermineErrorType(err error) string {
 
 	return "other"
 }
+
+// RecordAuditEvent counts one audit event by result: "stored" when the insert
+// succeeded and "failed" when it did not.
+func RecordAuditEvent(result string) {
+	metrics.GetOrCreateCounter(fmt.Sprintf(`logchef_audit_events_total{result=%q}`, result)).Inc()
+}
+
+// RecordAuditRedactions counts values that the audit serializer replaced.
+func RecordAuditRedactions(n int) {
+	if n > 0 {
+		metrics.GetOrCreateCounter("logchef_audit_redactions_total").Add(n)
+	}
+}
+
+// RecordAuditUnstaged counts an audit event whose handler staged no target or
+// no fields.
+func RecordAuditUnstaged() {
+	metrics.GetOrCreateCounter("logchef_audit_unstaged_total").Inc()
+}
