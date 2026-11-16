@@ -10,7 +10,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func (s *Store) UpsertJob(ctx context.Context, def models.JobDefinition) error {
+func (s *Store) UpsertJob(ctx context.Context, def models.JobDefinition, firstRunAt *time.Time) error {
 	err := s.q.UpsertJob(ctx, sqlc.UpsertJobParams{
 		Kind:         def.Kind,
 		Key:          def.Key,
@@ -20,6 +20,7 @@ func (s *Store) UpsertJob(ctx context.Context, def models.JobDefinition) error {
 		Misfire:      def.Misfire,
 		GraceSeconds: def.GraceSeconds,
 		Enabled:      def.Enabled,
+		FirstRunAt:   tsFromPtr(firstRunAt),
 	})
 	if err != nil {
 		return fmt.Errorf("error upserting job %s/%s: %w", def.Kind, def.Key, err)

@@ -322,10 +322,10 @@ type AlertSilenceStore interface {
 // change a job only while that token is current, that is, while no later
 // claim exists; they report whether a row changed.
 type JobStore interface {
-	// UpsertJob creates the job due now, or updates its definition. An
-	// update that changes the schedule makes the job due now; any other
-	// update keeps its next run and its lease.
-	UpsertJob(ctx context.Context, def models.JobDefinition) error
+	// UpsertJob creates the job, or updates its definition. A new job, or an
+	// update that changes the schedule, is due at firstRunAt, or now when it
+	// is nil; any other update keeps its next run and its lease.
+	UpsertJob(ctx context.Context, def models.JobDefinition, firstRunAt *time.Time) error
 	// DeleteJob removes the job. A missing job is not an error.
 	DeleteJob(ctx context.Context, kind, key string) error
 	// GetJob returns models.ErrNotFound when the job does not exist.

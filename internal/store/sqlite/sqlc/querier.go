@@ -502,8 +502,8 @@ type Querier interface {
 	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
 	UpsertAlertInstance(ctx context.Context, arg UpsertAlertInstanceParams) error
 	// Jobs (internal/jobs). Every time comparison uses the database clock.
-	// A new job is due now. A changed schedule makes an existing job due now;
-	// otherwise its next run and lease are kept.
+	// A new job, or an existing job whose schedule changes, is due at first_run_at,
+	// or now when that is null; any other update keeps its next run and lease.
 	UpsertJob(ctx context.Context, arg UpsertJobParams) error
 	// Dismissing a dismissed finding again replaces its reason and author.
 	UpsertSchemaAdvisorDismissal(ctx context.Context, arg UpsertSchemaAdvisorDismissalParams) error

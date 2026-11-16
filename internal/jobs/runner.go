@@ -113,6 +113,13 @@ func Upsert(ctx context.Context, tx store.JobStore, spec Spec) error {
 	if spec.Grace < 0 || spec.Grace%time.Second != 0 {
 		return fmt.Errorf("jobs: grace %s is not a whole number of seconds", spec.Grace)
 	}
+	// A cron job is first due at its next occurrence, so At is always an
+	// occurrence; a new interval job is due now.
+	var firstRunAt *time.Time
+	if scheduleKind == scheduleCron {
+		next := spec.Schedule.Next(time.Now())
+		firstRunAt = &next
+	}
 	return tx.UpsertJob(ctx, models.JobDefinition{
 		Kind:         string(spec.Kind),
 		Key:          spec.Key,
@@ -122,7 +129,7 @@ func Upsert(ctx context.Context, tx store.JobStore, spec Spec) error {
 		Misfire:      string(spec.Misfire),
 		GraceSeconds: int64(spec.Grace / time.Second),
 		Enabled:      spec.Enabled,
-	})
+	}, firstRunAt)
 }
 
 // Delete removes a job in the caller's transaction. A missing job is not an
@@ -154,6 +161,9 @@ type Runner struct {
 	owner string
 	poll  time.Duration
 	wake  chan struct{}
+	// searchCap bounds the search for the latest due occurrence. Tests lower
+	// it; production uses maxOccurrences.
+	searchCap int
 
 	mu       sync.Mutex
 	kinds    []*kindRunner // fixed once Start runs
@@ -182,11 +192,12 @@ type kindRunner struct {
 func New(opts Options) *Runner {
 	owner := uuid.NewString()
 	return &Runner{
-		db:    opts.Store,
-		log:   opts.Logger.With("component", "jobs", "owner", owner),
-		owner: owner,
-		poll:  opts.PollInterval,
-		wake:  make(chan struct{}, 1),
+		db:        opts.Store,
+		log:       opts.Logger.With("component", "jobs", "owner", owner),
+		owner:     owner,
+		poll:      opts.PollInterval,
+		wake:      make(chan struct{}, 1),
+		searchCap: maxOccurrences,
 	}
 }
 
@@ -291,7 +302,9 @@ func (r *Runner) write(runCtx context.Context, fn func(ctx context.Context)) boo
 
 // Kick makes a job due now and wakes the local loop. It returns
 // models.ErrNotFound when the job does not exist. A run in progress
-// overwrites the kick when it records its next run.
+// overwrites the kick when it records its next run. A kicked cron job runs
+// with At set to the kick, which is not an occurrence; its next run is the
+// first occurrence after that.
 func (r *Runner) Kick(ctx context.Context, kind Kind, key string) error {
 	if err := r.db.KickJob(ctx, string(kind), key); err != nil {
 		return err
@@ -359,19 +372,22 @@ func (r *Runner) claim(loopCtx, runCtx context.Context, k *kindRunner) {
 }
 
 func (r *Runner) run(runCtx context.Context, k *kindRunner, row *models.ScheduledJob) {
+	wake := true
 	defer func() {
 		<-k.slots
 		r.runs.Done()
 		// A kick that arrived while this run held the slot found no room;
 		// wake the loop so it claims that job now instead of at the next poll.
-		r.signal()
+		if wake {
+			r.signal()
+		}
 	}()
 	kind := string(k.spec.Kind)
 	log := r.log.With("kind", kind, "job_id", row.ID)
 	claimedAt := *row.LastStartedAt
 	metrics.ObserveJobScheduleLag(kind, claimedAt.Sub(row.NextRunAt))
 
-	sched, err := parseSchedule(row.ScheduleKind, row.ScheduleExpr)
+	sched, err := parseSchedule(row.ScheduleKind, row.ScheduleExpr, row.Timezone)
 	if err != nil {
 		// Upsert stores only valid schedules. The lease ends by time and the
 		// job is tried again then.
@@ -379,11 +395,14 @@ func (r *Runner) run(runCtx context.Context, k *kindRunner, row *models.Schedule
 		metrics.RecordJobRun(kind, "error")
 		return
 	}
-	at, err := latestDue(sched, row.NextRunAt, claimedAt, maxOccurrences)
+	at, err := latestDue(sched, row.NextRunAt, claimedAt, r.searchCap)
 	if err != nil {
 		log.Error("deferred a job whose latest due occurrence is too far away", "next_run_at", row.NextRunAt, "error", err)
 		metrics.RecordJobRun(kind, "deferred")
 		r.release(runCtx, row)
+		// The job is still due, so a wake would claim and defer it again at
+		// once; it waits for the next poll instead.
+		wake = false
 		return
 	}
 	job := Job{ID: row.ID, Kind: k.spec.Kind, Key: row.Key, At: at, ClaimedAt: claimedAt, LeaseToken: row.LeaseToken}
