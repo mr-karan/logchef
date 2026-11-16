@@ -26,10 +26,11 @@ func TestReportAttachesTheSavedQueryAsCSV(t *testing.T) {
 	}
 	in := e.input()
 	in.AttachCSV = true
-	r, err := CreateReport(context.Background(), e.db, access.SessionPrincipal(e.owner), in)
+	saved, err := CreateReport(context.Background(), e.db, access.SessionPrincipal(e.owner), in)
 	if err != nil {
 		t.Fatalf("CreateReport with attach_csv: %v", err)
 	}
+	r := saved.Report
 	if !e.report(r.ID).AttachCSV {
 		t.Fatal("attach_csv was not stored")
 	}

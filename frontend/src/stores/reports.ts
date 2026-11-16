@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
 import { useBaseStore } from "./base";
-import { reportsApi, type Report, type ReportInput, type ReportPreview, type ReportRun, type ReportScope } from "@/api/reports";
+import { reportsApi, type Report, type ReportInput, type ReportPreview, type ReportRecipientOptions, type ReportRun, type ReportScope } from "@/api/reports";
 import { savedQueriesApi, type SavedQuery } from "@/api/savedQueries";
 import { dashboardsApi, type Dashboard, type DashboardSummary } from "@/api/dashboards";
 import { i18n } from "@/i18n";
@@ -14,17 +14,19 @@ interface ReportsState {
   /** The tabs of each dashboard the editor picked, by dashboard id. */
   dashboardTabs: Record<number, { id: string; title: string }[]>;
   runs: Record<number, ReportRun[]>;
+  recipientOptions: ReportRecipientOptions;
 }
 
 export const RUNS_PAGE = 20;
 
 export const useReportsStore = defineStore("reports", () => {
-  const state = useBaseStore<ReportsState>({ reports: [], scope: "mine", savedQueries: [], dashboards: [], dashboardTabs: {}, runs: {} });
+  const state = useBaseStore<ReportsState>({ reports: [], scope: "mine", savedQueries: [], dashboards: [], dashboardTabs: {}, runs: {}, recipientOptions: { users: [], teams: [] } });
 
   const reports = computed(() => state.data.value.reports);
   const scope = computed(() => state.data.value.scope);
   const savedQueries = computed(() => state.data.value.savedQueries);
   const dashboards = computed(() => state.data.value.dashboards);
+  const recipientOptions = computed(() => state.data.value.recipientOptions);
 
   async function fetchReports(next: ReportScope = state.data.value.scope) {
     state.data.value.scope = next;
@@ -80,6 +82,18 @@ export const useReportsStore = defineStore("reports", () => {
     });
   }
 
+  // The recipient picker lists the users and teams the caller may add.
+  async function fetchRecipientOptions() {
+    return await state.callApi<ReportRecipientOptions>({
+      apiCall: () => reportsApi.recipientOptions(),
+      operationKey: "fetchReportRecipientOptions",
+      showToast: false,
+      onSuccess: (data) => {
+        if (data) state.data.value.recipientOptions = data;
+      },
+    });
+  }
+
   function tabsOf(id: number | null): { id: string; title: string }[] {
     return id === null ? [] : state.data.value.dashboardTabs[id] ?? [];
   }
@@ -89,7 +103,7 @@ export const useReportsStore = defineStore("reports", () => {
     const list = state.data.value.reports;
     const i = list.findIndex((r) => r.id === report.id);
     if (i >= 0) list.splice(i, 1, report);
-    else if (state.data.value.scope === "all" || report.can_edit) list.push(report);
+    else if (state.data.value.scope === "all" || (state.data.value.scope === "mine" && report.can_edit)) list.push(report);
   }
 
   async function createReport(input: ReportInput) {
@@ -119,6 +133,16 @@ export const useReportsStore = defineStore("reports", () => {
         state.data.value.reports = state.data.value.reports.filter((r) => r.id !== id);
         delete state.data.value.runs[id];
       },
+    });
+  }
+
+  async function leaveReport(id: number) {
+    return await state.callApi<null>({
+      apiCall: () => reportsApi.leave(id),
+      operationKey: `leaveReport-${id}`,
+      successMessage: i18n.global.t("reports.left"),
+      // A team can still send the report, so the list is read again.
+      onSuccess: () => void fetchReports(),
     });
   }
 
@@ -184,16 +208,19 @@ export const useReportsStore = defineStore("reports", () => {
     scope,
     savedQueries,
     dashboards,
+    recipientOptions,
     isLoadingOperation: state.isLoadingOperation,
     fetchReports,
     fetchSavedQueries,
     fetchDashboards,
     fetchDashboardTabs,
+    fetchRecipientOptions,
     tabsOf,
     getReport,
     createReport,
     updateReport,
     deleteReport,
+    leaveReport,
     setPaused,
     claimReport,
     sendTest,

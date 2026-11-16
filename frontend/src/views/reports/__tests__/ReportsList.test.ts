@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   reports: {
     list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(),
     pause: vi.fn(), resume: vi.fn(), claim: vi.fn(), run: vi.fn(), preview: vi.fn(), runs: vi.fn(),
+    recipientOptions: vi.fn(), leave: vi.fn(),
   },
   savedQueries: { list: vi.fn() },
   dashboards: { list: vi.fn(), get: vi.fn() },
@@ -25,7 +26,7 @@ vi.mock("@/api/dashboards", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/dashboards")>();
   return { ...actual, dashboardsApi: mocks.dashboards };
 });
-vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ user: { id: 1, role: "member" } }) }));
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ user: { id: "1", role: "member", full_name: "Owner", email: "owner@example.com" } }) }));
 
 import ReportsList from "../ReportsList.vue";
 import type { Report, ReportInput, ReportRun } from "@/api/reports";
@@ -37,7 +38,8 @@ const savedQuery: SavedQuery = {
   created_at: "", updated_at: "", source_name: "app_logs",
 };
 
-function report(input: ReportInput, id = 9): Report {
+// A list row carries no recipients; one report read by its editor does.
+function report(input: Omit<ReportInput, "recipients">, id = 9): Report {
   return {
     id, name: input.name, source: { ...input.source, name: savedQuery.name }, schedule: input.schedule, timezone: input.timezone,
     time_range: input.time_range, range_anchor: input.range_anchor, variables: input.variables, max_rows: input.max_rows,
@@ -75,6 +77,10 @@ describe("ReportsList", () => {
 
   async function mount(path: string, rows: Report[] = []) {
     mocks.reports.list.mockResolvedValue({ status: "success", data: rows });
+    mocks.reports.get.mockImplementation(async (id: number) => {
+      const row = rows.find((r) => r.id === id);
+      return { status: "success", data: row && { ...row, recipients: [{ kind: "user", user_id: 1, name: "Owner", email: "owner@example.com" }] } };
+    });
     host = document.createElement("div");
     document.body.appendChild(host);
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/reports/:id?", name: "Reports", component: ReportsList }] });
@@ -93,6 +99,8 @@ describe("ReportsList", () => {
     mocks.reports.runs.mockResolvedValue({ status: "success", data: [sentRun] });
     mocks.reports.remove.mockResolvedValue({ status: "success", data: null });
     mocks.dashboards.list.mockResolvedValue({ status: "success", data: [{ id: 4, name: "Edge" }] });
+    mocks.reports.recipientOptions.mockResolvedValue({ status: "success", data: { users: [{ id: 1, name: "Owner", email: "owner@example.com" }, { id: 2, name: "Mate", email: "mate@example.com" }], teams: [{ id: 3, name: "payments" }] } });
+    mocks.reports.leave.mockResolvedValue({ status: "success", data: null });
     mocks.dashboards.get.mockResolvedValue({ status: "success", data: { id: 4, corrupt: false, panels: { tabs: [{ id: "main", title: "Main", layout: [] }] } } });
   });
 
@@ -125,6 +133,8 @@ describe("ReportsList", () => {
     expect(input.time_range).toBe("today");
     expect(input.range_anchor).toBe("send_time");
     expect(input.variables).toEqual({});
+    // A new report goes to the person who creates it.
+    expect(input.recipients).toEqual([{ kind: "user", user_id: 1 }]);
 
     button(i18n.global.t("reports.sendTest")).click();
     await settle();
@@ -232,5 +242,50 @@ describe("ReportsList", () => {
     await settle();
     expect(mocks.reports.remove).toHaveBeenCalledWith(4);
     await vi.waitFor(() => expect(host.textContent).not.toContain("Nightly"));
+  });
+
+  it("reads the stored recipients before a save and adds a team", async () => {
+    const existing = report({ name: "Nightly", source: { kind: "saved_query", saved_query_id: 5 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: {}, max_rows: 25, skip_if_empty: false, attach_csv: false }, 4);
+    mocks.reports.update.mockImplementation(async (id: number, input: ReportInput) => ({ status: "success", data: report(input, id) }));
+    let finishGet: (value: unknown) => void = () => {};
+    await mount("/reports", [existing]);
+    mocks.reports.get.mockImplementationOnce(() => new Promise((resolve) => { finishGet = resolve; }));
+    host.querySelector<HTMLButtonElement>(`[data-report-id="4"] button[aria-label="${i18n.global.t("ui.edit")}"]`)!.click();
+    await settle();
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "Nightly 5xx");
+    await settle();
+    // Until the stored recipients arrive, a save would drop them.
+    expect(button(i18n.global.t("ui.save")).disabled).toBe(true);
+
+    finishGet({ status: "success", data: { ...existing, recipients: [{ kind: "user", user_id: 2, name: "Mate", email: "mate@example.com" }] } });
+    await vi.waitFor(() => expect(document.querySelector('[data-recipient="user:2"]')).not.toBeNull());
+    const picker = document.querySelector<HTMLSelectElement>("#report-add-recipient")!;
+    expect([...picker.options].map((o) => o.value)).toEqual(["", "user:1", "team:3"]);
+    setValue(picker, "team:3");
+    await settle();
+    expect(document.querySelector('[data-recipient="team:3"]')).not.toBeNull();
+    expect(picker.value).toBe("");
+
+    button(i18n.global.t("ui.save")).click();
+    await settle();
+    const input = mocks.reports.update.mock.calls[0][1] as ReportInput;
+    expect(input.name).toBe("Nightly 5xx");
+    expect(input.recipients).toEqual([{ kind: "user", user_id: 2 }, { kind: "team", team_id: 3 }]);
+  });
+
+  it("stops receiving a report sent to the caller only after the confirm dialog", async () => {
+    const received = { ...report({ name: "Their report", source: { kind: "saved_query", saved_query_id: 5 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "", range_anchor: "send_time", variables: {}, max_rows: 0, skip_if_empty: false, attach_csv: false }, 8), can_edit: false };
+    await mount("/reports", [received]);
+    const row = host.querySelector('[data-report-id="8"]')!;
+    expect(row.querySelector(`button[aria-label="${i18n.global.t("ui.edit")}"]`)).toBeNull();
+    row.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.global.t("reports.leave")}"]`)!.click();
+    await settle();
+    expect(mocks.reports.leave).not.toHaveBeenCalled();
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>("[role=alertdialog] button")].find((b) => b.textContent?.trim() === i18n.global.t("reports.leave"))!;
+    confirm.click();
+    await settle();
+    expect(mocks.reports.leave).toHaveBeenCalledWith(8);
+    // A team may still send it, so the list is read again.
+    expect(mocks.reports.list).toHaveBeenCalledTimes(2);
   });
 });

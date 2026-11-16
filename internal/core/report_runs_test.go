@@ -132,7 +132,7 @@ func (e *reportEnv) create() *models.Report {
 	if err != nil {
 		e.t.Fatalf("CreateReport: %v", err)
 	}
-	return r
+	return r.Report
 }
 
 // run claims a manual run as actor, without the cooldown, executes it and

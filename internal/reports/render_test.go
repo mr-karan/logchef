@@ -229,3 +229,56 @@ func TestRenderLabelsATruncatedStat(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderLockedPanelsShowNoData gives every panel kind data and a lock,
+// for the owner or for the recipient, and asserts that both bodies show
+// each title with its locked line and none of the data.
+func TestRenderLockedPanelsShowNoData(t *testing.T) {
+	bars := func(value string, percent bool) *Bars {
+		row := BarRow{Label: "secret-label", Value: value, Width: 100}
+		if percent {
+			row.Percent = "100.0%"
+		}
+		return &Bars{Blocks: []BarBlock{{Title: "secret-series", Rows: []BarRow{row}}}, Percent: percent, Notes: []string{"secret-note"}, Truncation: models.TruncationRows, Rows: 1}
+	}
+	panels := []Panel{
+		{ID: "stat", Title: "Stat panel", Stat: &Tile{Value: "4,242", RowLabel: "secret-row", Truncation: models.TruncationRows, Rows: 1}},
+		{ID: "table", Title: "Table panel", Table: &Table{Columns: []string{"secret-column"}, Rows: [][]Cell{{{Text: "secret-cell"}}}, TotalRows: 9, Truncation: models.TruncationRows}},
+		{ID: "chart", Title: "Count chart panel", Bars: bars("6,161", false)},
+		{ID: "toplist", Title: "Toplist panel", Bars: bars("5,151", false)},
+		{ID: "pie", Title: "Pie panel", Bars: bars("3,131", true)},
+	}
+	for _, lock := range []struct {
+		name string
+		set  func(*Panel)
+		line string
+	}{
+		{"recipient", func(p *Panel) { p.Restricted = true }, "You do not have access to this panel."},
+		{"owner", func(p *Panel) { p.Locked = true }, "The report owner no longer has access to this panel."},
+	} {
+		doc := Document{ReportName: "r", Location: time.UTC, Panels: make([]Panel, len(panels))}
+		for i := range panels {
+			doc.Panels[i] = panels[i]
+			lock.set(&doc.Panels[i])
+		}
+		out, err := Render(doc, 25)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for body, text := range map[string]string{"html": out.HTML, "text": out.Text} {
+			for _, leak := range []string{"4,242", "6,161", "5,151", "3,131", "secret", "100.0%", "First ", "more rows"} {
+				if strings.Contains(text, leak) {
+					t.Errorf("%s lock, %s body shows %q", lock.name, body, leak)
+				}
+			}
+			if n := strings.Count(text, lock.line); n != len(panels) {
+				t.Errorf("%s lock, %s body has %d locked lines, want %d", lock.name, body, n, len(panels))
+			}
+			for _, p := range panels {
+				if !strings.Contains(text, p.Title) {
+					t.Errorf("%s lock, %s body lacks the title %q", lock.name, body, p.Title)
+				}
+			}
+		}
+	}
+}

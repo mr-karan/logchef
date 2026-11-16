@@ -56,6 +56,9 @@ type Panel struct {
 	Failed bool
 	// Locked marks a panel whose source the report owner no longer reaches.
 	Locked bool
+	// Restricted marks a panel whose source this recipient does not reach.
+	// It keeps its title, as a locked panel on the dashboard does.
+	Restricted bool
 	// Unsupported marks a visualization that email does not show.
 	Unsupported bool
 	// Note qualifies the panel's data in its header: its own range, or a
@@ -139,6 +142,7 @@ type panelView struct {
 	Cut         bool
 	Failed      bool
 	Locked      bool
+	Restricted  bool
 	Unsupported bool
 	Stat        *Tile
 	Empty       bool
@@ -174,7 +178,13 @@ func barsViewOf(b *Bars, rows int) *barsView {
 func panelViews(doc Document, rows int, cut []bool) []panelView {
 	views := make([]panelView, len(doc.Panels))
 	for i, p := range doc.Panels {
-		v := panelView{Title: p.Title, Note: p.Note, Cut: cut[i], Failed: p.Failed, Locked: p.Locked, Unsupported: p.Unsupported}
+		v := panelView{Title: p.Title, Note: p.Note, Cut: cut[i], Failed: p.Failed, Locked: p.Locked, Restricted: p.Restricted, Unsupported: p.Unsupported}
+		// A locked panel shows its title and the locked line, whatever
+		// data the caller left on it.
+		if p.Locked || p.Restricted {
+			views[i] = v
+			continue
+		}
 		if p.Stat != nil && !cut[i] {
 			v.Stat = p.Stat
 			v.Truncation = truncationLabel(p.Stat.Truncation, p.Stat.Rows)
@@ -214,6 +224,7 @@ var htmlBody = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 {{if .Note}}<div style="font-size:12px;color:#71717a;margin:-4px 0 8px;">{{.Note}}</div>
 {{end}}{{if .Cut}}<div style="font-size:13px;color:#52525b;">This panel was left out to keep the email small.{{if $.SourceURL}} <a href="{{$.SourceURL}}" style="color:#2563eb;">Open it in Logchef</a>.{{end}}</div>
 {{else if .Locked}}<div style="font-size:13px;color:#52525b;">The report owner no longer has access to this panel.</div>
+{{else if .Restricted}}<div style="font-size:13px;color:#52525b;">You do not have access to this panel.</div>
 {{else if .Unsupported}}<div style="font-size:13px;color:#52525b;">This panel is not shown in email.{{if $.SourceURL}} <a href="{{$.SourceURL}}" style="color:#2563eb;">Open it in Logchef</a>.{{end}}</div>
 {{else if .Failed}}<div style="font-size:13px;color:#b91c1c;">This panel failed to load.</div>
 {{else if .Stat}}{{if .Truncation}}<div style="font-size:12px;color:#a16207;margin-bottom:6px;">{{.Truncation}}</div>
@@ -284,6 +295,8 @@ func renderText(doc Document, rows int, cut []bool) string {
 			b.WriteString("This panel was left out to keep the email small.\n")
 		case p.Locked:
 			b.WriteString("The report owner no longer has access to this panel.\n")
+		case p.Restricted:
+			b.WriteString("You do not have access to this panel.\n")
 		case p.Unsupported:
 			b.WriteString("This panel is not shown in email.\n")
 		case p.Failed:

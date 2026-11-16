@@ -296,3 +296,66 @@ func TestReportRunReachesDelivery(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// TestReportRecipientRoutes covers what a recipient reads and does over
+// HTTP: the recipient options, the received list, the reduced GET, and
+// DELETE /reports/:id/recipients/me with its audit event.
+func TestReportRecipientRoutes(t *testing.T) {
+	e := newReportRouteEnv(t, true)
+	ctx := context.Background()
+	lobby, _ := mkTestTeam(t, e.db, "lobby", e.owner, e.other)
+	id := e.create("Daily 5xx")
+	path := fmt.Sprintf("/api/v1/reports/%d", id)
+
+	options := e.expect(e.owner, http.MethodGet, "/api/v1/reports/recipient-options", "", http.StatusOK)
+	if !strings.Contains(options.body, e.other.Email) || !strings.Contains(options.body, `"name":"lobby"`) || strings.Contains(options.body, e.admin.Email) {
+		t.Errorf("owner's recipient options = %s, want lobby and its members only", options.body)
+	}
+
+	withRecipients := strings.Replace(e.body("Daily 5xx"), `"variables"`, fmt.Sprintf(`"recipients":[{"kind":"user","user_id":%d},{"kind":"team","team_id":%d}],"variables"`, e.other.ID, lobby.ID), 1)
+	updated := e.expect(e.owner, http.MethodPut, path, withRecipients, http.StatusOK)
+	if !strings.Contains(updated.body, `"recipients":[`) || !strings.Contains(updated.body, `"name":"lobby"`) {
+		t.Errorf("the editor's response lacks the named recipients: %s", updated.body)
+	}
+	outside := strings.Replace(e.body("Daily 5xx"), `"variables"`, fmt.Sprintf(`"recipients":[{"kind":"user","user_id":%d}]`+`,"variables"`, e.admin.ID), 1)
+	e.expect(e.owner, http.MethodPut, path, outside, http.StatusBadRequest)
+
+	received := e.expect(e.other, http.MethodGet, "/api/v1/reports?scope=received", "", http.StatusOK)
+	if !strings.Contains(received.body, `"name":"Daily 5xx"`) || strings.Contains(received.body, "secret-host-literal") {
+		t.Errorf("received list = %s, want the report without its variables", received.body)
+	}
+	got := e.expect(e.other, http.MethodGet, path, "", http.StatusOK)
+	if strings.Contains(got.body, "secret-host-literal") || strings.Contains(got.body, `"recipients"`) || !strings.Contains(got.body, `"can_edit":false`) {
+		t.Errorf("a recipient's GET = %s, want the reduced view", got.body)
+	}
+	e.expect(e.other, http.MethodGet, path+"/runs", "", http.StatusNotFound)
+	e.expect(e.other, http.MethodPut, path, e.body("x"), http.StatusNotFound)
+
+	read := apiToken(t, e.s, e.other, models.TokenScopeReportsRead)
+	if got := e.do(e.other, read, http.MethodDelete, path+"/recipients/me", ""); got.status != http.StatusForbidden {
+		t.Errorf("reports:read removes a recipient: %d", got.status)
+	}
+	e.expect(e.other, http.MethodDelete, path+"/recipients/me", "", http.StatusNoContent)
+	// Other still gets the report through the lobby team.
+	e.expect(e.other, http.MethodDelete, path+"/recipients/me", "", http.StatusBadRequest)
+	e.expect(e.admin, http.MethodDelete, path+"/recipients/me", "", http.StatusNotFound)
+
+	events, err := e.db.ListAuditEvents(ctx, models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []string
+	for _, ev := range events {
+		actions = append(actions, ev.Action)
+	}
+	if strings.Join(actions, " ") != "report.create report.update report_recipient.remove" {
+		t.Fatalf("events = %v", actions)
+	}
+	if update := string(events[1].Changes); !strings.Contains(update, `"recipients"`) || !strings.Contains(update, fmt.Sprintf("team:%d", lobby.ID)) {
+		t.Errorf("update changes = %s, want the recipient rows", update)
+	}
+	remove := events[2]
+	if remove.TargetType != "report_recipient" || remove.TargetID != fmt.Sprintf("%d/user:%d", id, e.other.ID) || !strings.Contains(string(remove.Detail), fmt.Sprintf(`"user_id":%d`, e.other.ID)) {
+		t.Errorf("remove event = %s %s %s", remove.TargetType, remove.TargetID, remove.Detail)
+	}
+}

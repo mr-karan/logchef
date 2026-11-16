@@ -107,6 +107,8 @@ const (
 	AlertSilenceCreate Action = "alert_silence.create"
 	AlertSilenceUpdate Action = "alert_silence.update"
 	AlertSilenceDelete Action = "alert_silence.delete"
+
+	ReportRecipientRemove Action = "report_recipient.remove"
 )
 
 // Spec is the registration of one action.
@@ -155,6 +157,7 @@ var registrations = []struct {
 	{ReportPause, false}, {ReportResume, false}, {ReportClaim, false},
 	{SchemaAdvisorDismissalCreate, true}, {SchemaAdvisorDismissalDelete, true},
 	{AlertSilenceCreate, true}, {AlertSilenceUpdate, true}, {AlertSilenceDelete, true},
+	{ReportRecipientRemove, false},
 }
 
 // verbs is the closed list of verbs an action may use.

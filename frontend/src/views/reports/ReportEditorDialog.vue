@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Eye, Send } from "lucide-vue-next";
+import { Eye, Send, X } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReportScheduleFields from "./ReportScheduleFields.vue";
 import { useReportsStore } from "@/stores/reports";
-import type { Report, ReportInput, ReportRangeAnchor, ReportSchedule, ReportSourceRef } from "@/api/reports";
+import type { Report, ReportInput, ReportRangeAnchor, ReportRecipient, ReportSchedule, ReportSourceRef } from "@/api/reports";
 import { REPORT_TIME_RANGES, isCalendarRange, savedQueryVariables, splitValues } from "@/utils/reportSchedule";
 import { usePreferencesStore } from "@/stores/preferences";
+import { useAuthStore } from "@/stores/auth";
 
 const props = defineProps<{
   /** The report to edit; null creates one. */
@@ -30,6 +31,7 @@ const emit = defineEmits<{ history: [report: Report] }>();
 
 const { t } = useI18n();
 const store = useReportsStore();
+const authStore = useAuthStore();
 
 // A new report starts in the zone the viewer reads times in.
 const defaultZone: string = usePreferencesStore().zone;
@@ -58,6 +60,16 @@ const storedLists = ref<Set<string>>(new Set());
 const maxRows = ref(25);
 const skipIfEmpty = ref(false);
 const attachCSV = ref(false);
+const recipients = ref<ReportRecipient[]>([]);
+// A report from a list carries no recipients; the editor reads them first,
+// and saving waits, so a save never drops them.
+const recipientsLoaded = ref(true);
+
+// A new report goes to the person who creates it.
+function me(): ReportRecipient[] {
+  const user = authStore.user;
+  return user ? [{ kind: "user", user_id: Number(user.id), name: user.full_name || user.email, email: user.email }] : [];
+}
 
 // Each load starts a new generation: a save from an earlier one finishes
 // without touching what the dialog shows now.
@@ -83,7 +95,52 @@ function load(report: Report | null) {
   maxRows.value = base?.max_rows ?? 25;
   skipIfEmpty.value = base?.skip_if_empty ?? false;
   attachCSV.value = base?.attach_csv ?? false;
+  recipients.value = report ? [...(report.recipients ?? [])] : me();
+  recipientsLoaded.value = !report || !!report.recipients;
   saved.value = report ? JSON.stringify(input.value) : "";
+  if (report && !report.recipients) void loadRecipients(report.id, generation);
+}
+
+async function loadRecipients(id: number, started: number) {
+  const result = await store.getReport(id);
+  if (started !== generation || !result.success || !result.data) return;
+  current.value = result.data;
+  recipients.value = [...(result.data.recipients ?? [])];
+  recipientsLoaded.value = true;
+  saved.value = JSON.stringify(input.value);
+}
+
+function recipientKey(r: { kind: string; user_id?: number; team_id?: number }): string {
+  return r.kind === "user" ? `user:${r.user_id}` : `team:${r.team_id}`;
+}
+
+function recipientLabel(r: ReportRecipient): string {
+  return r.kind === "team" ? t("reports.recipientTeam", { name: r.name }) : r.name || r.email || String(r.user_id);
+}
+
+const held = computed(() => new Set(recipients.value.map(recipientKey)));
+const userOptions = computed(() => store.recipientOptions.users.filter((u) => !held.value.has(`user:${u.id}`)));
+const teamOptions = computed(() => store.recipientOptions.teams.filter((tm) => !held.value.has(`team:${tm.id}`)));
+
+// The picker adds the chosen user or team, then shows its placeholder again.
+// The element is reset by hand: the chosen option leaves the list, and the
+// browser would otherwise select its neighbour.
+function addRecipient(event: Event) {
+  const select = event.target as HTMLSelectElement;
+  const [kind, raw] = select.value.split(":");
+  select.value = "";
+  const id = Number(raw);
+  if (kind === "user") {
+    const u = store.recipientOptions.users.find((x) => x.id === id);
+    if (u) recipients.value = [...recipients.value, { kind: "user", user_id: u.id, name: u.name || u.email, email: u.email }];
+  } else if (kind === "team") {
+    const tm = store.recipientOptions.teams.find((x) => x.id === id);
+    if (tm) recipients.value = [...recipients.value, { kind: "team", team_id: tm.id, name: tm.name }];
+  }
+}
+
+function removeRecipient(r: ReportRecipient) {
+  recipients.value = recipients.value.filter((x) => recipientKey(x) !== recipientKey(r));
 }
 
 // Values of the previous saved query's variables do not apply to another.
@@ -150,6 +207,7 @@ const input = computed<ReportInput>(() => ({
   skip_if_empty: skipIfEmpty.value,
   // Only a saved query attaches its rows; a dashboard refuses the flag.
   attach_csv: !isDashboard.value && attachCSV.value,
+  recipients: recipients.value.map((r) => (r.kind === "user" ? { kind: "user", user_id: r.user_id } : { kind: "team", team_id: r.team_id })),
 }));
 const dirty = computed(() => !current.value || JSON.stringify(input.value) !== saved.value);
 
@@ -158,11 +216,12 @@ watch(open, (isOpen) => {
   load(props.report);
   void store.fetchSavedQueries();
   void store.fetchDashboards();
+  void store.fetchRecipientOptions();
 }, { immediate: true });
 
 const missingVariable = computed(() => declared.value.some((v) => !v.optional && !v.fallback && !variables.value[v.name]?.trim()));
 const hasSource = computed(() => (isDashboard.value ? dashboardId.value !== null : savedQueryId.value !== null));
-const canSave = computed(() => !!input.value.name && hasSource.value && maxRows.value >= 5 && maxRows.value <= 100 && !missingVariable.value);
+const canSave = computed(() => !!input.value.name && hasSource.value && maxRows.value >= 5 && maxRows.value <= 100 && !missingVariable.value && recipientsLoaded.value && recipients.value.length > 0);
 const saving = computed(() => store.isLoadingOperation("saveReport"));
 const readOnly = computed(() => !!current.value && !current.value.can_edit);
 
@@ -266,6 +325,40 @@ function warningText(code: string): string {
                 </NativeSelectOption>
               </NativeSelect>
             </div>
+          </section>
+
+          <section class="space-y-3">
+            <h3 class="text-sm font-medium">{{ t("reports.sectionRecipients") }}</h3>
+            <ul v-if="recipients.length" class="flex flex-wrap gap-2" data-testid="report-recipients">
+              <li
+                v-for="r in recipients"
+                :key="recipientKey(r)"
+                :data-recipient="recipientKey(r)"
+                class="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-sm"
+                :title="r.email"
+              >
+                {{ recipientLabel(r) }}
+                <button
+                  v-if="!readOnly"
+                  type="button"
+                  class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  :aria-label="t('reports.removeRecipient', { name: recipientLabel(r) })"
+                  @click="removeRecipient(r)"
+                >
+                  <X class="h-3.5 w-3.5" />
+                </button>
+              </li>
+            </ul>
+            <p v-else-if="recipientsLoaded" class="text-sm text-muted-foreground">{{ t("reports.noRecipients") }}</p>
+            <NativeSelect id="report-add-recipient" model-value="" class="w-full" :aria-label="t('reports.addRecipient')" @change="addRecipient">
+              <NativeSelectOption value="" disabled>{{ t("reports.addRecipient") }}</NativeSelectOption>
+              <NativeSelectOptGroup v-if="userOptions.length" :label="t('reports.recipientUsers')">
+                <NativeSelectOption v-for="u in userOptions" :key="u.id" :value="`user:${u.id}`">{{ u.name ? `${u.name} (${u.email})` : u.email }}</NativeSelectOption>
+              </NativeSelectOptGroup>
+              <NativeSelectOptGroup v-if="teamOptions.length" :label="t('reports.recipientTeams')">
+                <NativeSelectOption v-for="tm in teamOptions" :key="tm.id" :value="`team:${tm.id}`">{{ tm.name }}</NativeSelectOption>
+              </NativeSelectOptGroup>
+            </NativeSelect>
           </section>
 
           <section class="space-y-3">

@@ -558,3 +558,48 @@ func TestAlertDeliveriesUpgrade(t *testing.T) {
 	defer db.Close()
 	storetest.CheckAlertDeliveriesUpgrade(t, db)
 }
+
+// reportOwnerRecipientsVersion is the migration that gives a report without
+// recipient rows its owner as one (RFC 0008 unit R8).
+const reportOwnerRecipientsVersion = 56
+
+func TestReportOwnerRecipientsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	m := newMigrator(t, raw)
+	before := lastVersionBefore(t, reportOwnerRecipientsVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.ReportOwnerRecipientsSeed {
+		mustExec(t, raw, query)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckReportOwnerRecipients(t, db)
+
+	// The statement adds nothing when it runs again.
+	up, err := migrationsFS.ReadFile("migrations/000056_add_report_owner_recipients.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	mustExec(t, check, string(up))
+	assertRow(t, check, `SELECT count(*) FROM report_recipients`, "2")
+}
