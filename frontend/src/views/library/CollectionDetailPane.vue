@@ -2,6 +2,7 @@
 import { useI18n } from "vue-i18n";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { useMetaStore } from "@/stores/meta";
 import { storeToRefs } from "pinia";
 import {
   Lock,
@@ -18,6 +19,7 @@ import {
   FolderInput,
   Pin,
   ShieldCheck,
+  CalendarClock,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import {
@@ -80,6 +82,7 @@ const props = defineProps<{ collectionId: number }>();
 const emit = defineEmits<{ deleted: [id: number] }>();
 
 const router = useRouter();
+const metaStore = useMetaStore();
 const { toast } = useToast();
 const { t } = useI18n();
 const store = useCollectionsStore();
@@ -155,8 +158,15 @@ const showsLinkKinds = computed(() => !!collection.value && !collection.value.is
 function canConvertItem(item: CollectionItem): boolean {
   return showsLinkKinds.value && canManageItemLink(item);
 }
+// Anyone who can run a query can schedule a report on it.
+function canScheduleItem(item: CollectionItem): boolean {
+  return item.runnable && !metaStore.demoReadOnly;
+}
+function scheduleReport(queryId: number) {
+  void router.push({ name: "Reports", query: { saved_query: String(queryId) } });
+}
 function hasItemActions(item: CollectionItem): boolean {
-  return canCurate.value && (canMoveItem(item) || canConvertItem(item) || canRemoveItem(item));
+  return canScheduleItem(item) || (canCurate.value && (canMoveItem(item) || canConvertItem(item) || canRemoveItem(item)));
 }
 // Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
 // invite UI from owners who lack that role since the dropdown can't be
@@ -604,14 +614,18 @@ async function handleDeleteCollection() {
                   <RowActionsMenu
                     v-if="hasItemActions(item)"
                     :delete-label="t('library.remove')"
-                    :on-delete="canRemoveItem(item) ? () => handleRemoveItem(item.query.id) : undefined"
+                    :on-delete="canCurate && canRemoveItem(item) ? () => handleRemoveItem(item.query.id) : undefined"
                   >
-                    <template v-if="canMoveItem(item) || canConvertItem(item)" #default>
-                      <DropdownMenuItem v-if="canMoveItem(item)" @click="openMove(item.query.id)">
+                    <template v-if="canScheduleItem(item) || (canCurate && (canMoveItem(item) || canConvertItem(item)))" #default>
+                      <DropdownMenuItem v-if="canScheduleItem(item)" @click="scheduleReport(item.query.id)">
+                        <CalendarClock class="mr-2 h-4 w-4" />
+                        {{ t('reports.scheduleReport') }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="canCurate && canMoveItem(item)" @click="openMove(item.query.id)">
                         <FolderInput class="mr-2 h-4 w-4" />
                         {{ t('library.move') }}
                       </DropdownMenuItem>
-                      <DropdownMenuItem v-if="canConvertItem(item)" @click="handleConvertItem(item)">
+                      <DropdownMenuItem v-if="canCurate && canConvertItem(item)" @click="handleConvertItem(item)">
                         <Pin v-if="item.kind === 'managed'" class="mr-2 h-4 w-4" />
                         <ShieldCheck v-else class="mr-2 h-4 w-4" />
                         {{ item.kind === 'managed' ? t('library.revokeDelegation') : t('library.delegateEdit') }}
