@@ -83,13 +83,17 @@ func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest,
 	if limit > 500 {
 		limit = 500
 	}
+	timezone := params.Timezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
 
 	run, err := t.runLogchefQL(ctx, params.TeamID, params.SourceID, core.LogchefQLQueryRequest{
 		Query:        params.Query,
 		Limit:        limit,
 		StartTime:    params.StartTime,
 		EndTime:      params.EndTime,
-		Timezone:     params.Timezone,
+		Timezone:     timezone,
 		QueryTimeout: params.QueryTimeout,
 		Interval:     params.Interval,
 		// The tool returns whatever the query computes, so it runs an
@@ -120,12 +124,18 @@ func (t *tools) handleTranslateLogchefQL(ctx context.Context, _ mcp.CallToolRequ
 	if limit <= 0 {
 		limit = 100
 	}
+	// ClickHouse builds full_sql only with a timezone, so an empty one
+	// would return the bare filter.
+	timezone := params.Timezone
+	if timezone == "" {
+		timezone = "UTC"
+	}
 
 	translation, err := core.TranslateLogchefQL(ctx, t.deps.Datasources, src, datasource.LogchefQLCompileRequest{
 		Query:     params.Query,
 		StartTime: params.StartTime,
 		EndTime:   params.EndTime,
-		Timezone:  params.Timezone,
+		Timezone:  timezone,
 		Limit:     limit,
 		Interval:  params.Interval,
 	})
