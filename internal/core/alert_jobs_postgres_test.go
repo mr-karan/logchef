@@ -61,7 +61,7 @@ func TestAlertEditWaitsForEvaluationCommit(t *testing.T) {
 	edit := make(chan error, 1)
 	name := "renamed"
 	go func() {
-		_, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &name})
+		_, _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &name})
 		edit <- err
 	}()
 	// Let the edit reach its first lock before the evaluation goes on.

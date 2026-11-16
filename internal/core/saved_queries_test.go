@@ -127,10 +127,10 @@ func TestUserCanEditSavedQueryDelegation(t *testing.T) {
 	if _, err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, models.CollectionLinkManaged, &creator.ID); err != nil {
 		t.Fatalf("AddCollectionItem: %v", err)
 	}
-	if err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, editor.ID, models.CollectionRoleEditor); err != nil {
+	if _, err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, editor.ID, models.CollectionRoleEditor); err != nil {
 		t.Fatalf("AddCollectionMember(editor): %v", err)
 	}
-	if err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, member.ID, models.CollectionRoleMember); err != nil {
+	if _, err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, member.ID, models.CollectionRoleMember); err != nil {
 		t.Fatalf("AddCollectionMember(member): %v", err)
 	}
 
@@ -468,7 +468,7 @@ func TestSavedQueryVariableNamesReserveTheMacroPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	update := func(variables ...string) error {
-		_, err := UpdateSavedQuery(ctx, db, nil, log, stored.ID, "old", "", content(variables...), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
+		_, _, err := UpdateSavedQuery(ctx, db, nil, log, stored.ID, "old", "", content(variables...), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
 		return err
 	}
 	if err := update("a", "__tenant"); err != nil {
@@ -486,7 +486,7 @@ func TestSavedQueryVariableNamesReserveTheMacroPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = UpdateSavedQuery(ctx, db, nil, log, shadow.ID, "shadow", "", content("a", "__from"), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
+	_, _, err = UpdateSavedQuery(ctx, db, nil, log, shadow.ID, "shadow", "", content("a", "__from"), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
 	if !errors.Is(err, ErrInvalidQueryContent) {
 		t.Errorf("an update that keeps a stored macro name: error = %v", err)
 	}

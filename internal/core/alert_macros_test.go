@@ -40,7 +40,7 @@ func TestAlertTimeMacros(t *testing.T) {
 		t.Fatalf("CreateAlert(macro query) = %v", err)
 	}
 	updated := "SELECT count() AS value FROM logs WHERE {{__time_filter}}"
-	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Query: &updated}); err != nil {
+	if _, _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Query: &updated}); err != nil {
 		t.Fatalf("UpdateAlert(macro query) = %v", err)
 	}
 	test := &models.TestAlertQueryRequest{

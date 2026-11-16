@@ -64,6 +64,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("ForUpdateReads", func(t *testing.T) { testForUpdateReads(t, ctx, s) })
 	t.Run("TeamForUpdate", func(t *testing.T) { testTeamForUpdate(t, ctx, s) })
 	t.Run("IdentityWriteCounts", func(t *testing.T) { testIdentityWriteCounts(t, ctx, s) })
+	t.Run("ContentForUpdate", func(t *testing.T) { testContentForUpdate(t, ctx, s) })
 }
 
 // --- helpers ---

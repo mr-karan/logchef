@@ -271,6 +271,10 @@ RETURNING id;
 -- Look up one saved query by id
 SELECT * FROM saved_queries WHERE id = $1;
 
+-- name: LockSavedQuery :one
+-- Lock a saved query row until the transaction ends
+SELECT id FROM saved_queries WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: UpdateSavedQuery :exec
 -- Update a saved query's mutable fields
 UPDATE saved_queries
@@ -596,6 +600,10 @@ RETURNING *;
 
 -- name: GetAlert :one
 SELECT * FROM alerts WHERE id = $1;
+
+-- name: LockAlert :one
+-- Lock an alert row until the transaction ends
+SELECT id FROM alerts WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: ListAlertsBySource :many
 -- List alerts for one source
@@ -1113,6 +1121,10 @@ ORDER BY ci.created_at ASC, ci.collection_id ASC, ci.saved_query_id ASC;
 INSERT INTO dashboards (name, description, panels_json, created_by, panel_count, tab_count, panel_types, panel_team_ids, panels_corrupt, summary_revision, summary_version)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10)
 RETURNING id;
+
+-- name: LockDashboard :one
+-- Lock a dashboard row until the transaction ends
+SELECT id FROM dashboards WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: GetDashboard :one
 -- Look up one dashboard by id, with creator identity like ListDashboardSummaries.

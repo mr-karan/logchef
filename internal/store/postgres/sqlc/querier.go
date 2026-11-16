@@ -385,14 +385,20 @@ type Querier interface {
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
+	// Lock an alert row until the transaction ends
+	LockAlert(ctx context.Context, id int64) (int64, error)
 	// Lock the collection row until the transaction ends, so a link, member or
 	// share write authorizes, mutates and selects its response against one state.
 	LockCollection(ctx context.Context, id int64) (int64, error)
+	// Lock a dashboard row until the transaction ends
+	LockDashboard(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock
 	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	// Holds the report row until the transaction ends, so two replacements of
 	// its recipients run one after the other instead of merging.
 	LockReport(ctx context.Context, id int64) (int64, error)
+	// Lock a saved query row until the transaction ends
+	LockSavedQuery(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock, which also covers a key with no row
 	LockSettingWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	// Records an evaluation and the rule's summary state. last_triggered_at moves

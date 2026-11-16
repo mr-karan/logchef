@@ -96,6 +96,9 @@ type SourceStore interface {
 type SavedQueryStore interface {
 	CreateSavedQuery(ctx context.Context, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error)
 	GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQuery, error)
+	// GetSavedQueryForUpdate reads a saved query and, inside WithTx, blocks
+	// other writers of the row until the transaction ends.
+	GetSavedQueryForUpdate(ctx context.Context, queryID int) (*models.SavedQuery, error)
 	UpdateSavedQuery(ctx context.Context, queryID int, name, description string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, queryContent string) error
 	DeleteSavedQuery(ctx context.Context, queryID int) error
 	ListSavedQueriesForUser(ctx context.Context, userID models.UserID) ([]*models.SavedQuery, error)
@@ -199,6 +202,9 @@ type CollectionStore interface {
 type DashboardStore interface {
 	CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error
 	GetDashboard(ctx context.Context, id int) (*models.Dashboard, error)
+	// GetDashboardForUpdate reads a dashboard and, inside WithTx, blocks
+	// other writers of the row until the transaction ends.
+	GetDashboardForUpdate(ctx context.Context, id int) (*models.Dashboard, error)
 	// ListDashboardSummaries returns every dashboard's summary from the derived
 	// columns, newest-updated first. It never reads panels_json.
 	ListDashboardSummaries(ctx context.Context) ([]*models.DashboardSummary, error)
@@ -225,6 +231,9 @@ type AlertStore interface {
 	UpdateAlert(ctx context.Context, alert *models.Alert) error
 	DeleteAlert(ctx context.Context, alertID models.AlertID) error
 	GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error)
+	// GetAlertForUpdate reads an alert and, inside WithTx, blocks other
+	// writers of the row until the transaction ends.
+	GetAlertForUpdate(ctx context.Context, alertID models.AlertID) (*models.Alert, error)
 	ListAlertsBySource(ctx context.Context, sourceID models.SourceID) ([]*models.Alert, error)
 	ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*models.Alert, error)
 	// MarkAlertEvaluated records an evaluation that left the rule in state,

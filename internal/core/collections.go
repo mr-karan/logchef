@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/core/access"
@@ -203,37 +204,16 @@ func lockCollection(ctx context.Context, tx store.StoreOps, collectionID int) er
 	return nil
 }
 
-// UpdateCollection renames/redescribes a collection. Owner-only.
-func UpdateCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, userID models.UserID, name, description string) (*models.Collection, error) {
-	collection, role, err := GetCollectionForUser(ctx, db, log, collectionID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if role != models.CollectionRoleOwner {
-		return nil, ErrCollectionForbidden
-	}
-	if collection.IsPersonal {
-		return nil, ErrPersonalCollectionImmutable
-	}
+// UpdateCollection renames/redescribes a collection. Owner-only. It returns
+// the collection before and after the write, both read under the collection
+// lock.
+func UpdateCollection(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, userID models.UserID, name, description string) (before, after *models.Collection, err error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return nil, fmt.Errorf("name is required")
+		return nil, nil, fmt.Errorf("name is required")
 	}
-	if err := db.UpdateCollection(ctx, collectionID, name, description); err != nil {
-		return nil, err
-	}
-	updated, err := db.GetCollection(ctx, collectionID)
-	if err != nil {
-		return nil, err
-	}
-	updated.CallerRole = role
-	return updated, nil
-}
-
-// DeleteCollection removes a collection. Owner-only; personal collections are protected.
-func DeleteCollection(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, userID models.UserID) error {
-	err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		if err := tx.LockMembershipWrites(ctx); err != nil {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := lockCollection(ctx, tx, collectionID); err != nil {
 			return err
 		}
 		collection, role, err := GetCollectionForUser(ctx, tx, log, collectionID, userID)
@@ -246,30 +226,66 @@ func DeleteCollection(ctx context.Context, db store.Store, log *slog.Logger, col
 		if collection.IsPersonal {
 			return ErrPersonalCollectionImmutable
 		}
-		if err := tx.DeleteCollection(ctx, collectionID); err != nil {
+		if err := tx.UpdateCollection(ctx, collectionID, name, description); err != nil {
 			return err
 		}
+		if after, err = tx.GetCollection(ctx, collectionID); err != nil {
+			return err
+		}
+		before, after.CallerRole = collection, role
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, nil, err
+	}
+	return before, after, nil
+}
+
+// DeleteCollection removes a collection and returns the row it deleted, read
+// under the collection lock. Owner-only; personal collections are protected.
+func DeleteCollection(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, userID models.UserID) (*models.Collection, error) {
+	var deleted *models.Collection
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		if err := lockCollection(ctx, tx, collectionID); err != nil {
+			return err
+		}
+		collection, role, err := GetCollectionForUser(ctx, tx, log, collectionID, userID)
+		if err != nil {
+			return err
+		}
+		deleted = collection
+		if role != models.CollectionRoleOwner {
+			return ErrCollectionForbidden
+		}
+		if collection.IsPersonal {
+			return ErrPersonalCollectionImmutable
+		}
+		return tx.DeleteCollection(ctx, collectionID)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	log.Info("collection deleted", "collection_id", collectionID, "user_id", userID)
-	return nil
+	return deleted, nil
 }
 
 // AddCollectionMember invites a user. Owner-only. The check and the write
 // run under the collection lock, because membership is the authority that a
-// managed link hands out.
-func AddCollectionMember(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID, targetUserID models.UserID, role models.CollectionRole) error {
+// managed link hands out. It returns the membership it added, and nil when
+// the user was already a member, whose role the add leaves as it is.
+func AddCollectionMember(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID, targetUserID models.UserID, role models.CollectionRole) (*models.CollectionMember, error) {
 	switch role {
 	case models.CollectionRoleOwner, models.CollectionRoleEditor, models.CollectionRoleMember:
 		// valid
 	default:
-		return ErrInvalidCollectionRole
+		return nil, ErrInvalidCollectionRole
 	}
-	return db.WithTx(ctx, func(tx store.StoreOps) error {
+	var added *models.CollectionMember
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := lockCollection(ctx, tx, collectionID); err != nil {
 			return err
 		}
@@ -286,17 +302,31 @@ func AddCollectionMember(ctx context.Context, db store.Store, log *slog.Logger, 
 		if _, err := tx.GetUser(ctx, targetUserID); err != nil {
 			return fmt.Errorf("user %d not found", targetUserID)
 		}
-		added := callerID
-		return tx.AddCollectionMember(ctx, collectionID, targetUserID, role, &added)
+		_, err = tx.GetCollectionMember(ctx, collectionID, targetUserID)
+		if err == nil || !models.IsNotFound(err) {
+			return err
+		}
+		addedBy := callerID
+		if err := tx.AddCollectionMember(ctx, collectionID, targetUserID, role, &addedBy); err != nil {
+			return err
+		}
+		added, err = tx.GetCollectionMember(ctx, collectionID, targetUserID)
+		return err
 	})
+	if err != nil {
+		return nil, err
+	}
+	return added, nil
 }
 
 // RemoveCollectionMember drops a direct membership row. Owners can remove
 // anyone (except the last owner); members can self-leave. Access derived from a
 // team share is not affected: it ends only when the share or the team
-// membership is removed.
-func RemoveCollectionMember(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID, targetUserID models.UserID) error {
-	return db.WithTx(ctx, func(tx store.StoreOps) error {
+// membership is removed. It returns the membership it removed, and nil when
+// the user had none.
+func RemoveCollectionMember(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID, targetUserID models.UserID) (*models.CollectionMember, error) {
+	var removed *models.CollectionMember
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := lockCollection(ctx, tx, collectionID); err != nil {
 			return err
 		}
@@ -334,8 +364,20 @@ func RemoveCollectionMember(ctx context.Context, db store.Store, log *slog.Logge
 			}
 		}
 
+		removed, err = tx.GetCollectionMember(ctx, collectionID, targetUserID)
+		if models.IsNotFound(err) {
+			removed = nil
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		return tx.RemoveCollectionMember(ctx, collectionID, targetUserID)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 // requireRosterAccess gates the member and team rosters: visible only to the
@@ -376,13 +418,13 @@ func ListCollectionTeams(ctx context.Context, db store.StoreOps, log *slog.Logge
 // collection; being a global admin does not replace ownership. Owners who are
 // not global admins (or who call through OAuth) may only share with teams they
 // belong to, so the endpoint cannot be used to probe or reach arbitrary teams.
-// Sharing is idempotent.
-func AddCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, p access.Principal, teamID models.TeamID) error {
+// Sharing is idempotent; added reports whether this call created the share.
+func AddCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, p access.Principal, teamID models.TeamID) (added bool, err error) {
 	if p.User == nil {
-		return ErrCollectionForbidden
+		return false, ErrCollectionForbidden
 	}
 	callerID := p.User.ID
-	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := lockCollection(ctx, tx, collectionID); err != nil {
 			return err
 		}
@@ -414,21 +456,40 @@ func AddCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger, co
 				return ErrCollectionTeamNotMember
 			}
 		}
-		added := callerID
-		return tx.AddCollectionTeam(ctx, collectionID, teamID, &added)
+		shared, err := collectionSharedWithTeam(ctx, tx, collectionID, teamID)
+		if err != nil || shared {
+			return err
+		}
+		addedBy := callerID
+		if err := tx.AddCollectionTeam(ctx, collectionID, teamID, &addedBy); err != nil {
+			return err
+		}
+		added = true
+		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	log.Info("collection shared with team", "collection_id", collectionID, "team_id", teamID, "user_id", callerID)
-	return nil
+	return added, nil
+}
+
+// collectionSharedWithTeam reports whether the collection is shared with the
+// team. A collection has few team shares, so it reads the list.
+func collectionSharedWithTeam(ctx context.Context, tx store.StoreOps, collectionID int, teamID models.TeamID) (bool, error) {
+	teams, err := tx.ListCollectionTeams(ctx, collectionID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(teams, func(t *models.CollectionTeam) bool { return t.TeamID == teamID }), nil
 }
 
 // RemoveCollectionTeam removes a team share. Direct-owner only. The owner does
 // not need to belong to the team, so a share stays revocable after the owner
-// leaves it. Direct memberships and other team shares are untouched.
-func RemoveCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID models.UserID, teamID models.TeamID) error {
-	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+// leaves it. Direct memberships and other team shares are untouched. removed
+// reports whether a share existed.
+func RemoveCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID models.UserID, teamID models.TeamID) (removed bool, err error) {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := lockCollection(ctx, tx, collectionID); err != nil {
 			return err
 		}
@@ -442,13 +503,16 @@ func RemoveCollectionTeam(ctx context.Context, db store.Store, log *slog.Logger,
 		if collection.IsPersonal {
 			return ErrPersonalCollectionImmutable
 		}
+		if removed, err = collectionSharedWithTeam(ctx, tx, collectionID, teamID); err != nil || !removed {
+			return err
+		}
 		return tx.RemoveCollectionTeam(ctx, collectionID, teamID)
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	log.Info("collection team share removed", "collection_id", collectionID, "team_id", teamID, "user_id", callerID)
-	return nil
+	return removed, nil
 }
 
 // linkWrite is the state a link write reads under the collection lock before
@@ -553,10 +617,10 @@ func AddCollectionItem(ctx context.Context, db store.Store, log *slog.Logger, co
 // must take part in the collection; a global admin needs no part in it, so a
 // link whose creator is gone can still be converted. The conversion statement
 // names the old kind in its condition, so one changed row means the link had
-// the other kind. A link already of that kind is returned unchanged.
-func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, caller *models.User, savedQueryID int, kind models.CollectionLinkKind) (*models.CollectionItemLink, error) {
-	var link *models.CollectionItemLink
-	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+// the other kind. A link already of that kind is returned unchanged. before
+// is the link as it was when it changed, and nil when it did not.
+func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, caller *models.User, savedQueryID int, kind models.CollectionLinkKind) (before, link *models.CollectionItemLink, err error) {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
 		w, err := beginLinkWrite(ctx, tx, log, collectionID, caller, savedQueryID)
 		if err != nil {
 			return err
@@ -586,6 +650,9 @@ func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 			return err
 		}
 		if changed {
+			prior := *link
+			prior.Kind = kind.Other()
+			before = &prior
 			log.Info("collection link kind changed",
 				"collection_id", collectionID, "saved_query_id", savedQueryID,
 				"old_kind", kind.Other(), "new_kind", kind,
@@ -594,9 +661,9 @@ func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return link, nil
+	return before, link, nil
 }
 
 // RemoveCollectionItem unlinks a saved query. A participant may remove a pin.
@@ -604,8 +671,10 @@ func UpdateCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 // created it: the query's creator or a global admin, who must still take part
 // in the collection. The delete statement names the kinds the caller may
 // remove, so a pin that became managed after the caller looked at it stays.
-func RemoveCollectionItem(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, caller *models.User, savedQueryID int) error {
-	return db.WithTx(ctx, func(tx store.StoreOps) error {
+// It returns the link it removed.
+func RemoveCollectionItem(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, caller *models.User, savedQueryID int) (*models.CollectionItemLink, error) {
+	var link *models.CollectionItemLink
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		w, err := beginLinkWrite(ctx, tx, log, collectionID, caller, savedQueryID)
 		if err != nil {
 			return err
@@ -615,6 +684,13 @@ func RemoveCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 		}
 		if w.query == nil {
 			return ErrCollectionLinkNotFound
+		}
+		link, err = tx.GetCollectionItemLink(ctx, collectionID, savedQueryID)
+		if models.IsNotFound(err) {
+			return ErrCollectionLinkNotFound
+		}
+		if err != nil {
+			return err
 		}
 		var removed bool
 		if userIsCreatorOrAdmin(w.query, w.caller) {
@@ -628,14 +704,12 @@ func RemoveCollectionItem(ctx context.Context, db store.Store, log *slog.Logger,
 		if removed {
 			return nil
 		}
-		if _, err := tx.GetCollectionItemLink(ctx, collectionID, savedQueryID); err != nil {
-			if models.IsNotFound(err) {
-				return ErrCollectionLinkNotFound
-			}
-			return err
-		}
 		return ErrCollectionLinkAuthority
 	})
+	if err != nil {
+		return nil, err
+	}
+	return link, nil
 }
 
 // ListDemotedCollectionLinks lists every pin in a shared collection with the

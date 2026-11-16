@@ -202,3 +202,9 @@ func (db *DB) ListSavedQueriesForUserBySource(ctx context.Context, userID models
 	}
 	return queries, nil
 }
+
+// GetSavedQueryForUpdate retrieves the row with GetSavedQuery. Inside WithTx the read runs on
+// the transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetSavedQueryForUpdate(ctx context.Context, queryID int) (*models.SavedQuery, error) {
+	return db.GetSavedQuery(ctx, queryID)
+}

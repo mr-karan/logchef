@@ -126,20 +126,20 @@ var registrations = []struct {
 	action Action
 	staged bool
 }{
-	{AlertCreate, false}, {AlertUpdate, false}, {AlertDelete, false}, {AlertResolve, false},
+	{AlertCreate, true}, {AlertUpdate, true}, {AlertDelete, true}, {AlertResolve, false},
 	{APITokenCreate, true}, {APITokenDelete, true},
 	{AuditEventExport, false},
-	{CollectionCreate, false}, {CollectionUpdate, false}, {CollectionDelete, false},
-	{CollectionItemAdd, false}, {CollectionItemUpdate, false}, {CollectionItemRemove, false},
-	{CollectionMemberAdd, false}, {CollectionMemberRemove, false},
-	{CollectionTeamAdd, false}, {CollectionTeamRemove, false},
-	{DashboardCreate, false}, {DashboardUpdate, false}, {DashboardDelete, false},
+	{CollectionCreate, true}, {CollectionUpdate, true}, {CollectionDelete, true},
+	{CollectionItemAdd, true}, {CollectionItemUpdate, true}, {CollectionItemRemove, true},
+	{CollectionMemberAdd, true}, {CollectionMemberRemove, true},
+	{CollectionTeamAdd, true}, {CollectionTeamRemove, true},
+	{DashboardCreate, true}, {DashboardUpdate, true}, {DashboardDelete, true},
 	{LogExportCreate, true}, {LogExportDownload, false},
 	{NotificationDestinationCreate, true}, {NotificationDestinationUpdate, true}, {NotificationDestinationDelete, true}, {NotificationDestinationTest, false},
 	{OAuthConsentApprove, true}, {OAuthConsentDeny, true},
 	{OAuthGrantRevoke, true},
-	{QueryShareCreate, false}, {QueryShareDelete, false},
-	{SavedQueryCreate, false}, {SavedQueryUpdate, false}, {SavedQueryDelete, false},
+	{QueryShareCreate, true}, {QueryShareDelete, true},
+	{SavedQueryCreate, true}, {SavedQueryUpdate, true}, {SavedQueryDelete, true},
 	{ServiceAccountCreate, true}, {ServiceAccountDelete, true},
 	{SessionLogin, true}, {SessionLogout, true},
 	// A setting test changes no object, so it has a target and a detail but

@@ -145,7 +145,7 @@ func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 		s.log.Error("failed to create alert", "source_id", req.SourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create alert", models.GeneralErrorType)
 	}
-	auditTarget(c, audit.AlertTarget(alert))
+	auditSet(c, audit.AlertTarget(alert), nil, audit.AlertFields(alert))
 	return SendSuccess(c, fiber.StatusCreated, alert)
 }
 
@@ -194,7 +194,7 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, updateErr := core.UpdateAlert(c.Context(), s.store, s.datasources, s.log, user, alert.ID, &req)
+	before, updated, updateErr := core.UpdateAlert(c.Context(), s.store, s.datasources, s.log, user, alert.ID, &req)
 	if updateErr != nil {
 		switch {
 		case errors.Is(updateErr, core.ErrInvalidAlertConfiguration):
@@ -208,7 +208,7 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update alert", models.GeneralErrorType)
 		}
 	}
-	auditTarget(c, audit.AlertTarget(updated))
+	auditSet(c, audit.AlertTarget(updated), audit.AlertFields(before), audit.AlertFields(updated))
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
@@ -222,13 +222,14 @@ func (s *Server) handleDeleteAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this alert", models.AuthorizationErrorType)
 	}
 
-	if delErr := core.DeleteAlert(c.Context(), s.store, s.log, alert.ID); delErr != nil {
+	deleted, delErr := core.DeleteAlert(c.Context(), s.store, s.log, alert.ID)
+	if delErr != nil {
 		if errors.Is(delErr, core.ErrAlertNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete alert", models.GeneralErrorType)
 	}
-	auditTarget(c, audit.AlertTarget(alert))
+	auditSet(c, audit.AlertTarget(deleted), audit.AlertFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert deleted"})
 }
 

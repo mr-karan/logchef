@@ -191,3 +191,15 @@ func (s *Store) ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, 
 	}
 	return queries, nil
 }
+
+// GetSavedQueryForUpdate locks the row until the transaction ends, then reads it with
+// GetSavedQuery.
+func (s *Store) GetSavedQueryForUpdate(ctx context.Context, queryID int) (*models.SavedQuery, error) {
+	if _, err := s.q.LockSavedQuery(ctx, int64(queryID)); err != nil {
+		if notFound(err) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("locking %v for update: %w", queryID, err)
+	}
+	return s.GetSavedQuery(ctx, queryID)
+}
