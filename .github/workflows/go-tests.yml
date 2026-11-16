@@ -178,6 +178,12 @@ jobs:
           test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.clusters WHERE cluster = 'logchef_two_shards'")" = 2
       - name: Query, schema, and lifecycle compatibility
         run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql ./internal/advisor ./internal/core -count=1
+      # The test job runs the rest of internal/server; these are the tests that
+      # skip there for lack of a ClickHouse address. Add new ones here.
+      - name: Server responses against ClickHouse
+        run: >-
+          go test -race -gcflags='modernc.org/...=-d=checkptr=0' ./internal/server -count=1
+          -run '^(TestClickHouseQueryFailureResponses|TestClickHouseResourceFailureResponses|TestClickHousePreviewClientDisconnect|TestClickHousePreviewContextCancellation|TestExportQueriesClickHouse|TestExportJobCancelledAtShutdown|TestViewActivityCapResponseClickHouse)$'
 
   lint:
     runs-on: ubuntu-latest
