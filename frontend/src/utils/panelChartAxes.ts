@@ -1,5 +1,6 @@
 import type { PanelFrame } from './panelFrame';
-import type { ChartViz } from './panelCharts';
+import type { NumberFormat } from '@/api/dashboards';
+import { chartValue, type ChartViz } from './panelCharts';
 import { parseGranularityToMilliseconds } from './histogram-chart';
 
 export function chartTicks(low: number, high: number, count: boolean): number[] {
@@ -11,6 +12,18 @@ export function chartTicks(low: number, high: number, count: boolean): number[] 
   const step = count ? Math.max(1, factor * power) : factor * power;
   const first = Math.floor(low / step), last = Math.ceil((high || step) / step);
   return Array.from({ length: last - first + 1 }, (_, i) => (first + i) * step);
+}
+
+// Value-axis labels for ticks. Rounding can give two ticks the same label (1500
+// and 2000 ms both read "2 s" at 0 decimals), so decimals grow until the labels
+// differ, up to 4 more than the format asks for.
+export function chartTickLabels(ticks: number[], format?: NumberFormat): Map<number, string> {
+  let labels = ticks.map(tick => chartValue(tick, format).text);
+  for (let extra = 1; extra <= 4 && new Set(labels).size < labels.length; extra++) {
+    const decimals = (format?.decimals ?? 2) + extra;
+    labels = ticks.map(tick => chartValue(tick, { ...format, decimals }).text);
+  }
+  return new Map(ticks.map((tick, i) => [tick, labels[i]]));
 }
 
 export function chartTimeFormatter(frame: PanelFrame, viz: ChartViz, count: boolean, zone: string): Intl.DateTimeFormat {

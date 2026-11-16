@@ -10,7 +10,7 @@ import { useThemeStore } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
 import { buildPanelChart, chartStacked, chartValue, chartLabelColor, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
-import { chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
+import { chartTickLabels, chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
 import { addExact, isExact, parseExact, type FrameNumber } from "@/utils/exactNumber";
 import { escapeHtml } from "@/lib/html";
 import type { ResolvedWindow } from "@/utils/timeWindow";
@@ -123,7 +123,8 @@ const pointLabelSelector = `.${Scatter.selectors.point} > text`;
 function xTick(value: number | Date) {
   return model.value.time ? timeFormatter.value.format(Number(value)).replaceAll(",", "") : model.value.rows[Number(value)]?.label() ?? "";
 }
-const yTick = (value: number | Date) => chartValue(Number(value), props.viz.format).text;
+const yTickLabels = computed(() => chartTickLabels(extent.value, props.viz.format));
+const yTick = (value: number | Date) => yTickLabels.value.get(Number(value)) ?? chartValue(Number(value), props.viz.format).text;
 const active = ref<number | null>(null);
 const sharedTooltip = ref<{ component?: Tooltip }>();
 const crosshair = ref<{ component?: Crosshair<ChartRow> }>();
