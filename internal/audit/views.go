@@ -277,3 +277,14 @@ func UserFields(u *models.User) *Fields {
 		Set("account_type", u.AccountType).
 		Set("managed", u.Managed)
 }
+
+// LogExportFields records an export: the query language, the format, the
+// row limit that applies, and the query as a digest, so a literal inside it
+// never reaches the event.
+func LogExportFields(language models.QueryLanguage, format string, rowLimit int, query string) *Fields {
+	return NewFields().
+		Set("language", language).
+		Set("format", format).
+		Set("row_limit", rowLimit).
+		Digest("query", query)
+}

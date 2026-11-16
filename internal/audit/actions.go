@@ -127,7 +127,7 @@ var registrations = []struct {
 	{CollectionMemberAdd, false}, {CollectionMemberRemove, false},
 	{CollectionTeamAdd, false}, {CollectionTeamRemove, false},
 	{DashboardCreate, false}, {DashboardUpdate, false}, {DashboardDelete, false},
-	{LogExportCreate, false}, {LogExportDownload, false},
+	{LogExportCreate, true}, {LogExportDownload, false},
 	{NotificationDestinationCreate, true}, {NotificationDestinationUpdate, true}, {NotificationDestinationDelete, true}, {NotificationDestinationTest, false},
 	{OAuthConsentApprove, true}, {OAuthConsentDeny, true},
 	{OAuthGrantRevoke, true},

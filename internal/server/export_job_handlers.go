@@ -19,6 +19,7 @@ import (
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -89,13 +90,37 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
 	}
 
-	if err := s.store.CreateExportJob(c.Context(), job); err != nil {
+	// No job exists without a stored event: the job and its event commit in
+	// one transaction.
+	ctx := c.Context()
+	var (
+		batch    *audit.Batch
+		auditErr error
+	)
+	err = s.store.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.CreateExportJob(ctx, job); err != nil {
+			return err
+		}
+		auditSet(c, audit.ExportJobTarget(job, teamID), nil,
+			audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, s.exportRowLimit(req.Limit), req.RawSQL))
+		batch = s.audit.Batch(tx)
+		auditErr = s.addRouteEvent(ctx, c, batch, fiber.StatusAccepted)
+		return auditErr
+	})
+	if err != nil {
 		queryTracker.RemoveQuery(job.ID)
 		cancel()
+		clearAuditFields(c)
+		auditTarget(c, audit.ExportSourceTarget(teamID, sourceID))
+		if auditErr != nil {
+			s.log.Error("export job not created: audit event not stored", "error", auditErr, "job_id", job.ID)
+			return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: no export job was created")
+		}
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create export job", models.GeneralErrorType)
 	}
-	auditTarget(c, audit.ExportJobTarget(job, teamID))
+	batch.Publish(ctx)
+	markAuditRecorded(c)
 
 	runReq := req
 	runReq.Format = format
@@ -241,13 +266,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 		return
 	}
 
-	exportLimit := req.Limit
-	if exportLimit <= 0 {
-		exportLimit = s.config.Export.MaxRows
-	}
-	if exportLimit > s.config.Export.MaxRows {
-		exportLimit = s.config.Export.MaxRows
-	}
+	exportLimit := s.exportRowLimit(req.Limit)
 
 	qb := client.QueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
