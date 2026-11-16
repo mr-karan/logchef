@@ -34,6 +34,7 @@ const (
 	TargetClickHouseSQL TargetLanguage = "clickhouse-sql"
 	TargetLogchefQL     TargetLanguage = "logchefql"
 	TargetLogsQL        TargetLanguage = "logsql"
+	TargetLogQL         TargetLanguage = "logql"
 )
 
 const (
@@ -115,6 +116,32 @@ level:="error" | stats count() as value
 
 Provided schema:
 %s`
+
+	// LogQLSystemPromptFormat teaches Grafana Loki LogQL (RFC 0011). Its
+	// arguments are the source's default stream selector, its parser rule and
+	// the schema. A column of type "label" is a stream label; the Loki
+	// provider's GetSourceSchema writes every other field with its detected
+	// type.
+	LogQLSystemPromptFormat = `You are an expert Grafana Loki LogQL query assistant for log analytics. Given a schema and a natural language query, produce a single valid LogQL query. Important guidelines:
+
+1. Every query starts with a stream selector in braces. Start from this source's default stream selector: %s
+   Keep all of its matchers and add more inside the same braces to narrow it, e.g. {service_name=~".+", env="prod"}. A selector needs at least one matcher that does not match the empty string.
+2. The schema has three kinds of field:
+   - Stream labels have type "label". Only stream labels may appear inside the selector braces.
+   - _msg is the log line. Filter it with a line filter right after the selector: |= "text" (contains), != "text" (does not contain), |~ "(?i)regex", !~ "regex". _time is the entry timestamp; never filter on it.
+   - Every other field is structured metadata or a field that the parser extracts. Filter it with a label filter after the parser stage: | level="error", | status>=500 (numbers bare), | duration_ms > 250.
+3. %s
+4. For counts, rates or totals, wrap the log query in a range aggregation, e.g. sum by (level) (count_over_time({service_name="api"} |= "timeout" [5m])). Use rate(...) for per-second rates.
+5. Do NOT add a time range or an offset: Logchef applies the selected time range separately.
+6. Output ONLY the raw LogQL query: NO code fences, NO markdown, NO explanation.
+
+Example query patterns:
+{service_name="payments-api"} |= "timeout"
+{service_name="payments-api", env="prod"} |~ "(?i)refused|reset"
+sum by (level) (count_over_time({service_name="payments-api"}[5m]))
+
+Provided schema:
+%s`
 )
 
 // GeneratorConfig contains the model/inference settings for a Generator.
@@ -182,6 +209,10 @@ type GenerateQueryInput struct {
 	Schema               string
 	TableName            string
 	CurrentQuery         string // Optional current query for context
+	// StreamSelector and Parser describe a Loki source for the LogQL target:
+	// its default stream selector and its parser ("", "json" or "logfmt").
+	StreamSelector string
+	Parser         string
 }
 
 // GenerateQuery turns natural language into a validated query in the requested
@@ -208,7 +239,7 @@ func (g *Generator) GenerateQuery(ctx context.Context, in GenerateQueryInput) (s
 	)
 
 	now := time.Now()
-	systemPrompt := systemPromptFor(in.Target, in.TableName, in.Schema)
+	systemPrompt := systemPromptFor(in)
 	userPrompt := userPromptFor(in.Target, in.NaturalLanguageQuery, in.CurrentQuery, now)
 
 	// Attempt 1. completeAndValidate applies its OWN g.callTimeout window per
@@ -225,8 +256,8 @@ func (g *Generator) GenerateQuery(ctx context.Context, in GenerateQueryInput) (s
 	g.logger.Warn("AI generated invalid query on first attempt", "target", in.Target, "error", validationErr)
 
 	// Repair loop, capped at exactly ONE repair attempt (max 2 Complete calls).
-	// LogsQL is not repairable: there is no local LogsQL validator to repair
-	// against, so a repair prompt would have nothing meaningful to correct.
+	// LogsQL and LogQL are not repairable: there is no local validator to
+	// repair against, so a repair prompt would have nothing meaningful to correct.
 	if !isRepairableTarget(in.Target) {
 		return "", ErrInvalidSQLGeneratedByAI
 	}
@@ -284,6 +315,8 @@ func targetLanguageName(target TargetLanguage) string {
 		return "LogchefQL"
 	case TargetLogsQL:
 		return "LogsQL"
+	case TargetLogQL:
+		return "LogQL"
 	default:
 		return "ClickHouse SQL"
 	}
@@ -291,15 +324,27 @@ func targetLanguageName(target TargetLanguage) string {
 
 // systemPromptFor builds the target-specific system prompt. The ClickHouse-SQL
 // prompt is byte-identical to the pre-P2 client.
-func systemPromptFor(target TargetLanguage, tableName, schema string) string {
-	switch target {
+func systemPromptFor(in GenerateQueryInput) string {
+	switch in.Target {
 	case TargetLogchefQL:
-		return fmt.Sprintf(LogchefQLSystemPromptFormat, schema)
+		return fmt.Sprintf(LogchefQLSystemPromptFormat, in.Schema)
 	case TargetLogsQL:
-		return fmt.Sprintf(LogsQLSystemPromptFormat, schema)
+		return fmt.Sprintf(LogsQLSystemPromptFormat, in.Schema)
+	case TargetLogQL:
+		return fmt.Sprintf(LogQLSystemPromptFormat, in.StreamSelector, logQLParserRule(in.Parser), in.Schema)
 	default:
-		return fmt.Sprintf(DefaultSystemPromptTableFormat, tableName, schema)
+		return fmt.Sprintf(DefaultSystemPromptTableFormat, in.TableName, in.Schema)
 	}
+}
+
+// logQLParserRule tells the model where the source's parser stage goes. The
+// schema lists parsed fields only when the source has a parser, so a query
+// that filters on one needs that stage.
+func logQLParserRule(parser string) string {
+	if parser == "" {
+		return "This source has no parser. Do not add a parser stage; filter structured metadata directly after the selector and line filters."
+	}
+	return fmt.Sprintf("This source parses lines with | %[1]s. Put | %[1]s after the line filters and before any filter on a field that is not a stream label.", parser)
 }
 
 // userPromptFor builds the target-specific user prompt. The ClickHouse-SQL
@@ -349,11 +394,11 @@ func validateForTarget(target TargetLanguage, cleaned string) (string, error) {
 			return "", fmt.Errorf("%w: %s", ErrInvalidSQLGeneratedByAI, msg)
 		}
 		return cleaned, nil
-	case TargetLogsQL:
-		// No local LogsQL parser exists in the codebase, and we deliberately do
-		// NOT fabricate one. Best-effort validation only: reject an empty
-		// (post-strip) response and otherwise accept as-is. Because there is
-		// nothing to validate the query against, LogsQL is NOT repairable.
+	case TargetLogsQL, TargetLogQL:
+		// No local LogsQL or LogQL parser exists in the codebase, and we
+		// deliberately do NOT fabricate one. Best-effort validation only: reject
+		// an empty (post-strip) response and otherwise accept as-is. Because
+		// there is nothing to validate the query against, neither is repairable.
 		if strings.TrimSpace(cleaned) == "" {
 			return "", ErrInvalidSQLGeneratedByAI
 		}
@@ -368,7 +413,7 @@ func validateForTarget(target TargetLanguage, cleaned string) (string, error) {
 
 // isRepairableTarget reports whether a failed generation for the target can be
 // repaired (i.e. there is a validator whose error we can feed back). ClickHouse
-// SQL and LogchefQL are repairable; LogsQL is not.
+// SQL and LogchefQL are repairable; LogsQL and LogQL are not.
 func isRepairableTarget(target TargetLanguage) bool {
 	return target == TargetClickHouseSQL || target == TargetLogchefQL
 }
