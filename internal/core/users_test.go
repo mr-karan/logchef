@@ -79,7 +79,7 @@ func TestDeleteUserRemovesSessions(t *testing.T) {
 		t.Fatalf("precondition: CountUserSessions = %d / %v, want 1", n, err)
 	}
 
-	if err := DeleteUser(ctx, db, log, user.ID); err != nil {
+	if _, err := DeleteUser(ctx, db, log, user.ID); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestDeleteUserOfOtherUsersSessionsUnaffected(t *testing.T) {
 		t.Fatalf("CreateSession(bystander): %v", err)
 	}
 
-	if err := DeleteUser(ctx, db, log, victim.ID); err != nil {
+	if _, err := DeleteUser(ctx, db, log, victim.ID); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestDeactivateUserRevokesSessions(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := UpdateUser(ctx, db, log, access.SystemPrincipal(), user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if _, _, err := UpdateUser(ctx, db, log, access.SystemPrincipal(), user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatalf("UpdateUser(deactivate): %v", err)
 	}
 
@@ -157,10 +157,10 @@ func TestDeactivateLastAdminRejected(t *testing.T) {
 	a := newTestAdmin(t, db, "admin-a@example.com")
 	b := newTestAdmin(t, db, "admin-b@example.com")
 
-	if err := UpdateUser(ctx, db, log, access.SystemPrincipal(), a.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if _, _, err := UpdateUser(ctx, db, log, access.SystemPrincipal(), a.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatalf("deactivating first admin should succeed: %v", err)
 	}
-	if err := UpdateUser(ctx, db, log, access.SystemPrincipal(), b.ID, models.User{Status: models.UserStatusInactive}); !errors.Is(err, ErrCannotDeleteLastAdmin) {
+	if _, _, err := UpdateUser(ctx, db, log, access.SystemPrincipal(), b.ID, models.User{Status: models.UserStatusInactive}); !errors.Is(err, ErrCannotDeleteLastAdmin) {
 		t.Fatalf("deactivating last admin: err = %v, want ErrCannotDeleteLastAdmin", err)
 	}
 	if n, err := db.CountAdminUsers(ctx); err != nil || n != 1 {
@@ -179,10 +179,10 @@ func TestDeleteLastAdminRejected(t *testing.T) {
 	a := newTestAdmin(t, db, "del-admin-a@example.com")
 	b := newTestAdmin(t, db, "del-admin-b@example.com")
 
-	if err := DeleteUser(ctx, db, log, a.ID); err != nil {
+	if _, err := DeleteUser(ctx, db, log, a.ID); err != nil {
 		t.Fatalf("deleting first admin should succeed: %v", err)
 	}
-	if err := DeleteUser(ctx, db, log, b.ID); !errors.Is(err, ErrCannotDeleteLastAdmin) {
+	if _, err := DeleteUser(ctx, db, log, b.ID); !errors.Is(err, ErrCannotDeleteLastAdmin) {
 		t.Fatalf("deleting last admin: err = %v, want ErrCannotDeleteLastAdmin", err)
 	}
 }
@@ -208,7 +208,7 @@ func TestConcurrentAdminDeactivationKeepsOneAdmin(t *testing.T) {
 	for i := range targets {
 		go func() {
 			defer wg.Done()
-			errs[i] = UpdateUser(ctx, db, log, access.SystemPrincipal(), targets[i], models.User{Status: models.UserStatusInactive})
+			_, _, errs[i] = UpdateUser(ctx, db, log, access.SystemPrincipal(), targets[i], models.User{Status: models.UserStatusInactive})
 		}()
 	}
 	wg.Wait()
@@ -292,7 +292,7 @@ func TestDemoteAdmin(t *testing.T) {
 			if tc.deactivate {
 				update.Status = models.UserStatusInactive
 			}
-			err := UpdateUser(ctx, db, discardLogger(), access.SystemPrincipal(), admin.ID, update)
+			_, _, err := UpdateUser(ctx, db, discardLogger(), access.SystemPrincipal(), admin.ID, update)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("UpdateUser = %v, want %v", err, tc.wantErr)
 			}
@@ -335,7 +335,7 @@ func TestConcurrentAdminDemotionKeepsOneAdmin(t *testing.T) {
 	for i, admin := range admins {
 		go func() {
 			defer wg.Done()
-			errs[i] = UpdateUser(ctx, db, discardLogger(), access.SystemPrincipal(), admin.ID, models.User{Role: models.UserRoleMember})
+			_, _, errs[i] = UpdateUser(ctx, db, discardLogger(), access.SystemPrincipal(), admin.ID, models.User{Role: models.UserRoleMember})
 		}()
 	}
 	wg.Wait()

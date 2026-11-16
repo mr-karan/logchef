@@ -46,10 +46,10 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(team-a): %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, teamA.ID, creator.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, teamA.ID, creator.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(creator, team-a): %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, teamA.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, teamA.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(team-a, src): %v", err)
 	}
 
@@ -61,10 +61,10 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(team-b): %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, teamB.ID, crossTeamUser.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, teamB.ID, crossTeamUser.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(crossTeamUser, team-b): %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, teamB.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, teamB.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(team-b, src): %v", err)
 	}
 
@@ -190,10 +190,10 @@ func TestMarkSavedQueriesRunnable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam: %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember: %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, team.ID, accessibleSrc.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, team.ID, accessibleSrc.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 

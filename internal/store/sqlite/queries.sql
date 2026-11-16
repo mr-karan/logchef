@@ -167,6 +167,13 @@ ORDER BY t.created_at DESC;
 
 -- Team Members
 
+-- name: InsertTeamMember :execrows
+-- Add a member to a team and report through the row count whether this call
+-- inserted it; an existing member is left as it is.
+INSERT INTO team_members (team_id, user_id, role)
+VALUES (?, ?, ?)
+ON CONFLICT (team_id, user_id) DO NOTHING;
+
 -- name: AddTeamMember :exec
 -- Add a member to a team; adding an existing member is a no-op and keeps their role.
 INSERT INTO team_members (team_id, user_id, role)
@@ -548,7 +555,7 @@ SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
 WHERE id = ?
   AND (last_used_at IS NULL OR julianday(last_used_at) < julianday('now', '-60 seconds'));
 
--- name: DeleteAPIToken :exec
+-- name: DeleteAPIToken :execrows
 -- Delete an API token by ID and user ID (ensure user owns the token)
 DELETE FROM api_tokens WHERE id = ? AND user_id = ?;
 

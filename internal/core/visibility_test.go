@@ -29,7 +29,7 @@ func TestVisibilityForPrincipal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam: %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, team.ID, owner.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, owner.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember: %v", err)
 	}
 	if err := db.AddTeamSource(ctx, team.ID, src.ID); err != nil {

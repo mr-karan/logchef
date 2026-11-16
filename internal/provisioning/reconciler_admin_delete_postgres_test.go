@@ -80,7 +80,7 @@ func TestReconcilePostgresConcurrentAdminTeamDelete(t *testing.T) {
 	wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps {
 		return afterMemberRoleUpdate{StoreOps: tx, after: func() error {
 			started = true
-			go func() { result <- core.DeleteTeam(ctx, db, quietLogger(), team.ID) }()
+			go func() { _, err := core.DeleteTeam(ctx, db, quietLogger(), team.ID); result <- err }()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
@@ -251,9 +251,11 @@ func TestReconcilePostgresConcurrentAdminTeamSourceWrite(t *testing.T) {
 					started = true
 					go func() {
 						if operation == "add" {
-							result <- core.AddTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							_, err := core.AddTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							result <- err
 						} else {
-							result <- core.RemoveTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							_, err := core.RemoveTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							result <- err
 						}
 						close(progress)
 					}()

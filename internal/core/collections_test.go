@@ -754,7 +754,7 @@ func TestCollectionTeamShareOverlapAndRemoval(t *testing.T) {
 	}
 
 	// Deleting the last shared team cleans up the share and revokes access.
-	if err := DeleteTeam(ctx, db, log, teamB.ID); err != nil {
+	if _, err := DeleteTeam(ctx, db, log, teamB.ID); err != nil {
 		t.Fatalf("DeleteTeam(B): %v", err)
 	}
 	assertNoCollectionAccess(t, db, both, coll.ID)

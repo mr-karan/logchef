@@ -8,6 +8,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/metrics"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	// "github.com/mr-karan/logchef/internal/identity" // Removed
@@ -106,7 +107,7 @@ func (s *Server) handleCreateUser(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error creating user")
 	}
 
-	auditTarget(c, audit.UserTarget(user))
+	auditSet(c, audit.UserTarget(user), nil, audit.UserFields(user))
 	return SendSuccess(c, fiber.StatusCreated, user)
 }
 
@@ -143,7 +144,8 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 	}
 
 	principal := principalFromLocals(c)
-	if err := core.UpdateUser(c.Context(), s.store, s.log, principal, userID, updateData); err != nil {
+	before, after, err := core.UpdateUser(c.Context(), s.store, s.log, principal, userID, updateData)
+	if err != nil {
 		// Handle specific error types from core
 		if errors.Is(err, core.ErrAdminGrantForbidden) {
 			metrics.RecordAuthorizationFailure(c.Route().Path, principal.User, "admin_grant_scope")
@@ -167,14 +169,12 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error updating user")
 	}
 
-	auditTarget(c, audit.UserIDTarget(userID))
+	auditSet(c, audit.UserTarget(after), audit.UserFields(before), audit.UserFields(after))
 	updatedUser, err := core.GetUser(c.Context(), s.store, userID)
 	if err != nil {
 		s.log.Error("failed to get updated user", "error", err, "user_id", userID)
 		return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "User updated successfully, but failed to fetch result"})
 	}
-
-	auditTarget(c, audit.UserTarget(updatedUser))
 	return SendSuccess(c, fiber.StatusOK, updatedUser)
 }
 
@@ -188,7 +188,8 @@ func (s *Server) handleDeleteUser(c fiber.Ctx) error {
 	}
 	userID := existing.ID
 
-	if err := core.DeleteUser(c.Context(), s.store, s.log, userID); err != nil {
+	deleted, err := core.DeleteUser(c.Context(), s.store, s.log, userID)
+	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "User not found")
 		}
@@ -200,7 +201,7 @@ func (s *Server) handleDeleteUser(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error deleting user")
 	}
 
-	auditTarget(c, audit.UserTarget(existing))
+	auditSet(c, audit.UserTarget(deleted), audit.UserFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "User deleted successfully"})
 }
 
@@ -317,19 +318,59 @@ func (s *Server) handleCreateAPIToken(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, err.Error())
 	}
 
-	response, err := core.CreateAPIToken(c.Context(), s.store, s.log, &s.config.Auth, user.ID, req.Name, req.ExpiresAt, req.Scopes)
+	response, err := s.createAPITokenWithEvent(c, user.ID, req)
 	if err != nil {
 		// Handle specific error types from core
 		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
+		if errors.Is(err, errAuditUnavailable) {
+			return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: no token was created")
+		}
 
 		s.log.Error("failed to create API token", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Error creating API token")
 	}
-
-	auditTarget(c, audit.APITokenTarget(response.APIToken))
 	return SendSuccess(c, fiber.StatusCreated, response)
+}
+
+// errAuditUnavailable means the api_token.create event could not be stored,
+// so the token was not created.
+var errAuditUnavailable = errors.New("audit event not stored")
+
+// createAPITokenWithEvent creates a token for ownerID and its api_token.create
+// event in one transaction: no token exists without a stored event (RFC 0009,
+// "When an audit write fails"). The handler stages any detail before the call.
+func (s *Server) createAPITokenWithEvent(c fiber.Ctx, ownerID models.UserID, req models.CreateAPITokenRequest) (*models.CreateAPITokenResponse, error) {
+	ctx := c.Context()
+	var (
+		response *models.CreateAPITokenResponse
+		batch    *audit.Batch
+		auditErr error
+	)
+	err := s.store.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		response, err = core.CreateAPIToken(ctx, tx, s.log, &s.config.Auth, ownerID, req.Name, req.ExpiresAt, req.Scopes)
+		if err != nil {
+			return err
+		}
+		auditSet(c, audit.APITokenTarget(response.APIToken), nil, audit.APITokenFields(response.APIToken))
+		batch = s.audit.Batch(tx)
+		auditErr = s.addRouteEvent(ctx, c, batch, fiber.StatusCreated)
+		return auditErr
+	})
+	if err != nil {
+		if auditErr != nil {
+			s.log.Error("api token not created: audit event not stored", "error", auditErr, "user_id", ownerID)
+			clearAuditFields(c)
+			return nil, errAuditUnavailable
+		}
+		clearAuditFields(c)
+		return nil, err
+	}
+	batch.Publish(ctx)
+	markAuditRecorded(c)
+	return response, nil
 }
 
 func authorizeAPITokenCreation(c fiber.Ctx, req models.CreateAPITokenRequest) error {
@@ -365,7 +406,8 @@ func (s *Server) handleDeleteAPIToken(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid token ID format")
 	}
 
-	if err := core.DeleteAPIToken(c.Context(), s.store, s.log, user.ID, tokenID); err != nil {
+	deleted, err := core.DeleteAPIToken(c.Context(), s.store, s.log, user.ID, tokenID)
+	if err != nil {
 		if errors.Is(err, core.ErrAPITokenNotFound) {
 			return SendError(c, fiber.StatusNotFound, "API token not found")
 		}
@@ -374,7 +416,7 @@ func (s *Server) handleDeleteAPIToken(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error deleting API token")
 	}
 
-	auditTarget(c, audit.APITokenIDTarget(tokenID))
+	auditSet(c, audit.APITokenTarget(deleted), audit.APITokenFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "API token deleted successfully"})
 }
 
@@ -407,7 +449,7 @@ func (s *Server) handleCreateServiceAccount(c fiber.Ctx) error {
 		s.log.Error("failed to create service account", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error creating service account")
 	}
-	auditTarget(c, audit.UserTarget(account))
+	auditSet(c, audit.UserTarget(account), nil, audit.UserFields(account))
 	return SendSuccess(c, fiber.StatusCreated, account)
 }
 
@@ -416,14 +458,15 @@ func (s *Server) handleDeleteServiceAccount(c fiber.Ctx) error {
 	if err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid service account ID format")
 	}
-	if err := core.DeleteServiceAccount(c.Context(), s.store, s.log, userID); err != nil {
+	deleted, err := core.DeleteServiceAccount(c.Context(), s.store, s.log, userID)
+	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Service account not found")
 		}
 		s.log.Error("failed to delete service account", "error", err, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Error deleting service account")
 	}
-	auditTarget(c, audit.UserIDTarget(userID))
+	auditSet(c, audit.UserTarget(deleted), audit.UserFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account deleted successfully"})
 }
 
@@ -475,16 +518,18 @@ func (s *Server) handleCreateServiceAccountToken(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusForbidden, err.Error())
 	}
 
-	response, err := core.CreateAPIToken(c.Context(), s.store, s.log, &s.config.Auth, account.ID, req.Name, req.ExpiresAt, req.Scopes)
+	auditDetail(c, "owner_id", account.ID)
+	response, err := s.createAPITokenWithEvent(c, account.ID, req)
 	if err != nil {
 		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
+		if errors.Is(err, errAuditUnavailable) {
+			return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: no token was created")
+		}
 		s.log.Error("failed to create service account token", "error", err, "user_id", account.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Error creating service account token")
 	}
-	auditTarget(c, audit.APITokenTarget(response.APIToken))
-	auditDetail(c, "owner_id", account.ID)
 	return SendSuccess(c, fiber.StatusCreated, response)
 }
 
@@ -516,7 +561,8 @@ func (s *Server) handleAddServiceAccountToTeam(c fiber.Ctx) error {
 	if req.Role == "" {
 		req.Role = models.TeamRoleMember
 	}
-	if err := core.AddTeamMember(c.Context(), s.store, s.log, req.TeamID, account.ID, req.Role); err != nil {
+	before, after, err := core.AddTeamMember(c.Context(), s.store, s.log, req.TeamID, account.ID, req.Role)
+	if err != nil {
 		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
@@ -526,8 +572,7 @@ func (s *Server) handleAddServiceAccountToTeam(c fiber.Ctx) error {
 		s.log.Error("failed to add service account to team", "error", err, "user_id", account.ID, "team_id", req.TeamID)
 		return SendError(c, fiber.StatusInternalServerError, "Error adding service account to team")
 	}
-	auditTarget(c, audit.TeamMemberTarget(req.TeamID, account.ID))
-	auditDetail(c, "role", req.Role)
+	auditTeamMemberAdd(c, before, after)
 	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Service account added to team"})
 }
 
@@ -540,11 +585,11 @@ func (s *Server) handleRemoveServiceAccountFromTeam(c fiber.Ctx) error {
 	if err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID format")
 	}
-	if err := core.RemoveTeamMember(c.Context(), s.store, s.log, teamID, account.ID); err != nil {
-		s.log.Error("failed to remove service account from team", "error", err, "user_id", account.ID, "team_id", teamID)
+	removed, err := core.RemoveTeamMember(c.Context(), s.store, s.log, teamID, account.ID)
+	if err != nil {
 		return SendError(c, fiber.StatusInternalServerError, "Error removing service account from team")
 	}
-	auditTarget(c, audit.TeamMemberTarget(teamID, account.ID))
+	auditTeamMemberRemove(c, teamID, account.ID, removed)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account removed from team"})
 }
 
@@ -557,14 +602,15 @@ func (s *Server) handleDeleteServiceAccountToken(c fiber.Ctx) error {
 	if err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid token ID format")
 	}
-	if err := core.DeleteAPIToken(c.Context(), s.store, s.log, account.ID, tokenID); err != nil {
+	deleted, err := core.DeleteAPIToken(c.Context(), s.store, s.log, account.ID, tokenID)
+	if err != nil {
 		if errors.Is(err, core.ErrAPITokenNotFound) {
 			return SendError(c, fiber.StatusNotFound, "API token not found")
 		}
 		s.log.Error("failed to delete service account token", "error", err, "token_id", tokenID, "user_id", account.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Error deleting service account token")
 	}
-	auditTarget(c, audit.APITokenIDTarget(tokenID))
+	auditSet(c, audit.APITokenTarget(deleted), audit.APITokenFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "API token deleted successfully"})
 }
 

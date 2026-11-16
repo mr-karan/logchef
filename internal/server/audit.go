@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -27,6 +28,9 @@ type auditStage struct {
 	actor         *audit.Actor
 	outcome       models.AuditOutcome
 	reason        string
+	// skip says that the middleware records nothing: the handler stored the
+	// event with the change, or the request changed nothing.
+	skip bool
 }
 
 func stagedAudit(c fiber.Ctx) *auditStage {
@@ -48,6 +52,14 @@ func auditStageFor(c fiber.Ctx) *auditStage {
 func auditSet(c fiber.Ctx, target audit.Target, before, after *audit.Fields) {
 	st := auditStageFor(c)
 	st.target, st.before, st.after, st.fields = &target, before, after, true
+}
+
+// clearAuditFields drops the staged target and fields, for a change that
+// rolled back after the handler staged them.
+func clearAuditFields(c fiber.Ctx) {
+	if st := stagedAudit(c); st != nil {
+		st.target, st.before, st.after, st.fields = nil, nil, nil, false
+	}
 }
 
 // auditTarget stages the target without fields.
@@ -184,13 +196,51 @@ func (s *Server) auditMiddleware(c fiber.Ctx) (err error) {
 }
 
 func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
-	spec, ok := audit.Lookup(c.Route().Name)
-	if !ok {
-		return
-	}
 	st := stagedAudit(c)
 	if st == nil {
 		st = &auditStage{}
+	}
+	if st.skip {
+		return
+	}
+	if ev, ok := s.routeEvent(c, st, status); ok {
+		s.audit.Record(c.Context(), ev)
+	}
+}
+
+// addRouteEvent adds the route's event, built from what the handler staged,
+// to a batch that inserts it in the transaction of the change. The handler
+// must call Publish after the transaction commits, and then
+// markAuditRecorded.
+func (s *Server) addRouteEvent(ctx context.Context, c fiber.Ctx, b *audit.Batch, status int) error {
+	st := stagedAudit(c)
+	if st == nil {
+		st = &auditStage{}
+	}
+	ev, ok := s.routeEvent(c, st, status)
+	if !ok {
+		return errors.New("audit: route " + c.Route().Name + " has no event for status " + strconv.Itoa(status))
+	}
+	return b.Add(ctx, ev)
+}
+
+// markAuditRecorded tells the middleware that the handler stored the event.
+func markAuditRecorded(c fiber.Ctx) {
+	auditStageFor(c).skip = true
+}
+
+// auditNoChange tells the middleware that the request changed nothing, such
+// as removing a member who is not one, so it records no event.
+func auditNoChange(c fiber.Ctx) {
+	auditStageFor(c).skip = true
+}
+
+// routeEvent builds the event of the request's route. ok is false when the
+// route records nothing: no registered action, a 4xx status, or no actor.
+func (s *Server) routeEvent(c fiber.Ctx, st *auditStage, status int) (ev audit.Event, ok bool) {
+	spec, ok := audit.Lookup(c.Route().Name)
+	if !ok {
+		return audit.Event{}, false
 	}
 
 	outcome := st.outcome
@@ -201,7 +251,7 @@ func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
 	case status >= fiber.StatusInternalServerError:
 		outcome = models.AuditOutcomeFailure
 	default:
-		return
+		return audit.Event{}, false
 	}
 
 	var actor audit.Actor
@@ -210,7 +260,7 @@ func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
 	} else if a, ok := requestActor(c); ok {
 		actor = a
 	} else {
-		return
+		return audit.Event{}, false
 	}
 
 	action := spec.Action
@@ -235,7 +285,7 @@ func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
 		detail.Set("unstaged", true)
 	}
 
-	s.audit.Record(c.Context(), audit.Event{
+	return audit.Event{
 		Action:  action,
 		Outcome: outcome,
 		Reason:  st.reason,
@@ -251,7 +301,7 @@ func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
 		Before: st.before,
 		After:  st.after,
 		Detail: detail,
-	})
+	}, true
 }
 
 // routeTarget builds a target from the route parameters when the handler

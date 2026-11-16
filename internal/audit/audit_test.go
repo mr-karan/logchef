@@ -126,7 +126,7 @@ func mustJSON(t *testing.T, v any) string {
 
 func TestActionRegistry(t *testing.T) {
 	spec, ok := audit.Lookup("team_member.add")
-	if !ok || spec.Action != audit.TeamMemberAdd || spec.TargetType != "team_member" || spec.Staged {
+	if !ok || spec.Action != audit.TeamMemberAdd || spec.TargetType != "team_member" || !spec.Staged {
 		t.Errorf("Lookup(team_member.add) = %+v, %v", spec, ok)
 	}
 	for _, name := range []string{"", "source", "source.frobnicate", "Source.update", "source.update.x", "source.update "} {

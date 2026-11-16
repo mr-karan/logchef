@@ -286,10 +286,12 @@ func requestMayRemoveAdmin(u models.User) bool {
 		(u.Status != "" && u.Status != models.UserStatusActive)
 }
 
-// UpdateUser authorizes the transition while preserving an active admin and revoking deactivated sessions.
-func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal access.Principal, userID models.UserID, updateData models.User) error {
+// UpdateUser authorizes the transition while preserving an active admin and
+// revoking deactivated sessions. It returns the user before and after the
+// update, both read under the row lock of the write.
+func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal access.Principal, userID models.UserID, updateData models.User) (before, after *models.User, err error) {
 	if err := validateUserUpdate(updateData); err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	// Decide from the request alone so the advisory lock is always taken
@@ -310,7 +312,8 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal
 			return fmt.Errorf("error getting user for update: %w", err)
 		}
 
-		before := *existing
+		prior := *existing
+		before, after = &prior, existing
 		updated, deactivating, err := applyUserUpdates(existing, updateData)
 		if err != nil {
 			return err
@@ -318,10 +321,10 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal
 		if !updated {
 			return nil
 		}
-		if err := AuthorizeAdminTransition(principal, before, *existing); err != nil {
+		if err := AuthorizeAdminTransition(principal, prior, *existing); err != nil {
 			return err
 		}
-		if isActiveAdmin(&before) && !isActiveAdmin(existing) {
+		if isActiveAdmin(&prior) && !isActiveAdmin(existing) {
 			if err := ensureAnotherActiveAdmin(ctx, tx); err != nil {
 				return err
 			}
@@ -342,7 +345,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal
 		if !errors.Is(err, ErrCannotDeleteLastAdmin) && !errors.Is(err, ErrUserNotFound) && !errors.Is(err, ErrAdminGrantForbidden) {
 			log.Error("failed to update user", "error", err, "user_id", userID)
 		}
-		return err
+		return nil, nil, err
 	}
 
 	if deactivated {
@@ -350,7 +353,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal
 	} else {
 		log.Debug("user updated", "user_id", userID)
 	}
-	return nil
+	return before, after, nil
 }
 
 // applyUserUpdates mutates existing in place from the provided updateData and
@@ -426,13 +429,15 @@ func applyStatusUpdate(existing *models.User, updateData models.User) (changed, 
 
 // DeleteUser deletes a user from the database, along with any sessions the
 // user holds. The user row and session rows are removed in the same
-// transaction so a deleted user can never be left with a live session.
-func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
+// transaction so a deleted user can never be left with a live session. It
+// returns the user as read under the row lock of the delete.
+func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) (*models.User, error) {
+	var deleted *models.User
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
-		existing, err := tx.GetUser(ctx, id)
+		existing, err := tx.GetUserForUpdate(ctx, id)
 		if err != nil {
 			if models.IsNotFound(err) {
 				return ErrUserNotFound
@@ -450,6 +455,7 @@ func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models
 		if err := tx.DeleteUserSessions(ctx, id); err != nil {
 			return fmt.Errorf("error deleting user sessions: %w", err)
 		}
+		deleted = existing
 		return nil
 	}); err != nil {
 		// The last-admin guard is an expected validation rejection, not a
@@ -457,20 +463,22 @@ func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models
 		if !errors.Is(err, ErrCannotDeleteLastAdmin) {
 			log.Error("failed to delete user and sessions", "error", err, "user_id", id)
 		}
-		return err
+		return nil, err
 	}
 
 	log.Debug("user deleted", "user_id", id)
-	return nil
+	return deleted, nil
 }
 
-// DeleteServiceAccount deletes a service principal and its tokens/memberships.
-func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
-	return db.WithTx(ctx, func(tx store.StoreOps) error {
+// DeleteServiceAccount deletes a service principal and its
+// tokens/memberships, and returns it as read under the row lock of the delete.
+func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) (*models.User, error) {
+	var deleted *models.User
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
-		existing, err := tx.GetUser(ctx, id)
+		existing, err := tx.GetUserForUpdate(ctx, id)
 		if err != nil {
 			if models.IsNotFound(err) {
 				return ErrUserNotFound
@@ -484,8 +492,13 @@ func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger,
 			log.Error("failed to delete service account from db", "error", err, "user_id", id)
 			return fmt.Errorf("error deleting service account: %w", err)
 		}
+		deleted = existing
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }
 
 // InitAdminUsers ensures that specified admin users exist and are configured correctly.

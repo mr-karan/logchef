@@ -35,7 +35,7 @@ func matchAllowedDomain(email string, allowedDomains []string) (string, bool) {
 // the email's domain isn't in the allowed list — callers should treat that
 // identically to "user not found". A non-nil error means auto-provisioning
 // was attempted (domain matched) but failed; the login must not proceed.
-func autoProvisionUser(ctx context.Context, db store.StoreOps, log *slog.Logger, cfg config.AutoProvisionConfig, email, fullName string) (*models.User, bool, error) {
+func autoProvisionUser(ctx context.Context, db store.Store, log *slog.Logger, cfg config.AutoProvisionConfig, email, fullName string) (*models.User, bool, error) {
 	if !cfg.Enabled {
 		return nil, false, nil
 	}
@@ -60,7 +60,7 @@ func autoProvisionUser(ctx context.Context, db store.StoreOps, log *slog.Logger,
 			log.Warn("auto_provision default_team_ids: team not found, skipping", "team_id", id, "email", email, "error", err)
 			continue
 		}
-		if err := core.AddTeamMember(ctx, db, log, teamID, user.ID, models.TeamRoleMember); err != nil {
+		if _, _, err := core.AddTeamMember(ctx, db, log, teamID, user.ID, models.TeamRoleMember); err != nil {
 			log.Warn("auto_provision default_team_ids: failed to add team membership, skipping", "team_id", id, "email", email, "error", err)
 			continue
 		}

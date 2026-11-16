@@ -458,6 +458,9 @@ type ProvisioningStore interface {
 type TeamStore interface {
 	CreateTeam(ctx context.Context, team *models.Team) error
 	GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, error)
+	// GetTeamForUpdate reads a team and, inside WithTx, blocks other writers
+	// of that team until the transaction ends.
+	GetTeamForUpdate(ctx context.Context, teamID models.TeamID) (*models.Team, error)
 	GetTeamByName(ctx context.Context, name string) (*models.Team, error)
 	UpdateTeam(ctx context.Context, team *models.Team) error
 	DeleteTeam(ctx context.Context, teamID models.TeamID) error
@@ -466,7 +469,14 @@ type TeamStore interface {
 	ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*models.UserTeamDetails, error)
 
 	AddTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
+	// InsertTeamMember adds a membership and reports whether this call
+	// inserted it. An existing membership is left as it is.
+	InsertTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) (bool, error)
 	GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error)
+	// GetTeamMemberForUpdate is GetTeamMember that, inside WithTx, blocks
+	// other writers of that membership until the transaction ends. Like
+	// GetTeamMember it returns a nil member for a non-member.
+	GetTeamMemberForUpdate(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error)
 	UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
 	ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
@@ -502,6 +512,7 @@ type TokenStore interface {
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (*models.APIToken, error)
 	ListAPITokensForUser(ctx context.Context, userID models.UserID) ([]*models.APIToken, error)
 	UpdateAPITokenLastUsed(ctx context.Context, id int) error
+	// DeleteAPIToken returns models.ErrNotFound when no token was deleted.
 	DeleteAPIToken(ctx context.Context, id int, userID models.UserID) error
 }
 

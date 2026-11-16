@@ -246,25 +246,32 @@ func ListAPITokensForUser(ctx context.Context, db store.StoreOps, userID models.
 	return tokens, nil
 }
 
-// DeleteAPIToken deletes an API token by ID, ensuring the user owns it
-func DeleteAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, tokenID int) error {
+// DeleteAPIToken deletes an API token by ID, ensuring the user owns it, and
+// returns the deleted token. A token changes only its last-used time, so the
+// read before the delete is the token that was deleted.
+func DeleteAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, tokenID int) (*models.APIToken, error) {
 	// Verify the token exists and belongs to the user
 	token, err := GetAPIToken(ctx, db, tokenID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if token.UserID != userID {
-		return ErrAPITokenNotFound // Don't reveal that token exists for security
+		return nil, ErrAPITokenNotFound // Don't reveal that token exists for security
 	}
 
+	// The delete reports a token that a concurrent request deleted first, so
+	// only the request that deleted it records the deletion.
 	if err := db.DeleteAPIToken(ctx, tokenID, userID); err != nil {
+		if errors.Is(err, models.ErrNotFound) {
+			return nil, ErrAPITokenNotFound
+		}
 		log.Error("failed to delete API token", "error", err, "token_id", tokenID, "user_id", userID)
-		return fmt.Errorf("failed to delete API token: %w", err)
+		return nil, fmt.Errorf("failed to delete API token: %w", err)
 	}
 
 	log.Info("API token deleted successfully", "token_id", tokenID, "user_id", userID)
-	return nil
+	return token, nil
 }
 
 // AuthenticateAPIToken authenticates a token and returns the associated user

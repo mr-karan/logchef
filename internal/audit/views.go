@@ -181,3 +181,49 @@ func SavedViewFields(v *models.SavedView) *Fields {
 	}
 	return f.Set("filter_language", models.QueryLanguageLogchefQL).Digest("filter", *d.Filter)
 }
+
+// APITokenFields records a token's name, owner, scopes and expiry. The hash
+// and the display prefix, which holds the start of the token, are left out.
+func APITokenFields(t *models.APIToken) *Fields {
+	return NewFields().
+		Set("name", t.Name).
+		Set("user_id", t.UserID).
+		Set("scopes", t.Scopes).
+		Set("expires_at", t.ExpiresAt)
+}
+
+// TeamFields records a team.
+func TeamFields(t *models.Team) *Fields {
+	return NewFields().
+		Set("name", t.Name).
+		Set("description", t.Description).
+		Set("managed", t.Managed)
+}
+
+// TeamMemberFields records a membership and its role.
+func TeamMemberFields(m *models.TeamMember) *Fields {
+	return NewFields().
+		Set("team_id", m.TeamID).
+		Set("user_id", m.UserID).
+		Set("role", m.Role)
+}
+
+// TeamSourceFields records a link between a team and a source, which has no
+// fields of its own.
+func TeamSourceFields(teamID models.TeamID, sourceID models.SourceID) *Fields {
+	return NewFields().
+		Set("team_id", teamID).
+		Set("source_id", sourceID)
+}
+
+// UserFields records a user or a service account. The password hash and the
+// sign-in times are left out.
+func UserFields(u *models.User) *Fields {
+	return NewFields().
+		Set("email", u.Email).
+		Set("full_name", u.FullName).
+		Set("role", u.Role).
+		Set("status", u.Status).
+		Set("account_type", u.AccountType).
+		Set("managed", u.Managed)
+}

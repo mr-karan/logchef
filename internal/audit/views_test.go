@@ -108,6 +108,26 @@ var viewCases = []viewCase{
 			c.Auth.Password, c.Auth.Token,
 			tag+"-user", tag+"-pass", tag+"-path", tag+"-query", tag+"-literal")
 	}},
+	{"user", func(tag string) (*audit.Fields, []string) {
+		var u models.User
+		fillStrings(reflect.ValueOf(&u), tag, "User")
+		return audit.UserFields(&u), []string{u.PasswordHash}
+	}},
+	{"api token", func(tag string) (*audit.Fields, []string) {
+		var tok models.APIToken
+		fillStrings(reflect.ValueOf(&tok), tag, "APIToken")
+		return audit.APITokenFields(&tok), []string{tok.TokenHash, tok.Prefix}
+	}},
+	{"team", func(tag string) (*audit.Fields, []string) {
+		var team models.Team
+		fillStrings(reflect.ValueOf(&team), tag, "Team")
+		return audit.TeamFields(&team), nil
+	}},
+	{"team member", func(tag string) (*audit.Fields, []string) {
+		var m models.TeamMember
+		fillStrings(reflect.ValueOf(&m), tag, "TeamMember")
+		return audit.TeamMemberFields(&m), nil
+	}},
 	{"sensitive setting", func(tag string) (*audit.Fields, []string) {
 		var s models.SystemSetting
 		fillStrings(reflect.ValueOf(&s), tag, "Setting")
