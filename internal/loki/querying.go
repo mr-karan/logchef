@@ -385,14 +385,6 @@ func notYetSupported(operation string) error {
 	return &datasource.ValidationError{Field: "source_type", Message: operation + " is not supported on Loki sources yet"}
 }
 
-func (p *Provider) GetFieldValues(context.Context, *models.Source, datasource.FieldValuesRequest) (*datasource.FieldValuesResult, error) {
-	return nil, notYetSupported("Field values")
-}
-
-func (p *Provider) GetAllFieldValues(context.Context, *models.Source, datasource.AllFieldValuesRequest) (datasource.AllFieldValuesResult, error) {
-	return nil, notYetSupported("Field values")
-}
-
 func (p *Provider) EvaluateAlert(context.Context, *models.Source, datasource.AlertQueryRequest) (*models.QueryResult, error) {
 	return nil, notYetSupported("Alerts")
 }

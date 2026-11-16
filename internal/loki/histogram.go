@@ -23,7 +23,7 @@ const (
 	histogramOtherGroup = "Other"
 )
 
-var histogramLabelName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var labelNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // histogramQuery is one Loki request of a histogram plan. A range query
 // returns a point at each multiple of the window from start to end, and the
@@ -157,7 +157,7 @@ func readHistogramRequest(req datasource.HistogramRequest) (histogramSpec, error
 		return histogramSpec{}, &datasource.ValidationError{Field: "window", Message: "invalid histogram window: use a whole number of milliseconds or more, such as 30s, 5m, 1h or 1d"}
 	}
 	spec.widthMs = width.Milliseconds()
-	if spec.groupBy != "" && !histogramLabelName.MatchString(spec.groupBy) {
+	if spec.groupBy != "" && !labelNamePattern.MatchString(spec.groupBy) {
 		return histogramSpec{}, &datasource.ValidationError{Field: "group_by", Message: fmt.Sprintf("%q is not a valid Loki label name", spec.groupBy)}
 	}
 	if spec.query == "" {

@@ -43,7 +43,7 @@ type pushStream struct {
 	Values [][2]string       `json:"values"`
 }
 
-func push(t *testing.T, url, tenant string, streams []pushStream) {
+func push(t *testing.T, url, tenant string, streams any) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"streams": streams})
 	if err != nil {
