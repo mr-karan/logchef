@@ -15,6 +15,7 @@ by what you want to do:
 
   query      Search with LogchefQL — the portable filter language that works on
              BOTH engines. Start here. e.g. `level=\"error\" and service=\"api\"`.
+             Aggregate with a pipe: `level=\"error\" | count() by service`.
   sql        Run a raw native query when LogchefQL isn't enough: ClickHouse SQL
              for ClickHouse sources, LogsQL for VictoriaLogs sources.
   explain    Show the ClickHouse SQL / LogsQL a LogchefQL query compiles to,

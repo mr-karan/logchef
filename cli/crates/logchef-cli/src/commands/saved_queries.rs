@@ -256,6 +256,7 @@ async fn run_saved_query(
                         end_time: Some(range.end),
                         timezone: Some(range.timezone),
                         limit: Some(limit),
+                        interval: None,
                     },
                 )
                 .await?;
@@ -296,6 +297,7 @@ async fn run_saved_query(
             timezone: Some(time_range.timezone),
             limit: Some(limit),
             query_timeout: Some(args.timeout),
+            interval: None,
         };
         client
             .query_logchefql(team_id, source_id, &request)

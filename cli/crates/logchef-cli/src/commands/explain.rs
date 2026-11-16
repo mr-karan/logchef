@@ -6,6 +6,7 @@ use logchef_core::cache::Cache;
 use serde::Serialize;
 
 use crate::cli::GlobalArgs;
+use crate::commands::query::parse_time_range;
 use crate::commands::{resolve_source, resolve_team};
 use crate::session;
 use crate::ui;
@@ -16,7 +17,10 @@ use crate::ui;
   logchef explain 'level=\"error\" and service=\"api\"' -t platform -S app-logs
 
   # Validate a filter's syntax in a script (exit stays 0; check the JSON)
-  logchef explain 'status>=500' --output json | jq '.valid'")]
+  logchef explain 'status>=500' --output json | jq '.valid'
+
+  # See the query an aggregation compiles to
+  logchef explain 'level=\"error\" | count() by service'")]
 pub struct ExplainArgs {
     /// LogchefQL query to translate (e.g. `level="error" and service="api"`)
     query: String,
@@ -28,6 +32,11 @@ pub struct ExplainArgs {
     /// Source ID or name
     #[arg(long, short = 'S')]
     source: Option<String>,
+
+    /// Bucket size of a `by time` aggregation key that has no window of its
+    /// own, such as 1m, 5m or 1h.
+    #[arg(long)]
+    interval: Option<String>,
 
     /// Output format
     #[arg(long, default_value = "text")]
@@ -49,6 +58,8 @@ struct JsonOutput<'a> {
     generated_query_language: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a logchef_core::api::QueryParseError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aggregation: Option<&'a logchef_core::api::AggregationInfo>,
 }
 
 pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
@@ -66,21 +77,38 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
     // Translate without a time range: this reports the engine-agnostic
     // translation (filter conditions for ClickHouse, native LogsQL for
     // VictoriaLogs) without executing anything.
-    let translate = client
-        .translate_logchefql(
-            team_id,
-            source_id,
-            &TranslateRequest {
-                variables: Vec::new(),
-                query: args.query.clone(),
-                start_time: None,
-                end_time: None,
-                timezone: None,
-                limit: None,
-            },
-        )
+    let mut request = TranslateRequest {
+        variables: Vec::new(),
+        query: args.query.clone(),
+        start_time: None,
+        end_time: None,
+        timezone: None,
+        limit: None,
+        interval: args.interval.clone(),
+    };
+    let mut translate = client
+        .translate_logchefql(team_id, source_id, &request)
         .await
         .context("Failed to translate query")?;
+
+    // An aggregation compiles against a time range: ClickHouse builds the
+    // SELECT only with one, and VictoriaLogs aligns buckets to its timezone.
+    // Ask again over the range that `logchef query` uses by default.
+    if translate.aggregation.is_some() && translate.full_sql.is_empty() {
+        let range = parse_time_range(
+            &ctx.defaults.since,
+            None,
+            None,
+            ctx.defaults.timezone.as_deref(),
+        )?;
+        request.start_time = Some(range.start);
+        request.end_time = Some(range.end);
+        request.timezone = Some(range.timezone);
+        translate = client
+            .translate_logchefql(team_id, source_id, &request)
+            .await
+            .context("Failed to translate query")?;
+    }
 
     // The validate endpoint is the authoritative syntax check.
     let validate = client
@@ -105,6 +133,7 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
                 generated_query: translate.generated_query(),
                 generated_query_language: translate.generated_query_language.as_deref(),
                 error,
+                aggregation: translate.aggregation.as_ref(),
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -115,6 +144,7 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
                 generated_query: translate.generated_query(),
                 generated_query_language: translate.generated_query_language.as_deref(),
                 error,
+                aggregation: translate.aggregation.as_ref(),
             };
             println!("{}", serde_json::to_string(&output)?);
         }
