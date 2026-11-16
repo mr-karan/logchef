@@ -14,6 +14,7 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	const (
 		day1 = "2026-07-10"
 		day2 = "2026-07-11"
+		day3 = "2026-07-12"
 	)
 	eq := models.FilterShape{{Column: "request_id", Kind: models.MatchEq}}
 	nested := models.FilterShape{{Column: "attrs", Path: []string{"a", "b"}, Access: models.AccessNested, Kind: models.MatchEq}}
@@ -40,6 +41,8 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	inc(day2, models.ShapeHashUnanalyzed, models.FilterShape{}, 3, 0, 0, new(int64(60)))
 	inc(day2, models.ShapeHashOverflow, models.FilterShape{}, 4, 0, 0, new(int64(60)))
 	inc(day2, "cccccccccccccccc", eq, 1, 0, 0, new(int64(60)))
+	// A day whose only queries have no filter is not a filtered day.
+	inc(day3, models.ShapeHashUnanalyzed, models.FilterShape{}, 2, 0, 0, new(int64(60)))
 
 	got, err := s.ListQueryShapeStats(ctx, source, day1, 2)
 	if err != nil {
@@ -62,7 +65,7 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil {
 		t.Fatalf("QueryShapeCoverage: %v", err)
 	}
-	wantCoverage := models.QueryShapeCoverage{Days: 2, QueryCount: 15, UnanalyzedCount: 3, OverflowCount: 4, NullLookbackCount: 1, MaxLookbackSeconds: new(int64(7200))}
+	wantCoverage := models.QueryShapeCoverage{Days: 3, FilteredDays: 2, QueryCount: 17, UnanalyzedCount: 5, OverflowCount: 4, NullLookbackCount: 1, MaxLookbackSeconds: new(int64(7200))}
 	if !reflect.DeepEqual(coverage, wantCoverage) {
 		t.Fatalf("QueryShapeCoverage = %+v, want %+v", coverage, wantCoverage)
 	}
@@ -78,7 +81,7 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil {
 		t.Fatalf("QueryShapeCoverage after prune: %v", err)
 	}
-	wantCoverage = models.QueryShapeCoverage{Days: 1, QueryCount: 11, UnanalyzedCount: 3, OverflowCount: 4, NullLookbackCount: 1, MaxLookbackSeconds: new(int64(7200))}
+	wantCoverage = models.QueryShapeCoverage{Days: 2, FilteredDays: 1, QueryCount: 13, UnanalyzedCount: 5, OverflowCount: 4, NullLookbackCount: 1, MaxLookbackSeconds: new(int64(7200))}
 	if !reflect.DeepEqual(coverage, wantCoverage) {
 		t.Fatalf("QueryShapeCoverage after prune = %+v, want %+v", coverage, wantCoverage)
 	}

@@ -69,6 +69,7 @@ func (s *Store) QueryShapeCoverage(ctx context.Context, sourceID models.SourceID
 	}
 	return models.QueryShapeCoverage{
 		Days:               r.Days,
+		FilteredDays:       r.FilteredDays,
 		QueryCount:         r.QueryCount,
 		UnanalyzedCount:    r.UnanalyzedCount,
 		OverflowCount:      r.OverflowCount,

@@ -387,3 +387,97 @@ func mustAtoi(t *testing.T, s string) int {
 	}
 	return n
 }
+
+// TestRebuildRulesOnClickHouse runs R6, R7 and R8 on metadata that
+// ClickHouse returns, which no gate covers because they generate no DDL: the
+// sorting and partition keys, the TTL clause, the partition count and the
+// age of the data. Usage and the sample are given; the unpartitioned table
+// is far below R7's size floor, so its size is scaled.
+func TestRebuildRulesOnClickHouse(t *testing.T) {
+	client, conn, ctx := gateClickHouse(t)
+	suffix := time.Now().UnixNano()
+	unpartitioned := fmt.Sprintf("logchef_rebuild_unpartitioned_%d", suffix)
+	hourly := fmt.Sprintf("logchef_rebuild_hourly_%d", suffix)
+	monthly := fmt.Sprintf("logchef_rebuild_monthly_%d", suffix)
+	t.Cleanup(func() {
+		for _, table := range []string{unpartitioned, hourly, monthly} {
+			_ = conn.Exec(context.Background(), "DROP TABLE IF EXISTS "+table)
+		}
+	})
+	gateExec(ctx, t, conn,
+		"CREATE TABLE "+unpartitioned+" (ts DateTime, msg String TTL ts + INTERVAL 1 DAY) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 30 DAY",
+		"INSERT INTO "+unpartitioned+" SELECT now() - number, 'x' FROM numbers(1000)",
+		"CREATE TABLE "+hourly+" (ts DateTime, msg String) ENGINE = MergeTree PARTITION BY toStartOfHour(ts) ORDER BY ts",
+		"INSERT INTO "+hourly+" SETTINGS max_partitions_per_insert_block = 0 SELECT toDateTime('2026-01-01 00:00:00') + number * 3600, 'x' FROM numbers(1001)",
+		"CREATE TABLE "+monthly+" (ts DateTime, service String, msg String) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY ts",
+		"INSERT INTO "+monthly+" SELECT now() - number * 3600, concat('svc-', toString(number % 7)), 'x' FROM numbers(200 * 24)",
+	)
+	noDDL := func(t *testing.T, found []models.SchemaFinding) {
+		t.Helper()
+		for _, f := range found {
+			if f.DDL == nil || len(f.DDL) != 0 {
+				t.Errorf("%s carries DDL %q", f.Rule, f.DDL)
+			}
+		}
+	}
+
+	t.Run("R7 A with a TTL under 90 days", func(t *testing.T) {
+		facts := gateFacts(ctx, t, client, unpartitioned, Usage{}, nil)
+		total := 100 * gib
+		facts.Metadata.Table.TotalBytes = &total
+		report := Analyze(facts)
+		found := findingsOf(report, rulePartitioning)
+		if len(found) != 1 || found[0].Title != "Partition the table by toDate(ts)" {
+			t.Fatalf("R7 findings = %+v, want toDate(ts)", found)
+		}
+		if !slicesContainEvidence(found[0].Evidence, "Table TTL", "ts + toIntervalDay(30)") {
+			t.Errorf("evidence %+v lacks the table TTL", found[0].Evidence)
+		}
+		noDDL(t, found)
+		if r8 := findingsOf(report, ruleRetentionReview); len(r8) != 0 {
+			t.Errorf("R8 fired on a table with a TTL: %+v", r8)
+		}
+	})
+
+	t.Run("R7 B with 1,001 partitions", func(t *testing.T) {
+		found := findingsOf(Analyze(gateFacts(ctx, t, client, hourly, Usage{}, nil)), rulePartitioning)
+		if len(found) != 1 || found[0].Title != "Use a coarser partition key than toStartOfHour(ts)" {
+			t.Fatalf("R7 findings = %+v, want a coarser key", found)
+		}
+		if !slicesContainEvidence(found[0].Evidence, "Active partitions", "1,001") || !slicesContainEvidence(found[0].Evidence, "Proposed partition key", "toYYYYMM(ts)") {
+			t.Errorf("evidence = %+v", found[0].Evidence)
+		}
+		noDDL(t, found)
+	})
+
+	t.Run("R6 and R8 on 200 days of data", func(t *testing.T) {
+		lookback := int64(7 * 86400)
+		usage := Usage{
+			Queries: 1000, Days: 30,
+			Shapes:    []ShapeUsage{{Shape: models.FilterShape{{Column: "service", Kind: models.MatchEq}}, Queries: 1000, DurationMs: 1000 * 300}},
+			Retention: models.QueryShapeCoverage{Days: 85, QueryCount: 3000, NullLookbackCount: 20, MaxLookbackSeconds: &lookback},
+		}
+		sample := &clickhouse.AdvisorSample{
+			Input:   models.AdvisorInput{Name: clickhouse.AdvisorInputSample, State: models.AdvisorInputOK},
+			Columns: []clickhouse.AdvisorCardinality{{Column: "service", Distinct: 7, MaxSliceDistinct: 7, Saturated: true}},
+		}
+		for i := range 7 {
+			sample.Slices = append(sample.Slices, clickhouse.AdvisorSlice{Start: time.Date(2026, 11, 1+i, 3, 0, 0, 0, time.UTC), Rows: 30_000, Distinct: []uint64{7}})
+		}
+		facts := gateFacts(ctx, t, client, monthly, usage, sample)
+		facts.Now = time.Now()
+		if facts.Metadata.OldestData == nil {
+			t.Fatal("the age of a table partitioned by month on its timestamp is unknown")
+		}
+		report := Analyze(facts)
+		sortKey := findingsOf(report, ruleSortKey)
+		if len(sortKey) != 1 || !slicesContainEvidence(sortKey[0].Evidence, "Proposed sorting key", "(service, ts)") || !sortKey[0].Rebuild {
+			t.Fatalf("R6 findings = %+v, want (service, ts)", sortKey)
+		}
+		retention := findingsOf(report, ruleRetentionReview)
+		if len(retention) != 1 || retention[0].Impact != models.ImpactInfo {
+			t.Fatalf("R8 findings = %+v, want one", retention)
+		}
+		noDDL(t, append(sortKey, retention...))
+	})
+}

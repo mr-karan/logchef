@@ -6717,6 +6717,7 @@ func (q *Queries) PruneReportRuns(ctx context.Context, arg PruneReportRunsParams
 const queryShapeCoverage = `-- name: QueryShapeCoverage :one
 SELECT
     CAST(COUNT(DISTINCT bucket_date) AS INTEGER) AS days,
+    CAST(COUNT(DISTINCT CASE WHEN shape <> '[]' THEN bucket_date END) AS INTEGER) AS filtered_days,
     CAST(COALESCE(SUM(query_count), 0) AS INTEGER) AS query_count,
     CAST(COALESCE(SUM(CASE WHEN shape_hash = 'unanalyzed' THEN query_count ELSE 0 END), 0) AS INTEGER) AS unanalyzed_count,
     CAST(COALESCE(SUM(CASE WHEN shape_hash = 'overflow' THEN query_count ELSE 0 END), 0) AS INTEGER) AS overflow_count,
@@ -6734,6 +6735,7 @@ type QueryShapeCoverageParams struct {
 
 type QueryShapeCoverageRow struct {
 	Days              int64 `json:"days"`
+	FilteredDays      int64 `json:"filtered_days"`
 	QueryCount        int64 `json:"query_count"`
 	UnanalyzedCount   int64 `json:"unanalyzed_count"`
 	OverflowCount     int64 `json:"overflow_count"`
@@ -6743,13 +6745,16 @@ type QueryShapeCoverageRow struct {
 }
 
 // Totals over every rollup row of a source on/after `since`, not only the rows
-// that ListQueryShapeStats returns. lookback_rows is 0 when no row has a
-// lookback, and then max_lookback_s means nothing.
+// that ListQueryShapeStats returns. filtered_days counts the days with a
+// query that has a filter: the empty shape, also kept by the 'unanalyzed' and
+// 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
+// and then max_lookback_s means nothing.
 func (q *Queries) QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error) {
 	row := q.queryRow(ctx, q.queryShapeCoverageStmt, queryShapeCoverage, arg.SourceID, arg.Since)
 	var i QueryShapeCoverageRow
 	err := row.Scan(
 		&i.Days,
+		&i.FilteredDays,
 		&i.QueryCount,
 		&i.UnanalyzedCount,
 		&i.OverflowCount,

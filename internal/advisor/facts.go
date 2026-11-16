@@ -1,6 +1,8 @@
 package advisor
 
 import (
+	"time"
+
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -15,6 +17,9 @@ type Facts struct {
 	// Sample is nil until the candidate columns are sampled, and stays nil
 	// when no sample ran.
 	Sample *clickhouse.AdvisorSample
+	// Now is when the analysis runs. Ages are measured from it, so the
+	// same facts give the same report.
+	Now time.Time
 }
 
 // Usage is what the shape rollup recorded for the source in the window.
@@ -30,6 +35,11 @@ type Usage struct {
 	// Overflow counts the queries recorded after a source passed its daily
 	// cap of distinct shapes.
 	Overflow int64
+	// Days counts the days in the window with a query that has a filter.
+	Days int64
+	// Retention covers the last 90 days, whatever the window: the retention
+	// review needs the longest record the rollup keeps.
+	Retention models.QueryShapeCoverage
 }
 
 // ShapeUsage is how often one filter shape ran.

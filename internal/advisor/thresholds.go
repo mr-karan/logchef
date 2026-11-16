@@ -37,4 +37,23 @@ const (
 	codecStringMinBytes    = 10 << 30
 	codecStringMinShare    = 0.20
 	codecStringMaxRatio    = 3
+
+	// R6 sort_key.
+	sortKeyMinQueries  = 200
+	sortKeyMinDays     = 14
+	sortKeyMinShare    = 0.50
+	sortKeyMaxDistinct = 10_000
+	sortKeyMaxColumns  = 3
+
+	// R7 partitioning. The docs give about a thousand partitions as the
+	// most a table should hold.
+	partitionMinBytes     = 100 << 30
+	partitionMaxCount     = 1_000
+	partitionDailyTTLDays = 90
+
+	// R8 retention_review.
+	retentionMinAgeDays   = 90
+	retentionMinDays      = 60
+	retentionMinQueries   = 200
+	retentionMaxNullShare = 0.05
 )

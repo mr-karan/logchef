@@ -402,8 +402,10 @@ type Querier interface {
 	PruneQueryShapeStats(ctx context.Context, bucketDate string) error
 	PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error
 	// Totals over every rollup row of a source on/after `since`, not only the rows
-	// that ListQueryShapeStats returns. lookback_rows is 0 when no row has a
-	// lookback, and then max_lookback_s means nothing.
+	// that ListQueryShapeStats returns. filtered_days counts the days with a
+	// query that has a filter: the empty shape, also kept by the 'unanalyzed' and
+	// 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
+	// and then max_lookback_s means nothing.
 	QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error)
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)

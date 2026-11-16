@@ -129,7 +129,9 @@ type QueryShapeIncrement struct {
 // QueryShapeCoverage summarizes every rollup row of a source in a window, so
 // the advisor can tell how complete the usage record is.
 type QueryShapeCoverage struct {
-	Days            int64 `json:"days"`
+	Days int64 `json:"days"`
+	// FilteredDays counts the days with a query that has a filter.
+	FilteredDays    int64 `json:"filtered_days"`
 	QueryCount      int64 `json:"query_count"`
 	UnanalyzedCount int64 `json:"unanalyzed_count"`
 	OverflowCount   int64 `json:"overflow_count"`
