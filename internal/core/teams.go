@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -352,8 +353,11 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 	return sources, nil
 }
 
-// AddTeamSource associates a source with a team.
-func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
+// AddTeamSource links a source to a team. A caller other than a global admin
+// or trusted system work may only link a source they can already query through one of their teams:
+// otherwise a team admin could link any source and read its logs. A source the
+// caller cannot see is reported as not found, so source IDs cannot be probed.
+func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, p access.Principal, teamID models.TeamID, sourceID models.SourceID) error {
 	return db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
@@ -366,6 +370,14 @@ func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID
 				return ErrSourceNotFound
 			}
 			return fmt.Errorf("error getting source: %w", err)
+		}
+		if p.Method != access.AuthSystem && p.RequireGlobalAdmin() != nil {
+			if err := requireSourceVisible(ctx, tx, p, sourceID); err != nil {
+				if errors.Is(err, ErrSourceAccessDenied) {
+					return ErrSourceNotFound
+				}
+				return err
+			}
 		}
 
 		log.Info("adding source to team", "team_id", teamID, "source_id", sourceID)

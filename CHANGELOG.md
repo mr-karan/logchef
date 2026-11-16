@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Linking a source to a team now requires access to that source. A team admin
+  who was not a global admin could link any source in the instance to their
+  team and then query its logs. Such a link is now refused as source not
+  found. Global admins and provisioning are unaffected.
+
 ## [2.7.0] - 2026-11-15
 
 Dashboards grow up. Panels run SQL as written and show the result as stats

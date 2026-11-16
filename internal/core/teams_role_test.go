@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -288,7 +289,7 @@ func TestUserHasAccessToTeamSourceRequiresBothMembershipAndLink(t *testing.T) {
 		t.Error("member should not have access before the source is linked")
 	}
 
-	if err := AddTeamSource(ctx, db, log, team, src.ID); err != nil {
+	if err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), team, src.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 
@@ -317,7 +318,7 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	src := newTestSource(t, db, "intersection-src")
 
 	linkedAndMember, userID := seedTeamWithMember(t, db, "linked-and-member", "intersection-user@example.com", models.TeamRoleMember)
-	if err := AddTeamSource(ctx, db, log, linkedAndMember, src.ID); err != nil {
+	if err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), linkedAndMember, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(linkedAndMember): %v", err)
 	}
 
@@ -326,7 +327,7 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(linkedNotMember): %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, linkedNotMember.ID, src.ID); err != nil {
+	if err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), linkedNotMember.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(linkedNotMember): %v", err)
 	}
 
@@ -345,5 +346,72 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	}
 	if len(accessible) != 1 || accessible[0].ID != linkedAndMember {
 		t.Errorf("ListTeamsWithAccessToSource = %+v, want exactly [team %d]", accessible, linkedAndMember)
+	}
+}
+
+// A team admin must not be able to link a source they cannot already query:
+// once linked, the source is readable by everyone on their team.
+func TestAddTeamSourceRequiresSourceAccess(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	teamA, err := CreateTeam(ctx, db, log, "link-team-a", "")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	teamB, err := CreateTeam(ctx, db, log, "link-team-b", "")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	srcB := newTestSource(t, db, "link_src_b")
+	if err := db.AddTeamSource(ctx, teamB.ID, srcB.ID); err != nil {
+		t.Fatalf("AddTeamSource: %v", err)
+	}
+
+	teamAdmin := newTestUser(t, db, "link-team-admin@example.com", "Team Admin")
+	if err := AddTeamMember(ctx, db, log, teamA.ID, teamAdmin.ID, models.TeamRoleAdmin); err != nil {
+		t.Fatalf("AddTeamMember: %v", err)
+	}
+	inBothTeams := newTestUser(t, db, "link-both-teams@example.com", "In Both Teams")
+	if err := AddTeamMember(ctx, db, log, teamA.ID, inBothTeams.ID, models.TeamRoleAdmin); err != nil {
+		t.Fatalf("AddTeamMember: %v", err)
+	}
+	if err := AddTeamMember(ctx, db, log, teamB.ID, inBothTeams.ID, models.TeamRoleMember); err != nil {
+		t.Fatalf("AddTeamMember: %v", err)
+	}
+	globalAdmin := &models.User{Email: "link-global-admin@example.com", FullName: "Global Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	if err := db.CreateUser(ctx, globalAdmin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		p       access.Principal
+		wantErr error
+	}{
+		{"team admin without access to the source", access.SessionPrincipal(teamAdmin), ErrSourceNotFound},
+		{"global admin through OAuth", access.OAuthPrincipal(globalAdmin, 1, "client", []models.TokenScope{models.TokenScopeTeamsWrite}), ErrSourceNotFound},
+		{"team admin who sees the source through another team", access.SessionPrincipal(inBothTeams), nil},
+		{"global admin session", access.SessionPrincipal(globalAdmin), nil},
+		{"system", access.SystemPrincipal(), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.RemoveTeamSource(ctx, teamA.ID, srcB.ID); err != nil {
+				t.Fatalf("RemoveTeamSource: %v", err)
+			}
+			err := AddTeamSource(ctx, db, log, tc.p, teamA.ID, srcB.ID)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("AddTeamSource error = %v, want %v", err, tc.wantErr)
+			}
+			linked, err := db.TeamHasSource(ctx, teamA.ID, srcB.ID)
+			if err != nil {
+				t.Fatalf("TeamHasSource: %v", err)
+			}
+			if linked != (tc.wantErr == nil) {
+				t.Errorf("source linked = %v, want %v", linked, tc.wantErr == nil)
+			}
+		})
 	}
 }
