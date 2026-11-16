@@ -115,8 +115,8 @@ assistant can count and group without writing SQL or LogsQL for one backend.
 - `translate_logchefql` takes `interval` too and returns the `aggregation`
   object. On VictoriaLogs `generated_query` holds the aggregated LogsQL. On
   ClickHouse `sql` stays the filter, and `full_sql` and `generated_query` hold
-  the aggregated SQL only when the call has `start_time`, `end_time` and
-  `timezone`.
+  the aggregated SQL only when the call has `start_time` and `end_time`.
+  `timezone` defaults to UTC.
 - `compare_windows` and the field value tools take a filter only, and reject
   an aggregation with "this feature needs log rows, and the query aggregates.
   Remove the pipe after the filter".
