@@ -230,8 +230,8 @@ func TestAdvisorBudgetsClickHouse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	table := fmt.Sprintf("logchef_advisor_budget_%d", time.Now().UnixNano())
-	distName := table + "_d"
-	dropAfter(t, client, distName, table)
+	distName, numbersDist := table+"_d", table+"_numbers"
+	dropAfter(t, client, numbersDist, distName, table)
 	advisorFixture(ctx, t, client,
 		"CREATE TABLE "+table+" (ts DateTime, user_id String) ENGINE = MergeTree ORDER BY ts",
 		"INSERT INTO "+table+" SELECT now() - number, toString(cityHash64(number)) FROM numbers(2000000)")
@@ -289,11 +289,16 @@ func TestAdvisorBudgetsClickHouse(t *testing.T) {
 		if !knowsLeafTimeout(ctx, t, client) {
 			t.Skip("max_execution_time_leaf needs ClickHouse 23.11")
 		}
+		// ClickHouse checks a timeout between blocks, so each block must be
+		// cheap for the timeout to end the read. A MergeTree block can be a
+		// whole 8192-row granule whatever max_block_size says (26.8 does
+		// this); system.numbers yields max_block_size rows and never ends.
+		advisorFixture(ctx, t, client, fmt.Sprintf("CREATE TABLE %s AS system.numbers ENGINE = Distributed(%s, system, numbers)", numbersDist, advisorTestCluster))
 		leafClient := advisorClient(t, map[string]any{"max_execution_time_leaf": 300, "prefer_localhost_replica": 0})
 		queryID := fmt.Sprintf("logchef-advisor-leaf-%d", time.Now().UnixNano())
 		start := time.Now()
 		_, err := leafClient.queryBudgeted(ch.Context(ctx, ch.WithQueryID(queryID)), advisorBudget{seconds: 2, memory: big}, true, drain,
-			"SELECT count() FROM "+distName+" WHERE NOT ignore(arrayMap(x -> sipHash64(x, user_id), range(2000))) SETTINGS max_block_size = 1024")
+			"SELECT count() FROM "+numbersDist+" WHERE NOT ignore(sipHash64(number))")
 		elapsed := time.Since(start)
 		if state, _ := advisorInputState(err); state != models.AdvisorInputLimited || elapsed > 2*time.Second+queryTimeoutGrace {
 			t.Fatalf("state %s after %v, err %v", state, elapsed, err)
