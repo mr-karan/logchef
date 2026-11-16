@@ -134,15 +134,6 @@ func (db *DB) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*m
 	return alertsFromSQLC(rows)
 }
 
-// ListActiveAlertsDue returns alerts that need evaluation.
-func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := db.readQueries.ListActiveAlertsDue(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list active alerts: %w", err)
-	}
-	return alertsFromSQLC(rows)
-}
-
 // MarkAlertEvaluated updates state after evaluation finishes without triggering.
 func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
 	if err := db.writeQueries.MarkAlertEvaluated(ctx, int64(alertID)); err != nil {

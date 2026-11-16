@@ -650,14 +650,6 @@ SET last_state = 'firing',
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
--- name: ListActiveAlertsDue :many
-SELECT * FROM alerts
-WHERE is_active = 1
-  AND (
-        last_evaluated_at IS NULL
-        OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds')
-      );
-
 -- name: AdvanceAlertEvalSeq :one
 UPDATE alerts
 SET eval_seq = eval_seq + 1

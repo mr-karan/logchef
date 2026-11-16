@@ -209,6 +209,11 @@ formats = ["csv", "ndjson"]
 enabled = true
 poll_interval = "2s"
 
+[alerts]
+# Alert rules this replica evaluates at once. Each rule is a job with its own
+# frequency (at least 10 seconds), so any replica with jobs enabled may run it.
+max_concurrent_evaluations = 4
+
 [tail]
 # Live tail (SSE) streams. ClickHouse polls on poll_interval; VictoriaLogs
 # streams natively. Guardrails are mandatory: admission limits, a hard session

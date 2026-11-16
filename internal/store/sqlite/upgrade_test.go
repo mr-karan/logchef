@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -416,4 +417,72 @@ func assertRow(t *testing.T, db *sql.DB, query, want string) {
 	if got != want {
 		t.Errorf("%s = %q, want %q", query, got, want)
 	}
+}
+
+// alertJobsVersion is the migration that gives every alert its alert.evaluate
+// job (RFC 0006 unit J2).
+const alertJobsVersion = 48
+
+// TestAlertJobsUpgrade seeds alerts at the last version before
+// alertJobsVersion, then opens the database through New, which runs the
+// remaining migrations. A legacy "YYYY-MM-DD HH:MM:SS" evaluation time, which
+// older binaries wrote, schedules the same as the RFC 3339 form.
+func TestAlertJobsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	m := newMigrator(t, raw)
+	before := lastVersionBefore(t, alertJobsVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.AlertJobsUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	mustExec(t, raw, `INSERT INTO alerts (id, source_id, name, query_language, editor_mode, query, lookback_seconds, threshold_operator,
+			threshold_value, frequency_seconds, severity, is_active, last_state, last_evaluated_at)
+		VALUES (5, 1, 'legacy time', 'clickhouse-sql', 'native', 'SELECT 1', 300, 'gt', 10, 60, 'warning', 1, 'resolved', '2026-01-01 00:10:00')`)
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	assertRow(t, check, `SELECT CAST(next_run_at AS TEXT) FROM jobs WHERE kind = 'alert.evaluate' AND key = '5'`, "2026-01-01T00:11:00.000Z")
+	mustExec(t, check, `DELETE FROM jobs WHERE key = '5'`)
+	storetest.CheckAlertJobsUpgrade(t, db)
+}
+
+// lastVersionBefore returns the newest migration version below v. Other
+// branches may hold the numbers in between.
+func lastVersionBefore(t *testing.T, v uint) uint {
+	t.Helper()
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint
+	for _, e := range entries {
+		var version uint
+		if _, err := fmt.Sscanf(e.Name(), "%d_", &version); err != nil {
+			t.Fatalf("parse version of %s: %v", e.Name(), err)
+		}
+		if version < v && version > last {
+			last = version
+		}
+	}
+	return last
 }

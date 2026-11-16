@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -269,7 +270,7 @@ func (f *groupedFixture) tick(t *testing.T, result *models.QueryResult) []string
 	}
 	f.provider.results = append(f.provider.results, result)
 	f.sent = nil
-	if err := f.manager.evaluateAlert(t.Context(), alert); err != nil {
+	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
 	var got []string
@@ -365,7 +366,7 @@ func TestGroupedEvaluationErrorKeepsState(t *testing.T) {
 	}
 	f.provider.results = append(f.provider.results, groupedResult(row("checkout", 1), row("checkout", 2)))
 	f.sent = nil
-	if err := f.manager.evaluateAlert(t.Context(), alert); err == nil || !strings.Contains(err.Error(), "more than one row") {
+	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err == nil || !strings.Contains(err.Error(), "more than one row") {
 		t.Fatalf("evaluate with a duplicate group err = %v, want the duplicate named", err)
 	}
 	if len(f.sent) != 0 {
@@ -459,7 +460,7 @@ func TestGroupedWebhookPerGroup(t *testing.T) {
 	if alert, err = f.db.GetAlert(t.Context(), alert.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.manager.evaluateAlert(t.Context(), alert); err != nil {
+	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 

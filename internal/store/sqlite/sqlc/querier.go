@@ -240,7 +240,6 @@ type Querier interface {
 	KickJob(ctx context.Context, arg KickJobParams) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
-	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	// Alert instance queries
 	ListAlertInstances(ctx context.Context, alertID int64) ([]AlertInstance, error)

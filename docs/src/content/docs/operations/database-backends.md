@@ -62,14 +62,22 @@ Shared metadata in Postgres is necessary for multi-replica operation, but it is
 **not sufficient on its own**. Before running more than one replica, understand
 these constraints:
 
-### Run exactly one alert-manager replica
+### Background jobs run on any replica
 
-Alert evaluation runs on a per-replica timer. Postgres does **not** coordinate
-this: if N replicas each run the alert manager, every alert is evaluated N times,
-producing duplicate notifications. Until leader election is added, run the alert
-evaluation loop on **exactly one** replica (e.g. a dedicated instance, or disable
-alerts on all but one). See [Alerting](/features/alerting) for the `alerts.enabled`
-switch used to disable evaluation on the other replicas.
+Alert evaluation runs on the background job runner. Each rule is a job in the
+metadata database with its own frequency. Every replica polls for due jobs
+(`[jobs] poll_interval`, default `2s`) and claims them with a lease, so one
+replica evaluates a given tick and the load spreads across replicas. A replica
+whose claim was taken over, for example after it stalled past its lease, cannot
+commit alert state or history.
+
+Set `[jobs] enabled = false` (`LOGCHEF_JOBS__ENABLED=false`) on a replica that
+should serve HTTP only. `[alerts] max_concurrent_evaluations` (default `4`)
+bounds the rules one replica evaluates at once.
+
+A notification is still sent by the replica that evaluated the tick. A replica
+that stalls or dies between a send and its bookkeeping can send that
+notification again on a later tick.
 
 ### Give each export replica a stable identity
 

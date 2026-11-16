@@ -280,7 +280,6 @@ func (s *Server) validateSpecificSetting(key, value string) error {
 var specificSettingValidators = map[string]func(string) error{
 	"auth.session_duration":        validatePositiveDuration,
 	"auth.default_token_expiry":    validatePositiveDuration,
-	"alerts.evaluation_interval":   validatePositiveDuration,
 	"alerts.default_lookback":      validatePositiveDuration,
 	"alerts.request_timeout":       validatePositiveDuration,
 	"alerts.external_url":          validateOptionalURL,

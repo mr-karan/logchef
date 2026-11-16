@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -49,7 +50,7 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 	sender := alertSenderFunc(func(context.Context, AlertNotification) error { sends++; return nil })
 	m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
 
-	if err := m.evaluateAlert(ctx, alert); err != nil {
+	if err := m.evaluateAlert(ctx, alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	history, err := db.ListAlertHistory(ctx, alert.ID, 10)
@@ -66,7 +67,7 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 	if err := db.UpdateAlert(ctx, alert); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.evaluateAlert(ctx, alert); err != nil {
+	if err := m.evaluateAlert(ctx, alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if history, err := db.ListAlertHistory(ctx, alert.ID, 10); err != nil || len(history) != 0 || sends != 0 {
@@ -77,7 +78,7 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.evaluateAlert(ctx, fresh); err != nil {
+	if err := m.evaluateAlert(ctx, fresh, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	history, err = db.ListAlertHistory(ctx, alert.ID, 10)
@@ -139,7 +140,7 @@ func TestEditDuringFailedEvaluationRecordsNothing(t *testing.T) {
 	sources := datasource.NewService(db, logger)
 	sources.Register(provider)
 	m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
-	if err := m.evaluateAlert(ctx, alert); err == nil {
+	if err := m.evaluateAlert(ctx, alert, time.Now()); err == nil {
 		t.Fatal("evaluation with a failing query returned no error")
 	}
 	history, err := db.ListAlertHistory(ctx, alert.ID, 10)

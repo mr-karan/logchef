@@ -369,9 +369,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
 	}
-	if q.listActiveAlertsDueStmt, err = db.PrepareContext(ctx, listActiveAlertsDue); err != nil {
-		return nil, fmt.Errorf("error preparing query ListActiveAlertsDue: %w", err)
-	}
 	if q.listAlertHistoryStmt, err = db.PrepareContext(ctx, listAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertHistory: %w", err)
 	}
@@ -1285,11 +1282,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAPITokensForUserStmt: %w", cerr)
 		}
 	}
-	if q.listActiveAlertsDueStmt != nil {
-		if cerr := q.listActiveAlertsDueStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listActiveAlertsDueStmt: %w", cerr)
-		}
-	}
 	if q.listAlertHistoryStmt != nil {
 		if cerr := q.listAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAlertHistoryStmt: %w", cerr)
@@ -1999,7 +1991,6 @@ type Queries struct {
 	isTeamManagedStmt                     *sql.Stmt
 	kickJobStmt                           *sql.Stmt
 	listAPITokensForUserStmt              *sql.Stmt
-	listActiveAlertsDueStmt               *sql.Stmt
 	listAlertHistoryStmt                  *sql.Stmt
 	listAlertInstancesStmt                *sql.Stmt
 	listAlertsBySourceStmt                *sql.Stmt
@@ -2232,7 +2223,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		isTeamManagedStmt:                     q.isTeamManagedStmt,
 		kickJobStmt:                           q.kickJobStmt,
 		listAPITokensForUserStmt:              q.listAPITokensForUserStmt,
-		listActiveAlertsDueStmt:               q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                  q.listAlertHistoryStmt,
 		listAlertInstancesStmt:                q.listAlertInstancesStmt,
 		listAlertsBySourceStmt:                q.listAlertsBySourceStmt,

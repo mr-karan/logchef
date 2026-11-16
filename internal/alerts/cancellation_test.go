@@ -15,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
 	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
@@ -92,33 +93,45 @@ func TestLiveEvaluationCancellationHistory(t *testing.T) {
 				}
 				ds := datasource.NewService(db, log)
 				ds.Register(datasource.NewClickHouseProvider(ch, log))
-				manager := NewManager(Options{Logger: log, DB: db, Datasources: ds, Config: config.AlertsConfig{Enabled: true, HistoryLimit: 10}})
+				manager := NewManager(Options{Logger: log, DB: db, Datasources: ds, Config: config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 1, HistoryLimit: 10}})
+				if err := db.WithTx(ctx, func(tx store.StoreOps) error { return jobs.Upsert(ctx, tx, EvaluationJob(alert)) }); err != nil {
+					t.Fatal(err)
+				}
+				kind := manager.EvaluationKind()
 				evaluated := make(chan struct{})
-				manager.evalFn = func(ctx context.Context, alert *models.Alert) error {
+				handler := kind.Handler
+				kind.Handler = func(ctx context.Context, job jobs.Job) error {
 					defer close(evaluated)
-					return manager.evaluateAlert(ctx, alert)
+					return handler(ctx, job)
 				}
 				if outcome == "timeout" {
-					manager.evalTimeout = 200 * time.Millisecond
+					kind.Timeout = 200 * time.Millisecond
 				}
-				manager.Start(ctx)
+				runner := jobs.New(jobs.Options{Store: db, Logger: log, PollInterval: 20 * time.Millisecond})
+				runner.Register(kind)
+				stop := func() {
+					if err := runner.Stop(ctx); err != nil {
+						t.Error(err)
+					}
+				}
+				runner.Start(ctx)
 				select {
 				case <-hook.started:
 				case <-time.After(5 * time.Second):
-					manager.Stop()
+					stop()
 					t.Fatal("live evaluation did not start")
 				}
 				if outcome == "timeout" {
 					select {
 					case <-evaluated:
 					case <-time.After(5 * time.Second):
-						manager.Stop()
+						stop()
 						t.Fatal("evaluation deadline did not stop query")
 					}
 				} else {
 					time.Sleep(100 * time.Millisecond)
 				}
-				manager.Stop()
+				stop()
 				history, err := db.ListAlertHistory(ctx, alert.ID, 10)
 				if err != nil {
 					t.Fatal(err)
@@ -139,7 +152,7 @@ func TestLiveEvaluationCancellationHistory(t *testing.T) {
 					if len(history) != 1 || history[0].Status != models.AlertStatusError || !strings.Contains(history[0].Message, "deadline exceeded") {
 						t.Errorf("timeout history = %+v", history)
 					}
-					if !strings.Contains(logs, "level=ERROR msg=\"alert evaluation failed\"") {
+					if !strings.Contains(logs, "level=ERROR msg=\"job failed\"") {
 						t.Errorf("timeout missing error log:\n%s", logs)
 					}
 				}

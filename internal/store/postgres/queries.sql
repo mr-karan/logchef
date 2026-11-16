@@ -645,14 +645,6 @@ SET last_state = 'firing',
     updated_at = now()
 WHERE id = $1;
 
--- name: ListActiveAlertsDue :many
-SELECT * FROM alerts
-WHERE is_active = true
-  AND (
-        last_evaluated_at IS NULL
-        OR last_evaluated_at <= now() - frequency_seconds * interval '1 second'
-      );
-
 -- name: AdvanceAlertEvalSeq :one
 UPDATE alerts
 SET eval_seq = eval_seq + 1

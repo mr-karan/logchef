@@ -221,7 +221,6 @@ type AlertStore interface {
 	GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error)
 	ListAlertsBySource(ctx context.Context, sourceID models.SourceID) ([]*models.Alert, error)
 	ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*models.Alert, error)
-	ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error)
 	MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error
 	TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error
 	MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error

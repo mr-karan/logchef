@@ -121,15 +121,6 @@ func (s *Store) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]
 	return alertsFromSQLC(rows)
 }
 
-// ListActiveAlertsDue returns alerts that need evaluation.
-func (s *Store) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := s.q.ListActiveAlertsDue(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list active alerts: %w", err)
-	}
-	return alertsFromSQLC(rows)
-}
-
 // MarkAlertEvaluated updates state after evaluation finishes without triggering.
 func (s *Store) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
 	if err := s.q.MarkAlertEvaluated(ctx, int64(alertID)); err != nil {

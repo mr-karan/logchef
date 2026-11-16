@@ -21,45 +21,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// TestEvaluateAlertWithTimeoutIsolatesHungEvaluation proves the per-alert
-// deadline bounds a single evaluation, so a wedged source (one whose evaluation
-
-// never returns on its own) cannot freeze the sequential evaluation loop.
-
-func TestEvaluateAlertWithTimeoutIsolatesHungEvaluation(t *testing.T) {
-	t.Parallel()
-
-	sawDeadline := make(chan bool, 1)
-	m := &Manager{
-		evalTimeout: 50 * time.Millisecond,
-		evalFn: func(ctx context.Context, _ *models.Alert) error {
-			_, ok := ctx.Deadline()
-			sawDeadline <- ok
-			// Simulate a hung source: block until the per-alert deadline fires.
-			<-ctx.Done()
-			return ctx.Err()
-		},
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- m.evaluateAlertWithTimeout(context.Background(), &models.Alert{ID: 1})
-	}()
-
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("expected context deadline exceeded, got %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("evaluateAlertWithTimeout did not return within the deadline; a hung source can freeze the loop")
-	}
-
-	if hadDeadline := <-sawDeadline; !hadDeadline {
-		t.Fatal("evaluation context carried no deadline")
-	}
-}
-
 func newManagerTestAlert(t *testing.T) (*sqlite.DB, *models.Alert, *slog.Logger) {
 	t.Helper()
 	return newManagerTestAlertAtPath(t, sqlitetest.Path(t))
@@ -94,7 +55,7 @@ func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.evaluateAlert(ctx, before); err == nil {
+	if err := m.evaluateAlert(ctx, before, time.Now()); err == nil {
 		t.Fatal("evaluateAlert succeeded without a datasource provider")
 	}
 	after, err := db.GetAlert(ctx, alert.ID)
@@ -109,10 +70,6 @@ func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
 	}
 	if after.LastTriggeredAt == nil || !after.LastTriggeredAt.Equal(*before.LastTriggeredAt) {
 		t.Errorf("trigger timestamp changed from %v to %v", before.LastTriggeredAt, after.LastTriggeredAt)
-	}
-	due, err := db.ListActiveAlertsDue(ctx)
-	if err != nil || len(due) != 0 {
-		t.Errorf("due after evaluation error = %d alerts, %v; want none", len(due), err)
 	}
 	history, err := db.ListAlertHistory(ctx, alert.ID, 10)
 	if err != nil || len(history) != 2 {
@@ -213,12 +170,6 @@ func TestManagerDeliveryRetries(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestManagerStopTwice(t *testing.T) {
-	m := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	m.Stop()
-	m.Stop()
 }
 
 type logRecord struct {
@@ -369,119 +320,20 @@ func TestManagerOutcomeWriteFailureStopsAtMaxAttempts(t *testing.T) {
 	}
 }
 
-func TestManagerStopCancelsEvaluation(t *testing.T) {
-	db, _, logger := newManagerTestAlert(t)
-	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour}})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	started := make(chan struct{})
-	manager.evalFn = func(ctx context.Context, _ *models.Alert) error { close(started); <-ctx.Done(); return ctx.Err() }
-	manager.Start(ctx)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("evaluation did not start")
-	}
-	stopped := make(chan struct{})
-	go func() { manager.Stop(); close(stopped) }()
-	select {
-	case <-stopped:
-	case <-time.After(time.Second):
-		cancel()
-		<-stopped
-		t.Fatal("Stop did not cancel in-flight evaluation within one second")
-	}
-}
-
-func TestManagerSkipsRemainingAlertsAfterCancellation(t *testing.T) {
-	db, alert, logger := newManagerTestAlert(t)
-	alert.ID = 0
-	alert.Name = "another alert"
-	if err := db.CreateAlert(t.Context(), alert); err != nil {
-		t.Fatal(err)
-	}
-	manager := NewManager(Options{DB: db, Logger: logger})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	evaluations := 0
-	manager.evalFn = func(context.Context, *models.Alert) error { evaluations++; cancel(); return nil }
-	manager.evaluateCycle(ctx)
-	if evaluations != 1 {
-		t.Errorf("evaluated %d alerts after cancellation; want one", evaluations)
-	}
-}
-
 func TestCanceledEvaluationDoesNotRecordFailure(t *testing.T) {
 	db, alert, _ := newManagerTestAlert(t)
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
 	ctx, cancel := context.WithCancel(t.Context())
-	manager.evalFn = func(ctx context.Context, current *models.Alert) error {
-		cancel()
-		err := fmt.Errorf("query failed: %w", context.Canceled)
-		manager.recordEvaluationError(ctx, current, err)
-		return err
-	}
-	manager.evaluateCycle(ctx)
+	cancel()
+	manager.recordEvaluationError(ctx, alert, fmt.Errorf("query failed: %w", context.Canceled))
 	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
 	if err != nil || len(history) != 0 {
 		t.Fatalf("cancellation created failure history = %v, %v", history, err)
 	}
 	if strings.Contains(logs.String(), `"level":"ERROR"`) {
 		t.Fatalf("cancellation logged an evaluation error: %s", logs.String())
-	}
-}
-
-func TestStopCancelsActiveEvaluation(t *testing.T) {
-	var logs bytes.Buffer
-	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	source := &models.Source{Name: "logs", MetaTSField: "timestamp", Connection: models.ConnectionInfo{Host: "localhost:9000", Database: "logs", TableName: "logs"}}
-	if err := source.SyncConnectionConfig(); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.CreateSource(context.Background(), source); err != nil {
-		t.Fatal(err)
-	}
-	alert := &models.Alert{SourceID: source.ID, Name: "slow", QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative, Query: "SELECT 1", LookbackSeconds: 60, ThresholdOperator: models.AlertThresholdGreaterThan, FrequencySeconds: 60, Severity: models.AlertSeverityWarning, IsActive: true, LastState: models.AlertStateResolved}
-	if err := db.CreateAlert(context.Background(), alert); err != nil {
-		t.Fatal(err)
-	}
-	manager := NewManager(Options{Logger: log, DB: db, Config: config.AlertsConfig{Enabled: true}})
-	for _, failure := range []error{context.Canceled, context.DeadlineExceeded} {
-		logs.Reset()
-		manager.evalFn = func(context.Context, *models.Alert) error { return failure }
-		manager.evaluateCycle(context.Background())
-		if !strings.Contains(logs.String(), "level=ERROR msg=\"alert evaluation failed\"") {
-			t.Errorf("evaluation failure missing error log: %s", logs.String())
-		}
-	}
-	logs.Reset()
-	entered := make(chan struct{})
-	manager.evalFn = func(ctx context.Context, _ *models.Alert) error { close(entered); <-ctx.Done(); return ctx.Err() }
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	manager.Start(ctx)
-	select {
-	case <-entered:
-	case <-ctx.Done():
-		t.Fatal("evaluation did not start")
-	}
-	start := time.Now()
-	manager.Stop()
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Fatalf("Stop waited %s for active evaluation", elapsed)
-	}
-	if strings.Contains(logs.String(), "level=ERROR") {
-		t.Errorf("shutdown cancellation logged as error: %s", logs.String())
-	}
-	if !strings.Contains(logs.String(), "level=DEBUG msg=\"alert evaluation failed\"") {
-		t.Errorf("shutdown cancellation missing debug log: %s", logs.String())
 	}
 }
 
@@ -509,25 +361,6 @@ func createManagerTestAlert(t *testing.T, db store.Store) *models.Alert {
 		t.Fatal(err)
 	}
 	return alert
-}
-
-func TestManagerEvaluatesAfterStartupSweepFailure(t *testing.T) {
-	path := sqlitetest.Path(t)
-	db, alert, logger := newManagerTestAlertAtPath(t, path)
-	if _, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true}); err != nil {
-		t.Fatal(err)
-	}
-	failHistoryWrites(t, path, "BEFORE UPDATE OF payload_json ON alert_history")
-	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour}})
-	evaluated := make(chan struct{}, 1)
-	manager.evalFn = func(context.Context, *models.Alert) error { evaluated <- struct{}{}; return nil }
-	manager.Start(t.Context())
-	defer manager.Stop()
-	select {
-	case <-evaluated:
-	case <-time.After(time.Second):
-		t.Fatal("startup sweep failure prevented alert evaluation")
-	}
 }
 
 func TestManagerReservesDeliveryDeadline(t *testing.T) {
@@ -566,36 +399,4 @@ func TestManagerReservesDeliveryDeadline(t *testing.T) {
 			t.Error("finished attempt retained its delivery deadline")
 		}
 	}
-}
-
-type blockedRecoveryStore struct {
-	store.Store
-	started chan struct{}
-}
-
-func (s *blockedRecoveryStore) RecoverAlertDeliveries(ctx context.Context) error {
-	close(s.started)
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func TestManagerStopCancelsStartupSweep(t *testing.T) {
-	db, _, logger := newManagerTestAlert(t)
-	blocked := &blockedRecoveryStore{Store: db, started: make(chan struct{})}
-	manager := NewManager(Options{DB: blocked, Logger: logger, Config: config.AlertsConfig{Enabled: true}})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	started := make(chan struct{})
-	go func() { manager.Start(ctx); close(started) }()
-	<-blocked.started
-	stopped := make(chan struct{})
-	go func() { manager.Stop(); close(stopped) }()
-	select {
-	case <-stopped:
-	case <-time.After(time.Second):
-		cancel()
-		<-stopped
-		t.Error("Stop could not cancel the startup sweep")
-	}
-	<-started
 }

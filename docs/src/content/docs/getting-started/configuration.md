@@ -522,6 +522,24 @@ their address. Leave per-IP limiting off until trusted-proxy resolution is
 configured; the global auth cap and per-user query limit remain usable.
 :::
 
+### Background jobs
+
+Alert evaluation runs on the background job runner. Each alert rule is a job with
+its own frequency (at least 10 seconds), and every replica with jobs enabled
+claims due jobs, so one replica runs each tick.
+
+```toml
+[jobs]
+enabled = true        # false: this replica serves HTTP and runs no jobs
+poll_interval = "2s"  # how often the replica looks for due jobs
+
+[alerts]
+max_concurrent_evaluations = 4  # alert rules this replica evaluates at once
+```
+
+These are static settings: they live in `config.toml` or `LOGCHEF_` variables,
+not in the Admin Settings UI.
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
@@ -645,7 +663,6 @@ Configure real-time log monitoring with email and webhook notifications through 
 - **SMTP From**: From address for alert emails
 - **SMTP Reply-To**: Reply-To address (optional)
 - **SMTP Security**: `none`, `starttls`, or `tls`
-- **Evaluation Interval**: How often to check all active alerts (e.g., "1m")
 - **Default Lookback**: Default time range for alert queries (e.g., "5m")
 - **History Limit**: Number of historical events to keep per alert (default: 50)
 - **External URL**: Backend URL for API access
@@ -657,7 +674,6 @@ Configure real-time log monitoring with email and webhook notifications through 
 ```toml
 [alerts]
 enabled = false
-evaluation_interval = "1m"
 default_lookback = "5m"
 history_limit = 50
 smtp_host = ""

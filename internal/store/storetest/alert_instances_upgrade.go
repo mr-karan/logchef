@@ -12,6 +12,7 @@ import (
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -119,8 +120,9 @@ func checkBackfilledInstances(t *testing.T, s store.Store) {
 	}
 }
 
-// firstTickAfterUpgrade runs one evaluation cycle in which every rule reads a
-// value above its threshold. Only the rule that was not firing may notify.
+// firstTickAfterUpgrade runs the job runner over the alert.evaluate jobs that
+// the upgrade backfilled, until every rule was evaluated once. Every rule reads
+// a value above its threshold. Only the rule that was not firing may notify.
 func firstTickAfterUpgrade(t *testing.T, s store.Store) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -128,14 +130,21 @@ func firstTickAfterUpgrade(t *testing.T, s store.Store) {
 	sources.Register(fixedValueProvider{value: 12})
 	sender := &recordingSender{}
 	manager := alerts.NewManager(alerts.Options{
-		Config:      config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour, HistoryLimit: 50},
+		Config:      config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 4, HistoryLimit: 50},
 		DB:          s,
 		Datasources: sources,
 		Logger:      logger,
 		Sender:      sender,
 	})
-	manager.Start(context.Background())
-	defer manager.Stop()
+	runner := jobs.New(jobs.Options{Store: s, Logger: logger, PollInterval: 20 * time.Millisecond})
+	runner.Register(manager.EvaluationKind())
+	runner.Start(context.Background())
+	stop := func() {
+		if err := runner.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}
+	defer stop()
 
 	seeded := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
 	deadline := time.Now().Add(10 * time.Second)
@@ -154,7 +163,7 @@ func firstTickAfterUpgrade(t *testing.T, s store.Store) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	manager.Stop()
+	stop()
 
 	sent := sender.sent()
 	if len(sent) != 1 || sent[0].AlertID != 5 || sent[0].Status != models.AlertStatusTriggered {

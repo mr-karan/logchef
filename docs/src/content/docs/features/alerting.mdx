@@ -112,7 +112,6 @@ Seed initial settings via `config.toml`. After first boot, use the Admin UI:
 ```toml
 [alerts]
 enabled = true
-evaluation_interval = "1m"
 smtp_host = "smtp.example.com"
 smtp_port = 587
 smtp_from = "alerts@example.com"
@@ -121,9 +120,10 @@ smtp_security = "starttls"
 
 `enabled` is the **server-wide** alerting switch. With `alerts.enabled = false`
 (or `LOGCHEF_ALERTS__ENABLED=false`) Logchef hides all alerting UI and every
-alert endpoint returns `503`. That's useful for exploration-only deployments,
-or to keep alert evaluation on a single instance when running multiple
-replicas against a shared [Postgres backend](/operations/database-backends/).
+alert endpoint returns `503`. That's useful for exploration-only deployments.
+Each rule is evaluated at its own frequency (at least 10 seconds) on whichever
+replica claims the tick; see [Postgres backend](/operations/database-backends/)
+for running several replicas.
 
 ## Troubleshooting
 

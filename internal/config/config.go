@@ -449,15 +449,17 @@ type JobsConfig struct {
 	PollInterval time.Duration `koanf:"poll_interval"`
 }
 
-// AlertsConfig controls scheduling and webhook network access for alert rules.
-// SMTP and other delivery settings are stored in the database and managed via Admin UI.
+// AlertsConfig controls evaluation and webhook network access for alert rules.
+// Each rule's job carries its own frequency. SMTP and other delivery settings
+// are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
-	Enabled             bool             `koanf:"enabled"`
-	EvaluationInterval  time.Duration    `koanf:"evaluation_interval"`
-	DefaultLookback     time.Duration    `koanf:"default_lookback"`
-	HistoryLimit        int              `koanf:"history_limit"`
-	WebhookAllowedHosts []string         `koanf:"webhook_allowed_hosts"`
-	WebhookAllowlist    WebhookAllowlist `koanf:"-"`
+	Enabled bool `koanf:"enabled"`
+	// MaxConcurrentEvaluations bounds the rules this replica evaluates at once.
+	MaxConcurrentEvaluations int              `koanf:"max_concurrent_evaluations"`
+	DefaultLookback          time.Duration    `koanf:"default_lookback"`
+	HistoryLimit             int              `koanf:"history_limit"`
+	WebhookAllowedHosts      []string         `koanf:"webhook_allowed_hosts"`
+	WebhookAllowlist         WebhookAllowlist `koanf:"-"`
 }
 
 const (
@@ -475,10 +477,10 @@ const (
 	defaultPostgresMaxIdleConns    = 5
 	defaultPostgresConnMaxLifetime = 30 * time.Minute
 
-	defaultAlertsEnabled            = true
-	defaultAlertsEvaluationInterval = time.Minute
-	defaultAlertsDefaultLookback    = 5 * time.Minute
-	defaultAlertsHistoryLimit       = 50
+	defaultAlertsEnabled                  = true
+	defaultAlertsMaxConcurrentEvaluations = 4
+	defaultAlertsDefaultLookback          = 5 * time.Minute
+	defaultAlertsHistoryLimit             = 50
 
 	defaultJobsEnabled      = true
 	defaultJobsPollInterval = 2 * time.Second
@@ -971,10 +973,10 @@ func defaultConfig() Config {
 		},
 		Logging: LoggingConfig{Level: defaultLoggingLevel},
 		Alerts: AlertsConfig{
-			Enabled:            defaultAlertsEnabled,
-			EvaluationInterval: defaultAlertsEvaluationInterval,
-			DefaultLookback:    defaultAlertsDefaultLookback,
-			HistoryLimit:       defaultAlertsHistoryLimit,
+			Enabled:                  defaultAlertsEnabled,
+			MaxConcurrentEvaluations: defaultAlertsMaxConcurrentEvaluations,
+			DefaultLookback:          defaultAlertsDefaultLookback,
+			HistoryLimit:             defaultAlertsHistoryLimit,
 		},
 		Jobs: JobsConfig{
 			Enabled:      defaultJobsEnabled,
@@ -1115,6 +1117,9 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 
 	if cfg.Jobs.PollInterval <= 0 {
 		cfg.Jobs.PollInterval = defaultJobsPollInterval
+	}
+	if cfg.Alerts.MaxConcurrentEvaluations <= 0 {
+		cfg.Alerts.MaxConcurrentEvaluations = defaultAlertsMaxConcurrentEvaluations
 	}
 
 	if cfg.Tail.PollInterval <= 0 {

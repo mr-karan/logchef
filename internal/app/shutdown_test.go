@@ -16,7 +16,9 @@ import (
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/server"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/internal/victorialogs"
@@ -55,12 +57,19 @@ func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
 	}
 	ds := datasource.NewService(db, log)
 	ds.Register(victorialogs.NewProvider(log))
-	manager := alerts.NewManager(alerts.Options{DB: db, Datasources: ds, Logger: log, Config: config.AlertsConfig{Enabled: true}})
+	if err := db.WithTx(context.Background(), func(tx store.StoreOps) error {
+		return jobs.Upsert(context.Background(), tx, alerts.EvaluationJob(alert))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := alerts.NewManager(alerts.Options{DB: db, Datasources: ds, Logger: log, Config: config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 4}})
+	runner := jobs.New(jobs.Options{Store: db, Logger: log, PollInterval: 20 * time.Millisecond})
+	runner.Register(manager.EvaluationKind())
 	cfg := &config.Config{}
-	a := &App{Logger: log, SQLite: db, Alerts: manager, server: server.New(server.ServerOptions{Config: cfg, SQLite: db, Audit: audit.New(audit.Options{Store: db, Logger: log}), Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})}
+	a := &App{Logger: log, SQLite: db, Alerts: manager, Jobs: runner, server: server.New(server.ServerOptions{Config: cfg, SQLite: db, Audit: audit.New(audit.Options{Store: db, Logger: log}), Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})}
 	evaluationCtx, cancelEvaluation := context.WithTimeout(context.Background(), time.Second)
 	defer cancelEvaluation()
-	manager.Start(evaluationCtx)
+	runner.Start(evaluationCtx)
 	select {
 	case <-entered:
 	case <-evaluationCtx.Done():
