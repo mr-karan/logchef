@@ -10,7 +10,6 @@ import {
     type ExpandedState,
     type PaginationState,
     type ColumnResizeMode,
-    type ColumnFiltersState,
 } from '@tanstack/vue-table'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -36,6 +35,7 @@ import CellContextMenu, { type CellMenuTarget } from './CellContextMenu.vue'
 import ExpandedRowFields from './ExpandedRowFields.vue'
 import { copyText } from '@/utils/clipboard'
 import type { FilterOperator } from '@/utils/logchefql/filters'
+import { isNumericFieldType } from '@/utils/logchefql-autocomplete'
 import { usePreferencesStore } from '@/stores/preferences'
 import { isPrimaryMessageField } from './fieldSemantics'
 
@@ -53,6 +53,7 @@ interface Props {
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
     activeMode?: 'logchefql' | 'clickhouse-sql' | 'native' // Current query mode
+    filteredColumns?: string[] // Columns with a top-level condition in the LogchefQL query
     isLoading?: boolean // Prop to indicate loading state
 }
 
@@ -62,6 +63,7 @@ const props = withDefaults(defineProps<Props>(), {
     queryFields: () => [],
     regexHighlights: () => ({}),
     activeMode: 'logchefql',
+    filteredColumns: () => [],
     isLoading: false // Default isLoading to false
 })
 
@@ -92,10 +94,6 @@ const pagination = ref<PaginationState>({
     pageSize: 50,
 })
 const globalFilter = ref('')
-// Column filters are local to this table (client-side filtering of the
-// currently loaded result page only) and reset whenever a new query runs -
-// see the watch on props.data below. They are intentionally not persisted.
-const columnFilters = ref<ColumnFiltersState>([])
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const preferencesStore = usePreferencesStore()
@@ -128,15 +126,6 @@ const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableS
     timestampField: timestampFieldName,
     severityField: severityFieldName,
 })
-
-// Reset column filters whenever a new query runs. A new query replaces
-// props.data with a fresh array reference, so any change here means the
-// previously loaded result page is gone and stale filters no longer apply.
-watch(() => props.data, () => {
-    if (columnFilters.value.length > 0) {
-        columnFilters.value = [];
-    }
-});
 
 function cellTitle(value: unknown): string {
     const text = value === null || value === undefined ? '' : String(value)
@@ -277,9 +266,6 @@ const table = useTable({
         get globalFilter() {
             return globalFilter.value
         },
-        get columnFilters() {
-            return columnFilters.value
-        },
         get columnSizing() {
             return effectiveColumnSizing.value
         },
@@ -295,7 +281,6 @@ const table = useTable({
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnFiltersChange: updaterOrValue => valueUpdater(updaterOrValue, columnFilters),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
     onColumnOrderChange: setColumnOrder,
     getRowCanExpand: () => true,
@@ -574,6 +559,8 @@ const onDragEnd = () => { // No event parameter
 const emit = defineEmits<{
     (e: 'drill-down', value: { column: string, value: unknown, operator: FilterOperator }): void
     (e: 'add-column', value: { field: string, shownColumns: string[] }): void
+    (e: 'apply-column-filter', value: { column: string, operator: FilterOperator, value: string | number }): void
+    (e: 'clear-column-filter', column: string): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
 }>();
 
@@ -581,6 +568,14 @@ const handleDrillDown = (value: { column: string, value: unknown, operator: Filt
     if (props.activeMode !== 'logchefql') return;
     emit('drill-down', value);
 };
+
+// Timestamps are filtered by the time picker, so they get no header filter.
+const columnFilterKind = (column: { id: string }): 'text' | 'number' | null => {
+    const info = props.columns.find(col => col.name === column.id)
+    const type = getColumnType(column)
+    if (!info || type === 'timestamp' || type === 'date') return null
+    return isNumericFieldType(info.type) ? 'number' : 'text'
+}
 
 const shownColumns = computed(() => visibleLeafColumns.value.map(column => column.id))
 
@@ -683,10 +678,15 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
-                                        <!-- Column Filter (client-side, filters the currently loaded page only) -->
-                                        <span v-if="header.column.getCanFilter()"
-                                            :class="header.column.getIsFiltered() ? 'ml-1 flex-shrink-0' : 'absolute right-5 top-1/2 -translate-y-1/2'">
-                                            <ColumnFilterButton :column="header.column" />
+                                        <!-- Column filter: adds a condition to the LogchefQL query -->
+                                        <span v-if="columnFilterKind(header.column)"
+                                            :class="filteredColumns.includes(header.column.id) ? 'ml-1 flex-shrink-0' : 'absolute right-5 top-1/2 -translate-y-1/2'">
+                                            <ColumnFilterButton :column="header.column.id"
+                                                :kind="columnFilterKind(header.column)!"
+                                                :active="filteredColumns.includes(header.column.id)"
+                                                :disabled="activeMode !== 'logchefql'"
+                                                @apply="emit('apply-column-filter', $event)"
+                                                @clear="emit('clear-column-filter', $event)" />
                                         </span>
 
                                         <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
