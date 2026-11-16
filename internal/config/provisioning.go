@@ -148,8 +148,8 @@ func (s *ProvisionSource) ConnectionPayload() (json.RawMessage, error) {
 			return nil, fmt.Errorf("marshal clickhouse connection config: %w", err)
 		}
 		return payload, nil
-	case models.SourceTypeVictoriaLogs:
-		return nil, fmt.Errorf("victorialogs source %q requires a connection block", s.Name)
+	case models.SourceTypeVictoriaLogs, models.SourceTypeLoki:
+		return nil, fmt.Errorf("%s source %q requires a connection block", s.NormalizedSourceType(), s.Name)
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", s.SourceType)
 	}
@@ -164,6 +164,19 @@ func (s *ProvisionSource) VictoriaLogsConnection() (models.VictoriaLogsConnectio
 
 	if err := json.Unmarshal(payload, &conn); err != nil {
 		return conn, fmt.Errorf("unmarshal victorialogs connection config: %w", err)
+	}
+	return conn, nil
+}
+
+func (s *ProvisionSource) LokiConnection() (models.LokiConnectionInfo, error) {
+	var conn models.LokiConnectionInfo
+	payload, err := s.ConnectionPayload()
+	if err != nil {
+		return conn, err
+	}
+
+	if err := json.Unmarshal(payload, &conn); err != nil {
+		return conn, fmt.Errorf("unmarshal loki connection config: %w", err)
 	}
 	return conn, nil
 }

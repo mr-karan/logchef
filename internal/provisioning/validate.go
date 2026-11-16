@@ -1,6 +1,7 @@
 package provisioning
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -87,7 +88,9 @@ func validateOneSource(i int, src config.ProvisionSource, seen map[string]bool) 
 		connErrs, connOK = validateVictoriaLogsSource(prefix, src)
 		errs = append(errs, connErrs...)
 	case models.SourceTypeLoki:
-		errs = append(errs, fmt.Sprintf("%s: source_type %q cannot be provisioned yet; add the source in the UI or the API", prefix, sourceType))
+		var connErrs []string
+		connErrs, connOK = validateLokiSource(prefix, src)
+		errs = append(errs, connErrs...)
 	}
 	if !connOK {
 		return errs
@@ -174,6 +177,46 @@ func validateVictoriaLogsSource(prefix string, src config.ProvisionSource) (errs
 	return errs, true
 }
 
+// validateLokiSource validates a Loki source's connection block with the same
+// rules the API applies. ok is false when the connection block itself failed
+// to parse.
+func validateLokiSource(prefix string, src config.ProvisionSource) (errs []string, ok bool) {
+	conn, err := src.LokiConnection()
+	if err != nil {
+		return []string{fmt.Sprintf("%s: %v", prefix, err)}, false
+	}
+	// An unset secret_ref variable is reported by the shared secret_ref check,
+	// so stand in a value here to keep the auth error from repeating it.
+	if secret := lokiSecretField(&conn); secret != nil && *secret == "" && src.SecretRef != "" {
+		*secret = "from secret_ref"
+	}
+	if err := conn.Validate(); err != nil {
+		msg := err.Error()
+		if connErr, isConnErr := errors.AsType[*models.LokiConnectionError](err); isConnErr {
+			msg = connErr.Message
+			if connErr.Field == "auth.token" || connErr.Field == "auth.password" {
+				msg += "; set it or secret_ref"
+			}
+			msg = fmt.Sprintf("loki connection.%s: %s", connErr.Field, msg)
+		}
+		errs = append(errs, fmt.Sprintf("%s: %s", prefix, msg))
+	}
+	return errs, true
+}
+
+// lokiSecretField returns the connection field that secret_ref fills: the
+// token in bearer mode, the password in basic mode, and nil otherwise.
+func lokiSecretField(conn *models.LokiConnectionInfo) *string {
+	switch normalizedAuthMode(conn.Auth.Mode) {
+	case "bearer":
+		return &conn.Auth.Token
+	case "basic":
+		return &conn.Auth.Password
+	default:
+		return nil
+	}
+}
+
 func validateTeams(cfg *config.ProvisioningConfig) []string {
 	var errs []string
 	seen := make(map[string]bool)
@@ -241,42 +284,7 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 // ResolveConfig applies defaults, normalizes members, and resolves environment secrets.
 func ResolveConfig(cfg *config.ProvisioningConfig) {
 	for i := range cfg.Sources {
-		source := &cfg.Sources[i]
-		source.SourceType = source.NormalizedSourceType()
-
-		switch source.SourceType {
-		case models.SourceTypeClickHouse:
-			conn, err := source.ClickHouseConnection()
-			if err == nil {
-				if conn.Password == "" && source.SecretRef != "" {
-					conn.Password = os.Getenv(source.SecretRef)
-				}
-				_ = source.SetConnectionConfig(conn)
-			}
-			if source.MetaTSField == "" {
-				source.MetaTSField = "timestamp"
-			}
-		case models.SourceTypeVictoriaLogs:
-			conn, err := source.VictoriaLogsConnection()
-			if err == nil {
-				switch normalizedAuthMode(conn.Auth.Mode) {
-				case "bearer":
-					if conn.Auth.Token == "" && source.SecretRef != "" {
-						conn.Auth.Token = os.Getenv(source.SecretRef)
-					}
-				case "basic":
-					if conn.Auth.Password == "" && source.SecretRef != "" {
-						conn.Auth.Password = os.Getenv(source.SecretRef)
-					}
-				}
-				_ = source.SetConnectionConfig(conn)
-			}
-			if source.MetaTSField == "" {
-				source.MetaTSField = "_time"
-			}
-		case models.SourceTypeLoki:
-			// ValidateConfig rejects provisioned Loki sources, so there is nothing to resolve.
-		}
+		resolveSource(&cfg.Sources[i])
 	}
 
 	// Default member roles
@@ -289,6 +297,71 @@ func ResolveConfig(cfg *config.ProvisioningConfig) {
 				member.Role = "member"
 			}
 		}
+	}
+}
+
+// resolveSource normalizes the source type, fills the secret that secret_ref
+// names, and applies the per-type field defaults.
+func resolveSource(source *config.ProvisionSource) {
+	source.SourceType = source.NormalizedSourceType()
+
+	switch source.SourceType {
+	case models.SourceTypeClickHouse:
+		resolveClickHouseSource(source)
+	case models.SourceTypeVictoriaLogs:
+		resolveVictoriaLogsSource(source)
+	case models.SourceTypeLoki:
+		resolveLokiSource(source)
+	}
+}
+
+func resolveClickHouseSource(source *config.ProvisionSource) {
+	conn, err := source.ClickHouseConnection()
+	if err == nil {
+		if conn.Password == "" && source.SecretRef != "" {
+			conn.Password = os.Getenv(source.SecretRef)
+		}
+		_ = source.SetConnectionConfig(conn)
+	}
+	if source.MetaTSField == "" {
+		source.MetaTSField = "timestamp"
+	}
+}
+
+func resolveVictoriaLogsSource(source *config.ProvisionSource) {
+	conn, err := source.VictoriaLogsConnection()
+	if err == nil {
+		switch normalizedAuthMode(conn.Auth.Mode) {
+		case "bearer":
+			if conn.Auth.Token == "" && source.SecretRef != "" {
+				conn.Auth.Token = os.Getenv(source.SecretRef)
+			}
+		case "basic":
+			if conn.Auth.Password == "" && source.SecretRef != "" {
+				conn.Auth.Password = os.Getenv(source.SecretRef)
+			}
+		}
+		_ = source.SetConnectionConfig(conn)
+	}
+	if source.MetaTSField == "" {
+		source.MetaTSField = "_time"
+	}
+}
+
+func resolveLokiSource(source *config.ProvisionSource) {
+	conn, err := source.LokiConnection()
+	if err == nil {
+		if secret := lokiSecretField(&conn); secret != nil && *secret == "" && source.SecretRef != "" {
+			*secret = os.Getenv(source.SecretRef)
+		}
+		_ = source.SetConnectionConfig(conn)
+	}
+	if source.MetaTSField == "" {
+		source.MetaTSField = "_time"
+	}
+	// Loki adds detected_level as structured metadata by default.
+	if source.MetaSeverityField == "" {
+		source.MetaSeverityField = "detected_level"
 	}
 }
 
@@ -317,6 +390,13 @@ func sourceSecretValueMissing(src config.ProvisionSource, sourceType models.Sour
 		default:
 			return false
 		}
+	case models.SourceTypeLoki:
+		conn, err := src.LokiConnection()
+		if err != nil {
+			return false
+		}
+		secret := lokiSecretField(&conn)
+		return secret != nil && strings.TrimSpace(*secret) == ""
 	default:
 		return false
 	}
