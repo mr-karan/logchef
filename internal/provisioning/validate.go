@@ -86,6 +86,8 @@ func validateOneSource(i int, src config.ProvisionSource, seen map[string]bool) 
 		var connErrs []string
 		connErrs, connOK = validateVictoriaLogsSource(prefix, src)
 		errs = append(errs, connErrs...)
+	case models.SourceTypeLoki:
+		errs = append(errs, fmt.Sprintf("%s: source_type %q cannot be provisioned yet; add the source in the UI or the API", prefix, sourceType))
 	}
 	if !connOK {
 		return errs
@@ -272,6 +274,8 @@ func ResolveConfig(cfg *config.ProvisioningConfig) {
 			if source.MetaTSField == "" {
 				source.MetaTSField = "_time"
 			}
+		case models.SourceTypeLoki:
+			// ValidateConfig rejects provisioned Loki sources, so there is nothing to resolve.
 		}
 	}
 

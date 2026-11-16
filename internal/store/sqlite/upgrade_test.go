@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -225,6 +226,148 @@ func TestAlertInstancesUpgrade(t *testing.T) {
 	defer check.Close()
 	assertRow(t, check, `SELECT seq FROM sqlite_sequence WHERE name = 'alerts'`, "1000")
 	assertRow(t, check, `SELECT count(*) FROM sqlite_master WHERE name = 'alert_sequences_saved'`, "0")
+}
+
+// allowLokiSourceTypeVersion is the migration that rebuilds sources to accept
+// source_type 'loki' (RFC 0011).
+const allowLokiSourceTypeVersion = 47
+
+// TestAllowLokiSourceTypeUpgrade seeds a source with every kind of child row
+// before the sources rebuild, applies it, and asserts that every child row
+// survives and still joins to its source, that the new CHECK accepts loki, and
+// that the child foreign keys point at the rebuilt table.
+func TestAllowLokiSourceTypeUpgrade(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "upgrade.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	m := newMigrator(t, db)
+	before := previousMigrationVersion(t, allowLokiSourceTypeVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+
+	mustExec(t, db, `INSERT INTO users (id, email, full_name, role, status) VALUES (1, 'admin@test.dev', 'Admin', 'admin', 'active')`)
+	mustExec(t, db, `INSERT INTO teams (id, name) VALUES (1, 'team-a'), (2, 'team-b')`)
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref) VALUES
+			(1, 'logs.app', 0, 'clickhouse', 'timestamp', 'severity_text', '{"host":"ch:9000","database":"logs","table_name":"app"}', 'clickhouse:ch:9000/logs/app', 'app logs', 30, 1, 'LOGCHEF_SOURCE_APP'),
+			(2, 'vl', 0, 'victorialogs', '_time', NULL, '{"base_url":"http://vl:9428"}', 'victorialogs:http://vl:9428|acct=|proj=|scope=', NULL, 0, 0, NULL)`)
+	if _, err := db.Exec(`INSERT INTO sources (name, _meta_is_auto_created, source_type, connection_config, identity_key) VALUES ('loki', 0, 'loki', '{}', 'loki:early')`); err == nil {
+		t.Fatalf("v%d accepted source_type loki before the rebuild", before)
+	}
+	// Source 9 was the newest and is gone; its ID must not be handed out again.
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, connection_config, identity_key) VALUES (9, 'deleted', 0, '{}', 'clickhouse:gone')`)
+	mustExec(t, db, `DELETE FROM sources WHERE id = 9`)
+	mustExec(t, db, `INSERT INTO team_sources (team_id, source_id) VALUES (1, 1), (2, 1), (1, 2)`)
+	mustExec(t, db, `INSERT INTO saved_queries (id, source_id, name, query_language, editor_mode, query_content, created_by, created_from_team_id) VALUES
+			(1, 1, 'errors', 'logchefql', 'builder', '{"content":"status>=500"}', 1, 1),
+			(2, 2, 'vl errors', 'logsql', 'native', '{"content":"error"}', 1, NULL)`)
+	mustExec(t, db, `INSERT INTO alerts (id, source_id, name, query_language, editor_mode, query, threshold_operator, threshold_value, severity, created_by) VALUES
+			(1, 1, 'too many errors', 'clickhouse-sql', 'native', 'SELECT count(*) FROM logs.app', 'gt', 10, 'warning', 1)`)
+	mustExec(t, db, `INSERT INTO query_shares (token, source_id, created_by, payload_json, expires_at, team_id) VALUES ('share-1', 1, 1, '{}', '2999-01-01 00:00:00', 1)`)
+	mustExec(t, db, `INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at) VALUES ('job-1', 1, 1, 'complete', 'csv', '{}', '2999-01-01 00:00:00')`)
+	mustExec(t, db, `INSERT INTO dashboards (id, name, panels_json, created_by) VALUES (1, 'ops', '{"version":1,"panels":[{"source_id":1}]}', 1)`)
+
+	if err := m.Migrate(allowLokiSourceTypeVersion); err != nil {
+		t.Fatalf("migrate to v%d: %v", allowLokiSourceTypeVersion, err)
+	}
+
+	assertRow(t, db, `SELECT group_concat(id || ':' || source_type || ':' || name || ':' || identity_key || ':' || ttl_days || ':' || managed || ':' || COALESCE(secret_ref, '-'), ',') FROM (SELECT * FROM sources ORDER BY id)`,
+		"1:clickhouse:logs.app:clickhouse:ch:9000/logs/app:30:1:LOGCHEF_SOURCE_APP,2:victorialogs:vl:victorialogs:http://vl:9428|acct=|proj=|scope=:0:0:-")
+	assertRow(t, db, `SELECT json_extract(connection_config, '$.table_name') FROM sources WHERE id = 1`, "app")
+	assertRow(t, db, `SELECT group_concat(ts.team_id || '>' || s.name, ',') FROM (SELECT * FROM team_sources ORDER BY team_id, source_id) ts JOIN sources s ON s.id = ts.source_id`, "1>logs.app,1>vl,2>logs.app")
+	assertRow(t, db, `SELECT group_concat(q.name || '>' || s.name, ',') FROM (SELECT * FROM saved_queries ORDER BY id) q JOIN sources s ON s.id = q.source_id`, "errors>logs.app,vl errors>vl")
+	assertRow(t, db, `SELECT a.name || '>' || s.name FROM alerts a JOIN sources s ON s.id = a.source_id`, "too many errors>logs.app")
+	assertRow(t, db, `SELECT q.token || '>' || s.name FROM query_shares q JOIN sources s ON s.id = q.source_id`, "share-1>logs.app")
+	assertRow(t, db, `SELECT j.id || '>' || s.name FROM export_jobs j JOIN sources s ON s.id = j.source_id`, "job-1>logs.app")
+	assertRow(t, db, `SELECT panels_json FROM dashboards WHERE id = 1`, `{"version":1,"panels":[{"source_id":1}]}`)
+	assertRow(t, db, `SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sources' AND sql IS NOT NULL ORDER BY name)`,
+		"idx_sources_created_at,idx_sources_identity_key,idx_sources_source_type")
+
+	mustExec(t, db, `INSERT INTO sources (name, _meta_is_auto_created, source_type, connection_config, identity_key) VALUES ('loki', 0, 'loki', '{"base_url":"http://loki:3100","selector":"{app=\"api\"}"}', 'loki:http://loki:3100|tenant=|selector={app="api"}|principal=')`)
+	assertRow(t, db, `SELECT id FROM sources WHERE name = 'loki'`, "10")
+	if _, err := db.Exec(`INSERT INTO sources (name, _meta_is_auto_created, source_type, connection_config, identity_key) VALUES ('other', 0, 'elastic', '{}', 'elastic:x')`); err == nil {
+		t.Fatal("the rebuilt CHECK accepted source_type elastic")
+	}
+
+	// With foreign keys on, deleting a source must cascade into the children:
+	// that proves their references resolve to the rebuilt table.
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("conn: %v", err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=on`); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM sources WHERE id = 1`); err != nil {
+		t.Fatalf("delete source: %v", err)
+	}
+	for _, table := range []string{"team_sources", "saved_queries", "alerts", "query_shares", "export_jobs"} {
+		var n int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE source_id = 1`).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("%s kept %d rows of the deleted source", table, n)
+		}
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close conn: %v", err)
+	}
+
+	// The down migration refuses to drop the Loki source silently.
+	if err := m.Migrate(before); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+		t.Fatalf("down migration with a loki source: err = %v, want a CHECK failure", err)
+	}
+}
+
+// TestAllowLokiSourceTypeDowngrade runs the down migration without Loki sources
+// and asserts that it keeps the rows and the AUTOINCREMENT high-water mark.
+func TestAllowLokiSourceTypeDowngrade(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "downgrade.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	m := newMigrator(t, db)
+	if err := m.Migrate(allowLokiSourceTypeVersion); err != nil {
+		t.Fatalf("migrate to v%d: %v", allowLokiSourceTypeVersion, err)
+	}
+	mustExec(t, db, `INSERT INTO teams (id, name) VALUES (1, 'team-a')`)
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, connection_config, identity_key) VALUES (1, 'app', 0, '{}', 'clickhouse:app'), (5, 'gone', 0, '{}', 'clickhouse:gone')`)
+	mustExec(t, db, `DELETE FROM sources WHERE id = 5`)
+	mustExec(t, db, `INSERT INTO team_sources (team_id, source_id) VALUES (1, 1)`)
+
+	if err := m.Migrate(previousMigrationVersion(t, allowLokiSourceTypeVersion)); err != nil {
+		t.Fatalf("down migration: %v", err)
+	}
+	assertRow(t, db, `SELECT ts.team_id || '>' || s.name FROM team_sources ts JOIN sources s ON s.id = ts.source_id`, "1>app")
+	mustExec(t, db, `INSERT INTO sources (name, _meta_is_auto_created, connection_config, identity_key) VALUES ('next', 0, '{}', 'clickhouse:next')`)
+	assertRow(t, db, `SELECT id FROM sources WHERE name = 'next'`, "6")
+}
+
+// previousMigrationVersion returns the migration before version, so a test
+// keeps working when its migration is renumbered at merge time.
+func previousMigrationVersion(t *testing.T, version uint) uint {
+	t.Helper()
+	migrationFS, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatalf("sub fs: %v", err)
+	}
+	sourceDriver, err := iofs.New(migrationFS, ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	prev, err := sourceDriver.Prev(version)
+	if err != nil {
+		t.Fatalf("migration before v%d: %v", version, err)
+	}
+	return prev
 }
 
 func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {

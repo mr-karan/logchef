@@ -98,7 +98,7 @@ var (
 	validDashboardCompareGood       = map[string]struct{}{"up": {}, "down": {}, "neutral": {}}
 	validDashboardPanelKinds        = map[DashboardPanelKind]struct{}{DashboardPanelKindQuery: {}}
 	validDashboardQueryModes        = map[DashboardQueryMode]struct{}{DashboardQueryModeCount: {}, DashboardQueryModeResult: {}}
-	validDashboardQueryLanguages    = map[QueryLanguage]struct{}{QueryLanguageLogchefQL: {}, QueryLanguageClickHouseSQL: {}, QueryLanguageLogsQL: {}}
+	validDashboardQueryLanguages    = map[QueryLanguage]struct{}{QueryLanguageLogchefQL: {}, QueryLanguageClickHouseSQL: {}, QueryLanguageLogsQL: {}, QueryLanguageLogQL: {}}
 	validDashboardQueryIntervals    = dashboardQueryIntervalSet()
 	validDashboardVizTypes          = map[DashboardVizType]struct{}{DashboardVizStat: {}, DashboardVizChart: {}, DashboardVizPie: {}, DashboardVizToplist: {}, DashboardVizTable: {}}
 	validDashboardChartMarks        = map[DashboardChartMark]struct{}{DashboardChartMarkLine: {}, DashboardChartMarkArea: {}, DashboardChartMarkBar: {}}
@@ -341,6 +341,15 @@ var dashboardFeatureRules = []struct {
 		}
 		return false
 	}},
+	// RFC 0011: a writer from before Loki rejects or misreads a LogQL panel.
+	{"loki_queries", func(blob *dashboardPanelsV2) bool {
+		for _, p := range blob.Panels {
+			if p.Query != nil && p.Query.Language == QueryLanguageLogQL {
+				return true
+			}
+		}
+		return false
+	}},
 }
 
 // dashboardSchema2FieldOrigins maps every JSON path of the schema 2 structs to
@@ -443,7 +452,7 @@ var dashboardSchema2EnumOrigins = map[string]map[string]DashboardFeature{
 	"panels.viz.orientation":        {"horizontal": "result_charts", "vertical": "result_charts"},
 	"panels.kind":                   {string(DashboardPanelKindQuery): dashboardFeatureBase},
 	"panels.query.mode":             {string(DashboardQueryModeCount): dashboardFeatureBase, string(DashboardQueryModeResult): dashboardFeatureBase},
-	"panels.query.language":         {string(QueryLanguageLogchefQL): dashboardFeatureBase, string(QueryLanguageClickHouseSQL): dashboardFeatureBase, string(QueryLanguageLogsQL): dashboardFeatureBase},
+	"panels.query.language":         {string(QueryLanguageLogchefQL): dashboardFeatureBase, string(QueryLanguageClickHouseSQL): dashboardFeatureBase, string(QueryLanguageLogsQL): dashboardFeatureBase, string(QueryLanguageLogQL): "loki_queries"},
 	"panels.query.interval":         dashboardQueryIntervalOrigins(),
 	"panels.viz.type":               {string(DashboardVizStat): dashboardFeatureBase, string(DashboardVizChart): dashboardFeatureBase, string(DashboardVizPie): dashboardFeatureBase, string(DashboardVizToplist): dashboardFeatureBase, string(DashboardVizTable): dashboardFeatureBase},
 	"panels.viz.mark":               {string(DashboardChartMarkLine): dashboardFeatureBase, string(DashboardChartMarkArea): dashboardFeatureBase, string(DashboardChartMarkBar): dashboardFeatureBase},

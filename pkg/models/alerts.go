@@ -73,7 +73,9 @@ func ResolveAlertMetadata(language QueryLanguage, mode AlertEditorMode) (QueryLa
 		}
 	}
 
-	if normalizedLanguage != QueryLanguageClickHouseSQL && normalizedLanguage != QueryLanguageLogsQL {
+	switch normalizedLanguage {
+	case QueryLanguageClickHouseSQL, QueryLanguageLogsQL, QueryLanguageLogQL:
+	default:
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(normalizedLanguage)}
 	}
 
@@ -83,12 +85,6 @@ func ResolveAlertMetadata(language QueryLanguage, mode AlertEditorMode) (QueryLa
 
 	if !normalizedMode.Valid() {
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(mode)}
-	}
-
-	if normalizedMode == AlertEditorModeCondition &&
-		normalizedLanguage != QueryLanguageClickHouseSQL &&
-		normalizedLanguage != QueryLanguageLogsQL {
-		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(normalizedLanguage)}
 	}
 
 	return normalizedLanguage, normalizedMode, nil

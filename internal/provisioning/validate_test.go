@@ -109,6 +109,24 @@ func TestValidateConfig_ValidVictoriaLogsSource(t *testing.T) {
 	}
 }
 
+// Provisioning Loki sources is RFC 0011 unit L12. Until then a Loki source in
+// the TOML must fail validation instead of passing with no connection checks.
+func TestValidateConfig_LokiSourceNotYetSupported(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{{
+			Name:       "loki",
+			SourceType: "loki",
+			Connection: map[string]any{"base_url": "http://loki:3100", "selector": `{app="api"}`},
+		}},
+	}
+	ResolveConfig(cfg)
+	err := ValidateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), `source_type "loki" cannot be provisioned yet`) {
+		t.Fatalf("ValidateConfig(loki) = %v, want the not-yet-supported error", err)
+	}
+}
+
 func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
 	chSource := func(database, table, tsField, sevField string) config.ProvisionSource {
 		return config.ProvisionSource{

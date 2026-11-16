@@ -125,8 +125,8 @@ func ValidateContentMatchesLanguage(content string, language models.QueryLanguag
 			}
 			return fmt.Errorf("%w: content is not valid logchefql: %s", ErrInvalidQueryContent, detail)
 		}
-	case models.QueryLanguageClickHouseSQL, models.QueryLanguageLogsQL:
-		// Deliberately NOT strict-parsed. ClickHouse SQL and LogsQL are large,
+	case models.QueryLanguageClickHouseSQL, models.QueryLanguageLogsQL, models.QueryLanguageLogQL:
+		// Deliberately NOT strict-parsed. ClickHouse SQL, LogsQL and LogQL are large,
 		// evolving dialects; validating them here with a third-party/absent
 		// parser would reject valid-but-exotic user queries at save time — a
 		// worse regression than the one-off mislabel this guard was added for
