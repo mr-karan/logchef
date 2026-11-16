@@ -50,6 +50,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("AlertInstances", func(t *testing.T) { testAlertInstances(t, ctx, s) })
 	t.Run("AlertGroups", func(t *testing.T) { testAlertGroups(t, ctx, s) })
 	t.Run("AlertNoData", func(t *testing.T) { testAlertNoData(t, ctx, s) })
+	t.Run("AlertSilences", func(t *testing.T) { testAlertSilences(t, ctx, s) })
 	t.Run("Destinations", func(t *testing.T) { testDestinations(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })

@@ -69,6 +69,21 @@ type AlertInstance struct {
 	Notified   bool               `json:"notified"`
 }
 
+type AlertSilence struct {
+	ID           int64              `json:"id"`
+	SourceID     int64              `json:"source_id"`
+	AlertID      pgtype.Int8        `json:"alert_id"`
+	MatchersJson string             `json:"matchers_json"`
+	Comment      string             `json:"comment"`
+	ScheduleKind string             `json:"schedule_kind"`
+	StartsAt     pgtype.Timestamptz `json:"starts_at"`
+	EndsAt       pgtype.Timestamptz `json:"ends_at"`
+	WeeklyJson   pgtype.Text        `json:"weekly_json"`
+	CreatedBy    pgtype.Int8        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ApiToken struct {
 	ID         int64              `json:"id"`
 	UserID     int64              `json:"user_id"`

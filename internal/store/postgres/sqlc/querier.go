@@ -52,6 +52,7 @@ type Querier interface {
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
 	// Instance counts of the given alerts, one row per (alert, state).
 	CountAlertInstancesByState(ctx context.Context, alertIds []int64) ([]CountAlertInstancesByStateRow, error)
+	CountAlertSilencesBySource(ctx context.Context, sourceID int64) (int64, error)
 	CountAlertsUsingDestination(ctx context.Context, destinationID int64) (int64, error)
 	// Counts the events that match the filters, stopping at max_rows.
 	CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error)
@@ -74,6 +75,8 @@ type Querier interface {
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (int64, error)
 	// Alerts
 	CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert, error)
+	// Alert silences (RFC 0006 unit S1)
+	CreateAlertSilence(ctx context.Context, arg CreateAlertSilenceParams) (AlertSilence, error)
 	// Collections (cross-team curation lists for saved queries)
 	// Insert a new collection (personal or shared)
 	CreateCollection(ctx context.Context, arg CreateCollectionParams) (CreateCollectionRow, error)
@@ -120,6 +123,7 @@ type Querier interface {
 	DeleteAlertDestinations(ctx context.Context, alertID int64) error
 	DeleteAlertInstance(ctx context.Context, arg DeleteAlertInstanceParams) error
 	DeleteAlertInstances(ctx context.Context, alertID int64) error
+	DeleteAlertSilence(ctx context.Context, id int64) (int64, error)
 	DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
 	DeleteCollection(ctx context.Context, id int64) error
@@ -169,6 +173,7 @@ type Querier interface {
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAlert(ctx context.Context, id int64) (Alert, error)
 	GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryEntryParams) (AlertHistory, error)
+	GetAlertSilence(ctx context.Context, id int64) (AlertSilence, error)
 	// The newest event beyond the keep_rows newest ones.
 	GetAuditPruneBoundary(ctx context.Context, keepRows int64) (GetAuditPruneBoundaryRow, error)
 	// Look up a collection by id with direct member, shared team, and item counts
@@ -276,6 +281,7 @@ type Querier interface {
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	// Alert instance queries
 	ListAlertInstances(ctx context.Context, alertID int64) ([]AlertInstance, error)
+	ListAlertSilencesBySource(ctx context.Context, sourceID int64) ([]AlertSilence, error)
 	// List alerts for one source
 	ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error)
 	// List every alert the user can see (any source attached to any of their teams)
@@ -486,6 +492,7 @@ type Querier interface {
 	UpdateAPITokenLastUsed(ctx context.Context, id int64) error
 	UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64, error)
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
+	UpdateAlertSilence(ctx context.Context, arg UpdateAlertSilenceParams) (AlertSilence, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
 	// Compare-and-swap on the client revision; no row means missing or stale. The

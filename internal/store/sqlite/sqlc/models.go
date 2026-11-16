@@ -70,6 +70,21 @@ type AlertInstance struct {
 	Notified   int64           `json:"notified"`
 }
 
+type AlertSilence struct {
+	ID           int64          `json:"id"`
+	SourceID     int64          `json:"source_id"`
+	AlertID      sql.NullInt64  `json:"alert_id"`
+	MatchersJson string         `json:"matchers_json"`
+	Comment      string         `json:"comment"`
+	ScheduleKind string         `json:"schedule_kind"`
+	StartsAt     sql.NullTime   `json:"starts_at"`
+	EndsAt       sql.NullTime   `json:"ends_at"`
+	WeeklyJson   sql.NullString `json:"weekly_json"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
 type ApiToken struct {
 	ID         int64        `json:"id"`
 	UserID     int64        `json:"user_id"`

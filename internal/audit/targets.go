@@ -154,3 +154,10 @@ func UserTarget(u *models.User) Target {
 func UserIDTarget(userID models.UserID) Target {
 	return Target{Type: "user", ID: id(userID)}
 }
+
+// AlertSilenceTarget is a silence, labelled with its comment. Its rule, when
+// it names one, is in the fields.
+func AlertSilenceTarget(s *models.AlertSilence) Target {
+	sourceID := s.SourceID
+	return Target{Type: "alert_silence", ID: id(s.ID), Label: s.Comment, SourceID: &sourceID}
+}

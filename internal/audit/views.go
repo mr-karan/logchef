@@ -296,3 +296,32 @@ func SchemaAdvisorDismissalFields(d *models.SchemaAdvisorDismissal) *Fields {
 		Set("finding_id", d.FindingID).
 		Set("reason", d.Reason)
 }
+
+// AlertSilenceFields records a silence: its rule, matchers, comment and
+// schedule. Matchers are recorded as "label=value", sorted.
+func AlertSilenceFields(s *models.AlertSilence) *Fields {
+	matchers := make([]string, 0, len(s.Matchers))
+	for key, value := range s.Matchers {
+		matchers = append(matchers, key+"="+value)
+	}
+	sort.Strings(matchers)
+	f := NewFields().
+		Set("source_id", s.SourceID).
+		Set("alert_id", s.AlertID).
+		Set("matchers", matchers).
+		Set("comment", s.Comment).
+		Set("schedule_kind", s.ScheduleKind).
+		Set("starts_at", s.StartsAt).
+		Set("ends_at", s.EndsAt)
+	if s.Weekly != nil {
+		days := make([]string, len(s.Weekly.Weekdays))
+		for i, day := range s.Weekly.Weekdays {
+			days[i] = strconv.Itoa(day)
+		}
+		f.Set("weekly.weekdays", days).
+			Set("weekly.start", s.Weekly.Start).
+			Set("weekly.duration_minutes", s.Weekly.DurationMinutes).
+			Set("weekly.timezone", s.Weekly.Timezone)
+	}
+	return f
+}

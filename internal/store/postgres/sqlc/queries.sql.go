@@ -569,6 +569,17 @@ func (q *Queries) CountAlertInstancesByState(ctx context.Context, alertIds []int
 	return items, nil
 }
 
+const countAlertSilencesBySource = `-- name: CountAlertSilencesBySource :one
+SELECT COUNT(*) FROM alert_silences WHERE source_id = $1
+`
+
+func (q *Queries) CountAlertSilencesBySource(ctx context.Context, sourceID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countAlertSilencesBySource, sourceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAlertsUsingDestination = `-- name: CountAlertsUsingDestination :one
 SELECT COUNT(*) FROM alert_destinations WHERE destination_id = $1
 `
@@ -902,6 +913,56 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.NoDataPolicy,
 		&i.EvalSeq,
 		&i.NotifyOnResolve,
+	)
+	return i, err
+}
+
+const createAlertSilence = `-- name: CreateAlertSilence :one
+
+INSERT INTO alert_silences (source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at
+`
+
+type CreateAlertSilenceParams struct {
+	SourceID     int64              `json:"source_id"`
+	AlertID      pgtype.Int8        `json:"alert_id"`
+	MatchersJson string             `json:"matchers_json"`
+	Comment      string             `json:"comment"`
+	ScheduleKind string             `json:"schedule_kind"`
+	StartsAt     pgtype.Timestamptz `json:"starts_at"`
+	EndsAt       pgtype.Timestamptz `json:"ends_at"`
+	WeeklyJson   pgtype.Text        `json:"weekly_json"`
+	CreatedBy    pgtype.Int8        `json:"created_by"`
+}
+
+// Alert silences (RFC 0006 unit S1)
+func (q *Queries) CreateAlertSilence(ctx context.Context, arg CreateAlertSilenceParams) (AlertSilence, error) {
+	row := q.db.QueryRow(ctx, createAlertSilence,
+		arg.SourceID,
+		arg.AlertID,
+		arg.MatchersJson,
+		arg.Comment,
+		arg.ScheduleKind,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.WeeklyJson,
+		arg.CreatedBy,
+	)
+	var i AlertSilence
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.AlertID,
+		&i.MatchersJson,
+		&i.Comment,
+		&i.ScheduleKind,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.WeeklyJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1528,6 +1589,18 @@ func (q *Queries) DeleteAlertInstances(ctx context.Context, alertID int64) error
 	return err
 }
 
+const deleteAlertSilence = `-- name: DeleteAlertSilence :one
+DELETE FROM alert_silences WHERE id = $1
+RETURNING id
+`
+
+func (q *Queries) DeleteAlertSilence(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, deleteAlertSilence, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const deleteClaimedJob = `-- name: DeleteClaimedJob :execrows
 DELETE FROM jobs WHERE id = $1 AND lease_token = $2
 `
@@ -2034,6 +2107,30 @@ func (q *Queries) GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryE
 		&i.CreatedAt,
 		&i.GroupKey,
 		&i.GroupJson,
+	)
+	return i, err
+}
+
+const getAlertSilence = `-- name: GetAlertSilence :one
+SELECT id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at FROM alert_silences WHERE id = $1
+`
+
+func (q *Queries) GetAlertSilence(ctx context.Context, id int64) (AlertSilence, error) {
+	row := q.db.QueryRow(ctx, getAlertSilence, id)
+	var i AlertSilence
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.AlertID,
+		&i.MatchersJson,
+		&i.Comment,
+		&i.ScheduleKind,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.WeeklyJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -3712,6 +3809,45 @@ func (q *Queries) ListAlertInstances(ctx context.Context, alertID int64) ([]Aler
 			&i.LastSeenAt,
 			&i.HistoryID,
 			&i.Notified,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertSilencesBySource = `-- name: ListAlertSilencesBySource :many
+SELECT id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at FROM alert_silences
+WHERE source_id = $1
+ORDER BY id
+`
+
+func (q *Queries) ListAlertSilencesBySource(ctx context.Context, sourceID int64) ([]AlertSilence, error) {
+	rows, err := q.db.Query(ctx, listAlertSilencesBySource, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertSilence{}
+	for rows.Next() {
+		var i AlertSilence
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.AlertID,
+			&i.MatchersJson,
+			&i.Comment,
+			&i.ScheduleKind,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.WeeklyJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -7391,6 +7527,60 @@ func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlert
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateAlertSilence = `-- name: UpdateAlertSilence :one
+UPDATE alert_silences
+SET alert_id = $1,
+    matchers_json = $2,
+    comment = $3,
+    schedule_kind = $4,
+    starts_at = $5,
+    ends_at = $6,
+    weekly_json = $7,
+    updated_at = now()
+WHERE id = $8
+RETURNING id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at
+`
+
+type UpdateAlertSilenceParams struct {
+	AlertID      pgtype.Int8        `json:"alert_id"`
+	MatchersJson string             `json:"matchers_json"`
+	Comment      string             `json:"comment"`
+	ScheduleKind string             `json:"schedule_kind"`
+	StartsAt     pgtype.Timestamptz `json:"starts_at"`
+	EndsAt       pgtype.Timestamptz `json:"ends_at"`
+	WeeklyJson   pgtype.Text        `json:"weekly_json"`
+	ID           int64              `json:"id"`
+}
+
+func (q *Queries) UpdateAlertSilence(ctx context.Context, arg UpdateAlertSilenceParams) (AlertSilence, error) {
+	row := q.db.QueryRow(ctx, updateAlertSilence,
+		arg.AlertID,
+		arg.MatchersJson,
+		arg.Comment,
+		arg.ScheduleKind,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.WeeklyJson,
+		arg.ID,
+	)
+	var i AlertSilence
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.AlertID,
+		&i.MatchersJson,
+		&i.Comment,
+		&i.ScheduleKind,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.WeeklyJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateCollection = `-- name: UpdateCollection :exec

@@ -4,7 +4,12 @@
 // backends (sql.NullString vs pgtype.Text); the encoding logic lives here.
 package alertjson
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/mr-karan/logchef/pkg/models"
+)
 
 // Encode returns the JSON encoding of v, or "" when empty is true — so an absent
 // collection is stored as NULL/empty rather than "null"/"[]"/"{}".
@@ -41,4 +46,29 @@ func EncodeGroup(group map[string]string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// EncodeSilence returns a silence's matchers as a JSON object ("{}" when it
+// has none) and its weekly window as JSON ("" when it has none).
+func EncodeSilence(silence *models.AlertSilence) (matchers, weekly string, err error) {
+	if matchers, err = EncodeGroup(silence.Matchers); err != nil {
+		return "", "", fmt.Errorf("failed to marshal silence matchers: %w", err)
+	}
+	if weekly, err = Encode(silence.Weekly, silence.Weekly == nil); err != nil {
+		return "", "", fmt.Errorf("failed to marshal silence weekly window: %w", err)
+	}
+	return matchers, weekly, nil
+}
+
+// DecodeSilence reads the columns that EncodeSilence wrote.
+func DecodeSilence(matchersJSON, weeklyJSON string) (map[string]string, *models.SilenceWeeklyWindow, error) {
+	matchers, err := Decode[map[string]string](matchersJSON)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decode silence matchers: %w", err)
+	}
+	weekly, err := Decode[*models.SilenceWeeklyWindow](weeklyJSON)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decode silence weekly window: %w", err)
+	}
+	return matchers, weekly, nil
 }

@@ -75,6 +75,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countAlertInstancesByStateStmt, err = db.PrepareContext(ctx, countAlertInstancesByState); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAlertInstancesByState: %w", err)
 	}
+	if q.countAlertSilencesBySourceStmt, err = db.PrepareContext(ctx, countAlertSilencesBySource); err != nil {
+		return nil, fmt.Errorf("error preparing query CountAlertSilencesBySource: %w", err)
+	}
 	if q.countAlertsUsingDestinationStmt, err = db.PrepareContext(ctx, countAlertsUsingDestination); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAlertsUsingDestination: %w", err)
 	}
@@ -104,6 +107,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createAlertStmt, err = db.PrepareContext(ctx, createAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateAlert: %w", err)
+	}
+	if q.createAlertSilenceStmt, err = db.PrepareContext(ctx, createAlertSilence); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateAlertSilence: %w", err)
 	}
 	if q.createCollectionStmt, err = db.PrepareContext(ctx, createCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateCollection: %w", err)
@@ -161,6 +167,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteAlertInstancesStmt, err = db.PrepareContext(ctx, deleteAlertInstances); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlertInstances: %w", err)
+	}
+	if q.deleteAlertSilenceStmt, err = db.PrepareContext(ctx, deleteAlertSilence); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAlertSilence: %w", err)
 	}
 	if q.deleteClaimedJobStmt, err = db.PrepareContext(ctx, deleteClaimedJob); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteClaimedJob: %w", err)
@@ -251,6 +260,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getAlertHistoryEntryStmt, err = db.PrepareContext(ctx, getAlertHistoryEntry); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAlertHistoryEntry: %w", err)
+	}
+	if q.getAlertSilenceStmt, err = db.PrepareContext(ctx, getAlertSilence); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAlertSilence: %w", err)
 	}
 	if q.getAuditPruneBoundaryStmt, err = db.PrepareContext(ctx, getAuditPruneBoundary); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAuditPruneBoundary: %w", err)
@@ -416,6 +428,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listAlertInstancesStmt, err = db.PrepareContext(ctx, listAlertInstances); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertInstances: %w", err)
+	}
+	if q.listAlertSilencesBySourceStmt, err = db.PrepareContext(ctx, listAlertSilencesBySource); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertSilencesBySource: %w", err)
 	}
 	if q.listAlertsBySourceStmt, err = db.PrepareContext(ctx, listAlertsBySource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertsBySource: %w", err)
@@ -720,6 +735,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateAlertHistoryPayloadStmt, err = db.PrepareContext(ctx, updateAlertHistoryPayload); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateAlertHistoryPayload: %w", err)
 	}
+	if q.updateAlertSilenceStmt, err = db.PrepareContext(ctx, updateAlertSilence); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateAlertSilence: %w", err)
+	}
 	if q.updateCollectionStmt, err = db.PrepareContext(ctx, updateCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateCollection: %w", err)
 	}
@@ -867,6 +885,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing countAlertInstancesByStateStmt: %w", cerr)
 		}
 	}
+	if q.countAlertSilencesBySourceStmt != nil {
+		if cerr := q.countAlertSilencesBySourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countAlertSilencesBySourceStmt: %w", cerr)
+		}
+	}
 	if q.countAlertsUsingDestinationStmt != nil {
 		if cerr := q.countAlertsUsingDestinationStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countAlertsUsingDestinationStmt: %w", cerr)
@@ -915,6 +938,11 @@ func (q *Queries) Close() error {
 	if q.createAlertStmt != nil {
 		if cerr := q.createAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createAlertStmt: %w", cerr)
+		}
+	}
+	if q.createAlertSilenceStmt != nil {
+		if cerr := q.createAlertSilenceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createAlertSilenceStmt: %w", cerr)
 		}
 	}
 	if q.createCollectionStmt != nil {
@@ -1010,6 +1038,11 @@ func (q *Queries) Close() error {
 	if q.deleteAlertInstancesStmt != nil {
 		if cerr := q.deleteAlertInstancesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAlertInstancesStmt: %w", cerr)
+		}
+	}
+	if q.deleteAlertSilenceStmt != nil {
+		if cerr := q.deleteAlertSilenceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAlertSilenceStmt: %w", cerr)
 		}
 	}
 	if q.deleteClaimedJobStmt != nil {
@@ -1160,6 +1193,11 @@ func (q *Queries) Close() error {
 	if q.getAlertHistoryEntryStmt != nil {
 		if cerr := q.getAlertHistoryEntryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAlertHistoryEntryStmt: %w", cerr)
+		}
+	}
+	if q.getAlertSilenceStmt != nil {
+		if cerr := q.getAlertSilenceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAlertSilenceStmt: %w", cerr)
 		}
 	}
 	if q.getAuditPruneBoundaryStmt != nil {
@@ -1435,6 +1473,11 @@ func (q *Queries) Close() error {
 	if q.listAlertInstancesStmt != nil {
 		if cerr := q.listAlertInstancesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAlertInstancesStmt: %w", cerr)
+		}
+	}
+	if q.listAlertSilencesBySourceStmt != nil {
+		if cerr := q.listAlertSilencesBySourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertSilencesBySourceStmt: %w", cerr)
 		}
 	}
 	if q.listAlertsBySourceStmt != nil {
@@ -1942,6 +1985,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateAlertHistoryPayloadStmt: %w", cerr)
 		}
 	}
+	if q.updateAlertSilenceStmt != nil {
+		if cerr := q.updateAlertSilenceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateAlertSilenceStmt: %w", cerr)
+		}
+	}
 	if q.updateCollectionStmt != nil {
 		if cerr := q.updateCollectionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateCollectionStmt: %w", cerr)
@@ -2093,6 +2141,7 @@ type Queries struct {
 	consumeOAuthRefreshTokenStmt           *sql.Stmt
 	countAdminUsersStmt                    *sql.Stmt
 	countAlertInstancesByStateStmt         *sql.Stmt
+	countAlertSilencesBySourceStmt         *sql.Stmt
 	countAlertsUsingDestinationStmt        *sql.Stmt
 	countAuditEventsStmt                   *sql.Stmt
 	countCollectionTeamAccessStmt          *sql.Stmt
@@ -2103,6 +2152,7 @@ type Queries struct {
 	countUserSessionsStmt                  *sql.Stmt
 	createAPITokenStmt                     *sql.Stmt
 	createAlertStmt                        *sql.Stmt
+	createAlertSilenceStmt                 *sql.Stmt
 	createCollectionStmt                   *sql.Stmt
 	createDashboardStmt                    *sql.Stmt
 	createExportJobStmt                    *sql.Stmt
@@ -2122,6 +2172,7 @@ type Queries struct {
 	deleteAlertDestinationsStmt            *sql.Stmt
 	deleteAlertInstanceStmt                *sql.Stmt
 	deleteAlertInstancesStmt               *sql.Stmt
+	deleteAlertSilenceStmt                 *sql.Stmt
 	deleteClaimedJobStmt                   *sql.Stmt
 	deleteCollectionStmt                   *sql.Stmt
 	deleteDashboardStmt                    *sql.Stmt
@@ -2152,6 +2203,7 @@ type Queries struct {
 	getAPITokenByHashStmt                  *sql.Stmt
 	getAlertStmt                           *sql.Stmt
 	getAlertHistoryEntryStmt               *sql.Stmt
+	getAlertSilenceStmt                    *sql.Stmt
 	getAuditPruneBoundaryStmt              *sql.Stmt
 	getCollectionStmt                      *sql.Stmt
 	getCollectionItemLinkStmt              *sql.Stmt
@@ -2207,6 +2259,7 @@ type Queries struct {
 	listAlertDestinationsStmt              *sql.Stmt
 	listAlertHistoryStmt                   *sql.Stmt
 	listAlertInstancesStmt                 *sql.Stmt
+	listAlertSilencesBySourceStmt          *sql.Stmt
 	listAlertsBySourceStmt                 *sql.Stmt
 	listAlertsForUserStmt                  *sql.Stmt
 	listAllSavedQueriesStmt                *sql.Stmt
@@ -2308,6 +2361,7 @@ type Queries struct {
 	updateAPITokenLastUsedStmt             *sql.Stmt
 	updateAlertStmt                        *sql.Stmt
 	updateAlertHistoryPayloadStmt          *sql.Stmt
+	updateAlertSilenceStmt                 *sql.Stmt
 	updateCollectionStmt                   *sql.Stmt
 	updateDashboardStmt                    *sql.Stmt
 	updateExportJobRunningStmt             *sql.Stmt
@@ -2350,6 +2404,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		consumeOAuthRefreshTokenStmt:           q.consumeOAuthRefreshTokenStmt,
 		countAdminUsersStmt:                    q.countAdminUsersStmt,
 		countAlertInstancesByStateStmt:         q.countAlertInstancesByStateStmt,
+		countAlertSilencesBySourceStmt:         q.countAlertSilencesBySourceStmt,
 		countAlertsUsingDestinationStmt:        q.countAlertsUsingDestinationStmt,
 		countAuditEventsStmt:                   q.countAuditEventsStmt,
 		countCollectionTeamAccessStmt:          q.countCollectionTeamAccessStmt,
@@ -2360,6 +2415,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		countUserSessionsStmt:                  q.countUserSessionsStmt,
 		createAPITokenStmt:                     q.createAPITokenStmt,
 		createAlertStmt:                        q.createAlertStmt,
+		createAlertSilenceStmt:                 q.createAlertSilenceStmt,
 		createCollectionStmt:                   q.createCollectionStmt,
 		createDashboardStmt:                    q.createDashboardStmt,
 		createExportJobStmt:                    q.createExportJobStmt,
@@ -2379,6 +2435,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteAlertDestinationsStmt:            q.deleteAlertDestinationsStmt,
 		deleteAlertInstanceStmt:                q.deleteAlertInstanceStmt,
 		deleteAlertInstancesStmt:               q.deleteAlertInstancesStmt,
+		deleteAlertSilenceStmt:                 q.deleteAlertSilenceStmt,
 		deleteClaimedJobStmt:                   q.deleteClaimedJobStmt,
 		deleteCollectionStmt:                   q.deleteCollectionStmt,
 		deleteDashboardStmt:                    q.deleteDashboardStmt,
@@ -2409,6 +2466,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAPITokenByHashStmt:                  q.getAPITokenByHashStmt,
 		getAlertStmt:                           q.getAlertStmt,
 		getAlertHistoryEntryStmt:               q.getAlertHistoryEntryStmt,
+		getAlertSilenceStmt:                    q.getAlertSilenceStmt,
 		getAuditPruneBoundaryStmt:              q.getAuditPruneBoundaryStmt,
 		getCollectionStmt:                      q.getCollectionStmt,
 		getCollectionItemLinkStmt:              q.getCollectionItemLinkStmt,
@@ -2464,6 +2522,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAlertDestinationsStmt:              q.listAlertDestinationsStmt,
 		listAlertHistoryStmt:                   q.listAlertHistoryStmt,
 		listAlertInstancesStmt:                 q.listAlertInstancesStmt,
+		listAlertSilencesBySourceStmt:          q.listAlertSilencesBySourceStmt,
 		listAlertsBySourceStmt:                 q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:                  q.listAlertsForUserStmt,
 		listAllSavedQueriesStmt:                q.listAllSavedQueriesStmt,
@@ -2565,6 +2624,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateAPITokenLastUsedStmt:             q.updateAPITokenLastUsedStmt,
 		updateAlertStmt:                        q.updateAlertStmt,
 		updateAlertHistoryPayloadStmt:          q.updateAlertHistoryPayloadStmt,
+		updateAlertSilenceStmt:                 q.updateAlertSilenceStmt,
 		updateCollectionStmt:                   q.updateCollectionStmt,
 		updateDashboardStmt:                    q.updateDashboardStmt,
 		updateExportJobRunningStmt:             q.updateExportJobRunningStmt,

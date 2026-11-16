@@ -2104,3 +2104,38 @@ SELECT d.* FROM notification_destinations d
 JOIN alert_destinations ad ON ad.destination_id = d.id
 WHERE ad.alert_id = $1
 ORDER BY d.id;
+
+-- Alert silences (RFC 0006 unit S1)
+
+-- name: CreateAlertSilence :one
+INSERT INTO alert_silences (source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: GetAlertSilence :one
+SELECT * FROM alert_silences WHERE id = $1;
+
+-- name: ListAlertSilencesBySource :many
+SELECT * FROM alert_silences
+WHERE source_id = $1
+ORDER BY id;
+
+-- name: CountAlertSilencesBySource :one
+SELECT COUNT(*) FROM alert_silences WHERE source_id = $1;
+
+-- name: UpdateAlertSilence :one
+UPDATE alert_silences
+SET alert_id = $1,
+    matchers_json = $2,
+    comment = $3,
+    schedule_kind = $4,
+    starts_at = $5,
+    ends_at = $6,
+    weekly_json = $7,
+    updated_at = now()
+WHERE id = $8
+RETURNING *;
+
+-- name: DeleteAlertSilence :one
+DELETE FROM alert_silences WHERE id = $1
+RETURNING id;
