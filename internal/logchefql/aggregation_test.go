@@ -264,3 +264,20 @@ func TestSelectPipeUnchangedByAggregation(t *testing.T) {
 		}
 	}
 }
+
+func TestPinTimeWindow(t *testing.T) {
+	for _, tc := range []struct{ query, want string }{
+		{"| count() by time", "| count() by time(5m)"},
+		{"level=error |\n  count() by TIME as t, service", "level=error |\n  count() by TIME(5m) as t, service"},
+		{`msg="by time" | count() by service, time`, `msg="by time" | count() by service, time(5m)`},
+		{"| count() by time(1h)", "| count() by time(1h)"},
+		{`| count() by "time"`, `| count() by "time"`},
+		{"| count() by time.zone", "| count() by time.zone"},
+		{"level=error | time msg", "level=error | time msg"},
+		{"| count() by", "| count() by"},
+	} {
+		if got := PinTimeWindow(tc.query, "5m"); got != tc.want {
+			t.Errorf("PinTimeWindow(%q) = %q, want %q", tc.query, got, tc.want)
+		}
+	}
+}

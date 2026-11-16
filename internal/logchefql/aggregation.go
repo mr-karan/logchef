@@ -361,6 +361,24 @@ func checkFieldName(pos Position, field string) *ParseError {
 	return nil
 }
 
+// PinTimeWindow writes window into a `by time` key that has none, so the
+// query no longer depends on the request interval: `| count() by time` with
+// window 5m becomes `| count() by time(5m)`. Any other query is returned
+// unchanged.
+func PinTimeWindow(query, window string) string {
+	pq, err := ParseLogchefQL(query)
+	if err != nil || pq.Aggregate == nil {
+		return query
+	}
+	for _, key := range pq.Aggregate.By {
+		if key.Time && key.Window == nil {
+			end := key.Pos.Offset + len("time")
+			return query[:end] + "(" + window + ")" + query[end:]
+		}
+	}
+	return query
+}
+
 // AggregationOf returns the aggregation of a parsed query, or nil.
 func AggregationOf(ast ASTNode) *AggregationNode {
 	if q, ok := ast.(*QueryNode); ok {

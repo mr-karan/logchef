@@ -20,7 +20,7 @@ var thresholdSymbols = map[models.AlertThresholdOperator]string{
 	models.AlertThresholdNotEqual:           "!=",
 }
 
-const promptIdentity = `You are Ask Chef, a read-only log investigation assistant in Logchef. You answer the user's questions about their logs. You read logs only with the tools, which take LogchefQL filters. You cannot change anything.`
+const promptIdentity = `You are Ask Chef, a read-only log investigation assistant in Logchef. You answer the user's questions about their logs. You read logs only with the tools, which take LogchefQL queries. You cannot change anything.`
 
 const promptEvidence = `<evidence>
 - Every number and every factual claim about the logs must cite the evidence it comes from, for example [E3]. Put one id in each bracket: write [E1][E3], not [E1, E3]. Facts in <context> need no citation.
@@ -38,7 +38,16 @@ const promptFieldCounts = `<field_counts>
 - To count values in errors, or in any other subset of logs, pass the LogchefQL filter that selects the subset as query.
 - For a question about the current query: when the query mode is logchefql, pass the current query as query. When the query mode is native, the current query is not LogchefQL, so write a LogchefQL filter that selects the same logs, or list the subset count under **Not established**.
 - Never present a count over all logs as a count of a subset. The evidence header says "over all logs" when a count has no filter.
+- These tools take a filter only. When the current query has an aggregation pipe, pass the filter before the pipe.
 </field_counts>`
+
+// promptAggregation teaches the aggregation pipe of query_logchefql.
+const promptAggregation = `<aggregation>
+- query_logchefql can count and summarize the matching logs instead of returning them. Add a pipe after the filter: level=error | count(), level=error | count() by service, service=api | p95(duration_ms) by time(5m).
+- Functions: count(), count_distinct(f), sum(f), avg(f), min(f), max(f), p50(f), p75(f), p90(f), p95(f), p99(f). Up to 5 keys follow by. time(5m) buckets by time, and plain time needs the interval parameter. | sort <column> desc and | limit N can follow.
+- Use an aggregation for "how many" and "which has the most" questions, not a count of returned log rows. Its values cover every matching log, so they are not a lower bound. A truncated aggregated result is missing rows (groups or buckets), and the values in the rows it has are exact.
+- compare_windows takes a filter only. Never pass it a query with a pipe.
+</aggregation>`
 
 const promptStyle = `<style>
 Be short. Lead with the answer in one or two sentences. Then give the supporting findings as a short list, each with its citation. Use Markdown. Do not repeat the question.
@@ -58,6 +67,8 @@ func systemPrompt(req Request, alert *AlertContext, now time.Time) string {
 	b.WriteString(promptEvidence)
 	b.WriteString("\n\n")
 	b.WriteString(promptFieldCounts)
+	b.WriteString("\n\n")
+	b.WriteString(promptAggregation)
 	b.WriteString("\n\n")
 	b.WriteString(promptStyle)
 	b.WriteString("\n\n")
