@@ -385,6 +385,43 @@ func TestKickWakesTheLoop(t *testing.T) {
 	}
 }
 
+// A kick that lands after a run records its finish but before the run frees
+// its slot still runs the job before the next poll.
+func TestKickWhileSlotIsBusyRunsAfterTheSlotFrees(t *testing.T) {
+	db, _ := openSQLite(t)
+	ctx := context.Background()
+	upsert(t, db, Spec{Kind: "busy", Key: "a", Schedule: Every(time.Hour), Misfire: RunOnce, Enabled: true})
+	rec := &recorder{}
+	hooked := &kickAfterFinish{JobStore: db}
+	r := newRunner(hooked)
+	hooked.kick = func() {
+		if err := r.Kick(ctx, "busy", "a"); err != nil {
+			t.Error(err)
+		}
+		// Hold the slot until the loop has taken the wake and tried to claim.
+		waitFor(t, func() bool { return len(r.wake) == 0 })
+		time.Sleep(50 * time.Millisecond)
+	}
+	r.Register(KindSpec{Kind: "busy", Handler: rec.handle, Timeout: time.Minute, Concurrency: 1})
+	r.Start(ctx)
+	defer stop(t, r)
+	waitFor(t, func() bool { return rec.count() == 2 })
+}
+
+// kickAfterFinish runs kick once, right after the first FinishJob commits,
+// while the finishing run still holds its slot.
+type kickAfterFinish struct {
+	store.JobStore
+	once sync.Once
+	kick func()
+}
+
+func (k *kickAfterFinish) FinishJob(ctx context.Context, id, token int64, res models.JobRunResult) (bool, error) {
+	finished, err := k.JobStore.FinishJob(ctx, id, token, res)
+	k.once.Do(k.kick)
+	return finished, err
+}
+
 // --- helpers ---
 
 type recorder struct {
