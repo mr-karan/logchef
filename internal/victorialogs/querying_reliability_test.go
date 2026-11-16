@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/util"
@@ -457,6 +458,7 @@ func TestEvaluateAlertColumnsIncludeLabels(t *testing.T) {
 	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
 
 	result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+		At:    time.Now(),
 		Query: "* | stats count() as value",
 	})
 	if err != nil {
@@ -493,6 +495,7 @@ func TestEvaluateAlertExtractsSampleBeforeLabels(t *testing.T) {
 			provider := newTestProvider(server)
 			source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
 			result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+				At:    time.Now(),
 				Query: `level:="error" | stats count() as value`,
 			})
 			if err != nil {

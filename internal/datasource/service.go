@@ -221,12 +221,13 @@ func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.Sour
 	return nil
 }
 
-// ValidateAlertQuery rejects alert SQL that EvaluateAlert would refuse to run.
-func ValidateAlertQuery(language models.QueryLanguage, query string) error {
+// ValidateAlertQuery rejects alert SQL that EvaluateAlert would refuse to
+// run. It renders the time macros for the source with a fixed sample window.
+func ValidateAlertQuery(source *models.Source, language models.QueryLanguage, query string) error {
 	if models.NormalizeQueryLanguage(language) != models.QueryLanguageClickHouseSQL {
 		return nil
 	}
-	_, err := formatAlertQuery(query)
+	_, err := renderAlertQuery(source, query, alertSampleTo.Add(-time.Hour), alertSampleTo)
 	return err
 }
 

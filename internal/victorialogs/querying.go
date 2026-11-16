@@ -773,11 +773,15 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	if query == "" {
 		return nil, fmt.Errorf("alert query is required")
 	}
+	if req.At.IsZero() {
+		return nil, fmt.Errorf("alert evaluation needs the instant it stands for")
+	}
 	query = applyAlertLookback(query, req.LookbackSeconds)
 
 	form := url.Values{}
 	form.Set("query", query)
-	form.Set("time", formatAPITime(time.Now().UTC()))
+	// The lookback filter is relative to time, so the window ends at At.
+	form.Set("time", formatAPITime(req.At.UTC()))
 	if timeout := formatTimeout(req.QueryTimeout); timeout != "" {
 		form.Set("timeout", timeout)
 	}

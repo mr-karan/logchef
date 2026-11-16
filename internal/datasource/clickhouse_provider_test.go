@@ -22,7 +22,7 @@ import (
 
 func TestEvaluateAlertRejectsNonSelectQueries(t *testing.T) {
 	provider := &ClickHouseProvider{manager: &clickhouse.Manager{}}
-	result, err := provider.EvaluateAlert(context.Background(), &models.Source{ID: 1}, AlertQueryRequest{Query: "DROP TABLE x"})
+	result, err := provider.EvaluateAlert(context.Background(), &models.Source{ID: 1}, AlertQueryRequest{At: time.Now(), Query: "DROP TABLE x"})
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) || validationErr.Field != "query" {
 		t.Fatalf("EvaluateAlert() = %v, %v; want query validation error before connection lookup", result, err)
@@ -55,7 +55,7 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		{query: "/* /* */ SELECT '*/ SELECT 42 AS value -- '", want: "*/ SELECT 42 AS value -- "},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
-			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: tc.query})
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: tc.query})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +70,7 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		})
 	}
 
-	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(1000000)"})
+	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: "SELECT number AS value FROM numbers(1000000)"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,12 +78,12 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		t.Fatalf("EvaluateAlert() buffered %d rows (truncated=%v), want %d truncated", len(result.Logs), result.Stats.Truncated, alertMaxRows)
 	}
 
-	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(10) WHERE number > 100"})
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: "SELECT number AS value FROM numbers(10) WHERE number > 100"})
 	if err != nil || len(result.Logs) != 0 || result.Stats.Truncated {
 		t.Fatalf("EvaluateAlert(empty) = %v, %v; want zero rows without error", result, err)
 	}
 
-	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)"})
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: "SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)"})
 	if err == nil {
 		t.Fatalf("EvaluateAlert(first row over byte limit) = %v, want error instead of an empty result", result.Logs)
 	}
@@ -96,7 +96,7 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		"SELECT $$ AS a, '$$, 42 AS value -- '",
 	} {
 		t.Run(query, func(t *testing.T) {
-			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: query})
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: query})
 			if _, ok := errors.AsType[*ValidationError](err); !ok {
 				t.Fatalf("EvaluateAlert() = %v, %v; want query validation error", result, err)
 			}

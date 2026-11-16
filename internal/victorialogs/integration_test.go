@@ -392,6 +392,7 @@ func TestIntegrationVictoriaLogs(t *testing.T) {
 		defer cancel()
 
 		result, err := provider.EvaluateAlert(ctx, source, datasource.AlertQueryRequest{
+			At:              time.Now(),
 			Language:        models.QueryLanguageLogsQL,
 			Query:           fmt.Sprintf(`%s | stats count() as value`, scopeFilter),
 			LookbackSeconds: 3600,

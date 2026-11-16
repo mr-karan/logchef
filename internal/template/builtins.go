@@ -146,6 +146,17 @@ func IsBuiltin(name string) bool {
 	return ok
 }
 
+// ReferencedNames lists the {{name}} tokens of query in order, quoted
+// text and comments included.
+func ReferencedNames(query string) []string {
+	matches := variablePattern.FindAllStringSubmatch(query, -1)
+	names := make([]string, len(matches))
+	for i, match := range matches {
+		names[i] = match[1]
+	}
+	return names
+}
+
 // HasBuiltinPrefix reports whether name starts with the reserved prefix.
 func HasBuiltinPrefix(name string) bool {
 	return strings.HasPrefix(name, BuiltinPrefix)

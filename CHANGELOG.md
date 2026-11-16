@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   groups and resolves one at a time; the alert list shows "N firing". A
   grouped result with a repeated group, a missing group column or more than
   100 rows is an evaluation error, never a partial update.
+- ClickHouse alert queries accept the dashboard time macros `{{__from}}`,
+  `{{__to}}` and `{{__time_filter}}`, which expand to the rule's lookback
+  window ending at the evaluation instant. The condition editor and the SQL
+  templates now generate `{{__time_filter}}` instead of
+  `now() - toIntervalSecond(...)`. Save-time validation renders the macros
+  through the same path as evaluation, so a query that saves also runs. A
+  query without macros runs unchanged.
 
 ### Upgrade notes
 

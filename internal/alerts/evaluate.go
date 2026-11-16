@@ -37,6 +37,9 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 
 	timeout := models.DefaultQueryTimeoutSeconds
 	result, err := m.datasource.EvaluateAlert(ctx, alert.SourceID, datasource.AlertQueryRequest{
+		// The manager's ticker evaluates the window that ends now. The job
+		// runner (unit J2) passes the due occurrence instead.
+		At:              time.Now().UTC(),
 		Language:        alert.QueryLanguage,
 		Query:           query,
 		LookbackSeconds: alert.LookbackSeconds,
