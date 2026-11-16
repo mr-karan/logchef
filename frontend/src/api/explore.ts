@@ -3,6 +3,7 @@ import { apiBaseURL } from "./config";
 import { streamSSE } from "./eventStream";
 import type { TemplateVariable } from "./logchefql";
 import type { SavedViewDefinition } from "@/lib/savedViewLayout";
+import type { QueryLanguage } from "@/lib/queryMetadata";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
 // tens of seconds, and the shared axios client otherwise aborts after 10s.
@@ -376,7 +377,7 @@ export const exploreApi = {
 
 // query_language values accepted by the tail endpoint. clickhouse-sql is
 // rejected server-side (400) by design, so it is intentionally excluded here.
-export type TailQueryLanguage = "logchefql" | "logsql";
+export type TailQueryLanguage = Exclude<QueryLanguage, "clickhouse-sql">;
 
 export interface TailNotice {
   code?: string;
