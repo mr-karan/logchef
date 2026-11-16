@@ -118,6 +118,18 @@ func RecordQueryShape(result string) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
+// RecordSchemaAdvisorRun counts one schema analysis. status is the report's
+// "ok", "partial" or "unavailable", or "error" when no report came out.
+func RecordSchemaAdvisorRun(status string) {
+	labels := fmt.Sprintf(`logchef_schema_advisor_runs_total{status=%q}`, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// ObserveSchemaAdvisorRunDuration records how long a schema analysis ran.
+func ObserveSchemaAdvisorRunDuration(d time.Duration) {
+	metrics.GetOrCreateHistogram("logchef_schema_advisor_run_duration_seconds").Update(d.Seconds())
+}
+
 // ObserveJobRunDuration records how long a job handler ran.
 func ObserveJobRunDuration(kind string, d time.Duration) {
 	labels := fmt.Sprintf(`logchef_jobs_run_duration_seconds{kind=%q}`, kind)

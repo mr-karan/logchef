@@ -195,6 +195,7 @@ type Querier interface {
 	// Look up one saved query by id
 	GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error)
 	GetSavedView(ctx context.Context, id int64) (SavedView, error)
+	GetSchemaAdvisorReport(ctx context.Context, sourceID int64) (SchemaAdvisorReport, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
@@ -504,6 +505,8 @@ type Querier interface {
 	// A new job is due now. A changed schedule makes an existing job due now;
 	// otherwise its next run and lease are kept.
 	UpsertJob(ctx context.Context, arg UpsertJobParams) error
+	// A refresh replaces the source's report.
+	UpsertSchemaAdvisorReport(ctx context.Context, arg UpsertSchemaAdvisorReportParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// Insert or update user preferences
 	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error

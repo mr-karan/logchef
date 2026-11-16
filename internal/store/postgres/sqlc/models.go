@@ -396,6 +396,14 @@ type SavedView struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SchemaAdvisorReport struct {
+	SourceID    int64              `json:"source_id"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	GeneratedBy pgtype.Int8        `json:"generated_by"`
+	WindowDays  int64              `json:"window_days"`
+	Report      string             `json:"report"`
+}
+
 type Session struct {
 	ID        string             `json:"id"`
 	UserID    int64              `json:"user_id"`

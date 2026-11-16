@@ -397,6 +397,14 @@ type SavedView struct {
 	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
+type SchemaAdvisorReport struct {
+	SourceID    int64         `json:"source_id"`
+	GeneratedAt time.Time     `json:"generated_at"`
+	GeneratedBy sql.NullInt64 `json:"generated_by"`
+	WindowDays  int64         `json:"window_days"`
+	Report      string        `json:"report"`
+}
+
 type Session struct {
 	ID        string    `json:"id"`
 	UserID    int64     `json:"user_id"`

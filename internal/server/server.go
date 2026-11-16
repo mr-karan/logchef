@@ -403,6 +403,10 @@ func (s *Server) setupRoutes() {
 	admin.Delete("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleDeleteSource).Name(string(audit.SourceDelete))
 	admin.Get("/sources/:sourceID/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceStats)
 	admin.Get("/sources/:sourceID/activity", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceActivity) // Admin-only recent activity
+	// Schema advisor (RFC 0010). Refresh reads ClickHouse under sources:read,
+	// as the stats route does.
+	admin.Get("/sources/:sourceID/advisor", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSchemaAdvice)
+	admin.Post("/sources/:sourceID/advisor/refresh", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleRefreshSchemaAdvice)
 
 	// Recent query activity (admin recent-activity view over query_history).
 	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)

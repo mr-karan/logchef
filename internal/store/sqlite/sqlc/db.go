@@ -303,6 +303,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getSavedViewStmt, err = db.PrepareContext(ctx, getSavedView); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSavedView: %w", err)
 	}
+	if q.getSchemaAdvisorReportStmt, err = db.PrepareContext(ctx, getSchemaAdvisorReport); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSchemaAdvisorReport: %w", err)
+	}
 	if q.getSessionStmt, err = db.PrepareContext(ctx, getSession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSession: %w", err)
 	}
@@ -746,6 +749,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.upsertJobStmt, err = db.PrepareContext(ctx, upsertJob); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertJob: %w", err)
+	}
+	if q.upsertSchemaAdvisorReportStmt, err = db.PrepareContext(ctx, upsertSchemaAdvisorReport); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertSchemaAdvisorReport: %w", err)
 	}
 	if q.upsertSystemSettingStmt, err = db.PrepareContext(ctx, upsertSystemSetting); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertSystemSetting: %w", err)
@@ -1224,6 +1230,11 @@ func (q *Queries) Close() error {
 	if q.getSavedViewStmt != nil {
 		if cerr := q.getSavedViewStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSavedViewStmt: %w", cerr)
+		}
+	}
+	if q.getSchemaAdvisorReportStmt != nil {
+		if cerr := q.getSchemaAdvisorReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSchemaAdvisorReportStmt: %w", cerr)
 		}
 	}
 	if q.getSessionStmt != nil {
@@ -1966,6 +1977,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing upsertJobStmt: %w", cerr)
 		}
 	}
+	if q.upsertSchemaAdvisorReportStmt != nil {
+		if cerr := q.upsertSchemaAdvisorReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertSchemaAdvisorReportStmt: %w", cerr)
+		}
+	}
 	if q.upsertSystemSettingStmt != nil {
 		if cerr := q.upsertSystemSettingStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertSystemSettingStmt: %w", cerr)
@@ -2113,6 +2129,7 @@ type Queries struct {
 	getReportStmt                          *sql.Stmt
 	getSavedQueryStmt                      *sql.Stmt
 	getSavedViewStmt                       *sql.Stmt
+	getSchemaAdvisorReportStmt             *sql.Stmt
 	getSessionStmt                         *sql.Stmt
 	getSourceStmt                          *sql.Stmt
 	getSourceByIdentityKeyStmt             *sql.Stmt
@@ -2261,6 +2278,7 @@ type Queries struct {
 	updateUserLastLoginStmt                *sql.Stmt
 	upsertAlertInstanceStmt                *sql.Stmt
 	upsertJobStmt                          *sql.Stmt
+	upsertSchemaAdvisorReportStmt          *sql.Stmt
 	upsertSystemSettingStmt                *sql.Stmt
 	upsertUserPreferencesStmt              *sql.Stmt
 	userHasSourceAccessStmt                *sql.Stmt
@@ -2363,6 +2381,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getReportStmt:                          q.getReportStmt,
 		getSavedQueryStmt:                      q.getSavedQueryStmt,
 		getSavedViewStmt:                       q.getSavedViewStmt,
+		getSchemaAdvisorReportStmt:             q.getSchemaAdvisorReportStmt,
 		getSessionStmt:                         q.getSessionStmt,
 		getSourceStmt:                          q.getSourceStmt,
 		getSourceByIdentityKeyStmt:             q.getSourceByIdentityKeyStmt,
@@ -2511,6 +2530,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateUserLastLoginStmt:                q.updateUserLastLoginStmt,
 		upsertAlertInstanceStmt:                q.upsertAlertInstanceStmt,
 		upsertJobStmt:                          q.upsertJobStmt,
+		upsertSchemaAdvisorReportStmt:          q.upsertSchemaAdvisorReportStmt,
 		upsertSystemSettingStmt:                q.upsertSystemSettingStmt,
 		upsertUserPreferencesStmt:              q.upsertUserPreferencesStmt,
 		userHasSourceAccessStmt:                q.userHasSourceAccessStmt,
