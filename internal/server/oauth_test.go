@@ -80,18 +80,25 @@ func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServ
 	if len(logs) > 0 {
 		log = logs[0]
 	}
-	datasources := datasource.NewService(db, log)
-	datasources.Register(datasource.NewClickHouseProvider(clickhouse.NewManager(log), log))
-	datasources.Register(victorialogs.NewProvider(log))
-	srv := New(ServerOptions{
-		Config:      cfg,
-		SQLite:      db,
-		Audit:       testAuditRecorder(t, db),
-		Datasources: datasources,
-		OAuth:       oauthServer,
-		FS:          http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}}),
-		Logger:      log,
-	})
+	return startTestServer(t, ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), OAuth: oauthServer, Logger: log})
+}
+
+// startTestServer builds a server from opts, adds datasources and UI files
+// when opts has none, and shuts the server down at cleanup. New starts
+// goroutines that read the server's fields, so everything a test needs goes
+// into opts: replacing a field such as store or audit afterwards races with
+// them.
+func startTestServer(t *testing.T, opts ServerOptions) *Server {
+	t.Helper()
+	if opts.Datasources == nil {
+		opts.Datasources = datasource.NewService(opts.SQLite, opts.Logger)
+		opts.Datasources.Register(datasource.NewClickHouseProvider(clickhouse.NewManager(opts.Logger), opts.Logger))
+		opts.Datasources.Register(victorialogs.NewProvider(opts.Logger))
+	}
+	if opts.FS == nil {
+		opts.FS = http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}})
+	}
+	srv := New(opts)
 	t.Cleanup(func() {
 		select {
 		case <-srv.stop: // the test already shut the server down

@@ -4,14 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -19,13 +17,7 @@ import (
 // audit log line to the env's log buffer.
 func newAuditLoggingEnv(t *testing.T) *auditRouteEnv {
 	t.Helper()
-	e := newAuditRouteEnv(t)
-	e.s.audit = audit.New(audit.Options{
-		Store:     strictAuditStore{AuditStore: e.db, t: t},
-		Logger:    slog.New(slog.NewJSONHandler(e.logs, nil)),
-		LogEvents: true,
-	})
-	return e
+	return newAuditRouteEnv(t, withAuditLogLines())
 }
 
 func changesOf(t *testing.T, ev models.AuditEvent) map[string]map[string]any {

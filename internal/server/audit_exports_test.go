@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -29,32 +29,39 @@ type exportAuditEnv struct {
 	streamPath, jobPath string
 }
 
-func newExportAuditEnv(t *testing.T) *exportAuditEnv {
+// newExportAuditEnv adds the export config, the source and its ClickHouse
+// client before the server starts; options run after, so they can change
+// the export config.
+func newExportAuditEnv(t *testing.T, options ...auditEnvOption) *exportAuditEnv {
 	t.Helper()
-	e := newAuditRouteEnv(t)
-	e.s.config.Export = config.ExportConfig{
-		MaxRows: 100, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
-		ArtifactTTL: time.Hour, Formats: []string{"csv", "ndjson"},
+	var base string
+	withSource := func(s *auditEnvSetup) {
+		s.opts.Config.Export = config.ExportConfig{
+			MaxRows: 100, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
+			ArtifactTTL: time.Hour, Formats: []string{"csv", "ndjson"},
+		}
+		manager := clickhouse.NewManager(s.opts.Logger)
+		t.Cleanup(func() { _ = manager.Close() })
+		ctx := context.Background()
+		source := &models.Source{Name: "export-audit", SourceType: models.SourceTypeClickHouse,
+			Connection: models.ConnectionInfo{Host: "127.0.0.1:1", Database: "default", TableName: "logs"}}
+		if err := s.db.CreateSource(ctx, source); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.AddSource(ctx, source); err != nil {
+			t.Fatal(err)
+		}
+		team := &models.Team{Name: "export-audit"}
+		if err := s.db.CreateTeam(ctx, team); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.db.AddTeamSource(ctx, team.ID, source.ID); err != nil {
+			t.Fatal(err)
+		}
+		s.opts.ClickHouse = manager
+		base = fmt.Sprintf("/api/v1/teams/%d/sources/%d", team.ID, source.ID)
 	}
-	e.s.clickhouse = clickhouse.NewManager(e.s.log)
-	t.Cleanup(func() { _ = e.s.clickhouse.Close() })
-	ctx := context.Background()
-	source := &models.Source{Name: "export-audit", SourceType: models.SourceTypeClickHouse,
-		Connection: models.ConnectionInfo{Host: "127.0.0.1:1", Database: "default", TableName: "logs"}}
-	if err := e.db.CreateSource(ctx, source); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.s.clickhouse.AddSource(ctx, source); err != nil {
-		t.Fatal(err)
-	}
-	team := &models.Team{Name: "export-audit"}
-	if err := e.db.CreateTeam(ctx, team); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.db.AddTeamSource(ctx, team.ID, source.ID); err != nil {
-		t.Fatal(err)
-	}
-	base := fmt.Sprintf("/api/v1/teams/%d/sources/%d", team.ID, source.ID)
+	e := newAuditRouteEnv(t, append([]auditEnvOption{withSource}, options...)...)
 	return &exportAuditEnv{auditRouteEnv: e, streamPath: base + "/logs/export", jobPath: base + "/exports"}
 }
 
@@ -89,17 +96,17 @@ func (o jobSpyOps) CreateExportJob(ctx context.Context, job *models.ExportJob) e
 // every test database numbers its first user 1, so a parallel export would
 // hold the slot this test counts.
 func TestAuditExportsFailClosed(t *testing.T) {
-	e := newExportAuditEnv(t)
-	spy := &jobSpyStore{auditDownStore: auditDownStore{Store: e.db}}
-	e.s.store = spy
-	e.s.audit = audit.New(audit.Options{
-		Store:     spy,
-		Logger:    slog.New(slog.NewJSONHandler(e.logs, nil)),
-		LogEvents: true,
-	})
-	// One slot per user: a slot that a refused export kept would turn the
-	// second attempt into a 429.
-	e.s.config.Export.MaxConcurrentPerUser = 1
+	var spy *jobSpyStore
+	e := newExportAuditEnv(t,
+		withAuditStore(func(db *sqlite.DB) store.Store {
+			spy = &jobSpyStore{auditDownStore: auditDownStore{Store: db}}
+			return spy
+		}),
+		withAuditLogLines(),
+		// One slot per user: a slot that a refused export kept would turn
+		// the second attempt into a 429.
+		withConfig(func(cfg *config.Config) { cfg.Export.MaxConcurrentPerUser = 1 }),
+	)
 	body := `{"raw_sql":"SELECT * FROM default.logs","format":"ndjson"}`
 
 	for range 2 {
@@ -136,12 +143,7 @@ func TestAuditExportsFailClosed(t *testing.T) {
 // neither the row nor the log line.
 func TestAuditExportRecordsQueryDigest(t *testing.T) {
 	t.Parallel()
-	e := newExportAuditEnv(t)
-	e.s.audit = audit.New(audit.Options{
-		Store:     strictAuditStore{AuditStore: e.db, t: t},
-		Logger:    slog.New(slog.NewJSONHandler(e.logs, nil)),
-		LogEvents: true,
-	})
+	e := newExportAuditEnv(t, withAuditLogLines())
 	const sentinel = "SENTINEL-session-7f3a"
 	query := `SELECT * FROM default.logs WHERE session_id = '` + sentinel + `'`
 	sum := sha256.Sum256([]byte(query))

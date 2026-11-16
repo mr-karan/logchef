@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -195,13 +194,7 @@ func TestAuditOAuthConsentAndConnectedAppFields(t *testing.T) {
 // bound allows in a minute: the extra one reaches the log line only.
 func TestAuditFailedSignInsAreBounded(t *testing.T) {
 	t.Parallel()
-	e := newAuditRouteEnv(t)
-	lines := &syncLogBuffer{}
-	e.s.audit = audit.New(audit.Options{
-		Store:     strictAuditStore{AuditStore: e.db, t: t},
-		Logger:    slog.New(slog.NewJSONHandler(lines, nil)),
-		LogEvents: true,
-	})
+	e := newAuditRouteEnv(t, withAuditLogLines())
 	// An email over the length limit fails before the password check and
 	// the login rate limiter, so the requests stay cheap.
 	body := `{"email":"` + strings.Repeat("a", models.MaxEmailLength) + `@example.com","password":"wrong"}`
@@ -213,7 +206,7 @@ func TestAuditFailedSignInsAreBounded(t *testing.T) {
 		t.Errorf("stored %d events, want %d", len(got), failedSignInEventsPerMinute)
 	}
 	stored := map[bool]int{}
-	sc := bufio.NewScanner(strings.NewReader(lines.String()))
+	sc := bufio.NewScanner(strings.NewReader(e.logs.String()))
 	for sc.Scan() {
 		var line struct {
 			Msg    string `json:"msg"`

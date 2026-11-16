@@ -5,29 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
-
-// logIdentityAudit makes the env's recorder store through st and write the
-// audit log line to the env's log buffer.
-func logIdentityAudit(t *testing.T, e *auditRouteEnv, st store.AuditStore) {
-	t.Helper()
-	e.s.audit = audit.New(audit.Options{
-		Store:     strictAuditStore{AuditStore: st, t: t},
-		Logger:    slog.New(slog.NewJSONHandler(e.logs, nil)),
-		LogEvents: true,
-	})
-}
 
 func identityChanges(t *testing.T, ev models.AuditEvent) map[string]map[string]any {
 	t.Helper()
@@ -48,8 +36,7 @@ func wantChange(t *testing.T, ev models.AuditEvent, key string, from, to any) {
 
 func TestAuditUserEventsRecordFields(t *testing.T) {
 	t.Parallel()
-	e := newAuditRouteEnv(t)
-	logIdentityAudit(t, e, e.db)
+	e := newAuditRouteEnv(t, withAuditLogLines())
 	user := mkTestUser(t, e.db, "subject@example.com", models.UserRoleMember)
 	path := fmt.Sprintf("/api/v1/admin/users/%d", user.ID)
 
@@ -147,8 +134,7 @@ func TestAuditTeamAndMembershipEventsRecordFields(t *testing.T) {
 
 func TestAuditAPITokenEventsRecordNoToken(t *testing.T) {
 	t.Parallel()
-	e := newAuditRouteEnv(t)
-	logIdentityAudit(t, e, e.db)
+	e := newAuditRouteEnv(t, withAuditLogLines())
 
 	resp := e.do(http.MethodPost, "/api/v1/me/tokens", `{"name":"ci","scopes":["profile:read"]}`, e.cookie)
 	wantStatus(t, resp, http.StatusCreated)
@@ -203,14 +189,10 @@ func (auditDownOps) InsertAuditEvent(context.Context, *models.AuditEvent) error 
 // Token creation fails closed: without a stored event no token exists.
 func TestAuditTokenCreationFailsClosed(t *testing.T) {
 	t.Parallel()
-	e := newAuditRouteEnv(t)
-	down := auditDownStore{Store: e.db}
-	e.s.store = down
-	e.s.audit = audit.New(audit.Options{
-		Store:     down,
-		Logger:    slog.New(slog.NewJSONHandler(e.logs, nil)),
-		LogEvents: true,
-	})
+	e := newAuditRouteEnv(t,
+		withAuditStore(func(db *sqlite.DB) store.Store { return auditDownStore{Store: db} }),
+		withAuditLogLines(),
+	)
 	account, err := core.CreateServiceAccount(context.Background(), e.db, e.s.log, "audit-bot")
 	if err != nil {
 		t.Fatal(err)
