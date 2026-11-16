@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // aggregationBackend is a VictoriaLogs stand-in that records the LogsQL it
@@ -133,6 +137,45 @@ func TestTranslateLogchefQLDescribesTheAggregation(t *testing.T) {
 	}
 	if !out.Valid || out.Aggregation == nil || out.Aggregation.Interval != "1h" || !strings.Contains(out.GeneratedQuery, "_time:1h") {
 		t.Fatalf("translation = %+v, want a 1h aggregation", out)
+	}
+}
+
+// fixedSchemaClickHouse is the real ClickHouse provider with a fixed schema,
+// so a LogchefQL compile needs no ClickHouse server.
+type fixedSchemaClickHouse struct {
+	*datasource.ClickHouseProvider
+}
+
+func (fixedSchemaClickHouse) InspectSource(context.Context, *models.Source) (*datasource.SourceInspection, error) {
+	return &datasource.SourceInspection{Schema: &datasource.SourceSchemaInspection{Fields: []datasource.SourceSchemaField{
+		{Name: "timestamp", Type: "DateTime64(3)"}, {Name: "level", Type: "String"}, {Name: "service", Type: "String"},
+	}}}, nil
+}
+
+// timezone is documented as "default UTC". ClickHouse builds full_sql only
+// with a timezone, so a client that sends none must still get the aggregated
+// query and not the bare filter.
+func TestTranslateLogchefQLDefaultsTheTimezoneToUTC(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	manager := clickhouse.NewManager(discardLogger())
+	t.Cleanup(func() { _ = manager.Close() })
+	w.ds.Register(fixedSchemaClickHouse{datasource.NewClickHouseProvider(manager, discardLogger())})
+	source := w.newSource(t, "app_logs")
+	w.link(t, w.team, source.ID)
+
+	result := callTool(t, w.server(), session(w.member), "translate_logchefql", map[string]any{
+		"team_id": w.team, "source_id": source.ID, "query": "level=error | count() by service",
+		"start_time": "2026-10-01 00:00:00", "end_time": "2026-10-01 01:00:00",
+	})
+	var out TranslateResult
+	if err := json.Unmarshal(result.StructuredContent, &out); err != nil || result.IsError {
+		t.Fatalf("translate_logchefql: %v %s", err, result.text())
+	}
+	for name, query := range map[string]string{"full_sql": out.FullSQL, "generated_query": out.GeneratedQuery} {
+		if !strings.Contains(query, "GROUP BY `service`") || !strings.Contains(query, "'UTC')") {
+			t.Errorf("%s = %q, want the aggregated query over a UTC range", name, query)
+		}
 	}
 }
 

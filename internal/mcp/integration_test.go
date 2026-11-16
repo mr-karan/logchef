@@ -131,7 +131,9 @@ func TestRealBackendsThroughHTTPHandler(t *testing.T) {
 			}
 
 			// The investigation panel's histogram flow: translate, then histogram.
-			result = post(t, "translate_logchefql", with(map[string]any{"query": backend.filter, "start_time": start, "end_time": end, "timezone": "UTC"}))
+			// No timezone: the tool documents "default UTC", and ClickHouse
+			// builds full_sql only with one.
+			result = post(t, "translate_logchefql", with(map[string]any{"query": backend.filter, "start_time": start, "end_time": end}))
 			var translated TranslateResult
 			if err := json.Unmarshal(result.StructuredContent, &translated); err != nil || !translated.Valid {
 				t.Fatalf("translate = %+v, %v", translated, err)
