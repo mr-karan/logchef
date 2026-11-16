@@ -17,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/loki"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
@@ -34,6 +35,7 @@ type App struct {
 	SQLite       store.Store
 	ClickHouse   *clickhouse.Manager
 	VictoriaLogs *victorialogs.Provider
+	Loki         *loki.Provider
 	Datasources  *datasource.Service
 	Logger       *slog.Logger
 	server       *server.Server
@@ -129,6 +131,8 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
 	a.VictoriaLogs = victorialogs.NewProvider(a.Logger)
 	a.Datasources.Register(a.VictoriaLogs)
+	a.Loki = loki.NewProvider(a.Logger)
+	a.Datasources.Register(a.Loki)
 
 	// OIDC is optional only with local auth and no provider_url (enforced by
 	// config validation). Once configured, a failed discovery aborts startup so
@@ -190,6 +194,7 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	a.ClickHouse.StartBackgroundHealthChecks(0)
 	a.VictoriaLogs.StartBackgroundHealthChecks(0)
+	a.Loki.StartBackgroundHealthChecks(0)
 
 	// Initialize alerts manager with dynamic senders that read config from DB
 	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
@@ -262,6 +267,13 @@ func (a *App) Shutdown(ctx context.Context) error {
 		defer func() {
 			if err := a.VictoriaLogs.Close(); err != nil {
 				a.Logger.Error("error closing victorialogs provider", "error", err)
+			}
+		}()
+	}
+	if a.Loki != nil {
+		defer func() {
+			if err := a.Loki.Close(); err != nil {
+				a.Logger.Error("error closing loki provider", "error", err)
 			}
 		}()
 	}

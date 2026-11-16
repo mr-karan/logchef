@@ -90,8 +90,13 @@ func newAggregationTestServer(t *testing.T, provider datasource.Provider, source
 	s.datasources = datasource.NewService(s.store, s.log)
 	s.datasources.Register(provider)
 	source := &models.Source{Name: "aggregation-" + string(sourceType), SourceType: sourceType, MetaTSField: "_time"}
-	if sourceType == models.SourceTypeVictoriaLogs {
+	switch sourceType {
+	case models.SourceTypeClickHouse:
+		// A ClickHouse test source needs no connection.
+	case models.SourceTypeVictoriaLogs:
 		source.ConnectionConfig = json.RawMessage(`{"url":"http://localhost:9428"}`)
+	case models.SourceTypeLoki:
+		source.ConnectionConfig = json.RawMessage(`{"base_url":"http://localhost:3100","selector":"{app=~\".+\"}"}`)
 	}
 	if err := s.store.CreateSource(t.Context(), source); err != nil {
 		t.Fatal(err)

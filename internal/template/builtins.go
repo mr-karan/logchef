@@ -45,7 +45,8 @@ var intervals = []Interval{
 // "INTERVAL 5 MINUTE".
 func (i Interval) ClickHouse() string { return i.clickhouse }
 
-// LogsQL is the interval as a LogsQL duration, such as "5m".
+// LogsQL is the interval as a LogsQL duration, such as "5m". LogQL reads the
+// same form.
 func (i Interval) LogsQL() string { return i.logsql }
 
 // ParseInterval returns the interval for a histogram window such as "24h".
@@ -83,12 +84,21 @@ type Builtins struct {
 // one dialect, or reports why that dialect or request cannot use it.
 var macros = map[string]func(Builtins, Dialect) (string, error){
 	"__from": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__from")
+		}
 		return renderInstant("__from", b.From, dialect)
 	},
 	"__to": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__to")
+		}
 		return renderInstant("__to", b.To, dialect)
 	},
 	"__time_filter": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__time_filter")
+		}
 		if dialect == LogsQL {
 			return "", fmt.Errorf("macro {{__time_filter}} is not available in LogsQL: the request's time range already applies")
 		}
@@ -110,7 +120,7 @@ var macros = map[string]func(Builtins, Dialect) (string, error){
 		if err := requireInterval("__interval", b); err != nil {
 			return "", err
 		}
-		if dialect == LogsQL {
+		if dialect == LogsQL || dialect == LogQL {
 			return b.Interval.logsql, nil
 		}
 		return b.Interval.clickhouse, nil
@@ -122,12 +132,18 @@ var macros = map[string]func(Builtins, Dialect) (string, error){
 		return strconv.Itoa(b.Interval.Seconds), nil
 	},
 	"__timezone": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__timezone")
+		}
 		if dialect == LogsQL {
 			return "", fmt.Errorf("macro {{__timezone}} is not available in LogsQL: use {{__tz_offset}}")
 		}
 		return formatString(location(b).String(), dialect)
 	},
 	"__tz_offset": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__tz_offset")
+		}
 		if dialect != LogsQL {
 			return "", fmt.Errorf("macro {{__tz_offset}} is not available in ClickHouse SQL: use {{__timezone}}")
 		}
@@ -202,6 +218,10 @@ func expandMacro(name string, quote byte, builtins Builtins, dialect Dialect) (s
 		return "", fmt.Errorf("macro {{%s}} cannot be used inside a string, a quoted identifier, a heredoc or a raw string", name)
 	}
 	return macros[name](builtins, dialect)
+}
+
+func logQLTimeMacroError(name string) error {
+	return fmt.Errorf("macro {{%s}} is not available in LogQL: LogQL has no time literal, and the request's time range already applies", name)
 }
 
 func reservedNameError(name string) error {

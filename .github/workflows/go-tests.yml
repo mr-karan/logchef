@@ -95,6 +95,40 @@ jobs:
       - name: Integration tests (VictoriaLogs)
         run: go test ./internal/victorialogs/ -run Integration -v
 
+  # The Loki provider integration tests (RFC 0011) run against the dev stack's
+  # config (auth_enabled, filesystem storage). The image is distroless, so the
+  # runner polls /ready instead of a container health check.
+  loki-integration:
+    runs-on: ubuntu-latest
+    env:
+      LOGCHEF_TEST_LOKI_URL: http://localhost:3100
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start Loki
+        run: |
+          docker run -d --name loki -p 3100:3100 \
+            -v "$PWD/dev/loki.yaml:/etc/loki/logchef.yaml:ro" \
+            grafana/loki:3.7.6 -config.file=/etc/loki/logchef.yaml
+      - name: Wait for Loki
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf "${LOGCHEF_TEST_LOKI_URL}/ready" >/dev/null; then
+              echo "Loki is ready"
+              exit 0
+            fi
+            echo "Waiting for Loki ($i/60)..."
+            sleep 1
+          done
+          echo "::error::Loki did not become ready in time"
+          docker logs loki || true
+          exit 1
+      - name: Integration tests (Loki)
+        run: go test ./internal/loki/ -run Integration -v
+
   clickhouse-integration:
     runs-on: ubuntu-latest
     strategy:

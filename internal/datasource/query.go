@@ -21,6 +21,9 @@ type QueryRequest struct {
 	MaxLimit           int
 	MaxResponseBytes   int
 	QueryTimeout       *int
+	// Step is the request interval. Loki sends it as the step of a metric
+	// range query; the other providers ignore it. Zero means none was sent.
+	Step time.Duration
 	// Aggregation describes the result of a compiled LogchefQL aggregation:
 	// the column names, order and types, and the query's own limit. Nil for
 	// a query that returns log rows.
