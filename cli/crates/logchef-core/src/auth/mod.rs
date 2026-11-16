@@ -18,8 +18,9 @@ use url::Url;
 
 pub const CLIENT_ID: &str = "logchef-cli";
 
-/// The seven read scopes. The CLI asks for all of them plus `offline_access`.
-pub const READ_SCOPES: [&str; 7] = [
+/// The read scopes. The CLI asks for each one the server advertises, plus
+/// `offline_access`.
+pub const READ_SCOPES: [&str; 8] = [
     "profile:read",
     "teams:read",
     "sources:read",
@@ -27,6 +28,7 @@ pub const READ_SCOPES: [&str; 7] = [
     "saved_queries:read",
     "collections:read",
     "alerts:read",
+    "saved_views:read",
 ];
 const OFFLINE_ACCESS: &str = "offline_access";
 
@@ -51,6 +53,8 @@ struct ServerMetadata {
     code_challenge_methods_supported: Vec<String>,
     #[serde(default)]
     authorization_response_iss_parameter_supported: bool,
+    #[serde(default)]
+    scopes_supported: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -238,6 +242,21 @@ fn granted_scopes(token: &TokenResponse, requested: &[String]) -> Vec<String> {
     }
 }
 
+/// The read scopes to request. A server rejects a scope it does not know, so
+/// a server older than a scope (`saved_views:read` before saved views) is
+/// asked only for the scopes it advertises. A server that advertises none is
+/// asked for all of them.
+fn requested_scopes(metadata: &ServerMetadata) -> Vec<String> {
+    READ_SCOPES
+        .iter()
+        .filter(|scope| {
+            metadata.scopes_supported.is_empty()
+                || metadata.scopes_supported.iter().any(|s| s == *scope)
+        })
+        .map(|scope| scope.to_string())
+        .collect()
+}
+
 /// How `login` shows the authorization URL.
 #[derive(Clone, Copy, Debug)]
 pub struct LoginOptions {
@@ -252,7 +271,7 @@ pub async fn login(issuer: &str, options: LoginOptions) -> Result<OAuthCredentia
     let http = http_client()?;
     let metadata = discover(&http, issuer).await?;
     let resource = api_resource(issuer);
-    let requested: Vec<String> = READ_SCOPES.iter().map(|s| s.to_string()).collect();
+    let requested = requested_scopes(&metadata);
 
     let listener = CallbackListener::bind()?;
     let redirect_uri = listener.redirect_uri().to_string();
@@ -267,7 +286,7 @@ pub async fn login(issuer: &str, options: LoginOptions) -> Result<OAuthCredentia
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair(
             "scope",
-            &format!("{} {OFFLINE_ACCESS}", READ_SCOPES.join(" ")),
+            &format!("{} {OFFLINE_ACCESS}", requested.join(" ")),
         )
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
@@ -458,6 +477,7 @@ mod tests {
             revocation_endpoint: Some("https://logchef-api.example.com/oauth/revoke".into()),
             code_challenge_methods_supported: vec!["S256".into()],
             authorization_response_iss_parameter_supported: true,
+            scopes_supported: vec![],
         }
     }
 

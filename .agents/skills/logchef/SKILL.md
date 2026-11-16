@@ -72,7 +72,8 @@ source resolve, and prints a fix hint for each problem.
 | `logchef tail '<logchefql>'` | Live follow — native server streaming (SSE), works for both backends; `--poll` for the polling fallback. |
 | `logchef find '<pattern>'` | Which sources contain a service / host / message pattern (ClickHouse **and** VictoriaLogs). |
 | `logchef collections` / `logchef saved-queries` | List/run saved queries (by name, id, or explorer URL; `--var k=v`). |
-| `logchef open [query]` | Open a query in the web explorer — carries the query (`--sql` for native), `--since` or `--from/--to`, and `--limit`; `--print` just prints the URL. |
+| `logchef open [query]` | Open a query in the web explorer — carries the query (`--sql` for native), `--since` or `--from/--to`, `--limit`, and `--view <id\|name>` for a saved view; `--print` just prints the URL. |
+| `logchef views list` | Saved Explorer views of a source (personal, team, source): id, name, scope, default mark, and the parts each sets (columns, sort, display mode, filter, time range). `--output json` for the raw list. Read-only. |
 | `logchef doctor` | Diagnose config, auth, server reachability, CLI and server versions, and default team/source — each problem with a `→` fix hint. `--json` for scripts. |
 | `logchef config …` | Contexts + defaults (team, source, limit, since, timezone, timeout). |
 | `logchef skills get core [--full]` | Print this skill, version-matched to the binary. |

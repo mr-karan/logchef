@@ -545,6 +545,33 @@ pub struct Collection {
     pub source_name: Option<String>,
 }
 
+/// The list route's response: the views the caller can see for one team and
+/// source, and the view the default rules pick (personal, then team, then
+/// source default).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedViewList {
+    pub views: Vec<SavedView>,
+    pub default_view_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedView {
+    pub id: i64,
+    pub name: String,
+    /// `personal`, `team` or `source`.
+    pub scope: String,
+    /// The default of its own scope, which is not always the one the
+    /// default rules pick.
+    #[serde(default)]
+    pub is_default: bool,
+    /// The definition as sent. Each key other than `version` is a part of
+    /// the Explorer that the view sets.
+    pub definition: serde_json::Map<String, serde_json::Value>,
+    /// The remaining fields, kept so `--output json` prints the response.
+    #[serde(flatten)]
+    pub rest: serde_json::Map<String, serde_json::Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedSavedQuery {
     #[serde(flatten)]
