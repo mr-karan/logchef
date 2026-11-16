@@ -167,6 +167,7 @@
   "Reports": {
     "Enabled": true,
     "QueryBudget": 300000000000,
-    "MaxConcurrentRuns": 2
+    "MaxConcurrentRuns": 2,
+    "MaxAttachmentBytes": 5242880
   }
 }

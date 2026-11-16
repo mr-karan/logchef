@@ -72,6 +72,8 @@ type PanelOutput struct {
 	// Empty means the query matched no rows: no table rows, no stat rows,
 	// or a count of zero.
 	Empty bool
+	// CSV is the result as a file, for a saved query that attaches it.
+	CSV *CSVFile
 }
 
 // PanelResult is one panel's output or error, in job order.

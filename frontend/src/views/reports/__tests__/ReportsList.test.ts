@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     pause: vi.fn(), resume: vi.fn(), claim: vi.fn(), run: vi.fn(), preview: vi.fn(), runs: vi.fn(),
   },
   savedQueries: { list: vi.fn() },
+  dashboards: { list: vi.fn(), get: vi.fn() },
 }));
 
 vi.mock("@/api/reports", async (importOriginal) => {
@@ -19,6 +20,10 @@ vi.mock("@/api/reports", async (importOriginal) => {
 vi.mock("@/api/savedQueries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/savedQueries")>();
   return { ...actual, savedQueriesApi: mocks.savedQueries };
+});
+vi.mock("@/api/dashboards", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/dashboards")>();
+  return { ...actual, dashboardsApi: mocks.dashboards };
 });
 vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ user: { id: 1, role: "member" } }) }));
 
@@ -36,7 +41,7 @@ function report(input: ReportInput, id = 9): Report {
   return {
     id, name: input.name, source: { ...input.source, name: savedQuery.name }, schedule: input.schedule, timezone: input.timezone,
     time_range: input.time_range, range_anchor: input.range_anchor, variables: input.variables, max_rows: input.max_rows,
-    skip_if_empty: input.skip_if_empty, owner: { id: 1, name: "Owner", email: "owner@example.com" }, state: "active",
+    skip_if_empty: input.skip_if_empty, attach_csv: input.attach_csv, owner: { id: 1, name: "Owner", email: "owner@example.com" }, state: "active",
     pause_reason: "", last_run: null, can_edit: true, warnings: [], created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-16T00:00:00Z",
   };
 }
@@ -87,6 +92,8 @@ describe("ReportsList", () => {
     mocks.reports.run.mockResolvedValue({ status: "success", data: { ...sentRun, status: "running" } });
     mocks.reports.runs.mockResolvedValue({ status: "success", data: [sentRun] });
     mocks.reports.remove.mockResolvedValue({ status: "success", data: null });
+    mocks.dashboards.list.mockResolvedValue({ status: "success", data: [{ id: 4, name: "Edge" }] });
+    mocks.dashboards.get.mockResolvedValue({ status: "success", data: { id: 4, corrupt: false, panels: { tabs: [{ id: "main", title: "Main", layout: [] }] } } });
   });
 
   afterEach(() => {
@@ -133,13 +140,31 @@ describe("ReportsList", () => {
     expect(host.querySelector('[data-report-id="9"]')!.textContent).toContain(i18n.global.t("reports.status_sent"));
   });
 
+  it("offers the CSV attachment for a saved query only", async () => {
+    await mount("/reports?saved_query=5");
+    await vi.waitFor(() => expect(document.querySelector("#report-attach-csv")).not.toBeNull());
+    document.querySelector<HTMLButtonElement>("#report-attach-csv")!.click();
+    setValue(document.querySelector<HTMLSelectElement>("#report-source-kind")!, "dashboard");
+    await settle();
+    expect(document.querySelector("#report-attach-csv")).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector<HTMLSelectElement>("#report-dashboard")!.options.length).toBe(2));
+    setValue(document.querySelector<HTMLSelectElement>("#report-dashboard")!, "4");
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "Edge daily");
+    await settle();
+    button(i18n.global.t("reports.create")).click();
+    await settle();
+    const input = mocks.reports.create.mock.calls[0][0] as ReportInput;
+    expect(input.source).toEqual({ kind: "dashboard", dashboard_id: 4 });
+    expect(input.attach_csv).toBe(false);
+  });
+
   it("takes a list default and keeps a stored list as a list", async () => {
     const listQuery: SavedQuery = {
       ...savedQuery, id: 6, name: "by hosts",
       query_content: JSON.stringify({ content: "SELECT 1 WHERE host IN ({{hosts}})", variables: [{ name: "hosts", label: "Hosts", type: "text", inputType: "multiselect", value: [], defaultValue: ["api-1", "api-2"] }] }),
     };
     mocks.savedQueries.list.mockResolvedValue({ status: "success", data: [listQuery] });
-    const existing = report({ name: "Hosts", source: { kind: "saved_query", saved_query_id: 6 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: { hosts: ["web-1", "web-2"] }, max_rows: 25, skip_if_empty: false }, 7);
+    const existing = report({ name: "Hosts", source: { kind: "saved_query", saved_query_id: 6 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: { hosts: ["web-1", "web-2"] }, max_rows: 25, skip_if_empty: false, attach_csv: true }, 7);
     mocks.reports.update.mockImplementation(async (_id: number, input: ReportInput) => ({ status: "success", data: report(input, 7) }));
     await mount("/reports/7", [existing]);
     await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>("#report-var-hosts")?.value).toBe("web-1, web-2"));
@@ -148,6 +173,8 @@ describe("ReportsList", () => {
     button(i18n.global.t("ui.save")).click();
     await settle();
     expect((mocks.reports.update.mock.calls[0][1] as ReportInput).variables).toEqual({ hosts: ["web-1", "web-2"] });
+    // A save keeps the stored attachment setting: PUT replaces every field.
+    expect((mocks.reports.update.mock.calls[0][1] as ReportInput).attach_csv).toBe(true);
 
     setValue(document.querySelector<HTMLInputElement>("#report-var-hosts")!, "");
     await settle();
@@ -158,7 +185,7 @@ describe("ReportsList", () => {
   });
 
   it("does not let a save that finishes late take over another report", async () => {
-    const base = { source: { kind: "saved_query" as const, saved_query_id: 5 }, schedule: { frequency: "daily" as const, hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time" as const, variables: {}, max_rows: 25, skip_if_empty: false };
+    const base = { source: { kind: "saved_query" as const, saved_query_id: 5 }, schedule: { frequency: "daily" as const, hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time" as const, variables: {}, max_rows: 25, skip_if_empty: false, attach_csv: false };
     const a = report({ ...base, name: "A" }, 1);
     const b = report({ ...base, name: "B" }, 2);
     let finishA: (value: unknown) => void = () => {};
@@ -188,7 +215,7 @@ describe("ReportsList", () => {
   });
 
   it("deletes a report only after the confirm dialog", async () => {
-    const existing = report({ name: "Nightly", source: { kind: "saved_query", saved_query_id: 5 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: {}, max_rows: 25, skip_if_empty: false }, 4);
+    const existing = report({ name: "Nightly", source: { kind: "saved_query", saved_query_id: 5 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: {}, max_rows: 25, skip_if_empty: false, attach_csv: false }, 4);
     await mount("/reports", [existing]);
     expect(host.textContent).toContain("Nightly");
     const trigger = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.global.t("ui.actions")}"]`)!;

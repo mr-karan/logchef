@@ -152,9 +152,6 @@ func validateReport(ctx context.Context, db store.StoreOps, owner *models.User, 
 }
 
 func validateSavedQueryReport(ctx context.Context, db store.StoreOps, owner *models.User, in *ReportInput, now time.Time) (*models.Report, error) {
-	if in.AttachCSV {
-		return nil, invalidReport("attach_csv is not supported yet")
-	}
 	sq, err := validateReportSource(ctx, db, owner, in.Source)
 	if err != nil {
 		return nil, err
@@ -185,6 +182,7 @@ func validateSavedQueryReport(ctx context.Context, db store.StoreOps, owner *mod
 		TimeRange:    *in.TimeRange,
 		RangeAnchor:  timing.anchor,
 		Variables:    variables,
+		AttachCSV:    in.AttachCSV,
 	}, nil
 }
 

@@ -57,6 +57,7 @@ const variables = ref<Record<string, string>>({});
 const storedLists = ref<Set<string>>(new Set());
 const maxRows = ref(25);
 const skipIfEmpty = ref(false);
+const attachCSV = ref(false);
 
 // Each load starts a new generation: a save from an earlier one finishes
 // without touching what the dialog shows now.
@@ -81,6 +82,7 @@ function load(report: Report | null) {
   variables.value = Object.fromEntries(stored.map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : String(v ?? "")]));
   maxRows.value = base?.max_rows ?? 25;
   skipIfEmpty.value = base?.skip_if_empty ?? false;
+  attachCSV.value = base?.attach_csv ?? false;
   saved.value = report ? JSON.stringify(input.value) : "";
 }
 
@@ -146,6 +148,8 @@ const input = computed<ReportInput>(() => ({
   variables: isDashboard.value ? {} : Object.fromEntries(Object.entries(variables.value).filter(([, v]) => v.trim()).map(([k, v]) => [k, isList(k) ? splitValues(v) : v.trim()])),
   max_rows: maxRows.value,
   skip_if_empty: skipIfEmpty.value,
+  // Only a saved query attaches its rows; a dashboard refuses the flag.
+  attach_csv: !isDashboard.value && attachCSV.value,
 }));
 const dirty = computed(() => !current.value || JSON.stringify(input.value) !== saved.value);
 
@@ -303,6 +307,10 @@ function warningText(code: string): string {
               <div class="flex items-center gap-2 sm:col-span-2">
                 <Switch id="report-skip-empty" v-model="skipIfEmpty" />
                 <Label for="report-skip-empty">{{ t("reports.skipIfEmpty") }}</Label>
+              </div>
+              <div v-if="!isDashboard" class="flex items-center gap-2 sm:col-span-2">
+                <Switch id="report-attach-csv" v-model="attachCSV" />
+                <Label for="report-attach-csv">{{ t("reports.attachCSV") }}</Label>
               </div>
             </div>
           </section>

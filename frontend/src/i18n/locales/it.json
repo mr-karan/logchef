@@ -1176,6 +1176,7 @@
   "reports.optional": "Facoltativo",
   "reports.maxRows": "Righe per tabella",
   "reports.skipIfEmpty": "Salta quando non ci sono righe",
+  "reports.attachCSV": "Allega le righe come file CSV",
   "reports.preview": "Anteprima",
   "reports.previewTitle": "Anteprima email",
   "reports.sendTest": "Invia una prova a me",

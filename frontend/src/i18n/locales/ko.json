@@ -1176,6 +1176,7 @@
   "reports.optional": "선택 사항",
   "reports.maxRows": "표당 행 수",
   "reports.skipIfEmpty": "행이 없으면 건너뛰기",
+  "reports.attachCSV": "행을 CSV 파일로 첨부",
   "reports.preview": "미리 보기",
   "reports.previewTitle": "이메일 미리 보기",
   "reports.sendTest": "나에게 테스트 보내기",

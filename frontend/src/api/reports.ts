@@ -41,6 +41,7 @@ export interface ReportInput {
   variables: Record<string, string | string[]>;
   max_rows: number;
   skip_if_empty: boolean;
+  attach_csv: boolean;
 }
 
 export interface ReportWarning {
@@ -59,6 +60,7 @@ export interface Report {
   variables: Record<string, unknown>;
   max_rows: number;
   skip_if_empty: boolean;
+  attach_csv: boolean;
   owner: { id: number; name: string; email: string } | null;
   state: ReportState;
   pause_reason: ReportPauseReason;

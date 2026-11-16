@@ -17,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -312,7 +313,7 @@ func (w *exportRowWriter) WriteRow(row map[string]any) error {
 	if w.format == "csv" {
 		record := make([]string, len(w.columns))
 		for i, col := range w.columns {
-			record[i] = csvValue(row[col.Name])
+			record[i] = util.CSVValue(row[col.Name])
 		}
 		if err := w.csv.Write(record); err != nil {
 			return err
@@ -372,31 +373,4 @@ func (w *exportRowWriter) writeNDJSON(v any) error {
 		return err
 	}
 	return w.out.WriteByte('\n')
-}
-
-func csvValue(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case time.Time:
-		return v.Format(time.RFC3339Nano)
-	case []byte:
-		return string(v)
-	case fmt.Stringer:
-		return v.String()
-	case string:
-		return v
-	case bool:
-		return strconv.FormatBool(v)
-	case int:
-		return strconv.Itoa(v)
-	case int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		return fmt.Sprint(v)
-	default:
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprint(v)
-		}
-		return string(encoded)
-	}
 }

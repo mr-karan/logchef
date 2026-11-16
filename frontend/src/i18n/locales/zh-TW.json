@@ -1176,6 +1176,7 @@
   "reports.optional": "選填",
   "reports.maxRows": "每個表格的列數",
   "reports.skipIfEmpty": "沒有資料列時略過",
+  "reports.attachCSV": "將資料列附加為 CSV 檔案",
   "reports.preview": "預覽",
   "reports.previewTitle": "郵件預覽",
   "reports.sendTest": "寄送測試給我",

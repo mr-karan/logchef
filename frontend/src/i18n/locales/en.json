@@ -1930,6 +1930,7 @@
   "reports.optional": "Optional",
   "reports.maxRows": "Rows per table",
   "reports.skipIfEmpty": "Skip when there are no rows",
+  "reports.attachCSV": "Attach the rows as a CSV file",
   "reports.preview": "Preview",
   "reports.previewTitle": "Email preview",
   "reports.sendTest": "Send test to me",

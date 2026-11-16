@@ -2,9 +2,13 @@ package reports
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/mail"
 	"slices"
@@ -266,5 +270,51 @@ func TestDeliverStopsAtTheDeadline(t *testing.T) {
 	got = d.Deliver(context.Background(), testRecipient, testMail, time.Now().Add(time.Second))
 	if got.Status != models.ReportDeliveryFailed || got.Attempts != 1 {
 		t.Errorf("retry past the deadline = %+v, want failed after 1 attempt", got)
+	}
+}
+
+// TestSMTPMailerSendsTheCSV sends a CSV attachment, under the longest
+// file name a report allows, through the SMTP adapter over notify.Mailer
+// and reads it back from what the server received.
+func TestSMTPMailerSendsTheCSV(t *testing.T) {
+	f := newFakeSMTP(t, "250 ok", "250 queued", "221 bye")
+	host, port := fakeAddr(t, f)
+	data := []byte("status,n\n" + strings.Repeat("503,1\n", 500))
+	msg := testMail
+	msg.Attachments = []Attachment{{Name: CSVName(strings.Repeat("界", 200), time.Now(), time.UTC), ContentType: "text/csv; charset=utf-8", Data: data}}
+	if err := smtpMailer(host, port).Send(context.Background(), testRecipient.Address, msg); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	received := f.messages[0]
+	f.mu.Unlock()
+	for line := range strings.SplitSeq(received, "\r\n") {
+		if len(line) > 998 {
+			t.Fatalf("line of %d bytes on the wire, over the SMTP limit", len(line))
+		}
+	}
+	parsed, err := mail.ReadMessage(strings.NewReader(received))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, params, err := mime.ParseMediaType(parsed.Header.Get("Content-Type"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := multipart.NewReader(parsed.Body, params["boundary"])
+	if _, err := parts.NextPart(); err != nil {
+		t.Fatal(err)
+	}
+	file, err := parts.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(string(encoded), "\r\n", ""))
+	if err != nil || !bytes.Equal(decoded, data) {
+		t.Fatalf("received attachment decodes to %d bytes, %v; want the %d bytes sent", len(decoded), err, len(data))
 	}
 }

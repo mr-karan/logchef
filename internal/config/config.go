@@ -52,6 +52,9 @@ type ReportsConfig struct {
 	// MaxConcurrentRuns bounds the runs this replica executes at once.
 	// Later runs wait inside their own deadline.
 	MaxConcurrentRuns int `koanf:"max_concurrent_runs"`
+	// MaxAttachmentBytes bounds a CSV attachment before encoding. A larger
+	// file ends at the last whole row that fits.
+	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
 }
 
 // AuditConfig bounds the audit_events table and controls the audit log line.
@@ -538,6 +541,7 @@ const (
 	defaultReportsEnabled     = true
 	defaultReportsQueryBudget = 5 * time.Minute
 	defaultReportsMaxRuns     = 2
+	defaultReportsAttachment  = 5 << 20
 	minReportsQueryBudget     = time.Minute
 	maxReportsQueryBudget     = 30 * time.Minute
 
@@ -1048,9 +1052,10 @@ func defaultConfig() Config {
 			MaxQueryTextBytes: defaultSharesMaxQueryTextBytes,
 		},
 		Reports: ReportsConfig{
-			Enabled:           defaultReportsEnabled,
-			QueryBudget:       defaultReportsQueryBudget,
-			MaxConcurrentRuns: defaultReportsMaxRuns,
+			Enabled:            defaultReportsEnabled,
+			QueryBudget:        defaultReportsQueryBudget,
+			MaxConcurrentRuns:  defaultReportsMaxRuns,
+			MaxAttachmentBytes: defaultReportsAttachment,
 		},
 		Audit: AuditConfig{
 			RetentionDays: defaultAuditRetentionDays,
@@ -1179,6 +1184,9 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 
 	if cfg.Reports.MaxConcurrentRuns <= 0 {
 		cfg.Reports.MaxConcurrentRuns = defaultReportsMaxRuns
+	}
+	if cfg.Reports.MaxAttachmentBytes <= 0 {
+		cfg.Reports.MaxAttachmentBytes = defaultReportsAttachment
 	}
 
 	// Zero disables an audit bound; only a negative value is invalid.

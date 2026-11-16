@@ -1176,6 +1176,7 @@
   "reports.optional": "वैकल्पिक",
   "reports.maxRows": "प्रति तालिका पंक्तियाँ",
   "reports.skipIfEmpty": "कोई पंक्ति न हो तो छोड़ें",
+  "reports.attachCSV": "पंक्तियों को CSV फ़ाइल के रूप में संलग्न करें",
   "reports.preview": "पूर्वावलोकन",
   "reports.previewTitle": "ईमेल पूर्वावलोकन",
   "reports.sendTest": "मुझे परीक्षण भेजें",

@@ -58,6 +58,8 @@ type ReportRunner struct {
 	// Slots bounds the runs of this replica that execute at once; a run
 	// waits for a slot inside its own deadline. Nil does not bound them.
 	Slots chan struct{}
+	// MaxAttachmentBytes bounds a CSV attachment before encoding.
+	MaxAttachmentBytes int
 	// Sleep waits between delivery attempts; nil waits on a timer.
 	Sleep func(ctx context.Context, d time.Duration) error
 }
@@ -297,13 +299,21 @@ func (rr *ReportRunner) planSavedQuery(ctx context.Context, r *models.Report, ow
 		return nil, nil, fmt.Errorf("loading source %d: %w", sq.SourceID, err)
 	}
 	run := rr.savedQueryRun(src, sq, content, r.Timezone, window, variables)
-	maxRows := r.MaxRows
+	maxRows, attachCSV, maxAttachment := r.MaxRows, r.AttachCSV, rr.MaxAttachmentBytes
 	job := &reports.PanelJob{ID: reportPanelID, Title: sq.Name, Run: func(ctx context.Context) (reports.PanelOutput, error) {
 		res, err := run(ctx)
 		if err != nil {
 			return reports.PanelOutput{}, err
 		}
-		return tableOutput(reportPanelID, sq.Name, res, loc, maxRows), nil
+		out := tableOutput(reportPanelID, sq.Name, res, loc, maxRows)
+		if attachCSV {
+			file, err := reports.BuildCSV(res, maxAttachment)
+			if err != nil {
+				return reports.PanelOutput{}, err
+			}
+			out.CSV = &file
+		}
+		return out, nil
 	}}
 	plan := &reportPlan{
 		report: r, owner: owner, loc: loc, window: window, sources: []string{source.Name},
@@ -384,7 +394,10 @@ func (rr *ReportRunner) savedQueryRun(src access.AuthorizedSource, sq *models.Sa
 type renderedRun struct {
 	panels   []models.ReportPanelOutcome
 	rendered reports.Rendered
-	stop     *runStop
+	// csv is the saved query's rows as a file, when the report attaches
+	// them and the query ran.
+	csv  *reports.CSVFile
+	stop *runStop
 }
 
 // runAndRender runs the panels until queryDeadline, decides the outcomes
@@ -430,6 +443,10 @@ func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, quer
 			}
 		default:
 			o.Rows, o.Truncation, o.Status = res.Output.Rows, res.Output.Truncation, models.ReportPanelOK
+			if res.Output.CSV != nil {
+				out.csv = res.Output.CSV
+				doc.AttachmentNote = reports.CSVNote(*res.Output.CSV)
+			}
 			if res.Output.Empty {
 				o.Status = models.ReportPanelEmpty
 				empty++
@@ -496,6 +513,15 @@ func (rr *ReportRunner) execute(ctx context.Context, run *models.ReportRun, r *m
 		Date:    time.Now(),
 		Text:    rendered.rendered.Text,
 		HTML:    rendered.rendered.HTML,
+	}
+	// Every recipient that receives the message passed the saved-query
+	// test below, so the file goes only to users who reach its source.
+	if rendered.csv != nil && !rendered.csv.HeaderTooLarge {
+		msg.Attachments = []reports.Attachment{{
+			Name:        reports.CSVName(r.Name, run.ScheduledFor, plan.loc),
+			ContentType: "text/csv; charset=utf-8",
+			Data:        rendered.csv.Data,
+		}}
 	}
 	for _, u := range users {
 		recipient := reports.Recipient{

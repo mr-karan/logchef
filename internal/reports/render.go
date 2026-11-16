@@ -40,6 +40,8 @@ type Document struct {
 	// configured, and the email then has no links.
 	SourceURL string
 	ReportURL string
+	// AttachmentNote describes the attached file, if any.
+	AttachmentNote string
 }
 
 // Panel is one rendered panel. A failed, locked or unsupported panel has
@@ -196,7 +198,8 @@ var htmlBody = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 {{if .MoreRows}}<div style="font-size:12px;color:#52525b;margin-top:6px;">{{if $.SourceURL}}<a href="{{$.SourceURL}}" style="color:#2563eb;">{{.MoreRows}} more rows</a>{{else}}{{.MoreRows}} more rows{{end}}</div>
 {{end}}{{end}}</td></tr>
 {{end}}<tr><td style="padding:16px 24px;font-size:12px;color:#71717a;">
-{{if .Owner}}<div>Runs as {{.Owner}}.</div>{{end}}
+{{if .AttachmentNote}}<div>{{.AttachmentNote}}</div>
+{{end}}{{if .Owner}}<div>Runs as {{.Owner}}.</div>{{end}}
 {{if .Sources}}<div>Sources: {{range $i, $s := .Sources}}{{if $i}}, {{end}}{{$s}}{{end}}.</div>{{end}}
 <div>Window: {{.From}} to {{.To}}, timezone {{.Zone}}.</div>
 {{if .SourceURL}}<div><a href="{{.SourceURL}}" style="color:#2563eb;">Open in Logchef</a>{{if .ReportURL}} · <a href="{{.ReportURL}}" style="color:#2563eb;">Report settings</a>{{end}}</div>{{else if .ReportURL}}<div><a href="{{.ReportURL}}" style="color:#2563eb;">Report settings</a></div>{{end}}
@@ -209,15 +212,16 @@ var htmlBody = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 func renderHTML(doc Document, rows int, cut []bool) (string, error) {
 	var b bytes.Buffer
 	err := htmlBody.Execute(&b, map[string]any{
-		"Name":      doc.ReportName,
-		"From":      formatWindowEdge(doc.Window.Start, doc.Location),
-		"To":        formatWindowEdge(doc.Window.End, doc.Location),
-		"Zone":      doc.Location.String(),
-		"Panels":    panelViews(doc, rows, cut),
-		"Owner":     doc.Owner,
-		"Sources":   doc.Sources,
-		"SourceURL": doc.SourceURL,
-		"ReportURL": doc.ReportURL,
+		"Name":           doc.ReportName,
+		"From":           formatWindowEdge(doc.Window.Start, doc.Location),
+		"To":             formatWindowEdge(doc.Window.End, doc.Location),
+		"Zone":           doc.Location.String(),
+		"Panels":         panelViews(doc, rows, cut),
+		"Owner":          doc.Owner,
+		"Sources":        doc.Sources,
+		"SourceURL":      doc.SourceURL,
+		"ReportURL":      doc.ReportURL,
+		"AttachmentNote": doc.AttachmentNote,
 	})
 	if err != nil {
 		return "", fmt.Errorf("rendering report html: %w", err)
@@ -273,6 +277,9 @@ func renderText(doc Document, rows int, cut []bool) string {
 		}
 	}
 	b.WriteString("\n--\n")
+	if doc.AttachmentNote != "" {
+		b.WriteString(doc.AttachmentNote + "\n")
+	}
 	if doc.Owner != "" {
 		fmt.Fprintf(&b, "Runs as %s.\n", doc.Owner)
 	}
