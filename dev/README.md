@@ -19,6 +19,20 @@ Logchef's local dev environment intentionally keeps this lighter:
 - it seeds a LogChef datasource pointing at the local VictoriaLogs instance
 - it ships a tiny ingestion helper for sample data instead of mirroring the full upstream Vector topology
 
+## Loki
+
+The dev stack runs Grafana Loki 3.7.6 as a single binary on `:3100`, configured by `loki.yaml`: filesystem storage, a TSDB index with schema v13, and `auth_enabled: true`. Every request needs an `X-Scope-OrgID` header, and the sample data uses the tenant `dev`.
+
+```bash
+# Seed four streams (service_name, env, level) with JSON lines and trace_id as structured metadata
+cd dev && ./ingest-loki.sh
+
+# List the labels of tenant dev; without the header Loki returns 401
+curl -s -H 'X-Scope-OrgID: dev' 'http://localhost:3100/loki/api/v1/labels'
+```
+
+`just dev-ingest-logs` also streams demo logs into Loki through Vector (`loki.toml`, `service_name="loki-vector"`). Logchef cannot query Loki yet: the Loki source arrives with the provider work of RFC 0011.
+
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/)
@@ -40,13 +54,14 @@ just dev-seed
 # Run frontend (terminal 2)
 just run-frontend
 
-# Ingest sample logs through Vector into ClickHouse and VictoriaLogs (terminal 3)
+# Ingest sample logs through Vector into ClickHouse, VictoriaLogs and Loki (terminal 3)
 just dev-ingest-logs
 ```
 
 Open http://localhost:5173 and login with `admin@logchef.internal` / `password`.
 Mailpit UI is available at http://localhost:8025.
 VictoriaLogs health should be available at http://localhost:9428/health.
+Loki readiness should be available at http://localhost:3100/ready.
 This local setup does not expose the upstream VMUI path on `:8427`, because `vmauth` is not part of Logchef's dev compose.
 
 To test email delivery locally, configure SMTP settings to:
@@ -84,6 +99,7 @@ Backend startup provisioning creates:
 | ClickHouse HTTP | 8123 | HTTP interface |
 | ClickHouse Native | 9000 | Native protocol |
 | VictoriaLogs | 9428 | Local VictoriaLogs API |
+| Loki | 3100 | Local Loki API, tenant `dev` |
 | Dex | 5556 | OIDC provider |
 | Webhook Receiver | 8888 | Test webhook endpoint |
 | Mailpit UI | 8025 | Email inbox UI |
@@ -119,7 +135,7 @@ The data lives in the `postgres-data` volume; `just dev-clean` removes it.
 ## Useful Commands
 
 ```bash
-# Quick reset (truncate ClickHouse logs, wipe VictoriaLogs data, recreate SQLite data)
+# Quick reset (truncate ClickHouse logs, wipe VictoriaLogs and Loki data, recreate SQLite data)
 just dev-reset
 
 # Full clean (stop docker, remove volumes, delete DB)
@@ -146,6 +162,9 @@ just dev-test-webhook
 | `provisioning.toml` | Example datasource-aware provisioning config for dev |
 | `victorialogs.toml` | Vector config for the local VictoriaLogs demo stream |
 | `ingest-victorialogs.sh` | Fallback helper that sends sample JSONL logs directly to VictoriaLogs |
+| `loki.yaml` | Loki server config for the dev stack |
+| `loki.toml` | Vector config for the local Loki demo stream |
+| `ingest-loki.sh` | Sends four sample streams directly to Loki for tenant `dev` |
 | `ingest-wide-fixture.py` | Wide-schema VictoriaLogs fixtures for Explorer performance work (`just dev-ingest-wide`) |
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
@@ -173,6 +192,11 @@ just dev-init-tables
 - Validate the service is up with: `curl http://localhost:9428/health`
 - Re-send only the VictoriaLogs sample payload without Vector with: `cd dev && ./ingest-victorialogs.sh`
 - If you want the full upstream VictoriaLogs demo stack with VMUI, Grafana, `vmauth`, and `vmalert`, use the official compose files linked above instead of Logchef's trimmed local dev compose.
+
+**Loki returns 401 or no data?**
+- Send `X-Scope-OrgID: dev` with every request; `auth_enabled` is on.
+- Validate the service is up with: `curl http://localhost:3100/ready` (it can take about 20 seconds after start).
+- Re-send the sample streams with: `cd dev && ./ingest-loki.sh`
 
 **VictoriaLogs still has old dev data?**
 - Run `just dev-reset` to clear ClickHouse tables, wipe VictoriaLogs data, and remove `local.db`.
