@@ -296,11 +296,16 @@ func (r *Runner) Kick(ctx context.Context, kind Kind, key string) error {
 	if err := r.db.KickJob(ctx, string(kind), key); err != nil {
 		return err
 	}
+	r.signal()
+	return nil
+}
+
+// signal wakes the loop without blocking. A wake already pending covers it.
+func (r *Runner) signal() {
 	select {
 	case r.wake <- struct{}{}:
 	default:
 	}
-	return nil
 }
 
 func (r *Runner) loop(loopCtx, runCtx context.Context) {
@@ -357,6 +362,9 @@ func (r *Runner) run(runCtx context.Context, k *kindRunner, row *models.Schedule
 	defer func() {
 		<-k.slots
 		r.runs.Done()
+		// A kick that arrived while this run held the slot found no room;
+		// wake the loop so it claims that job now instead of at the next poll.
+		r.signal()
 	}()
 	kind := string(k.spec.Kind)
 	log := r.log.With("kind", kind, "job_id", row.ID)
