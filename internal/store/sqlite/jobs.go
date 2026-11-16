@@ -14,7 +14,7 @@ import (
 // jobs queries compare as text.
 const jobTimeLayout = "2006-01-02T15:04:05.000Z"
 
-func (db *DB) UpsertJob(ctx context.Context, def models.JobDefinition) error {
+func (db *DB) UpsertJob(ctx context.Context, def models.JobDefinition, firstRunAt *time.Time) error {
 	err := db.writeQueries.UpsertJob(ctx, sqlc.UpsertJobParams{
 		Kind:         def.Kind,
 		Key:          def.Key,
@@ -24,6 +24,7 @@ func (db *DB) UpsertJob(ctx context.Context, def models.JobDefinition) error {
 		Misfire:      def.Misfire,
 		GraceSeconds: def.GraceSeconds,
 		Enabled:      boolToInt(def.Enabled),
+		FirstRunAt:   nullTimeText(firstRunAt),
 	})
 	if err != nil {
 		return fmt.Errorf("error upserting job %s/%s: %w", def.Kind, def.Key, translateBusy(err))

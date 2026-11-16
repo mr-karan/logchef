@@ -9,7 +9,7 @@ type JobDefinition struct {
 	Kind         string
 	Key          string
 	ScheduleKind string // "interval" or "cron"
-	ScheduleExpr string // seconds for "interval"
+	ScheduleExpr string // seconds for "interval", five fields for "cron"
 	Timezone     string // IANA name, used by "cron"
 	Misfire      string // "run_once" or "skip"
 	GraceSeconds int64

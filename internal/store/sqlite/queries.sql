@@ -1564,15 +1564,15 @@ UPDATE alerts SET last_state = 'resolved', eval_seq = eval_seq + 1, updated_at =
 -- Jobs (internal/jobs). Every time comparison uses the database clock.
 
 -- name: UpsertJob :exec
--- A new job is due now. A changed schedule makes an existing job due now;
--- otherwise its next run and lease are kept.
+-- A new job, or an existing job whose schedule changes, is due at first_run_at,
+-- or now when that is null; any other update keeps its next run and lease.
 INSERT INTO jobs (
     kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled,
     next_run_at, created_at, updated_at
 ) VALUES (
     sqlc.arg(kind), sqlc.arg(key), sqlc.arg(schedule_kind), sqlc.arg(schedule_expr),
     sqlc.arg(timezone), sqlc.arg(misfire), sqlc.arg(grace_seconds), sqlc.arg(enabled),
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    COALESCE(CAST(sqlc.narg(first_run_at) AS TEXT), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 )
 ON CONFLICT (kind, key) DO UPDATE SET
     next_run_at = CASE

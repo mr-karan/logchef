@@ -8230,7 +8230,7 @@ INSERT INTO jobs (
 ) VALUES (
     ?1, ?2, ?3, ?4,
     ?5, ?6, ?7, ?8,
-    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    COALESCE(CAST(?9 AS TEXT), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 )
 ON CONFLICT (kind, key) DO UPDATE SET
     next_run_at = CASE
@@ -8250,19 +8250,20 @@ ON CONFLICT (kind, key) DO UPDATE SET
 `
 
 type UpsertJobParams struct {
-	Kind         string `json:"kind"`
-	Key          string `json:"key"`
-	ScheduleKind string `json:"schedule_kind"`
-	ScheduleExpr string `json:"schedule_expr"`
-	Timezone     string `json:"timezone"`
-	Misfire      string `json:"misfire"`
-	GraceSeconds int64  `json:"grace_seconds"`
-	Enabled      int64  `json:"enabled"`
+	Kind         string         `json:"kind"`
+	Key          string         `json:"key"`
+	ScheduleKind string         `json:"schedule_kind"`
+	ScheduleExpr string         `json:"schedule_expr"`
+	Timezone     string         `json:"timezone"`
+	Misfire      string         `json:"misfire"`
+	GraceSeconds int64          `json:"grace_seconds"`
+	Enabled      int64          `json:"enabled"`
+	FirstRunAt   sql.NullString `json:"first_run_at"`
 }
 
 // Jobs (internal/jobs). Every time comparison uses the database clock.
-// A new job is due now. A changed schedule makes an existing job due now;
-// otherwise its next run and lease are kept.
+// A new job, or an existing job whose schedule changes, is due at first_run_at,
+// or now when that is null; any other update keeps its next run and lease.
 func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
 	_, err := q.exec(ctx, q.upsertJobStmt, upsertJob,
 		arg.Kind,
@@ -8273,6 +8274,7 @@ func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
 		arg.Misfire,
 		arg.GraceSeconds,
 		arg.Enabled,
+		arg.FirstRunAt,
 	)
 	return err
 }

@@ -27,12 +27,56 @@ func RunJobs(t *testing.T, open Opener, rowLocks bool) {
 	t.Run("TakeoverAfterNewerClaimCommits", func(t *testing.T) { testTakeoverClaimFirst(t, open(t), open(t)) })
 	t.Run("TakeoverWhileHoldIsOpen", func(t *testing.T) { testTakeoverHoldFirst(t, open(t), open(t), rowLocks) })
 	t.Run("ScheduleChangeDuringRun", func(t *testing.T) { testScheduleChangeDuringRun(t, open(t)) })
+	t.Run("CronFirstRun", func(t *testing.T) { testCronFirstRun(t, open(t)) })
+}
+
+// testCronFirstRun checks that a cron job, new or with a changed schedule,
+// is first due at its next occurrence rather than now, and that an update
+// without a schedule change keeps the due time.
+func testCronFirstRun(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	daily := mustCron(t, "30 9 * * *", "Asia/Kolkata")
+	spec := jobs.Spec{Kind: "cron-first", Key: "a", Schedule: daily, Misfire: jobs.Skip, Grace: time.Hour, Enabled: true}
+	before := time.Now()
+	upsertJob(t, s, spec)
+	created := mustGetJob(t, s, "cron-first", "a")
+	if want := daily.Next(before); !created.NextRunAt.Equal(want) {
+		t.Fatalf("new cron job next_run_at = %v, want the next occurrence %v", created.NextRunAt, want)
+	}
+	if created.ScheduleKind != "cron" || created.ScheduleExpr != "30 9 * * *" || created.Timezone != "Asia/Kolkata" {
+		t.Errorf("stored schedule = %q %q %q", created.ScheduleKind, created.ScheduleExpr, created.Timezone)
+	}
+	if got, err := s.ClaimJobs(ctx, "cron-first", "owner-a", time.Minute, 10); err != nil || len(got) != 0 {
+		t.Errorf("claimed a cron job before its first occurrence: %v, %v", got, err)
+	}
+
+	spec.Enabled = false
+	upsertJob(t, s, spec)
+	if kept := mustGetJob(t, s, "cron-first", "a"); !kept.NextRunAt.Equal(created.NextRunAt) {
+		t.Errorf("an update without a schedule change moved next_run_at to %v", kept.NextRunAt)
+	}
+
+	spec.Schedule = mustCron(t, "30 9 * * *", "Europe/Berlin")
+	upsertJob(t, s, spec)
+	moved := mustGetJob(t, s, "cron-first", "a")
+	if want := spec.Schedule.Next(before); !moved.NextRunAt.Equal(want) {
+		t.Errorf("a timezone change gave next_run_at %v, want %v", moved.NextRunAt, want)
+	}
+}
+
+func mustCron(t *testing.T, expr, timezone string) jobs.Schedule {
+	t.Helper()
+	s, err := jobs.Cron(expr, timezone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func testJobDefinitions(t *testing.T, s store.Store) {
 	ctx := context.Background()
 	def := models.JobDefinition{Kind: "defs", Key: "a", ScheduleKind: "interval", ScheduleExpr: "60", Timezone: "UTC", Misfire: "run_once", Enabled: true}
-	if err := s.UpsertJob(ctx, def); err != nil {
+	if err := s.UpsertJob(ctx, def, nil); err != nil {
 		t.Fatal(err)
 	}
 	created := mustGetJob(t, s, "defs", "a")
@@ -50,7 +94,7 @@ func testJobDefinitions(t *testing.T, s store.Store) {
 	}
 
 	def.Misfire, def.GraceSeconds, def.Enabled = "skip", 30, false
-	if err := s.UpsertJob(ctx, def); err != nil {
+	if err := s.UpsertJob(ctx, def, nil); err != nil {
 		t.Fatal(err)
 	}
 	kept := mustGetJob(t, s, "defs", "a")
@@ -62,7 +106,7 @@ func testJobDefinitions(t *testing.T, s store.Store) {
 	}
 
 	def.ScheduleExpr = "120"
-	if err := s.UpsertJob(ctx, def); err != nil {
+	if err := s.UpsertJob(ctx, def, nil); err != nil {
 		t.Fatal(err)
 	}
 	if moved := mustGetJob(t, s, "defs", "a"); !moved.NextRunAt.Before(later) {
