@@ -27,18 +27,20 @@ explorer, they can see in a panel.
 
 ## Panel types
 
-- **Chart**: a line, area, or bar chart over a time or category column.
+- **Time series**: a line, area, or bar chart over a time or category column.
   Result charts store the X column, ordered Y columns, and an optional series
-  column. Bars can be stacked or grouped and can display values. Count charts
-  use the histogram endpoint and can group by a field.
+  column. See [Chart styles](#chart-styles) for the display options. Count
+  charts use the histogram endpoint and can group by a field.
 - **Stat**: a match count or a computed value from a result column. Run SQL or
   a LogsQL stats query, select the value column, and reduce it with `last`,
-  `first`, `sum`, `avg`, `min`, or `max`.
-- **Breakdown**: a toplist or pie chart. Result panels store a label column
-  and a numeric value column. Count panels group matching logs by a field.
-  Toplists keep query order. Pies fold small slices into **Other** only when
-  you set **Fold slices below %**. The remainder retains the sum of those
-  slices, even when it is very small.
+  `first`, `sum`, `avg`, `min`, or `max`. A stat can also
+  [compare with the previous row and draw a sparkline](#compare-and-sparkline).
+- **Breakdown**: **Horizontal bars** (a toplist) or a **Donut**. Result panels
+  store a label column and a numeric value column. Count panels group matching
+  logs by a field. Toplists keep query order and show up to **Maximum rows**
+  rows (20 by default). Turn off **Donut** for a full pie. Pies fold small
+  slices into **Other** only when you set **Fold slices below %**. The
+  remainder retains the sum of those slices, even when it is very small.
 - **Table**: the matching rows, like the explorer results grid. Set a row limit and
   an optional column subset. A `LIMIT` in the query itself also applies, and the
   smaller of the two wins. A panel whose rows were cut shows a chip: **First N
@@ -138,6 +140,38 @@ frame. It does not rerun the query. Dashboards that use these settings store
 `result_frames` or `formats` features. An older client cannot save over them
 and asks you to reload before editing.
 
+### Compare and sparkline
+
+A stat can show how its value changed and how it got there. Both options need
+an **Order by** column, and comparison needs the `first` or `last` reducer.
+
+- Set **Comparison** to **Previous row** to show the change from the
+  neighboring row as a delta and a percentage, for example `+1,204 (+8.31%)`,
+  with "Compared with" and that row's date. The percentage is left out when the
+  previous value is zero. Deltas use exact arithmetic.
+- Set **Improvement direction** to **Increase** or **Decrease** to color the
+  change green when it moves that way and red when it moves the other way.
+  **Neutral**, the default, leaves it gray. Use **Decrease** for error counts
+  and latency.
+- Turn on **Sparkline** to draw the value column, in order, under the value.
+  Hover or use the arrow keys to read each point.
+
+The comparison uses the neighboring row, not a calendar period. If a day has no
+row, the stat compares with the last day that has one. For a daily comparison,
+return one row per day:
+
+```sql
+SELECT toDate(timestamp) AS day, count() AS requests
+FROM default.http
+WHERE timestamp >= today() - 13
+GROUP BY day
+ORDER BY day
+```
+
+Pick `requests` as the value, `day` as **Order by**, `last` as the reducer,
+**Previous row** as the comparison, and turn on **Sparkline**. The tile shows
+today's count, the change from yesterday, and two weeks of history.
+
 ### Thresholds and table formatting
 
 Stat panels can color the value or background using up to ten ordered threshold
@@ -189,9 +223,9 @@ a calendar range such as **Today** or **Last 7 calendar days**.
 Set an **auto-refresh** interval (off, 30 seconds, 1 minute, or 5 minutes) to keep
 a wall-board style view current. There is also a manual refresh button.
 
-Panels render correctly for viewers in any timezone: histogram buckets (time series
-panels) align to your local timezone, while table and stat panels use a UTC-anchored
-query internally so their time window doesn't shift for non-UTC viewers.
+Every panel request sends the range together with the viewer's timezone.
+Histogram buckets align to local time, calendar ranges such as **Today** start
+at local midnight, and the `{{__timezone}}` macro renders the viewer's zone.
 
 ## Tabs
 
@@ -296,12 +330,21 @@ cached. Server-wide limits (total size, per-entry cap, entry count) are set with
 
 ## Chart styles
 
-Time series panels can render as **line** (default), **area**, or **bars**. Set the
-style per panel in the panel builder. When the style is bars, you can choose
-**stacked** (default) or **grouped** bar mode. The histogram data is shared with the
-explorer, including zero-filled gaps, so a sparse or grouped series (e.g. 5xx errors
-by host) renders as a continuous chart instead of isolated bars floating over dead
-space.
+Time series panels render as **line** (default), **area**, or **bars**. Set the
+style per panel in the panel builder. Bars can be **stacked** or **grouped**.
+
+Result charts add three switches:
+
+- **Show values** prints each value on the chart. Labels sit above grouped
+  bars and inside stacked segments.
+- **Show legend** is on by default. The legend lists the Y columns in the order
+  you set under **Y columns, in legend order**, or one entry per value of the
+  series column.
+- **Horizontal** turns bars sideways, which suits long category labels.
+
+Count charts read the same histogram data as the explorer, including
+zero-filled gaps. A sparse or grouped series, such as 5xx errors by host, draws
+as a continuous chart.
 
 ## Editing
 
@@ -311,10 +354,17 @@ Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
 - **Resize a panel**: drag the handle on its bottom-right corner. A panel can be
   any width from 2 to 12 columns and from 1 to 12 rows tall.
 - **Add a panel**: click an empty grid slot, or the "+ Add panel" tile. This opens
-  the **panel builder**, a full-height drawer where you pick the team and source,
-  write the query in the Monaco editor (LogchefQL, or LogsQL for VictoriaLogs)
-  with a live preview, choose the panel type, and set type-specific options: group-by
-  and chart style for time series, a required group-by and horizontal-bar or donut view for breakdowns, and a row limit and optional column subset for tables.
+  the **panel builder**, a full-height drawer. Pick the team and source, then
+  write the query in LogchefQL, ClickHouse SQL, or LogsQL, and check it in the
+  live preview. Choose the panel type and its options:
+  - Count mode: a group-by field and chart style for time series, a required
+    group-by and the view for breakdowns.
+  - Result mode: the column roles (X, Y and series, label and value, or the
+    stat value column), [column kinds](#computed-stats-and-exact-values),
+    number formats, [thresholds and table rules](#thresholds-and-table-formatting),
+    and the stat [comparison and sparkline](#compare-and-sparkline).
+  - Tables: a row limit, visible columns, and column formats.
+  - Any panel: its own [time range and bucket size](#panel-time).
 - **Edit or remove** an existing panel via the pencil / trash icons on its header,
   which reopens the same panel builder drawer.
 - **Add a tab** with **Add tab** next to the tab bar. The menu beside the tab bar
@@ -333,6 +383,14 @@ If someone else saves the dashboard while you edit it, **Save** keeps your chang
 and asks what to do: **Save as copy** creates a new dashboard from your version,
 **Overwrite with mine** shows when the newer version was saved and replaces it after
 you confirm, and **Discard and load latest** drops your changes and shows theirs.
+
+When the server is upgraded while a page is open, a banner says "Logchef was
+updated. Reload to continue." Logchef checks the server version when the page
+loads and when the window regains focus, at most every 30 seconds. The banner
+never reloads the page by itself. If a dashboard has unsaved edits,
+**Reload Page** asks before it discards them. Save your edits before an upgrade:
+a page from an older version cannot save over a dashboard that uses newer
+features.
 
 A dashboard can contain up to 24 panels on up to 10 tabs. Dashboard names are
 limited to 200 characters, descriptions to 2,000 and tab names to 60.
