@@ -570,6 +570,33 @@ impl Client {
         Ok(response.data)
     }
 
+    /// Lists up to `limit` audit events, newest first, following the cursor
+    /// across pages. Needs a global admin and, for an API token, the
+    /// `audit:read` scope.
+    pub async fn list_audit_events(
+        &self,
+        filter: &AuditEventFilter,
+        limit: usize,
+    ) -> Result<Vec<AuditEvent>> {
+        let mut events = Vec::new();
+        let mut cursor = String::new();
+        while events.len() < limit {
+            let page_size = (limit - events.len()).min(AUDIT_PAGE_MAX);
+            let path = format!(
+                "/api/v1/admin/audit-events?{}",
+                audit_query(filter, page_size, &cursor)
+            );
+            let response: ApiResponse<AuditEventsPage> = self.get(&path).await?;
+            events.extend(response.data.events);
+            if response.data.next_cursor.is_empty() {
+                break;
+            }
+            cursor = response.data.next_cursor;
+        }
+        events.truncate(limit);
+        Ok(events)
+    }
+
     /// Fetches the caller's recent query history, newest first. The server
     /// defaults `limit` to 50 and caps it at 200.
     pub async fn get_query_history(&self, limit: u32) -> Result<Vec<QueryHistoryEntry>> {
@@ -578,6 +605,32 @@ impl Client {
             .await?;
         Ok(response.data)
     }
+}
+
+/// The server clamps a larger page to this.
+const AUDIT_PAGE_MAX: usize = 500;
+
+fn audit_query(filter: &AuditEventFilter, limit: usize, cursor: &str) -> String {
+    let time =
+        |t: &chrono::DateTime<chrono::Utc>| t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    let pairs = [
+        ("from", filter.from.as_ref().map(time)),
+        ("to", filter.to.as_ref().map(time)),
+        ("action", filter.action.clone()),
+        ("actor_id", filter.actor_id.map(|id| id.to_string())),
+        ("target_type", filter.target_type.clone()),
+        ("target_id", filter.target_id.clone()),
+        ("outcome", filter.outcome.clone()),
+        ("limit", Some(limit.to_string())),
+        ("cursor", Some(cursor.to_owned()).filter(|c| !c.is_empty())),
+    ];
+    for (key, value) in pairs {
+        if let Some(value) = value {
+            query.append_pair(key, &value);
+        }
+    }
+    query.finish()
 }
 
 /// Refreshes the grant and marks the client's one refresh as used.
@@ -626,6 +679,97 @@ mod tests {
         });
 
         (format!("http://{}", address), server)
+    }
+
+    /// Answers one request per body, in order, and returns each request line.
+    fn serve_each(bodies: Vec<String>) -> (String, thread::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("read test server address");
+        let server = thread::spawn(move || {
+            let mut lines = Vec::new();
+            for body in bodies {
+                let (mut stream, _) = listener.accept().expect("accept test request");
+                let mut request = [0_u8; 4096];
+                let n = stream.read(&mut request).expect("read test request");
+                let text = String::from_utf8_lossy(&request[..n]);
+                lines.push(text.lines().next().unwrap_or_default().to_owned());
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write test response");
+            }
+            lines
+        });
+        (format!("http://{}", address), server)
+    }
+
+    fn audit_page(ids: std::ops::Range<usize>, next_cursor: &str) -> String {
+        let events: Vec<serde_json::Value> = ids
+            .map(|i| {
+                serde_json::json!({
+                    "id": format!("e{i}"), "occurred_at": "2026-11-16T10:00:00.123Z",
+                    "action": "source.update", "outcome": "success", "reason": "",
+                    "actor_type": "user", "actor_id": 1, "actor_label": "admin@example.com",
+                    "auth_method": "api_token", "credential_id": "7", "client_id": "",
+                    "target_type": "source", "target_id": "7", "target_label": "app",
+                    "team_id": null, "source_id": 7, "ip": "192.0.2.1", "user_agent": "logchef-cli",
+                    "http_method": "PUT", "route": "/api/v1/admin/sources/:sourceID", "status": 200,
+                    "changes": {"ttl_days": {"from": 7, "to": 30}}, "detail": {}
+                })
+            })
+            .collect();
+        serde_json::json!({"status": "success", "data": {"events": events, "next_cursor": next_cursor}})
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn list_audit_events_follows_the_cursor_and_stops_at_the_limit() {
+        let (server_url, server) =
+            serve_each(vec![audit_page(0..500, "c1"), audit_page(500..700, "c2")]);
+        let client = Client::new(&server_url, 5).expect("create client");
+        let filter = AuditEventFilter {
+            from: Some("2026-11-09T00:00:00+05:30".parse().expect("parse time")),
+            action: Some("source.".to_owned()),
+            target_type: Some("source".to_owned()),
+            target_id: Some("7".to_owned()),
+            ..AuditEventFilter::default()
+        };
+
+        let events = client
+            .list_audit_events(&filter, 700)
+            .await
+            .expect("list audit events");
+
+        assert_eq!(events.len(), 700);
+        assert_eq!(events[699].id, "e699");
+        assert_eq!(events[0].changes["ttl_days"]["to"], 30);
+        let lines = server.join().expect("join test server");
+        assert_eq!(
+            lines,
+            [
+                "GET /api/v1/admin/audit-events?from=2026-11-08T18%3A30%3A00.000Z&action=source.&target_type=source&target_id=7&limit=500 HTTP/1.1",
+                "GET /api/v1/admin/audit-events?from=2026-11-08T18%3A30%3A00.000Z&action=source.&target_type=source&target_id=7&limit=200&cursor=c1 HTTP/1.1",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_audit_events_stops_on_the_last_page() {
+        let (server_url, server) = serve_each(vec![audit_page(0..3, "")]);
+        let client = Client::new(&server_url, 5).expect("create client");
+
+        let events = client
+            .list_audit_events(&AuditEventFilter::default(), 100)
+            .await
+            .expect("list audit events");
+
+        assert_eq!(events.len(), 3);
+        let lines = server.join().expect("join test server");
+        assert_eq!(lines, ["GET /api/v1/admin/audit-events?limit=100 HTTP/1.1"]);
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    agent, auth, collections, completions, config, doctor, explain, fields, find, histogram,
+    agent, audit, auth, collections, completions, config, doctor, explain, fields, find, histogram,
     history, open, query, saved_queries, schema, skills, sources, sql, tail, teams, views, whoami,
 };
 
@@ -117,6 +117,9 @@ enum Commands {
     #[command(about = "List saved Explorer views")]
     Views(views::ViewsArgs),
 
+    #[command(about = "List audit events (global admins, API token with audit:read)")]
+    Audit(audit::AuditArgs),
+
     #[command(about = "Find sources that contain a service, job, host, or message pattern")]
     Find(find::FindArgs),
 
@@ -199,6 +202,7 @@ impl Cli {
             Some(Commands::Collections(args)) => collections::run(args, global).await,
             Some(Commands::SavedQueries(args)) => saved_queries::run(args, global).await,
             Some(Commands::Views(args)) => views::run(args, global).await,
+            Some(Commands::Audit(args)) => audit::run(args, global).await,
             Some(Commands::Find(args)) => find::run(args, global).await,
             Some(Commands::Tail(args)) => tail::run(args, global).await,
             Some(Commands::Teams(args)) => teams::run(args, global).await,

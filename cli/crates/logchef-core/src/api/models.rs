@@ -943,3 +943,53 @@ mod template_request_tests {
         );
     }
 }
+
+/// One audit event from `GET /api/v1/admin/audit-events`. Action, outcome,
+/// auth method and target type stay strings: the server adds kinds without
+/// a CLI release.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEvent {
+    pub id: String,
+    pub occurred_at: DateTime<Utc>,
+    pub action: String,
+    pub outcome: String,
+    pub reason: String,
+    pub actor_type: String,
+    pub actor_id: Option<i64>,
+    pub actor_label: String,
+    pub auth_method: String,
+    pub credential_id: String,
+    pub client_id: String,
+    pub target_type: String,
+    pub target_id: String,
+    pub target_label: String,
+    pub team_id: Option<i64>,
+    pub source_id: Option<i64>,
+    pub ip: String,
+    pub user_agent: String,
+    pub http_method: String,
+    pub route: String,
+    pub status: u16,
+    pub changes: serde_json::Map<String, serde_json::Value>,
+    pub detail: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AuditEventsPage {
+    pub events: Vec<AuditEvent>,
+    pub next_cursor: String,
+}
+
+/// Filters of the audit event list. `None` leaves a filter off; without
+/// `from` the server starts seven days before `to`.
+#[derive(Debug, Clone, Default)]
+pub struct AuditEventFilter {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    /// An exact action, or a resource with a trailing dot such as `source.`.
+    pub action: Option<String>,
+    pub actor_id: Option<i64>,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub outcome: Option<String>,
+}
