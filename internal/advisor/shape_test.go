@@ -204,6 +204,7 @@ func TestShapeOfUnanalyzed(t *testing.T) {
 		{"not a select", "DROP TABLE logs.app", models.QueryLanguageClickHouseSQL},
 		{"unparsable logchefql", `level = `, models.QueryLanguageLogchefQL},
 		{"logsql", `level:error`, models.QueryLanguageLogsQL},
+		{"logql", `{service_name="checkout"} |= "error"`, models.QueryLanguageLogQL},
 		{"17 sql items", "SELECT * FROM logs.app WHERE " + columns(17), models.QueryLanguageClickHouseSQL},
 		{"17 logchefql items", strings.ReplaceAll(columns(17), "AND", "and"), models.QueryLanguageLogchefQL},
 		{"long column", "SELECT * FROM logs.app WHERE " + strings.Repeat("c", 129) + " = 1", models.QueryLanguageClickHouseSQL},
