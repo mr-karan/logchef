@@ -210,6 +210,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteSavedViewStmt, err = db.PrepareContext(ctx, deleteSavedView); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSavedView: %w", err)
 	}
+	if q.deleteSchemaAdvisorDismissalStmt, err = db.PrepareContext(ctx, deleteSchemaAdvisorDismissal); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSchemaAdvisorDismissal: %w", err)
+	}
 	if q.deleteSessionStmt, err = db.PrepareContext(ctx, deleteSession); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSession: %w", err)
 	}
@@ -302,6 +305,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getSavedViewStmt, err = db.PrepareContext(ctx, getSavedView); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSavedView: %w", err)
+	}
+	if q.getSchemaAdvisorDismissalStmt, err = db.PrepareContext(ctx, getSchemaAdvisorDismissal); err != nil {
+		return nil, fmt.Errorf("error preparing query GetSchemaAdvisorDismissal: %w", err)
 	}
 	if q.getSchemaAdvisorReportStmt, err = db.PrepareContext(ctx, getSchemaAdvisorReport); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSchemaAdvisorReport: %w", err)
@@ -506,6 +512,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listSavedViewsStmt, err = db.PrepareContext(ctx, listSavedViews); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSavedViews: %w", err)
+	}
+	if q.listSchemaAdvisorDismissalsStmt, err = db.PrepareContext(ctx, listSchemaAdvisorDismissals); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSchemaAdvisorDismissals: %w", err)
 	}
 	if q.listServiceAccountsStmt, err = db.PrepareContext(ctx, listServiceAccounts); err != nil {
 		return nil, fmt.Errorf("error preparing query ListServiceAccounts: %w", err)
@@ -752,6 +761,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.upsertJobStmt, err = db.PrepareContext(ctx, upsertJob); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertJob: %w", err)
+	}
+	if q.upsertSchemaAdvisorDismissalStmt, err = db.PrepareContext(ctx, upsertSchemaAdvisorDismissal); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertSchemaAdvisorDismissal: %w", err)
 	}
 	if q.upsertSchemaAdvisorReportStmt, err = db.PrepareContext(ctx, upsertSchemaAdvisorReport); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertSchemaAdvisorReport: %w", err)
@@ -1080,6 +1092,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteSavedViewStmt: %w", cerr)
 		}
 	}
+	if q.deleteSchemaAdvisorDismissalStmt != nil {
+		if cerr := q.deleteSchemaAdvisorDismissalStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSchemaAdvisorDismissalStmt: %w", cerr)
+		}
+	}
 	if q.deleteSessionStmt != nil {
 		if cerr := q.deleteSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSessionStmt: %w", cerr)
@@ -1233,6 +1250,11 @@ func (q *Queries) Close() error {
 	if q.getSavedViewStmt != nil {
 		if cerr := q.getSavedViewStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSavedViewStmt: %w", cerr)
+		}
+	}
+	if q.getSchemaAdvisorDismissalStmt != nil {
+		if cerr := q.getSchemaAdvisorDismissalStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getSchemaAdvisorDismissalStmt: %w", cerr)
 		}
 	}
 	if q.getSchemaAdvisorReportStmt != nil {
@@ -1573,6 +1595,11 @@ func (q *Queries) Close() error {
 	if q.listSavedViewsStmt != nil {
 		if cerr := q.listSavedViewsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSavedViewsStmt: %w", cerr)
+		}
+	}
+	if q.listSchemaAdvisorDismissalsStmt != nil {
+		if cerr := q.listSchemaAdvisorDismissalsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSchemaAdvisorDismissalsStmt: %w", cerr)
 		}
 	}
 	if q.listServiceAccountsStmt != nil {
@@ -1985,6 +2012,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing upsertJobStmt: %w", cerr)
 		}
 	}
+	if q.upsertSchemaAdvisorDismissalStmt != nil {
+		if cerr := q.upsertSchemaAdvisorDismissalStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertSchemaAdvisorDismissalStmt: %w", cerr)
+		}
+	}
 	if q.upsertSchemaAdvisorReportStmt != nil {
 		if cerr := q.upsertSchemaAdvisorReportStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertSchemaAdvisorReportStmt: %w", cerr)
@@ -2106,6 +2138,7 @@ type Queries struct {
 	deleteReportUserRecipientStmt          *sql.Stmt
 	deleteSavedQueryStmt                   *sql.Stmt
 	deleteSavedViewStmt                    *sql.Stmt
+	deleteSchemaAdvisorDismissalStmt       *sql.Stmt
 	deleteSessionStmt                      *sql.Stmt
 	deleteSourceStmt                       *sql.Stmt
 	deleteSystemSettingStmt                *sql.Stmt
@@ -2137,6 +2170,7 @@ type Queries struct {
 	getReportStmt                          *sql.Stmt
 	getSavedQueryStmt                      *sql.Stmt
 	getSavedViewStmt                       *sql.Stmt
+	getSchemaAdvisorDismissalStmt          *sql.Stmt
 	getSchemaAdvisorReportStmt             *sql.Stmt
 	getSessionStmt                         *sql.Stmt
 	getSourceStmt                          *sql.Stmt
@@ -2205,6 +2239,7 @@ type Queries struct {
 	listSavedQueriesForUserStmt            *sql.Stmt
 	listSavedQueriesForUserBySourceStmt    *sql.Stmt
 	listSavedViewsStmt                     *sql.Stmt
+	listSchemaAdvisorDismissalsStmt        *sql.Stmt
 	listServiceAccountsStmt                *sql.Stmt
 	listSharedCollectionPinsStmt           *sql.Stmt
 	listSourceTeamsStmt                    *sql.Stmt
@@ -2287,6 +2322,7 @@ type Queries struct {
 	updateUserLastLoginStmt                *sql.Stmt
 	upsertAlertInstanceStmt                *sql.Stmt
 	upsertJobStmt                          *sql.Stmt
+	upsertSchemaAdvisorDismissalStmt       *sql.Stmt
 	upsertSchemaAdvisorReportStmt          *sql.Stmt
 	upsertSystemSettingStmt                *sql.Stmt
 	upsertUserPreferencesStmt              *sql.Stmt
@@ -2359,6 +2395,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteReportUserRecipientStmt:          q.deleteReportUserRecipientStmt,
 		deleteSavedQueryStmt:                   q.deleteSavedQueryStmt,
 		deleteSavedViewStmt:                    q.deleteSavedViewStmt,
+		deleteSchemaAdvisorDismissalStmt:       q.deleteSchemaAdvisorDismissalStmt,
 		deleteSessionStmt:                      q.deleteSessionStmt,
 		deleteSourceStmt:                       q.deleteSourceStmt,
 		deleteSystemSettingStmt:                q.deleteSystemSettingStmt,
@@ -2390,6 +2427,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getReportStmt:                          q.getReportStmt,
 		getSavedQueryStmt:                      q.getSavedQueryStmt,
 		getSavedViewStmt:                       q.getSavedViewStmt,
+		getSchemaAdvisorDismissalStmt:          q.getSchemaAdvisorDismissalStmt,
 		getSchemaAdvisorReportStmt:             q.getSchemaAdvisorReportStmt,
 		getSessionStmt:                         q.getSessionStmt,
 		getSourceStmt:                          q.getSourceStmt,
@@ -2458,6 +2496,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSavedQueriesForUserStmt:            q.listSavedQueriesForUserStmt,
 		listSavedQueriesForUserBySourceStmt:    q.listSavedQueriesForUserBySourceStmt,
 		listSavedViewsStmt:                     q.listSavedViewsStmt,
+		listSchemaAdvisorDismissalsStmt:        q.listSchemaAdvisorDismissalsStmt,
 		listServiceAccountsStmt:                q.listServiceAccountsStmt,
 		listSharedCollectionPinsStmt:           q.listSharedCollectionPinsStmt,
 		listSourceTeamsStmt:                    q.listSourceTeamsStmt,
@@ -2540,6 +2579,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateUserLastLoginStmt:                q.updateUserLastLoginStmt,
 		upsertAlertInstanceStmt:                q.upsertAlertInstanceStmt,
 		upsertJobStmt:                          q.upsertJobStmt,
+		upsertSchemaAdvisorDismissalStmt:       q.upsertSchemaAdvisorDismissalStmt,
 		upsertSchemaAdvisorReportStmt:          q.upsertSchemaAdvisorReportStmt,
 		upsertSystemSettingStmt:                q.upsertSystemSettingStmt,
 		upsertUserPreferencesStmt:              q.upsertUserPreferencesStmt,

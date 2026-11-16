@@ -55,3 +55,74 @@ func (s *Store) UpsertSchemaAdvisorReport(ctx context.Context, report *models.St
 	}
 	return nil
 }
+
+func dismissalFromRow(row sqlc.SchemaAdvisorDismissal) models.SchemaAdvisorDismissal {
+	d := models.SchemaAdvisorDismissal{
+		SourceID:    models.SourceID(row.SourceID),
+		FindingID:   row.FindingID,
+		Reason:      row.Reason,
+		DismissedAt: row.DismissedAt.Time.UTC(),
+	}
+	if row.DismissedBy.Valid {
+		by := models.UserID(row.DismissedBy.Int64)
+		d.DismissedBy = &by
+	}
+	return d
+}
+
+// ListSchemaAdvisorDismissals returns the dismissed findings of a source.
+func (s *Store) ListSchemaAdvisorDismissals(ctx context.Context, sourceID models.SourceID) ([]models.SchemaAdvisorDismissal, error) {
+	rows, err := s.q.ListSchemaAdvisorDismissals(ctx, int64(sourceID))
+	if err != nil {
+		return nil, fmt.Errorf("error listing schema advisor dismissals of source %d: %w", sourceID, err)
+	}
+	out := make([]models.SchemaAdvisorDismissal, len(rows))
+	for i, row := range rows {
+		out[i] = dismissalFromRow(row)
+	}
+	return out, nil
+}
+
+// GetSchemaAdvisorDismissal returns the dismissal of one finding.
+func (s *Store) GetSchemaAdvisorDismissal(ctx context.Context, sourceID models.SourceID, findingID string) (*models.SchemaAdvisorDismissal, error) {
+	row, err := s.q.GetSchemaAdvisorDismissal(ctx, sqlc.GetSchemaAdvisorDismissalParams{SourceID: int64(sourceID), FindingID: findingID})
+	if err != nil {
+		if notFound(err) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("error getting dismissal of finding %s of source %d: %w", findingID, sourceID, err)
+	}
+	d := dismissalFromRow(row)
+	return &d, nil
+}
+
+// UpsertSchemaAdvisorDismissal dismisses a finding.
+func (s *Store) UpsertSchemaAdvisorDismissal(ctx context.Context, d *models.SchemaAdvisorDismissal) error {
+	var by *int64
+	if d.DismissedBy != nil {
+		id := int64(*d.DismissedBy)
+		by = &id
+	}
+	if err := s.q.UpsertSchemaAdvisorDismissal(ctx, sqlc.UpsertSchemaAdvisorDismissalParams{
+		SourceID:    int64(d.SourceID),
+		FindingID:   d.FindingID,
+		Reason:      d.Reason,
+		DismissedBy: int8FromPtr(by),
+		DismissedAt: ts(d.DismissedAt),
+	}); err != nil {
+		return fmt.Errorf("error saving dismissal of finding %s of source %d: %w", d.FindingID, d.SourceID, err)
+	}
+	return nil
+}
+
+// DeleteSchemaAdvisorDismissal restores a dismissed finding.
+func (s *Store) DeleteSchemaAdvisorDismissal(ctx context.Context, sourceID models.SourceID, findingID string) error {
+	n, err := s.q.DeleteSchemaAdvisorDismissal(ctx, sqlc.DeleteSchemaAdvisorDismissalParams{SourceID: int64(sourceID), FindingID: findingID})
+	if err != nil {
+		return fmt.Errorf("error deleting dismissal of finding %s of source %d: %w", findingID, sourceID, err)
+	}
+	if n == 0 {
+		return models.ErrNotFound
+	}
+	return nil
+}

@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "limité",
   "advisor.inputMissing": "absent",
   "advisor.inputError": "erreur",
-  "advisor.inputSkipped": "ignoré"
+  "advisor.inputSkipped": "ignoré",
+  "advisor.dismiss": "Ignorer",
+  "advisor.dismissTitle": "Ignorer la recommandation",
+  "advisor.dismissReason": "Raison (facultative)",
+  "advisor.reasonTooLong": "La raison peut faire au plus {max} octets",
+  "advisor.showDismissed": "Afficher les ignorées ({count})",
+  "advisor.dismissed": "Ignorées",
+  "advisor.dismissedAt": "Ignorée {time}",
+  "advisor.findingGone": "La recommandation {id} n’est pas dans le rapport actuel",
+  "advisor.restore": "Restaurer"
 }

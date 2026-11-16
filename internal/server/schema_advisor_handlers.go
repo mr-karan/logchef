@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -56,6 +57,56 @@ func (s *Server) handleRefreshSchemaAdvice(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, advice)
 }
 
+// schemaFindingDismissalRequest is the optional body of a dismissal.
+type schemaFindingDismissalRequest struct {
+	Reason string `json:"reason"`
+}
+
+// handleDismissSchemaFinding dismisses a finding of the stored report.
+// URL: PUT /api/v1/admin/sources/:sourceID/advisor/findings/:findingID/dismissal
+func (s *Server) handleDismissSchemaFinding(c fiber.Ctx) error {
+	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+	}
+	var req schemaFindingDismissalRequest
+	if len(c.Body()) > 0 {
+		if err := c.Bind().Body(&req); err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+		}
+	}
+	p := principalFromLocals(c)
+	before, after, rule, err := core.DismissSchemaFinding(c.Context(), s.store, s.datasources, p, sourceID, c.Params("findingID"), req.Reason)
+	if err != nil {
+		return s.sendSchemaAdviceError(c, p, sourceID, err)
+	}
+	var beforeFields *audit.Fields
+	if before != nil {
+		beforeFields = audit.SchemaAdvisorDismissalFields(before)
+	}
+	auditSet(c, audit.SourceIDTarget(sourceID), beforeFields, audit.SchemaAdvisorDismissalFields(after))
+	auditDetail(c, "finding_id", after.FindingID)
+	auditDetail(c, "rule", rule)
+	return SendSuccess(c, fiber.StatusOK, after)
+}
+
+// handleRestoreSchemaFinding deletes the dismissal of a finding.
+// URL: DELETE /api/v1/admin/sources/:sourceID/advisor/findings/:findingID/dismissal
+func (s *Server) handleRestoreSchemaFinding(c fiber.Ctx) error {
+	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+	}
+	p := principalFromLocals(c)
+	dismissal, err := core.RestoreSchemaFinding(c.Context(), s.store, s.datasources, p, sourceID, c.Params("findingID"))
+	if err != nil {
+		return s.sendSchemaAdviceError(c, p, sourceID, err)
+	}
+	auditSet(c, audit.SourceIDTarget(sourceID), audit.SchemaAdvisorDismissalFields(dismissal), nil)
+	auditDetail(c, "finding_id", dismissal.FindingID)
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func (s *Server) sendSchemaAdviceError(c fiber.Ctx, p access.Principal, sourceID models.SourceID, err error) error {
 	if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
 		return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
@@ -67,6 +118,8 @@ func (s *Server) sendSchemaAdviceError(c fiber.Ctx, p access.Principal, sourceID
 		return sendInsufficientScope(c, p.User)
 	case errors.Is(err, core.ErrSourceNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	case errors.Is(err, core.ErrSchemaFindingNotFound):
+		return SendErrorWithType(c, fiber.StatusNotFound, "Finding not found", models.NotFoundErrorType)
 	case errors.Is(err, datasource.ErrSchemaAdvisorBusy):
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Two schema analyses are already running, try again shortly", models.ValidationErrorType)
 	case errors.Is(err, core.ErrSchemaAdviceRunFailed):

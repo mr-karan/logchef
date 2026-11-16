@@ -1378,6 +1378,27 @@ ON CONFLICT (source_id) DO UPDATE SET
     window_days = excluded.window_days,
     report = excluded.report;
 
+-- name: ListSchemaAdvisorDismissals :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = $1
+ORDER BY dismissed_at, finding_id;
+
+-- name: GetSchemaAdvisorDismissal :one
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = $1 AND finding_id = $2;
+
+-- name: UpsertSchemaAdvisorDismissal :exec
+-- Dismissing a dismissed finding again replaces its reason and author.
+INSERT INTO schema_advisor_dismissals (source_id, finding_id, reason, dismissed_by, dismissed_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (source_id, finding_id) DO UPDATE SET
+    reason = excluded.reason,
+    dismissed_by = excluded.dismissed_by,
+    dismissed_at = excluded.dismissed_at;
+
+-- name: DeleteSchemaAdvisorDismissal :execrows
+DELETE FROM schema_advisor_dismissals WHERE source_id = $1 AND finding_id = $2;
+
 -- OAuth authorization server ------------------------------------------------
 -- Every *_hash argument is an HMAC hex digest, never a plaintext code or
 -- token. Postgres runs at READ COMMITTED: a conditional UPDATE waits on the

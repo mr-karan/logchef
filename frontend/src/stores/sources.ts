@@ -9,6 +9,7 @@ import type {
   SourceInspection,
   SourceActivity,
   SchemaAdvice,
+  SchemaAdvisorDismissal,
   ValidateConnectionRequestInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
@@ -405,6 +406,29 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
+  function setSchemaDismissals(sourceId: number, update: (dismissals: SchemaAdvisorDismissal[]) => SchemaAdvisorDismissal[]) {
+    const advice = state.data.value.schemaAdvice[sourceId.toString()];
+    if (advice) storeSchemaAdvice(sourceId, { ...advice, dismissals: update(advice.dismissals) });
+  }
+
+  async function dismissSchemaFinding(sourceId: number, findingId: string, reason: string) {
+    return await state.callApi<SchemaAdvisorDismissal>({
+      apiCall: () => sourcesApi.dismissSchemaFinding(sourceId, findingId, reason),
+      operationKey: `dismissSchemaFinding-${sourceId}-${findingId}`,
+      onSuccess: (dismissal) => {
+        if (dismissal) setSchemaDismissals(sourceId, list => [...list.filter(d => d.finding_id !== findingId), dismissal]);
+      },
+    });
+  }
+
+  async function restoreSchemaFinding(sourceId: number, findingId: string) {
+    return await state.callApi<null>({
+      apiCall: () => sourcesApi.restoreSchemaFinding(sourceId, findingId),
+      operationKey: `restoreSchemaFinding-${sourceId}-${findingId}`,
+      onSuccess: () => setSchemaDismissals(sourceId, list => list.filter(d => d.finding_id !== findingId)),
+    });
+  }
+
   // Get team-scoped inspection data for a source
   async function getTeamSourceInspection(teamId: number, sourceId: number) {
     return await state.withLoading(`getTeamSourceInspection-${teamId}-${sourceId}`, async () => {
@@ -585,6 +609,8 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourceActivity,
     getSchemaAdvice,
     refreshSchemaAdvice,
+    dismissSchemaFinding,
+    restoreSchemaFinding,
     getTeamSourceInspection,
     validateSourceConnection,
     invalidateSourceCache,

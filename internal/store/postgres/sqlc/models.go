@@ -397,6 +397,14 @@ type SavedView struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SchemaAdvisorDismissal struct {
+	SourceID    int64              `json:"source_id"`
+	FindingID   string             `json:"finding_id"`
+	Reason      string             `json:"reason"`
+	DismissedBy pgtype.Int8        `json:"dismissed_by"`
+	DismissedAt pgtype.Timestamptz `json:"dismissed_at"`
+}
+
 type SchemaAdvisorReport struct {
 	SourceID    int64              `json:"source_id"`
 	GeneratedAt pgtype.Timestamptz `json:"generated_at"`

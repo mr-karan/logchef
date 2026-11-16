@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "begrenzt",
   "advisor.inputMissing": "fehlt",
   "advisor.inputError": "Fehler",
-  "advisor.inputSkipped": "übersprungen"
+  "advisor.inputSkipped": "übersprungen",
+  "advisor.dismiss": "Ausblenden",
+  "advisor.dismissTitle": "Empfehlung ausblenden",
+  "advisor.dismissReason": "Grund (optional)",
+  "advisor.reasonTooLong": "Der Grund darf höchstens {max} Byte lang sein",
+  "advisor.showDismissed": "Ausgeblendete anzeigen ({count})",
+  "advisor.dismissed": "Ausgeblendet",
+  "advisor.dismissedAt": "Ausgeblendet {time}",
+  "advisor.findingGone": "Empfehlung {id} ist nicht im aktuellen Bericht",
+  "advisor.restore": "Wiederherstellen"
 }

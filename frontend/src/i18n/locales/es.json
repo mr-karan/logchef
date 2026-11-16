@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "limitado",
   "advisor.inputMissing": "ausente",
   "advisor.inputError": "error",
-  "advisor.inputSkipped": "omitido"
+  "advisor.inputSkipped": "omitido",
+  "advisor.dismiss": "Descartar",
+  "advisor.dismissTitle": "Descartar hallazgo",
+  "advisor.dismissReason": "Motivo (opcional)",
+  "advisor.reasonTooLong": "El motivo puede tener como máximo {max} bytes",
+  "advisor.showDismissed": "Mostrar descartados ({count})",
+  "advisor.dismissed": "Descartados",
+  "advisor.dismissedAt": "Descartado {time}",
+  "advisor.findingGone": "El hallazgo {id} no está en el informe actual",
+  "advisor.restore": "Restaurar"
 }

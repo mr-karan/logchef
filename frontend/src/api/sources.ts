@@ -288,7 +288,15 @@ export interface SchemaAdvisorReport {
   notes?: string[];
 }
 
-// Before the first analysis every field but source_id is null.
+export interface SchemaAdvisorDismissal {
+  finding_id: string;
+  reason: string;
+  dismissed_by: number | null;
+  dismissed_at: string;
+}
+
+// Before the first analysis every report field is null. Dismissals can name
+// findings that the current report no longer holds.
 export interface SchemaAdvice {
   source_id: number;
   generated_at: string | null;
@@ -296,6 +304,7 @@ export interface SchemaAdvice {
   window_days: number | null;
   stale: boolean;
   report: SchemaAdvisorReport | null;
+  dismissals: SchemaAdvisorDismissal[];
 }
 
 // Field values types for sidebar exploration
@@ -343,6 +352,11 @@ export const sourcesApi = {
   // The server stops an analysis after 30 s.
   refreshSchemaAdvice: (sourceId: number) =>
     apiClient.post<SchemaAdvice>(`/admin/sources/${sourceId}/advisor/refresh`, {}, { timeout: 40, suppressErrorToast: true }),
+  dismissSchemaFinding: (sourceId: number, findingId: string, reason: string) =>
+    apiClient.put<SchemaAdvisorDismissal>(`/admin/sources/${sourceId}/advisor/findings/${findingId}/dismissal`, { reason }),
+  // A restore answers 204 with no body; a failure rejects with its envelope.
+  restoreSchemaFinding: async (sourceId: number, findingId: string) =>
+    (await apiClient.delete<null>(`/admin/sources/${sourceId}/advisor/findings/${findingId}/dismissal`)) || { status: "success" as const, data: null },
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
 

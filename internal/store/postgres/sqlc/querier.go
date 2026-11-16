@@ -145,6 +145,7 @@ type Querier interface {
 	// Delete a saved query
 	DeleteSavedQuery(ctx context.Context, id int64) error
 	DeleteSavedView(ctx context.Context, id int64) (int64, error)
+	DeleteSchemaAdvisorDismissal(ctx context.Context, arg DeleteSchemaAdvisorDismissalParams) (int64, error)
 	// Delete a session by ID
 	DeleteSession(ctx context.Context, id string) error
 	// Delete a source by ID
@@ -195,6 +196,7 @@ type Querier interface {
 	// Look up one saved query by id
 	GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error)
 	GetSavedView(ctx context.Context, id int64) (SavedView, error)
+	GetSchemaAdvisorDismissal(ctx context.Context, arg GetSchemaAdvisorDismissalParams) (SchemaAdvisorDismissal, error)
 	GetSchemaAdvisorReport(ctx context.Context, sourceID int64) (SchemaAdvisorReport, error)
 	// Get a session by ID
 	GetSession(ctx context.Context, id string) (Session, error)
@@ -345,6 +347,7 @@ type Querier interface {
 	// source, personal first, then team, then source, each by name. COLLATE "C"
 	// orders names by bytes, as SQLite does.
 	ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error)
+	ListSchemaAdvisorDismissals(ctx context.Context, sourceID int64) ([]SchemaAdvisorDismissal, error)
 	// List service principals
 	ListServiceAccounts(ctx context.Context) ([]User, error)
 	// Every pin in a shared collection, oldest first, with the query's creator and
@@ -511,6 +514,8 @@ type Querier interface {
 	// A new job is due now. A changed schedule makes an existing job due now;
 	// otherwise its next run and lease are kept.
 	UpsertJob(ctx context.Context, arg UpsertJobParams) error
+	// Dismissing a dismissed finding again replaces its reason and author.
+	UpsertSchemaAdvisorDismissal(ctx context.Context, arg UpsertSchemaAdvisorDismissalParams) error
 	// A refresh replaces the source's report.
 	UpsertSchemaAdvisorReport(ctx context.Context, arg UpsertSchemaAdvisorReportParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error

@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "limitado",
   "advisor.inputMissing": "ausente",
   "advisor.inputError": "erro",
-  "advisor.inputSkipped": "ignorado"
+  "advisor.inputSkipped": "ignorado",
+  "advisor.dismiss": "Dispensar",
+  "advisor.dismissTitle": "Dispensar recomendação",
+  "advisor.dismissReason": "Motivo (opcional)",
+  "advisor.reasonTooLong": "O motivo pode ter no máximo {max} bytes",
+  "advisor.showDismissed": "Mostrar dispensadas ({count})",
+  "advisor.dismissed": "Dispensadas",
+  "advisor.dismissedAt": "Dispensada {time}",
+  "advisor.findingGone": "A recomendação {id} não está no relatório atual",
+  "advisor.restore": "Restaurar"
 }

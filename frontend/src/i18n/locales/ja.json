@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "制限",
   "advisor.inputMissing": "なし",
   "advisor.inputError": "エラー",
-  "advisor.inputSkipped": "スキップ"
+  "advisor.inputSkipped": "スキップ",
+  "advisor.dismiss": "非表示にする",
+  "advisor.dismissTitle": "推奨事項を非表示にする",
+  "advisor.dismissReason": "理由（任意）",
+  "advisor.reasonTooLong": "理由は {max} バイト以内にしてください",
+  "advisor.showDismissed": "非表示の項目を表示 ({count})",
+  "advisor.dismissed": "非表示",
+  "advisor.dismissedAt": "{time} に非表示",
+  "advisor.findingGone": "推奨事項 {id} は現在のレポートにありません",
+  "advisor.restore": "元に戻す"
 }

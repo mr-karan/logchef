@@ -398,6 +398,14 @@ type SavedView struct {
 	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
+type SchemaAdvisorDismissal struct {
+	SourceID    int64         `json:"source_id"`
+	FindingID   string        `json:"finding_id"`
+	Reason      string        `json:"reason"`
+	DismissedBy sql.NullInt64 `json:"dismissed_by"`
+	DismissedAt time.Time     `json:"dismissed_at"`
+}
+
 type SchemaAdvisorReport struct {
 	SourceID    int64         `json:"source_id"`
 	GeneratedAt time.Time     `json:"generated_at"`

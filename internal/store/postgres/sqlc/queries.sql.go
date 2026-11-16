@@ -1727,6 +1727,23 @@ func (q *Queries) DeleteSavedView(ctx context.Context, id int64) (int64, error) 
 	return id_2, err
 }
 
+const deleteSchemaAdvisorDismissal = `-- name: DeleteSchemaAdvisorDismissal :execrows
+DELETE FROM schema_advisor_dismissals WHERE source_id = $1 AND finding_id = $2
+`
+
+type DeleteSchemaAdvisorDismissalParams struct {
+	SourceID  int64  `json:"source_id"`
+	FindingID string `json:"finding_id"`
+}
+
+func (q *Queries) DeleteSchemaAdvisorDismissal(ctx context.Context, arg DeleteSchemaAdvisorDismissalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSchemaAdvisorDismissal, arg.SourceID, arg.FindingID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = $1
 `
@@ -2567,6 +2584,29 @@ func (q *Queries) GetSavedView(ctx context.Context, id int64) (SavedView, error)
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSchemaAdvisorDismissal = `-- name: GetSchemaAdvisorDismissal :one
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = $1 AND finding_id = $2
+`
+
+type GetSchemaAdvisorDismissalParams struct {
+	SourceID  int64  `json:"source_id"`
+	FindingID string `json:"finding_id"`
+}
+
+func (q *Queries) GetSchemaAdvisorDismissal(ctx context.Context, arg GetSchemaAdvisorDismissalParams) (SchemaAdvisorDismissal, error) {
+	row := q.db.QueryRow(ctx, getSchemaAdvisorDismissal, arg.SourceID, arg.FindingID)
+	var i SchemaAdvisorDismissal
+	err := row.Scan(
+		&i.SourceID,
+		&i.FindingID,
+		&i.Reason,
+		&i.DismissedBy,
+		&i.DismissedAt,
 	)
 	return i, err
 }
@@ -5407,6 +5447,38 @@ func (q *Queries) ListSavedViews(ctx context.Context, arg ListSavedViewsParams) 
 	return items, nil
 }
 
+const listSchemaAdvisorDismissals = `-- name: ListSchemaAdvisorDismissals :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = $1
+ORDER BY dismissed_at, finding_id
+`
+
+func (q *Queries) ListSchemaAdvisorDismissals(ctx context.Context, sourceID int64) ([]SchemaAdvisorDismissal, error) {
+	rows, err := q.db.Query(ctx, listSchemaAdvisorDismissals, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SchemaAdvisorDismissal{}
+	for rows.Next() {
+		var i SchemaAdvisorDismissal
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.FindingID,
+			&i.Reason,
+			&i.DismissedBy,
+			&i.DismissedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServiceAccounts = `-- name: ListServiceAccounts :many
 SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE account_type = 'service' ORDER BY created_at ASC
 `
@@ -7850,6 +7922,35 @@ func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
 		arg.Misfire,
 		arg.GraceSeconds,
 		arg.Enabled,
+	)
+	return err
+}
+
+const upsertSchemaAdvisorDismissal = `-- name: UpsertSchemaAdvisorDismissal :exec
+INSERT INTO schema_advisor_dismissals (source_id, finding_id, reason, dismissed_by, dismissed_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (source_id, finding_id) DO UPDATE SET
+    reason = excluded.reason,
+    dismissed_by = excluded.dismissed_by,
+    dismissed_at = excluded.dismissed_at
+`
+
+type UpsertSchemaAdvisorDismissalParams struct {
+	SourceID    int64              `json:"source_id"`
+	FindingID   string             `json:"finding_id"`
+	Reason      string             `json:"reason"`
+	DismissedBy pgtype.Int8        `json:"dismissed_by"`
+	DismissedAt pgtype.Timestamptz `json:"dismissed_at"`
+}
+
+// Dismissing a dismissed finding again replaces its reason and author.
+func (q *Queries) UpsertSchemaAdvisorDismissal(ctx context.Context, arg UpsertSchemaAdvisorDismissalParams) error {
+	_, err := q.db.Exec(ctx, upsertSchemaAdvisorDismissal,
+		arg.SourceID,
+		arg.FindingID,
+		arg.Reason,
+		arg.DismissedBy,
+		arg.DismissedAt,
 	)
 	return err
 }

@@ -1757,6 +1757,23 @@ func (q *Queries) DeleteSavedView(ctx context.Context, id int64) (int64, error) 
 	return id_2, err
 }
 
+const deleteSchemaAdvisorDismissal = `-- name: DeleteSchemaAdvisorDismissal :execrows
+DELETE FROM schema_advisor_dismissals WHERE source_id = ? AND finding_id = ?
+`
+
+type DeleteSchemaAdvisorDismissalParams struct {
+	SourceID  int64  `json:"source_id"`
+	FindingID string `json:"finding_id"`
+}
+
+func (q *Queries) DeleteSchemaAdvisorDismissal(ctx context.Context, arg DeleteSchemaAdvisorDismissalParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteSchemaAdvisorDismissalStmt, deleteSchemaAdvisorDismissal, arg.SourceID, arg.FindingID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = ?
 `
@@ -2597,6 +2614,29 @@ func (q *Queries) GetSavedView(ctx context.Context, id int64) (SavedView, error)
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSchemaAdvisorDismissal = `-- name: GetSchemaAdvisorDismissal :one
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = ? AND finding_id = ?
+`
+
+type GetSchemaAdvisorDismissalParams struct {
+	SourceID  int64  `json:"source_id"`
+	FindingID string `json:"finding_id"`
+}
+
+func (q *Queries) GetSchemaAdvisorDismissal(ctx context.Context, arg GetSchemaAdvisorDismissalParams) (SchemaAdvisorDismissal, error) {
+	row := q.queryRow(ctx, q.getSchemaAdvisorDismissalStmt, getSchemaAdvisorDismissal, arg.SourceID, arg.FindingID)
+	var i SchemaAdvisorDismissal
+	err := row.Scan(
+		&i.SourceID,
+		&i.FindingID,
+		&i.Reason,
+		&i.DismissedBy,
+		&i.DismissedAt,
 	)
 	return i, err
 }
@@ -5524,6 +5564,41 @@ func (q *Queries) ListSavedViews(ctx context.Context, arg ListSavedViewsParams) 
 	return items, nil
 }
 
+const listSchemaAdvisorDismissals = `-- name: ListSchemaAdvisorDismissals :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = ?
+ORDER BY dismissed_at, finding_id
+`
+
+func (q *Queries) ListSchemaAdvisorDismissals(ctx context.Context, sourceID int64) ([]SchemaAdvisorDismissal, error) {
+	rows, err := q.query(ctx, q.listSchemaAdvisorDismissalsStmt, listSchemaAdvisorDismissals, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SchemaAdvisorDismissal{}
+	for rows.Next() {
+		var i SchemaAdvisorDismissal
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.FindingID,
+			&i.Reason,
+			&i.DismissedBy,
+			&i.DismissedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServiceAccounts = `-- name: ListServiceAccounts :many
 SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE account_type = 'service' ORDER BY created_at ASC
 `
@@ -8000,6 +8075,35 @@ func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
 		arg.Misfire,
 		arg.GraceSeconds,
 		arg.Enabled,
+	)
+	return err
+}
+
+const upsertSchemaAdvisorDismissal = `-- name: UpsertSchemaAdvisorDismissal :exec
+INSERT INTO schema_advisor_dismissals (source_id, finding_id, reason, dismissed_by, dismissed_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (source_id, finding_id) DO UPDATE SET
+    reason = excluded.reason,
+    dismissed_by = excluded.dismissed_by,
+    dismissed_at = excluded.dismissed_at
+`
+
+type UpsertSchemaAdvisorDismissalParams struct {
+	SourceID    int64         `json:"source_id"`
+	FindingID   string        `json:"finding_id"`
+	Reason      string        `json:"reason"`
+	DismissedBy sql.NullInt64 `json:"dismissed_by"`
+	DismissedAt time.Time     `json:"dismissed_at"`
+}
+
+// Dismissing a dismissed finding again replaces its reason and author.
+func (q *Queries) UpsertSchemaAdvisorDismissal(ctx context.Context, arg UpsertSchemaAdvisorDismissalParams) error {
+	_, err := q.exec(ctx, q.upsertSchemaAdvisorDismissalStmt, upsertSchemaAdvisorDismissal,
+		arg.SourceID,
+		arg.FindingID,
+		arg.Reason,
+		arg.DismissedBy,
+		arg.DismissedAt,
 	)
 	return err
 }

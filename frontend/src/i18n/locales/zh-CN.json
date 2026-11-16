@@ -2017,5 +2017,14 @@
   "advisor.inputLimited": "受限",
   "advisor.inputMissing": "不存在",
   "advisor.inputError": "错误",
-  "advisor.inputSkipped": "已跳过"
+  "advisor.inputSkipped": "已跳过",
+  "advisor.dismiss": "忽略",
+  "advisor.dismissTitle": "忽略建议",
+  "advisor.dismissReason": "原因（可选）",
+  "advisor.reasonTooLong": "原因最多 {max} 字节",
+  "advisor.showDismissed": "显示已忽略 ({count})",
+  "advisor.dismissed": "已忽略",
+  "advisor.dismissedAt": "忽略于 {time}",
+  "advisor.findingGone": "当前报告中没有建议 {id}",
+  "advisor.restore": "恢复"
 }

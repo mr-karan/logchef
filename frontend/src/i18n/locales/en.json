@@ -2017,5 +2017,14 @@
   "advisor.inputLimited": "limited",
   "advisor.inputMissing": "missing",
   "advisor.inputError": "error",
-  "advisor.inputSkipped": "skipped"
+  "advisor.inputSkipped": "skipped",
+  "advisor.dismiss": "Dismiss",
+  "advisor.dismissTitle": "Dismiss finding",
+  "advisor.dismissReason": "Reason (optional)",
+  "advisor.reasonTooLong": "The reason can be at most {max} bytes",
+  "advisor.showDismissed": "Show dismissed ({count})",
+  "advisor.dismissed": "Dismissed",
+  "advisor.dismissedAt": "Dismissed {time}",
+  "advisor.findingGone": "Finding {id} is not in the current report",
+  "advisor.restore": "Restore"
 }
