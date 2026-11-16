@@ -813,7 +813,7 @@ export const useExploreStore = defineStore("explore", () => {
     });
   }
 
-  function buildQuerySharePayload(): QuerySharePayload {
+  function buildQuerySharePayload(layout: SavedViewDefinition | null): QuerySharePayload {
     const { activeMode, nativeQuery, logchefqlCode, limit, window } = state.data.value;
     const stored = window ? encodeStoredRange(window) : null;
     return {
@@ -824,17 +824,22 @@ export const useExploreStore = defineStore("explore", () => {
       timezone: preferencesStore.zone,
       variables: variableStore.allVariables as unknown as QuerySharePayload["variables"],
       ...(stored ? { time_range: stored.timeRange } : {}),
+      ...(layout ? { layout } : {}),
     };
   }
 
-  /** Creates a share link for the editor's query. markShare selects it while the editor still holds what was shared. */
-  async function createQueryShare() {
+  /**
+   * Creates a share link for the editor's query, with a copy of the table
+   * layout when given one. markShare selects it while the editor still holds
+   * what was shared.
+   */
+  async function createQueryShare(layout: SavedViewDefinition | null = null) {
     const currentTeamId = useTeamsStore().currentTeamId;
     if (!currentTeamId || !sourceId.value) {
       throw new Error("Team and source are required to share a query");
     }
 
-    const payload = buildQuerySharePayload();
+    const payload = buildQuerySharePayload(layout);
     if (payload.mode === "sql" && !payload.query.trim()) {
       throw new Error("Query is required to create a share link");
     }

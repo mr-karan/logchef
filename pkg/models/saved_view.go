@@ -97,6 +97,20 @@ func ParseSavedViewDefinition(raw []byte) (SavedViewDefinition, error) {
 	return def, nil
 }
 
+// ParseQueryShareLayout parses the layout of a share payload. A share's
+// query and time range travel in the payload itself, so a layout that sets
+// filter or time_range is rejected.
+func ParseQueryShareLayout(raw []byte) (SavedViewDefinition, error) {
+	def, err := ParseSavedViewDefinition(raw)
+	if err != nil {
+		return SavedViewDefinition{}, err
+	}
+	if def.Filter != nil || def.TimeRange != nil {
+		return SavedViewDefinition{}, invalidSavedViewDefinition("a share layout cannot set filter or time_range; the share's query and time range hold them")
+	}
+	return def, nil
+}
+
 // Validate checks every definition rule except the LogchefQL filter check,
 // which needs the logchefql package and runs in core.
 func (d SavedViewDefinition) Validate() error {

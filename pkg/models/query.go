@@ -413,6 +413,9 @@ type QuerySharePayload struct {
 	TimeRange SavedQueryTimeRange  `json:"time_range"`
 	Timezone  string               `json:"timezone,omitempty"`
 	Variables []SavedQueryVariable `json:"variables,omitempty"`
+	// Layout is a copy of the sender's table layout (RFC 0007). It holds no
+	// view id, so the share opens for any recipient and outlives the view.
+	Layout *SavedViewDefinition `json:"layout,omitempty"`
 }
 
 // CreateQueryShareRequest creates a short share token for a query payload.

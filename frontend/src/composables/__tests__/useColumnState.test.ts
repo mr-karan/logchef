@@ -614,3 +614,46 @@ describe('useColumnState with a view seed', () => {
     expect(setupView(null).workingLayout.value).toBeNull()
   })
 })
+
+describe('useColumnState with a shared layout', () => {
+  function shared(revision = 1): TableViewSeed {
+    return { ...view(revision), viewId: null }
+  }
+
+  it('seeds from the share, keeps edits in memory, and leaves both stored layouts untouched', async () => {
+    const own = setupView(view())
+    own.columnSizing.value = { ...own.columnSizing.value, message: 333 }
+    await persist()
+    own.input.seed = null
+    await nextTick()
+    own.columnSizing.value = { message: 250 }
+    await persist()
+    const stored = { table: localStorage.getItem(storageKey), view: localStorage.getItem(viewKey) }
+
+    own.input.seed = shared()
+    await nextTick()
+    expect(own.columnOrder.value).toEqual(['timestamp', 'status', 'message'])
+    expect(own.columnSizing.value).toEqual({ status: 120 })
+    expect(own.sorting.value).toEqual([{ id: 'status', desc: false }])
+    own.columnSizing.value = { status: 700 }
+    own.sorting.value = [{ id: 'message', desc: true }]
+    await persist()
+    expect(own.workingLayout.value?.columns?.[0]).toEqual({ name: 'status', width: 700 })
+    expect({ table: localStorage.getItem(storageKey), view: localStorage.getItem(viewKey) }).toEqual(stored)
+
+    own.input.seed = view()
+    await nextTick()
+    expect(own.columnSizing.value).toEqual({ status: 120, message: 333 })
+    own.input.seed = null
+    await nextTick()
+    expect(own.columnSizing.value).toEqual({ message: 250 })
+  })
+
+  it('seeds again from the next shared layout', async () => {
+    const state = setupView(shared(1))
+    state.columnSizing.value = { status: 700 }
+    state.input.seed = shared(2)
+    await nextTick()
+    expect(state.columnSizing.value).toEqual({ status: 120 })
+  })
+})

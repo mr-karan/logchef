@@ -30,7 +30,8 @@ import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
 import { useSavedViewsStore } from "@/stores/savedViews";
-import type { SavedViewLayout } from "@/lib/savedViewLayout";
+import type { SavedViewDefinition, SavedViewLayout } from "@/lib/savedViewLayout";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useQuery } from "@/composables/useQuery";
 import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 
@@ -552,9 +553,15 @@ onBeforeRouteLeave(() => {
   exploreStore.stopLiveTail();
 });
 
-const handleShare = async () => {
+// The query and the table layout share the server's payload limit. When the
+// server refuses a share with a layout, the user can share the query alone.
+const shareRefusal = ref<string | null>(null);
+
+const handleShare = () => shareQuery(savedViews.shareLayout(displayMode.value));
+
+const shareQuery = async (layout: SavedViewDefinition | null) => {
   try {
-    const share = await nav.recordAfter(() => exploreStore.createQueryShare(), exploreStore.markShare);
+    const share = await nav.recordAfter(() => exploreStore.createQueryShare(layout), exploreStore.markShare);
     if (!share?.share_url) return;
 
     await copyText(share.share_url);
@@ -567,6 +574,10 @@ const handleShare = async () => {
       duration: TOAST_DURATION.SUCCESS,
     });
   } catch (error: any) {
+    if (layout && error?.error_type === "ValidationError") {
+      shareRefusal.value = error.message || getErrorMessage(error);
+      return;
+    }
     toast({
       get title() { return t('ui.shareFailed'); },
       description: error?.message || getErrorMessage(error),
@@ -1204,6 +1215,11 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
           :edit-data="editQueryData" :query-content="currentQueryContentJson"
           @close="closeSaveQueryModal" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
+
+        <ConfirmDialog :open="shareRefusal !== null" :title="t('explore.shareWithoutLayoutTitle')"
+          :description="t('explore.shareWithoutLayoutDescription', { reason: shareRefusal ?? '' })"
+          :confirm-text="t('explore.shareWithoutLayout')"
+          @update:open="open => { if (!open) shareRefusal = null }" @confirm="shareQuery(null)" />
 
 
       </div>
