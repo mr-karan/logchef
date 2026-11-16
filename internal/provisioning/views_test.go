@@ -166,7 +166,7 @@ func TestValidateSourceViews(t *testing.T) {
 			}(),
 			wantErr: "this source does not support LogchefQL"},
 		{name: "seconds", src: viewSource("s", ok, config.ProvisionView{Name: "fast", TimeRange: new("30s")}),
-			wantErr: `views[1] ("fast"): time_range "30s" is in seconds`},
+			wantErr: `views[1] ("fast"): invalid saved view definition: time_range "30s" is in seconds`},
 		{name: "absolute range", src: viewSource("s", config.ProvisionView{Name: "t", TimeRange: new("2026-01-01")}),
 			wantErr: "time_range must be a relative range"},
 		{name: "display mode", src: viewSource("s", config.ProvisionView{Name: "d", DisplayMode: new(models.DisplayModePreference("grid"))}),

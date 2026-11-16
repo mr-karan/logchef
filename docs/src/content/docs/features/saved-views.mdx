@@ -105,9 +105,8 @@ you have.
 - **Reset to view** is the one action that replaces the editor text with the
   view's filter.
 
-The Explorer's time picker has no seconds unit. The API accepts a range such as
-`30s`, but the Explorer ignores it and keeps the window in use. The save dialog
-never writes one.
+The Explorer's time picker has no seconds unit, so a view's range is in
+minutes, hours, days or weeks. The API answers 400 to a range such as `30s`.
 
 ## Manage views
 
@@ -162,6 +161,10 @@ A managed view belongs to provisioning. It shows **Managed** in Manage views
 and offers only Duplicate, and the API answers 403 to an update, a delete or a
 default change. A managed view that is the source default stays the default:
 setting another source view as default answers 403.
+
+Each provisioning run that changes a view records it in the audit log, with
+the same `saved_view` actions as the API and the provisioning run as the
+actor. Adopting an existing view is a `saved_view.update` that sets `managed`.
 
 ## CLI and MCP
 
@@ -222,7 +225,7 @@ The `definition` is a JSON object. The server rejects an unknown key.
 | `sort` | Optional. 1 to 3 entries, most significant first, each a `column` and a `desc` boolean |
 | `display_mode` | Optional. `table`, `compact` or `json` |
 | `filter` | Optional. Valid LogchefQL, up to 8,192 bytes. The source must support LogchefQL |
-| `time_range` | Optional. A number and a unit `s`, `m`, `h`, `d` or `w`. The Explorer ignores seconds. An absolute range is not allowed |
+| `time_range` | Optional. A number and a unit `m`, `h`, `d` or `w`. Seconds and an absolute range are not allowed |
 
 ### Limits
 

@@ -213,7 +213,8 @@ func headersFingerprint(headers map[string]string) string {
 }
 
 // SavedViewFields records a saved view. The filter is LogchefQL text, so it
-// is recorded as its language and a digest.
+// is recorded as its language and a digest. managed shows a provisioning
+// adoption, which changes nothing else.
 func SavedViewFields(v *models.SavedView) *Fields {
 	d := v.Definition
 	f := NewFields().
@@ -223,6 +224,7 @@ func SavedViewFields(v *models.SavedView) *Fields {
 		Set("team_id", v.TeamID).
 		Set("revision", v.Revision).
 		Set("is_default", v.IsDefault).
+		Set("managed", v.Managed).
 		Set("column_count", len(d.Columns)).
 		Set("display_mode", d.DisplayMode).
 		Set("time_range", d.TimeRange)

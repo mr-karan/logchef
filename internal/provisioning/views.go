@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -55,12 +55,6 @@ func validateSourceViews(prefix string, src config.ProvisionSource, ds *datasour
 		}
 		if err := core.ValidateSavedViewDefinition(view.Definition(), descriptor); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", viewPrefix, err))
-			continue
-		}
-		// The Explorer's time picker has no seconds unit and ignores such a
-		// range, so a provisioned view may not declare one.
-		if tr := view.TimeRange; tr != nil && strings.HasSuffix(*tr, "s") {
-			errs = append(errs, fmt.Sprintf("%s: time_range %q is in seconds, which the Explorer does not support; use minutes (m), hours (h), days (d) or weeks (w)", viewPrefix, *tr))
 		}
 	}
 	return errs
@@ -85,21 +79,21 @@ func listSourceScopeViews(ctx context.Context, db store.StoreOps, sourceID model
 // reconcileSourceViews makes the source views of every declared source match
 // the file. It runs after reconcileSources, so every declared source exists
 // and a pruned source has taken its views with it.
-func reconcileSourceViews(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger) error {
+func reconcileSourceViews(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger, events *auditLog) error {
 	for i := range cfg.Sources {
 		cfgSrc := &cfg.Sources[i]
 		src, err := tx.GetSourceByNameForProvisioning(ctx, cfgSrc.Name)
 		if err != nil {
 			return fmt.Errorf("failed to look up source %q: %w", cfgSrc.Name, err)
 		}
-		if err := reconcileViewsOfSource(ctx, tx, cfgSrc, src.ID, cfg.Prune, log); err != nil {
+		if err := reconcileViewsOfSource(ctx, tx, cfgSrc, src.ID, cfg.Prune, log, events); err != nil {
 			return fmt.Errorf("source %q: %w", cfgSrc.Name, err)
 		}
 	}
 	return nil
 }
 
-func reconcileViewsOfSource(ctx context.Context, tx store.StoreOps, cfgSrc *config.ProvisionSource, sourceID models.SourceID, prune bool, log *slog.Logger) error {
+func reconcileViewsOfSource(ctx context.Context, tx store.StoreOps, cfgSrc *config.ProvisionSource, sourceID models.SourceID, prune bool, log *slog.Logger, events *auditLog) error {
 	existing, err := listSourceScopeViews(ctx, tx, sourceID)
 	if err != nil {
 		return fmt.Errorf("failed to list views: %w", err)
@@ -112,7 +106,7 @@ func reconcileViewsOfSource(ctx context.Context, tx store.StoreOps, cfgSrc *conf
 	declared := make(map[string]bool, len(cfgSrc.Views))
 	var wantDefault *models.SavedView
 	for i := range cfgSrc.Views {
-		view, err := upsertManagedView(ctx, tx, sourceID, &cfgSrc.Views[i], byName[cfgSrc.Views[i].Name], log)
+		view, err := upsertManagedView(ctx, tx, sourceID, &cfgSrc.Views[i], byName[cfgSrc.Views[i].Name], log, events)
 		if err != nil {
 			return err
 		}
@@ -141,15 +135,17 @@ func reconcileViewsOfSource(ctx context.Context, tx store.StoreOps, cfgSrc *conf
 		if err := tx.DeleteSavedView(ctx, v.ID); err != nil {
 			return fmt.Errorf("failed to prune view %q: %w", v.Name, err)
 		}
+		events.add(audit.SavedViewDelete, audit.SavedViewTarget(v), audit.SavedViewFields(v), nil)
 	}
 
-	return reconcileDefaultView(ctx, tx, cfgSrc.Name, currentDefault, wantDefault, log)
+	return reconcileDefaultView(ctx, tx, cfgSrc.Name, currentDefault, wantDefault, log, events)
 }
 
 // upsertManagedView creates, adopts or updates the stored view for one
 // declaration and returns the stored view. An unchanged view is not written,
-// so its revision stays put.
-func upsertManagedView(ctx context.Context, tx store.StoreOps, sourceID models.SourceID, decl *config.ProvisionView, current *models.SavedView, log *slog.Logger) (*models.SavedView, error) {
+// so its revision stays put. An adoption and an update in one run are one
+// saved_view.update event.
+func upsertManagedView(ctx context.Context, tx store.StoreOps, sourceID models.SourceID, decl *config.ProvisionView, current *models.SavedView, log *slog.Logger, events *auditLog) (*models.SavedView, error) {
 	def := decl.Definition()
 	if current == nil {
 		log.Info("creating managed view", "source_id", sourceID, "view", decl.Name)
@@ -164,10 +160,13 @@ func upsertManagedView(ctx context.Context, tx store.StoreOps, sourceID models.S
 		if err := tx.CreateSavedView(ctx, view); err != nil {
 			return nil, fmt.Errorf("failed to create view %q: %w", decl.Name, err)
 		}
+		events.add(audit.SavedViewCreate, audit.SavedViewTarget(view), nil, audit.SavedViewFields(view))
 		return view, nil
 	}
 
-	if !current.Managed {
+	before := audit.SavedViewFields(current)
+	adopted := !current.Managed
+	if adopted {
 		log.Info("adopting existing view as managed", "source_id", sourceID, "view", decl.Name, "id", current.ID)
 		if err := tx.MarkSavedViewManaged(ctx, current.ID); err != nil {
 			return nil, fmt.Errorf("failed to adopt view %q: %w", decl.Name, err)
@@ -180,6 +179,9 @@ func upsertManagedView(ctx context.Context, tx store.StoreOps, sourceID models.S
 		return nil, fmt.Errorf("failed to compare view %q: %w", decl.Name, err)
 	}
 	if same {
+		if adopted {
+			events.add(audit.SavedViewUpdate, audit.SavedViewTarget(current), before, audit.SavedViewFields(current))
+		}
 		return current, nil
 	}
 	log.Info("updating managed view", "source_id", sourceID, "view", decl.Name, "revision", current.Revision)
@@ -188,6 +190,7 @@ func upsertManagedView(ctx context.Context, tx store.StoreOps, sourceID models.S
 	if err := tx.UpdateSavedView(ctx, &next); err != nil {
 		return nil, fmt.Errorf("failed to update view %q: %w", decl.Name, err)
 	}
+	events.add(audit.SavedViewUpdate, audit.SavedViewTarget(&next), before, audit.SavedViewFields(&next))
 	return &next, nil
 }
 
@@ -209,18 +212,31 @@ func sameViewContent(v *models.SavedView, description string, def models.SavedVi
 // reconcileDefaultView gives the source default to the declared default view.
 // With no declared default it clears a managed default and leaves an
 // unmanaged one, so a file without a default leaves it to global admins.
-func reconcileDefaultView(ctx context.Context, tx store.StoreOps, source string, current, want *models.SavedView, log *slog.Logger) error {
+func reconcileDefaultView(ctx context.Context, tx store.StoreOps, source string, current, want *models.SavedView, log *slog.Logger, events *auditLog) error {
 	switch {
 	case want != nil && (current == nil || current.ID != want.ID):
 		log.Info("setting managed default view", "source", source, "view", want.Name)
-		if _, err := tx.SetSavedViewDefault(ctx, want.ID); err != nil {
+		cleared, err := tx.SetSavedViewDefault(ctx, want.ID)
+		if err != nil {
 			return fmt.Errorf("failed to make view %q the default: %w", want.Name, err)
 		}
+		var clearedID *models.SavedViewID
+		if cleared != nil {
+			clearedID = &cleared.ID
+		}
+		after := *want
+		after.IsDefault = true
+		events.addWithDetail(audit.SavedViewSetDefault, audit.SavedViewTarget(&after), audit.SavedViewFields(want), audit.SavedViewFields(&after),
+			audit.NewFields().Set("scope", after.Scope).Set("cleared_view_id", clearedID))
 	case want == nil && current != nil && current.Managed:
 		log.Info("clearing managed default view", "source", source, "view", current.Name)
 		if err := tx.ClearSavedViewDefault(ctx, current.ID); err != nil {
 			return fmt.Errorf("failed to clear the default of view %q: %w", current.Name, err)
 		}
+		after := *current
+		after.IsDefault = false
+		events.addWithDetail(audit.SavedViewClearDefault, audit.SavedViewTarget(&after), audit.SavedViewFields(current), audit.SavedViewFields(&after),
+			audit.NewFields().Set("scope", after.Scope))
 	}
 	return nil
 }
