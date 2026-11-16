@@ -179,6 +179,9 @@ type AdvisorMetadata struct {
 	Columns          []AdvisorColumn
 	ColumnsTruncated bool
 	Indexes          []AdvisorIndex
+	// IndexesTruncated is true when the table has more skip indexes than
+	// were read.
+	IndexesTruncated bool
 	Partitions       []AdvisorPartition
 	// PartitionsTruncated is true when the table has more partitions than
 	// were read.
@@ -249,6 +252,9 @@ func (c *Client) AdvisorMetadata(ctx context.Context, database, table, tsColumn 
 
 	var indexInput, partsInput, logInput models.AdvisorInput
 	meta.Indexes, indexInput = c.advisorIndexes(ctx, target.Database, target.Table)
+	if len(meta.Indexes) > advisorMaxIndexes {
+		meta.Indexes, meta.IndexesTruncated = meta.Indexes[:advisorMaxIndexes], true
+	}
 	meta.Partitions, partsInput = c.advisorPartitions(ctx, target.Database, target.Table)
 	if len(meta.Partitions) > advisorMaxPartitions {
 		meta.Partitions, meta.PartitionsTruncated = meta.Partitions[:advisorMaxPartitions], true
@@ -517,7 +523,7 @@ func (c *Client) advisorIndexes(ctx context.Context, database, table string) ([]
 		}
 		return rows.Err()
 	}, fmt.Sprintf(`SELECT name, type_full, expr, granularity, data_compressed_bytes, data_uncompressed_bytes
-		FROM system.data_skipping_indices WHERE database = ? AND table = ? ORDER BY name LIMIT %d`, advisorMaxIndexes), database, table)
+		FROM system.data_skipping_indices WHERE database = ? AND table = ? ORDER BY name LIMIT %d`, advisorMaxIndexes+1), database, table)
 	input := read.withState(AdvisorInputIndexes, err)
 	if input.State != models.AdvisorInputOK {
 		return nil, input

@@ -136,7 +136,9 @@ func TestSampleColumns(t *testing.T) {
 		used(200, 1, plain("tenant", models.MatchEq)),
 	)
 	facts := Facts{Metadata: meta, Usage: usage, Sample: sampleOf()}
-	if got, want := SampleColumns(facts), []string{"request_id", "trace_id"}; !reflect.DeepEqual(got, want) {
+	// rare is too rare for R1, but its size makes it an R4 candidate, ranked
+	// by its 2% share of the table's bytes.
+	if got, want := SampleColumns(facts), []string{"request_id", "trace_id", "rare"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("SampleColumns = %q, want %q", got, want)
 	}
 

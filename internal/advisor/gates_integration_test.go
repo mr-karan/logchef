@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// The build gates of RFC 0010 for R1 and R3. Each executes the DDL that
+// The build gates of RFC 0010 for R1, R3, R4 and R5. Each executes the DDL that
 // Analyze generates on a table with existing parts. A rule whose gate fails
 // is removed from the rule set.
 
@@ -73,7 +74,7 @@ func gateFacts(ctx context.Context, t *testing.T, client *clickhouse.Client, tab
 	if reason := unavailable(meta); reason != "" {
 		t.Fatalf("metadata unavailable: %s", reason)
 	}
-	return Facts{Metadata: meta, Usage: usage, Sample: sample}
+	return Facts{Metadata: meta, TimestampColumn: "ts", Usage: usage, Sample: sample}
 }
 
 // TestGateBloomFilter is G1 for bloom_filter: an index that R1 adds with ADD
@@ -231,4 +232,158 @@ func TestGateMaterializedColumn(t *testing.T) {
 	if again := findingsOf(Analyze(gateFacts(ctx, t, client, table, usage, nil)), ruleMaterializedColumn); len(again) != 0 {
 		t.Errorf("R3 fires again after its DDL: %+v", again)
 	}
+}
+
+// TestGateLowCardinality is G4: the MODIFY COLUMN that R4 generates changes
+// only the type. It keeps the default expression, comment and codec, runs
+// as one mutation per column and keeps every value. The column name holds a
+// backtick. Columns that a skip index or a projection reads get no finding,
+// since ClickHouse before 26.8 and from 24.1 on, in turn, refuses the change.
+func TestGateLowCardinality(t *testing.T) {
+	client, conn, ctx := gateClickHouse(t)
+	const level = "le`vel"
+	quoted := queryescape.ClickHouseIdentifier(level)
+	table := fmt.Sprintf("logchef_gate_low_cardinality_%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = conn.Exec(context.Background(), "DROP TABLE IF EXISTS "+table) })
+	gateExec(ctx, t, conn,
+		// One partition per insert keeps three parts that no merge combines.
+		"CREATE TABLE "+table+" (ts DateTime, tenant String, "+quoted+" String DEFAULT 'none' COMMENT 'the level' CODEC(ZSTD(3)), "+
+			"service Nullable(String) DEFAULT NULL COMMENT 'the service', indexed String, projected String, "+
+			"INDEX idx_indexed lower(indexed) TYPE set(10) GRANULARITY 1, PROJECTION by_projected (SELECT projected, count() GROUP BY projected)) "+
+			"ENGINE = MergeTree PARTITION BY tenant ORDER BY (tenant, ts)",
+	)
+	for part := range 3 {
+		gateExec(ctx, t, conn, fmt.Sprintf("INSERT INTO %s SELECT toDateTime('2026-11-01 00:00:00') + number, 't%d', "+
+			"['debug', 'info', 'warning', 'error'][number %% 4 + 1], if(number %% 5 = 0, NULL, concat('svc-', toString(number %% 7))), "+
+			"concat('host-', toString(number %% 3)), concat('zone-', toString(number %% 2)) FROM numbers(20000)", table, part))
+	}
+	// The sum of row hashes ignores row order, which a merge may change.
+	values := "SELECT toString(count()) || ':' || toString(sum(cityHash64(toString((ts, tenant, " + quoted + ", service, indexed, projected))))) FROM " + table
+	definitions := "SELECT arrayStringConcat(groupArray(concat(name, ' ', default_kind, ' ', default_expression, ' ', compression_codec, ' ', comment)), '\n') " +
+		"FROM (SELECT * FROM system.columns WHERE database = currentDatabase() AND table = '" + table + "' ORDER BY position)"
+	beforeValues, beforeDefinitions := gateString(ctx, t, conn, values), gateString(ctx, t, conn, definitions)
+
+	cards := []clickhouse.AdvisorCardinality{
+		{Column: level, Distinct: 4, MaxSliceDistinct: 4, Saturated: true},
+		{Column: "service", Distinct: 7, MaxSliceDistinct: 7, Saturated: true},
+		{Column: "indexed", Distinct: 3, MaxSliceDistinct: 3, Saturated: true},
+		{Column: "projected", Distinct: 2, MaxSliceDistinct: 2, Saturated: true},
+	}
+	sample := &clickhouse.AdvisorSample{Input: models.AdvisorInput{Name: clickhouse.AdvisorInputSample, State: models.AdvisorInputOK}, Columns: cards}
+	for range 7 {
+		sample.Slices = append(sample.Slices, clickhouse.AdvisorSlice{Start: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Rows: 20_000, Distinct: []uint64{4, 7, 3, 2}})
+	}
+	facts := gateFacts(ctx, t, client, table, Usage{}, sample)
+	if got := SampleColumns(facts); !slices.Contains(got, level) || !slices.Contains(got, "service") || slices.Contains(got, "indexed") || slices.Contains(got, "projected") {
+		t.Fatalf("SampleColumns = %q, want the two R4 candidates and neither indexed nor projected", got)
+	}
+	found := findingsOf(Analyze(facts), ruleLowCardinality)
+	if len(found) != 2 {
+		t.Fatalf("R4 findings = %+v, want 2", found)
+	}
+	for _, f := range found {
+		gateExec(ctx, t, conn, f.DDL...)
+	}
+
+	if got := gateString(ctx, t, conn, values); got != beforeValues {
+		t.Errorf("values changed: hash %s, want %s", got, beforeValues)
+	}
+	if got := gateString(ctx, t, conn, definitions); got != beforeDefinitions {
+		t.Errorf("column definitions changed:\n%s\nwant\n%s", got, beforeDefinitions)
+	}
+	types := gateString(ctx, t, conn, "SELECT arrayStringConcat(groupArray(type), ', ') FROM (SELECT type FROM system.columns WHERE database = currentDatabase() AND table = '"+table+"' ORDER BY position)")
+	if want := "DateTime, String, LowCardinality(String), LowCardinality(Nullable(String)), String, String"; types != want {
+		t.Errorf("types = %s, want %s", types, want)
+	}
+	mutations := gateString(ctx, t, conn, "SELECT toString(count()) || '/' || toString(countIf(is_done)) FROM system.mutations WHERE database = currentDatabase() AND table = '"+table+"'")
+	if mutations != "2/2" {
+		t.Errorf("mutations (all/done) = %s, want one finished mutation per column, 2/2", mutations)
+	}
+	gateExec(ctx, t, conn, "INSERT INTO "+table+" (ts, tenant) VALUES ('2026-11-02 00:00:00', 't9')")
+	if got := gateString(ctx, t, conn, "SELECT "+quoted+" || '/' || toString(isNull(service)) FROM "+table+" WHERE tenant = 't9'"); got != "none/1" {
+		t.Errorf("defaults after the change = %s, want none/1", got)
+	}
+	if again := findingsOf(Analyze(gateFacts(ctx, t, client, table, Usage{}, sample)), ruleLowCardinality); len(again) != 0 {
+		t.Errorf("R4 fires again after its DDL: %+v", again)
+	}
+}
+
+// TestGateCodec is G5: the MODIFY COLUMN ... CODEC that R5 generates is
+// accepted on a DateTime64 sorting key column and on a String column, runs
+// no mutation and leaves existing parts as they are until a merge rewrites
+// them. A column with an empty compression_codec uses the part's default.
+// The tables are too small for R5's size floors, so the gate scales the
+// sizes it read before it runs the rules.
+func TestGateCodec(t *testing.T) {
+	client, conn, ctx := gateClickHouse(t)
+	table := fmt.Sprintf("logchef_gate_codec_%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = conn.Exec(context.Background(), "DROP TABLE IF EXISTS "+table) })
+	gateExec(ctx, t, conn,
+		"CREATE TABLE "+table+" (ts DateTime64(3, 'UTC'), tenant String, msg String) ENGINE = MergeTree ORDER BY (tenant, ts) "+
+			// Compact parts report no per-column size.
+			"SETTINGS min_bytes_for_wide_part = 0",
+		"SYSTEM STOP MERGES "+table,
+	)
+	for part := range 3 {
+		gateExec(ctx, t, conn, fmt.Sprintf("INSERT INTO %s SELECT toDateTime64('2026-11-01 00:00:00', 3, 'UTC') + number * 0.137, 't', "+
+			"concat('request ', toString(number %% 97), ' took ', toString(number %% 1000), ' ms') FROM numbers(%d, 100000)", table, part*100000))
+	}
+	parts := "SELECT arrayStringConcat(groupArray(concat(name, ':', column, ':', toString(column_data_compressed_bytes))), ',') " +
+		"FROM (SELECT * FROM system.parts_columns WHERE database = currentDatabase() AND table = '" + table + "' AND active ORDER BY name, column)"
+	values := "SELECT toString(count()) || ':' || toString(sum(cityHash64(toString((ts, tenant, msg))))) FROM " + table
+	beforeParts, beforeValues := gateString(ctx, t, conn, parts), gateString(ctx, t, conn, values)
+	codecs := "SELECT arrayStringConcat(groupArray(concat(name, '=', compression_codec)), ',') FROM (SELECT * FROM system.columns WHERE database = currentDatabase() AND table = '" + table + "' AND name != 'tenant' ORDER BY name)"
+	if got := gateString(ctx, t, conn, codecs); got != "msg=,ts=" {
+		t.Fatalf("codecs = %s, want none set", got)
+	}
+	if got := gateString(ctx, t, conn, "SELECT arrayStringConcat(groupUniqArray(default_compression_codec), ',') FROM system.parts WHERE database = currentDatabase() AND table = '"+table+"' AND active"); got != "LZ4" {
+		t.Fatalf("parts' default codec = %s, want LZ4", got)
+	}
+	tsBefore := gateString(ctx, t, conn, "SELECT toString(sum(column_data_compressed_bytes)) FROM system.parts_columns WHERE database = currentDatabase() AND table = '"+table+"' AND active AND column = 'ts'")
+
+	facts := gateFacts(ctx, t, client, table, Usage{}, nil)
+	total := 100 * gib
+	facts.Metadata.Table.TotalBytes = &total
+	for i, column := range facts.Metadata.Columns {
+		switch column.Name {
+		case "ts":
+			facts.Metadata.Columns[i].CompressedBytes, facts.Metadata.Columns[i].UncompressedBytes = 2*gib, 8*gib
+		case "msg":
+			facts.Metadata.Columns[i].CompressedBytes, facts.Metadata.Columns[i].UncompressedBytes = 60*gib, 150*gib
+		}
+	}
+	found := findingsOf(Analyze(facts), ruleCodec)
+	if len(found) != 2 {
+		t.Fatalf("R5 findings = %+v, want 2", found)
+	}
+	for _, f := range found {
+		gateExec(ctx, t, conn, f.DDL...)
+	}
+
+	if got := gateString(ctx, t, conn, codecs); got != "msg=CODEC(ZSTD(1)),ts=CODEC(Delta(8), ZSTD(1))" {
+		t.Errorf("codecs = %s, want the generated ones", got)
+	}
+	if got := gateString(ctx, t, conn, "SELECT toString(count()) FROM system.mutations WHERE database = currentDatabase() AND table = '"+table+"'"); got != "0" {
+		t.Errorf("%s mutations, want none", got)
+	}
+	if got := gateString(ctx, t, conn, parts); got != beforeParts {
+		t.Errorf("parts changed before a merge:\n%s\nwant\n%s", got, beforeParts)
+	}
+	gateExec(ctx, t, conn, "SYSTEM START MERGES "+table, "OPTIMIZE TABLE "+table+" FINAL")
+	tsAfter := gateString(ctx, t, conn, "SELECT toString(sum(column_data_compressed_bytes)) FROM system.parts_columns WHERE database = currentDatabase() AND table = '"+table+"' AND active AND column = 'ts'")
+	if after, before := mustAtoi(t, tsAfter), mustAtoi(t, tsBefore); after >= before {
+		t.Errorf("ts takes %d compressed bytes after the merge, want fewer than %d", after, before)
+	}
+	if got := gateString(ctx, t, conn, values); got != beforeValues {
+		t.Errorf("values changed: hash %s, want %s", got, beforeValues)
+	}
+}
+
+func mustAtoi(t *testing.T, s string) int {
+	t.Helper()
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
