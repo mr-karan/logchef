@@ -81,15 +81,6 @@ export const useSettingsStore = defineStore("settings", () => {
     });
   }
 
-  // Send a test webhook to verify webhook configuration
-  async function testWebhook(webhookUrl: string) {
-    return await state.callApi({
-      apiCall: () => settingsApi.testWebhook({ webhook_url: webhookUrl }),
-      successMessage: i18n.global.t("admin.testWebhookSent"),
-      operationKey: 'testWebhook',
-    });
-  }
-
   return {
     // State
     isLoading: state.isLoading,
@@ -100,7 +91,6 @@ export const useSettingsStore = defineStore("settings", () => {
     updateSetting,
     deleteSetting,
     testEmail,
-    testWebhook,
 
     // Helpers
     getSettingsByCategory,

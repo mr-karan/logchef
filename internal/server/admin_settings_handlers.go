@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -16,7 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -403,26 +402,6 @@ type TestEmailRequest struct {
 	RecipientEmail string `json:"recipient_email"`
 }
 
-// TestWebhookRequest represents a request to send a test webhook.
-type TestWebhookRequest struct {
-	WebhookURL string `json:"webhook_url"`
-}
-
-func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
-	return alerts.EmailSenderOptions{
-		Host:          store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_host", ""),
-		Port:          store.GetIntSetting(ctx, s.store, "alerts.smtp_port", 587),
-		Username:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_username", ""),
-		Password:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_password", ""),
-		From:          store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_from", ""),
-		ReplyTo:       store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_reply_to", ""),
-		Security:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_security", "starttls"),
-		Timeout:       store.GetDurationSetting(ctx, s.store, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: store.GetBoolSetting(ctx, s.store, "alerts.tls_insecure_skip_verify", false),
-		Logger:        s.log,
-	}
-}
-
 // handleTestEmail sends a test email to verify SMTP configuration.
 // POST /api/v1/admin/settings/test-email
 func (s *Server) handleTestEmail(c fiber.Ctx) error {
@@ -450,36 +429,32 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid recipient email address")
 	}
 
-	// Load SMTP config from DB
-	smtpConfig := s.loadSMTPConfig(c.Context())
-
-	// Validate SMTP is configured
-	if smtpConfig.Host == "" || smtpConfig.Port == 0 || smtpConfig.From == "" {
+	mailer := notify.NewMailer(notify.MailerOptionsFromSettings(c.Context(), s.store))
+	if !mailer.Configured() {
 		return SendError(c, fiber.StatusBadRequest, "SMTP is not configured. Please configure smtp_host, smtp_port, and smtp_from in settings.")
 	}
 
 	auditTarget(c, audit.SettingTestTarget("email"))
 	auditDetail(c, "kind", "email")
 
-	// Create email sender
-	sender := alerts.NewEmailSender(smtpConfig)
+	sender := alerts.NewEmailSender(mailer)
 
 	// Build test notification
 	notification := alerts.AlertNotification{
-		AlertName:       "Test Alert",
-		Description:     "This is a test notification to verify your SMTP configuration.",
-		Status:          models.AlertStatusTriggered,
-		Severity:        models.AlertSeverityInfo,
-		SourceName:      "Test Source",
-		Value:           1.0,
-		ThresholdOp:     models.AlertThresholdGreaterThan,
-		ThresholdValue:  0.0,
-		FrequencySecs:   60,
-		LookbackSecs:    300,
-		Query:           "SELECT 1",
-		TriggeredAt:     time.Now(),
-		Message:         "Test notification - please ignore",
-		RecipientEmails: []string{recipientEmail},
+		AlertName:      "Test Alert",
+		Description:    "This is a test notification to verify your SMTP configuration.",
+		Status:         models.AlertStatusTriggered,
+		Severity:       models.AlertSeverityInfo,
+		SourceName:     "Test Source",
+		Value:          1.0,
+		ThresholdOp:    models.AlertThresholdGreaterThan,
+		ThresholdValue: 0.0,
+		FrequencySecs:  60,
+		LookbackSecs:   300,
+		Query:          "SELECT 1",
+		TriggeredAt:    time.Now(),
+		Message:        "Test notification - please ignore",
+		Emails:         []alerts.EmailTarget{{Target: "test", Address: recipientEmail}},
 	}
 
 	// Send test email
@@ -492,68 +467,5 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
 		"message":   "Test email sent successfully",
 		"recipient": recipientEmail,
-	})
-}
-
-// handleTestWebhook sends a test webhook to verify webhook configuration.
-// POST /api/v1/admin/settings/test-webhook
-func (s *Server) handleTestWebhook(c fiber.Ctx) error {
-	// Get current user for audit log
-	user := currentUser(c)
-	if user == nil {
-		s.log.Error("user not found in context despite requireAuth middleware")
-		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
-	}
-
-	var req TestWebhookRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
-	}
-
-	webhookURL := strings.TrimSpace(req.WebhookURL)
-	if webhookURL == "" {
-		return SendError(c, fiber.StatusBadRequest, "Webhook URL is required")
-	}
-
-	// Validate webhook URL format
-	parsedURL, err := url.Parse(webhookURL)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid webhook URL format")
-	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
-	}
-	auditTarget(c, audit.SettingTestTarget("webhook"))
-	auditDetail(c, "kind", "webhook")
-	auditSecretDetail(c, "webhook_url", webhookURL)
-
-	// Build test notification
-	notification := alerts.AlertNotification{
-		AlertName:      "Test Alert",
-		Description:    "This is a test notification to verify your webhook configuration.",
-		Status:         models.AlertStatusTriggered,
-		Severity:       models.AlertSeverityInfo,
-		SourceName:     "Test Source",
-		Value:          1.0,
-		ThresholdOp:    models.AlertThresholdGreaterThan,
-		ThresholdValue: 0.0,
-		FrequencySecs:  60,
-		LookbackSecs:   300,
-		Query:          "SELECT 1",
-		TriggeredAt:    time.Now(),
-		Message:        "Test notification - please ignore",
-		WebhookURLs:    []string{webhookURL},
-	}
-
-	// Send test webhook
-	if err := s.webhookSender.Send(c.Context(), notification).Err(); err != nil {
-		s.log.Error("failed to send test webhook", "error", err, "host", parsedURL.Hostname(), "user", user.Email)
-		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test webhook: %v", err))
-	}
-
-	s.log.Info("test webhook sent successfully", "host", parsedURL.Hostname(), "user", user.Email)
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"message": "Test webhook sent successfully",
-		"url":     webhookURL,
 	})
 }

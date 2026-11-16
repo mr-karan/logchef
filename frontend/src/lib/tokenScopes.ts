@@ -24,7 +24,9 @@ export type TokenScope =
   | "query_shares:read"
   | "query_shares:write"
   | "settings:read"
-  | "settings:write";
+  | "settings:write"
+  | "destinations:read"
+  | "destinations:write";
 
 interface TokenScopeOption {
   value: TokenScope;
@@ -47,6 +49,7 @@ export const READ_ONLY_SCOPES: TokenScope[] = [
   "query_shares:read",
   "settings:read",
   "saved_views:read",
+  "destinations:read",
 ];
 
 export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
@@ -69,6 +72,8 @@ export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
   { value: "collections:write", labelKey: "tokens.scopes.collectionsWrite", descriptionKey: "tokens.scopeDescriptions.collectionsWrite", groupKey: "tokens.groups.collections" },
   { value: "alerts:read", labelKey: "tokens.scopes.alertsRead", descriptionKey: "tokens.scopeDescriptions.alertsRead", groupKey: "tokens.groups.alerts" },
   { value: "alerts:write", labelKey: "tokens.scopes.alertsWrite", descriptionKey: "tokens.scopeDescriptions.alertsWrite", groupKey: "tokens.groups.alerts" },
+  { value: "destinations:read", labelKey: "tokens.scopes.destinationsRead", descriptionKey: "tokens.scopeDescriptions.destinationsRead", groupKey: "tokens.groups.alerts" },
+  { value: "destinations:write", labelKey: "tokens.scopes.destinationsWrite", descriptionKey: "tokens.scopeDescriptions.destinationsWrite", groupKey: "tokens.groups.alerts" },
   { value: "dashboards:read", labelKey: "tokens.scopes.dashboardsRead", descriptionKey: "tokens.scopeDescriptions.dashboardsRead", groupKey: "tokens.groups.dashboards" },
   { value: "dashboards:write", labelKey: "tokens.scopes.dashboardsWrite", descriptionKey: "tokens.scopeDescriptions.dashboardsWrite", groupKey: "tokens.groups.dashboards" },
   { value: "query_shares:read", labelKey: "tokens.scopes.querySharesRead", descriptionKey: "tokens.scopeDescriptions.querySharesRead", groupKey: "tokens.groups.sharing" },
@@ -107,6 +112,8 @@ const ALERTS_MANAGER_SCOPES: TokenScope[] = [
   "saved_queries:read",
   "alerts:read",
   "alerts:write",
+  "destinations:read",
+  "destinations:write",
 ];
 
 const SOURCE_ADMIN_SCOPES: TokenScope[] = [

@@ -4,23 +4,30 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // messageContext holds what every message of one evaluation shares, so a
-// grouped rule reads the source, the recipients and the settings once.
+// grouped rule reads the source, the destinations and the settings once.
 type messageContext struct {
-	alert             *models.Alert
-	sourceName        string
-	recipientEmails   []string
-	missingRecipients []models.UserID
-	recipientTargets  map[string]DeliveryTargetID
-	generatorURL      string
+	alert        *models.Alert
+	sourceName   string
+	targets      targets
+	generatorURL string
+}
+
+// targets are the resolved targets of a rule's destinations.
+type targets struct {
+	webhooks []WebhookTarget
+	emails   []EmailTarget
+	unusable []UnusableTarget
 }
 
 func (m *Manager) newMessageContext(ctx context.Context, alert *models.Alert) *messageContext {
@@ -30,7 +37,13 @@ func (m *Manager) newMessageContext(ctx context.Context, alert *models.Alert) *m
 	} else {
 		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
 	}
-	mc.recipientEmails, mc.missingRecipients, mc.recipientTargets = m.resolveRecipientEmails(ctx, alert)
+	destinations, err := m.db.ListAlertDestinations(ctx, alert.ID)
+	if err != nil {
+		m.log.Error("failed to load alert destinations", "alert_id", alert.ID, "error", err)
+		mc.targets.unusable = []UnusableTarget{{Target: deliveryTargetID("destinations", "lookup"), Err: "destination lookup failed"}}
+	} else {
+		mc.targets = m.resolveTargets(ctx, destinations, false)
+	}
 	mc.generatorURL = m.generatorURL(ctx, alert)
 	return mc
 }
@@ -83,32 +96,30 @@ func (mc *messageContext) metadata(status models.AlertStatus, value float64, gro
 func (mc *messageContext) notification(history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
 	alert := mc.alert
 	return AlertNotification{
-		AlertID:                 alert.ID,
-		AlertName:               alert.Name,
-		Description:             strings.TrimSpace(alert.Description),
-		Status:                  status,
-		Severity:                alert.Severity,
-		SourceID:                alert.SourceID,
-		SourceName:              mc.sourceName,
-		Value:                   value,
-		ThresholdOp:             alert.ThresholdOperator,
-		ThresholdValue:          alert.ThresholdValue,
-		FrequencySecs:           alert.FrequencySeconds,
-		LookbackSecs:            alert.LookbackSeconds,
-		Query:                   strings.TrimSpace(alert.Query),
-		ConditionJSON:           strings.TrimSpace(alert.ConditionJSON),
-		Group:                   copyStringMap(history.Group),
-		Labels:                  copyStringMap(labels),
-		Annotations:             copyStringMap(annotations),
-		TriggeredAt:             history.TriggeredAt,
-		ResolvedAt:              history.ResolvedAt,
-		GeneratorURL:            mc.generatorURL,
-		Message:                 history.Message,
-		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
-		RecipientEmails:         append([]string(nil), mc.recipientEmails...),
-		recipientTargets:        mc.recipientTargets,
-		MissingRecipientUserIDs: append([]models.UserID(nil), mc.missingRecipients...),
-		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
+		AlertID:        alert.ID,
+		AlertName:      alert.Name,
+		Description:    strings.TrimSpace(alert.Description),
+		Status:         status,
+		Severity:       alert.Severity,
+		SourceID:       alert.SourceID,
+		SourceName:     mc.sourceName,
+		Value:          value,
+		ThresholdOp:    alert.ThresholdOperator,
+		ThresholdValue: alert.ThresholdValue,
+		FrequencySecs:  alert.FrequencySeconds,
+		LookbackSecs:   alert.LookbackSeconds,
+		Query:          strings.TrimSpace(alert.Query),
+		ConditionJSON:  strings.TrimSpace(alert.ConditionJSON),
+		Group:          copyStringMap(history.Group),
+		Labels:         copyStringMap(labels),
+		Annotations:    copyStringMap(annotations),
+		TriggeredAt:    history.TriggeredAt,
+		ResolvedAt:     history.ResolvedAt,
+		GeneratorURL:   mc.generatorURL,
+		Message:        history.Message,
+		Webhooks:       slices.Clone(mc.targets.webhooks),
+		Emails:         slices.Clone(mc.targets.emails),
+		Unusable:       slices.Clone(mc.targets.unusable),
 	}
 }
 
@@ -119,39 +130,100 @@ func (m *Manager) sendResolved(ctx context.Context, mc *messageContext, entry *m
 		annotations["resolved_at"] = entry.ResolvedAt.Format(time.RFC3339Nano)
 	}
 	maps.Copy(annotations, extra)
-	return m.sender.Send(ctx, mc.notification(entry, labels, annotations, models.AlertStatusResolved, value)).Err()
+	return m.deliver(ctx, mc.notification(entry, labels, annotations, models.AlertStatusResolved, value)).Err()
 }
 
-func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, targets map[string]DeliveryTargetID) {
-	if alert == nil || len(alert.RecipientUserIDs) == 0 {
-		return nil, nil, nil
-	}
+// deliver sends to the selected targets and reports the selected unusable
+// targets as failed.
+func (m *Manager) deliver(ctx context.Context, notification AlertNotification) DeliveryResults {
+	return append(m.sender.Send(ctx, notification), notification.unusableResults()...)
+}
 
-	// Recipients are users (not team-scoped). Resolve each by id directly.
-	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
-	emails := make([]string, 0, len(alert.RecipientUserIDs))
-	targets = make(map[string]DeliveryTargetID)
-	missing := make([]models.UserID, 0)
-	for _, userID := range alert.RecipientUserIDs {
-		user, err := m.db.GetUser(ctx, userID)
-		if err != nil || user == nil {
-			missing = append(missing, userID)
+// resolveTargets resolves destinations into targets. An inactive destination
+// is unusable unless includeInactive is set. An email address reached
+// through two destinations is mailed once.
+func (m *Manager) resolveTargets(ctx context.Context, destinations []*models.NotificationDestination, includeInactive bool) targets {
+	var out targets
+	mailed := make(map[string]struct{})
+	for _, d := range destinations {
+		if !d.IsActive && !includeInactive {
+			out.unusable = append(out.unusable, UnusableTarget{Target: destinationTarget(d.ID), Err: fmt.Sprintf("destination %q is inactive", d.Name)})
 			continue
 		}
-		email := strings.TrimSpace(user.Email)
-		if email == "" {
-			missing = append(missing, userID)
-			continue
+		switch d.Type {
+		case models.DestinationTypeWebhook:
+			out.webhooks = append(out.webhooks, WebhookTarget{Target: webhookTarget(d.ID), URL: d.Secret})
+		case models.DestinationTypeEmail:
+			recipients, err := notify.ExpandEmailDestination(ctx, m.db, d)
+			if err != nil {
+				m.log.Error("failed to resolve email recipients", "destination_id", d.ID, "error", err)
+				out.unusable = append(out.unusable, UnusableTarget{Target: destinationTarget(d.ID), Err: "recipient resolution failed"})
+				continue
+			}
+			for _, r := range recipients {
+				target := emailAddressTarget(d.ID, r.Address)
+				if r.UserID != nil {
+					target = emailUserTarget(d.ID, *r.UserID)
+				}
+				if r.Address == "" {
+					out.unusable = append(out.unusable, UnusableTarget{Target: target, Err: fmt.Sprintf("missing recipient user ID: %d", *r.UserID)})
+					continue
+				}
+				if _, seen := mailed[r.Address]; seen {
+					continue
+				}
+				mailed[r.Address] = struct{}{}
+				out.emails = append(out.emails, EmailTarget{Target: target, Address: r.Address})
+			}
+		default:
+			out.unusable = append(out.unusable, UnusableTarget{Target: destinationTarget(d.ID), Err: fmt.Sprintf("destination type %q has no sender yet", d.Type)})
 		}
-		if _, ok := seen[email]; ok {
-			continue
-		}
-		seen[email] = struct{}{}
-		emails = append(emails, email)
-		targets[email] = emailUserTarget(userID)
 	}
+	return out
+}
 
-	return emails, missing, targets
+// TestDestination sends a test notification to every target of d, active or
+// not, and returns one result per target.
+func (m *Manager) TestDestination(ctx context.Context, d *models.NotificationDestination) []models.DestinationTestResult {
+	resolved := m.resolveTargets(ctx, []*models.NotificationDestination{d}, true)
+	notification := AlertNotification{
+		AlertName:      "Test Alert",
+		Description:    "This is a test notification to verify a notification destination.",
+		Status:         models.AlertStatusTriggered,
+		Severity:       models.AlertSeverityInfo,
+		SourceName:     "Test Source",
+		Value:          1.0,
+		ThresholdOp:    models.AlertThresholdGreaterThan,
+		ThresholdValue: 0.0,
+		FrequencySecs:  60,
+		LookbackSecs:   300,
+		Query:          "SELECT 1",
+		TriggeredAt:    time.Now().UTC(),
+		Message:        "Test notification - please ignore",
+		Webhooks:       resolved.webhooks,
+		Emails:         resolved.emails,
+		Unusable:       resolved.unusable,
+	}
+	labels := make(map[DeliveryTargetID]string)
+	for _, w := range resolved.webhooks {
+		labels[w.Target] = string(d.Type)
+	}
+	for _, e := range resolved.emails {
+		labels[e.Target] = e.Address
+	}
+	for _, u := range resolved.unusable {
+		labels[u.Target] = string(d.Type)
+	}
+	results := m.deliver(ctx, notification)
+	out := make([]models.DestinationTestResult, 0, len(results))
+	for _, r := range results {
+		result := models.DestinationTestResult{Target: labels[r.Target], OK: r.Err == nil}
+		if r.Err != nil {
+			result.Error = boundedDeliveryError(r.Err).Error()
+		}
+		out = append(out, result)
+	}
+	return out
 }
 
 func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {

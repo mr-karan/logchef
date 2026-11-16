@@ -30,7 +30,7 @@ func TestWebhookRefusesLoopbackByDefault(t *testing.T) {
 	defer receiver.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}).Err()
+	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err()
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Errorf("delivery error = %v; want destination not allowed", err)
 	}
@@ -48,7 +48,7 @@ func TestWebhookResponseBodyBoundedInHistory(t *testing.T) {
 	defer receiver.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	alert.WebhookURLs = []string{receiver.URL}
+	linkWebhooks(t, db, alert, receiver.URL)
 	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
 	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
 		t.Fatal(err)
@@ -82,7 +82,7 @@ func TestDynamicWebhookReusesConnections(t *testing.T) {
 	defer receiver.Close()
 	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	for range 3 {
-		if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}).Err(); err != nil {
+		if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,7 +96,7 @@ func TestWebhookRejectsPrivateDestinations(t *testing.T) {
 		t.Run(host, func(t *testing.T) {
 			sender := NewWebhookSender(WebhookSenderOptions{Timeout: time.Second})
 			defer sender.client.CloseIdleConnections()
-			err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{"http://" + host + ":8888"}}).Err()
+			err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://" + host + ":8888")}).Err()
 			if err == nil || !strings.Contains(err.Error(), "not allowed") {
 				t.Fatalf("delivery error = %v; want destination not allowed", err)
 			}
@@ -128,7 +128,7 @@ func TestWebhookAllowsListedHost(t *testing.T) {
 			sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, strings.ToUpper(host)+".")})
 			defer sender.client.CloseIdleConnections()
 			destination := "http://" + net.JoinHostPort(host, parsed.Port())
-			if err := sender.Send(t.Context(), AlertNotification{AlertName: "errors", Value: 12, WebhookURLs: []string{destination}}).Err(); err != nil {
+			if err := sender.Send(t.Context(), AlertNotification{AlertName: "errors", Value: 12, Webhooks: testWebhooks(destination)}).Err(); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -145,7 +145,7 @@ func TestWebhookDoesNotFollowRedirects(t *testing.T) {
 	defer redirector.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{redirector.URL}}).Err()
+	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(redirector.URL)}).Err()
 	if err == nil || !strings.Contains(err.Error(), "status 307") {
 		t.Errorf("redirect error = %v; want status 307", err)
 	}
@@ -167,7 +167,9 @@ func TestWebhookTimeout(t *testing.T) {
 	sender := NewWebhookSender(WebhookSenderOptions{Timeout: 30 * time.Millisecond, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
 	done := make(chan error, 1)
-	go func() { done <- sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}).Err() }()
+	go func() {
+		done <- sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err()
+	}()
 	select {
 	case err := <-done:
 		if err == nil {
@@ -184,7 +186,7 @@ func TestDynamicWebhookConcurrentSendsAndSettingsChange(t *testing.T) {
 	receiver := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(http.StatusNoContent) }))
 	defer receiver.Close()
 	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	notification := AlertNotification{WebhookURLs: []string{receiver.URL}}
+	notification := AlertNotification{Webhooks: testWebhooks(receiver.URL)}
 	if err := sender.Send(t.Context(), notification).Err(); err == nil {
 		t.Fatal("accepted untrusted TLS certificate")
 	}
@@ -208,7 +210,7 @@ func TestDynamicWebhookConcurrentSendsAndSettingsChange(t *testing.T) {
 func TestWebhookErrorOmitsDestinationURL(t *testing.T) {
 	sender := NewWebhookSender(WebhookSenderOptions{})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{"http://127.0.0.1:8888/receiver?token=example-token"}}).Err()
+	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://127.0.0.1:8888/receiver?token=example-token")}).Err()
 	if err == nil {
 		t.Fatal("accepted loopback destination")
 	}
@@ -231,7 +233,7 @@ func TestWebhookDoesNotRetainStatusReason(t *testing.T) {
 	defer receiver.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}).Err()
+	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err()
 	if err == nil || !strings.Contains(err.Error(), "status 500") {
 		t.Fatalf("error = %v; want HTTP status", err)
 	}
@@ -255,7 +257,7 @@ func TestWebhookMalformedStatusBoundedInHistory(t *testing.T) {
 	defer receiver.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	alert.WebhookURLs = []string{receiver.URL}
+	linkWebhooks(t, db, alert, receiver.URL)
 	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
 	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
 		t.Fatal(err)
@@ -279,7 +281,7 @@ func TestManagerStopRecordsInFlightDeliveryError(t *testing.T) {
 	defer close(release)
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	alert.WebhookURLs = []string{receiver.URL}
+	linkWebhooks(t, db, alert, receiver.URL)
 	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 1, HistoryLimit: 100}})
 	upsertEvaluationJob(t, db, alert)
 	kind := manager.EvaluationKind()
@@ -326,7 +328,7 @@ func TestWebhookProxyEnvironmentCannotBypassGuard(t *testing.T) {
 		t.Fatal("webhook transport must ignore environment proxies")
 	}
 	for _, destination := range []string{"http://169.254.169.254/", "https://169.254.169.254/"} {
-		err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{destination}}).Err()
+		err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(destination)}).Err()
 		if err == nil || !strings.Contains(err.Error(), "not allowed") {
 			t.Errorf("proxy delivery = %v; want blocked destination", err)
 		}
@@ -374,7 +376,7 @@ func TestWebhookLocalNAT64Policy(t *testing.T) {
 			}
 			sender := NewWebhookSender(WebhookSenderOptions{Timeout: 50 * time.Millisecond, AllowedHosts: webhookTestAllowlist(t, address)})
 			defer sender.client.CloseIdleConnections()
-			err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{"http://[" + address + "]/"}}).Err()
+			err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://[" + address + "]/")}).Err()
 			if err != nil && strings.Contains(err.Error(), "not allowed") {
 				t.Fatal("explicit host exception was denied")
 			}
@@ -398,9 +400,9 @@ func TestWebhookTransportErrorCategories(t *testing.T) {
 			db, alert, logger := newManagerTestAlert(t)
 			sender := NewWebhookSender(WebhookSenderOptions{})
 			sender.client.Transport = webhookErrorTransport{err: tc.err}
-			alert.WebhookURLs = []string{"https://internal.example/"}
+			linkWebhooks(t, db, alert, "https://internal.example/")
 			want := "webhook delivery failed: webhook 1: " + tc.want
-			if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: alert.WebhookURLs}).Err(); err == nil || err.Error() != want {
+			if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("https://internal.example/")}).Err(); err == nil || err.Error() != want {
 				t.Fatalf("API delivery error = %v, want %q", err, want)
 			}
 			manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
@@ -433,7 +435,7 @@ func TestWebhookCapsEachResponseExcerpt(t *testing.T) {
 	var logs bytes.Buffer
 	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL, receiver.URL}}).Err()
+	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL, receiver.URL)}).Err()
 	if err == nil || strings.Contains(err.Error(), "xxx") || !strings.Contains(err.Error(), "webhook 2: status 502") {
 		t.Fatalf("response error retained body or lost status: %v", err)
 	}
@@ -466,11 +468,11 @@ func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
 	defer receiver.Close()
 	defer close(release)
 	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, Timeout: 200 * time.Millisecond, SkipTLSVerify: true, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}).Err(); err != nil {
+	if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err(); err != nil {
 		t.Fatalf("option TLS default ignored: %v", err)
 	}
 	started := time.Now()
-	if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL + "/slow"}}).Err(); err == nil {
+	if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL + "/slow")}).Err(); err == nil {
 		t.Fatal("timeout default ignored")
 	}
 	if time.Since(started) > time.Second {
@@ -479,7 +481,7 @@ func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
 	if err := db.UpsertSetting(t.Context(), "alerts.tls_insecure_skip_verify", "false", "boolean", "alerts", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}).Err(); err == nil {
+	if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err(); err == nil {
 		t.Fatal("saved TLS setting did not override option default")
 	}
 }
@@ -501,7 +503,7 @@ func TestWebhookTranslationPrefixes(t *testing.T) {
 					opts.AllowedHosts = webhookTestAllowlist(t, address)
 				}
 				sender := NewWebhookSender(opts)
-				err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{"http://[" + address + "]/"}}).Err()
+				err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://[" + address + "]/")}).Err()
 				sender.client.CloseIdleConnections()
 				blocked := err != nil && strings.Contains(err.Error(), "not allowed")
 				if blocked == allowed {
@@ -517,7 +519,7 @@ func TestWebhookPolicyDenialLogAndHistory(t *testing.T) {
 	var logs bytes.Buffer
 	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
 	defer sender.client.CloseIdleConnections()
-	alert.WebhookURLs = []string{"http://127.0.0.1:8888/"}
+	linkWebhooks(t, db, alert, "http://127.0.0.1:8888/")
 	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
 	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
 		t.Fatal(err)
@@ -554,7 +556,7 @@ func TestManagerRetriesOnlyFailedWebhookTargets(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer failure.Close()
-	alert.WebhookURLs = []string{success.URL, failure.URL}
+	linkWebhooks(t, db, alert, success.URL, failure.URL)
 	sender := NewMultiSender(NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")}))
 	for range 5 {
 		manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})

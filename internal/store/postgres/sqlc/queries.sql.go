@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAlertDestination = `-- name: AddAlertDestination :exec
+INSERT INTO alert_destinations (alert_id, destination_id) VALUES ($1, $2)
+`
+
+type AddAlertDestinationParams struct {
+	AlertID       int64 `json:"alert_id"`
+	DestinationID int64 `json:"destination_id"`
+}
+
+func (q *Queries) AddAlertDestination(ctx context.Context, arg AddAlertDestinationParams) error {
+	_, err := q.db.Exec(ctx, addAlertDestination, arg.AlertID, arg.DestinationID)
+	return err
+}
+
 const addCollectionItem = `-- name: AddCollectionItem :execrows
 INSERT INTO collection_items (collection_id, saved_query_id, sort_order, kind, added_by)
 VALUES ($1, $2, $3, $4, $5)
@@ -555,6 +569,17 @@ func (q *Queries) CountAlertInstancesByState(ctx context.Context, alertIds []int
 	return items, nil
 }
 
+const countAlertsUsingDestination = `-- name: CountAlertsUsingDestination :one
+SELECT COUNT(*) FROM alert_destinations WHERE destination_id = $1
+`
+
+func (q *Queries) CountAlertsUsingDestination(ctx context.Context, destinationID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countAlertsUsingDestination, destinationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAuditEvents = `-- name: CountAuditEvents :one
 SELECT COUNT(*) FROM (
     SELECT 1 FROM audit_events
@@ -713,6 +738,17 @@ func (q *Queries) CountSharedCollectionEditAccess(ctx context.Context, arg Count
 	return count, err
 }
 
+const countTeamNotificationDestinations = `-- name: CountTeamNotificationDestinations :one
+SELECT COUNT(*) FROM notification_destinations WHERE team_id = $1
+`
+
+func (q *Queries) CountTeamNotificationDestinations(ctx context.Context, teamID pgtype.Int8) (int64, error) {
+	row := q.db.QueryRow(ctx, countTeamNotificationDestinations, teamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUserSessions = `-- name: CountUserSessions :one
 SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND expires_at > $2
 `
@@ -779,38 +815,34 @@ INSERT INTO alerts (
     severity,
     labels_json,
     annotations_json,
-    recipient_user_ids_json,
-    webhook_urls_json,
     generator_url,
     group_by_json,
     is_active,
     created_by
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-RETURNING id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode, group_by_json, no_data_policy, eval_seq
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+RETURNING id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, query_language, editor_mode, group_by_json, no_data_policy, eval_seq
 `
 
 type CreateAlertParams struct {
-	SourceID             int64       `json:"source_id"`
-	Name                 string      `json:"name"`
-	Description          pgtype.Text `json:"description"`
-	QueryLanguage        string      `json:"query_language"`
-	EditorMode           string      `json:"editor_mode"`
-	Query                pgtype.Text `json:"query"`
-	ConditionJson        pgtype.Text `json:"condition_json"`
-	LookbackSeconds      int64       `json:"lookback_seconds"`
-	ThresholdOperator    string      `json:"threshold_operator"`
-	ThresholdValue       float64     `json:"threshold_value"`
-	FrequencySeconds     int64       `json:"frequency_seconds"`
-	Severity             string      `json:"severity"`
-	LabelsJson           pgtype.Text `json:"labels_json"`
-	AnnotationsJson      pgtype.Text `json:"annotations_json"`
-	RecipientUserIdsJson pgtype.Text `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      pgtype.Text `json:"webhook_urls_json"`
-	GeneratorUrl         pgtype.Text `json:"generator_url"`
-	GroupByJson          pgtype.Text `json:"group_by_json"`
-	IsActive             bool        `json:"is_active"`
-	CreatedBy            pgtype.Int8 `json:"created_by"`
+	SourceID          int64       `json:"source_id"`
+	Name              string      `json:"name"`
+	Description       pgtype.Text `json:"description"`
+	QueryLanguage     string      `json:"query_language"`
+	EditorMode        string      `json:"editor_mode"`
+	Query             pgtype.Text `json:"query"`
+	ConditionJson     pgtype.Text `json:"condition_json"`
+	LookbackSeconds   int64       `json:"lookback_seconds"`
+	ThresholdOperator string      `json:"threshold_operator"`
+	ThresholdValue    float64     `json:"threshold_value"`
+	FrequencySeconds  int64       `json:"frequency_seconds"`
+	Severity          string      `json:"severity"`
+	LabelsJson        pgtype.Text `json:"labels_json"`
+	AnnotationsJson   pgtype.Text `json:"annotations_json"`
+	GeneratorUrl      pgtype.Text `json:"generator_url"`
+	GroupByJson       pgtype.Text `json:"group_by_json"`
+	IsActive          bool        `json:"is_active"`
+	CreatedBy         pgtype.Int8 `json:"created_by"`
 }
 
 // Alerts
@@ -830,8 +862,6 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		arg.Severity,
 		arg.LabelsJson,
 		arg.AnnotationsJson,
-		arg.RecipientUserIdsJson,
-		arg.WebhookUrlsJson,
 		arg.GeneratorUrl,
 		arg.GroupByJson,
 		arg.IsActive,
@@ -857,8 +887,6 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.LastState,
 		&i.LastEvaluatedAt,
 		&i.LastTriggeredAt,
-		&i.RecipientUserIdsJson,
-		&i.WebhookUrlsJson,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -993,6 +1021,59 @@ func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const createNotificationDestination = `-- name: CreateNotificationDestination :one
+
+INSERT INTO notification_destinations (name, type, scope, team_id, config_json, secret, is_active, created_by)
+VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8
+)
+RETURNING id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at
+`
+
+type CreateNotificationDestinationParams struct {
+	Name       string      `json:"name"`
+	Type       string      `json:"type"`
+	Scope      string      `json:"scope"`
+	TeamID     pgtype.Int8 `json:"team_id"`
+	ConfigJson string      `json:"config_json"`
+	Secret     string      `json:"secret"`
+	IsActive   bool        `json:"is_active"`
+	CreatedBy  pgtype.Int8 `json:"created_by"`
+}
+
+// Notification destinations --------------------------------------------------
+func (q *Queries) CreateNotificationDestination(ctx context.Context, arg CreateNotificationDestinationParams) (NotificationDestination, error) {
+	row := q.db.QueryRow(ctx, createNotificationDestination,
+		arg.Name,
+		arg.Type,
+		arg.Scope,
+		arg.TeamID,
+		arg.ConfigJson,
+		arg.Secret,
+		arg.IsActive,
+		arg.CreatedBy,
+	)
+	var i NotificationDestination
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Scope,
+		&i.TeamID,
+		&i.ConfigJson,
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedBy,
+		&i.LastDeliveryAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const createOAuthAuthRequest = `-- name: CreateOAuthAuthRequest :exec
@@ -1408,6 +1489,15 @@ func (q *Queries) DeleteAlert(ctx context.Context, id int64) (int64, error) {
 	return id_2, err
 }
 
+const deleteAlertDestinations = `-- name: DeleteAlertDestinations :exec
+DELETE FROM alert_destinations WHERE alert_id = $1
+`
+
+func (q *Queries) DeleteAlertDestinations(ctx context.Context, alertID int64) error {
+	_, err := q.db.Exec(ctx, deleteAlertDestinations, alertID)
+	return err
+}
+
 const deleteAlertInstance = `-- name: DeleteAlertInstance :exec
 DELETE FROM alert_instances WHERE alert_id = $1 AND group_key = $2
 `
@@ -1541,6 +1631,18 @@ type DeleteJobParams struct {
 func (q *Queries) DeleteJob(ctx context.Context, arg DeleteJobParams) error {
 	_, err := q.db.Exec(ctx, deleteJob, arg.Kind, arg.Key)
 	return err
+}
+
+const deleteNotificationDestination = `-- name: DeleteNotificationDestination :execrows
+DELETE FROM notification_destinations WHERE id = $1
+`
+
+func (q *Queries) DeleteNotificationDestination(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteNotificationDestination, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteQueryShare = `-- name: DeleteQueryShare :one
@@ -1845,7 +1947,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode, group_by_json, no_data_policy, eval_seq FROM alerts WHERE id = $1
+SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, query_language, editor_mode, group_by_json, no_data_policy, eval_seq FROM alerts WHERE id = $1
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -1870,8 +1972,6 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.LastState,
 		&i.LastEvaluatedAt,
 		&i.LastTriggeredAt,
-		&i.RecipientUserIdsJson,
-		&i.WebhookUrlsJson,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2180,6 +2280,32 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 		&i.CreatedAt,
 		&i.GroupKey,
 		&i.GroupJson,
+	)
+	return i, err
+}
+
+const getNotificationDestination = `-- name: GetNotificationDestination :one
+SELECT id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at FROM notification_destinations WHERE id = $1
+`
+
+func (q *Queries) GetNotificationDestination(ctx context.Context, id int64) (NotificationDestination, error) {
+	row := q.db.QueryRow(ctx, getNotificationDestination, id)
+	var i NotificationDestination
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Scope,
+		&i.TeamID,
+		&i.ConfigJson,
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedBy,
+		&i.LastDeliveryAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -3381,6 +3507,74 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 	return items, nil
 }
 
+const listAlertDestinationLinks = `-- name: ListAlertDestinationLinks :many
+SELECT alert_id, destination_id FROM alert_destinations
+WHERE alert_id = ANY($1::bigint[])
+ORDER BY alert_id, destination_id
+`
+
+func (q *Queries) ListAlertDestinationLinks(ctx context.Context, alertIds []int64) ([]AlertDestination, error) {
+	rows, err := q.db.Query(ctx, listAlertDestinationLinks, alertIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertDestination{}
+	for rows.Next() {
+		var i AlertDestination
+		if err := rows.Scan(&i.AlertID, &i.DestinationID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertDestinations = `-- name: ListAlertDestinations :many
+SELECT d.id, d.name, d.type, d.scope, d.team_id, d.config_json, d.secret, d.is_active, d.created_by, d.last_delivery_at, d.last_delivery_status, d.last_delivery_error, d.created_at, d.updated_at FROM notification_destinations d
+JOIN alert_destinations ad ON ad.destination_id = d.id
+WHERE ad.alert_id = $1
+ORDER BY d.id
+`
+
+func (q *Queries) ListAlertDestinations(ctx context.Context, alertID int64) ([]NotificationDestination, error) {
+	rows, err := q.db.Query(ctx, listAlertDestinations, alertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDestination{}
+	for rows.Next() {
+		var i NotificationDestination
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.Scope,
+			&i.TeamID,
+			&i.ConfigJson,
+			&i.Secret,
+			&i.IsActive,
+			&i.CreatedBy,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryStatus,
+			&i.LastDeliveryError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAlertHistory = `-- name: ListAlertHistory :many
 SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
 WHERE alert_id = $1
@@ -3464,7 +3658,7 @@ func (q *Queries) ListAlertInstances(ctx context.Context, alertID int64) ([]Aler
 }
 
 const listAlertsBySource = `-- name: ListAlertsBySource :many
-SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode, group_by_json, no_data_policy, eval_seq FROM alerts
+SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, query_language, editor_mode, group_by_json, no_data_policy, eval_seq FROM alerts
 WHERE source_id = $1
 ORDER BY updated_at DESC, created_at DESC
 `
@@ -3498,8 +3692,6 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 			&i.LastState,
 			&i.LastEvaluatedAt,
 			&i.LastTriggeredAt,
-			&i.RecipientUserIdsJson,
-			&i.WebhookUrlsJson,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -3520,7 +3712,7 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 }
 
 const listAlertsForUser = `-- name: ListAlertsForUser :many
-SELECT a.id, a.source_id, a.name, a.description, a.query, a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.recipient_user_ids_json, a.webhook_urls_json, a.created_by, a.created_at, a.updated_at, a.query_language, a.editor_mode, a.group_by_json, a.no_data_policy, a.eval_seq FROM alerts a
+SELECT a.id, a.source_id, a.name, a.description, a.query, a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.created_by, a.created_at, a.updated_at, a.query_language, a.editor_mode, a.group_by_json, a.no_data_policy, a.eval_seq FROM alerts a
 WHERE a.source_id IN (
     SELECT DISTINCT ts.source_id
     FROM team_sources ts
@@ -3559,8 +3751,6 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 			&i.LastState,
 			&i.LastEvaluatedAt,
 			&i.LastTriggeredAt,
-			&i.RecipientUserIdsJson,
-			&i.WebhookUrlsJson,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4399,6 +4589,45 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 			&i.Name,
 			&i.Description,
 			&i.Managed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationDestinations = `-- name: ListNotificationDestinations :many
+SELECT id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at FROM notification_destinations ORDER BY name, id
+`
+
+func (q *Queries) ListNotificationDestinations(ctx context.Context) ([]NotificationDestination, error) {
+	rows, err := q.db.Query(ctx, listNotificationDestinations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDestination{}
+	for rows.Next() {
+		var i NotificationDestination
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.Scope,
+			&i.TeamID,
+			&i.ConfigJson,
+			&i.Secret,
+			&i.IsActive,
+			&i.CreatedBy,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryStatus,
+			&i.LastDeliveryError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -5678,6 +5907,51 @@ func (q *Queries) ListTeamsForUser(ctx context.Context, userID int64) ([]ListTea
 	return items, nil
 }
 
+const listUsableNotificationDestinations = `-- name: ListUsableNotificationDestinations :many
+SELECT d.id, d.name, d.type, d.scope, d.team_id, d.config_json, d.secret, d.is_active, d.created_by, d.last_delivery_at, d.last_delivery_status, d.last_delivery_error, d.created_at, d.updated_at FROM notification_destinations d
+WHERE d.scope = 'global'
+   OR (d.scope = 'private' AND d.created_by = $1)
+   OR (d.scope = 'team' AND d.team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = $1))
+ORDER BY d.name, d.id
+`
+
+// Private destinations of the user, team destinations of the user's teams,
+// and global ones.
+func (q *Queries) ListUsableNotificationDestinations(ctx context.Context, userID pgtype.Int8) ([]NotificationDestination, error) {
+	rows, err := q.db.Query(ctx, listUsableNotificationDestinations, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDestination{}
+	for rows.Next() {
+		var i NotificationDestination
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.Scope,
+			&i.TeamID,
+			&i.ConfigJson,
+			&i.Secret,
+			&i.IsActive,
+			&i.CreatedBy,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryStatus,
+			&i.LastDeliveryError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserTeams = `-- name: ListUserTeams :many
 SELECT t.id, t.name, t.description, t.managed, t.created_at, t.updated_at
 FROM teams t
@@ -6870,37 +7144,33 @@ SET name = $1,
     severity = $11,
     labels_json = $12,
     annotations_json = $13,
-    recipient_user_ids_json = $14,
-    webhook_urls_json = $15,
-    generator_url = $16,
-    group_by_json = $17,
-    is_active = $18,
+    generator_url = $14,
+    group_by_json = $15,
+    is_active = $16,
     eval_seq = eval_seq + 1,
     updated_at = now()
-WHERE id = $19
+WHERE id = $17
 RETURNING id
 `
 
 type UpdateAlertParams struct {
-	Name                 string      `json:"name"`
-	Description          pgtype.Text `json:"description"`
-	QueryLanguage        string      `json:"query_language"`
-	EditorMode           string      `json:"editor_mode"`
-	Query                pgtype.Text `json:"query"`
-	ConditionJson        pgtype.Text `json:"condition_json"`
-	LookbackSeconds      int64       `json:"lookback_seconds"`
-	ThresholdOperator    string      `json:"threshold_operator"`
-	ThresholdValue       float64     `json:"threshold_value"`
-	FrequencySeconds     int64       `json:"frequency_seconds"`
-	Severity             string      `json:"severity"`
-	LabelsJson           pgtype.Text `json:"labels_json"`
-	AnnotationsJson      pgtype.Text `json:"annotations_json"`
-	RecipientUserIdsJson pgtype.Text `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      pgtype.Text `json:"webhook_urls_json"`
-	GeneratorUrl         pgtype.Text `json:"generator_url"`
-	GroupByJson          pgtype.Text `json:"group_by_json"`
-	IsActive             bool        `json:"is_active"`
-	ID                   int64       `json:"id"`
+	Name              string      `json:"name"`
+	Description       pgtype.Text `json:"description"`
+	QueryLanguage     string      `json:"query_language"`
+	EditorMode        string      `json:"editor_mode"`
+	Query             pgtype.Text `json:"query"`
+	ConditionJson     pgtype.Text `json:"condition_json"`
+	LookbackSeconds   int64       `json:"lookback_seconds"`
+	ThresholdOperator string      `json:"threshold_operator"`
+	ThresholdValue    float64     `json:"threshold_value"`
+	FrequencySeconds  int64       `json:"frequency_seconds"`
+	Severity          string      `json:"severity"`
+	LabelsJson        pgtype.Text `json:"labels_json"`
+	AnnotationsJson   pgtype.Text `json:"annotations_json"`
+	GeneratorUrl      pgtype.Text `json:"generator_url"`
+	GroupByJson       pgtype.Text `json:"group_by_json"`
+	IsActive          bool        `json:"is_active"`
+	ID                int64       `json:"id"`
 }
 
 func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64, error) {
@@ -6918,8 +7188,6 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 		arg.Severity,
 		arg.LabelsJson,
 		arg.AnnotationsJson,
-		arg.RecipientUserIdsJson,
-		arg.WebhookUrlsJson,
 		arg.GeneratorUrl,
 		arg.GroupByJson,
 		arg.IsActive,
@@ -7044,6 +7312,59 @@ func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJo
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateNotificationDestination = `-- name: UpdateNotificationDestination :one
+UPDATE notification_destinations
+SET name = $1,
+    scope = $2,
+    team_id = $3,
+    config_json = $4,
+    secret = $5,
+    is_active = $6,
+    updated_at = now()
+WHERE id = $7
+RETURNING id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at
+`
+
+type UpdateNotificationDestinationParams struct {
+	Name       string      `json:"name"`
+	Scope      string      `json:"scope"`
+	TeamID     pgtype.Int8 `json:"team_id"`
+	ConfigJson string      `json:"config_json"`
+	Secret     string      `json:"secret"`
+	IsActive   bool        `json:"is_active"`
+	ID         int64       `json:"id"`
+}
+
+func (q *Queries) UpdateNotificationDestination(ctx context.Context, arg UpdateNotificationDestinationParams) (NotificationDestination, error) {
+	row := q.db.QueryRow(ctx, updateNotificationDestination,
+		arg.Name,
+		arg.Scope,
+		arg.TeamID,
+		arg.ConfigJson,
+		arg.Secret,
+		arg.IsActive,
+		arg.ID,
+	)
+	var i NotificationDestination
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Scope,
+		&i.TeamID,
+		&i.ConfigJson,
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedBy,
+		&i.LastDeliveryAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateReport = `-- name: UpdateReport :execrows

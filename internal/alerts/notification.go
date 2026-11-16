@@ -32,14 +32,33 @@ type AlertNotification struct {
 	GeneratorURL string
 	Message      string
 
-	RecipientUserIDs        []models.UserID
-	RecipientEmails         []string
-	MissingRecipientUserIDs []models.UserID
-	RecipientResolutionErr  string
-	WebhookURLs             []string
-	deliveryTargets         map[DeliveryTargetID]struct{}
-	attemptedTargets        map[DeliveryTargetID]struct{}
-	recipientTargets        map[string]DeliveryTargetID
+	// The targets of the rule's destinations. Unusable targets cannot be
+	// sent to and are reported as failed deliveries.
+	Webhooks []WebhookTarget
+	Emails   []EmailTarget
+	Unusable []UnusableTarget
+
+	deliveryTargets  map[DeliveryTargetID]struct{}
+	attemptedTargets map[DeliveryTargetID]struct{}
+}
+
+// WebhookTarget is the URL of one webhook destination.
+type WebhookTarget struct {
+	Target DeliveryTargetID
+	URL    string
+}
+
+// EmailTarget is one recipient address of an email destination.
+type EmailTarget struct {
+	Target  DeliveryTargetID
+	Address string
+}
+
+// UnusableTarget is a target that cannot receive the notification: an
+// inactive destination, or a recipient user without an address.
+type UnusableTarget struct {
+	Target DeliveryTargetID
+	Err    string
 }
 
 // AlertSender abstracts the delivery mechanism for alert notifications.

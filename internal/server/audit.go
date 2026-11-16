@@ -76,16 +76,6 @@ func auditDetail(c fiber.Ctx, key string, value any) {
 	st.detail.Set(key, value)
 }
 
-// auditSecretDetail adds one detail field that holds a credential: the event
-// records that it was given, never its value.
-func auditSecretDetail(c fiber.Ctx, key, value string) {
-	st := auditStageFor(c)
-	if st.detail == nil {
-		st.detail = audit.NewFields()
-	}
-	st.detail.Secret(key, value)
-}
-
 // auditAction replaces the route's action with another action of the same
 // resource. Any other action is a bug in the handler.
 func auditAction(c fiber.Ctx, action audit.Action) {

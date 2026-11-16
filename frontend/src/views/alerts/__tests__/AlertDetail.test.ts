@@ -13,7 +13,7 @@ function alert(id: number): Alert {
     id, source_id: 1, name: `Alert ${id}`, query_language: 'clickhouse-sql', editor_mode: 'native',
     query: 'SELECT count(*) FROM logs', lookback_seconds: 60, threshold_operator: 'gt',
     threshold_value: 0, frequency_seconds: 60, severity: 'warning',
-    recipient_user_ids: [], webhook_urls: [], is_active: true, last_state: 'firing',
+    destination_ids: [], is_active: true, last_state: 'firing',
     created_at: '2026-01-01', updated_at: '2026-01-01',
   }
 }

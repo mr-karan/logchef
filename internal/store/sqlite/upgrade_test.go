@@ -486,3 +486,39 @@ func lastVersionBefore(t *testing.T, v uint) uint {
 	}
 	return last
 }
+
+// alertDestinationsVersion is the migration that moves rule targets into
+// notification destinations (RFC 0006 unit D1).
+const alertDestinationsVersion = 50
+
+// TestAlertDestinationsUpgrade seeds rule targets at the newest version below
+// alertDestinationsVersion, then opens the database through New, which runs
+// the remaining migrations.
+func TestAlertDestinationsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	before := lastVersionBefore(t, alertDestinationsVersion)
+	m := newMigrator(t, raw)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.AlertDestinationsUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckAlertDestinationsUpgrade(t, db)
+}

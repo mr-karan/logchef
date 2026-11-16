@@ -11,6 +11,26 @@ import (
 // One view per audited object, sorted by object. A view names every field it
 // records and marks every credential with Secret.
 
+// NotificationDestinationFields records a destination. The webhook URL or
+// routing key and the external addresses of an email destination are
+// secrets.
+func NotificationDestinationFields(d *models.NotificationDestination) *Fields {
+	userIDs := make([]string, len(d.Config.UserIDs))
+	for i, id := range d.Config.UserIDs {
+		userIDs[i] = strconv.FormatInt(int64(id), 10)
+	}
+	return NewFields().
+		Set("name", d.Name).
+		Set("type", d.Type).
+		Set("scope", d.Scope).
+		Set("team_id", d.TeamID).
+		Set("is_active", d.IsActive).
+		Set("config.payload_version", d.Config.PayloadVersion).
+		Set("config.user_ids", userIDs).
+		Secret("config.addresses", strings.Join(d.Config.Addresses, "\n")).
+		Secret("secret", d.Secret)
+}
+
 // ReportFields records a report's configuration: its source by kind and ID,
 // its schedule and its options. Variables are recorded by name only, because
 // a value can be a literal from a query.
