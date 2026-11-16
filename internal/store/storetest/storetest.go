@@ -905,22 +905,6 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListAlertsBySource: %v / %d", err, len(bySrc))
 	}
 
-	// A never-evaluated active alert is due (LastEvaluatedAt IS NULL). This is
-	// the path whose dialect-specific time math differs between backends.
-	due, err := s.ListActiveAlertsDue(ctx)
-	if err != nil {
-		t.Fatalf("ListActiveAlertsDue: %v", err)
-	}
-	found := false
-	for _, d := range due {
-		if d.ID == a.ID {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("fresh active alert %d not returned by ListActiveAlertsDue", a.ID)
-	}
-
 	testAlertEvaluationState(t, ctx, s, a.ID)
 
 	// History round-trip.

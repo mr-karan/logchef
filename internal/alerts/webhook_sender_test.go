@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/pkg/models"
+	"github.com/mr-karan/logchef/internal/jobs"
 )
 
 func TestWebhookRefusesLoopbackByDefault(t *testing.T) {
@@ -280,17 +280,23 @@ func TestManagerStopRecordsInFlightDeliveryError(t *testing.T) {
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
 	alert.WebhookURLs = []string{receiver.URL}
-	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour, HistoryLimit: 100}})
-	manager.evalFn = func(ctx context.Context, _ *models.Alert) error { return manager.handleTriggered(ctx, alert, 12) }
-	manager.Start(t.Context())
-	defer manager.Stop()
+	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 1, HistoryLimit: 100}})
+	upsertEvaluationJob(t, db, alert)
+	kind := manager.EvaluationKind()
+	kind.Handler = func(ctx context.Context, job jobs.Job) error {
+		return manager.handleTriggered(withClaim(ctx, job), alert, 12)
+	}
+	runner := jobs.New(jobs.Options{Store: db, Logger: logger, PollInterval: 20 * time.Millisecond})
+	runner.Register(kind)
+	runner.Start(t.Context())
+	defer func() { _ = runner.Stop(context.Background()) }()
 	select {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("delivery did not start")
 	}
 	stopped := make(chan struct{})
-	go func() { manager.Stop(); close(stopped) }()
+	go func() { _ = runner.Stop(context.Background()); close(stopped) }()
 	select {
 	case <-stopped:
 	case <-time.After(3 * time.Second):

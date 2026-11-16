@@ -125,7 +125,7 @@ func TestSettingsRejectNonPositiveDurations(t *testing.T) {
 	e := newCollectionRouteEnv(t)
 	admin := mkTestUser(t, e.s.store, "duration-admin@example.com", models.UserRoleAdmin)
 	token := e.token(admin, models.TokenScopeSettingsWrite)
-	keys := []string{"auth.session_duration", "auth.default_token_expiry", "alerts.evaluation_interval", "alerts.default_lookback", "alerts.request_timeout"}
+	keys := []string{"auth.session_duration", "auth.default_token_expiry", "alerts.default_lookback", "alerts.request_timeout"}
 	for _, key := range keys {
 		for _, valueType := range []string{"duration", "string"} {
 			for _, value := range []string{"-1h", "0s", "1h"} {

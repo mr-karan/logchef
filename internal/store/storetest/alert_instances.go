@@ -133,7 +133,6 @@ func testAlertEvalSeq(t *testing.T, ctx context.Context, s store.Store, alert *m
 	assertEvalSeq(t, ctx, s, alert.ID, seq+2)
 	for _, read := range []func() ([]*models.Alert, error){
 		func() ([]*models.Alert, error) { return s.ListAlertsBySource(ctx, alert.SourceID) },
-		func() ([]*models.Alert, error) { return s.ListActiveAlertsDue(ctx) },
 	} {
 		alerts, err := read()
 		if err != nil {

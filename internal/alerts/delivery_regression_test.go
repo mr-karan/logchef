@@ -298,8 +298,7 @@ func TestDeliveryRecovery(t *testing.T) {
 								t.Fatal(err)
 							}
 						case "startup inactive":
-							m.Start(t.Context())
-							m.Stop()
+							m.RecoverDeliveries(t.Context())
 						case "deactivate":
 							alert.IsActive = false
 							if err := db.UpdateAlert(t.Context(), alert); err != nil {
@@ -321,8 +320,7 @@ func TestDeliveryRecovery(t *testing.T) {
 						}
 						if action == "startup inactive" {
 							m = NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true}})
-							m.Start(t.Context())
-							m.Stop()
+							m.RecoverDeliveries(t.Context())
 							again, err := db.GetAlertHistoryEntry(t.Context(), alert.ID, entry.ID)
 							if err != nil {
 								t.Fatal(err)

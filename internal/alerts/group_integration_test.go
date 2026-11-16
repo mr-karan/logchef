@@ -26,7 +26,7 @@ func firingServices(t *testing.T, manager *Manager, alertID models.AlertID) []st
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.evaluateAlert(t.Context(), alert); err != nil {
+	if err := manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	instances, err := manager.db.ListAlertInstances(t.Context(), alertID)

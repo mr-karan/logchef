@@ -12,6 +12,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -219,8 +220,9 @@ func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.S
 	return nil
 }
 
-// CreateAlert creates a new alert rule for the specified source, owned by createdBy.
-func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
+// CreateAlert creates a new alert rule for the specified source, owned by
+// createdBy, together with the job that evaluates it.
+func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -255,11 +257,20 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
 	}
+	if err := validateFrequency(alert.FrequencySeconds); err != nil {
+		return nil, err
+	}
 	if err := validateAlertModel(ctx, db, ds, sourceID, alert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
-	if err := db.CreateAlert(ctx, alert); err != nil {
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.CreateAlert(ctx, alert); err != nil {
+			return err
+		}
+		return jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert))
+	})
+	if err != nil {
 		log.Error("failed to create alert", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("failed to create alert: %w", err)
 	}
@@ -280,7 +291,7 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 	return alert, nil
 }
 
-// UpdateAlert updates an existing alert rule. A change of group_by closes every
+// UpdateAlert updates an existing alert rule and its job. A change of group_by closes every
 // open episode with "rule changed", because the old group keys no longer
 // name any group of the new result.
 func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
@@ -320,7 +331,12 @@ func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 	}
 
 	groupByChanged := !slices.Equal(existing.GroupBy, previous.GroupBy)
+	// The job row is written before the alert row, the order in which an
+	// evaluation's commit locks them, so an edit cannot deadlock with it.
 	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(existing)); err != nil {
+			return err
+		}
 		if err := tx.UpdateAlert(ctx, existing); err != nil {
 			return err
 		}
@@ -401,8 +417,8 @@ func applyThresholdUpdates(alert *models.Alert, req *models.UpdateAlertRequest) 
 		alert.ThresholdValue = *req.ThresholdValue
 	}
 	if req.FrequencySeconds != nil {
-		if *req.FrequencySeconds <= 0 {
-			return fmt.Errorf("%w: frequency_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+		if err := validateFrequency(*req.FrequencySeconds); err != nil {
+			return err
 		}
 		alert.FrequencySeconds = *req.FrequencySeconds
 	}
@@ -439,9 +455,25 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	}
 }
 
-// DeleteAlert removes an alert rule.
-func DeleteAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) error {
-	if err := db.DeleteAlert(ctx, alertID); err != nil {
+// validateFrequency applies the floor of the rule's job schedule. A stored rule
+// below the floor keeps its value until an edit sets a new one.
+func validateFrequency(seconds int) error {
+	if seconds < alerts.MinFrequencySeconds {
+		return fmt.Errorf("%w: frequency_seconds must be at least %d", ErrInvalidAlertConfiguration, alerts.MinFrequencySeconds)
+	}
+	return nil
+}
+
+// DeleteAlert removes an alert rule and its job.
+func DeleteAlert(ctx context.Context, db store.Store, log *slog.Logger, alertID models.AlertID) error {
+	// Job row first, as in UpdateAlert.
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := alerts.DeleteEvaluationJob(ctx, tx, alertID); err != nil {
+			return err
+		}
+		return tx.DeleteAlert(ctx, alertID)
+	})
+	if err != nil {
 		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}

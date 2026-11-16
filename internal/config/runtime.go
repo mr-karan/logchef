@@ -12,9 +12,6 @@ import (
 func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, settings store.SettingGetter) *Config {
 	// Start with the static configuration
 	cfg := *staticConfig
-	if cfg.Alerts.EvaluationInterval <= 0 {
-		cfg.Alerts.EvaluationInterval = defaultAlertsEvaluationInterval
-	}
 	if cfg.Alerts.DefaultLookback <= 0 {
 		cfg.Alerts.DefaultLookback = defaultAlertsDefaultLookback
 	}
@@ -36,7 +33,6 @@ func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, settings store
 	// Alerts configuration (only essential scheduling settings in config struct)
 	// SMTP and delivery settings are read directly from DB by the alerts manager
 	cfg.Alerts.Enabled = store.GetBoolSetting(ctx, settings, "alerts.enabled", cfg.Alerts.Enabled)
-	cfg.Alerts.EvaluationInterval = store.GetDurationSetting(ctx, settings, "alerts.evaluation_interval", cfg.Alerts.EvaluationInterval)
 	cfg.Alerts.DefaultLookback = store.GetDurationSetting(ctx, settings, "alerts.default_lookback", cfg.Alerts.DefaultLookback)
 	cfg.Alerts.HistoryLimit = store.GetIntSetting(ctx, settings, "alerts.history_limit", cfg.Alerts.HistoryLimit)
 

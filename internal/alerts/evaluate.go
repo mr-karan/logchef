@@ -10,15 +10,17 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// evaluateAlert runs the rule's query and commits the resulting transition.
+// evaluateAlert runs the rule's query over the lookback that ends at at, and
+// commits the resulting transition.
 // Every write is guarded by alert.EvalSeq, read with the rule, so an edit or
 // manual resolve after the rule was loaded makes the evaluation write nothing.
 // The next cycle evaluates the new rule.
-func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error {
+func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert, at time.Time) error {
 	if alert == nil {
 		return nil
 	}
@@ -37,9 +39,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 
 	timeout := models.DefaultQueryTimeoutSeconds
 	result, err := m.datasource.EvaluateAlert(ctx, alert.SourceID, datasource.AlertQueryRequest{
-		// The manager's ticker evaluates the window that ends now. The job
-		// runner (unit J2) passes the due occurrence instead.
-		At:              time.Now().UTC(),
+		At:              at.UTC(),
 		Language:        alert.QueryLanguage,
 		Query:           query,
 		LookbackSeconds: alert.LookbackSeconds,
@@ -152,7 +152,7 @@ func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq
 		return nil
 	}
 	if plan.newEpisode {
-		if err := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); err != nil {
+		if err := m.pruneHistory(ctx, alert.ID); err != nil {
 			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", err)
 		}
 	}
@@ -393,18 +393,41 @@ func firingInstance(alertID models.AlertID, current *models.AlertInstance, chang
 	return instance
 }
 
-// commit runs fn in one transaction behind the eval_seq guard. It returns
-// models.ErrConflict, and writes nothing, when a person edited or resolved the
-// rule after seq was read.
+// commit runs fn in one transaction behind the job claim and the eval_seq
+// guard. It writes nothing and returns models.ErrConflict when a later claim
+// owns the rule's job, or when a person edited or resolved the rule after seq
+// was read. Callers treat both as a discarded result.
 func (m *Manager) commit(ctx context.Context, alertID models.AlertID, seq int64, fn func(tx store.StoreOps) error) error {
 	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := holdClaim(ctx, tx); err != nil {
+			return err
+		}
 		if err := tx.AdvanceAlertEvalSeq(ctx, alertID, seq); err != nil {
 			return err
 		}
 		return fn(tx)
 	})
-	if models.IsConflict(err) {
+	switch {
+	case errors.Is(err, jobs.ErrLeaseLost):
+		m.log.Warn("a later claim owns this alert's evaluation; result discarded", "alert_id", alertID)
+		return models.ErrConflict
+	case models.IsConflict(err):
 		m.log.Debug("alert changed during evaluation; result discarded", "alert_id", alertID)
+	}
+	return err
+}
+
+// pruneHistory deletes the oldest closed history rows behind the job claim. A
+// run whose claim was taken over leaves pruning to the newer run.
+func (m *Manager) pruneHistory(ctx context.Context, alertID models.AlertID) error {
+	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := holdClaim(ctx, tx); err != nil {
+			return err
+		}
+		return tx.PruneAlertHistory(ctx, alertID, m.cfg.HistoryLimit)
+	})
+	if errors.Is(err, jobs.ErrLeaseLost) {
+		return nil
 	}
 	return err
 }
@@ -453,7 +476,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 	}
 
 	// Prune old history entries to prevent unbounded growth from repeated errors
-	if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
+	if pruneErr := m.pruneHistory(ctx, alert.ID); pruneErr != nil {
 		m.log.Warn("failed to prune alert history after error", "alert_id", alert.ID, "error", pruneErr)
 	}
 }
@@ -464,6 +487,9 @@ func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.Aler
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBookkeepingTimeout)
 	defer cancel()
 	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := holdClaim(ctx, tx); err != nil {
+			return err
+		}
 		if err := tx.UpdateAlertHistoryPayload(ctx, historyID, payload); err != nil {
 			return err
 		}
@@ -476,6 +502,8 @@ func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.Aler
 	case err == nil:
 	case models.IsNotFound(err):
 		m.log.Debug("alert history resolved during delivery", "alert_id", alertID, "history_id", historyID)
+	case errors.Is(err, jobs.ErrLeaseLost):
+		m.log.Warn("a later claim owns this alert's evaluation; delivery outcome not recorded", "alert_id", alertID, "history_id", historyID)
 	default:
 		m.log.Error("failed to update alert history payload after delivery", "alert_id", alertID, "history_id", historyID, "error", err)
 	}

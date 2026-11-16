@@ -81,7 +81,7 @@
   },
   "Alerts": {
     "Enabled": true,
-    "EvaluationInterval": 60000000000,
+    "MaxConcurrentEvaluations": 4,
     "DefaultLookback": 300000000000,
     "HistoryLimit": 50,
     "WebhookAllowedHosts": null,

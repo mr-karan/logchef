@@ -10,6 +10,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -43,8 +44,7 @@ func clickHouseAlertManager(t *testing.T) (*Manager, *models.Alert, *clickhouse.
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManager(Options{DB: db, Logger: logger, Datasources: service, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour, HistoryLimit: 100}})
-	t.Cleanup(manager.Stop)
+	manager := NewManager(Options{DB: db, Logger: logger, Datasources: service, Config: config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 1, HistoryLimit: 100}})
 	return manager, alert, client
 }
 
@@ -60,7 +60,7 @@ func TestManagerEvaluatesNumericTypesClickHouse(t *testing.T) {
 				t.Fatal(err)
 			}
 			alert.EvalSeq = stored.EvalSeq
-			if err := manager.evaluateAlert(t.Context(), alert); err != nil {
+			if err := manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			saved, err := manager.db.GetAlert(t.Context(), alert.ID)
@@ -86,9 +86,12 @@ func TestManagerStopCancelsClickHouseQuery(t *testing.T) {
 	if err := manager.db.UpdateAlert(t.Context(), alert); err != nil {
 		t.Fatal(err)
 	}
+	upsertEvaluationJob(t, manager.db, alert)
+	runner := jobs.New(jobs.Options{Store: manager.db, Logger: manager.log, PollInterval: 20 * time.Millisecond})
+	runner.Register(manager.EvaluationKind())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	manager.Start(ctx)
+	runner.Start(ctx)
 	deadline := time.NewTimer(2 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -112,7 +115,7 @@ func TestManagerStopCancelsClickHouseQuery(t *testing.T) {
 		}
 	}
 	stopped := make(chan struct{})
-	go func() { manager.Stop(); close(stopped) }()
+	go func() { _ = runner.Stop(context.Background()); close(stopped) }()
 	select {
 	case <-stopped:
 	case <-time.After(time.Second):

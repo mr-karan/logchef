@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -17,8 +16,8 @@ import (
 // alertEvaluationTimeout bounds a single alert's evaluation wall-clock time. It
 // sits above the per-query timeout (models.DefaultQueryTimeoutSeconds) with
 // headroom for result processing, so a query's own timeout normally fires
-// first; this deadline is the backstop that stops a wedged source from blocking
-// the sequential evaluation loop.
+// first; this deadline is the backstop that frees the job runner's slot when a
+// source wedges.
 const alertEvaluationTimeout = (models.DefaultQueryTimeoutSeconds + 30) * time.Second
 
 const maxDeliveryAttempts = 3
@@ -36,24 +35,14 @@ type Options struct {
 	Sender      AlertSender
 }
 
-// Manager coordinates alert evaluation and dispatches notifications when thresholds are met.
+// Manager evaluates alert rules, as the handler of the alert.evaluate job, and
+// dispatches notifications when thresholds are met.
 type Manager struct {
 	cfg        config.AlertsConfig
 	db         store.Store
 	datasource *datasource.Service
 	log        *slog.Logger
 	sender     AlertSender
-
-	// evalTimeout bounds a single alert's evaluation; evalFn is the function
-	// invoked per alert. Both are seams so the per-alert timeout isolation can
-	// be exercised in tests without a live datasource/store.
-	evalTimeout time.Duration
-	evalFn      func(context.Context, *models.Alert) error
-
-	lifecycleMu sync.Mutex
-	stopped     bool
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
 }
 
 // NewManager constructs a new alert manager instance.
@@ -62,128 +51,24 @@ func NewManager(opts Options) *Manager {
 	if sender == nil {
 		sender = noopSender{}
 	}
-	m := &Manager{
-		cfg:         opts.Config,
-		db:          opts.DB,
-		datasource:  opts.Datasources,
-		log:         opts.Logger.With("component", "alert_manager"),
-		sender:      sender,
-		evalTimeout: alertEvaluationTimeout,
+	return &Manager{
+		cfg:        opts.Config,
+		db:         opts.DB,
+		datasource: opts.Datasources,
+		log:        opts.Logger.With("component", "alert_manager"),
+		sender:     sender,
 	}
-	m.evalFn = m.evaluateAlert
-	return m
 }
 
-// Start launches the evaluation loop. It is a no-op when alerting is disabled.
-func (m *Manager) Start(ctx context.Context) {
-	m.lifecycleMu.Lock()
-	if m.stopped || m.cancel != nil {
-		m.lifecycleMu.Unlock()
-		return
-	}
-	if !m.cfg.Enabled {
-		m.lifecycleMu.Unlock()
-		m.log.Debug("alerting disabled")
-		return
-	}
-	ctx, m.cancel = context.WithCancel(ctx)
-	interval := m.cfg.EvaluationInterval
-	if interval <= 0 {
-		interval = time.Minute
-	}
-	ctx, m.cancel = context.WithCancel(ctx)
-	m.wg.Add(1)
-	m.lifecycleMu.Unlock()
-
-	// One manager owns delivery reservations, as required by docs/src/content/docs/operations/database-backends.md.
-	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
-	err := m.db.RecoverAlertDeliveries(recoveryCtx)
-	cancel()
-	if err != nil && !errors.Is(err, context.Canceled) {
+// RecoverDeliveries finalizes the delivery reservations that a stopped process
+// left. Call it once at startup, before the job runner starts evaluations. A
+// failure is logged and does not prevent evaluation.
+func (m *Manager) RecoverDeliveries(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
+	defer cancel()
+	if err := m.db.RecoverAlertDeliveries(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
 	}
-
-	m.log.Debug("starting alert manager", "interval", interval)
-
-	go func() {
-		defer m.wg.Done()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		// Run an initial evaluation so alerts fire soon after startup.
-		m.evaluateCycle(ctx)
-
-		for {
-			select {
-			case <-ticker.C:
-				m.evaluateCycle(ctx)
-			case <-ctx.Done():
-				m.log.Debug("alert manager context cancelled")
-				return
-			}
-		}
-	}()
-}
-
-// Stop signals the manager to stop evaluating alerts.
-func (m *Manager) Stop() {
-	_ = m.StopWithContext(context.Background())
-}
-
-// StopWithContext cancels evaluation and waits within the shutdown budget.
-func (m *Manager) StopWithContext(ctx context.Context) error {
-	m.lifecycleMu.Lock()
-	m.stopped = true
-	if m.cancel != nil {
-		m.cancel()
-	}
-	m.lifecycleMu.Unlock()
-	done := make(chan struct{})
-	go func() { m.wg.Wait(); close(done) }()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (m *Manager) evaluateCycle(ctx context.Context) {
-	if ctx.Err() != nil {
-		return
-	}
-	alerts, err := m.db.ListActiveAlertsDue(ctx)
-	if err != nil {
-		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to fetch alerts for evaluation", "error", err)
-		return
-	}
-	if len(alerts) == 0 {
-		return
-	}
-
-	for _, alert := range alerts {
-		if ctx.Err() != nil {
-			return
-		}
-		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
-			m.log.Log(ctx, evaluationLogLevel(ctx, err), "alert evaluation failed", "alert_id", alert.ID, "error", err)
-		}
-	}
-}
-
-// evaluateAlertWithTimeout bounds a single alert's evaluation with its own
-// deadline. The manager runs on the process-lifetime context, so without this
-// a source whose endpoint wedges (stalled socket) would block the sequential
-// loop forever and freeze alerting org-wide. A per-alert deadline isolates that
-// failure to the one slow alert; the loop then advances to the rest.
-func (m *Manager) evaluateAlertWithTimeout(ctx context.Context, alert *models.Alert) error {
-	timeout := m.evalTimeout
-	if timeout <= 0 {
-		timeout = alertEvaluationTimeout
-	}
-	alertCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	return m.evalFn(alertCtx, alert)
 }
 
 type noopSender struct{}

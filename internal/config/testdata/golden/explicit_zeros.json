@@ -85,7 +85,7 @@
   },
   "Alerts": {
     "Enabled": false,
-    "EvaluationInterval": 0,
+    "MaxConcurrentEvaluations": 4,
     "DefaultLookback": 0,
     "HistoryLimit": 0,
     "WebhookAllowedHosts": null,

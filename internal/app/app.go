@@ -17,6 +17,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/loki"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
@@ -44,6 +45,8 @@ type App struct {
 	Version      string
 	Alerts       *alerts.Manager
 	Audit        *audit.Recorder
+	// Jobs is nil on a replica with jobs.enabled = false.
+	Jobs *jobs.Runner
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -243,10 +246,23 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	a.server = server.New(serverOpts) //nolint:contextcheck // starts an app-lifetime cleanup janitor with its own timeout context; no request ctx to propagate
 
-	// Start the alerts evaluation loop.
-	a.Alerts.Start(ctx)
-
+	a.startJobs(ctx)
 	return nil
+}
+
+// startJobs starts the job runner. Every replica with jobs enabled claims due
+// jobs; a claim makes one replica run each tick.
+func (a *App) startJobs(ctx context.Context) {
+	if !a.Config.Jobs.Enabled {
+		a.Logger.Info("job runner disabled; this replica runs no background jobs")
+		return
+	}
+	a.Jobs = jobs.New(jobs.Options{Store: a.SQLite, Logger: a.Logger, PollInterval: a.Config.Jobs.PollInterval})
+	if a.Config.Alerts.Enabled {
+		a.Alerts.RecoverDeliveries(ctx)
+		a.Jobs.Register(a.Alerts.EvaluationKind())
+	}
+	a.Jobs.Start(ctx)
 }
 
 // Start begins the application's main execution loop (starts the HTTP server).
@@ -292,11 +308,11 @@ func (a *App) Shutdown(ctx context.Context) error {
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
 
-	alertDone := make(chan error, 1)
-	if a.Alerts != nil {
-		go func() { alertDone <- a.Alerts.StopWithContext(serverCtx) }()
+	jobsDone := make(chan error, 1)
+	if a.Jobs != nil {
+		go func() { jobsDone <- a.Jobs.Stop(serverCtx) }()
 	} else {
-		alertDone <- nil
+		jobsDone <- nil
 	}
 
 	var shutdownErr error
@@ -305,8 +321,8 @@ func (a *App) Shutdown(ctx context.Context) error {
 			shutdownErr = fmt.Errorf("error shutting down server: %w", err)
 		}
 	}
-	if err := <-alertDone; err != nil {
-		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("error stopping alerts: %w", err))
+	if err := <-jobsDone; err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("error stopping jobs: %w", err))
 	}
 	if shutdownErr != nil {
 		return shutdownErr
@@ -378,12 +394,6 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 			value:       fmt.Sprintf("%t", a.Config.Alerts.Enabled),
 			valueType:   "boolean",
 			description: "Enable or disable alert evaluation",
-			isSensitive: false,
-		},
-		"alerts.evaluation_interval": {
-			value:       a.Config.Alerts.EvaluationInterval.String(),
-			valueType:   "duration",
-			description: "How often to evaluate alert rules",
 			isSensitive: false,
 		},
 		"alerts.default_lookback": {

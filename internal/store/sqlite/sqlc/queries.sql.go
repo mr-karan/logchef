@@ -3249,67 +3249,6 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 	return items, nil
 }
 
-const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
-SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq FROM alerts
-WHERE is_active = 1
-  AND (
-        last_evaluated_at IS NULL
-        OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds')
-      )
-`
-
-func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
-	rows, err := q.query(ctx, q.listActiveAlertsDueStmt, listActiveAlertsDue)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Alert{}
-	for rows.Next() {
-		var i Alert
-		if err := rows.Scan(
-			&i.ID,
-			&i.SourceID,
-			&i.Name,
-			&i.Description,
-			&i.QueryLanguage,
-			&i.EditorMode,
-			&i.Query,
-			&i.ConditionJson,
-			&i.LookbackSeconds,
-			&i.ThresholdOperator,
-			&i.ThresholdValue,
-			&i.FrequencySeconds,
-			&i.Severity,
-			&i.LabelsJson,
-			&i.AnnotationsJson,
-			&i.GeneratorUrl,
-			&i.IsActive,
-			&i.LastState,
-			&i.LastEvaluatedAt,
-			&i.LastTriggeredAt,
-			&i.RecipientUserIdsJson,
-			&i.WebhookUrlsJson,
-			&i.CreatedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.GroupByJson,
-			&i.NoDataPolicy,
-			&i.EvalSeq,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAlertHistory = `-- name: ListAlertHistory :many
 SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
 WHERE alert_id = ?

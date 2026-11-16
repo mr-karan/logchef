@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/util"
@@ -448,6 +450,57 @@ func TestUpdateAlertRejectsInvalidPartialFields(t *testing.T) {
 	}
 	if reloaded.FrequencySeconds != 60 || reloaded.ThresholdOperator != models.AlertThresholdGreaterThan {
 		t.Errorf("alert mutated despite rejected update: %+v", reloaded)
+	}
+}
+
+// TestAlertJobFollowsTheRule: create, update and delete change the rule's
+// alert.evaluate job in the same transaction. The job runs at the rule's
+// frequency, is disabled while the rule is paused, and a frequency below the
+// 10-second floor is refused.
+func TestAlertJobFollowsTheRule(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	owner := newTestUser(t, db, "job-owner@example.com", "Owner")
+	src := newTestSource(t, db, "job-src")
+	ds := newFakeDatasourceService(db, log, nil)
+	job := func(id models.AlertID) (*models.ScheduledJob, error) {
+		return db.GetJob(ctx, string(alerts.EvaluateKind), strconv.FormatInt(int64(id), 10))
+	}
+
+	tooFast := newTestCreateAlertRequest()
+	tooFast.FrequencySeconds = 9
+	if _, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, tooFast); !errors.Is(err, ErrInvalidAlertConfiguration) {
+		t.Errorf("CreateAlert(9s) err = %v, want ErrInvalidAlertConfiguration", err)
+	}
+
+	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, newTestCreateAlertRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := job(alert.ID)
+	if err != nil || created.ScheduleKind != "interval" || created.ScheduleExpr != "60" || created.Misfire != "run_once" || !created.Enabled {
+		t.Fatalf("job after create = %+v, %v; want an enabled 60s interval", created, err)
+	}
+
+	paused, ten := false, 10
+	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{IsActive: &paused, FrequencySeconds: &ten}); err != nil {
+		t.Fatal(err)
+	}
+	if updated, err := job(alert.ID); err != nil || updated.ScheduleExpr != "10" || updated.Enabled {
+		t.Fatalf("job after pause = %+v, %v; want a disabled 10s interval", updated, err)
+	}
+	nine := 9
+	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{FrequencySeconds: &nine}); !errors.Is(err, ErrInvalidAlertConfiguration) {
+		t.Errorf("UpdateAlert(9s) err = %v, want ErrInvalidAlertConfiguration", err)
+	}
+
+	if err := DeleteAlert(ctx, db, log, alert.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := job(alert.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("job after delete err = %v, want ErrNotFound", err)
 	}
 }
 
