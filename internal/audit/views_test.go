@@ -54,6 +54,23 @@ type viewCase struct {
 }
 
 var viewCases = []viewCase{
+	{"session", func(tag string) (*audit.Fields, []string) {
+		var x models.Session
+		fillStrings(reflect.ValueOf(&x), tag, "Session")
+		// SessionFields records only a time, so the probe gives the suite a
+		// recorded string; the leak check on the session ID is what counts.
+		return audit.SessionFields(&x).Set("probe", tag+":probe;"), []string{string(x.ID)}
+	}},
+	{"oauth consent", func(tag string) (*audit.Fields, []string) {
+		var r models.OAuthAuthRequest
+		fillStrings(reflect.ValueOf(&r), tag, "Request")
+		return audit.OAuthConsentFields(&r, "mcp", r.GrantID), []string{string(r.ID), r.RedirectURI, r.CodeChallenge, r.State}
+	}},
+	{"oauth grant", func(tag string) (*audit.Fields, []string) {
+		var g models.OAuthGrant
+		fillStrings(reflect.ValueOf(&g), tag, "Grant")
+		return audit.OAuthGrantFields(&g, "api"), nil
+	}},
 	{"clickhouse source", func(tag string) (*audit.Fields, []string) {
 		var s models.Source
 		fillStrings(reflect.ValueOf(&s), tag, "Source")

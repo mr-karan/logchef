@@ -129,12 +129,12 @@ var registrations = []struct {
 	{DashboardCreate, false}, {DashboardUpdate, false}, {DashboardDelete, false},
 	{LogExportCreate, false}, {LogExportDownload, false},
 	{NotificationDestinationCreate, true}, {NotificationDestinationUpdate, true}, {NotificationDestinationDelete, true}, {NotificationDestinationTest, false},
-	{OAuthConsentApprove, false}, {OAuthConsentDeny, false},
-	{OAuthGrantRevoke, false},
+	{OAuthConsentApprove, true}, {OAuthConsentDeny, true},
+	{OAuthGrantRevoke, true},
 	{QueryShareCreate, false}, {QueryShareDelete, false},
 	{SavedQueryCreate, false}, {SavedQueryUpdate, false}, {SavedQueryDelete, false},
 	{ServiceAccountCreate, true}, {ServiceAccountDelete, true},
-	{SessionLogin, false}, {SessionLogout, false},
+	{SessionLogin, true}, {SessionLogout, true},
 	// A setting test changes no object, so it has a target and a detail but
 	// no fields to stage.
 	{SettingUpdate, true}, {SettingDelete, true}, {SettingTest, false},

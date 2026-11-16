@@ -1397,19 +1397,24 @@ RETURNING *;
 -- name: GetOAuthGrant :one
 SELECT * FROM oauth_grants WHERE id = ?;
 
--- name: RevokeOAuthGrant :execrows
+-- name: RevokeOAuthGrant :one
+-- Returns no row when the grant was already revoked, so only the call that
+-- revokes it reports the revocation.
 UPDATE oauth_grants
 SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
-WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL
+RETURNING *;
 
--- name: RevokeOAuthGrantForUser :execrows
+-- name: RevokeOAuthGrantForUser :one
 UPDATE oauth_grants
 SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
-WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
+WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL
+RETURNING *;
 
--- name: RevokeOAuthGrantByToken :exec
+-- name: RevokeOAuthGrantByToken :one
 -- Revoke the grant that owns an access-token ID hash or refresh-token hash,
--- only when the grant belongs to the given client.
+-- only when the grant belongs to the given client. Returns no row when no
+-- active grant matched.
 UPDATE oauth_grants
 SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
 WHERE oauth_grants.revoked_at IS NULL
@@ -1418,7 +1423,8 @@ WHERE oauth_grants.revoked_at IS NULL
       SELECT a.grant_id FROM oauth_access_tokens a WHERE a.id_hash = sqlc.arg(token_hash)
       UNION
       SELECT r.grant_id FROM oauth_refresh_tokens r WHERE r.token_hash = sqlc.arg(token_hash)
-  );
+  )
+RETURNING *;
 
 -- name: TouchOAuthGrant :exec
 UPDATE oauth_grants SET last_used_at = ? WHERE id = ?;

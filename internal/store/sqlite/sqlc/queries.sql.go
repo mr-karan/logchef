@@ -6836,10 +6836,11 @@ func (q *Queries) ResumeReport(ctx context.Context, id int64) (int64, error) {
 	return result.RowsAffected()
 }
 
-const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows
+const revokeOAuthGrant = `-- name: RevokeOAuthGrant :one
 UPDATE oauth_grants
 SET revoked_at = ?1, revoke_reason = ?2
 WHERE id = ?3 AND revoked_at IS NULL
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
 `
 
 type RevokeOAuthGrantParams struct {
@@ -6848,15 +6849,27 @@ type RevokeOAuthGrantParams struct {
 	ID     int64          `json:"id"`
 }
 
-func (q *Queries) RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error) {
-	result, err := q.exec(ctx, q.revokeOAuthGrantStmt, revokeOAuthGrant, arg.Now, arg.Reason, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+// Returns no row when the grant was already revoked, so only the call that
+// revokes it reports the revocation.
+func (q *Queries) RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.revokeOAuthGrantStmt, revokeOAuthGrant, arg.Now, arg.Reason, arg.ID)
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
-const revokeOAuthGrantByToken = `-- name: RevokeOAuthGrantByToken :exec
+const revokeOAuthGrantByToken = `-- name: RevokeOAuthGrantByToken :one
 UPDATE oauth_grants
 SET revoked_at = ?1, revoke_reason = ?2
 WHERE oauth_grants.revoked_at IS NULL
@@ -6866,6 +6879,7 @@ WHERE oauth_grants.revoked_at IS NULL
       UNION
       SELECT r.grant_id FROM oauth_refresh_tokens r WHERE r.token_hash = ?4
   )
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
 `
 
 type RevokeOAuthGrantByTokenParams struct {
@@ -6876,21 +6890,36 @@ type RevokeOAuthGrantByTokenParams struct {
 }
 
 // Revoke the grant that owns an access-token ID hash or refresh-token hash,
-// only when the grant belongs to the given client.
-func (q *Queries) RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) error {
-	_, err := q.exec(ctx, q.revokeOAuthGrantByTokenStmt, revokeOAuthGrantByToken,
+// only when the grant belongs to the given client. Returns no row when no
+// active grant matched.
+func (q *Queries) RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.revokeOAuthGrantByTokenStmt, revokeOAuthGrantByToken,
 		arg.Now,
 		arg.Reason,
 		arg.ClientID,
 		arg.TokenHash,
 	)
-	return err
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
-const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :execrows
+const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :one
 UPDATE oauth_grants
 SET revoked_at = ?1, revoke_reason = ?2
 WHERE id = ?3 AND user_id = ?4 AND revoked_at IS NULL
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
 `
 
 type RevokeOAuthGrantForUserParams struct {
@@ -6900,17 +6929,27 @@ type RevokeOAuthGrantForUserParams struct {
 	UserID int64          `json:"user_id"`
 }
 
-func (q *Queries) RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error) {
-	result, err := q.exec(ctx, q.revokeOAuthGrantForUserStmt, revokeOAuthGrantForUser,
+func (q *Queries) RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.revokeOAuthGrantForUserStmt, revokeOAuthGrantForUser,
 		arg.Now,
 		arg.Reason,
 		arg.ID,
 		arg.UserID,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
 const saveOAuthAuthCode = `-- name: SaveOAuthAuthCode :execrows

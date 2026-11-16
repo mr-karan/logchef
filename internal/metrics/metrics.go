@@ -200,7 +200,8 @@ func DetermineErrorType(err error) string {
 }
 
 // RecordAuditEvent counts one audit event by result: "stored" when the insert
-// succeeded and "failed" when it did not.
+// succeeded, "failed" when it did not, and "limited" when a rate bound kept
+// it out of the table.
 func RecordAuditEvent(result string) {
 	metrics.GetOrCreateCounter(fmt.Sprintf(`logchef_audit_events_total{result=%q}`, result)).Inc()
 }

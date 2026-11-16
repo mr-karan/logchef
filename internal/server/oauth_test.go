@@ -113,7 +113,7 @@ func newOAuthEnv(t *testing.T) *oauthEnv {
 func newOAuthEnvWithConfig(t *testing.T, cfg *config.Config, role models.UserRole) *oauthEnv {
 	t.Helper()
 	db := newServerTestDB(t)
-	oauthServer, err := oauth.New(cfg, db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	oauthServer, err := oauth.New(cfg, db, testAuditRecorder(t, db), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatalf("oauth.New: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/zitadel/oidc/v3/pkg/op"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
@@ -49,7 +50,13 @@ func openDB(t *testing.T, path string) *sqlite.DB {
 
 func newTestServer(t *testing.T, db *sqlite.DB) *Server {
 	t.Helper()
-	s, err := New(testConfig(), db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return newTestServerWithConfig(t, testConfig(), db)
+}
+
+func newTestServerWithConfig(t *testing.T, cfg *config.Config, db *sqlite.DB) *Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s, err := New(cfg, db, audit.New(audit.Options{Store: db, Logger: log}), log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -135,10 +142,7 @@ func TestKeysDeriveFromSecret(t *testing.T) {
 	}
 	cfg := testConfig()
 	cfg.Auth.APITokenSecret = strings.Repeat("z", 32)
-	other, err := New(cfg, openDB(t, path), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	other := newTestServerWithConfig(t, cfg, openDB(t, path))
 	if _, err := other.AuthenticateAccessToken(context.Background(), token, ResourceAPI); err == nil {
 		t.Fatal("a server with another secret accepted the token")
 	}

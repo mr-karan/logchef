@@ -32,6 +32,9 @@ func RunOAuth(t *testing.T, open Opener) {
 	t.Run("RefreshReplayRevocationSurvives", func(t *testing.T) { o.testRefreshReplay(t, ctx, open) })
 	t.Run("RefreshCheckDetectsReplay", func(t *testing.T) { o.testRefreshCheckReplay(t, ctx, open) })
 	t.Run("RefreshExpiredAndUnknown", func(t *testing.T) { o.testRefreshInvalid(t, ctx, open) })
+	t.Run("CodeReplayReportsRevocationOnce", func(t *testing.T) { o.testCodeReplayReportsRevocationOnce(t, ctx, open) })
+	t.Run("RefreshReplayReportsRevocationOnce", func(t *testing.T) { o.testRefreshReplayReportsRevocationOnce(t, ctx, open) })
+	t.Run("RevokeReturnsTheGrant", func(t *testing.T) { o.testRevokeReturnsTheGrant(t, ctx, open) })
 	t.Run("AccessTokenAuthentication", func(t *testing.T) { o.testAccessToken(t, ctx, open) })
 	t.Run("GrantRevocation", func(t *testing.T) { o.testRevocation(t, ctx, open) })
 	t.Run("CleanupKeepsLiveRefreshFamilies", func(t *testing.T) { o.testCleanup(t, ctx, open) })
@@ -169,8 +172,8 @@ func (o *oauthFixture) testCodeConcurrent(t *testing.T, ctx context.Context, ope
 		_, code := o.approvedCode(t, ctx, s1, user, o.base.Add(2*time.Minute))
 		var err1, err2 error
 		race(
-			func() { _, err1 = s1.ConsumeAuthCode(ctx, code, o.base) },
-			func() { _, err2 = s2.ConsumeAuthCode(ctx, code, o.base) },
+			func() { _, _, err1 = s1.ConsumeAuthCode(ctx, code, o.base) },
+			func() { _, _, err2 = s2.ConsumeAuthCode(ctx, code, o.base) },
 		)
 		if (err1 == nil) == (err2 == nil) {
 			t.Fatalf("round %d: want exactly one success, got %v / %v", round, err1, err2)
@@ -190,14 +193,14 @@ func (o *oauthFixture) testCodeReplay(t *testing.T, ctx context.Context, open Op
 	user := o.user(t, ctx, s)
 
 	grant, code := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
-	got, err := s.ConsumeAuthCode(ctx, code, o.base)
+	got, _, err := s.ConsumeAuthCode(ctx, code, o.base)
 	if err != nil {
 		t.Fatalf("first ConsumeAuthCode: %v", err)
 	}
 	if got.GrantID == nil || *got.GrantID != grant.ID || got.Resource != mcpResource || got.UserID == nil || *got.UserID != user.ID {
 		t.Fatalf("consumed request = %+v, want grant %d, resource %s, user %d", got, grant.ID, mcpResource, user.ID)
 	}
-	if _, err := s.ConsumeAuthCode(ctx, code, o.base); !errors.Is(err, models.ErrOAuthCodeReplay) {
+	if _, _, err := s.ConsumeAuthCode(ctx, code, o.base); !errors.Is(err, models.ErrOAuthCodeReplay) {
 		t.Fatalf("replayed code err = %v, want ErrOAuthCodeReplay", err)
 	}
 	if grantActive(t, ctx, open(t), user.ID, grant.ID) {
@@ -206,23 +209,23 @@ func (o *oauthFixture) testCodeReplay(t *testing.T, ctx context.Context, open Op
 
 	// An expired code is invalid but is not a replay: the grant stays.
 	expiredGrant, expired := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
-	if _, err := s.ConsumeAuthCode(ctx, expired, o.base.Add(2*time.Minute)); !errors.Is(err, models.ErrOAuthInvalidGrant) || errors.Is(err, models.ErrOAuthCodeReplay) {
+	if _, _, err := s.ConsumeAuthCode(ctx, expired, o.base.Add(2*time.Minute)); !errors.Is(err, models.ErrOAuthInvalidGrant) || errors.Is(err, models.ErrOAuthCodeReplay) {
 		t.Fatalf("expired code err = %v, want ErrOAuthInvalidGrant without replay", err)
 	}
 	if !grantActive(t, ctx, s, user.ID, expiredGrant.ID) {
 		t.Fatalf("expired code revoked grant %d", expiredGrant.ID)
 	}
 
-	if _, err := s.ConsumeAuthCode(ctx, o.hash("never-issued"), o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
+	if _, _, err := s.ConsumeAuthCode(ctx, o.hash("never-issued"), o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
 		t.Fatalf("unknown code err = %v, want ErrOAuthInvalidGrant", err)
 	}
 
 	// A code under a revoked grant cannot be consumed.
 	revoked, revokedCode := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
-	if err := s.RevokeGrant(ctx, revoked.ID, user.ID, o.base); err != nil {
+	if _, err := s.RevokeGrant(ctx, revoked.ID, user.ID, o.base); err != nil {
 		t.Fatalf("RevokeGrant: %v", err)
 	}
-	if _, err := s.ConsumeAuthCode(ctx, revokedCode, o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
+	if _, _, err := s.ConsumeAuthCode(ctx, revokedCode, o.base); !errors.Is(err, models.ErrOAuthInvalidGrant) {
 		t.Fatalf("code under revoked grant err = %v, want ErrOAuthInvalidGrant", err)
 	}
 }
@@ -453,13 +456,13 @@ func (o *oauthFixture) testRevocation(t *testing.T, ctx context.Context, open Op
 
 	grant, _ := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
 	access, refresh := o.tokens(t, ctx, s, grant.ID, o.base.Add(time.Hour))
-	if err := s.RevokeGrant(ctx, grant.ID, other.ID, o.base); !errors.Is(err, models.ErrNotFound) {
+	if _, err := s.RevokeGrant(ctx, grant.ID, other.ID, o.base); !errors.Is(err, models.ErrNotFound) {
 		t.Fatalf("revoke by other user err = %v, want ErrNotFound", err)
 	}
-	if err := s.RevokeGrant(ctx, grant.ID, user.ID, o.base); err != nil {
+	if _, err := s.RevokeGrant(ctx, grant.ID, user.ID, o.base); err != nil {
 		t.Fatalf("RevokeGrant: %v", err)
 	}
-	if err := s.RevokeGrant(ctx, grant.ID, user.ID, o.base); !errors.Is(err, models.ErrNotFound) {
+	if _, err := s.RevokeGrant(ctx, grant.ID, user.ID, o.base); !errors.Is(err, models.ErrNotFound) {
 		t.Fatalf("second revoke err = %v, want ErrNotFound", err)
 	}
 	if _, _, err := s.AuthenticateOAuthAccessToken(ctx, access, mcpResource, o.base); !errors.Is(err, models.ErrNotFound) {
@@ -480,20 +483,20 @@ func (o *oauthFixture) testRevocation(t *testing.T, ctx context.Context, open Op
 		if byRefresh {
 			token = r
 		}
-		if err := s.RevokeGrantByToken(ctx, token, cliClient, o.base); err != nil {
+		if _, err := s.RevokeGrantByToken(ctx, token, cliClient, o.base); err != nil {
 			t.Fatalf("RevokeGrantByToken(other client): %v", err)
 		}
 		if !grantActive(t, ctx, s, user.ID, g.ID) {
 			t.Fatalf("other client revoked grant %d", g.ID)
 		}
-		if err := s.RevokeGrantByToken(ctx, token, webClient, o.base); err != nil {
+		if _, err := s.RevokeGrantByToken(ctx, token, webClient, o.base); err != nil {
 			t.Fatalf("RevokeGrantByToken: %v", err)
 		}
 		if grantActive(t, ctx, s, user.ID, g.ID) {
 			t.Fatalf("grant %d active after RevokeGrantByToken (refresh=%v)", g.ID, byRefresh)
 		}
 	}
-	if err := s.RevokeGrantByToken(ctx, o.hash("never-issued"), webClient, o.base); err != nil {
+	if _, err := s.RevokeGrantByToken(ctx, o.hash("never-issued"), webClient, o.base); err != nil {
 		t.Fatalf("RevokeGrantByToken(unknown): %v", err)
 	}
 
@@ -568,7 +571,7 @@ func (o *oauthFixture) testRestart(t *testing.T, ctx context.Context, open Opene
 	if _, _, err := second.AuthenticateOAuthAccessToken(ctx, access, mcpResource, o.base); err != nil {
 		t.Fatalf("access token lost across restart: %v", err)
 	}
-	if _, err := second.ConsumeAuthCode(ctx, code, o.base); err != nil {
+	if _, _, err := second.ConsumeAuthCode(ctx, code, o.base); err != nil {
 		t.Fatalf("auth code lost across restart: %v", err)
 	}
 	if out, err := second.RotateRefreshToken(ctx, refresh, o.rotation(o.base.Add(time.Hour)), o.base); err != nil || out.Kind != models.RefreshOK {
@@ -583,7 +586,7 @@ func (o *oauthFixture) testRootOnly(t *testing.T, ctx context.Context, open Open
 	_, refresh := o.tokens(t, ctx, s, grant.ID, o.base.Add(time.Hour))
 
 	err := s.WithTx(ctx, func(tx store.StoreOps) error {
-		if _, err := tx.ConsumeAuthCode(ctx, code, o.base); err == nil {
+		if _, _, err := tx.ConsumeAuthCode(ctx, code, o.base); err == nil {
 			t.Errorf("ConsumeAuthCode inside WithTx succeeded")
 		}
 		if _, err := tx.RotateRefreshToken(ctx, refresh, o.rotation(o.base.Add(time.Hour)), o.base); err == nil {
@@ -598,5 +601,91 @@ func (o *oauthFixture) testRootOnly(t *testing.T, ctx context.Context, open Open
 	})
 	if err != nil {
 		t.Fatalf("WithTx: %v", err)
+	}
+}
+
+// wantRevoked checks the grant that a replay reports it revoked.
+func wantRevoked(t *testing.T, path string, got *models.OAuthGrant, user models.UserID, grant models.OAuthGrantID, reason models.OAuthRevokeReason) {
+	t.Helper()
+	if got == nil || got.ID != grant || got.UserID != user || got.RevokedAt == nil || got.RevokeReason != reason {
+		t.Fatalf("%s revoked %+v, want grant %d revoked for %s", path, got, grant, reason)
+	}
+}
+
+// A code replay returns the grant it revoked, so the caller can audit the
+// revocation, and nil when the grant was already revoked, so a second replay
+// reports nothing.
+func (o *oauthFixture) testCodeReplayReportsRevocationOnce(t *testing.T, ctx context.Context, open Opener) {
+	s := open(t)
+	user := o.user(t, ctx, s)
+	grant, code := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
+	if _, revoked, err := s.ConsumeAuthCode(ctx, code, o.base); err != nil || revoked != nil {
+		t.Fatalf("first ConsumeAuthCode = %+v / %v", revoked, err)
+	}
+	_, revoked, err := s.ConsumeAuthCode(ctx, code, o.base)
+	if !errors.Is(err, models.ErrOAuthCodeReplay) {
+		t.Fatalf("code replay err = %v", err)
+	}
+	wantRevoked(t, "code replay", revoked, user.ID, grant.ID, models.OAuthRevokeCodeReplay)
+	if _, revoked, err := s.ConsumeAuthCode(ctx, code, o.base); !errors.Is(err, models.ErrOAuthCodeReplay) || revoked != nil {
+		t.Fatalf("second code replay = %+v / %v, want no revocation", revoked, err)
+	}
+}
+
+// A refresh replay, detected by the check or by the rotation, reports the
+// grant it revoked once, like a code replay.
+func (o *oauthFixture) testRefreshReplayReportsRevocationOnce(t *testing.T, ctx context.Context, open Opener) {
+	s := open(t)
+	user := o.user(t, ctx, s)
+	for _, viaCheck := range []bool{false, true} {
+		g, _ := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
+		_, r0 := o.tokens(t, ctx, s, g.ID, o.base.Add(time.Hour))
+		if out, err := s.RotateRefreshToken(ctx, r0, o.rotation(o.base.Add(time.Hour)), o.base); err != nil || out.Kind != models.RefreshOK || out.Revoked != nil {
+			t.Fatalf("rotate r0 = %+v / %v", out, err)
+		}
+		replay := func() (models.RefreshOutcome, error) {
+			if viaCheck {
+				return s.CheckRefreshToken(ctx, r0, o.base)
+			}
+			return s.RotateRefreshToken(ctx, r0, o.rotation(o.base.Add(time.Hour)), o.base)
+		}
+		out, err := replay()
+		if err != nil || out.Kind != models.RefreshReplay {
+			t.Fatalf("refresh replay (check %v) = %+v / %v", viaCheck, out, err)
+		}
+		wantRevoked(t, "refresh replay", out.Revoked, user.ID, g.ID, models.OAuthRevokeRefreshReplay)
+		if out, err := replay(); err != nil || out.Kind != models.RefreshReplay || out.Revoked != nil {
+			t.Fatalf("second refresh replay (check %v) = %+v / %v, want no revocation", viaCheck, out, err)
+		}
+	}
+}
+
+// RevokeGrant and RevokeGrantByToken return the grant they revoked.
+// RevokeGrantByToken returns nil for an unknown token and for a grant that
+// is already revoked.
+func (o *oauthFixture) testRevokeReturnsTheGrant(t *testing.T, ctx context.Context, open Opener) {
+	s := open(t)
+	user := o.user(t, ctx, s)
+
+	grant, _ := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
+	got, err := s.RevokeGrant(ctx, grant.ID, user.ID, o.base)
+	if err != nil || got.ID != grant.ID || got.ClientID != grant.ClientID || got.Resource != grant.Resource || got.RevokeReason != models.OAuthRevokeUser {
+		t.Fatalf("RevokeGrant = %+v / %v, want grant %d", got, err, grant.ID)
+	}
+
+	g, _ := o.approvedCode(t, ctx, s, user, o.base.Add(2*time.Minute))
+	access, _ := o.tokens(t, ctx, s, g.ID, o.base.Add(time.Hour))
+	if got, err := s.RevokeGrantByToken(ctx, access, cliClient, o.base); err != nil || got != nil {
+		t.Fatalf("RevokeGrantByToken(other client) = %+v / %v, want nil", got, err)
+	}
+	got, err = s.RevokeGrantByToken(ctx, access, webClient, o.base)
+	if err != nil || got == nil || got.ID != g.ID || got.UserID != user.ID || got.RevokeReason != models.OAuthRevokeTokenEndpoint {
+		t.Fatalf("RevokeGrantByToken = %+v / %v, want grant %d", got, err, g.ID)
+	}
+	if got, err := s.RevokeGrantByToken(ctx, access, webClient, o.base); err != nil || got != nil {
+		t.Fatalf("second RevokeGrantByToken = %+v / %v, want nil", got, err)
+	}
+	if got, err := s.RevokeGrantByToken(ctx, o.hash("never-issued"), webClient, o.base); err != nil || got != nil {
+		t.Fatalf("RevokeGrantByToken(unknown) = %+v / %v, want nil", got, err)
 	}
 }

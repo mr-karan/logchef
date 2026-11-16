@@ -79,41 +79,54 @@ func (s *Server) pendingRequest(ctx context.Context, id models.OAuthAuthRequestI
 	return req, nil
 }
 
-// Decide records user's decision and returns where the browser goes next:
-// the client's redirect URI with a code (approve) or access_denied (deny),
-// with state and iss in both cases.
-func (s *Server) Decide(ctx context.Context, id models.OAuthAuthRequestID, user *models.User, approve bool) (string, error) {
+// Decision is a recorded consent decision.
+type Decision struct {
+	// RedirectURL is where the browser goes next: the client's redirect URI
+	// with a code (approve) or access_denied (deny), with state and iss in
+	// both cases.
+	RedirectURL string
+	// Request is the request as it was decided.
+	Request *models.OAuthAuthRequest
+	// Grant is the grant an approval created; nil for a denial.
+	Grant *models.OAuthGrant
+}
+
+// Decide records user's decision on a pending request.
+func (s *Server) Decide(ctx context.Context, id models.OAuthAuthRequestID, user *models.User, approve bool) (*Decision, error) {
 	req, err := s.pendingRequest(ctx, id)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	now := time.Now().UTC()
 	if !approve {
 		err := s.db.DenyOAuthAuthRequest(ctx, id, user.ID, now)
 		if errors.Is(err, models.ErrNotFound) {
-			return "", ErrRequestDecided
+			return nil, ErrRequestDecided
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return s.errorRedirectURL(req.RedirectURI, req.State, "access_denied", "The user denied the request"), nil
+		return &Decision{
+			RedirectURL: s.errorRedirectURL(req.RedirectURI, req.State, "access_denied", "The user denied the request"),
+			Request:     req,
+		}, nil
 	}
-	_, err = s.db.ApproveOAuthAuthRequest(ctx, id, user.ID, now)
+	grant, err := s.db.ApproveOAuthAuthRequest(ctx, id, user.ID, now)
 	if errors.Is(err, models.ErrNotFound) {
-		return "", ErrRequestDecided
+		return nil, ErrRequestDecided
 	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	approved, err := s.db.GetOAuthAuthRequest(ctx, id)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	location, err := op.BuildAuthResponseCallbackURL(ctx, &authRequest{req: approved}, s.provider)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return withIssuer(location, s.issuer), nil
+	return &Decision{RedirectURL: withIssuer(location, s.issuer), Request: approved, Grant: grant}, nil
 }
 
 // ConnectedApp is one active grant, as the Connected-apps screen shows it.
@@ -150,12 +163,12 @@ func (s *Server) ConnectedApps(ctx context.Context, userID models.UserID) ([]Con
 	return apps, nil
 }
 
-// RevokeConnectedApp revokes one of the user's grants. Its access and refresh
-// tokens stop working on their next use.
-func (s *Server) RevokeConnectedApp(ctx context.Context, userID models.UserID, id models.OAuthGrantID) error {
-	err := s.db.RevokeGrant(ctx, id, userID, time.Now().UTC())
+// RevokeConnectedApp revokes one of the user's grants and returns it. Its
+// access and refresh tokens stop working on their next use.
+func (s *Server) RevokeConnectedApp(ctx context.Context, userID models.UserID, id models.OAuthGrantID) (*models.OAuthGrant, error) {
+	grant, err := s.db.RevokeGrant(ctx, id, userID, time.Now().UTC())
 	if errors.Is(err, models.ErrNotFound) {
-		return ErrGrantNotFound
+		return nil, ErrGrantNotFound
 	}
-	return err
+	return grant, err
 }

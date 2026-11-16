@@ -127,6 +127,21 @@ func (r *Recorder) Record(ctx context.Context, e Event) {
 	r.line(ctx, ev, true)
 }
 
+// RecordLimited writes the log line of an event that a rate bound kept out
+// of the table, counted as limited. A failed sign-in is the only event that an
+// unauthenticated caller can cause, so a credential-stuffing run must not be
+// able to fill the table and push real events past audit.max_rows.
+func (r *Recorder) RecordLimited(ctx context.Context, e Event) {
+	ev, err := r.build(e)
+	if err != nil {
+		r.log.Error("audit event dropped", "action", e.Action, "error", err)
+		metrics.RecordAuditEvent("failed")
+		return
+	}
+	metrics.RecordAuditEvent("limited")
+	r.line(ctx, ev, false)
+}
+
 // RecordOrFail is Record for an action that must not happen without a stored
 // event. It returns the insert error and writes no log line on failure.
 func (r *Recorder) RecordOrFail(ctx context.Context, e Event) error {
