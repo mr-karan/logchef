@@ -323,6 +323,62 @@ func extractConditionsFromAST(node ASTNode) []FilterCondition {
 	return conditions
 }
 
+// FilterItem is one comparison of a query's filter, without its value. Base
+// and Path keep a nested field's column and path segments apart.
+type FilterItem struct {
+	Base     string
+	Path     []string
+	Operator Operator
+	// Null is true when the value is the bare NULL.
+	Null bool
+	// Disjunct is true when the comparison sits under an OR whose branches
+	// compare more than one field, so no single field narrows the result.
+	Disjunct bool
+}
+
+// FilterItems returns the comparisons of a parsed query's filter. It reads
+// the WHERE part only and ignores any pipe.
+func FilterItems(ast ASTNode) []FilterItem {
+	switch v := ast.(type) {
+	case *ExpressionNode:
+		item := FilterItem{Base: getFieldName(v.Key), Operator: v.Operator, Null: v.Value == nil}
+		if nested, ok := v.Key.(NestedField); ok && len(nested.Path) > 0 {
+			item.Base, item.Path = nested.Base, nested.Path
+		}
+		return []FilterItem{item}
+	case *LogicalNode:
+		items := filterItemsOf(v.Children)
+		if v.Operator == BoolOr && !sameField(items) {
+			for i := range items {
+				items[i].Disjunct = true
+			}
+		}
+		return items
+	case *GroupNode:
+		return filterItemsOf(v.Children)
+	case *QueryNode:
+		return FilterItems(v.Where)
+	}
+	return nil
+}
+
+func filterItemsOf(nodes []ASTNode) []FilterItem {
+	var items []FilterItem
+	for _, node := range nodes {
+		items = append(items, FilterItems(node)...)
+	}
+	return items
+}
+
+func sameField(items []FilterItem) bool {
+	for _, item := range items {
+		if item.Base != items[0].Base || !slices.Equal(item.Path, items[0].Path) {
+			return false
+		}
+	}
+	return true
+}
+
 func getFieldName(key any) string {
 	switch k := key.(type) {
 	case string:
