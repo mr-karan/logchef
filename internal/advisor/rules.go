@@ -20,6 +20,8 @@ import (
 var rules = []func(a *analysis) []finding{
 	bloomFindings,
 	materializedColumnFindings,
+	lowCardinalityFindings,
+	codecFindings,
 }
 
 // finding is a SchemaFinding with the share that ranks it.
@@ -32,13 +34,18 @@ type finding struct {
 type analysis struct {
 	meta  *clickhouse.AdvisorMetadata
 	usage Usage
+	// ts is the source's timestamp column.
+	ts string
 	// q is Q, the analyzed queries with at least one filter item.
 	q int64
 	// usageRules is false when Q or the usage record is too small to trust.
 	usageRules bool
 	columns    map[string]clickhouse.AdvisorColumn
-	// sample is nil until a usable sample exists.
-	sample map[string]clickhouse.AdvisorCardinality
+	// sample is nil until a usable sample exists; sampleSlices then holds
+	// its slices, whose Distinct follows sampleOrder.
+	sample       map[string]clickhouse.AdvisorCardinality
+	sampleSlices []clickhouse.AdvisorSlice
+	sampleOrder  map[string]int
 	// sampled is false before the sample runs; rules then name the columns
 	// whose cardinality they need.
 	sampled    bool
@@ -135,6 +142,7 @@ func newAnalysis(f Facts) *analysis {
 	a := &analysis{
 		meta:       f.Metadata,
 		usage:      f.Usage,
+		ts:         f.TimestampColumn,
 		columns:    map[string]clickhouse.AdvisorColumn{},
 		sampled:    f.Sample != nil,
 		candidates: map[string]float64{},
@@ -144,8 +152,11 @@ func newAnalysis(f Facts) *analysis {
 	}
 	if f.Sample != nil && f.Sample.Input.State == models.AdvisorInputOK {
 		a.sample = map[string]clickhouse.AdvisorCardinality{}
-		for _, c := range f.Sample.Columns {
+		a.sampleSlices = f.Sample.Slices
+		a.sampleOrder = map[string]int{}
+		for i, c := range f.Sample.Columns {
 			a.sample[c.Column] = c
+			a.sampleOrder[c.Column] = i
 		}
 	}
 	// Q comes from the window's totals, not the listed shapes, so a
@@ -270,12 +281,22 @@ func (a *analysis) usageEvidence(label string, stat *usageStat) []models.Advisor
 	}
 }
 
+// tableShare returns a column's compressed bytes as a share of the table's,
+// and false when the table's size is unknown.
+func (a *analysis) tableShare(column clickhouse.AdvisorColumn) (float64, bool) {
+	total := a.meta.Table.TotalBytes
+	if total == nil || *total == 0 {
+		return 0, false
+	}
+	return float64(column.CompressedBytes) / float64(*total), true
+}
+
 // sizeEvidence describes a column's size, and for a Distributed source that
 // the sizes cover one replica.
 func (a *analysis) sizeEvidence(column clickhouse.AdvisorColumn) []models.AdvisorEvidence {
 	value := fmt.Sprintf("%s compressed, %s uncompressed", formatBytes(column.CompressedBytes), formatBytes(column.UncompressedBytes))
-	if total := a.meta.Table.TotalBytes; total != nil && *total > 0 {
-		value += fmt.Sprintf(", %s of the table", formatPercent(float64(column.CompressedBytes)/float64(*total)))
+	if share, ok := a.tableShare(column); ok {
+		value += fmt.Sprintf(", %s of the table", formatPercent(share))
 	}
 	evidence := []models.AdvisorEvidence{{Label: "Size of " + column.Name, Value: value, Source: clickhouse.AdvisorInputColumns}}
 	if a.meta.Target.Kind == models.AdvisorTargetDistributedLocal {
@@ -379,4 +400,20 @@ func formatBytes(n uint64) string {
 		}
 	}
 	return fmt.Sprintf("%.1f %s", value, suffix)
+}
+
+// sliceEvidence describes a column's sample: the distinct count over all
+// slices, and the rows and distinct count of each slice.
+func (a *analysis) sliceEvidence(column string, cardinality clickhouse.AdvisorCardinality) []models.AdvisorEvidence {
+	order := a.sampleOrder[column]
+	var rows uint64
+	lines := make([]string, len(a.sampleSlices))
+	for i, slice := range a.sampleSlices {
+		rows += slice.Rows
+		lines[i] = fmt.Sprintf("%s: %s rows, %s distinct", slice.Start.UTC().Format("2006-01-02 15:04"), formatCount(slice.Rows), formatCount(slice.Distinct[order]))
+	}
+	return []models.AdvisorEvidence{
+		{Label: "Distinct values in the sample", Value: fmt.Sprintf("%s in %s rows, from %d slices of the last 7 days", formatCount(cardinality.Distinct), formatCount(rows), len(a.sampleSlices)), Source: clickhouse.AdvisorInputSample},
+		{Label: "Rows and distinct values per slice (UTC)", Value: strings.Join(lines, "; "), Source: clickhouse.AdvisorInputSample},
+	}
 }

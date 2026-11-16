@@ -25,4 +25,16 @@ const (
 	// R3 materialized_column.
 	materializedMinShare   = 0.10
 	materializedMinQueries = 20
+
+	// R4 low_cardinality. The docs give 10,000 distinct values as the bound
+	// for a gain; the rule stays well under it.
+	lowCardinalityMinBytes    = 1 << 30
+	lowCardinalityMinShare    = 0.01
+	lowCardinalityMaxDistinct = 1_000
+
+	// R5 codec, trigger A on the timestamp column and B on a String column.
+	codecTimestampMinBytes = 1 << 30
+	codecStringMinBytes    = 10 << 30
+	codecStringMinShare    = 0.20
+	codecStringMaxRatio    = 3
 )

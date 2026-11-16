@@ -9,7 +9,9 @@ import (
 // metadata, its recorded usage and the sample of candidate columns.
 type Facts struct {
 	Metadata *clickhouse.AdvisorMetadata
-	Usage    Usage
+	// TimestampColumn is the source's timestamp column.
+	TimestampColumn string
+	Usage           Usage
 	// Sample is nil until the candidate columns are sampled, and stays nil
 	// when no sample ran.
 	Sample *clickhouse.AdvisorSample

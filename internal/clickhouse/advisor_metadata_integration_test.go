@@ -110,7 +110,7 @@ func TestAdvisorMetadataClickHouse(t *testing.T) {
 	if c := columns["msg"]; c.DefaultKind != "DEFAULT" || c.DefaultExpression != "'x'" {
 		t.Fatalf("msg %+v", c)
 	}
-	if len(meta.Indexes) != 1 || meta.Indexes[0].Name != "idx_user" || meta.Indexes[0].Expr != "user_id" || !strings.HasPrefix(meta.Indexes[0].Type, "bloom_filter") {
+	if len(meta.Indexes) != 1 || meta.IndexesTruncated || meta.Indexes[0].Name != "idx_user" || meta.Indexes[0].Expr != "user_id" || !strings.HasPrefix(meta.Indexes[0].Type, "bloom_filter") {
 		t.Fatalf("indexes %+v", meta.Indexes)
 	}
 	if len(meta.Partitions) != 3 || meta.PartitionsTruncated {
@@ -442,4 +442,30 @@ func advisorClientAs(t *testing.T, user string, settings map[string]any) *Client
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	return client
+}
+
+// TestAdvisorMetadataIndexesTruncated reads a table with one skip index more
+// than the advisor reads, and finds the list marked as truncated.
+func TestAdvisorMetadataIndexesTruncated(t *testing.T) {
+	client, ctx := integrationClient(t)
+	table := fmt.Sprintf("logchef_advisor_indexes_%d", time.Now().UnixNano())
+	dropAfter(t, client, table)
+	var ddl strings.Builder
+	ddl.WriteString("CREATE TABLE " + table + " (ts DateTime, level String")
+	for i := range advisorMaxIndexes + 1 {
+		fmt.Fprintf(&ddl, ", INDEX idx_%03d ts TYPE minmax GRANULARITY 1", i)
+	}
+	ddl.WriteString(") ENGINE = MergeTree ORDER BY ts")
+	advisorFixture(ctx, t, client, ddl.String())
+
+	meta, err := client.AdvisorMetadata(ctx, "default", table, "ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := inputState(t, meta, AdvisorInputIndexes); state != models.AdvisorInputOK {
+		t.Fatalf("indexes input is %s", state)
+	}
+	if len(meta.Indexes) != advisorMaxIndexes || !meta.IndexesTruncated {
+		t.Fatalf("%d indexes, truncated %v; want %d and truncated", len(meta.Indexes), meta.IndexesTruncated, advisorMaxIndexes)
+	}
 }
