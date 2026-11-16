@@ -77,6 +77,11 @@ const (
 	LogsQL
 	// LogchefQL scans escaped strings without comments.
 	LogchefQL
+	// LogQL scans double-quoted escaped strings, raw strings, and hash
+	// comments. It leaves a {{name}} inside a string unchanged when name is
+	// neither a request variable nor a macro, because LogQL's line_format and
+	// label_format templates use the same braces.
+	LogQL
 )
 
 // Substitute formats template values, expands built-in macros and removes
@@ -155,7 +160,10 @@ func substituteTemplateTokens(query string, variables map[string]Variable, built
 
 func substituteVariableTokens(token string, quote byte, variables map[string]Variable, builtins Builtins, dialect Dialect) (string, error) {
 	if quote != 0 {
-		for _, match := range variablePattern.FindAllStringIndex(token, -1) {
+		for _, match := range variablePattern.FindAllStringSubmatchIndex(token, -1) {
+			if keepLogQLTemplate(token[match[2]:match[3]], quote, variables, dialect) {
+				continue
+			}
 			backslashes := 0
 			for i := match[0] - 1; i >= 0 && token[i] == '\\'; i-- {
 				backslashes++
@@ -168,6 +176,9 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 	var substitutionErr error
 	result := variablePattern.ReplaceAllStringFunc(token, func(match string) string {
 		name := variablePattern.FindStringSubmatch(match)[1]
+		if keepLogQLTemplate(name, quote, variables, dialect) {
+			return match
+		}
 		var rendered string
 		var err error
 		if IsBuiltin(name) {
@@ -182,6 +193,16 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 		return rendered
 	})
 	return result, substitutionErr
+}
+
+// keepLogQLTemplate reports whether a {{name}} inside a LogQL string belongs
+// to LogQL's own template language, such as {{__line__}} in line_format.
+func keepLogQLTemplate(name string, quote byte, variables map[string]Variable, dialect Dialect) bool {
+	if dialect != LogQL || quote == 0 || IsBuiltin(name) {
+		return false
+	}
+	_, isVariable := variables[name]
+	return !isVariable
 }
 
 // renderVariable formats one request variable for the place that holds it.
@@ -307,7 +328,7 @@ func formatString(value any, dialect Dialect) (string, error) {
 	default:
 		s = fmt.Sprintf("%v", val)
 	}
-	if dialect == LogsQL {
+	if dialect == LogsQL || dialect == LogQL {
 		return strconv.Quote(s), nil
 	}
 	return "'" + queryescape.ClickHouseString(s) + "'", nil
@@ -390,7 +411,7 @@ func formatDialectDate(value any, dialect Dialect) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if dialect == LogsQL {
+	if dialect == LogsQL || dialect == LogQL {
 		return strconv.Quote(formatted[1 : len(formatted)-1]), nil
 	}
 	return formatted, nil

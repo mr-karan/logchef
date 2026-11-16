@@ -28,6 +28,38 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
+// UpstreamKind classifies a failure of the backend behind a source.
+type UpstreamKind string
+
+const (
+	// UpstreamAuth means the backend rejected the source's credentials or tenant.
+	UpstreamAuth UpstreamKind = "auth"
+	// UpstreamBusy means the backend refused the request under load.
+	UpstreamBusy UpstreamKind = "busy"
+	// UpstreamUnavailable means the backend failed, could not be reached, or
+	// sent a body that could not be read.
+	UpstreamUnavailable UpstreamKind = "unavailable"
+)
+
+// UpstreamError is a backend failure that is not the caller's to fix.
+// Message is shown to the user and never holds the backend's response body;
+// Err holds the detail for the server log.
+type UpstreamError struct {
+	Kind    UpstreamKind
+	Status  int
+	Message string
+	Err     error
+}
+
+func (e *UpstreamError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("upstream %s (status %d): %s: %v", e.Kind, e.Status, e.Message, e.Err)
+	}
+	return fmt.Sprintf("upstream %s (status %d): %s", e.Kind, e.Status, e.Message)
+}
+
+func (e *UpstreamError) Unwrap() error { return e.Err }
+
 func IsValidationError(err error) bool {
 	var validationErr *ValidationError
 	return errors.As(err, &validationErr) || clickhouse.IsValidationError(err)

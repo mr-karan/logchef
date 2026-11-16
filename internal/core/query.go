@@ -137,6 +137,7 @@ func prepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, target 
 		MaxLimit:           cfg.MaxPreviewLimit,
 		MaxResponseBytes:   cfg.MaxResponseBytes,
 		QueryTimeout:       timeout,
+		Step:               time.Duration(interval.Seconds) * time.Second,
 	}, nil
 }
 
@@ -248,9 +249,9 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 		return nil, &QueryRequestError{Message: "Variable substitution failed: " + err.Error()}
 	}
 
-	// ClickHouse bakes the time range into the SQL. For VictoriaLogs the
-	// LogsQL query carries no time range, so the parsed window goes to
-	// QueryLogs separately. The request limit stays out of the compiled
+	// ClickHouse bakes the time range into the SQL. LogsQL and LogQL
+	// queries carry no time range, so the parsed window goes to QueryLogs
+	// separately. The request limit stays out of the compiled
 	// query: the limit rule applies it when the query runs, so it can probe
 	// for a cut, and the SQL that the histogram and the export reuse carries
 	// no limit of its own.
@@ -280,7 +281,7 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	if compiled.Aggregation != nil {
 		params.AggregationMaxMemoryBytes = cfg.AggregationMaxMemoryBytes
 	}
-	if compiled.Language == models.QueryLanguageLogsQL {
+	if compiled.Language != models.QueryLanguageClickHouseSQL {
 		startTime, endTime, err := ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
 		if err != nil {
 			return nil, &QueryRequestError{Message: err.Error()}
@@ -496,6 +497,9 @@ func nativeTemplateTarget(ctx context.Context, ds *datasource.Service, src acces
 	}
 	if source.IsVictoriaLogs() {
 		return templateTarget{dialect: template.LogsQL}, nil
+	}
+	if source.IsLoki() {
+		return templateTarget{dialect: template.LogQL}, nil
 	}
 	return templateTarget{dialect: template.ClickHouseSQL, timestampColumn: source.MetaTSField}, nil
 }

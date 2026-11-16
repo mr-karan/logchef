@@ -3,14 +3,11 @@ package server
 // Log-context ("grep -C" style) handler.
 
 import (
-	"errors"
-	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -67,14 +64,7 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 		ExcludeBoundary: req.ExcludeBoundary,
 	})
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Log context is not supported for this source type", models.ValidationErrorType)
-		}
-		s.log.Error("failed to get log context", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
+		return s.sendQueryError(c, sourceID, err, "Failed to retrieve log context", "Log context")
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
