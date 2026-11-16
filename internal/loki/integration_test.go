@@ -300,3 +300,138 @@ func rowKeys(rows []map[string]any) []string {
 	}
 	return keys
 }
+
+// histogramCounts runs a histogram and maps each bucket's start, as an offset
+// from base, to its count. A grouped bucket is keyed by offset and group.
+func histogramCounts(t *testing.T, p *Provider, source *models.Source, req datasource.HistogramRequest, base time.Time) map[string]int {
+	t.Helper()
+	result, err := p.Histogram(t.Context(), source, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, b := range result.Data {
+		key := b.Bucket.Sub(base).String()
+		if req.GroupBy != "" {
+			key += " " + b.GroupValue
+			if b.IsOther {
+				key += "*"
+			}
+		}
+		counts[key] += b.LogCount
+	}
+	return counts
+}
+
+func assertCounts(t *testing.T, got, want map[string]int) {
+	t.Helper()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("buckets\n got %v\nwant %v", got, want)
+	}
+}
+
+// The histogram runs through Loki's query frontend with
+// split_queries_by_interval set (dev/loki.yaml), so every request passes the
+// splitter. Windows are open at the start and closed at the end.
+func TestIntegrationHistogram(t *testing.T) {
+	url := integrationURL(t)
+	runID := newRunID(t)
+	tenant := "logchef-" + runID
+
+	base := time.Now().UTC().Truncate(time.Minute).Add(-20 * time.Minute)
+	at := func(ms int64) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+	entries := func(run string, offsets ...int64) pushStream {
+		s := pushStream{Stream: map[string]string{"service_name": "it-hist", "test_run": run}}
+		for _, ms := range offsets {
+			s.Values = append(s.Values, [2]string{fmt.Sprint(at(ms).UnixNano()), fmt.Sprintf("entry at %dms", ms)})
+		}
+		return s
+	}
+	// [start, end) is [15s, 3m20s) with a one minute window.
+	const start, end = int64(15_000), int64(200_000)
+	edges := entries(runID+"-edges",
+		start-1, start, 30_000, 60_000, 90_000, 120_000, 150_000, 190_000, end, end+1)
+	inner := entries(runID+"-inner", start-1, 30_000, 90_000, 150_000, 190_000, end+1)
+	single := entries(runID+"-single", 5_000, 30_000, 60_000)
+	var groups []pushStream
+	for i := range 12 {
+		s := entries(runID+"-groups", 30_000)
+		s.Stream["grp"] = fmt.Sprintf("g%02d", i)
+		s.Values = nil
+		for j := 0; j <= i; j++ {
+			s.Values = append(s.Values, [2]string{fmt.Sprint(at(30_000 + int64(j)).UnixNano()), "grouped"})
+		}
+		groups = append(groups, s)
+	}
+	push(t, url, tenant, append([]pushStream{edges, inner, single}, groups...))
+
+	p := testProvider()
+	t.Cleanup(func() { _ = p.Close() })
+	source := testSource(t, models.LokiConnectionInfo{BaseURL: url, TenantID: tenant, Selector: `{service_name="it-hist"}`})
+	selector := func(run string) string { return `{test_run="` + run + `"}` }
+	wideStart, wideEnd := at(-60_000), at(300_000)
+	waitForRows(t, p, source, datasource.QueryRequest{RawQuery: `{service_name="it-hist"}`, StartTime: &wideStart, EndTime: &wideEnd, Limit: 1000}, 10+6+3+78)
+	request := func(query string, from, to int64) datasource.HistogramRequest {
+		s, e := at(from), at(to)
+		return datasource.HistogramRequest{Query: query, StartTime: &s, EndTime: &e, Window: "1m"}
+	}
+
+	t.Run("partial edges, inner boundaries and the range ends", func(t *testing.T) {
+		got := histogramCounts(t, p, source, request(selector(runID+"-edges"), start, end), base)
+		// Not counted: start - 1ms, start, end + 1ms. 60s and 120s fall in the
+		// bucket before them, and end in the last bucket.
+		assertCounts(t, got, map[string]int{"0s": 2, "1m0s": 2, "2m0s": 1, "3m0s": 2})
+	})
+
+	t.Run("without boundary entries the buckets sum to the search", func(t *testing.T) {
+		got := histogramCounts(t, p, source, request(selector(runID+"-inner"), start, end), base)
+		sum := 0
+		for _, n := range got {
+			sum += n
+		}
+		s, e := at(start), at(end)
+		rows, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{RawQuery: selector(runID + "-inner"), StartTime: &s, EndTime: &e, Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum != 4 || len(rows.Logs) != sum {
+			t.Fatalf("histogram sum %d (%v), search rows %d", sum, got, len(rows.Logs))
+		}
+	})
+
+	t.Run("an aligned range with a trailing comment", func(t *testing.T) {
+		got := histogramCounts(t, p, source, request(selector(runID+"-edges")+" # every entry", 0, 180_000), base)
+		assertCounts(t, got, map[string]int{"0s": 4, "1m0s": 2, "2m0s": 1})
+	})
+
+	t.Run("a range inside one bucket", func(t *testing.T) {
+		got := histogramCounts(t, p, source, request(selector(runID+"-single"), 10_000, 50_000), base)
+		assertCounts(t, got, map[string]int{"0s": 1})
+	})
+
+	t.Run("a group-by over 12 values returns the top 10 and Other", func(t *testing.T) {
+		req := request(selector(runID+"-groups"), 0, 60_000)
+		req.GroupBy = "grp"
+		result, err := p.Histogram(t.Context(), source, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := histogramCounts(t, p, source, req, base)
+		want := map[string]int{"0s Other*": 1 + 2}
+		for i := 2; i < 12; i++ {
+			want[fmt.Sprintf("0s g%02d", i)] = i + 1
+		}
+		assertCounts(t, got, want)
+		if !strings.Contains(result.Notice, `top 10 series by "grp"`) {
+			t.Fatalf("notice %q", result.Notice)
+		}
+	})
+
+	t.Run("a metric query is rejected with Loki's message", func(t *testing.T) {
+		_, err := p.Histogram(t.Context(), source, request(`count_over_time(`+selector(runID+"-edges")+` [1m])`, start, end))
+		validation, ok := errors.AsType[*datasource.ValidationError](err)
+		if !ok || !strings.HasPrefix(validation.Message, "The histogram needs a LogQL log query: parse error") {
+			t.Fatalf("error %v", err)
+		}
+	})
+}

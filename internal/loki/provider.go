@@ -115,12 +115,13 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeLoki
 }
 
-// Describe lists only what works. Later units of RFC 0011 add the
-// histogram, field values, live tail, log context and alerts.
+// Describe lists only what works. Later units of RFC 0011 add field values,
+// live tail, log context and alerts.
 func (p *Provider) Describe() datasource.Descriptor {
 	return datasource.Descriptor{
 		Capabilities: []datasource.Capability{
 			datasource.CapabilitySchemaInspection,
+			datasource.CapabilityHistogram,
 			datasource.CapabilitySourceInspection,
 		},
 		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogQL},

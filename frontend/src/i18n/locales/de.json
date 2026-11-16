@@ -830,6 +830,7 @@
   "dashboards.chipIntervalHint": "Intervallgröße {interval}",
   "dashboards.chipIntervalRaisedHint": "{chosen} ergäbe in diesem Zeitraum mehr als 1.000 Intervalle, daher verwendet das Panel {used}.",
   "dashboards.fixedOffsetNotice": "{zone} wechselte am {at} von {before} zu {after}. VictoriaLogs behält den ersten Versatz bei, daher beginnen die Intervalle nach dem Wechsel nicht um Mitternacht Ortszeit.",
+  "dashboards.utcBucketNotice": "Loki beginnt Intervalle an UTC-Grenzen, daher sind sie in {zone} nicht an der Ortszeit ausgerichtet.",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "Zustellung unterbrochen",
   "alerts.deliveryFailed": "Delivery failed",

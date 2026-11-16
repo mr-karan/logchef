@@ -830,6 +830,7 @@
   "dashboards.chipIntervalHint": "बकेट आकार {interval}",
   "dashboards.chipIntervalRaisedHint": "इस समय सीमा में {chosen} से 1,000 से अधिक बकेट बनते, इसलिए पैनल ने {used} का उपयोग किया।",
   "dashboards.fixedOffsetNotice": "{zone} {at} को {before} से {after} में बदला। VictoriaLogs के बकेट पहला ऑफ़सेट बनाए रखते हैं, इसलिए बदलाव के बाद के बकेट स्थानीय आधी रात से शुरू नहीं होते।",
+  "dashboards.utcBucketNotice": "Loki बकेट UTC सीमाओं पर शुरू करता है, इसलिए वे {zone} के स्थानीय समय से मेल नहीं खाते।",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "डिलीवरी बाधित हुई",
   "alerts.deliveryFailed": "Delivery failed",

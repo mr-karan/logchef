@@ -1608,6 +1608,7 @@
   "dashboards.chipIntervalHint": "时间桶大小 {interval}",
   "dashboards.chipIntervalRaisedHint": "在此范围内使用 {chosen} 会产生超过 1,000 个时间桶，因此面板使用了 {used}。",
   "dashboards.fixedOffsetNotice": "{zone} 在 {at} 从 {before} 变为 {after}。VictoriaLogs 的时间桶保持最初的偏移量，因此变更之后的时间桶不从当地午夜开始。",
+  "dashboards.utcBucketNotice": "Loki 在 UTC 边界开始分桶，因此与 {zone} 的本地时间不对齐。",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "投递中断",
   "alerts.deliveryFailed": "Delivery failed",

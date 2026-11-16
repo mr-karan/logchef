@@ -1608,6 +1608,7 @@
   "dashboards.chipIntervalHint": "Bucket size {interval}",
   "dashboards.chipIntervalRaisedHint": "{chosen} would give more than 1,000 buckets over this range, so the panel used {used}.",
   "dashboards.fixedOffsetNotice": "{zone} changed from {before} to {after} on {at}. VictoriaLogs buckets keep the first offset, so buckets after the change do not start at local midnight.",
+  "dashboards.utcBucketNotice": "Loki starts buckets on UTC boundaries, so they do not line up with local time in {zone}.",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "Delivery interrupted",
   "alerts.deliveryFailed": "Delivery failed",

@@ -830,6 +830,7 @@
   "dashboards.chipIntervalHint": "Tamaño de intervalo {interval}",
   "dashboards.chipIntervalRaisedHint": "{chosen} daría más de 1.000 intervalos en este rango, así que el panel usó {used}.",
   "dashboards.fixedOffsetNotice": "{zone} cambió de {before} a {after} el {at}. Los intervalos de VictoriaLogs mantienen el primer desfase, así que después del cambio no empiezan a la medianoche local.",
+  "dashboards.utcBucketNotice": "Loki inicia los intervalos en límites UTC, por lo que no coinciden con la hora local de {zone}.",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "Entrega interrumpida",
   "alerts.deliveryFailed": "Delivery failed",

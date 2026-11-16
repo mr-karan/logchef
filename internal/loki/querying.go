@@ -385,10 +385,6 @@ func notYetSupported(operation string) error {
 	return &datasource.ValidationError{Field: "source_type", Message: operation + " is not supported on Loki sources yet"}
 }
 
-func (p *Provider) Histogram(context.Context, *models.Source, datasource.HistogramRequest) (*datasource.HistogramResult, error) {
-	return nil, notYetSupported("The histogram")
-}
-
 func (p *Provider) GetFieldValues(context.Context, *models.Source, datasource.FieldValuesRequest) (*datasource.FieldValuesResult, error) {
 	return nil, notYetSupported("Field values")
 }
