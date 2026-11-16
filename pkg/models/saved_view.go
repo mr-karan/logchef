@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 )
 
 // SavedViewID identifies a saved Explorer view.
@@ -133,8 +134,15 @@ func (d SavedViewDefinition) Validate() error {
 	if d.Filter != nil && len(*d.Filter) > MaxSavedViewFilterBytes {
 		return invalidSavedViewDefinition("filter is %d bytes, the limit is %d", len(*d.Filter), MaxSavedViewFilterBytes)
 	}
-	if d.TimeRange != nil && !savedViewTimeRangePattern.MatchString(*d.TimeRange) {
-		return invalidSavedViewDefinition("time_range must be a relative range such as 15m, 1h or 7d")
+	if d.TimeRange != nil {
+		if !savedViewTimeRangePattern.MatchString(*d.TimeRange) {
+			return invalidSavedViewDefinition("time_range must be a relative range such as 15m, 1h or 7d")
+		}
+		// The Explorer's time picker has no seconds unit and ignores such a
+		// range, and provisioning could not import it back.
+		if strings.HasSuffix(*d.TimeRange, "s") {
+			return invalidSavedViewDefinition("time_range %q is in seconds, which the Explorer does not support; use minutes (m), hours (h), days (d) or weeks (w)", *d.TimeRange)
+		}
 	}
 	encoded, err := json.Marshal(d)
 	if err != nil {

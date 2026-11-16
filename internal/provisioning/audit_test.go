@@ -315,3 +315,130 @@ func TestReconcileAuditsAdoptionAsAnUpdate(t *testing.T) {
 		t.Errorf("adoption changes = %+v, want managed false to true and description old to new", c)
 	}
 }
+
+func savedViewEvents(t *testing.T, db *sqlite.DB, from int) []models.AuditEvent {
+	t.Helper()
+	var out []models.AuditEvent
+	all := storedEvents(t, db)
+	for i := from; i < len(all); i++ {
+		if strings.HasPrefix(all[i].Action, "saved_view.") {
+			out = append(out, all[i])
+		}
+	}
+	return out
+}
+
+func actionsOf(events []models.AuditEvent) string {
+	names := make([]string, len(events))
+	for i := range events {
+		names[i] = events[i].Action + " " + events[i].TargetLabel
+	}
+	return strings.Join(names, ", ")
+}
+
+func TestReconcileAuditsSourceViews(t *testing.T) {
+	db := newReconcileTestDB(t)
+	ctx := context.Background()
+	ds := datasourcesFor(db)
+	rec, lines := lineRecorder(db)
+	const filterText = `secret_marker = "x"`
+	access := config.ProvisionView{Name: "Access", Default: true, Filter: new(filterText), TimeRange: new("1h")}
+	errorsView := config.ProvisionView{Name: "Errors"}
+	run := func(prune, dryRun bool, views ...config.ProvisionView) []models.AuditEvent {
+		t.Helper()
+		from := len(storedEvents(t, db))
+		cfg := &config.ProvisioningConfig{ManageSources: true, Prune: prune, DryRun: dryRun, Sources: []config.ProvisionSource{viewSource("nginx", views...)}}
+		if err := Reconcile(t.Context(), cfg, db, ds, rec, quietLogger(), nil); err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+		return savedViewEvents(t, db, from)
+	}
+
+	// Creation and the declared default, by the run that created the source.
+	events := run(false, false, access, errorsView)
+	if got := actionsOf(events); got != "saved_view.create Access, saved_view.create Errors, saved_view.set_default Access" {
+		t.Fatalf("first run recorded %s", got)
+	}
+	src, err := db.GetSourceByNameForProvisioning(ctx, "nginx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := storedEvents(t, db)
+	if all[0].Action != string(audit.SourceCreate) {
+		t.Fatalf("first event %s, want source.create", all[0].Action)
+	}
+	for _, e := range events {
+		if e.ActorType != models.AuditActorSystem || e.AuthMethod != models.AuditAuthProvisioning || e.CredentialID != all[0].CredentialID {
+			t.Errorf("%s actor %s/%s run %q, want system/provisioning with the run ID %q", e.Action, e.ActorType, e.AuthMethod, e.CredentialID, all[0].CredentialID)
+		}
+		if e.TargetType != "saved_view" || e.SourceID == nil || *e.SourceID != src.ID {
+			t.Errorf("%s target %s source %v, want a saved_view of source %d", e.Action, e.TargetType, e.SourceID, src.ID)
+		}
+	}
+	accessID := events[0].TargetID
+	if c := changesOf(t, events[0]); c["managed"].To != true || c["scope"].To != "source" || c["filter_language"].To != "logchefql" || c["time_range"].To != "1h" {
+		t.Errorf("create changes = %+v", c)
+	}
+
+	// An unchanged file records nothing; a dry run of a change records nothing.
+	if events := run(false, false, access, errorsView); len(events) != 0 {
+		t.Fatalf("an unchanged file recorded %s", actionsOf(events))
+	}
+	changed := access
+	changed.Default = false
+	changed.TimeRange = new("6h")
+	errorsDefault := errorsView
+	errorsDefault.Default = true
+	if events := run(false, true, changed, errorsDefault); len(events) != 0 {
+		t.Fatalf("a dry run recorded %s", actionsOf(events))
+	}
+
+	// An update, and the default moving to another view.
+	events = run(false, false, changed, errorsDefault)
+	if got := actionsOf(events); got != "saved_view.update Access, saved_view.set_default Errors" {
+		t.Fatalf("change run recorded %s", got)
+	}
+	if c := changesOf(t, events[0]); len(c) != 2 || c["time_range"].From != "1h" || c["time_range"].To != "6h" || c["revision"].To != float64(2) {
+		t.Errorf("update changes = %+v, want time_range and revision", c)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(events[1].Detail, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := strconv.Atoi(accessID); detail["scope"] != "source" || detail["cleared_view_id"] != float64(id) {
+		t.Errorf("set_default detail = %v, want scope source and cleared_view_id %s", detail, accessID)
+	}
+
+	// Adoption of an unmanaged view with the declared name is one update.
+	manual := &models.SavedView{SourceID: src.ID, Scope: models.SavedViewScopeSource, Name: "Slow", Definition: models.SavedViewDefinition{Version: 1}}
+	if err := db.CreateSavedView(ctx, manual); err != nil {
+		t.Fatal(err)
+	}
+	slow := config.ProvisionView{Name: "Slow", TimeRange: new("15m")}
+	events = run(false, false, changed, errorsDefault, slow)
+	if got := actionsOf(events); got != "saved_view.update Slow" {
+		t.Fatalf("adopt run recorded %s", got)
+	}
+	if c := changesOf(t, events[0]); c["managed"].From != false || c["managed"].To != true || c["time_range"].To != "15m" {
+		t.Errorf("adoption changes = %+v, want managed false to true and the new time_range", c)
+	}
+
+	// Without a declared default the managed default is cleared; prune deletes.
+	events = run(true, false, changed, slow)
+	if got := actionsOf(events); got != "saved_view.delete Errors" {
+		t.Fatalf("prune run recorded %s", got)
+	}
+	events = run(true, false, changed, config.ProvisionView{Name: "Slow", TimeRange: new("15m"), Default: true})
+	events = append(events, run(true, false, changed, slow)...)
+	if got := actionsOf(events); got != "saved_view.set_default Slow, saved_view.clear_default Slow" {
+		t.Fatalf("default runs recorded %s", got)
+	}
+
+	stored := lines.String()
+	for _, e := range storedEvents(t, db) {
+		stored += string(e.Changes) + string(e.Detail)
+	}
+	if strings.Contains(stored, "secret_marker") {
+		t.Error("the filter text reached the audit log")
+	}
+}

@@ -239,6 +239,12 @@ func TestSavedViewRequestErrors(t *testing.T) {
 			t.Errorf("%s: status %d, want %d (%s)", name, got, want, data)
 		}
 	}
+	// Provisioning rejects a range in seconds, so the API does too: a view
+	// that saves must also export and import.
+	resp := w.env.do(http.MethodPost, p(""), `{"name":"fast","scope":"personal","definition":{"version":1,"time_range":"30s"}}`, w.cookies[w.member.ID])
+	if resp.status != http.StatusBadRequest || !strings.Contains(string(resp.body), `time_range \"30s\" is in seconds`) {
+		t.Errorf("a range in seconds: status %d body %s, want 400 naming the seconds unit", resp.status, resp.body)
+	}
 	w.want(w.member, http.MethodPost, p(""), `{"name":"ok","scope":"personal","definition":{"version":1,"filter":"level = \"error\"","time_range":"1h","display_mode":"compact"}}`, http.StatusCreated)
 }
 

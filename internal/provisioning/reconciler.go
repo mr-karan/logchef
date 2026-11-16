@@ -30,6 +30,10 @@ type auditLog struct {
 }
 
 func (l *auditLog) add(action audit.Action, target audit.Target, before, after *audit.Fields) {
+	l.addWithDetail(action, target, before, after, nil)
+}
+
+func (l *auditLog) addWithDetail(action audit.Action, target audit.Target, before, after, detail *audit.Fields) {
 	l.events = append(l.events, audit.Event{
 		Action:  action,
 		Outcome: models.AuditOutcomeSuccess,
@@ -37,6 +41,7 @@ func (l *auditLog) add(action audit.Action, target audit.Target, before, after *
 		Target:  target,
 		Before:  before,
 		After:   after,
+		Detail:  detail,
 	})
 }
 
@@ -96,7 +101,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 			if err := reconcileSources(ctx, tx, cfg, log, events, &sourcesToConnect); err != nil {
 				return fmt.Errorf("source reconciliation failed: %w", err)
 			}
-			if err := reconcileSourceViews(ctx, tx, cfg, log); err != nil {
+			if err := reconcileSourceViews(ctx, tx, cfg, log, events); err != nil {
 				return fmt.Errorf("source view reconciliation failed: %w", err)
 			}
 		}

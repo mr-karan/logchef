@@ -101,6 +101,7 @@ func TestParseSavedViewDefinitionRules(t *testing.T) {
 		{"time_range 15m", `{"version":1,"time_range":"15m"}`, true},
 		{"time_range 7d", `{"version":1,"time_range":"7d"}`, true},
 		{"time_range 2w", `{"version":1,"time_range":"2w"}`, true},
+		{"time_range seconds", `{"version":1,"time_range":"30s"}`, false},
 		{"time_range unit missing", `{"version":1,"time_range":"15"}`, false},
 		{"time_range unknown unit", `{"version":1,"time_range":"1y"}`, false},
 		{"time_range absolute", `{"version":1,"time_range":"2026-11-15T00:00:00Z"}`, false},
