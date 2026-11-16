@@ -232,6 +232,12 @@ const routes: RouteRecordRaw[] = [
         component: lazy("AdminQueryActivity", () => import("@/views/admin/QueryActivity.vue")),
         meta: { title: "routes.queryActivity", requiresAdmin: true, palette: { icon: "queryActivity" } },
       },
+      {
+        path: "audit-log",
+        name: "AdminAuditLog",
+        component: lazy("AdminAuditLog", () => import("@/views/admin/AuditLog.vue")),
+        meta: { title: "routes.auditLog", requiresAdmin: true, palette: { icon: "auditLog" } },
+      },
     ],
   },
 

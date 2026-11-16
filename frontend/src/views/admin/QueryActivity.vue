@@ -235,6 +235,9 @@ onMounted(refreshAll);
       :description="t('admin.queryActivityDescription')"
     >
       <template #actions>
+        <Button variant="ghost" size="sm" as-child>
+          <router-link :to="{ name: 'AdminAuditLog' }">{{ t('routes.auditLog') }}</router-link>
+        </Button>
         <Button variant="outline" size="sm" :disabled="isRefreshing" @click="refreshAll">
           <RefreshCw :class="['mr-2 h-3.5 w-3.5', isRefreshing && 'animate-spin']" />
           {{ t('ui.refresh') }}
