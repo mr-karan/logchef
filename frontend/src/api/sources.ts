@@ -234,6 +234,70 @@ export interface SourceInspection {
   schema?: SourceSchemaInspection | null;
 }
 
+// Schema advisor (RFC 0010). Finding text comes from the server in English.
+export type AdvisorInputState = "ok" | "denied" | "limited" | "missing" | "error" | "skipped";
+export type AdvisorImpact = "high" | "medium" | "low" | "info";
+
+export interface AdvisorInput {
+  name: string;
+  state: AdvisorInputState;
+  detail?: string;
+  read_rows: number;
+  read_bytes: number;
+}
+
+export interface AdvisorTarget {
+  kind: "table" | "distributed_local" | "view_base";
+  database: string;
+  table: string;
+  cluster?: string;
+  engine: string;
+}
+
+export interface AdvisorEvidence {
+  label: string;
+  value: string;
+  source: string;
+}
+
+export interface SchemaFinding {
+  id: string;
+  rule: string;
+  impact: AdvisorImpact;
+  title: string;
+  column?: string;
+  path?: string[];
+  evidence: AdvisorEvidence[];
+  ddl: string[];
+  rebuild: boolean;
+  candidate: boolean;
+  gain: string;
+  cost: string;
+  verify?: string;
+}
+
+export interface SchemaAdvisorReport {
+  status: "ok" | "partial" | "unavailable";
+  reason?: string;
+  clickhouse_version: string;
+  target?: AdvisorTarget;
+  inputs: AdvisorInput[];
+  queries_analyzed: number;
+  queries_unanalyzed: number;
+  findings: SchemaFinding[];
+  notes?: string[];
+}
+
+// Before the first analysis every field but source_id is null.
+export interface SchemaAdvice {
+  source_id: number;
+  generated_at: string | null;
+  generated_by: number | null;
+  window_days: number | null;
+  stale: boolean;
+  report: SchemaAdvisorReport | null;
+}
+
 // Field values types for sidebar exploration
 export interface FieldValueInfo {
   value: string;
@@ -274,6 +338,11 @@ export const sourcesApi = {
     apiClient.get<SourceActivity>(`/admin/sources/${sourceId}/activity${refresh ? '?refresh=true' : ''}`, { timeout: 5, suppressErrorToast: true }),
   getTeamSourceActivity: (teamId: number, sourceId: number, refresh = false) =>
     apiClient.get<SourceActivity>(`/teams/${teamId}/sources/${sourceId}/activity${refresh ? '?refresh=true' : ''}`, { timeout: 5, suppressErrorToast: true }),
+  getSchemaAdvice: (sourceId: number) =>
+    apiClient.get<SchemaAdvice>(`/admin/sources/${sourceId}/advisor`, { suppressErrorToast: true }),
+  // The server stops an analysis after 30 s.
+  refreshSchemaAdvice: (sourceId: number) =>
+    apiClient.post<SchemaAdvice>(`/admin/sources/${sourceId}/advisor/refresh`, {}, { timeout: 40, suppressErrorToast: true }),
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
 
