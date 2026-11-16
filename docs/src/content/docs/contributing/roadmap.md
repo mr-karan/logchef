@@ -8,7 +8,8 @@ committed direction, not dated promises. Timelines shift as we learn.
 
 ## Recently shipped
 
-- **Dashboards**: grids of saved visualizations (time series, stat, and table panels) with a shared time range and auto-refresh; panels can mix ClickHouse and VictoriaLogs sources (v2.0). See [dashboards](/features/dashboards).
+- **Dashboards v2** (v2.7): panels run SQL and LogsQL as written and draw the result as stats with comparisons and sparklines, line, area and bar charts, toplists, pies, or tables with rules and formats. Dashboards gain tabs, free panel sizes, per-panel ranges and bucket sizes, thresholds, and built-in time macros. See [dashboards](/features/dashboards).
+- **Dashboards** (v2.0): grids of panels with a shared time range and auto-refresh. Panels can mix ClickHouse and VictoriaLogs sources.
 - **VictoriaLogs as a first-class datasource** (v2.0): LogchefQL compiles to LogsQL as well as ClickHouse SQL, with a native LogsQL editor and a capability-driven UI that adapts to what each backend supports.
 - **Built-in local authentication** (v2.0): run Logchef with email+password auth, with or without an external OIDC provider.
 - **Live tail** (v2.0): follow matching logs as they arrive, on both ClickHouse and VictoriaLogs sources.
