@@ -55,6 +55,33 @@ export interface VictoriaLogsConnectionInfo {
   optimizer?: VictoriaLogsOptimizer;
 }
 
+export interface LokiConnectionInfo {
+  base_url: string;
+  auth?: {
+    mode?: string;
+    username?: string;
+    password?: string;
+    token?: string;
+  };
+  tenant_id?: string;
+  selector: string;
+  principal?: string;
+  parser?: string;
+  headers?: Record<string, string>;
+  limits?: {
+    max_entries_per_query?: number;
+    sidebar_lookback_seconds?: number;
+    schema_lookback_seconds?: number;
+  };
+}
+
+// The default stream selector of a Loki source, or null for other sources.
+export function getLokiSelector(source: Source | undefined | null): string | null {
+  if (source?.source_type !== 'loki') return null;
+  const selector = (source.connection as Partial<LokiConnectionInfo>).selector;
+  return typeof selector === 'string' && selector ? selector : null;
+}
+
 export interface VictoriaLogsOptimizer {
   enabled: boolean;
   max_window_seconds?: number;
@@ -83,6 +110,7 @@ export function getVictoriaLogsOptimizer(source: Source | undefined | null): Vic
 export type SourceConnectionInfo =
   | ClickHouseConnectionInfo
   | VictoriaLogsConnectionInfo
+  | LokiConnectionInfo
   | Record<string, unknown>;
 
 // Narrow a source's connection to the ClickHouse shape. Returns null for

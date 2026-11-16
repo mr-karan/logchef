@@ -203,6 +203,7 @@ function languageLabel(language: string): string {
   if (language === "logchefql") return "LogChefQL";
   if (language === "clickhouse-sql") return "ClickHouse SQL";
   if (language === "logsql") return "LogsQL";
+  if (language === "logql") return "LogQL";
   return language;
 }
 

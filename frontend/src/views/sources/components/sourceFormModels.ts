@@ -2,12 +2,14 @@ import type {
   ClickHouseActivityConfig,
   ClickHouseConnectionInfo,
   ClickHouseQuerySettings,
+  LokiConnectionInfo,
   Source,
   ValidateConnectionRequestInfo,
   VictoriaLogsConnectionInfo,
 } from "@/api/sources";
 
-export type DatasourceType = "clickhouse" | "victorialogs";
+export type DatasourceType = "clickhouse" | "victorialogs" | "loki";
+export type LokiParser = "" | "json" | "logfmt";
 export type ClickHouseTableMode = "create" | "connect";
 export type VictoriaLogsAuthMode = "none" | "basic" | "bearer";
 
@@ -68,6 +70,26 @@ export interface VictoriaLogsSourceFormState {
   histogramEnabled: boolean;
   streamFields: string;
 }
+
+export interface LokiSourceFormState {
+  baseURL: string;
+  authMode: VictoriaLogsAuthMode;
+  username: string;
+  password: string;
+  token: string;
+  tenantID: string;
+  selector: string;
+  principal: string;
+  parser: LokiParser;
+  metaTSField: string;
+  metaSeverityField: string;
+  // Headers and limits have no form controls. They are kept so an edit sends
+  // them back: a header value comes redacted, and blank means "keep".
+  headers: Record<string, string>;
+  limits?: LokiConnectionInfo["limits"];
+}
+
+export const LOKI_SELECTOR_SUGGESTION = '{service_name=~".+"}';
 
 const clickHouseSchemaTemplate = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
 (
@@ -156,8 +178,28 @@ export function createDefaultVictoriaLogsFormState(): VictoriaLogsSourceFormStat
   };
 }
 
+export function createDefaultLokiFormState(): LokiSourceFormState {
+  return {
+    baseURL: "",
+    authMode: "none",
+    username: "",
+    password: "",
+    token: "",
+    tenantID: "",
+    selector: "",
+    principal: "",
+    parser: "",
+    metaTSField: "_time",
+    metaSeverityField: "detected_level",
+    headers: {},
+  };
+}
+
 export function sourceTypeFromSource(source?: { source_type?: string | null }): DatasourceType {
-  return source?.source_type === "victorialogs" ? "victorialogs" : "clickhouse";
+  if (source?.source_type === "victorialogs" || source?.source_type === "loki") {
+    return source.source_type;
+  }
+  return "clickhouse";
 }
 
 export function generateClickHouseSchema(state: Pick<ClickHouseSourceFormState, "database" | "tableName" | "ttlDays">): string {
@@ -341,6 +383,42 @@ export function buildVictoriaLogsConnection(state: VictoriaLogsSourceFormState):
   return connection;
 }
 
+export function buildLokiConnection(state: LokiSourceFormState): LokiConnectionInfo {
+  const connection: LokiConnectionInfo = {
+    base_url: state.baseURL.trim(),
+    selector: state.selector.trim(),
+  };
+  if (state.authMode === "basic") {
+    connection.auth = { mode: "basic", username: state.username.trim(), password: state.password };
+  }
+  if (state.authMode === "bearer") {
+    connection.auth = { mode: "bearer", token: state.token };
+  }
+  if (state.tenantID.trim()) {
+    connection.tenant_id = state.tenantID.trim();
+  }
+  if (state.principal.trim()) {
+    connection.principal = state.principal.trim();
+  }
+  if (state.parser) {
+    connection.parser = state.parser;
+  }
+  if (Object.keys(state.headers).length > 0) {
+    connection.headers = { ...state.headers };
+  }
+  if (state.limits) {
+    connection.limits = { ...state.limits };
+  }
+  return connection;
+}
+
+export function buildLokiValidationRequest(state: LokiSourceFormState): ValidateConnectionRequestInfo {
+  return {
+    source_type: "loki",
+    connection: buildLokiConnection(state),
+  };
+}
+
 export function buildClickHouseValidationRequest(state: ClickHouseSourceFormState): ValidateConnectionRequestInfo {
   const request: ValidateConnectionRequestInfo = {
     source_type: "clickhouse",
@@ -463,6 +541,28 @@ export function victoriaLogsFormStateFromSource(source: Source): VictoriaLogsSou
     sidebarValuesCap: String(connection.optimizer?.sidebar_values_cap || 10000),
     histogramEnabled: connection.optimizer?.histogram_enabled ?? true,
     streamFields: connection.optimizer?.stream_fields?.join(', ') ?? '',
+  };
+}
+
+export function lokiFormStateFromSource(source: Source): LokiSourceFormState {
+  const connection = (source.connection || {}) as Partial<LokiConnectionInfo>;
+  const auth = connection.auth || {};
+  const parser = connection.parser === "json" || connection.parser === "logfmt" ? connection.parser : "";
+
+  return {
+    baseURL: connection.base_url || "",
+    authMode: auth.mode === "basic" || auth.mode === "bearer" ? auth.mode : "none",
+    username: auth.username || "",
+    password: auth.password || "",
+    token: auth.token || "",
+    tenantID: connection.tenant_id || "",
+    selector: connection.selector || "",
+    principal: connection.principal || "",
+    parser,
+    metaTSField: source._meta_ts_field || "_time",
+    metaSeverityField: source._meta_severity_field || "",
+    headers: { ...(connection.headers || {}) },
+    limits: connection.limits ? { ...connection.limits } : undefined,
   };
 }
 

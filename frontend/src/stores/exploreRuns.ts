@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, markRaw, shallowReactive, shallowRef } from "vue";
 import { exploreApi, type AggregationInfo, type ColumnInfo, type QueryStats, type QueryWarning } from "@/api/explore";
 import { logchefqlApi, type FilterCondition, type TemplateVariable } from "@/api/logchefql";
-import { asClickHouseConnection, getVictoriaLogsOptimizer, type Source } from "@/api/sources";
+import { asClickHouseConnection, getLokiSelector, getVictoriaLogsOptimizer, type Source } from "@/api/sources";
 import { getErrorMessage } from "@/api/types";
 import { WindowedHTTPError, type LogRow } from "@/api/windowed";
 import { useVariables } from "@/composables/useVariables";
@@ -93,9 +93,13 @@ function results(rows: LogRow[], columns: ColumnInfo[] | null | undefined, stats
   return { rows: markRaw(rows), columns: normalizeColumns(columns, rows), stats: stats ?? DEFAULT_QUERY_STATS, warnings: [], sql: "", compilation: null, aggregation: null, ...rest };
 }
 
-// An empty native query on a ClickHouse source runs the source's default SQL over the run's own window.
+// An empty native query runs the source's default: the default SQL over the run's own
+// window on ClickHouse, the default stream selector on Loki.
 function withDefaultSql(query: RunQuery, source: Source, window: ResolvedWindow, limit: number): RunQuery {
-  if (query.mode !== "native" || query.text.trim() || getNativeQueryLanguageForSource(source) !== "clickhouse-sql") return query;
+  if (query.mode !== "native" || query.text.trim()) return query;
+  const selector = getLokiSelector(source);
+  if (selector) return { mode: "native", text: selector };
+  if (getNativeQueryLanguageForSource(source) !== "clickhouse-sql") return query;
   const connection = asClickHouseConnection(source.connection);
   const tableName = connection?.database && connection.table_name ? `${connection.database}.${connection.table_name}` : "default.logs";
   return { mode: "native", text: generateDefaultSql({ tableName, tsField: source._meta_ts_field || "timestamp", window, limit }) };
@@ -301,7 +305,9 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
         aggregation: data.aggregation ?? null,
       });
     }
-    const response = await exploreApi.getLogs(source.id, { ...common, interval, query_text: query.text, limit: optimizer ? limit : undefined }, teamId, controller.signal);
+    // LogQL has no limit stage for log queries, so the picker's limit goes with the request.
+    const sendLimit = optimizer || getNativeQueryLanguageForSource(source) === "logql";
+    const response = await exploreApi.getLogs(source.id, { ...common, interval, query_text: query.text, limit: sendLimit ? limit : undefined }, teamId, controller.signal);
     if (response.status !== "success") throw response;
     const data = response.data;
     if (data && "error" in data) throw new Error(data.details || data.error);
