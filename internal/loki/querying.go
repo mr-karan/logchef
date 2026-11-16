@@ -18,6 +18,7 @@ import (
 	"unicode"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -263,6 +264,42 @@ func schemaColumns(labels []string, detected detectedFieldsResponse, parser stri
 		columns = append(columns, models.ColumnInfo{Name: field.Label, Type: field.Type})
 	}
 	return columns
+}
+
+// CompileLogchefQL compiles a LogchefQL query into a LogQL log query that
+// starts from the source's selector. The time range is not in the query;
+// callers pass it to QueryLogs separately.
+func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	compiled := &datasource.CompiledLogchefQL{Language: models.QueryLanguageLogQL}
+	conn, err := p.connectionForSource(source)
+	if err != nil {
+		return compiled, err
+	}
+	selector, err := models.ParseLokiSelector(conn.Selector)
+	if err != nil {
+		return compiled, fmt.Errorf("read the source selector: %w", err)
+	}
+	options := logchefql.LogQLTranslateOptions{Parser: conn.Parser}
+	for _, m := range selector {
+		options.Selector = append(options.Selector, logchefql.LogQLMatcher{Name: m.Name, Op: m.Op, Value: m.Value})
+	}
+	for _, column := range source.Columns {
+		if column.Type == labelColumnType {
+			options.StreamLabels = append(options.StreamLabels, column.Name)
+		}
+	}
+
+	result := logchefql.TranslateToLogQL(req.Query, options)
+	compiled.Valid = result.Valid
+	compiled.Error = result.Error
+	compiled.Conditions = result.Conditions
+	compiled.FieldsUsed = result.FieldsUsed
+	compiled.Query = result.Query
+	compiled.FilterOnly = result.Query
+	if result.Error != nil {
+		return compiled, result.Error
+	}
+	return compiled, nil
 }
 
 type indexStatsResponse struct {

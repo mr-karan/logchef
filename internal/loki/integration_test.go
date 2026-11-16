@@ -239,3 +239,64 @@ func TestIntegrationQueryLogs(t *testing.T) {
 		}
 	})
 }
+
+// A LogchefQL query and the LogQL a person would write for it return the
+// same rows.
+func TestIntegrationLogchefQL(t *testing.T) {
+	url := integrationURL(t)
+	runID := newRunID(t)
+	tenant := "logchef-" + runID
+
+	now := time.Now().UTC().Truncate(time.Second)
+	lines := map[string][]string{
+		"error": {"upstream Gateway timeout", "gateway reset by peer", "db error", "bad gateway", "disk full"},
+		"info":  {"gateway ok", "request served"},
+	}
+	var streams []pushStream
+	for level, msgs := range lines {
+		stream := pushStream{Stream: map[string]string{"service_name": "it-api", "test_run": runID, "level": level}}
+		for i, msg := range msgs {
+			stream.Values = append(stream.Values, [2]string{fmt.Sprint(now.Add(-time.Duration(i+1) * time.Second).UnixNano()), msg})
+		}
+		streams = append(streams, stream)
+	}
+	push(t, url, tenant, streams)
+
+	p := testProvider()
+	t.Cleanup(func() { _ = p.Close() })
+	source := testSource(t, models.LokiConnectionInfo{BaseURL: url, TenantID: tenant, Selector: `{test_run="` + runID + `"}`})
+	start, end := now.Add(-time.Minute), now.Add(time.Minute)
+	waitForRows(t, p, source, datasource.QueryRequest{RawQuery: `{test_run="` + runID + `"}`, StartTime: &start, EndTime: &end, Limit: 100}, 7)
+
+	columns, err := p.GetSourceSchema(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.Columns = columns
+	compiled, err := p.CompileLogchefQL(t.Context(), source, datasource.LogchefQLCompileRequest{Query: `level="error" and _msg~"gateway"`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logchefQL, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{RawQuery: compiled.Query, StartTime: &start, EndTime: &end, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{
+		RawQuery: `{test_run="` + runID + `", level="error"} |~ "(?i)gateway"`, StartTime: &start, EndTime: &end, Limit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, want := rowKeys(logchefQL.Logs), rowKeys(native.Logs)
+	if len(want) != 3 || strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("LogchefQL (%s) rows\n%s\nnative rows\n%s", compiled.Query, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func rowKeys(rows []map[string]any) []string {
+	keys := make([]string, len(rows))
+	for i, row := range rows {
+		keys[i] = fmt.Sprint(row["_time"], " ", row["level"], " ", row["_msg"])
+	}
+	return keys
+}

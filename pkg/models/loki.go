@@ -195,24 +195,26 @@ func (l LokiLimits) validate() error {
 	return nil
 }
 
-type lokiMatcher struct {
-	name  string
-	op    string
-	value string
+// LokiMatcher is one matcher of a stream selector. Op is "=", "!=", "=~" or
+// "!~", and Value is unquoted.
+type LokiMatcher struct {
+	Name  string
+	Op    string
+	Value string
 }
 
 // matchesEmpty reports whether the matcher selects a stream that lacks the
 // label. Loki rejects a selector whose every matcher does.
-func (m lokiMatcher) matchesEmpty() bool {
-	switch m.op {
+func (m LokiMatcher) matchesEmpty() bool {
+	switch m.Op {
 	case "=":
-		return m.value == ""
+		return m.Value == ""
 	case "!=":
-		return m.value != ""
+		return m.Value != ""
 	case "=~":
-		return regexp.MustCompile("^(?:" + m.value + ")$").MatchString("")
+		return regexp.MustCompile("^(?:" + m.Value + ")$").MatchString("")
 	default:
-		return !regexp.MustCompile("^(?:" + m.value + ")$").MatchString("")
+		return !regexp.MustCompile("^(?:" + m.Value + ")$").MatchString("")
 	}
 }
 
@@ -220,7 +222,7 @@ func (m lokiMatcher) matchesEmpty() bool {
 // {namespace="payments", app=~"api|web"}, with a matcher that does not match
 // the empty string.
 func validateLokiSelector(selector string) error {
-	matchers, err := parseLokiSelector(selector)
+	matchers, err := ParseLokiSelector(selector)
 	if err != nil {
 		return err
 	}
@@ -232,13 +234,15 @@ func validateLokiSelector(selector string) error {
 	return fmt.Errorf("selector needs a matcher that does not match the empty string, such as {service_name=~\".+\"}")
 }
 
-func parseLokiSelector(selector string) ([]lokiMatcher, error) {
+// ParseLokiSelector reads one LogQL stream selector into its matchers. It
+// does not check that a matcher selects something; Validate does.
+func ParseLokiSelector(selector string) ([]LokiMatcher, error) {
 	s := strings.TrimSpace(selector)
 	if !strings.HasPrefix(s, "{") {
 		return nil, fmt.Errorf("selector must start with '{'")
 	}
 	s = strings.TrimLeft(s[1:], " \t\r\n")
-	var matchers []lokiMatcher
+	var matchers []LokiMatcher
 	for {
 		m, rest, err := parseLokiMatcher(s)
 		if err != nil {
@@ -254,19 +258,19 @@ func parseLokiSelector(selector string) ([]lokiMatcher, error) {
 		case strings.HasPrefix(rest, "}"):
 			return nil, fmt.Errorf("selector must be one stream selector with nothing after '}'")
 		default:
-			return nil, fmt.Errorf("expected ',' or '}' after matcher %s", m.name)
+			return nil, fmt.Errorf("expected ',' or '}' after matcher %s", m.Name)
 		}
 	}
 }
 
-func parseLokiMatcher(s string) (lokiMatcher, string, error) {
+func parseLokiMatcher(s string) (LokiMatcher, string, error) {
 	end := strings.IndexAny(s, "=!")
 	if end <= 0 {
-		return lokiMatcher{}, "", fmt.Errorf("expected a matcher such as app=\"api\"")
+		return LokiMatcher{}, "", fmt.Errorf("expected a matcher such as app=\"api\"")
 	}
 	name := strings.TrimRight(s[:end], " \t\r\n")
 	if !lokiLabelName.MatchString(name) {
-		return lokiMatcher{}, "", fmt.Errorf("invalid label name %q", name)
+		return LokiMatcher{}, "", fmt.Errorf("invalid label name %q", name)
 	}
 	s = s[end:]
 	var op string
@@ -277,19 +281,19 @@ func parseLokiMatcher(s string) (lokiMatcher, string, error) {
 		}
 	}
 	if op == "" {
-		return lokiMatcher{}, "", fmt.Errorf("label %s needs one of =, !=, =~, !~", name)
+		return LokiMatcher{}, "", fmt.Errorf("label %s needs one of =, !=, =~, !~", name)
 	}
 	s = strings.TrimLeft(s[len(op):], " \t\r\n")
 	value, rest, err := parseLokiString(s)
 	if err != nil {
-		return lokiMatcher{}, "", fmt.Errorf("label %s: %w", name, err)
+		return LokiMatcher{}, "", fmt.Errorf("label %s: %w", name, err)
 	}
 	if op == "=~" || op == "!~" {
 		if _, err := regexp.Compile("^(?:" + value + ")$"); err != nil {
-			return lokiMatcher{}, "", fmt.Errorf("label %s: invalid regex: %w", name, err)
+			return LokiMatcher{}, "", fmt.Errorf("label %s: invalid regex: %w", name, err)
 		}
 	}
-	return lokiMatcher{name: name, op: op, value: value}, rest, nil
+	return LokiMatcher{Name: name, Op: op, Value: value}, rest, nil
 }
 
 // parseLokiString reads a double-quoted string with Go escapes or a backtick

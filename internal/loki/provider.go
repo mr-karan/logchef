@@ -115,17 +115,19 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeLoki
 }
 
-// Describe lists only what works. Later units of RFC 0011 add LogchefQL,
-// the histogram, field values, live tail, log context and alerts.
+// Describe lists only what works. Later units of RFC 0011 add the
+// histogram, field values, live tail, log context and alerts.
 func (p *Provider) Describe() datasource.Descriptor {
 	return datasource.Descriptor{
 		Capabilities: []datasource.Capability{
 			datasource.CapabilitySchemaInspection,
 			datasource.CapabilitySourceInspection,
 		},
-		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogQL},
-		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeNative},
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogQL},
+		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
 		AlertEditorModes:      []models.AlertEditorMode{},
+		// The generator must know which fields are stream labels.
+		LogchefQLNeedsColumns: true,
 	}
 }
 

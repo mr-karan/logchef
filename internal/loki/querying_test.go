@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -125,4 +126,52 @@ func TestLaterUnitsAreValidationErrors(t *testing.T) {
 			t.Fatalf("error %v, want a validation error", err)
 		}
 	}
+}
+
+func TestCompileLogchefQL(t *testing.T) {
+	columns := []models.ColumnInfo{
+		{Name: "_time", Type: timeColumnType},
+		{Name: "_msg", Type: stringColumnType},
+		{Name: "env", Type: labelColumnType},
+		{Name: "level", Type: labelColumnType},
+		{Name: "status", Type: "int"},
+		{Name: "trace_id", Type: "string"},
+	}
+	tests := []struct {
+		name, parser, query, want string
+	}{
+		{"empty query is the source selector", "", "", `{env="dev"}`},
+		{"stream label is hoisted, the line is a line filter", "", `level="error" and _msg~"gateway"`, `{env="dev", level="error"} |~ "(?i)gateway"`},
+		{"other fields are label filters after the source parser", "json", `level="error" and trace_id="abc"`, `{env="dev", level="error"} | json | drop __error__, __error_details__ | trace_id="abc"`},
+		{"numeric comparison drops conversion errors", "logfmt", `status>=500`, `{env="dev"} | logfmt | drop __error__, __error_details__ | status>=500 | __error__=""`},
+		{"select keeps the stream labels", "", `level="error" | trace_id`, `{env="dev", level="error"} | keep trace_id, env, level`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := testSource(t, models.LokiConnectionInfo{BaseURL: "http://loki.test", Selector: `{env="dev"}`, Parser: tt.parser})
+			source.Columns = columns
+			compiled, err := testProvider().CompileLogchefQL(t.Context(), source, datasource.LogchefQLCompileRequest{Query: tt.query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if compiled.Query != tt.want || compiled.FilterOnly != tt.want {
+				t.Fatalf("query\n got %s\nwant %s", compiled.Query, tt.want)
+			}
+			if !compiled.Valid || compiled.Language != models.QueryLanguageLogQL {
+				t.Fatalf("compiled %+v", compiled)
+			}
+		})
+	}
+
+	t.Run("an unsupported construct returns the parse error with the result", func(t *testing.T) {
+		source := testSource(t, models.LokiConnectionInfo{BaseURL: "http://loki.test", Selector: `{env="dev"}`})
+		source.Columns = columns
+		compiled, err := testProvider().CompileLogchefQL(t.Context(), source, datasource.LogchefQLCompileRequest{Query: `_msg~"a" or level="error"`})
+		if compiled == nil || compiled.Valid || compiled.Error == nil || err == nil || compiled.Language != models.QueryLanguageLogQL {
+			t.Fatalf("compiled %+v, error %v", compiled, err)
+		}
+		if compiled.Error.Code != logchefql.ErrUnsupportedFeature {
+			t.Fatalf("code %s", compiled.Error.Code)
+		}
+	})
 }
