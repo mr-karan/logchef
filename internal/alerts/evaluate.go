@@ -199,21 +199,13 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 	if err != nil {
 		return nil, fmt.Errorf("failed to list open alert history: %w", err)
 	}
+	silences, err := m.db.ListAlertSilences(ctx, alert.SourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert silences: %w", err)
+	}
+	silencedBy := func(group map[string]string) []int64 { return m.silencedBy(alert, silences, group, at) }
 	episodes := openEpisodes(instances, open)
-	stored := make(map[string]*models.AlertInstance, len(instances))
-	tracked := make([]Instance, 0, len(instances)+len(episodes))
-	for _, entry := range open {
-		if ep, ok := episodes[entry.GroupKey]; ok && ep.history == entry {
-			tracked = append(tracked, trackedInstance(ep.instance))
-		}
-	}
-	for _, instance := range instances {
-		stored[instance.GroupKey] = instance
-		// An ok instance has no episode; the no_data and keep policies keep it.
-		if _, ok := episodes[instance.GroupKey]; !ok && instance.State == models.AlertInstanceStateOK {
-			tracked = append(tracked, trackedInstance(instance))
-		}
-	}
+	stored, tracked := trackedGroups(instances, open, episodes)
 
 	rule := Rule{
 		Operator:  alert.ThresholdOperator,
@@ -245,14 +237,18 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 				// A tracked ok group keeps its last value and sighting.
 				current = stored[change.GroupKey]
 			}
-			plan.opens = append(plan.opens, m.planOpen(alert, rule, current, ep.history, change, at, messages))
+			plan.opens = append(plan.opens, m.planOpen(alert, rule, current, ep.history, change, at, silencedBy(change.Group), messages))
 			plan.state = summaryState(plan.state, change.To)
 		case change.Closes():
+			silenced := silencedBy(change.Group)
+			if len(silenced) > 0 {
+				m.log.Debug("silenced alert resolve", "alert_id", alert.ID, "group_key", change.GroupKey, "silences", silenced)
+			}
 			plan.resolves = append(plan.resolves, &resolveStep{
 				change:  change,
 				history: ep.history,
 				message: resolveMessage(alert, change),
-				notify:  alert.NotifyOnResolve,
+				notify:  alert.NotifyOnResolve && announced(ep.history) && len(silenced) == 0,
 			})
 			if !change.Untracked {
 				plan.tracks = append(plan.tracks, okInstance(alert.ID, nil, change, at))
@@ -266,6 +262,26 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 		}
 	}
 	return plan, nil
+}
+
+// trackedGroups indexes the stored instances by group key and lists the
+// Transition input: each open episode's instance, and each ok instance, which
+// the no_data and keep policies keep without an episode.
+func trackedGroups(instances []*models.AlertInstance, open []*models.AlertHistoryEntry, episodes map[string]episode) (map[string]*models.AlertInstance, []Instance) {
+	stored := make(map[string]*models.AlertInstance, len(instances))
+	tracked := make([]Instance, 0, len(instances)+len(episodes))
+	for _, entry := range open {
+		if ep, ok := episodes[entry.GroupKey]; ok && ep.history == entry {
+			tracked = append(tracked, trackedInstance(ep.instance))
+		}
+	}
+	for _, instance := range instances {
+		stored[instance.GroupKey] = instance
+		if _, ok := episodes[instance.GroupKey]; !ok && instance.State == models.AlertInstanceStateOK {
+			tracked = append(tracked, trackedInstance(instance))
+		}
+	}
+	return stored, tracked
 }
 
 // trackedInstance is the Transition input of a stored instance.
@@ -390,9 +406,12 @@ func (m *Manager) deliverResolved(ctx context.Context, alert *models.Alert, step
 
 // planOpen decides what one group in firing or no_data writes and whether it
 // notifies. An open episode in the same state notifies again only while its
-// instance is not notified and its delivery bookkeeping asks for a retry. An
-// open episode that moves between firing and no_data notifies its new state.
-func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.AlertInstance, prev *models.AlertHistoryEntry, change Change, at time.Time, messages func() *messageContext) *openStep {
+// instance is not notified and its delivery bookkeeping asks for a retry, or a
+// silence held its notification back. An open episode that moves between
+// firing and no_data notifies its new state. A group that a silence mutes
+// writes its episode with silenced_by in the payload and stays not notified,
+// so the evaluation after the silence ends sends the notification it owes.
+func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.AlertInstance, prev *models.AlertHistoryEntry, change Change, at time.Time, silencedBy []int64, messages func() *messageContext) *openStep {
 	status := models.AlertStatusTriggered
 	if change.To == models.AlertInstanceStateNoData {
 		status = models.AlertStatusNoData
@@ -400,6 +419,7 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 	step := &openStep{change: change, status: status, instance: openInstance(alert.ID, rule, current, change, at), history: prev}
 	step.moved = prev != nil && change.From != change.To
 	attempts, retry := deliveryRetryState(prev)
+	owed := prev != nil && prev.Payload["delivery_silenced"] == true
 	if prev == nil {
 		step.instance.Notified = false
 		step.instance.HistoryID = nil
@@ -407,7 +427,7 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 	if step.moved {
 		attempts, retry = 0, false
 		step.instance.Notified = false
-	} else if prev != nil && (current.Notified || !retry) {
+	} else if prev != nil && (current.Notified || (!retry && !owed)) {
 		step.instance.Notified = true
 		if attempts >= maxDeliveryAttempts && prev.Payload["delivery_in_progress"] == true {
 			prev.Payload["delivery_in_progress"] = false
@@ -421,10 +441,13 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 		return step
 	}
 
+	if len(silencedBy) > 0 {
+		return m.planSilencedOpen(alert, step, silencedBy)
+	}
+
 	value := change.Value
 	if status == models.AlertStatusNoData {
 		m.log.Info("alert has no data", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", change.GroupKey, "severity", alert.Severity)
-		step.message = fmt.Sprintf("alert %s has no data: the query returned no row", alert.Name)
 	} else {
 		m.log.Info("alert triggered",
 			"alert_id", alert.ID,
@@ -434,8 +457,8 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 			"value", value,
 			"threshold", alert.ThresholdValue,
 			"operator", alert.ThresholdOperator)
-		step.message = fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
 	}
+	step.message = openMessage(alert, status, value)
 
 	mc := messages()
 	labels, annotations := mc.metadata(status, value, change.Group)
@@ -471,6 +494,7 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 		"delivery_pending":           selected,
 		"delivery_retries_exhausted": attempts >= maxDeliveryAttempts,
 	})
+	delete(payload, "delivery_silenced")
 	step.notify = true
 	step.attempts = attempts
 	step.retry = retry
@@ -478,6 +502,77 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 	step.payload = payload
 	step.notification = notification
 	return step
+}
+
+// openMessage is the history message of a group in firing or no_data.
+func openMessage(alert *models.Alert, status models.AlertStatus, value float64) string {
+	if status == models.AlertStatusNoData {
+		return fmt.Sprintf("alert %s has no data: the query returned no row", alert.Name)
+	}
+	return fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
+}
+
+// announced reports that a notification of the episode was sent or
+// attempted. Only an episode whose notification a silence held back, and
+// that has had no attempt since, is not announced; it sends no resolved
+// notification, so a group that fired and resolved inside a silence sends
+// nothing.
+func announced(history *models.AlertHistoryEntry) bool {
+	_, attempted := history.Payload["delivery_attempts"]
+	return attempted || history.Payload["delivery_silenced"] != true
+}
+
+// planSilencedOpen records a group in firing or no_data that a silence
+// mutes: the episode is written, nothing is sent, and the instance stays not
+// notified. An announced episode that moves state while silenced owes its
+// new notification with a fresh set of attempts.
+func (m *Manager) planSilencedOpen(alert *models.Alert, step *openStep, silencedBy []int64) *openStep {
+	m.log.Info("alert changed state while silenced", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", step.change.GroupKey, "status", step.status, "silences", silencedBy)
+	step.instance.Notified = false
+	step.message = openMessage(alert, step.status, step.change.Value)
+	payload := make(map[string]any)
+	if step.history != nil {
+		maps.Copy(payload, step.history.Payload)
+	}
+	if _, attempted := payload["delivery_attempts"]; attempted && step.moved {
+		payload["delivery_attempts"] = 0
+		payload["delivery_failed"] = false
+		payload["delivery_in_progress"] = false
+		payload["delivery_retries_exhausted"] = false
+		for _, key := range []string{"delivery_pending", "delivery_attempted", "delivery_error", "delivery_deadline_at"} {
+			delete(payload, key)
+		}
+	}
+	payload["status"] = string(step.status)
+	payload["silenced_by"] = silencedBy
+	payload["delivery_silenced"] = true
+	step.payload = payload
+	return step
+}
+
+// silencedBy returns the ids of the silences that mute a group of alert at
+// at. A silence whose stored schedule cannot be read is logged and mutes
+// nothing, so a broken silence never hides a notification.
+func (m *Manager) silencedBy(alert *models.Alert, silences []*models.AlertSilence, group map[string]string, at time.Time) []int64 {
+	if len(silences) == 0 {
+		return nil
+	}
+	labels := SilenceLabels(alert, group)
+	var ids []int64
+	for _, silence := range silences {
+		if !Matches(silence, alert, labels) {
+			continue
+		}
+		active, err := ActiveAt(silence, at)
+		if err != nil {
+			m.log.Error("alert silence cannot be evaluated; it mutes nothing", "silence_id", silence.ID, "alert_id", alert.ID, "error", err)
+			continue
+		}
+		if active {
+			ids = append(ids, int64(silence.ID))
+		}
+	}
+	return ids
 }
 
 // deliverOpen sends one group's firing or no-data notification after its

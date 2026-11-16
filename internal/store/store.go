@@ -299,6 +299,23 @@ type DestinationStore interface {
 	ListAlertDestinations(ctx context.Context, alertID models.AlertID) ([]*models.NotificationDestination, error)
 }
 
+// AlertSilenceStore persists alert silences.
+type AlertSilenceStore interface {
+	// CreateAlertSilence fills the ID and timestamps.
+	CreateAlertSilence(ctx context.Context, silence *models.AlertSilence) error
+	// GetAlertSilence returns models.ErrNotFound for a missing silence.
+	GetAlertSilence(ctx context.Context, id models.AlertSilenceID) (*models.AlertSilence, error)
+	// ListAlertSilences returns the silences of one source, ordered by id.
+	ListAlertSilences(ctx context.Context, sourceID models.SourceID) ([]*models.AlertSilence, error)
+	CountAlertSilences(ctx context.Context, sourceID models.SourceID) (int, error)
+	// UpdateAlertSilence writes everything but the source and the creator,
+	// and refreshes the timestamps. It returns models.ErrNotFound for a
+	// missing silence.
+	UpdateAlertSilence(ctx context.Context, silence *models.AlertSilence) error
+	// DeleteAlertSilence returns models.ErrNotFound for a missing silence.
+	DeleteAlertSilence(ctx context.Context, id models.AlertSilenceID) error
+}
+
 // JobStore persists the background jobs that internal/jobs schedules and
 // leases. Every time comparison uses the database clock, so clock skew
 // between replicas does not matter. The methods that take a lease token
@@ -671,6 +688,7 @@ type StoreOps interface {
 	DashboardStore
 	AlertStore
 	DestinationStore
+	AlertSilenceStore
 	JobStore
 	ReportStore
 	QueryHistoryStore

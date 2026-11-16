@@ -138,8 +138,12 @@ func deliveryRetryState(history *models.AlertHistoryEntry) (attempts int, retry 
 	if history == nil {
 		return 0, false
 	}
-	// Legacy entries have already had one delivery attempt.
+	// Legacy entries have already had one delivery attempt; an episode that
+	// a silence held back has had none.
 	attempts = 1
+	if history.Payload["delivery_silenced"] == true {
+		attempts = 0
+	}
 	if value, ok := history.Payload["delivery_attempts"].(float64); ok {
 		attempts = int(value)
 	}

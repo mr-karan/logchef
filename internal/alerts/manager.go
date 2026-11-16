@@ -78,13 +78,17 @@ func (noopSender) Send(_ context.Context, _ AlertNotification) DeliveryResults {
 }
 
 // ManualResolve closes the open episode of one group, or of every group when
-// groupKey is nil, and sends one resolved notification per closed group when
-// the rule notifies on resolve. It returns models.ErrNotFound when nothing is
-// open.
+// groupKey is nil. When the rule notifies on resolve, it sends one resolved
+// notification per closed group that was announced and that no silence mutes
+// now. It returns models.ErrNotFound when nothing is open.
 func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, groupKey *string, message string) error {
 	alert, err := m.db.GetAlert(ctx, alertID)
 	if err != nil {
 		return fmt.Errorf("failed to get alert: %w", err)
+	}
+	silences, err := m.db.ListAlertSilences(ctx, alert.SourceID)
+	if err != nil {
+		return fmt.Errorf("failed to list alert silences: %w", err)
 	}
 	// Close exactly the groups that were read, in one transaction, so every
 	// closed group gets its resolved notification. A group that opens after
@@ -116,6 +120,13 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, gro
 	mc := m.newMessageContext(ctx, alert)
 	now := time.Now().UTC()
 	for _, entry := range entries {
+		if !announced(entry) {
+			continue
+		}
+		if silenced := m.silencedBy(alert, silences, entry.Group, now); len(silenced) > 0 {
+			m.log.Debug("silenced manual resolve", "alert_id", alertID, "group_key", entry.GroupKey, "silences", silenced)
+			continue
+		}
 		entry.Message = message
 		entry.ResolvedAt = &now
 		entry.Status = models.AlertStatusResolved

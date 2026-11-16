@@ -555,6 +555,14 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Get("/:alertID/instances", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertInstances)
 	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert).Name(string(audit.AlertResolve))
 
+	// Alert silences. Anyone who sees the source lists them and, with
+	// alerts:write, creates one; the creator and global admins change them.
+	silenceRoutes := api.Group("/alert-silences", s.requireAuth, s.requireAlertsEnabled)
+	silenceRoutes.Get("/", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListSilences)
+	silenceRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateSilence).Name(string(audit.AlertSilenceCreate))
+	silenceRoutes.Put("/:silenceID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateSilence).Name(string(audit.AlertSilenceUpdate))
+	silenceRoutes.Delete("/:silenceID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteSilence).Name(string(audit.AlertSilenceDelete))
+
 	// Notification destinations. Not behind requireAlertsEnabled: scheduled
 	// reports send to email destinations when alerting is off.
 	destinationRoutes := api.Group("/notification-destinations", s.requireAuth)
