@@ -39,8 +39,8 @@ func ShapeOf(query string, language models.QueryLanguage, rel Relation) (models.
 		items, ok = logchefQLItems(query)
 	case models.QueryLanguageClickHouseSQL:
 		items, ok = sqlItems(query, rel)
-	case models.QueryLanguageLogsQL:
-		// VictoriaLogs has no user-defined schema to tune.
+	case models.QueryLanguageLogsQL, models.QueryLanguageLogQL:
+		// VictoriaLogs and Loki have no user-defined schema to tune.
 	}
 	if !ok {
 		return nil, false
