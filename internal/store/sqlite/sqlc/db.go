@@ -354,6 +354,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertSkippedReportTickStmt, err = db.PrepareContext(ctx, insertSkippedReportTick); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertSkippedReportTick: %w", err)
 	}
+	if q.insertTeamMemberStmt, err = db.PrepareContext(ctx, insertTeamMember); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertTeamMember: %w", err)
+	}
 	if q.interruptAlertDeliveriesStmt, err = db.PrepareContext(ctx, interruptAlertDeliveries); err != nil {
 		return nil, fmt.Errorf("error preparing query InterruptAlertDeliveries: %w", err)
 	}
@@ -1272,6 +1275,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertSkippedReportTickStmt: %w", cerr)
 		}
 	}
+	if q.insertTeamMemberStmt != nil {
+		if cerr := q.insertTeamMemberStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertTeamMemberStmt: %w", cerr)
+		}
+	}
 	if q.interruptAlertDeliveriesStmt != nil {
 		if cerr := q.interruptAlertDeliveriesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing interruptAlertDeliveriesStmt: %w", cerr)
@@ -2026,6 +2034,7 @@ type Queries struct {
 	insertReportRecipientStmt             *sql.Stmt
 	insertRunningReportRunStmt            *sql.Stmt
 	insertSkippedReportTickStmt           *sql.Stmt
+	insertTeamMemberStmt                  *sql.Stmt
 	interruptAlertDeliveriesStmt          *sql.Stmt
 	interruptStaleReportRunsStmt          *sql.Stmt
 	isSourceManagedStmt                   *sql.Stmt
@@ -2263,6 +2272,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		insertReportRecipientStmt:             q.insertReportRecipientStmt,
 		insertRunningReportRunStmt:            q.insertRunningReportRunStmt,
 		insertSkippedReportTickStmt:           q.insertSkippedReportTickStmt,
+		insertTeamMemberStmt:                  q.insertTeamMemberStmt,
 		interruptAlertDeliveriesStmt:          q.interruptAlertDeliveriesStmt,
 		interruptStaleReportRunsStmt:          q.interruptStaleReportRunsStmt,
 		isSourceManagedStmt:                   q.isSourceManagedStmt,

@@ -84,7 +84,6 @@ func (q *Queries) AddCollectionTeam(ctx context.Context, arg AddCollectionTeamPa
 }
 
 const addTeamMember = `-- name: AddTeamMember :exec
-
 INSERT INTO team_members (team_id, user_id, role)
 VALUES ($1, $2, $3)
 ON CONFLICT (team_id, user_id) DO NOTHING
@@ -96,7 +95,6 @@ type AddTeamMemberParams struct {
 	Role   string `json:"role"`
 }
 
-// Team Members
 // Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.db.Exec(ctx, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
@@ -1380,7 +1378,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	return id, err
 }
 
-const deleteAPIToken = `-- name: DeleteAPIToken :exec
+const deleteAPIToken = `-- name: DeleteAPIToken :execrows
 DELETE FROM api_tokens WHERE id = $1 AND user_id = $2
 `
 
@@ -1390,9 +1388,12 @@ type DeleteAPITokenParams struct {
 }
 
 // Delete an API token by ID and user ID (ensure user owns the token)
-func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error {
-	_, err := q.db.Exec(ctx, deleteAPIToken, arg.ID, arg.UserID)
-	return err
+func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAPIToken, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteAlert = `-- name: DeleteAlert :one
@@ -2622,6 +2623,25 @@ func (q *Queries) GetTeamByName(ctx context.Context, name string) (Team, error) 
 	return i, err
 }
 
+const getTeamForUpdate = `-- name: GetTeamForUpdate :one
+SELECT id, name, description, managed, created_at, updated_at FROM teams WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Get a team by ID and lock the row until the transaction ends
+func (q *Queries) GetTeamForUpdate(ctx context.Context, id int64) (Team, error) {
+	row := q.db.QueryRow(ctx, getTeamForUpdate, id)
+	var i Team
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Managed,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTeamMember = `-- name: GetTeamMember :one
 SELECT team_id, user_id, role, created_at FROM team_members WHERE team_id = $1 AND user_id = $2
 `
@@ -2634,6 +2654,28 @@ type GetTeamMemberParams struct {
 // Get a team member
 func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (TeamMember, error) {
 	row := q.db.QueryRow(ctx, getTeamMember, arg.TeamID, arg.UserID)
+	var i TeamMember
+	err := row.Scan(
+		&i.TeamID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getTeamMemberForUpdate = `-- name: GetTeamMemberForUpdate :one
+SELECT team_id, user_id, role, created_at FROM team_members WHERE team_id = $1 AND user_id = $2 FOR UPDATE
+`
+
+type GetTeamMemberForUpdateParams struct {
+	TeamID int64 `json:"team_id"`
+	UserID int64 `json:"user_id"`
+}
+
+// Get a team member and lock the row until the transaction ends
+func (q *Queries) GetTeamMemberForUpdate(ctx context.Context, arg GetTeamMemberForUpdateParams) (TeamMember, error) {
+	row := q.db.QueryRow(ctx, getTeamMemberForUpdate, arg.TeamID, arg.UserID)
 	var i TeamMember
 	err := row.Scan(
 		&i.TeamID,
@@ -3194,6 +3236,30 @@ func (q *Queries) InsertSkippedReportTick(ctx context.Context, arg InsertSkipped
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const insertTeamMember = `-- name: InsertTeamMember :execrows
+
+INSERT INTO team_members (team_id, user_id, role)
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING
+`
+
+type InsertTeamMemberParams struct {
+	TeamID int64  `json:"team_id"`
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// Team Members
+// Add a member to a team and report through the row count whether this call
+// inserted it; an existing member is left as it is.
+func (q *Queries) InsertTeamMember(ctx context.Context, arg InsertTeamMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertTeamMember, arg.TeamID, arg.UserID, arg.Role)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec

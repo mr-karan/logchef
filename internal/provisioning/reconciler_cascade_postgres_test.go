@@ -90,9 +90,11 @@ func TestReconcilePostgresSourcePruneConcurrentDelete(t *testing.T) {
 					started = true
 					go func() {
 						if accountType == models.UserAccountTypeService {
-							result <- core.DeleteServiceAccount(ctx, db, quietLogger(), creator.ID)
+							_, err := core.DeleteServiceAccount(ctx, db, quietLogger(), creator.ID)
+							result <- err
 						} else {
-							result <- core.DeleteUser(ctx, db, quietLogger(), creator.ID)
+							_, err := core.DeleteUser(ctx, db, quietLogger(), creator.ID)
+							result <- err
 						}
 					}()
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
@@ -143,7 +145,7 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if err := core.AddTeamMember(ctx, db, quietLogger(), team.ID, user.ID, models.TeamRoleMember); err != nil {
+				if _, _, err := core.AddTeamMember(ctx, db, quietLogger(), team.ID, user.ID, models.TeamRoleMember); err != nil {
 					return err
 				}
 			}
@@ -154,7 +156,7 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 				return nil
 			}
 			started = true
-			go func() { result <- core.DeleteUser(ctx, db, quietLogger(), user.ID) }()
+			go func() { _, err := core.DeleteUser(ctx, db, quietLogger(), user.ID); result <- err }()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
@@ -206,10 +208,10 @@ func TestReconcilePostgresConcurrentLoginAndMembershipWrites(t *testing.T) {
 		return afterUserManaged{StoreOps: tx, after: func() error {
 			started = true
 			go func() { result <- db.UpdateUserLastLogin(ctx, user.ID, stamp) }()
-			if err := core.AddTeamMember(ctx, db, quietLogger(), addedTeam.ID, user.ID, models.TeamRoleEditor); err != nil {
+			if _, _, err := core.AddTeamMember(ctx, db, quietLogger(), addedTeam.ID, user.ID, models.TeamRoleEditor); err != nil {
 				return err
 			}
-			if err := core.RemoveTeamMember(ctx, db, quietLogger(), removedTeam.ID, user.ID); err != nil {
+			if _, err := core.RemoveTeamMember(ctx, db, quietLogger(), removedTeam.ID, user.ID); err != nil {
 				return err
 			}
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)

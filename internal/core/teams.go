@@ -132,66 +132,69 @@ func CreateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, name, 
 	return team, nil
 }
 
-// UpdateTeam updates an existing team's mutable fields (name, description).
-func UpdateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, updateData models.Team) error {
-	// Validate the fields provided for update
+// UpdateTeam updates an existing team's mutable fields (name, description)
+// and returns the team before and after the update, both read under the row
+// lock of the write.
+func UpdateTeam(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, updateData models.Team) (before, after *models.Team, err error) {
 	if err := validateTeamUpdate(updateData); err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	// Get existing team
-	existing, err := db.GetTeam(ctx, teamID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrTeamNotFound
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		existing, err := tx.GetTeamForUpdate(ctx, teamID)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrTeamNotFound
+			}
+			return fmt.Errorf("error getting team for update: %w", err)
 		}
-		log.Error("failed to get existing team for update", "error", err, "team_id", teamID)
-		return fmt.Errorf("error getting team for update: %w", err)
-	}
+		prior := *existing
+		before, after = &prior, existing
 
-	updated := false
-	// Apply updates from updateData
-	if updateData.Name != "" && updateData.Name != existing.Name {
-		// Check if new name conflicts with another existing team
-		conflictingTeam, err := db.GetTeamByName(ctx, updateData.Name)
-		if err == nil && conflictingTeam.ID != existing.ID {
-			return fmt.Errorf("%w: team with name '%s' already exists", ErrTeamAlreadyExists, updateData.Name) // Use error from users.go
+		updated := false
+		if updateData.Name != "" && updateData.Name != existing.Name {
+			conflictingTeam, err := tx.GetTeamByName(ctx, updateData.Name)
+			if err == nil && conflictingTeam.ID != existing.ID {
+				return fmt.Errorf("%w: team with name '%s' already exists", ErrTeamAlreadyExists, updateData.Name)
+			}
+			if err != nil && !models.IsNotFound(err) {
+				return fmt.Errorf("error checking for conflicting name: %w", err)
+			}
+			existing.Name = updateData.Name
+			updated = true
 		}
-		if err != nil && !models.IsNotFound(err) {
-			log.Error("error checking conflicting team name during update", "error", err, "new_name", updateData.Name)
-			return fmt.Errorf("error checking for conflicting name: %w", err)
+		if updateData.Description != existing.Description { // Update description even if empty
+			existing.Description = updateData.Description
+			updated = true
 		}
-		existing.Name = updateData.Name
-		updated = true
-	}
-	if updateData.Description != existing.Description { // Update description even if empty
-		existing.Description = updateData.Description
-		updated = true
-	}
-
-	// If no changes, return early
-	if !updated {
-		log.Debug("no update needed for team", "team_id", teamID)
+		if !updated {
+			return nil
+		}
+		if err := tx.UpdateTeam(ctx, existing); err != nil {
+			return fmt.Errorf("error updating team: %w", err)
+		}
 		return nil
-	}
-
-	// Update timestamp is handled by the DB layer
-	if err := db.UpdateTeam(ctx, existing); err != nil {
-		log.Error("failed to update team in db", "error", err, "team_id", teamID)
-		return fmt.Errorf("error updating team: %w", err)
+	})
+	if err != nil {
+		if !errors.Is(err, ErrTeamNotFound) && !errors.Is(err, ErrTeamAlreadyExists) {
+			log.Error("failed to update team", "error", err, "team_id", teamID)
+		}
+		return nil, nil, err
 	}
 
 	log.Info("team updated successfully", "team_id", teamID)
-	return nil
+	return before, after, nil
 }
 
-// DeleteTeam deletes a team and its associations (members, sources, queries).
-func DeleteTeam(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID) error {
+// DeleteTeam deletes a team and its associations (members, sources, queries),
+// and returns the team as read under the row lock of the delete.
+func DeleteTeam(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID) (*models.Team, error) {
+	var deleted *models.Team
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
-		_, err := tx.GetTeam(ctx, teamID)
+		existing, err := tx.GetTeamForUpdate(ctx, teamID)
 		if err != nil {
 			if models.IsNotFound(err) {
 				return ErrTeamNotFound
@@ -206,14 +209,15 @@ func DeleteTeam(ctx context.Context, db store.Store, log *slog.Logger, teamID mo
 			log.Error("failed to delete team from db", "error", err, "team_id", teamID)
 			return fmt.Errorf("error deleting team: %w", err)
 		}
+		deleted = existing
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Info("team deleted successfully", "team_id", teamID)
-	return nil
+	return deleted, nil
 }
 
 // --- Team Member Functions ---
@@ -231,82 +235,94 @@ func ListTeamMembers(ctx context.Context, db store.StoreOps, teamID models.TeamI
 	return members, nil
 }
 
-// AddTeamMember adds a user to a team with a specified role.
-// If the user is already a member, it updates their role.
-func AddTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
-	// Validate parameters
+// AddTeamMember adds a user to a team with a specified role. If the user is
+// already a member, it updates their role. It returns the membership before
+// (nil for a new member) and after the write, both read under the row lock of
+// the write. It takes no LockMembershipWrites: provisioning copes with
+// concurrent membership writes and must not wait for them.
+func AddTeamMember(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, userID models.UserID, role models.TeamRole) (before, after *models.TeamMember, err error) {
 	if err := validateTeamMember(teamID, userID, role); err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	// Validate team exists
-	if _, err := GetTeam(ctx, db, teamID); err != nil {
-		return err // Propagate ErrTeamNotFound or other DB errors
-	}
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if _, err := GetTeam(ctx, tx, teamID); err != nil {
+			return err
+		}
+		if _, err := GetUser(ctx, tx, userID); err != nil {
+			return err
+		}
 
-	// Validate user exists (call function from users.go)
-	if _, err := GetUser(ctx, db, userID); err != nil {
-		return err // Propagate ErrUserNotFound or other DB errors
-	}
-
-	// Check if user is already a member
-	existingMember, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, models.ErrNotFound) {
-		log.Error("failed to check existing team member", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error checking team member: %w", err)
-	}
-
-	if existingMember != nil {
-		// User is already a member, update role if different
-		if existingMember.Role != role {
-			log.Info("updating team member role", "team_id", teamID, "user_id", userID, "old_role", existingMember.Role, "new_role", role)
-			if err := db.UpdateTeamMemberRole(ctx, teamID, userID, role); err != nil {
-				log.Error("failed to update team member role in db", "error", err, "team_id", teamID, "user_id", userID)
+		existing, err := tx.GetTeamMemberForUpdate(ctx, teamID, userID)
+		if err != nil {
+			return fmt.Errorf("error checking team member: %w", err)
+		}
+		if existing == nil {
+			log.Info("adding new team member", "team_id", teamID, "user_id", userID, "role", role)
+			inserted, err := tx.InsertTeamMember(ctx, teamID, userID, role)
+			if err != nil {
+				return fmt.Errorf("error adding team member: %w", err)
+			}
+			if !inserted {
+				// A concurrent add won the insert: its committed row is the
+				// state this call changes, if it changes anything.
+				if existing, err = tx.GetTeamMemberForUpdate(ctx, teamID, userID); err != nil {
+					return fmt.Errorf("error reading concurrently added team member: %w", err)
+				}
+				if existing == nil {
+					return fmt.Errorf("team member %d of team %d was added and removed concurrently", userID, teamID)
+				}
+			}
+		}
+		switch {
+		case existing == nil: // this call inserted the member
+		case existing.Role != role:
+			log.Info("updating team member role", "team_id", teamID, "user_id", userID, "old_role", existing.Role, "new_role", role)
+			if err := tx.UpdateTeamMemberRole(ctx, teamID, userID, role); err != nil {
 				return fmt.Errorf("error updating team member role: %w", err)
 			}
-		} else {
+		default:
 			log.Debug("user already team member with correct role", "team_id", teamID, "user_id", userID, "role", role)
 		}
-		return nil // Indicate success (or no-op)
+		before = existing
+		after, err = tx.GetTeamMember(ctx, teamID, userID)
+		return err
+	})
+	if err != nil {
+		if !errors.Is(err, ErrTeamNotFound) && !errors.Is(err, ErrUserNotFound) {
+			log.Error("failed to add team member", "error", err, "team_id", teamID, "user_id", userID)
+		}
+		return nil, nil, err
 	}
-
-	// Add user to team
-	log.Info("adding new team member", "team_id", teamID, "user_id", userID, "role", role)
-	if err := db.AddTeamMember(ctx, teamID, userID, role); err != nil {
-		log.Error("failed to add team member to db", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error adding team member: %w", err)
-	}
-
-	return nil
+	return before, after, nil
 }
 
-// RemoveTeamMember removes a user from a team.
-func RemoveTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, userID models.UserID) error {
-	// Optional: Validate team and user exist first
-	// _, err := GetTeam(ctx, db, teamID)
-	// if err != nil { return err }
-	// _, err = GetUser(ctx, db, userID) // Use function from users.go
-	// if err != nil { return err }
-
-	// Check if user is actually a member before attempting delete
-	_, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
-			log.Debug("user not a member of team, nothing to remove", "team_id", teamID, "user_id", userID)
-			return nil // Not an error, just nothing to do
+// RemoveTeamMember removes a user from a team and returns the membership it
+// removed, read under the row lock of the delete. Removing a non-member is a
+// no-op that returns a nil membership.
+func RemoveTeamMember(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
+	var removed *models.TeamMember
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		existing, err := tx.GetTeamMemberForUpdate(ctx, teamID, userID)
+		if err != nil {
+			return fmt.Errorf("error checking team member before removal: %w", err)
 		}
-		log.Error("failed to check team member before removal", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error checking team member before removal: %w", err)
+		if existing == nil {
+			log.Debug("user not a member of team, nothing to remove", "team_id", teamID, "user_id", userID)
+			return nil
+		}
+		log.Info("removing team member", "team_id", teamID, "user_id", userID)
+		if err := tx.RemoveTeamMember(ctx, teamID, userID); err != nil {
+			return fmt.Errorf("error removing team member: %w", err)
+		}
+		removed = existing
+		return nil
+	})
+	if err != nil {
+		log.Error("failed to remove team member", "error", err, "team_id", teamID, "user_id", userID)
+		return nil, err
 	}
-
-	// Remove user from team
-	log.Info("removing team member", "team_id", teamID, "user_id", userID)
-	if err := db.RemoveTeamMember(ctx, teamID, userID); err != nil {
-		log.Error("failed to remove team member from db", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error removing team member: %w", err)
-	}
-
-	return nil
+	return removed, nil
 }
 
 // --- Team Source Functions ---
@@ -352,9 +368,11 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 	return sources, nil
 }
 
-// AddTeamSource associates a source with a team.
-func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
-	return db.WithTx(ctx, func(tx store.StoreOps) error {
+// AddTeamSource associates a source with a team. It reports whether the link
+// existed before, read under LockMembershipWrites; linking an already linked
+// source is a no-op.
+func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) (existed bool, err error) {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
@@ -367,6 +385,9 @@ func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID
 			}
 			return fmt.Errorf("error getting source: %w", err)
 		}
+		if existed, err = tx.TeamHasSource(ctx, teamID, sourceID); err != nil {
+			return fmt.Errorf("error checking team source: %w", err)
+		}
 
 		log.Info("adding source to team", "team_id", teamID, "source_id", sourceID)
 		if err := tx.AddTeamSource(ctx, teamID, sourceID); err != nil {
@@ -375,17 +396,31 @@ func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID
 		}
 		return nil
 	})
+	return existed, err
 }
 
-// RemoveTeamSource removes the association between a source and a team.
-func RemoveTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
-	log.Info("removing source from team", "team_id", teamID, "source_id", sourceID)
-	if err := db.RemoveTeamSource(ctx, teamID, sourceID); err != nil {
-		log.Error("failed to remove team source from db", "error", err, "team_id", teamID, "source_id", sourceID)
-		return fmt.Errorf("error removing team source: %w", err)
-	}
-
-	return nil
+// RemoveTeamSource removes the association between a source and a team, and
+// reports whether a link existed, read under LockMembershipWrites. Unlinking
+// a source that is not linked is a no-op.
+func RemoveTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) (removed bool, err error) {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		if removed, err = tx.TeamHasSource(ctx, teamID, sourceID); err != nil {
+			return fmt.Errorf("error checking team source: %w", err)
+		}
+		if !removed {
+			return nil
+		}
+		log.Info("removing source from team", "team_id", teamID, "source_id", sourceID)
+		if err := tx.RemoveTeamSource(ctx, teamID, sourceID); err != nil {
+			log.Error("failed to remove team source from db", "error", err, "team_id", teamID, "source_id", sourceID)
+			return fmt.Errorf("error removing team source: %w", err)
+		}
+		return nil
+	})
+	return removed, err
 }
 
 // --- Authorization/Access Check Functions ---

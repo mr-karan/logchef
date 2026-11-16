@@ -79,7 +79,7 @@ func TestReconcilePostgresConcurrentDelete(t *testing.T) {
 			wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps {
 				return afterMembershipRemoval{StoreOps: tx, after: func() error {
 					started = true
-					go func() { deleteResult <- core.DeleteUser(ctx, deleting, quietLogger(), user.ID) }()
+					go func() { _, err := core.DeleteUser(ctx, deleting, quietLogger(), user.ID); deleteResult <- err }()
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 				}}
 			}}
@@ -268,7 +268,7 @@ func TestReconcilePostgresConcurrentDeletePrunedMember(t *testing.T) {
 						return nil
 					}
 					started = true
-					go func() { result <- core.DeleteUser(ctx, deleting, quietLogger(), user.ID) }()
+					go func() { _, err := core.DeleteUser(ctx, deleting, quietLogger(), user.ID); result <- err }()
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 				}}
 			}}

@@ -57,6 +57,8 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("ConcurrentAdminRemovals", func(t *testing.T) { testConcurrentAdminRemovals(t, s) })
 	t.Run("Audit", func(t *testing.T) { testAudit(t, ctx, s) })
 	t.Run("ForUpdateReads", func(t *testing.T) { testForUpdateReads(t, ctx, s) })
+	t.Run("TeamForUpdate", func(t *testing.T) { testTeamForUpdate(t, ctx, s) })
+	t.Run("IdentityWriteCounts", func(t *testing.T) { testIdentityWriteCounts(t, ctx, s) })
 }
 
 // --- helpers ---

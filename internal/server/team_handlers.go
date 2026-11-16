@@ -71,7 +71,7 @@ func (s *Server) handleCreateTeam(c fiber.Ctx) error {
 	if actor := currentUser(c); actor != nil {
 		s.log.Info("team.create", "actor", actor.Email, "team", team.Name, "team_id", team.ID)
 	}
-	auditTarget(c, audit.TeamTarget(team))
+	auditSet(c, audit.TeamTarget(team), nil, audit.TeamFields(team))
 	return SendSuccess(c, fiber.StatusCreated, team)
 }
 
@@ -103,7 +103,8 @@ func (s *Server) handleUpdateTeam(c fiber.Ctx) error {
 	}
 
 	// Call core update function.
-	if err := core.UpdateTeam(c.Context(), s.store, s.log, teamID, updateData); err != nil {
+	before, after, err := core.UpdateTeam(c.Context(), s.store, s.log, teamID, updateData)
+	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
@@ -118,13 +119,12 @@ func (s *Server) handleUpdateTeam(c fiber.Ctx) error {
 	}
 
 	// Fetch and return updated team.
-	auditTarget(c, audit.TeamIDTarget(teamID))
+	auditSet(c, audit.TeamTarget(after), audit.TeamFields(before), audit.TeamFields(after))
 	updatedTeam, err := core.GetTeam(c.Context(), s.store, teamID)
 	if err != nil {
 		s.log.Error("failed to fetch updated team after successful update", "error", err, "team_id", teamID)
 		return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team updated successfully, but failed to fetch result"})
 	}
-	auditTarget(c, audit.TeamTarget(updatedTeam))
 	return SendSuccess(c, fiber.StatusOK, updatedTeam)
 }
 
@@ -138,14 +138,15 @@ func (s *Server) handleDeleteTeam(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
 	}
 
-	if err := core.DeleteTeam(c.Context(), s.store, s.log, teamID); err != nil {
+	deleted, err := core.DeleteTeam(c.Context(), s.store, s.log, teamID)
+	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to delete team", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to delete team")
 	}
-	auditTarget(c, audit.TeamIDTarget(teamID))
+	auditSet(c, audit.TeamTarget(deleted), audit.TeamFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team deleted successfully"})
 }
 
@@ -187,7 +188,8 @@ func (s *Server) handleAddTeamMember(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if err := core.AddTeamMember(c.Context(), s.store, s.log, teamID, req.UserID, req.Role); err != nil {
+	before, after, err := core.AddTeamMember(c.Context(), s.store, s.log, teamID, req.UserID, req.Role)
+	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
@@ -207,8 +209,7 @@ func (s *Server) handleAddTeamMember(c fiber.Ctx) error {
 	if actor := currentUser(c); actor != nil {
 		s.log.Info("team.member.add", "actor", actor.Email, "team_id", teamID, "member_id", req.UserID, "role", req.Role)
 	}
-	auditTarget(c, audit.TeamMemberTarget(teamID, req.UserID))
-	auditDetail(c, "role", req.Role)
+	auditTeamMemberAdd(c, before, after)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member added successfully"})
 }
 
@@ -228,12 +229,11 @@ func (s *Server) handleRemoveTeamMember(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid user ID: "+err.Error())
 	}
 
-	if err := core.RemoveTeamMember(c.Context(), s.store, s.log, teamID, userID); err != nil {
-		// Core function returns nil if member didn't exist, so only log unexpected errors.
-		s.log.Error("failed to remove team member", "error", err, "team_id", teamID, "user_id", userID)
+	removed, err := core.RemoveTeamMember(c.Context(), s.store, s.log, teamID, userID)
+	if err != nil {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team member")
 	}
-	auditTarget(c, audit.TeamMemberTarget(teamID, userID))
+	auditTeamMemberRemove(c, teamID, userID, removed)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member removed successfully"})
 }
 
@@ -333,7 +333,8 @@ func (s *Server) handleLinkSourceToTeam(c fiber.Ctx) error {
 	}
 
 	// Call core function to create the link.
-	if err := core.AddTeamSource(c.Context(), s.store, s.log, teamID, req.SourceID); err != nil {
+	existed, err := core.AddTeamSource(c.Context(), s.store, s.log, teamID, req.SourceID)
+	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) || errors.Is(err, core.ErrSourceNotFound) {
 			// Return 404 if either team or source doesn't exist.
 			return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
@@ -342,7 +343,12 @@ func (s *Server) handleLinkSourceToTeam(c fiber.Ctx) error {
 		s.log.Error("failed to add team source", "error", err, "team_id", teamID, "source_id", req.SourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to link source to team")
 	}
-	auditTarget(c, audit.TeamSourceTarget(teamID, req.SourceID))
+	link := audit.TeamSourceFields(teamID, req.SourceID)
+	var before *audit.Fields
+	if existed {
+		before = link
+	}
+	auditSet(c, audit.TeamSourceTarget(teamID, req.SourceID), before, link)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source linked to team successfully"})
 }
 
@@ -363,11 +369,35 @@ func (s *Server) handleUnlinkSourceFromTeam(c fiber.Ctx) error {
 	}
 
 	// Call core function to remove the link.
-	if err := core.RemoveTeamSource(c.Context(), s.store, s.log, teamID, sourceID); err != nil {
-		// Core function likely doesn't error if link doesn't exist, log unexpected errors.
+	removed, err := core.RemoveTeamSource(c.Context(), s.store, s.log, teamID, sourceID)
+	if err != nil {
 		s.log.Error("failed to remove team source", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team source link")
 	}
-	auditTarget(c, audit.TeamSourceTarget(teamID, sourceID))
+	if removed {
+		auditSet(c, audit.TeamSourceTarget(teamID, sourceID), audit.TeamSourceFields(teamID, sourceID), nil)
+	} else {
+		auditNoChange(c)
+	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source unlinked from team successfully"})
+}
+
+// auditTeamMemberAdd stages a member add, which is a role change when the
+// user was already a member.
+func auditTeamMemberAdd(c fiber.Ctx, before, after *models.TeamMember) {
+	var beforeFields *audit.Fields
+	if before != nil {
+		beforeFields = audit.TeamMemberFields(before)
+	}
+	auditSet(c, audit.TeamMemberTarget(after.TeamID, after.UserID), beforeFields, audit.TeamMemberFields(after))
+}
+
+// auditTeamMemberRemove stages a member removal, or no event when the user was
+// not a member.
+func auditTeamMemberRemove(c fiber.Ctx, teamID models.TeamID, userID models.UserID, removed *models.TeamMember) {
+	if removed == nil {
+		auditNoChange(c)
+		return
+	}
+	auditSet(c, audit.TeamMemberTarget(teamID, userID), audit.TeamMemberFields(removed), nil)
 }

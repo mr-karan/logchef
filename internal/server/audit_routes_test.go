@@ -276,8 +276,8 @@ func TestAuditRoutesRecordActorAndTarget(t *testing.T) {
 		fmt.Sprintf(`{"user_id":%d,"role":"member"}`, member.ID), e.cookie), http.StatusOK)
 	ev = e.only()
 	checkActorAndTarget(t, ev, "team_member.add", e.admin, "team_member", strconv.Itoa(int(member.ID)))
-	if ev.TeamID == nil || *ev.TeamID != team.ID || detailOf(t, ev)["role"] != "member" {
-		t.Errorf("team member add team_id %v detail %s", ev.TeamID, ev.Detail)
+	if ev.TeamID == nil || *ev.TeamID != team.ID || !strings.Contains(string(ev.Changes), `"role":{"to":"member"}`) {
+		t.Errorf("team member add team_id %v changes %s", ev.TeamID, ev.Changes)
 	}
 	e.reset()
 

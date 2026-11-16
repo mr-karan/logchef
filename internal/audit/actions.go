@@ -115,7 +115,7 @@ var registrations = []struct {
 	staged bool
 }{
 	{AlertCreate, false}, {AlertUpdate, false}, {AlertDelete, false}, {AlertResolve, false},
-	{APITokenCreate, false}, {APITokenDelete, false},
+	{APITokenCreate, true}, {APITokenDelete, true},
 	{AuditEventExport, false},
 	{CollectionCreate, false}, {CollectionUpdate, false}, {CollectionDelete, false},
 	{CollectionItemAdd, false}, {CollectionItemUpdate, false}, {CollectionItemRemove, false},
@@ -127,16 +127,16 @@ var registrations = []struct {
 	{OAuthGrantRevoke, false},
 	{QueryShareCreate, false}, {QueryShareDelete, false},
 	{SavedQueryCreate, false}, {SavedQueryUpdate, false}, {SavedQueryDelete, false},
-	{ServiceAccountCreate, false}, {ServiceAccountDelete, false},
+	{ServiceAccountCreate, true}, {ServiceAccountDelete, true},
 	{SessionLogin, false}, {SessionLogout, false},
 	// A setting test changes no object, so it has a target and a detail but
 	// no fields to stage.
 	{SettingUpdate, true}, {SettingDelete, true}, {SettingTest, false},
 	{SourceCreate, true}, {SourceUpdate, true}, {SourceDelete, true},
-	{TeamCreate, false}, {TeamUpdate, false}, {TeamDelete, false},
-	{TeamMemberAdd, false}, {TeamMemberRemove, false},
-	{TeamSourceLink, false}, {TeamSourceUnlink, false},
-	{UserCreate, false}, {UserUpdate, false}, {UserDelete, false},
+	{TeamCreate, true}, {TeamUpdate, true}, {TeamDelete, true},
+	{TeamMemberAdd, true}, {TeamMemberRemove, true},
+	{TeamSourceLink, true}, {TeamSourceUnlink, true},
+	{UserCreate, true}, {UserUpdate, true}, {UserDelete, true},
 	{SavedViewCreate, true}, {SavedViewUpdate, true}, {SavedViewDelete, true}, {SavedViewSetDefault, true}, {SavedViewClearDefault, true},
 	{ReportCreate, true}, {ReportUpdate, true}, {ReportDelete, false},
 	{ReportPause, false}, {ReportResume, false}, {ReportClaim, false},

@@ -18,7 +18,6 @@ type Querier interface {
 	AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error
 	// Share a collection with a team; idempotent on (collection_id, team_id).
 	AddCollectionTeam(ctx context.Context, arg AddCollectionTeamParams) error
-	// Team Members
 	// Add a member to a team; adding an existing member is a no-op and keeps their role.
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error
 	// Team Sources
@@ -109,7 +108,7 @@ type Querier interface {
 	// Create a new user
 	CreateUser(ctx context.Context, arg CreateUserParams) (int64, error)
 	// Delete an API token by ID and user ID (ensure user owns the token)
-	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
+	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
 	DeleteAlertInstance(ctx context.Context, arg DeleteAlertInstanceParams) error
 	DeleteAlertInstances(ctx context.Context, alertID int64) error
@@ -237,6 +236,10 @@ type Querier interface {
 	// row; the caller then tells the tick conflict from a run in flight.
 	InsertRunningReportRun(ctx context.Context, arg InsertRunningReportRunParams) (ReportRun, error)
 	InsertSkippedReportTick(ctx context.Context, arg InsertSkippedReportTickParams) (ReportRun, error)
+	// Team Members
+	// Add a member to a team and report through the row count whether this call
+	// inserted it; an existing member is left as it is.
+	InsertTeamMember(ctx context.Context, arg InsertTeamMemberParams) (int64, error)
 	InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error
 	InterruptStaleReportRuns(ctx context.Context, graceModifier string) (int64, error)
 	// Check if a source is managed

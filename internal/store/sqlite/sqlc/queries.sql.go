@@ -85,7 +85,6 @@ func (q *Queries) AddCollectionTeam(ctx context.Context, arg AddCollectionTeamPa
 }
 
 const addTeamMember = `-- name: AddTeamMember :exec
-
 INSERT INTO team_members (team_id, user_id, role)
 VALUES (?, ?, ?)
 ON CONFLICT (team_id, user_id) DO NOTHING
@@ -97,7 +96,6 @@ type AddTeamMemberParams struct {
 	Role   string `json:"role"`
 }
 
-// Team Members
 // Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.exec(ctx, q.addTeamMemberStmt, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
@@ -1409,7 +1407,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	return id, err
 }
 
-const deleteAPIToken = `-- name: DeleteAPIToken :exec
+const deleteAPIToken = `-- name: DeleteAPIToken :execrows
 DELETE FROM api_tokens WHERE id = ? AND user_id = ?
 `
 
@@ -1419,9 +1417,12 @@ type DeleteAPITokenParams struct {
 }
 
 // Delete an API token by ID and user ID (ensure user owns the token)
-func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error {
-	_, err := q.exec(ctx, q.deleteAPITokenStmt, deleteAPIToken, arg.ID, arg.UserID)
-	return err
+func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteAPITokenStmt, deleteAPIToken, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteAlert = `-- name: DeleteAlert :one
@@ -3170,6 +3171,30 @@ func (q *Queries) InsertSkippedReportTick(ctx context.Context, arg InsertSkipped
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const insertTeamMember = `-- name: InsertTeamMember :execrows
+
+INSERT INTO team_members (team_id, user_id, role)
+VALUES (?, ?, ?)
+ON CONFLICT (team_id, user_id) DO NOTHING
+`
+
+type InsertTeamMemberParams struct {
+	TeamID int64  `json:"team_id"`
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// Team Members
+// Add a member to a team and report through the row count whether this call
+// inserted it; an existing member is left as it is.
+func (q *Queries) InsertTeamMember(ctx context.Context, arg InsertTeamMemberParams) (int64, error) {
+	result, err := q.exec(ctx, q.insertTeamMemberStmt, insertTeamMember, arg.TeamID, arg.UserID, arg.Role)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec

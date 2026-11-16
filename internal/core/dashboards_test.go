@@ -168,11 +168,11 @@ func seedTeamWithSource(t *testing.T, db *sqlite.DB, name string, members ...*mo
 		t.Fatalf("CreateTeam(%s): %v", name, err)
 	}
 	src := newTestSource(t, db, name+"-src")
-	if err := AddTeamSource(ctx, db, log, team.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, team.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(%s): %v", name, err)
 	}
 	for _, m := range members {
-		if err := AddTeamMember(ctx, db, log, team.ID, m.ID, models.TeamRoleMember); err != nil {
+		if _, _, err := AddTeamMember(ctx, db, log, team.ID, m.ID, models.TeamRoleMember); err != nil {
 			t.Fatalf("AddTeamMember(%s): %v", m.Email, err)
 		}
 	}

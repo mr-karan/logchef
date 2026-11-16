@@ -157,6 +157,10 @@ RETURNING id;
 -- Get a team by ID
 SELECT * FROM teams WHERE id = $1;
 
+-- name: GetTeamForUpdate :one
+-- Get a team by ID and lock the row until the transaction ends
+SELECT * FROM teams WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: UpdateTeam :exec
 -- Update a team
 UPDATE teams
@@ -179,6 +183,13 @@ ORDER BY t.created_at DESC;
 
 -- Team Members
 
+-- name: InsertTeamMember :execrows
+-- Add a member to a team and report through the row count whether this call
+-- inserted it; an existing member is left as it is.
+INSERT INTO team_members (team_id, user_id, role)
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING;
+
 -- name: AddTeamMember :exec
 -- Add a member to a team; adding an existing member is a no-op and keeps their role.
 INSERT INTO team_members (team_id, user_id, role)
@@ -188,6 +199,10 @@ ON CONFLICT (team_id, user_id) DO NOTHING;
 -- name: GetTeamMember :one
 -- Get a team member
 SELECT * FROM team_members WHERE team_id = $1 AND user_id = $2;
+
+-- name: GetTeamMemberForUpdate :one
+-- Get a team member and lock the row until the transaction ends
+SELECT * FROM team_members WHERE team_id = $1 AND user_id = $2 FOR UPDATE;
 
 -- name: UpdateTeamMemberRole :exec
 -- Update a team member's role
@@ -547,7 +562,7 @@ SET last_used_at = now(),
 WHERE id = $1
   AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds');
 
--- name: DeleteAPIToken :exec
+-- name: DeleteAPIToken :execrows
 -- Delete an API token by ID and user ID (ensure user owns the token)
 DELETE FROM api_tokens WHERE id = $1 AND user_id = $2;
 
