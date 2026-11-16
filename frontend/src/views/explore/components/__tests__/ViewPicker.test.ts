@@ -4,9 +4,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type { SavedView } from "@/api/savedViews";
 import { useSavedViewsStore } from "@/stores/savedViews";
+import { useExploreStore } from "@/stores/explore";
+import { relativeWindow } from "@/utils/timeWindow";
 import ViewPicker from "../ViewPicker.vue";
 
-vi.mock("@/api/savedViews", () => ({ savedViewsApi: { list: vi.fn(), create: vi.fn(), update: vi.fn() } }));
+const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn() }));
+vi.mock("@/api/savedViews", () => ({ savedViewsApi: api }));
 
 let unmount: (() => void) | null = null;
 
@@ -24,11 +27,11 @@ function view(id: number, scope: SavedView["scope"], name: string, can_edit = tr
   };
 }
 
-async function mount(views: SavedView[], active: number | null) {
+async function mount(views: SavedView[], active: number | null, defaultViewId: number | null = null) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const store = useSavedViewsStore();
-  store.enter(2, 5, { views, default_view_id: null }, active);
+  store.enter(2, 5, { views, default_view_id: defaultViewId }, active);
   const selected: (number | null)[] = [];
   const host = document.createElement("div");
   document.body.append(host);
@@ -80,4 +83,52 @@ it("lists the views in scope groups and emits the pick", async () => {
   items[1].click();
   await nextTick();
   expect(selected).toEqual([2]);
+});
+
+it("marks the default view", async () => {
+  const { host } = await mount([view(1, "personal", "mine"), view(2, "team", "ours")], null, 2);
+  const items = await openMenu(host);
+  expect(items[0].querySelector("[data-testid=view-default]")).toBeNull();
+  expect(items[1].querySelector("[data-testid=view-default]")?.textContent).toBe("Default");
+});
+
+it("saves the filter and time range only when checked, and only what a view can hold", async () => {
+  const { host } = await mount([], null);
+  const explore = useExploreStore();
+  const save = async (check: string[]) => {
+    const items = await openMenu(host);
+    items.find(item => item.textContent?.trim() === "Save as new view")!.click();
+    await nextTick();
+    await nextTick();
+    const name = document.body.querySelector<HTMLInputElement>("#view-name")!;
+    name.value = "errors";
+    name.dispatchEvent(new Event("input"));
+    for (const id of check) document.body.querySelector<HTMLElement>(`[data-testid=${id}]`)!.click();
+    await nextTick();
+    document.body.querySelector<HTMLFormElement>("[role=dialog] form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await vi.waitFor(() => expect(api.create).toHaveBeenCalled());
+    const definition = api.create.mock.lastCall?.[2].definition;
+    api.create.mockClear();
+    return definition;
+  };
+  api.create.mockResolvedValue({ data: view(9, "personal", "errors") });
+
+  explore.setLogchefqlCode('level="error"');
+  explore.setWindow(relativeWindow("1h")!);
+  const unchecked = await save([]);
+  expect(unchecked).not.toHaveProperty("filter");
+  expect(unchecked).not.toHaveProperty("time_range");
+
+  const checked = await save(["view-include-filter", "view-include-time-range"]);
+  expect(checked).toMatchObject({ filter: 'level="error"', time_range: "1h" });
+
+  // An empty editor has no filter to save.
+  explore.setLogchefqlCode("");
+  await openMenu(host);
+  const items = [...document.body.querySelectorAll<HTMLElement>("[role=menuitem]")];
+  items.find(item => item.textContent?.trim() === "Save as new view")!.click();
+  await nextTick();
+  await nextTick();
+  expect(document.body.querySelector("[data-testid=view-include-filter]")?.hasAttribute("disabled")).toBe(true);
+  expect(document.body.querySelector("[data-testid=view-include-time-range]")?.hasAttribute("disabled")).toBe(false);
 });

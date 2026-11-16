@@ -570,10 +570,10 @@ describe("Explorer history navigation", () => {
     expect(readRecentSources("1").map(recent => recent.sourceId)).toEqual([4, 3]);
   });
 
-  function savedView(id: number, name: string) {
+  function savedView(id: number, name: string, defaults: { filter?: string; time_range?: string } = {}) {
     return {
       id, source_id: 3, scope: "personal" as const, name, description: "",
-      definition: { version: 1 as const, columns: [{ name: "msg" }] },
+      definition: { version: 1 as const, columns: [{ name: "msg" }], ...defaults },
       is_default: false, managed: false, revision: 1, created_at: "", updated_at: "", can_edit: true, can_set_default: true,
     };
   }
@@ -612,6 +612,55 @@ describe("Explorer history navigation", () => {
     const { router } = await mountExplorer();
     await settle();
     expect(router.currentRoute.value.query.view).toBe("12");
+  });
+
+  const noDraft = () => localStorage.removeItem("logchef.explore.draft.1.3");
+
+  it("opens the default view with its filter and range, keeps a typed condition across picks and resets to the view", async () => {
+    savedViewList = { views: [savedView(12, "errors", { filter: 'level="error"', time_range: "1h" }), savedView(13, "wide")], default_view_id: 12 };
+    const { router, store, nav, query } = await mountExplorer({ team: "1", source: "3" }, noDraft);
+    await settle();
+    expect(useSavedViewsStore().activeViewId).toBe(12);
+    expect(router.currentRoute.value.query).toMatchObject({ view: "12", q: 'level="error"', t: "1h" });
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'level="error"' });
+
+    // A header condition writes LogchefQL into the editor and runs it.
+    store.setLogchefqlCode('level="error" and host="a"');
+    nav.run();
+    await settle();
+    const runs = query.mock.calls.length;
+    nav.selectView(13);
+    await settle();
+    expect(store.logchefqlCode).toBe('level="error" and host="a"');
+    expect(query.mock.calls.length).toBe(runs);
+
+    nav.selectView(12);
+    nav.resetView();
+    await settle();
+    expect(store.logchefqlCode).toBe('level="error"');
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'level="error"' });
+    expect(router.currentRoute.value.query).toMatchObject({ view: "12", q: 'level="error"', t: "1h" });
+  });
+
+  it("keeps the remembered No view over the default view", async () => {
+    savedViewList = { views: [savedView(12, "errors", { filter: 'level="error"' })], default_view_id: 12 };
+    localStorage.setItem("logchef-activeView-1-3", "null");
+    const { router, store } = await mountExplorer({ team: "1", source: "3" }, noDraft);
+    await settle();
+    expect(router.currentRoute.value.query.view).toBeUndefined();
+    expect(store.logchefqlCode).toBe("");
+  });
+
+  it("runs a picked view's filter when the editor is empty", async () => {
+    savedViewList = { views: [savedView(12, "errors", { filter: 'level="error"' })], default_view_id: null };
+    const { router, store, nav, query } = await mountExplorer({ team: "1", source: "3" }, noDraft);
+    await settle();
+    expect(store.logchefqlCode).toBe("");
+    nav.selectView(12);
+    await settle();
+    expect(store.logchefqlCode).toBe('level="error"');
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'level="error"' });
+    expect(router.currentRoute.value.query).toMatchObject({ view: "12", q: 'level="error"' });
   });
 
   it("picks a view without running the query again and remembers it", async () => {
