@@ -6,7 +6,7 @@ import type { SavedViewDefinition } from "@/lib/savedViewLayout";
 import { useSavedViewsStore } from "../savedViews";
 import { useActiveSavedViewStore } from "../activeSavedView";
 
-const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(), setDefault: vi.fn(), clearDefault: vi.fn() }));
 vi.mock("@/api/savedViews", () => ({ savedViewsApi: api }));
 
 function view(id: number, overrides: Partial<SavedView> = {}, definition: Partial<SavedViewDefinition> = {}): SavedView {
@@ -210,5 +210,21 @@ describe("saved views store: working copy", () => {
     expect(localStorage.getItem("logchef-viewState-2-5")).toBeNull();
     expect(localStorage.getItem("logchef-viewDisplayMode-2-5")).toBeNull();
     expect(store.layoutResetToken).toBe(token + 1);
+  });
+});
+
+describe("saved views store: manage", () => {
+  it("reports no delete for a source the Explorer left while the list reloaded", async () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1), view(2)), 1);
+    api.remove.mockResolvedValue({ data: { message: "View deleted" } });
+    let release: (value: unknown) => void = () => {};
+    api.list.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    const removed = store.remove(view(1));
+    await vi.waitFor(() => expect(api.list).toHaveBeenCalled());
+    store.enter(2, 6, list(view(7)), 7);
+    release({ data: list(view(2)) });
+    expect(await removed).toBe(false);
+    expect(store.activeViewId).toBe(7);
   });
 });

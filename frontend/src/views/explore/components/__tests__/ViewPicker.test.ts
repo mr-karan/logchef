@@ -11,9 +11,19 @@ import ViewPicker from "../ViewPicker.vue";
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), update: vi.fn() }));
 vi.mock("@/api/savedViews", () => ({ savedViewsApi: api }));
 
+// The result on screen. Only its columns, rows and aggregation matter to the picker.
+type Results = { columns: { name: string; type: string }[]; rows: Record<string, unknown>[]; aggregation: unknown };
+const runs = vi.hoisted(() => ({ state: null as unknown as { results: Results | null } }));
+vi.mock("@/stores/exploreRuns", async () => {
+  const { reactive } = await import("vue");
+  runs.state = reactive({ results: null as Results | null });
+  return { useExploreRuns: () => runs.state };
+});
+
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
+  runs.state.results = null;
   unmount?.();
   unmount = null;
   document.body.innerHTML = "";
@@ -131,4 +141,28 @@ it("saves the filter and time range only when checked, and only what a view can 
   await nextTick();
   expect(document.body.querySelector("[data-testid=view-include-filter]")?.hasAttribute("disabled")).toBe(true);
   expect(document.body.querySelector("[data-testid=view-include-time-range]")?.hasAttribute("disabled")).toBe(false);
+});
+
+it("warns when a result with rows lacks a view column and names it", async () => {
+  const { host } = await mount([view(1, "personal", "errors")], 1);
+  const mark = () => host.querySelector<HTMLElement>("[data-testid=view-missing-columns]");
+  const result = (names: string[], rows: number, aggregation: unknown = null): Results => ({
+    columns: names.map(name => ({ name, type: "String" })), rows: Array.from({ length: rows }, () => ({})), aggregation,
+  });
+
+  runs.state.results = result(["timestamp", "msg"], 3);
+  await nextTick();
+  expect(mark()).toBeNull();
+
+  runs.state.results = result(["timestamp", "level"], 3);
+  await nextTick();
+  expect(mark()?.getAttribute("title")).toBe("Not in this result: msg");
+
+  // No rows, or an aggregation with its own columns, shows no mark.
+  runs.state.results = result(["timestamp", "level"], 0);
+  await nextTick();
+  expect(mark()).toBeNull();
+  runs.state.results = result(["count"], 3, { kind: "count" });
+  await nextTick();
+  expect(mark()).toBeNull();
 });

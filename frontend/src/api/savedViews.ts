@@ -54,4 +54,13 @@ export const savedViewsApi = {
 
   update: (teamId: number, sourceId: number, viewId: number, view: UpdateSavedViewRequest) =>
     apiClient.put<SavedView>(`${base(teamId, sourceId)}/${viewId}`, view),
+
+  remove: (teamId: number, sourceId: number, viewId: number) =>
+    apiClient.delete<{ message: string }>(`${base(teamId, sourceId)}/${viewId}`),
+
+  setDefault: (teamId: number, sourceId: number, viewId: number) =>
+    apiClient.put<SavedView>(`${base(teamId, sourceId)}/${viewId}/default`),
+
+  clearDefault: (teamId: number, sourceId: number, viewId: number) =>
+    apiClient.delete<SavedView>(`${base(teamId, sourceId)}/${viewId}/default`),
 };

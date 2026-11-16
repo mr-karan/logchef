@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   layoutHasResultColumn,
+  missingViewColumns,
   seedColumnLayout,
   seedSorting,
   sortingForResult,
   tableLayoutToDefinition,
+  withoutColumns,
   type SavedViewColumn,
 } from './savedViewLayout'
 
@@ -87,5 +89,27 @@ describe('layoutHasResultColumn', () => {
     const layout = seedColumnLayout([{ name: 'gone' }], ['timestamp', 'level'], 'timestamp')
     expect(layoutHasResultColumn(layout, ['timestamp', 'level'])).toBe(false)
     expect(layoutHasResultColumn(layout, ['timestamp', 'gone'])).toBe(true)
+  })
+})
+
+describe('missing view columns', () => {
+  const definition = { version: 1 as const, columns: viewColumns, sort: [{ column: 'msg', desc: false }, { column: 'host', desc: true }], filter: 'level="error"' }
+
+  it('lists the column and sort names a result lacks, once each', () => {
+    expect(missingViewColumns(definition, ['timestamp', 'level', 'msg', 'host'])).toEqual([])
+    expect(missingViewColumns(definition, ['timestamp', 'level'])).toEqual(['msg', 'host'])
+  })
+
+  it('removes the names from columns and sort and keeps the other parts', () => {
+    expect(withoutColumns(definition, ['msg'])).toEqual({
+      version: 1,
+      columns: [{ name: 'timestamp', width: 190 }, { name: 'level' }],
+      sort: [{ column: 'host', desc: true }],
+      filter: 'level="error"',
+    })
+  })
+
+  it('drops a part that has no entry left', () => {
+    expect(withoutColumns(definition, ['timestamp', 'level', 'msg', 'host'])).toEqual({ version: 1, filter: 'level="error"' })
   })
 })
