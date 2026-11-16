@@ -152,7 +152,7 @@ func normalizeGroupBy(in []string) ([]string, error) {
 	return out, nil
 }
 
-func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert, checkQuery bool) error {
+func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert, checkQuery bool) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
@@ -210,7 +210,11 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 		return fmt.Errorf("invalid severity %q", alert.Severity)
 	}
 	if checkQuery {
-		return datasource.ValidateAlertQuery(alert.QueryLanguage, alert.Query)
+		source, err := db.GetSource(ctx, sourceID)
+		if err != nil {
+			return fmt.Errorf("failed to load source: %w", err)
+		}
+		return datasource.ValidateAlertQuery(source, alert.QueryLanguage, alert.Query)
 	}
 	return nil
 }
@@ -251,7 +255,7 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
 	}
-	if err := validateAlertModel(ctx, ds, sourceID, alert, true); err != nil {
+	if err := validateAlertModel(ctx, db, ds, sourceID, alert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -311,7 +315,7 @@ func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 		}
 	}
-	if err := validateAlertModel(ctx, ds, existing.SourceID, existing, queryChanged); err != nil {
+	if err := validateAlertModel(ctx, db, ds, existing.SourceID, existing, queryChanged); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -597,7 +601,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		Severity:          models.AlertSeverityWarning,
 		GroupBy:           req.GroupBy,
 	}
-	if err := validateAlertModel(ctx, ds, sourceID, tempAlert, true); err != nil {
+	if err := validateAlertModel(ctx, db, ds, sourceID, tempAlert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -605,6 +609,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	timeout := models.DefaultQueryTimeoutSeconds
 	startTime := time.Now()
 	result, err := ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
+		At:              time.Now().UTC(),
 		Language:        tempAlert.QueryLanguage,
 		Query:           tempAlert.Query,
 		LookbackSeconds: tempAlert.LookbackSeconds,
@@ -698,7 +703,7 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 
 	// Warn if query doesn't have a time filter (for SQL queries)
 	if !strings.Contains(queryLower, "where") && !strings.Contains(queryLower, "interval") && !strings.Contains(queryLower, "now()") {
-		warnings = append(warnings, "Query appears to lack a time-based filter. Consider adding a time window (e.g., WHERE timestamp >= now() - INTERVAL 5 MINUTE) to improve performance and relevance.")
+		warnings = append(warnings, "Query appears to lack a time-based filter. Consider adding a time window (e.g., WHERE {{__time_filter}}) to improve performance and relevance.")
 	}
 
 	if grouped {

@@ -65,8 +65,11 @@ type HistogramResult struct {
 }
 
 type AlertQueryRequest struct {
-	Language        models.QueryLanguage
-	Query           string
+	Language models.QueryLanguage
+	Query    string
+	// At is the instant the evaluation stands for. The window is the
+	// lookback that ends at At. Required.
+	At              time.Time
 	LookbackSeconds int
 	QueryTimeout    *int
 }

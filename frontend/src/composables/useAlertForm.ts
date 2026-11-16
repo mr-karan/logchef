@@ -169,9 +169,6 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   // LogChefQL validation state
   const conditionError = ref<string | null>(null);
 
-  // Get source details for schema-aware parsing (same pattern as explore page)
-  const sourceDetails = currentSource;
-  const timestampField = computed(() => sourceDetails.value?._meta_ts_field || "timestamp");
   const alertMetadata = computed(() =>
     resolveAlertMetadata({
       editor_mode: form.editor_mode,
@@ -181,18 +178,16 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     })
   );
 
-  // Generate ClickHouse lookback expression based on lookback_seconds
-  const lookbackExpression = computed(() => {
-    const seconds = form.lookback_seconds || 300;
-    return `now() - toIntervalSecond(${seconds})`;
-  });
+  // The server expands this to the lookback window that ends at the
+  // evaluation instant, so a query can also run for a past instant.
+  const timeFilter = "{{__time_filter}}";
 
   const nativeQueryPlaceholder = computed(() => {
     if (sourceType.value === "victorialogs") {
       return `level:="error" | stats count() as value`;
     }
 
-    return `SELECT count(*) as value FROM ${currentTableName.value} WHERE severity = 'ERROR' AND \`${timestampField.value}\` >= ${lookbackExpression.value}`;
+    return `SELECT count(*) as value FROM ${currentTableName.value} WHERE severity = 'ERROR' AND ${timeFilter}`;
   });
 
   const nativeQueryHelpText = computed(() => {
@@ -268,10 +263,9 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
         } else {
           const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(\`${aggregateField}\`)`;
           const tableName = currentTableName.value;
-          const tsField = timestampField.value;
 
           let whereClause = response.data.sql ? `(${response.data.sql})` : "1=1";
-          whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
+          whereClause += ` AND ${timeFilter}`;
 
           generatedQuery.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
         }
@@ -304,8 +298,8 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
 
   watch(
     () => [props.open, props.teamId, props.sourceId, form.editor_mode,
-      form.condition_json, form.aggregate_function, form.aggregate_field, form.lookback_seconds,
-      currentTableName.value, timestampField.value, nativeQueryLanguage.value, supportsConditionEditor.value],
+      form.condition_json, form.aggregate_function, form.aggregate_field,
+      currentTableName.value, nativeQueryLanguage.value, supportsConditionEditor.value],
     () => {
       invalidateTranslation();
       if (form.editor_mode !== "condition") return;
@@ -337,8 +331,6 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
 
   function getClickHouseQueryTemplates(): QueryTemplate[] {
     const tableName = currentTableName.value;
-    const tsField = timestampField.value;
-    const lookback = lookbackExpression.value;
 
     return [
       {
@@ -348,7 +340,7 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
         query: `SELECT count(*) as value
 FROM ${tableName}
 WHERE severity = 'ERROR'
-  AND \`${tsField}\` >= ${lookback}`,
+  AND ${timeFilter}`,
       },
       {
         name: t("alerts.templates.criticalLogs"),
@@ -357,7 +349,7 @@ WHERE severity = 'ERROR'
         query: `SELECT count(*) as value
 FROM ${tableName}
 WHERE severity = 'CRITICAL'
-  AND \`${tsField}\` >= ${lookback}`,
+  AND ${timeFilter}`,
       },
       {
         name: t("alerts.templates.highResponseTime"),
@@ -365,7 +357,7 @@ WHERE severity = 'CRITICAL'
         editorMode: "native" as const,
         query: `SELECT avg(response_time) as value
 FROM ${tableName}
-WHERE \`${tsField}\` >= ${lookback}`,
+WHERE ${timeFilter}`,
       },
       {
         name: t("alerts.templates.failedRequests"),
@@ -374,7 +366,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
         query: `SELECT count(*) as value
 FROM ${tableName}
 WHERE status_code >= 500
-  AND \`${tsField}\` >= ${lookback}`,
+  AND ${timeFilter}`,
       },
       {
         name: t("alerts.templates.lowSuccessRate"),
@@ -382,7 +374,7 @@ WHERE status_code >= 500
         editorMode: "native" as const,
         query: `SELECT (countIf(status_code < 400) * 100.0 / count(*)) as value
 FROM ${tableName}
-WHERE \`${tsField}\` >= ${lookback}`,
+WHERE ${timeFilter}`,
       },
     ];
   }

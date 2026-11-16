@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/logchefql"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -682,6 +684,37 @@ func formatAlertQuery(raw string) (string, error) {
 	return query, nil
 }
 
+// alertSampleTo ends the fixed window that save-time validation renders the
+// time macros with. Any window works: validation checks the statement, not
+// its result.
+var alertSampleTo = time.Date(2000, time.January, 1, 1, 0, 0, 0, time.UTC)
+
+// renderAlertQuery is the one path from stored alert SQL to the statement
+// that runs: it expands the built-in macros for the window [from, to) and
+// then applies formatAlertQuery. Validation and evaluation both call it, so
+// a query that saves also runs. A query that names no macro skips the
+// template step, so alert SQL saved before macros, which may hold "{{" text
+// in a string, runs as it did. A user variable has no value and is refused
+// up front, because an optional block would otherwise drop its clause.
+func renderAlertQuery(source *models.Source, query string, from, to time.Time) (string, error) {
+	names := template.ReferencedNames(query)
+	if !slices.ContainsFunc(names, template.HasBuiltinPrefix) {
+		return formatAlertQuery(query)
+	}
+	for _, name := range names {
+		if !template.HasBuiltinPrefix(name) {
+			return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: fmt.Errorf("{{%s}} has no value: an alert takes no variables", name)}
+		}
+	}
+	rendered, err := template.ClickHouseSQL.Substitute(query, nil, template.Builtins{
+		From: &from, To: &to, TimestampColumn: source.MetaTSField,
+	})
+	if err != nil {
+		return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	return formatAlertQuery(rendered)
+}
+
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
@@ -689,7 +722,10 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageClickHouseSQL {
 		return nil, fmt.Errorf("clickhouse alerts require %q, got %q", models.QueryLanguageClickHouseSQL, language)
 	}
-	query, err := formatAlertQuery(req.Query)
+	if req.At.IsZero() {
+		return nil, fmt.Errorf("alert evaluation needs the instant it stands for")
+	}
+	query, err := renderAlertQuery(source, req.Query, req.At.Add(-time.Duration(req.LookbackSeconds)*time.Second), req.At)
 	if err != nil {
 		return nil, err
 	}

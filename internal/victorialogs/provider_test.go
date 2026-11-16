@@ -346,7 +346,7 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	t.Parallel()
 
 	timeout := 20
-	var gotAlertQuery string
+	var gotAlertQuery, gotAlertTime string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
@@ -362,6 +362,7 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 				t.Fatalf("unexpected alert scope filters: %#v", got)
 			}
 			gotAlertQuery = r.Form.Get("query")
+			gotAlertTime = r.Form.Get("time")
 			_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service":"api"},"value":[1712570400,"7"]}]}}`))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -398,7 +399,9 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 		t.Fatalf("unexpected histogram data: %#v", histogram.Data)
 	}
 
+	at := time.Date(2026, 4, 8, 9, 30, 0, 0, time.UTC)
 	result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+		At:              at,
 		Language:        models.QueryLanguageLogsQL,
 		Query:           `count() if (level:error)`,
 		LookbackSeconds: 300,
@@ -410,6 +413,10 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	if gotAlertQuery != "_time:5m count() if (level:error)" {
 		t.Fatalf("unexpected alert query: %q", gotAlertQuery)
 	}
+	// The lookback filter is relative to time, so the window ends at At.
+	if gotAlertTime != "2026-04-08T09:30:00Z" {
+		t.Fatalf("alert time = %q, want At", gotAlertTime)
+	}
 	if len(result.Logs) != 1 {
 		t.Fatalf("unexpected alert rows: %#v", result.Logs)
 	}
@@ -418,6 +425,7 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	}
 
 	_, err = provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+		At:       time.Now(),
 		Language: models.QueryLanguageClickHouseSQL,
 		Query:    "SELECT 1",
 	})

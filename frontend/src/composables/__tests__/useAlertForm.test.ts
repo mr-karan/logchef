@@ -51,6 +51,14 @@ describe('alert condition translation ownership', () => {
     expect(mounted.form.isValid.value).toBe(true)
   })
 
+  it('bounds the generated SQL with the time filter macro', async () => {
+    await edit('severity = "error"')
+    network.requests[0].succeed(translation("severity = 'error'"))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mounted.form.form.query).toContain("(severity = 'error') AND {{__time_filter}}")
+    expect(mounted.form.form.query).not.toContain('now()')
+  })
+
   it('invalidates pending SQL immediately during the next debounce', async () => {
     await edit('severity = "old"')
     mounted.form.form.condition_json = 'severity = "new"'
