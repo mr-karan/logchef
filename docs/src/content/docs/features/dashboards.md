@@ -336,7 +336,8 @@ style per panel in the panel builder. Bars can be **stacked** or **grouped**.
 Result charts add three switches:
 
 - **Show values** prints each value on the chart. Labels sit above grouped
-  bars and inside stacked segments.
+  bars and above the bars of a one-series chart, and inside stacked segments.
+  A label that does not fit is hidden, and the panel says so.
 - **Show legend** is on by default. The legend lists the Y columns in the order
   you set under **Y columns, in legend order**, or one entry per value of the
   series column.
