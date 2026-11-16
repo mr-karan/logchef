@@ -316,8 +316,8 @@ func TestAuditMiddlewareRecordsHandlerFailures(t *testing.T) {
 		e.reset()
 		wantStatus(t, e.do(http.MethodPost, tc.path, `{}`, e.cookie), tc.status)
 		ev := e.only()
-		if ev.Outcome != models.AuditOutcomeFailure || ev.Status != tc.status || ev.Route != tc.path || ev.ActorID == nil || *ev.ActorID != e.admin.ID {
-			t.Errorf("%s: event %s status %d route %q actor %v", tc.path, ev.Outcome, ev.Status, ev.Route, ev.ActorID)
+		if ev.Outcome != models.AuditOutcomeFailure || ev.Reason != "internal_error" || ev.Status != tc.status || ev.Route != tc.path || ev.ActorID == nil || *ev.ActorID != e.admin.ID {
+			t.Errorf("%s: event %s %q status %d route %q actor %v", tc.path, ev.Outcome, ev.Reason, ev.Status, ev.Route, ev.ActorID)
 		}
 	}
 	if !strings.Contains(e.logs.String(), `"msg":"panic recovered"`) {
@@ -354,6 +354,9 @@ func TestAuditLocalSessionEvents(t *testing.T) {
 	if detailOf(t, ev)["method"] != "local" {
 		t.Errorf("detail %s, want method local", ev.Detail)
 	}
+	if c := changesOf(t, ev); len(c) != 1 || c["expires_at"]["to"] == nil {
+		t.Errorf("sign-in changes %s, want the session expiry", ev.Changes)
+	}
 	var session *http.Cookie
 	for _, c := range resp.cookies {
 		if c.Name == sessionCookieName {
@@ -377,7 +380,11 @@ func TestAuditLocalSessionEvents(t *testing.T) {
 	e.reset()
 
 	wantStatus(t, e.do(http.MethodPost, "/api/v1/auth/logout", ``, session), http.StatusOK)
-	checkActorAndTarget(t, e.only(), "session.logout", user, "user", strconv.Itoa(int(user.ID)))
+	ev = e.only()
+	checkActorAndTarget(t, ev, "session.logout", user, "user", strconv.Itoa(int(user.ID)))
+	if c := changesOf(t, ev); len(c) != 1 || c["expires_at"]["from"] == nil || strings.Contains(string(ev.Changes), session.Value) {
+		t.Errorf("sign-out changes %s, want the session expiry and no session ID", ev.Changes)
+	}
 	e.reset()
 
 	// The session is gone, so a second sign-out has no user and records nothing.

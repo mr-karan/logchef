@@ -272,6 +272,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	)
 
 	auditSession(c, loginUser, "oidc")
+	auditSessionFields(c, nil, session)
 
 	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
 	// a transient failure here must not block login.
@@ -303,6 +304,7 @@ func (s *Server) handleLogout(c fiber.Ctx) error {
 		if session, err := core.ValidateSession(c.Context(), s.store, s.log, models.SessionID(sessionIDStr)); err == nil {
 			if user, err := core.GetUser(c.Context(), s.store, session.UserID); err == nil {
 				auditSession(c, user, "")
+				auditSessionFields(c, session, nil)
 			}
 		}
 		// Attempt to revoke the session in the database.
@@ -419,6 +421,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create session")
 	}
 
+	auditSessionFields(c, nil, session)
 	s.log.Info("user.login", "email", user.Email, "user_id", user.ID, "method", "local")
 
 	if _, err := core.EnsurePersonalCollection(c.Context(), s.store, s.log, user); err != nil {

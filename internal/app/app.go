@@ -153,7 +153,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	// The OAuth authorization server exists only when enabled; nil otherwise.
 	var oauthServer *oauth.Server
 	if a.Config.Auth.OAuth.Enabled {
-		oauthServer, err = oauth.New(a.Config, a.SQLite, a.Logger)
+		oauthServer, err = oauth.New(a.Config, a.SQLite, a.Audit, a.Logger)
 		if err != nil {
 			return fmt.Errorf("failed to initialize OAuth server: %w", err)
 		}

@@ -564,9 +564,10 @@ type OAuthStore interface {
 	// code yet. It returns models.ErrNotFound otherwise.
 	SaveOAuthAuthCode(ctx context.Context, id models.OAuthAuthRequestID, codeHash models.OAuthSecretHash, expiresAt time.Time) error
 	// ConsumeAuthCode marks the code used, once. A second use of a consumed
-	// code revokes its grant and returns models.ErrOAuthCodeReplay. Unknown,
-	// expired or revoked codes return models.ErrOAuthInvalidGrant.
-	ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, error)
+	// code revokes its grant and returns models.ErrOAuthCodeReplay, with the
+	// grant when this call revoked it and nil when it was already revoked.
+	// Unknown, expired or revoked codes return models.ErrOAuthInvalidGrant.
+	ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, *models.OAuthGrant, error)
 
 	// IssueOAuthTokens stores a new access token, and a refresh token when
 	// issue.RefreshHash is set, for an active grant. A revoked grant returns
@@ -586,13 +587,14 @@ type OAuthStore interface {
 	AuthenticateOAuthAccessToken(ctx context.Context, idHash models.OAuthSecretHash, resource string, now time.Time) (*models.OAuthGrant, *models.User, error)
 	TouchOAuthGrant(ctx context.Context, id models.OAuthGrantID, now time.Time) error
 
-	// RevokeGrant revokes one of userID's active grants, or returns
-	// models.ErrNotFound.
-	RevokeGrant(ctx context.Context, id models.OAuthGrantID, userID models.UserID, now time.Time) error
+	// RevokeGrant revokes one of userID's active grants and returns it, or
+	// returns models.ErrNotFound.
+	RevokeGrant(ctx context.Context, id models.OAuthGrantID, userID models.UserID, now time.Time) (*models.OAuthGrant, error)
 	// RevokeGrantByToken revokes the client's grant that owns the access-token
-	// ID hash or refresh-token hash. An unknown token is not an error
-	// (RFC 7009 section 2.2).
-	RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) error
+	// ID hash or refresh-token hash and returns it. An unknown token or a
+	// grant that is already revoked is not an error (RFC 7009 section 2.2)
+	// and returns nil.
+	RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (*models.OAuthGrant, error)
 	// ListGrantsForUser returns userID's active grants, newest first.
 	ListGrantsForUser(ctx context.Context, userID models.UserID) ([]*models.OAuthGrant, error)
 	// DeleteExpiredOAuthRows removes expired requests and access

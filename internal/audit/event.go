@@ -3,7 +3,11 @@
 // that writes each event to the metadata store and to the log stream.
 package audit
 
-import "github.com/mr-karan/logchef/pkg/models"
+import (
+	"context"
+
+	"github.com/mr-karan/logchef/pkg/models"
+)
 
 // Actor is who acted and how they authenticated.
 type Actor struct {
@@ -30,6 +34,21 @@ type Request struct {
 	Method    string
 	Route     string
 	Status    int
+}
+
+type requestKey struct{}
+
+// WithRequest carries the request metadata to code that records outside the
+// audit middleware, such as the OAuth endpoints.
+func WithRequest(ctx context.Context, r Request) context.Context {
+	return context.WithValue(ctx, requestKey{}, r)
+}
+
+// RequestFrom returns the metadata that WithRequest stored. It is empty for
+// a context that no HTTP request carried.
+func RequestFrom(ctx context.Context) Request {
+	r, _ := ctx.Value(requestKey{}).(Request)
+	return r
 }
 
 // Event is one audited action before it is stored. A nil Before means a

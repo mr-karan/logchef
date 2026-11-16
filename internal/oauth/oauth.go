@@ -21,6 +21,7 @@ import (
 
 	"github.com/zitadel/oidc/v3/pkg/op"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -80,12 +81,13 @@ type Server struct {
 	hashKey       models.OAuthHashKey
 	crypto        op.Crypto
 	provider      *op.Provider
+	audit         *audit.Recorder
 	log           *slog.Logger
 }
 
 // New builds the authorization server from the validated configuration. The
 // caller must only call it when cfg.Auth.OAuth.Enabled is true.
-func New(cfg *config.Config, db store.Store, log *slog.Logger) (*Server, error) {
+func New(cfg *config.Config, db store.Store, rec *audit.Recorder, log *slog.Logger) (*Server, error) {
 	issuer := cfg.Server.PublicURL
 	u, err := url.Parse(issuer)
 	if err != nil {
@@ -123,6 +125,7 @@ func New(cfg *config.Config, db store.Store, log *slog.Logger) (*Server, error) 
 		// AES-GCM only. ZITADEL's default crypto also decrypts the legacy,
 		// unauthenticated AES-CFB format (dependency audit F3).
 		crypto: op.NewAES256GCMCrypto(cryptoKey, ""),
+		audit:  rec,
 		log:    log.With("component", "oauth"),
 	}
 

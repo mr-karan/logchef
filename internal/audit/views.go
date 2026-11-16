@@ -31,6 +31,30 @@ func NotificationDestinationFields(d *models.NotificationDestination) *Fields {
 		Secret("secret", d.Secret)
 }
 
+// OAuthConsentFields records the authorization request a user decided:
+// the client, the resource kind (api or mcp) and the scopes. grantID is the
+// grant that an approval created, nil for a denial. The redirect URI and the
+// PKCE challenge are left out.
+func OAuthConsentFields(r *models.OAuthAuthRequest, resourceKind string, grantID *models.OAuthGrantID) *Fields {
+	return NewFields().
+		Set("client_id", r.ClientID).
+		Set("resource", resourceKind).
+		Set("scopes", r.Scopes).
+		Set("offline_access", r.OfflineAccess).
+		Set("grant_id", grantID)
+}
+
+// OAuthGrantFields records a grant: its user, client, resource kind (api or
+// mcp) and scopes. A grant holds no credential; its tokens live elsewhere.
+func OAuthGrantFields(g *models.OAuthGrant, resourceKind string) *Fields {
+	return NewFields().
+		Set("user_id", g.UserID).
+		Set("client_id", g.ClientID).
+		Set("resource", resourceKind).
+		Set("scopes", g.Scopes).
+		Set("offline_access", g.OfflineAccess)
+}
+
 // ReportFields records a report's configuration: its source by kind and ID,
 // its schedule and its options. Variables are recorded by name only, because
 // a value can be a literal from a query.
@@ -62,6 +86,12 @@ func ReportFields(r *models.Report) *Fields {
 		Set("max_rows", r.MaxRows).
 		Set("skip_if_empty", r.SkipIfEmpty).
 		Set("attach_csv", r.AttachCSV)
+}
+
+// SessionFields records a browser session by its expiry. The session ID is
+// a bearer credential and is never recorded.
+func SessionFields(s *models.Session) *Fields {
+	return NewFields().Set("expires_at", s.ExpiresAt)
 }
 
 // SettingFields records a system setting. The value is a secret when the

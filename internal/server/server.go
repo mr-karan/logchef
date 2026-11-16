@@ -85,6 +85,9 @@ type Server struct {
 	reports       *core.ReportRunner
 
 	localLoginLimiter *auth.LoginRateLimiter
+	// signInFailureAudit bounds the failed sign-in events that reach the
+	// audit table, the only events an unauthenticated caller can cause.
+	signInFailureAudit *auth.WindowLimiter
 
 	listener        net.Listener
 	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
@@ -225,6 +228,7 @@ func New(opts ServerOptions) *Server {
 		cancelRequests:  cancelRequests,
 	}
 
+	s.signInFailureAudit = auth.NewGlobalWindowLimiter(time.Minute, failedSignInEventsPerMinute)
 	if opts.Config.Auth.Local.Enabled {
 		s.localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 	}
@@ -579,7 +583,7 @@ func (s *Server) setupRoutes() {
 
 	// --- OAuth authorization server (only when auth.oauth.enabled) ---
 	if s.oauth != nil {
-		oauthEndpoints := httpHandlerWithRequestContext(s.oauth.Handler())
+		oauthEndpoints := withAuditRequest(httpHandlerWithRequestContext(s.oauth.Handler()))
 		registerLimited(s.app, fiber.MethodGet, oauth.AuthorizePath, authLimiter, oauthEndpoints)
 		registerLimited(s.app, fiber.MethodPost, oauth.AuthorizePath, authLimiter, oauthEndpoints)
 		registerLimited(s.app, fiber.MethodPost, oauth.TokenPath, authLimiter, oauthEndpoints)

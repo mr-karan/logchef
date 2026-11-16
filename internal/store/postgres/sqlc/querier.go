@@ -431,11 +431,14 @@ type Querier interface {
 	ResolveAlertGroupHistory(ctx context.Context, arg ResolveAlertGroupHistoryParams) error
 	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
 	ResumeReport(ctx context.Context, id int64) (int64, error)
-	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)
+	// Returns no row when the grant was already revoked, so only the call that
+	// revokes it reports the revocation.
+	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (OauthGrant, error)
 	// Revoke the grant that owns an access-token ID hash or refresh-token hash,
-	// only when the grant belongs to the given client.
-	RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) error
-	RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error)
+	// only when the grant belongs to the given client. Returns no row when no
+	// active grant matched.
+	RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) (OauthGrant, error)
+	RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (OauthGrant, error)
 	// Attach the code to an approved request. A request carries at most one code.
 	SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error)
 	// Convert a link to the given kind. One changed row means the link had the

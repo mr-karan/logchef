@@ -14,6 +14,12 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// failedSignInEventsPerMinute bounds the failed sign-in events that one
+// process stores. The auth rate limiter is optional, so without this bound a
+// credential-stuffing run would fill the table and push real events past
+// audit.max_rows. Events above it go to the log line only.
+const failedSignInEventsPerMinute = 600
+
 // auditStageKey holds the *auditStage a handler fills for the audit
 // middleware.
 type auditStageKey struct{}
@@ -31,6 +37,8 @@ type auditStage struct {
 	// skip says that the middleware records nothing: the handler stored the
 	// event with the change, or the request changed nothing.
 	skip bool
+	// signInFailure puts the event under failedSignInEventsPerMinute.
+	signInFailure bool
 }
 
 func stagedAudit(c fiber.Ctx) *auditStage {
@@ -104,12 +112,41 @@ func auditSession(c fiber.Ctx, user *models.User, method string) {
 	}
 }
 
+// auditSessionFields stages the session that a sign-in created or a
+// sign-out revoked.
+func auditSessionFields(c fiber.Ctx, before, after *models.Session) {
+	st := auditStageFor(c)
+	st.before, st.after, st.fields = sessionFields(before), sessionFields(after), true
+}
+
+func sessionFields(s *models.Session) *audit.Fields {
+	if s == nil {
+		return nil
+	}
+	return audit.SessionFields(s)
+}
+
 // auditSignInFailure stages a failed sign-in. No user is known, so the actor
 // is anonymous and its label is the attempted email, if any.
 func auditSignInFailure(c fiber.Ctx, email, method, reason string) {
 	auditAuth(c, audit.Actor{Type: models.AuditActorAnonymous, Label: email, AuthMethod: models.AuditAuthNone}, models.AuditOutcomeFailure, reason)
 	auditTarget(c, audit.SessionUserTarget(nil, email))
 	auditDetail(c, "method", method)
+	auditStageFor(c).signInFailure = true
+}
+
+// withAuditRequest hands the request metadata to a handler that records its
+// own events, such as the OAuth endpoints, through the request context.
+func withAuditRequest(next fiber.Handler) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		c.SetContext(audit.WithRequest(c.Context(), audit.Request{
+			IP:        c.IP(),
+			UserAgent: c.Get(fiber.HeaderUserAgent),
+			Method:    c.Method(),
+			Route:     c.Route().Path,
+		}))
+		return next(c)
+	}
 }
 
 // userActor is the actor for a user who signed in with a session.
@@ -193,9 +230,15 @@ func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
 	if st.skip {
 		return
 	}
-	if ev, ok := s.routeEvent(c, st, status); ok {
-		s.audit.Record(c.Context(), ev)
+	ev, ok := s.routeEvent(c, st, status)
+	if !ok {
+		return
 	}
+	if st.signInFailure && !s.signInFailureAudit.Allow("sign_in") {
+		s.audit.RecordLimited(c.Context(), ev)
+		return
+	}
+	s.audit.Record(c.Context(), ev)
 }
 
 // addRouteEvent adds the route's event, built from what the handler staged,
@@ -233,7 +276,7 @@ func (s *Server) routeEvent(c fiber.Ctx, st *auditStage, status int) (ev audit.E
 		return audit.Event{}, false
 	}
 
-	outcome := st.outcome
+	outcome, reason := st.outcome, st.reason
 	switch {
 	case outcome != "":
 	case status < fiber.StatusBadRequest:
@@ -242,6 +285,9 @@ func (s *Server) routeEvent(c fiber.Ctx, st *auditStage, status int) (ev audit.E
 		outcome = models.AuditOutcomeFailure
 	default:
 		return audit.Event{}, false
+	}
+	if outcome == models.AuditOutcomeFailure && reason == "" {
+		reason = "internal_error"
 	}
 
 	var actor audit.Actor
@@ -278,7 +324,7 @@ func (s *Server) routeEvent(c fiber.Ctx, st *auditStage, status int) (ev audit.E
 	return audit.Event{
 		Action:  action,
 		Outcome: outcome,
-		Reason:  st.reason,
+		Reason:  reason,
 		Actor:   actor,
 		Target:  target,
 		Request: audit.Request{

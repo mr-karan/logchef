@@ -72,7 +72,7 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 		auditAction(c, audit.OAuthConsentDeny)
 	}
 	user := currentUser(c)
-	redirectURL, err := s.oauth.Decide(c.Context(), requestID, user, *body.Approve)
+	decision, err := s.oauth.Decide(c.Context(), requestID, user, *body.Approve)
 	switch {
 	case errors.Is(err, oauth.ErrRequestNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
@@ -82,8 +82,14 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 		s.log.Error("failed to record OAuth decision", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to record decision")
 	}
+	var grantID *models.OAuthGrantID
+	if decision.Grant != nil {
+		grantID = &decision.Grant.ID
+	}
+	auditSet(c, audit.OAuthConsentTarget(requestID), nil,
+		audit.OAuthConsentFields(decision.Request, s.oauth.ResourceKind(decision.Request.Resource), grantID))
 	s.log.Info("OAuth authorization decided", "user_id", user.ID, "approved", *body.Approve)
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{"redirect_url": redirectURL})
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"redirect_url": decision.RedirectURL})
 }
 
 // handleListConnectedApps lists the session user's active OAuth grants.
@@ -104,7 +110,7 @@ func (s *Server) handleRevokeConnectedApp(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 	user := currentUser(c)
-	err = s.oauth.RevokeConnectedApp(c.Context(), user.ID, models.OAuthGrantID(id))
+	grant, err := s.oauth.RevokeConnectedApp(c.Context(), user.ID, models.OAuthGrantID(id))
 	if errors.Is(err, oauth.ErrGrantNotFound) {
 		return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
 	}
@@ -112,7 +118,8 @@ func (s *Server) handleRevokeConnectedApp(c fiber.Ctx) error {
 		s.log.Error("failed to revoke connected app", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to revoke connected app")
 	}
-	auditTarget(c, audit.OAuthGrantTarget(models.OAuthGrantID(id)))
+	auditSet(c, audit.OAuthGrantTarget(grant.ID), audit.OAuthGrantFields(grant, s.oauth.ResourceKind(grant.Resource)), nil)
+	auditDetail(c, "cause", grant.RevokeReason)
 	s.log.Info("connected app revoked", "user_id", user.ID, "grant_id", id)
 	return c.SendStatus(fiber.StatusNoContent)
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -185,6 +186,7 @@ func (s *storage) CreateAccessAndRefreshTokens(ctx context.Context, req op.Token
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
+	s.server.recordReplay(ctx, outcome.Revoked, http.StatusBadRequest)
 	if outcome.Kind != models.RefreshOK {
 		return "", "", time.Time{}, oidc.ErrInvalidGrant()
 	}
@@ -200,7 +202,8 @@ func (s *storage) issueFromCode(ctx context.Context, req op.TokenRequest, withRe
 		return "", "", time.Time{}, fmt.Errorf("oauth: unexpected token request %T", req)
 	}
 	now := time.Now().UTC()
-	consumed, err := s.server.db.ConsumeAuthCode(ctx, s.server.hash(ar.code), now)
+	consumed, revoked, err := s.server.db.ConsumeAuthCode(ctx, s.server.hash(ar.code), now)
+	s.server.recordReplay(ctx, revoked, http.StatusBadRequest)
 	if errors.Is(err, models.ErrOAuthInvalidGrant) {
 		return "", "", time.Time{}, oidc.ErrInvalidGrant()
 	}
@@ -273,6 +276,7 @@ func (s *storage) TokenRequestByRefreshToken(ctx context.Context, refreshToken s
 	if err != nil {
 		return nil, err
 	}
+	s.server.recordReplay(ctx, outcome.Revoked, http.StatusBadRequest)
 	if outcome.Kind != models.RefreshOK || outcome.Grant.Resource != resource {
 		return nil, op.ErrInvalidRefreshToken
 	}
@@ -287,11 +291,16 @@ func (s *storage) TerminateSession(context.Context, string, string) error {
 }
 
 // RevokeToken revokes the grant behind an access-token ID or a refresh token.
-// An unknown token is not an error (RFC 7009 section 2.2).
+// An unknown token is not an error (RFC 7009 section 2.2). Only the call that
+// revoked the grant records it, so a repeated or unknown token records
+// nothing although it answers 200 as well.
 func (s *storage) RevokeToken(ctx context.Context, tokenOrTokenID, _, clientID string) *oidc.Error {
-	err := s.server.db.RevokeGrantByToken(ctx, s.server.hash(tokenOrTokenID), models.OAuthClientID(clientID), time.Now().UTC())
+	revoked, err := s.server.db.RevokeGrantByToken(ctx, s.server.hash(tokenOrTokenID), models.OAuthClientID(clientID), time.Now().UTC())
 	if err != nil {
 		return oidc.ErrServerError().WithParent(err)
+	}
+	if revoked != nil {
+		s.server.recordClientRevoke(ctx, revoked)
 	}
 	return nil
 }
@@ -301,6 +310,9 @@ func (s *storage) GetRefreshTokenInfo(ctx context.Context, clientID, token strin
 	if err != nil {
 		return "", "", err
 	}
+	// Only /oauth/revoke calls this. It answers 200 after a replay too,
+	// because the revoke itself then finds no active grant.
+	s.server.recordReplay(ctx, outcome.Revoked, http.StatusOK)
 	if outcome.Kind != models.RefreshOK || string(outcome.Grant.ClientID) != clientID {
 		return "", "", op.ErrInvalidRefreshToken
 	}
