@@ -24,7 +24,7 @@ use crate::ui;
   logchef query --from '2026-07-14 09:00:00' --to '2026-07-14 10:00:00' \\
     --limit 500 --output jsonl | jq 'select(.status >= 500)'
 
-  # See the ClickHouse SQL / LogsQL a query compiles to, then run it
+  # See the ClickHouse SQL / LogsQL / LogQL a query compiles to, then run it
   logchef query 'status>=500' --since 15m --show-sql
 
   # Count errors per service, the top 10
@@ -79,7 +79,7 @@ pub struct QueryArgs {
     #[arg(
         long,
         visible_alias = "explain",
-        help = "Show the generated backend query (SQL for ClickHouse, LogsQL for VictoriaLogs)"
+        help = "Show the generated backend query (SQL for ClickHouse, LogsQL for VictoriaLogs, LogQL for Loki)"
     )]
     show_sql: bool,
 
@@ -274,6 +274,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     {
         let label = match response.generated_query_language() {
             Some("logsql") => "Generated LogsQL",
+            Some("logql") => "Generated LogQL",
             Some("clickhouse-sql") => "Generated SQL",
             _ => "Generated query",
         };

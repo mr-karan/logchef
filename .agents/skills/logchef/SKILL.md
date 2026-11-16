@@ -2,25 +2,28 @@
 name: logchef
 description: >-
   Query logs from the terminal with the Logchef CLI. Covers LogchefQL search
-  filters (`query`, `tail`), raw ClickHouse SQL and VictoriaLogs LogsQL (`sql`),
+  filters (`query`, `tail`), raw ClickHouse SQL, VictoriaLogs LogsQL and Loki
+  LogQL (`sql`),
   seeing the generated query without running it (`explain`), field and value
   discovery (`fields`, `schema`), counts-over-time (`histogram`), finding which
   source holds a service/host/message (`find`), saved queries and collections,
   live follow, output formats and piping to jq, config/contexts/auth, and
   troubleshooting query errors. Use whenever the user mentions logchef,
-  LogchefQL, LogsQL, log search, or wants to investigate logs from a
-  ClickHouse- or VictoriaLogs-backed source.
+  LogchefQL, LogsQL, LogQL, log search, or wants to investigate logs from a
+  ClickHouse-, VictoriaLogs- or Loki-backed source.
 ---
 
 # Logchef CLI
 
-Logchef queries logs from two kinds of backend: **ClickHouse** and **VictoriaLogs**.
+Logchef queries logs from three kinds of backend: **ClickHouse**, **VictoriaLogs**
+and **Grafana Loki**.
 The `logchef` binary talks to a Logchef server over HTTP; the server does the
 translation and runs the query. `logchef sources` shows each source's backend
 in a `TYPE` column.
 
-You almost never need to know the backend up front: **LogchefQL works on both**.
-Reach for raw SQL/LogsQL only when LogchefQL can't express the query.
+You almost never need to know the backend up front: **LogchefQL filters work on
+every backend** (aggregation pipes are not available on Loki sources).
+Reach for raw SQL/LogsQL/LogQL only when LogchefQL can't express the query.
 
 ## The core loop
 
@@ -59,13 +62,13 @@ source resolve, and prints a fix hint for each problem.
 |---|---|
 | `logchef auth --server <url>` | Logchef OAuth browser login (server needs `auth.oauth`; else use `--token` / `LOGCHEF_AUTH_TOKEN`). `--no-browser` prints the URL only. `--status`, `--logout`, `auth current` (offline, no network). |
 | `logchef whoami` | Current user + accessible teams. |
-| `logchef teams` / `logchef sources -t <team>` | List teams / list a team's sources (with `TYPE`: ClickHouse or VictoriaLogs). |
+| `logchef teams` / `logchef sources -t <team>` | List teams / list a team's sources (with `TYPE`: ClickHouse, VictoriaLogs or Loki). |
 | `logchef schema -t <team> -S <src>` | Table columns and types. |
 | `logchef fields [<field>]` | Field discovery: no arg lists fields; a field name lists observed values. |
 | `logchef query '<logchefql>'` | **Primary search.** LogchefQL, translated server-side for either backend. |
-| `logchef explain '<query>'` | Show the generated ClickHouse SQL / LogsQL **without running it**. Validate + preview. |
+| `logchef explain '<query>'` | Show the generated ClickHouse SQL / LogsQL / LogQL **without running it**. Validate + preview. |
 | `logchef histogram '<query>'` | Counts-over-time buckets. Cheap way to find spikes without pulling rows. |
-| `logchef sql '<native>'` (alias `native`) | Raw **ClickHouse SQL** on CH sources, raw **LogsQL** on VictoriaLogs sources. `--var k=v` fills `{{k}}`; `--interval 24h` and the time flags fill the `{{__…}}` time macros of a dashboard panel's query. |
+| `logchef sql '<native>'` (alias `native`) | Raw **ClickHouse SQL** on CH sources, raw **LogsQL** on VictoriaLogs sources, raw **LogQL** on Loki sources (the window rides in the request; `--since` defaults to the context's `since`). `--var k=v` fills `{{k}}`; `--interval 24h` and the time flags fill the `{{__…}}` time macros of a dashboard panel's query. |
 | `logchef tail '<logchefql>'` | Live follow — native server streaming (SSE), works for both backends; `--poll` for the polling fallback. |
 | `logchef find '<pattern>'` | Which sources contain a service / host / message pattern (ClickHouse **and** VictoriaLogs). |
 | `logchef collections` / `logchef saved-queries` | List/run saved queries (by name, id, or explorer URL; `--var k=v`). |
@@ -81,11 +84,11 @@ Wrap every query in **single quotes** so the shell doesn't expand `"`, `!`, `|`,
 
 ```
 Just filtering logs?  ................  query  '<logchefql>'   (both backends)
-Want to see the SQL/LogsQL first?  ...  explain '<logchefql>' (no scan)
+Want to see the native query first? ..  explain '<logchefql>' (no scan)
 How many / when / spikes?  ...........  histogram '<logchefql>'
 Count / sum / p95 per group?  ........  query  '<filter> | count() by service'
 Join / expression / thing
-LogchefQL can't express?  ............  sql '<ClickHouse SQL or LogsQL>'
+LogchefQL can't express?  ............  sql '<ClickHouse SQL, LogsQL or LogQL>'
 ```
 
 - **LogchefQL** (`query`, `tail`, `histogram`) is the default. Same syntax on
@@ -97,8 +100,9 @@ LogchefQL can't express?  ............  sql '<ClickHouse SQL or LogsQL>'
 - **`histogram`** returns bucketed counts, not raw rows — the cheapest way to
   confirm a problem exists and locate its time window.
 - **`sql`** carries your text **verbatim** to the backend: ClickHouse SQL for CH
-  sources, LogsQL for VictoriaLogs sources. Powerful but backend-specific and
-  unbounded — always add a time filter and a limit.
+  sources, LogsQL for VictoriaLogs sources, LogQL for Loki sources. Powerful but
+  backend-specific and unbounded — always add a time filter and a limit. A LogQL
+  query starts with a stream selector: `{service_name="api"} |= "error"`.
 
 ### LogchefQL in 30 seconds
 
@@ -114,6 +118,9 @@ logchef query 'level="error" | count() by service' -s 1h        # aggregate with
 
 # VictoriaLogs source (identical LogchefQL — server translates to LogsQL)
 logchef query 'level="error" and app="checkout"' -t platform -S vl-app -s 1h
+
+# Loki source, native LogQL
+logchef sql '{service_name="checkout"} |= "error"' -t platform -S loki-app -s 1h
 ```
 
 Operators: `=` `!=` `~` (contains, case-insensitive) `!~` (not-contains) `>` `<` `>=` `<=`.

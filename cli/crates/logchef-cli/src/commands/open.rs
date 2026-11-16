@@ -18,7 +18,7 @@ use crate::session;
   logchef open 'recipient~\"alice@example.com\"' -t 2 -S 2 \\
     --from '2026-06-30 00:00:00' --to '2026-06-30 23:59:59'
 
-  # Open a raw native (ClickHouse SQL / VictoriaLogs LogsQL) query
+  # Open a raw native (ClickHouse SQL / VictoriaLogs LogsQL / Loki LogQL) query
   logchef open 'SELECT * FROM logs.app WHERE level=' --sql -t 2 -S 2
 
   # Just print the URL (don't launch a browser)
@@ -35,7 +35,7 @@ pub struct OpenArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Treat the query as raw native (ClickHouse SQL / VictoriaLogs LogsQL)
+    /// Treat the query as raw native (ClickHouse SQL / VictoriaLogs LogsQL / Loki LogQL)
     #[arg(long)]
     sql: bool,
 

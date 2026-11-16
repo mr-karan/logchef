@@ -10,16 +10,17 @@ use crate::commands::{
 const LONG_ABOUT: &str = "\
 Logchef CLI — search and investigate logs from your terminal.
 
-Logchef sources are backed by either ClickHouse or VictoriaLogs. Pick a command
-by what you want to do:
+Logchef sources are backed by ClickHouse, VictoriaLogs or Grafana Loki. Pick a
+command by what you want to do:
 
   query      Search with LogchefQL — the portable filter language that works on
-             BOTH engines. Start here. e.g. `level=\"error\" and service=\"api\"`.
+             every engine. Start here. e.g. `level=\"error\" and service=\"api\"`.
              Aggregate with a pipe: `level=\"error\" | count() by service`.
   sql        Run a raw native query when LogchefQL isn't enough: ClickHouse SQL
-             for ClickHouse sources, LogsQL for VictoriaLogs sources.
-  explain    Show the ClickHouse SQL / LogsQL a LogchefQL query compiles to,
-             without running it. Great for learning and debugging filters.
+             for ClickHouse sources, LogsQL for VictoriaLogs sources, LogQL for
+             Loki sources.
+  explain    Show the ClickHouse SQL / LogsQL / LogQL a LogchefQL query compiles
+             to, without running it. Great for learning and debugging filters.
   histogram  Plot log counts over time (trends, spikes, error rates).
   fields     Discover a source's fields, or the observed values of one field.
   find       Locate which source holds a given service, host, or message.
@@ -86,12 +87,12 @@ enum Commands {
 
     #[command(
         visible_alias = "native",
-        about = "Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs)"
+        about = "Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs, LogQL for Loki)"
     )]
     Sql(sql::SqlArgs),
 
     #[command(
-        about = "Translate and validate a LogchefQL query without executing it (shows the generated ClickHouse SQL or LogsQL)"
+        about = "Translate and validate a LogchefQL query without executing it (shows the generated ClickHouse SQL, LogsQL or LogQL)"
     )]
     Explain(explain::ExplainArgs),
 
