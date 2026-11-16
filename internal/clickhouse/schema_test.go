@@ -14,8 +14,8 @@ func TestParseSortKeysPreservesExpressions(t *testing.T) {
 		{"toDate(ts), ts", []string{"toDate(ts)", "ts"}},
 		{"tuple()", nil},
 	} {
-		if got := parseSortKeys(test.input); !reflect.DeepEqual(got, test.want) {
-			t.Errorf("parseSortKeys(%q) = %v, want %v", test.input, got, test.want)
+		if got := ParseSortKeys(test.input); !reflect.DeepEqual(got, test.want) {
+			t.Errorf("ParseSortKeys(%q) = %v, want %v", test.input, got, test.want)
 		}
 	}
 }
