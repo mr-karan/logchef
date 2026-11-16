@@ -688,7 +688,7 @@ function blob(tabs: { tab: DashboardTab; panels: DashboardQueryPanel[] }[], extr
   // A short TTL keeps reruns fresh. TTL 0 is avoided on purpose: uncached
   // panels count against the per-user preview limit of 3 and one of four
   // concurrent panels fails with 429.
-  return { version: 2, features: [], cache_ttl_seconds: 60, ...extra, tabs: tabs.map((t) => t.tab), panels: tabs.flatMap((t) => t.panels) };
+  return { version: 2, features: [], cache_ttl_seconds: 0, ...extra, tabs: tabs.map((t) => t.tab), panels: tabs.flatMap((t) => t.panels) };
 }
 
 interface Summary { id: number; name: string }
