@@ -137,6 +137,9 @@ type SavedViewStore interface {
 	ClearSavedViewDefault(ctx context.Context, id models.SavedViewID) error
 	// CountSavedViewsInScope counts the views of one scope of one source.
 	CountSavedViewsInScope(ctx context.Context, key models.SavedViewScopeKey) (int, error)
+	// MarkSavedViewManaged hands an existing view to provisioning. It returns
+	// models.ErrNotFound when no view has the id.
+	MarkSavedViewManaged(ctx context.Context, id models.SavedViewID) error
 	// ListManagedSavedViews returns every view that provisioning owns,
 	// ordered by source, name (bytewise) and id.
 	ListManagedSavedViews(ctx context.Context) ([]*models.SavedView, error)

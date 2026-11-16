@@ -31,6 +31,9 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 		if err != nil {
 			return nil, err
 		}
+		if provisioned.Views, err = exportSourceViews(ctx, db, src); err != nil {
+			return nil, err
+		}
 		cfg.Sources = append(cfg.Sources, provisioned)
 	}
 

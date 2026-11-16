@@ -140,6 +140,22 @@ func testSavedViewManagedRoundTrip(t *testing.T, ctx context.Context, s store.St
 	if _, err := s.GetSavedView(ctx, 1<<30); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("GetSavedView(missing) = %v, want ErrNotFound", err)
 	}
+
+	// Adoption flips the flag and leaves the revision and definition alone.
+	width := 120
+	adopted := sourceView(f, "adopted")
+	adopted.Definition.Columns = []models.SavedViewColumn{{Name: "msg", Width: &width}}
+	mkView(t, ctx, s, adopted)
+	if err := s.MarkSavedViewManaged(ctx, adopted.ID); err != nil {
+		t.Fatalf("MarkSavedViewManaged: %v", err)
+	}
+	got, err := s.GetSavedView(ctx, adopted.ID)
+	if err != nil || !got.Managed || got.Revision != 1 || !reflect.DeepEqual(got.Definition, adopted.Definition) {
+		t.Errorf("adopted view = %+v / %v, want managed at revision 1 with its definition", got, err)
+	}
+	if err := s.MarkSavedViewManaged(ctx, 1<<30); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("MarkSavedViewManaged(missing) = %v, want ErrNotFound", err)
+	}
 }
 
 // The CHECK constraint ties the scope to its owner columns on both stores

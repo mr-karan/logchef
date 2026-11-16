@@ -6183,6 +6183,19 @@ func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
 	return err
 }
 
+const markSavedViewManaged = `-- name: MarkSavedViewManaged :one
+UPDATE saved_views SET managed = TRUE WHERE id = $1
+RETURNING id
+`
+
+// Provisioning adopts a view; the definition and revision stay as they are.
+func (q *Queries) MarkSavedViewManaged(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, markSavedViewManaged, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const pauseReport = `-- name: PauseReport :execrows
 UPDATE reports
 SET state = 'paused',

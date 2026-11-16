@@ -12,7 +12,7 @@ import (
 
 func TestValidateConfig_Empty(t *testing.T) {
 	cfg := &config.ProvisioningConfig{}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("empty config should be valid: %v", err)
 	}
 }
@@ -32,7 +32,7 @@ func TestValidateConfig_ValidSources(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("valid source config should pass: %v", err)
 	}
 }
@@ -54,7 +54,7 @@ func TestValidateConfig_ValidSourceWithNestedClickHouseConnection(t *testing.T) 
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("valid nested clickhouse source config should pass: %v", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestValidateConfig_LegacyFlatSourceFormat(t *testing.T) {
 			},
 		},
 	}
-	err := ValidateConfig(cfg)
+	err := ValidateConfig(cfg, testDatasources())
 	if err == nil {
 		t.Fatal("flat pre-v2.0 source format should fail validation")
 	}
@@ -104,7 +104,7 @@ func TestValidateConfig_ValidVictoriaLogsSource(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("valid victorialogs source config should pass: %v", err)
 	}
 }
@@ -170,7 +170,7 @@ auth = { mode = "bearer" }
 		t.Fatal(err)
 	}
 	ResolveConfig(&cfg.Provisioning)
-	if err := ValidateConfig(&cfg.Provisioning); err != nil {
+	if err := ValidateConfig(&cfg.Provisioning, testDatasources()); err != nil {
 		t.Fatalf("valid loki source should pass: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestResolveConfig_LokiSecretRefBasicFillsPassword(t *testing.T) {
 	src.SecretRef = "LOKI_GATEWAY_PASSWORD"
 	cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{src}}
 	ResolveConfig(cfg)
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Fatalf("basic auth with secret_ref should pass: %v", err)
 	}
 	conn, err := cfg.Sources[0].LokiConnection()
@@ -239,7 +239,7 @@ func TestValidateConfig_InvalidLokiSources(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{tc.src}}
 			ResolveConfig(cfg)
-			err := ValidateConfig(cfg)
+			err := ValidateConfig(cfg, testDatasources())
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("ValidateConfig = %v, want an error containing %q", err, tc.want)
 			}
@@ -277,7 +277,7 @@ func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{tc.src}}
-			if err := ValidateConfig(cfg); err == nil {
+			if err := ValidateConfig(cfg, testDatasources()); err == nil {
 				t.Errorf("%s should fail identifier validation", tc.name)
 			}
 		})
@@ -311,7 +311,7 @@ func TestValidateConfig_ClickHouseQuerySettings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{withSettings(tc.settings)}}
-			err := ValidateConfig(cfg)
+			err := ValidateConfig(cfg, testDatasources())
 			if (err != nil) != tc.wantErr {
 				t.Errorf("ValidateConfig() error = %v, wantErr = %v", err, tc.wantErr)
 			}
@@ -349,7 +349,7 @@ func TestValidateConfig_ClickHouseActivitySettings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{withActivity(tc.activity)}}
-			err := ValidateConfig(cfg)
+			err := ValidateConfig(cfg, testDatasources())
 			if (err != nil) != tc.wantErr {
 				t.Errorf("ValidateConfig() error = %v, wantErr = %v", err, tc.wantErr)
 			}
@@ -365,7 +365,7 @@ func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl2", "password": "pass"}},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("duplicate source names should fail validation")
 	}
 }
@@ -377,7 +377,7 @@ func TestValidateConfig_MissingSourceFields(t *testing.T) {
 			{Name: "src1"},
 		},
 	}
-	err := ValidateConfig(cfg)
+	err := ValidateConfig(cfg, testDatasources())
 	if err == nil {
 		t.Error("source missing host/database/table should fail")
 	}
@@ -390,7 +390,7 @@ func TestValidateConfig_EmptySourceName(t *testing.T) {
 			{Name: "", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl"}},
 		},
 	}
-	err := ValidateConfig(cfg)
+	err := ValidateConfig(cfg, testDatasources())
 	if err == nil {
 		t.Error("empty source name should fail")
 	}
@@ -414,7 +414,7 @@ func TestValidateConfig_ValidTeams(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("valid team config should pass: %v", err)
 	}
 }
@@ -427,7 +427,7 @@ func TestValidateConfig_DuplicateTeamNames(t *testing.T) {
 			{Name: "team1"},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("duplicate team names should fail validation")
 	}
 }
@@ -443,7 +443,7 @@ func TestValidateConfig_InvalidSourceRef(t *testing.T) {
 			{Name: "team1", Sources: []string{"nonexistent"}},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("team referencing nonexistent source should fail")
 	}
 }
@@ -460,7 +460,7 @@ func TestValidateConfig_InvalidMemberRole(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("invalid member role should fail validation")
 	}
 }
@@ -477,7 +477,7 @@ func TestValidateConfig_ValidEditorRole(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("editor role should be valid: %v", err)
 	}
 }
@@ -495,7 +495,7 @@ func TestValidateConfig_DuplicateMemberEmails(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("duplicate member emails should fail validation")
 	}
 }
@@ -507,7 +507,7 @@ func TestValidateConfig_EmptyTeamName(t *testing.T) {
 			{Name: ""},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("empty team name should fail")
 	}
 }
@@ -524,7 +524,7 @@ func TestValidateConfig_EmptyMemberEmail(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateConfig(cfg); err == nil {
+	if err := ValidateConfig(cfg, testDatasources()); err == nil {
 		t.Error("empty member email should fail")
 	}
 }
@@ -542,7 +542,7 @@ func TestValidateConfig_DefaultMemberRole(t *testing.T) {
 		},
 	}
 	// Empty role defaults to "member" — should pass
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("empty role (defaults to member) should pass: %v", err)
 	}
 }
@@ -556,7 +556,7 @@ func TestValidateConfig_SourcesNotManagedTeamRefsIgnored(t *testing.T) {
 		},
 	}
 	// When manage_sources=false, source refs in teams aren't validated against config
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, testDatasources()); err != nil {
 		t.Errorf("source refs should be ignored when manage_sources=false: %v", err)
 	}
 }
@@ -656,7 +656,7 @@ schema_lookback_seconds = %d
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = ValidateConfig(&cfg.Provisioning)
+		err = ValidateConfig(&cfg.Provisioning, testDatasources())
 		if !tc.valid {
 			if err == nil || !strings.Contains(err.Error(), "schema_lookback_seconds") {
 				t.Fatalf("schema_lookback_seconds = %d: got %v", tc.lookback, err)
@@ -685,7 +685,7 @@ func TestValidateConfig_DuplicateTeamSources(t *testing.T) {
 				Sources:       []config.ProvisionSource{{Name: "logs", Connection: map[string]any{"host": "localhost:9000", "database": "default", "table_name": "logs"}}},
 				Teams:         []config.ProvisionTeam{{Name: "team", Sources: []string{"logs", "logs"}}},
 			}
-			if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "duplicate source") {
+			if err := ValidateConfig(cfg, testDatasources()); err == nil || !strings.Contains(err.Error(), "duplicate source") {
 				t.Fatalf("expected duplicate source validation error, got %v", err)
 			}
 		})

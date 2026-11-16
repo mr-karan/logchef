@@ -68,6 +68,10 @@ type ProvisionSource struct {
 	MetaTSField       string `koanf:"meta_ts_field" json:"meta_ts_field,omitempty"`
 	MetaSeverityField string `koanf:"meta_severity_field" json:"meta_severity_field,omitempty"`
 
+	// Views declares the source's saved Explorer views (RFC 0007). They are
+	// managed: read-only in the UI and owned by this file.
+	Views []ProvisionView `koanf:"views" json:"views,omitempty"`
+
 	// Legacy detection fields (pre-v2.0 flat schema). These mirror the old
 	// top-level connection keys that v2.0 moved under [sources.connection].
 	// They exist ONLY so the startup guard can detect an un-migrated config and
@@ -199,4 +203,46 @@ type ProvisionMember struct {
 	Email string `koanf:"email" json:"email"`
 	// Role is the team-level role: "admin", "editor", or "member".
 	Role string `koanf:"role" json:"role,omitempty"`
+}
+
+// ProvisionView declares a source view, matched to a stored view by source and
+// name. The fields after Default are the parts of the view definition; an
+// absent part says nothing about that part of the Explorer.
+type ProvisionView struct {
+	Name        string `koanf:"name" json:"name"`
+	Description string `koanf:"description" json:"description,omitempty"`
+	// Default makes the view the source default. At most one per source.
+	Default bool `koanf:"default" json:"default,omitempty"`
+
+	Columns     []models.SavedViewColumn      `koanf:"columns" json:"columns,omitempty"`
+	Sort        []models.SavedViewSort        `koanf:"sort" json:"sort,omitempty"`
+	DisplayMode *models.DisplayModePreference `koanf:"display_mode" json:"display_mode,omitempty"`
+	Filter      *string                       `koanf:"filter" json:"filter,omitempty"`
+	TimeRange   *string                       `koanf:"time_range" json:"time_range,omitempty"`
+}
+
+// Definition returns the view definition the declaration describes.
+func (v *ProvisionView) Definition() models.SavedViewDefinition {
+	return models.SavedViewDefinition{
+		Version:     models.SavedViewDefinitionVersion,
+		Columns:     v.Columns,
+		Sort:        v.Sort,
+		DisplayMode: v.DisplayMode,
+		Filter:      v.Filter,
+		TimeRange:   v.TimeRange,
+	}
+}
+
+// ProvisionViewFromSaved is the declaration of a stored view.
+func ProvisionViewFromSaved(v *models.SavedView) ProvisionView {
+	return ProvisionView{
+		Name:        v.Name,
+		Description: v.Description,
+		Default:     v.IsDefault,
+		Columns:     v.Definition.Columns,
+		Sort:        v.Definition.Sort,
+		DisplayMode: v.Definition.DisplayMode,
+		Filter:      v.Definition.Filter,
+		TimeRange:   v.Definition.TimeRange,
+	}
 }

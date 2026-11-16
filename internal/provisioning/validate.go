@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -18,11 +19,12 @@ import (
 var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ValidateConfig checks resolved provisioning config for internal consistency.
-func ValidateConfig(cfg *config.ProvisioningConfig) error {
+// ds supplies the provider descriptors that source views are checked against.
+func ValidateConfig(cfg *config.ProvisioningConfig, ds *datasource.Service) error {
 	var errs []string
 
 	if cfg.ManageSources {
-		errs = append(errs, validateSources(cfg)...)
+		errs = append(errs, validateSources(cfg, ds)...)
 	}
 	if cfg.ManageTeams {
 		errs = append(errs, validateTeams(cfg)...)
@@ -34,12 +36,15 @@ func ValidateConfig(cfg *config.ProvisioningConfig) error {
 	return nil
 }
 
-func validateSources(cfg *config.ProvisioningConfig) []string {
+func validateSources(cfg *config.ProvisioningConfig, ds *datasource.Service) []string {
 	var errs []string
 	seen := make(map[string]bool)
 
 	for i := range cfg.Sources {
 		errs = append(errs, validateOneSource(i, cfg.Sources[i], seen)...)
+		if cfg.Sources[i].Name != "" {
+			errs = append(errs, validateSourceViews(fmt.Sprintf("sources[%d] (%q)", i, cfg.Sources[i].Name), cfg.Sources[i], ds)...)
+		}
 	}
 	return errs
 }
@@ -304,6 +309,11 @@ func ResolveConfig(cfg *config.ProvisioningConfig) {
 // names, and applies the per-type field defaults.
 func resolveSource(source *config.ProvisionSource) {
 	source.SourceType = source.NormalizedSourceType()
+	// The API trims a view's name and description; views match by name.
+	for i := range source.Views {
+		source.Views[i].Name = strings.TrimSpace(source.Views[i].Name)
+		source.Views[i].Description = strings.TrimSpace(source.Views[i].Description)
+	}
 
 	switch source.SourceType {
 	case models.SourceTypeClickHouse:

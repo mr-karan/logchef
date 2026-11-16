@@ -51,7 +51,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	}
 
 	ResolveConfig(cfg)
-	if err := ValidateConfig(cfg); err != nil {
+	if err := ValidateConfig(cfg, ds); err != nil {
 		return err
 	}
 
@@ -95,6 +95,9 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 		if cfg.ManageSources {
 			if err := reconcileSources(ctx, tx, cfg, log, events, &sourcesToConnect); err != nil {
 				return fmt.Errorf("source reconciliation failed: %w", err)
+			}
+			if err := reconcileSourceViews(ctx, tx, cfg, log); err != nil {
+				return fmt.Errorf("source view reconciliation failed: %w", err)
 			}
 		}
 

@@ -573,6 +573,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.markAlertTriggeredStmt, err = db.PrepareContext(ctx, markAlertTriggered); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertTriggered: %w", err)
 	}
+	if q.markSavedViewManagedStmt, err = db.PrepareContext(ctx, markSavedViewManaged); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkSavedViewManaged: %w", err)
+	}
 	if q.pauseReportStmt, err = db.PrepareContext(ctx, pauseReport); err != nil {
 		return nil, fmt.Errorf("error preparing query PauseReport: %w", err)
 	}
@@ -1682,6 +1685,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing markAlertTriggeredStmt: %w", cerr)
 		}
 	}
+	if q.markSavedViewManagedStmt != nil {
+		if cerr := q.markSavedViewManagedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markSavedViewManagedStmt: %w", cerr)
+		}
+	}
 	if q.pauseReportStmt != nil {
 		if cerr := q.pauseReportStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing pauseReportStmt: %w", cerr)
@@ -2219,6 +2227,7 @@ type Queries struct {
 	markAlertInstanceNotifiedStmt          *sql.Stmt
 	markAlertResolvedStmt                  *sql.Stmt
 	markAlertTriggeredStmt                 *sql.Stmt
+	markSavedViewManagedStmt               *sql.Stmt
 	pauseReportStmt                        *sql.Stmt
 	pruneAlertHistoryStmt                  *sql.Stmt
 	pruneAuditEventsStmt                   *sql.Stmt
@@ -2471,6 +2480,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAlertInstanceNotifiedStmt:          q.markAlertInstanceNotifiedStmt,
 		markAlertResolvedStmt:                  q.markAlertResolvedStmt,
 		markAlertTriggeredStmt:                 q.markAlertTriggeredStmt,
+		markSavedViewManagedStmt:               q.markSavedViewManagedStmt,
 		pauseReportStmt:                        q.pauseReportStmt,
 		pruneAlertHistoryStmt:                  q.pruneAlertHistoryStmt,
 		pruneAuditEventsStmt:                   q.pruneAuditEventsStmt,
