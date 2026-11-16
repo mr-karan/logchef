@@ -1,0 +1,158 @@
+---
+title: Dashboard Gallery
+description: Example Logchef dashboards for API health, business KPIs and worker logs, with the panel queries and the dashboard features each one uses.
+---
+
+The dashboards on this page run on synthetic data: a week of API requests and a
+week of orders in ClickHouse, and a week of background worker logs in
+VictoriaLogs. Each section says what the dashboard answers, lists the
+[dashboard features](/features/dashboards) it uses, and shows a panel query you
+can copy. The scripts that build the data, the dashboards and these screenshots
+are in [`dev/gallery`](https://github.com/mr-karan/logchef/tree/main/dev/gallery).
+
+## API health
+
+![The API health dashboard: four stat tiles with comparisons and sparklines, requests by service as stacked bars, the slowest routes, p50 and p95 latency with an 800 ms reference line, 5xx responses by service, and a table of recent 5xx responses](/screenshots/dashboard-api-health-light.png)
+
+A wall screen for the team that runs the storefront API. The top row answers
+"how did the last whole hour compare with the one before it". The charts below
+cover the last 24 hours. The 5xx and latency charts show an incident three and
+a half hours earlier, when checkout and payments failed.
+
+It uses:
+
+- [Stats with a comparison and a sparkline](/features/dashboards/#compare-and-sparkline),
+  colored green or red by the direction that counts as better
+- [Thresholds](/features/dashboards/#thresholds-and-table-formatting) that color
+  the 5xx rate and p95 values, and an 800 ms reference line on the latency chart
+- [Result charts](/features/dashboards/#panel-types): stacked bars, lines and a
+  toplist, all drawn from SQL results
+- A fixed [bucket size](/features/dashboards/#bucket-size) per chart, 30 minutes
+  for the bars and 15 minutes for the latency lines
+- [Table rules and column formats](/features/dashboards/#thresholds-and-table-formatting):
+  a 504 cell turns amber, a row whose message contains "timed out" turns
+  purple, and timestamps show seconds
+- Panel widths of 7 and 5 columns, which the [free grid](/features/dashboards/#editing) allows
+- Two [tabs](/features/dashboards/#tabs)
+
+Each stat tile runs one row per hour and leaves out the hour in progress, so
+the comparison is between two whole hours. `HAVING` drops the first hour, which
+the range start cuts in half:
+
+```sql
+SELECT toStartOfHour(timestamp, {{__timezone}}) AS hour,
+       round(quantile(0.95)(duration_ms)) AS p95_ms
+FROM gallery.http_requests
+WHERE {{__time_filter}}
+  AND timestamp < toStartOfHour(now(), {{__timezone}})
+GROUP BY hour
+HAVING hour > {{__from}}
+ORDER BY hour
+```
+
+The tile uses `p95_ms` as the value, `hour` as **Order by**, the `last`
+reducer, **Previous row** as the comparison and **Decrease** as the improvement
+direction.
+
+### The last 7 days tab
+
+![The Last 7 days tab: stats for yesterday, requests per day with value labels, requests by region as a donut, daily p95 latency by service, and the routes with the most 5xx responses](/screenshots/dashboard-api-health-week-light.png)
+
+The second tab answers "how does this week look". The dashboard opens on the
+last 24 hours, but every panel on this tab sets its own
+[range](/features/dashboards/#a-range-for-one-panel) of `today-6d`, which is
+today and the six days before it in the viewer's timezone. The charts use
+`24h` buckets, so each bar is one calendar day. The stats leave out today and
+compare yesterday with the day before. The chips in each panel header show the
+range and the bucket size.
+
+## Business KPIs
+
+![The Business KPIs dashboard: revenue today in crores, orders today, average order value and a refund rate tile with a green background, daily revenue bars with value labels, orders by payment method, orders by hour today and yesterday, revenue by city, and a categories table](/screenshots/dashboard-business-light.png)
+
+A dashboard for the people who ask "are we selling more than yesterday".
+Amounts are in rupees and revenue reads in crores. The dashboard opens on the
+calendar range **Last 7 calendar days**.
+
+It uses:
+
+- [Number formats](/features/dashboards/#computed-stats-and-exact-values) with
+  Scale `1e-7`, Prefix `₹` and Suffix ` Cr`, so 52,900,000 shows as ₹5.29 Cr
+- A [background threshold](/features/dashboards/#thresholds-and-table-formatting)
+  on the refund rate: green below 4%, amber from 4%, red from 6%
+- Bars with [value labels](/features/dashboards/#panel-types) above each bar,
+  a donut and a toplist
+- A category [X scale](/features/dashboards/#chart-axes-and-colors) for the
+  hour of day, with one line for today and one for yesterday
+- A **Fixed window** chip on the hourly chart, because its SQL sets its own
+  window instead of using a [time macro](/features/dashboards/#which-panels-follow-the-time-picker)
+- [Cell rules](/features/dashboards/#thresholds-and-table-formatting) that
+  mark revenue of ₹40 Cr or more and a refund rate of 3.6% or more
+
+A comparison of today with yesterday at 3 pm should not use all of yesterday.
+The stat tiles count each day only up to the current time of day:
+
+```sql
+SELECT toStartOfDay(created_at, {{__timezone}}) AS day,
+       sumIf(amount, status = 'paid') AS revenue
+FROM gallery.orders
+WHERE {{__time_filter}}
+  AND dateDiff('second', toStartOfDay(created_at, {{__timezone}}), created_at)
+      <= dateDiff('second', toStartOfDay(now(), {{__timezone}}), now())
+GROUP BY day
+ORDER BY day
+```
+
+The last row is today so far, and the row before it is yesterday up to the
+same minute. The sparkline shows the same slice of each of the last seven days.
+
+## Worker logs
+
+![The Worker logs dashboard in dark mode: counts of log lines, errors and warnings, p95 job duration, log volume by service as stacked bars, a levels donut, errors by service, and a table of recent errors](/screenshots/dashboard-worker-logs-dark.png)
+
+A dashboard for the on-call engineer who owns the background workers, on a
+VictoriaLogs source. It mixes count panels written in LogchefQL with result
+panels written in LogsQL.
+
+It uses:
+
+- Count mode with [group by](/features/dashboards/#panel-types) for the stats,
+  the stacked bars and the levels donut, which run filters such as
+  `level="error"` through the histogram endpoint
+- [LogsQL](/features/dashboards/#multiple-data-sources) result panels for the
+  p95 duration, the errors toplist and the recent errors table
+- Confirmed [column kinds](/features/dashboards/#computed-stats-and-exact-values),
+  because VictoriaLogs returns every field as text: `duration_ms` is a number
+  and `_time` is a time
+- A background threshold on the error count, and a row rule that marks
+  `payment-webhooks` errors amber
+
+The errors toplist is one LogsQL stats query:
+
+```
+level:error | stats by (service) count() as errors | sort by (errors desc)
+```
+
+## Build a panel
+
+![The panel builder for the Latency panel: a live preview, the ClickHouse SQL with time macros, chart style options and the threshold editor](/screenshots/dashboard-builder-chart-light.png)
+
+The panel builder shows a live preview above the query. For the Latency panel
+the options column holds the chart style, the X scale, value labels, the legend
+and the thresholds that draw the 800 ms line.
+
+![The panel builder for a stat panel: value column, order by, reducer, comparison, improvement direction and sparkline](/screenshots/dashboard-builder-stat-light.png)
+
+For a stat, the same column sets the value column, **Order by**, the reducer,
+the comparison and its improvement direction, and the sparkline.
+
+![A dashboard in edit mode with two tabs, the tab menu, Add tab, and panels showing range and bucket size chips](/screenshots/dashboard-tabs-edit-light.png)
+
+In edit mode the tab bar gets a menu to rename, move or delete the open tab,
+and **Add tab** next to it. The toolbar sets the range the dashboard opens
+with and its cache TTL.
+
+![A refund rate stat with a green background threshold, a comparison with yesterday and a sparkline, in dark mode](/screenshots/dashboard-stat-thresholds-dark.png)
+
+A stat with a background threshold keeps the comparison and the sparkline on
+the colored background.
