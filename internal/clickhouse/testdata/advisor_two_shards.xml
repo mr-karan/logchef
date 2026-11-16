@@ -1,0 +1,8 @@
+<clickhouse>
+    <remote_servers>
+        <logchef_two_shards>
+            <shard><replica><host>localhost</host><port>9000</port></replica></shard>
+            <shard><replica><host>127.0.0.1</host><port>9000</port></replica></shard>
+        </logchef_two_shards>
+    </remote_servers>
+</clickhouse>
