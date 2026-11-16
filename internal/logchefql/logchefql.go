@@ -18,6 +18,9 @@ type TranslateOptions struct {
 	// AllowAggregation accepts an aggregation pipe. Leave it false on a path
 	// that needs log rows, and the query fails with AGGREGATION_NOT_ALLOWED.
 	AllowAggregation bool
+	// Interval is the request interval, the window of a `by time` key that
+	// has none of its own.
+	Interval string
 }
 
 // Translate parses a LogchefQL query and returns the SQL translation with
@@ -49,10 +52,10 @@ func TranslateWithOptions(query string, schema *Schema, opts TranslateOptions) *
 		return result
 	}
 
-	return translateAST(ast, schema)
+	return translateAST(ast, schema, opts.Interval)
 }
 
-func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
+func translateAST(ast ASTNode, schema *Schema, interval string) *TranslateResult {
 	result := &TranslateResult{
 		Valid:      false,
 		Conditions: []FilterCondition{},
@@ -64,9 +67,13 @@ func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
 		result.Error = genErr
 		return result
 	}
-	if agg := AggregationOf(ast); agg != nil {
-		result.Error = errAggregationNotSupported(agg)
-		return result
+	if node := AggregationOf(ast); node != nil {
+		agg, aggErr := generator.GenerateAggregation(node, interval)
+		if aggErr != nil {
+			result.Error = aggErr
+			return result
+		}
+		result.Aggregation = agg
 	}
 	selectClause := ""
 	if queryNode, ok := ast.(*QueryNode); ok && len(queryNode.Select) > 0 {
@@ -443,6 +450,19 @@ type timeBound struct {
 	zone  string
 }
 
+// time is the instant of the bound.
+func (b timeBound) time() (time.Time, *ParseError) {
+	location, err := time.LoadLocation(b.zone)
+	if err != nil {
+		return time.Time{}, validateTimezone(b.zone)
+	}
+	parsed, err := time.ParseInLocation("2006-01-02 15:04:05.999999999", b.value, location)
+	if err != nil {
+		return time.Time{}, validateTimeFormat(b.value)
+	}
+	return parsed, nil
+}
+
 // prepareTimeRange validates params and returns the start and end bounds.
 func prepareTimeRange(params QueryBuildParams) (start, end timeBound, err error) {
 	if err := validateTimezone(params.Timezone); err != nil {
@@ -489,6 +509,16 @@ func parseTimeBound(value, timezone string) (timeBound, *ParseError) {
 func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound, translateResult *TranslateResult) (string, error) {
 	var query strings.Builder
 
+	if agg := translateResult.Aggregation; agg != nil {
+		if err := agg.checkBuckets(start, end); err != nil {
+			return "", err
+		}
+		if err := agg.writeQuery(&query, params, timeFilter(params, start, end), translateResult.SQL); err != nil {
+			return "", err
+		}
+		return query.String(), nil
+	}
+
 	query.WriteString("SELECT ")
 	if translateResult.SelectClause != "" {
 		timestampInSelect := strings.Contains(translateResult.SelectClause, queryescape.ClickHouseIdentifier(params.TimestampField))
@@ -508,12 +538,7 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 
 	// WHERE clause with time range
 	query.WriteString("WHERE ")
-	query.WriteString(queryescape.ClickHouseIdentifier(params.TimestampField))
-	if strings.Contains(start.value, ".") || strings.Contains(end.value, ".") {
-		fmt.Fprintf(&query, " BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", start.value, start.zone, end.value, end.zone)
-	} else {
-		fmt.Fprintf(&query, " BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", start.value, start.zone, end.value, end.zone)
-	}
+	query.WriteString(timeFilter(params, start, end))
 
 	// Add LogchefQL conditions if present
 	if translateResult.SQL != "" {
@@ -534,6 +559,15 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 	}
 
 	return query.String(), nil
+}
+
+// timeFilter is the condition that keeps the rows of the time range.
+func timeFilter(params QueryBuildParams, start, end timeBound) string {
+	column := queryescape.ClickHouseIdentifier(params.TimestampField)
+	if strings.Contains(start.value, ".") || strings.Contains(end.value, ".") {
+		return fmt.Sprintf("%s BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", column, start.value, start.zone, end.value, end.zone)
+	}
+	return fmt.Sprintf("%s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", column, start.value, start.zone, end.value, end.zone)
 }
 
 // QueryBuildParams contains parameters for building a full SQL query

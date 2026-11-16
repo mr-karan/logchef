@@ -115,6 +115,10 @@ type QueryConfig struct {
 	MaxConcurrentPerUser int `koanf:"max_concurrent_per_user"`
 	// MaxConcurrentGlobal limits active queries globally, per class.
 	MaxConcurrentGlobal int `koanf:"max_concurrent_global"`
+	// AggregationMaxMemoryBytes is the ClickHouse max_memory_usage of a
+	// LogchefQL aggregation. A lower limit of the source or the ClickHouse
+	// user wins.
+	AggregationMaxMemoryBytes int64 `koanf:"aggregation_max_memory_bytes"`
 }
 
 // ExportConfig contains settings for streaming result exports.
@@ -484,6 +488,7 @@ const (
 	defaultQueryMCPCallTimeoutSecs   = 60
 	defaultQueryMaxConcurrentPerUser = 3
 	defaultQueryMaxConcurrentGlobal  = 30
+	defaultQueryAggregationMaxMemory = 2 << 30
 
 	defaultExportMaxRows              = 1000000
 	defaultExportDefaultTimeoutSecs   = 120
@@ -970,14 +975,15 @@ func defaultConfig() Config {
 			DefaultTokenExpiry:    defaultAuthDefaultTokenExpiry,
 		},
 		Query: QueryConfig{
-			DefaultPreviewLimit:   defaultQueryDefaultPreviewLimit,
-			MaxPreviewLimit:       defaultQueryMaxPreviewLimit,
-			MaxResponseBytes:      defaultQueryMaxResponseBytes,
-			DefaultTimeoutSeconds: defaultQueryDefaultTimeoutSecs,
-			MaxTimeoutSeconds:     defaultQueryMaxTimeoutSecs,
-			MCPCallTimeoutSeconds: defaultQueryMCPCallTimeoutSecs,
-			MaxConcurrentPerUser:  defaultQueryMaxConcurrentPerUser,
-			MaxConcurrentGlobal:   defaultQueryMaxConcurrentGlobal,
+			DefaultPreviewLimit:       defaultQueryDefaultPreviewLimit,
+			MaxPreviewLimit:           defaultQueryMaxPreviewLimit,
+			MaxResponseBytes:          defaultQueryMaxResponseBytes,
+			DefaultTimeoutSeconds:     defaultQueryDefaultTimeoutSecs,
+			MaxTimeoutSeconds:         defaultQueryMaxTimeoutSecs,
+			MCPCallTimeoutSeconds:     defaultQueryMCPCallTimeoutSecs,
+			MaxConcurrentPerUser:      defaultQueryMaxConcurrentPerUser,
+			MaxConcurrentGlobal:       defaultQueryMaxConcurrentGlobal,
+			AggregationMaxMemoryBytes: defaultQueryAggregationMaxMemory,
 		},
 		Export: ExportConfig{
 			MaxRows:               defaultExportMaxRows,
@@ -1061,6 +1067,9 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	}
 	if cfg.Query.MCPCallTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
 		cfg.Query.MCPCallTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
+	}
+	if cfg.Query.AggregationMaxMemoryBytes <= 0 {
+		cfg.Query.AggregationMaxMemoryBytes = defaultQueryAggregationMaxMemory
 	}
 
 	if cfg.Export.MaxRows <= 0 {

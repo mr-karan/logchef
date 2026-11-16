@@ -363,6 +363,9 @@ max_timeout_seconds = 120
 mcp_call_timeout_seconds = 60
 max_concurrent_per_user = 3
 max_concurrent_global = 30
+# ClickHouse max_memory_usage of a LogchefQL aggregation. Default 2 GiB. A lower
+# limit of the source or the ClickHouse user wins.
+aggregation_max_memory_bytes = 2147483648
 
 [export]
 # Stable identity unique to this replica. Empty keeps age-based cleanup only.

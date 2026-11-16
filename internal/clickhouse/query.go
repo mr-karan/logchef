@@ -42,6 +42,9 @@ type QueryOptions struct {
 	// max_result_rows, or 0 when Logchef bounds the result only in its reader.
 	// A bound past MaxRows lets a row beyond the cap prove a cut.
 	ResultRows int
+	// AggregationMaxMemoryBytes marks a compiled LogchefQL aggregation and
+	// bounds its memory. 0 for any other query.
+	AggregationMaxMemoryBytes int64
 }
 
 // RowStreamWriter receives rows as they are read from ClickHouse.

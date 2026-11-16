@@ -41,6 +41,13 @@ var intervals = []Interval{
 	{"24h", 86400, "INTERVAL 1 DAY", "1d"},
 }
 
+// ClickHouse is the interval as a ClickHouse INTERVAL literal, such as
+// "INTERVAL 5 MINUTE".
+func (i Interval) ClickHouse() string { return i.clickhouse }
+
+// LogsQL is the interval as a LogsQL duration, such as "5m".
+func (i Interval) LogsQL() string { return i.logsql }
+
 // ParseInterval returns the interval for a histogram window such as "24h".
 func ParseInterval(window string) (Interval, bool) {
 	for _, interval := range intervals {
