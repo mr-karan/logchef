@@ -290,6 +290,8 @@ export interface LogchefqlQueryRequestBody {
   end_time: string; // RFC3339
   timezone?: string;
   limit?: number;
+  /** The window of a `by time` key that names none. */
+  interval?: PanelInterval;
   // See HistogramRequestBody.query_language.
   query_language?: PanelQueryLanguage;
   // Dashboard result-cache directive; omitted when caching is off.

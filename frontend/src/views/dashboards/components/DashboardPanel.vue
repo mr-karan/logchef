@@ -15,6 +15,7 @@ import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 import { panelExploreQuery } from "@/utils/panelExplore";
 import { truncationMessage } from "@/utils/truncation";
+import { fillAggregationGaps } from "@/utils/panelFrame";
 
 const { t } = useI18n();
 
@@ -43,6 +44,11 @@ const store = useDashboardsStore();
 const panelState = computed<PanelState>(
   () => props.state ?? store.panelStates[props.panel.id] ?? { status: "idle" as const }
 );
+// An aggregation has no rows for its empty buckets, so its chart fills them. A table shows the rows as they came.
+const chartFrame = computed(() => {
+  const { frame, aggregation, range, alignment } = panelState.value;
+  return frame && aggregation && range && alignment ? fillAggregationGaps(frame, aggregation, range, alignment) : frame;
+});
 
 // A server-redacted panel (viewer lacks source access) carries `locked` and has
 // no query to run. Treat it as locked straight from the prop so it renders the
@@ -174,8 +180,8 @@ const columnSubset = computed(() => {
       <!-- Success -->
       <template v-else>
         <PanelChart
-          v-if="!panel.locked && panel.viz.type === 'chart' && panelState.frame"
-          :frame="panelState.frame" :viz="panel.viz" :count="panel.query.mode === 'count'" :range="panelState.range" :height="chartHeight"
+          v-if="!panel.locked && panel.viz.type === 'chart' && chartFrame"
+          :frame="chartFrame" :viz="panel.viz" :count="panel.query.mode === 'count'" :range="panelState.range" :height="chartHeight"
         />
         <PanelStat
           v-else-if="vizType === 'stat' && panelState.frame && !panel.locked"

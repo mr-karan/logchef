@@ -1,5 +1,6 @@
 import { i18n } from "@/i18n";
 import type { DashboardViz, DashboardVizType, NumberFormat } from "@/api/dashboards";
+import type { AggregationInfo } from "@/api/explore";
 import { addExact, compareExact, exactString, isExact, multiplyExact, parseExact, type FrameNumber } from "./exactNumber";
 import { frameCellText, frameWithKinds, suggestKind, type FrameColumn, type PanelFrame } from "./panelFrame";
 import { getColorForGroupValue } from "./histogram-chart";
@@ -239,6 +240,33 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
   }
   if (items.some((i) => i.value.approximate)) notices.push("Chart coordinates are approximate. Tooltips show exact values.");
   return { items, notices, total: totalValue === null ? null : chartValue(totalValue, viz.format) };
+}
+
+// The chart roles that an aggregation's columns declare: the time key is x,
+// every value is a y, and the one group field is the series. Null when the
+// result has no time key, or two group fields, which a chart cannot tell apart.
+function aggregationChartRoles(info: AggregationInfo): Pick<ChartViz, "x" | "y" | "series"> | null {
+  const time = info.columns.find((c) => c.role === "time");
+  const groups = info.columns.filter((c) => c.role === "group");
+  if (!time || groups.length > 1) return null;
+  return { x: time.name, y: info.columns.filter((c) => c.role === "value").map((c) => c.name), ...(groups[0] ? { series: groups[0].name } : {}) };
+}
+
+/**
+ * The first visualization for an aggregated LogchefQL result. A time key gives
+ * a line chart with the roles its columns declare. Two group fields give a
+ * table. Any other shape takes the suggestion for its frame.
+ */
+export function suggestAggregationViz(frame: PanelFrame, info: AggregationInfo): DashboardViz {
+  if (info.columns.filter((c) => c.role === "group").length > 1) return { type: "table" };
+  const roles = aggregationChartRoles(info);
+  return roles ? { type: "chart", ...roles, mark: "line", stack: "none" } : suggestViz(frame);
+}
+
+/** Fills the roles a chart lacks from an aggregation's columns, and any other gap as `withSuggestedRoles` does. */
+export function withAggregationRoles(frame: PanelFrame, viz: DashboardViz, info: AggregationInfo): DashboardViz {
+  const roles = viz.type === "chart" && !(viz.x && viz.y?.length) ? aggregationChartRoles(info) : null;
+  return roles ? { ...viz, ...roles } : withSuggestedRoles(frame, viz);
 }
 
 export function withSuggestedRoles(frame: PanelFrame, viz: DashboardViz): DashboardViz {

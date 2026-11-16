@@ -27,14 +27,16 @@ const (
 
 func TestValidateDashboardPanelsV2_Valid(t *testing.T) {
 	for name, blob := range map[string]json.RawMessage{
-		"chart":         v2Blob(v2Layout, v2ChartPanel),
-		"stat":          v2Blob(v2Layout, v2StatPanel),
-		"table":         v2Blob(v2Layout, v2TablePanel),
-		"pie":           v2Blob(v2Layout, v2PiePanel),
-		"empty":         json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]}`),
-		"toplist":       v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"","team_id":1,"source_id":1,"query":{"mode":"count","language":"logchefql","text":"","group_by":"host"},"viz":{"type":"toplist"}}`),
-		"settings":      json.RawMessage(`{"version":2,"features":["ignored-on-write"],"cache_ttl_seconds":0,"default_time_range":"7d","tabs":[{"id":"t","title":"Overview","layout":[]}],"panels":[]}`),
-		"minimal chart": v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","team_id":1,"source_id":1,"query":{"mode":"count","language":"clickhouse-sql","text":"SELECT 1"},"viz":{"type":"chart"}}`),
+		"chart":                         v2Blob(v2Layout, v2ChartPanel),
+		"stat":                          v2Blob(v2Layout, v2StatPanel),
+		"table":                         v2Blob(v2Layout, v2TablePanel),
+		"pie":                           v2Blob(v2Layout, v2PiePanel),
+		"empty":                         json.RawMessage(`{"version":2,"features":[],"tabs":[{"id":"main","title":"Main","layout":[]}],"panels":[]}`),
+		"toplist":                       v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"","team_id":1,"source_id":1,"query":{"mode":"count","language":"logchefql","text":"","group_by":"host"},"viz":{"type":"toplist"}}`),
+		"settings":                      json.RawMessage(`{"version":2,"features":["ignored-on-write"],"cache_ttl_seconds":0,"default_time_range":"7d","tabs":[{"id":"t","title":"Overview","layout":[]}],"panels":[]}`),
+		"aggregation in result mode":    v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","team_id":1,"source_id":1,"query":{"mode":"result","language":"logchefql","text":"| count() by time, service"},"viz":{"type":"table"}}`),
+		"count mode with a select pipe": v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","team_id":1,"source_id":1,"query":{"mode":"count","language":"logchefql","text":"x=1 | count"},"viz":{"type":"chart"}}`),
+		"minimal chart":                 v2Blob(v2Layout, `{"id":"p1","kind":"query","title":"a","team_id":1,"source_id":1,"query":{"mode":"count","language":"clickhouse-sql","text":"SELECT 1"},"viz":{"type":"chart"}}`),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := ValidateDashboardPanels(blob); err != nil {
@@ -110,6 +112,7 @@ func TestValidateDashboardPanelsV2_Violations(t *testing.T) {
 		{"translate_limit in result mode", panel(`{"mode":"result","language":"logchefql","text":"x","translate_limit":10}`, `{"type":"table"}`), "only count mode with logchefql"},
 		{"translate_limit with sql", panel(`{"mode":"count","language":"clickhouse-sql","text":"x","translate_limit":10}`, `{"type":"stat"}`), "only count mode with logchefql"},
 		{"translate_limit too large", panel(`{"mode":"count","language":"logchefql","text":"x","translate_limit":100001}`, `{"type":"stat"}`), "invalid query.translate_limit"},
+		{"aggregation in count mode", panel(`{"mode":"count","language":"logchefql","text":"level=error | count() by service"}`, `{"type":"chart"}`), "an aggregation needs result mode"},
 		{"bad viz type", panel(countQ, `{"type":"gauge"}`), "invalid viz.type"},
 		{"table in count mode", panel(countQ, `{"type":"table"}`), "table needs result mode"},
 		{"result stat needs a value", panel(resultQ, `{"type":"stat"}`), "needs viz.value"},

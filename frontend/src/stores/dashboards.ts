@@ -22,7 +22,7 @@ import {
   type CacheDirective,
 } from "@/api/dashboards";
 import { countFrame, resultFrame, type PanelFrame } from "@/utils/panelFrame";
-import type { QueryStats } from "@/api/explore";
+import type { AggregationInfo, QueryStats } from "@/api/explore";
 import {
   addPanelToTab,
   dashboardTab,
@@ -48,6 +48,7 @@ import {
   relativeWindow,
   resolveWindow,
   toRfc3339,
+  type BucketAlignment,
   type ResolvedWindow,
   type TimeWindow,
 } from "@/utils/timeWindow";
@@ -100,6 +101,10 @@ export interface PanelState {
   /** The window the query ran with, and whether a fixed interval was raised to fit the range. */
   interval?: PanelInterval;
   intervalRaised?: boolean;
+  /** Set when a LogchefQL query aggregates: the frame is its result, not log rows. */
+  aggregation?: AggregationInfo;
+  /** How the backend aligned an aggregation's time buckets, for the chart's gap fill. */
+  alignment?: BucketAlignment;
 }
 
 
@@ -539,6 +544,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       };
     }
 
+    // The interval is the window of a `by time` key that names none.
+    const { window, raised } = resolveInterval(panel.query.interval, range);
     const resp = await dashboardPanelApi.logchefqlQuery(
       panel.team_id,
       panel.source_id,
@@ -548,16 +555,24 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         end_time: toRfc3339(range.end),
         timezone: range.zone,
         limit,
+        interval: window,
         ...(cache ? { cache } : {}),
       },
       signal
     );
     const data = unwrap(resp);
     const rows = data?.logs ?? [];
+    const aggregation = data?.aggregation;
+    const logsql = data?.generated_query_language === "logsql";
+    // LogsQL reports no column types, except for an aggregation: the compiler wrote the query and declares them.
+    const frame = resultFrame({ columns: data?.columns ?? [], rows, untyped: logsql && !aggregation, stats: data?.stats });
     return {
       status: rows.length ? "success" : "empty",
-      frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: data?.generated_query_language === "logsql", stats: data?.stats }),
+      frame: aggregation?.interval ? { ...frame, interval: aggregation.interval } : frame,
       stats: data?.stats,
+      ...(aggregation ? { aggregation, alignment: logsql ? "fixed-offset" : "calendar" } : {}),
+      // A `by time` key without its own window ran with the panel's interval.
+      ...(aggregation?.interval === window ? { interval: window, intervalRaised: raised } : {}),
     };
   }
 

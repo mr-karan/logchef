@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { countFrame, resultFrame } from "../panelFrame";
-import { buildPanelChart, buildPanelList, suggestRoles, suggestViz } from "../panelCharts";
+import { buildPanelChart, buildPanelList, suggestAggregationViz, suggestRoles, suggestViz, withAggregationRoles } from "../panelCharts";
+import type { DashboardViz } from "@/api/dashboards";
 
 const frame = resultFrame({ columns: [{ name: "day", type: "Date" }, { name: "a", type: "Decimal(20,2)" }, { name: "b", type: "UInt64" }], rows: [{ day: "2026-11-10", a: "12.50", b: "9007199254740993" }, { day: "2026-11-08", a: null, b: "3" }] });
 
@@ -114,4 +115,32 @@ it("does not invent a remainder when all slices meet the threshold", () => {
   const pie = buildPanelList(source, { type: "pie", label: "method", value: "n", min_slice_percent: 1 }, false);
   expect(pie.items.map((i) => i.label)).toEqual(["GET", "POST"]);
   expect(pie.total?.exact).toBe("0.3");
+});
+
+describe("aggregation suggestions", () => {
+  type Role = "time" | "group" | "value";
+  const info = (shape: "grouped" | "timeseries" | "grouped_timeseries", columns: [string, Role, string][]) =>
+    ({ shape, interval: "", limit: 0, columns: columns.map(([name, role, type]) => ({ name, role, type })) });
+  const frameOf = (columns: [string, Role, string][], rows: Record<string, unknown>[]) => resultFrame({ columns: columns.map(([name, , type]) => ({ name, type })), rows });
+
+  it("suggests the table for two group fields", () => {
+    const columns: [string, Role, string][] = [["time", "time", "DateTime"], ["service", "group", "String"], ["host", "group", "String"], ["count", "value", "UInt64"]];
+    const rows = [{ time: "2026-11-12T00:00:00Z", service: "api", host: "a", count: "3" }, { time: "2026-11-12T00:00:00Z", service: "api", host: "b", count: "2" }];
+    expect(suggestAggregationViz(frameOf(columns, rows), info("grouped_timeseries", columns))).toEqual({ type: "table" });
+  });
+
+  it("charts time as x, every value as y and the one group field as the series", () => {
+    const columns: [string, Role, string][] = [["time", "time", "DateTime"], ["service", "group", "String"], ["p95_duration_ms", "value", "Float64"], ["count", "value", "UInt64"]];
+    const frame = frameOf(columns, [{ time: "2026-11-12T00:00:00Z", service: "api", p95_duration_ms: 12.5, count: "3" }]);
+    const roles = { x: "time", y: ["p95_duration_ms", "count"], series: "service" };
+    expect(suggestAggregationViz(frame, info("grouped_timeseries", columns))).toEqual({ type: "chart", ...roles, mark: "line", stack: "none" });
+    expect(withAggregationRoles(frame, { type: "chart", mark: "bar" }, info("grouped_timeseries", columns))).toEqual({ type: "chart", mark: "bar", ...roles });
+  });
+
+  it("keeps the roles an author chose", () => {
+    const columns: [string, Role, string][] = [["time", "time", "DateTime"], ["count", "value", "UInt64"], ["avg_bytes", "value", "Float64"]];
+    const frame = frameOf(columns, [{ time: "2026-11-12T00:00:00Z", count: "3", avg_bytes: 1.5 }]);
+    const chosen: DashboardViz = { type: "chart", x: "time", y: ["avg_bytes"] };
+    expect(withAggregationRoles(frame, chosen, info("timeseries", columns))).toEqual(chosen);
+  });
 });

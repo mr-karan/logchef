@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mr-karan/logchef/internal/logchefql"
 )
 
 // Schema 2 panel blob (RFC 0003 "Panel blob schema 2"). A panel is a query
@@ -802,15 +804,34 @@ func validateDashboardQueryV2(panelID string, q *dashboardQueryV2) error {
 			return fmt.Errorf("panel %q has invalid query.limit %d (allowed: 1-%d)", panelID, *q.Limit, MaxDashboardQueryLimit)
 		}
 	}
-	if q.TranslateLimit != nil {
-		if !count || q.Language != QueryLanguageLogchefQL {
-			return fmt.Errorf("panel %q has query.translate_limit, which only count mode with logchefql uses", panelID)
-		}
-		if *q.TranslateLimit < 1 || *q.TranslateLimit > MaxDashboardTranslateLimit {
-			return fmt.Errorf("panel %q has invalid query.translate_limit %d (allowed: 1-%d)", panelID, *q.TranslateLimit, MaxDashboardTranslateLimit)
-		}
+	return validateDashboardLogchefQLCount(panelID, q)
+}
+
+// validateDashboardLogchefQLCount checks the fields and text that count mode
+// with LogchefQL constrains. Count mode charts the histogram of a filter, so
+// an aggregation pipe needs result mode.
+func validateDashboardLogchefQLCount(panelID string, q *dashboardQueryV2) error {
+	countLogchefQL := q.Mode == DashboardQueryModeCount && q.Language == QueryLanguageLogchefQL
+	if countLogchefQL && logchefQLAggregates(q.Text) {
+		return fmt.Errorf("panel %q is in count mode, and an aggregation needs result mode", panelID)
+	}
+	if q.TranslateLimit == nil {
+		return nil
+	}
+	if !countLogchefQL {
+		return fmt.Errorf("panel %q has query.translate_limit, which only count mode with logchefql uses", panelID)
+	}
+	if *q.TranslateLimit < 1 || *q.TranslateLimit > MaxDashboardTranslateLimit {
+		return fmt.Errorf("panel %q has invalid query.translate_limit %d (allowed: 1-%d)", panelID, *q.TranslateLimit, MaxDashboardTranslateLimit)
 	}
 	return nil
+}
+
+// logchefQLAggregates reports whether LogchefQL text ends in an aggregation
+// pipe. Text that does not parse is not an aggregation: it fails when it runs.
+func logchefQLAggregates(text string) bool {
+	pq, err := logchefql.ParseLogchefQL(text)
+	return err == nil && pq.Aggregate != nil
 }
 
 func validateDashboardVizV2(panelID string, q *dashboardQueryV2, v *dashboardVizV2) error {
