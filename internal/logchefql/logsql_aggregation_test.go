@@ -37,18 +37,18 @@ func TestLogsQLAggregationGolden(t *testing.T) {
 		{
 			name:  "sum and avg skip rows without the field",
 			query: "| sum(bytes), avg(bytes)",
-			want:  "* | stats sum(bytes) if (bytes:*) as __lc_v0, avg(bytes) if (bytes:*) as __lc_v1",
+			want:  "* | stats sum(bytes) if (NOT bytes:\"\") as __lc_v0, avg(bytes) if (NOT bytes:\"\") as __lc_v1",
 		},
 		{
 			name:  "min and max",
 			query: "| min(bytes), max(bytes)",
-			want:  "* | stats min(bytes) if (bytes:*) as __lc_v0, max(bytes) if (bytes:*) as __lc_v1",
+			want:  "* | stats min(bytes) if (NOT bytes:\"\") as __lc_v0, max(bytes) if (NOT bytes:\"\") as __lc_v1",
 		},
 		{
 			name:  "percentiles",
 			query: "| p50(d), p75(d), p90(d), p95(d), p99(d)",
-			want: "* | stats quantile(0.5, d) if (d:*) as __lc_v0, quantile(0.75, d) if (d:*) as __lc_v1, " +
-				"quantile(0.9, d) if (d:*) as __lc_v2, quantile(0.95, d) if (d:*) as __lc_v3, quantile(0.99, d) if (d:*) as __lc_v4",
+			want: "* | stats quantile(0.5, d) if (NOT d:\"\") as __lc_v0, quantile(0.75, d) if (NOT d:\"\") as __lc_v1, " +
+				"quantile(0.9, d) if (NOT d:\"\") as __lc_v2, quantile(0.95, d) if (NOT d:\"\") as __lc_v3, quantile(0.99, d) if (NOT d:\"\") as __lc_v4",
 			sources: [][2]string{{"p50_d", "__lc_v0"}, {"p75_d", "__lc_v1"}, {"p90_d", "__lc_v2"}, {"p95_d", "__lc_v3"}, {"p99_d", "__lc_v4"}},
 		},
 		{
@@ -68,8 +68,8 @@ func TestLogsQLAggregationGolden(t *testing.T) {
 			query:    "service=api | p95(duration_ms), avg(duration_ms) by time(5m)",
 			interval: "1h",
 			offset:   "19800s",
-			want: `service:="api" | stats by (_time:5m offset 19800s) quantile(0.95, duration_ms) if (duration_ms:*) as __lc_v0, ` +
-				`avg(duration_ms) if (duration_ms:*) as __lc_v1 | sort by (_time)`,
+			want: `service:="api" | stats by (_time:5m offset 19800s) quantile(0.95, duration_ms) if (NOT duration_ms:"") as __lc_v0, ` +
+				`avg(duration_ms) if (NOT duration_ms:"") as __lc_v1 | sort by (_time)`,
 			sources: [][2]string{{"time", "_time"}, {"p95_duration_ms", "__lc_v0"}, {"avg_duration_ms", "__lc_v1"}},
 		},
 		{
@@ -101,7 +101,7 @@ func TestLogsQLAggregationGolden(t *testing.T) {
 		{
 			name:  "sort asc by a value",
 			query: "| sum(bytes) by service | sort sum_bytes asc",
-			want:  "* | stats by (service) sum(bytes) if (bytes:*) as __lc_v0 | sort by (__lc_v0, service)",
+			want:  "* | stats by (service) sum(bytes) if (NOT bytes:\"\") as __lc_v0 | sort by (__lc_v0, service)",
 		},
 		{
 			name:  "sort by a key lists it once",
@@ -139,14 +139,14 @@ func TestLogsQLAggregationGolden(t *testing.T) {
 		{
 			name:    "keyword and spaced fields are quoted",
 			query:   `| min(count), avg("bytes sent") by "my host"`,
-			want:    `* | stats by ("my host") min("count") if ("count":*) as __lc_v0, avg("bytes sent") if ("bytes sent":*) as __lc_v1 | sort by (__lc_v0 desc, "my host")`,
+			want:    `* | stats by ("my host") min("count") if (NOT "count":"") as __lc_v0, avg("bytes sent") if (NOT "bytes sent":"") as __lc_v1 | sort by (__lc_v0 desc, "my host")`,
 			sources: [][2]string{{"my host", "my host"}, {"min_count", "__lc_v0"}, {"avg_bytes_sent", "__lc_v1"}},
 		},
 		{
 			// A bare name with a colon is a bucket in a stats clause.
 			name:    "fields with a colon are quoted",
 			query:   `| sum("latency:10") by "http:status"`,
-			want:    `* | stats by ("http:status") sum("latency:10") if ("latency:10":*) as __lc_v0 | sort by (__lc_v0 desc, "http:status")`,
+			want:    `* | stats by ("http:status") sum("latency:10") if (NOT "latency:10":"") as __lc_v0 | sort by (__lc_v0 desc, "http:status")`,
 			sources: [][2]string{{"http:status", "http:status"}, {"sum_latency_10", "__lc_v0"}},
 		},
 	}

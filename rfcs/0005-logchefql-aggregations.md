@@ -478,7 +478,7 @@ named `time`, and the message asks for `as`.
 level:="error"
   | stats by (_time:5m offset 19800s, service)
       count() as __lc_v0,
-      quantile(0.95, duration_ms) if (duration_ms:*) as __lc_v1
+      quantile(0.95, duration_ms) if (NOT duration_ms:"") as __lc_v1
   | sort by (_time, service)
 ```
 
@@ -517,10 +517,10 @@ above.
 | `count()` | `count()` | `count()` |
 | `count_distinct(f)`, String field | `uniqExactIf(f, f != '')` | `count_uniq(f)` |
 | `count_distinct(f)`, other type | `uniqExact(f)` | `count_uniq(f)` |
-| `sum(f)` | `sumOrNull(n(f))` | `sum(f) if (f:*)` |
-| `avg(f)` | `avgOrNull(n(f))` | `avg(f) if (f:*)` |
-| `min(f)`, `max(f)` | `minOrNull(n(f))`, `maxOrNull(n(f))` | `min(f) if (f:*)`, `max(f) if (f:*)` |
-| `p95(f)` | `quantileOrNull(0.95)(n(f))` | `quantile(0.95, f) if (f:*)` |
+| `sum(f)` | `sumOrNull(n(f))` | `sum(f) if (NOT f:"")` |
+| `avg(f)` | `avgOrNull(n(f))` | `avg(f) if (NOT f:"")` |
+| `min(f)`, `max(f)` | `minOrNull(n(f))`, `maxOrNull(n(f))` | `min(f) if (NOT f:"")`, `max(f) if (NOT f:"")` |
+| `p95(f)` | `quantileOrNull(0.95)(n(f))` | `quantile(0.95, f) if (NOT f:"")` |
 | A value and its name | `` <expr> AS `<name>` `` | `<expr> as __lc_v<i>`. The provider writes the name |
 | `by f` | `` f AS `<name>` `` and `` GROUP BY `<name>` `` | `by (f)`. The provider writes the name |
 | `by time(5m)` | `` toStartOfInterval(`ts`, INTERVAL 5 MINUTE, '<tz>') AS `time` `` | `by (_time:5m offset <offset>)`. The provider writes the name |
@@ -530,6 +530,12 @@ above.
 | `\| limit N` | `LIMIT N` | `limit N` |
 | Group count bound | Query settings `max_rows_to_group_by = 100000` with `throw` | None exists |
 | Memory bound | Query setting `max_memory_usage` | None exists |
+
+The LogsQL filter is `NOT f:""`, the complement of the empty value filter.
+The any value filter `f:*` means the same in the LogsQL reference, but on
+VictoriaLogs v1.52.0 `if (f:*)` inside `stats` matches no row of a block
+that stores `f` as an integer column, while a top-level `f:*` does. With it
+every number function over an integer field returned null.
 
 The `-OrNull` and `-If` combinators and their combination are in the
 ClickHouse combinator reference at
@@ -739,7 +745,7 @@ goes into the docs page.
 | Topic | ClickHouse | VictoriaLogs |
 |---|---|---|
 | Number typing | The column type decides. Text is parsed with `toFloat64OrNull`, and text that is not a number is skipped | Every value is text. `sum` and `avg` skip non-numbers. `min`, `max` and `quantile` may compare a non-numeric string as text |
-| Missing field in a number function | NULL, or the type default for a non-Nullable column, such as 0 for `UInt32`. The default takes part | Skipped, by the `if (f:*)` filter |
+| Missing field in a number function | NULL, or the type default for a non-Nullable column, such as 0 for `UInt32`. The default takes part | Skipped, by the `if (NOT f:"")` filter |
 | No numeric input at all | null, by `-OrNull` | null. The provider maps `NaN`, `""` and unparsed text to null |
 | Missing field as a group key | `""` for a String, Map or JSON-string field. null for a `Nullable` column. Two different groups | `""`. No null group exists |
 | `count_distinct` on empty values | `""` is not counted for a String field | Empty values are not counted |
@@ -992,7 +998,7 @@ and the unit stops for a design change in this RFC.
 | 6 | `toStartOfInterval(ts, INTERVAL 1 DAY, 'Asia/Kolkata')` returns local midnight | Read one bucket |
 | 7 | A scalar `count_distinct` over many distinct values fails with the memory error and no rows when `max_memory_usage` is small, and a query setting above a lower ClickHouse constraint does not raise the limit | Run it with `max_memory_usage` of 50 MiB, then again as a user that has a constraint |
 | 8 | Gate. VictoriaLogs v1.52.0 accepts `stats by (_time:5m offset 19800s, f)`, returns the bucket under `_time`, and aligns it to the offset. RFC 0003 marks the same form as inferred | Run it through `/select/logsql/query` and read two bucket starts |
-| 9 | `func(f) if (f:*) as name` is the accepted order of filter and name | Run one query |
+| 9 | `func(f) if (f:*) as name` is the accepted order of filter and name. The order holds, but `f:*` fails on an integer column inside `if`, so the filter is `NOT f:""` (see the construct table) | Run one query |
 | 10 | The `sort` pipe orders a numeric result column by number and not by text | Sort counts of 9, 10 and 100 |
 | 11 | A `by` field that a row lacks groups under `""` | Group by a field that half the rows have |
 | 12 | `min`, `max` and `quantile` compare a non-numeric string as text | Run them on a field with mixed values. If they skip it, the "Number typing" row gets simpler |

@@ -453,18 +453,21 @@ type logsQLAggregation struct {
 
 // logsQLFuncs maps each function to its LogsQL form. %s is the formatted
 // field. A number function counts only rows that have the field, so a row
-// without it is skipped and not read as an empty value.
+// without it is skipped and not read as an empty value. The filter is
+// `NOT f:""` and not the any value filter `f:*`: on VictoriaLogs v1.52.0
+// `if (f:*)` matches no row of a block that stores f as an integer column,
+// so every number function over an integer field returned null.
 var logsQLFuncs = map[AggFunc]string{
 	AggCountDistinct: "count_uniq(%s)",
-	AggSum:           "sum(%[1]s) if (%[1]s:*)",
-	AggAvg:           "avg(%[1]s) if (%[1]s:*)",
-	AggMin:           "min(%[1]s) if (%[1]s:*)",
-	AggMax:           "max(%[1]s) if (%[1]s:*)",
-	AggP50:           "quantile(0.5, %[1]s) if (%[1]s:*)",
-	AggP75:           "quantile(0.75, %[1]s) if (%[1]s:*)",
-	AggP90:           "quantile(0.9, %[1]s) if (%[1]s:*)",
-	AggP95:           "quantile(0.95, %[1]s) if (%[1]s:*)",
-	AggP99:           "quantile(0.99, %[1]s) if (%[1]s:*)",
+	AggSum:           `sum(%[1]s) if (NOT %[1]s:"")`,
+	AggAvg:           `avg(%[1]s) if (NOT %[1]s:"")`,
+	AggMin:           `min(%[1]s) if (NOT %[1]s:"")`,
+	AggMax:           `max(%[1]s) if (NOT %[1]s:"")`,
+	AggP50:           `quantile(0.5, %[1]s) if (NOT %[1]s:"")`,
+	AggP75:           `quantile(0.75, %[1]s) if (NOT %[1]s:"")`,
+	AggP90:           `quantile(0.9, %[1]s) if (NOT %[1]s:"")`,
+	AggP95:           `quantile(0.95, %[1]s) if (NOT %[1]s:"")`,
+	AggP99:           `quantile(0.99, %[1]s) if (NOT %[1]s:"")`,
 }
 
 // generateAggregation compiles a query with an aggregation pipe into a

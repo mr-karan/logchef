@@ -78,7 +78,7 @@ func TestLogchefQLAggregationOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "x:=1 | stats by (_time:1h offset 19800s) quantile(0.95, d) if (d:*) as __lc_v0 | sort by (_time)"; compiled.Query != want {
+	if want := "x:=1 | stats by (_time:1h offset 19800s) quantile(0.95, d) if (NOT d:\"\") as __lc_v0 | sort by (_time)"; compiled.Query != want {
 		t.Fatalf("query=%q, want %q", compiled.Query, want)
 	}
 	if compiled.FilterOnly != "x:=1" {
