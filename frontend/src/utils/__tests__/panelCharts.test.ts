@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { countFrame, resultFrame } from "../panelFrame";
-import { buildPanelChart, buildPanelList, suggestAggregationViz, suggestRoles, suggestViz, withAggregationRoles } from "../panelCharts";
+import { buildPanelChart, buildPanelList, chartColors, definedRuns, suggestAggregationViz, suggestRoles, suggestViz, withAggregationRoles } from "../panelCharts";
 import type { DashboardViz } from "@/api/dashboards";
 
 const frame = resultFrame({ columns: [{ name: "day", type: "Date" }, { name: "a", type: "Decimal(20,2)" }, { name: "b", type: "UInt64" }], rows: [{ day: "2026-11-10", a: "12.50", b: "9007199254740993" }, { day: "2026-11-08", a: null, b: "3" }] });
@@ -142,5 +142,21 @@ describe("aggregation suggestions", () => {
     const frame = frameOf(columns, [{ time: "2026-11-12T00:00:00Z", count: "3", avg_bytes: 1.5 }]);
     const chosen: DashboardViz = { type: "chart", x: "time", y: ["avg_bytes"] };
     expect(withAggregationRoles(frame, chosen, info("timeseries", columns))).toEqual(chosen);
+  });
+});
+
+describe("definedRuns", () => {
+  it("splits rows at missing values", () => {
+    const rows = [1, Number.NaN, 2, 3, Number.NaN, Number.NaN, 4];
+    expect(definedRuns(rows, (n) => n)).toEqual([[1], [2, 3], [4]]);
+    expect(definedRuns([Number.NaN], (n) => n)).toEqual([]);
+  });
+});
+
+describe("chartColors", () => {
+  it("colors HTTP status classes by meaning", () => {
+    expect(chartColors("a", "2xx").color).toBe("var(--panel-green)");
+    expect(chartColors("b", "5XX").color).toBe("var(--panel-red)");
+    expect(chartColors("c", "4xx").color).toBe("var(--panel-amber)");
   });
 });

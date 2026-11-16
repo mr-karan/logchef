@@ -9,7 +9,7 @@ import { getHexValue } from "@unovis/ts/utils/color";
 import { useThemeStore } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
-import { buildPanelChart, chartStacked, chartValue, chartLabelColor, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
+import { buildPanelChart, chartStacked, chartValue, definedRuns, chartLabelColor, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
 import { chartTickLabels, chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
 import { addExact, isExact, parseExact, type FrameNumber } from "@/utils/exactNumber";
 import { escapeHtml } from "@/lib/html";
@@ -55,6 +55,8 @@ const labelsDropped = ref(false);
 const x = (row: ChartRow) => row.x;
 const accessors = computed(() => model.value.series.map(s => (row: ChartRow) => row.values.get(s.key)?.coordinate ?? Number.NaN));
 const colors = computed(() => model.value.series.map(s => s.color));
+const areaRuns = computed(() => accessors.value.flatMap((accessor, i) =>
+  definedRuns(model.value.rows, accessor).map((rows, j) => ({ key: `${model.value.series[i].key}:${j}`, rows, accessor, color: colors.value[i] }))));
 const plotHost = ref<HTMLElement | null>(null);
 const { height: plotHeight, width: plotWidth } = useElementSize(plotHost);
 const chartHeight = computed(() => Math.max(60, plotHeight.value || props.height - 30));
@@ -237,7 +239,7 @@ function barLabels(svg: SVGSVGElement) {
           <VisLine :data="model.rows" v-else-if="mark === 'line'" :x="x" :y="accessors" :color="colors" />
           <VisArea :data="model.rows" v-else-if="stacked" :x="x" :y="accessors" :color="colors" :opacity="0.35" :line="true" />
           <template v-else>
-            <VisArea :data="model.rows" v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :color="colors[i]" :opacity="0.35" :line="true" />
+            <VisArea v-for="run in areaRuns" :key="run.key" :data="run.rows" :x="x" :y="run.accessor" :color="run.color" :opacity="0.35" :line="true" />
           </template>
           <template v-if="viz.show_values && mark !== 'bar'">
             <VisScatter v-for="(accessor, i) in labelAccessors" :key="model.series[i].key" :data="pointRows[i]" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />

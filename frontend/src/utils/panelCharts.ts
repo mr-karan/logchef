@@ -34,6 +34,19 @@ export function chartLabelColor(hex: string | undefined): string | undefined {
   return luminance > 0.179 ? "#000000" : "#ffffff";
 }
 
+// Splits rows into runs with a finite value, so an unstacked area leaves a gap
+// at a missing point instead of drawing down to zero.
+export function definedRuns<T>(rows: T[], value: (row: T) => number): T[][] {
+  const runs: T[][] = [];
+  let run: T[] = [];
+  for (const row of rows) {
+    if (Number.isFinite(value(row))) run.push(row);
+    else if (run.length) { runs.push(run); run = []; }
+  }
+  if (run.length) runs.push(run);
+  return runs;
+}
+
 export function chartStacked(viz: ChartViz): boolean {
   return (viz.stack ?? ((viz.mark ?? "line") === "line" ? "none" : "stacked")) === "stacked";
 }
