@@ -208,6 +208,37 @@ func TestParseScopes(t *testing.T) {
 	}
 }
 
+// TestScopeMaskPositions pins the bit of every read scope: access tokens
+// already issued carry these masks and must keep decoding to the same scopes.
+func TestScopeMaskPositions(t *testing.T) {
+	t.Parallel()
+	want := []models.TokenScope{
+		models.TokenScopeProfileRead,
+		models.TokenScopeTeamsRead,
+		models.TokenScopeSourcesRead,
+		models.TokenScopeLogsRead,
+		models.TokenScopeSavedQueriesRead,
+		models.TokenScopeCollectionsRead,
+		models.TokenScopeAlertsRead,
+		models.TokenScopeSavedViewsRead,
+	}
+	if len(ReadScopes) != len(want) {
+		t.Fatalf("ReadScopes has %d entries, want %d: pin the new scope's bit here", len(ReadScopes), len(want))
+	}
+	for bit, scope := range want {
+		if got := scopeMask([]string{string(scope)}); got != 1<<bit {
+			t.Errorf("%s encodes as %b, want bit %d", scope, got, bit)
+		}
+	}
+	if got := scopesFromMask(1<<3 | 1<<6); !slices.Equal(got, []models.TokenScope{models.TokenScopeLogsRead, models.TokenScopeAlertsRead}) {
+		t.Errorf("an existing logs+alerts mask decodes to %v", got)
+	}
+	scopes, _, err := parseScopes([]string{"saved_views:read"})
+	if err != nil || !slices.Equal(scopes, []models.TokenScope{models.TokenScopeSavedViewsRead}) {
+		t.Errorf("parseScopes(saved_views:read) = %v, %v", scopes, err)
+	}
+}
+
 func TestNativeRedirectPolicy(t *testing.T) {
 	t.Parallel()
 	clients := newClients(config.OAuthConfig{}, "https://logchef.test", "https://logchef.test/oauth/consent?request=")

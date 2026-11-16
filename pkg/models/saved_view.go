@@ -230,3 +230,36 @@ type ClearedSavedViewDefault struct {
 	ID      SavedViewID
 	Managed bool
 }
+
+// Saved view text and count bounds.
+const (
+	MaxSavedViewNameRunes        = 200
+	MaxSavedViewDescriptionRunes = 2000
+	MaxSavedViewsPerScope        = 50
+)
+
+// CreateSavedViewRequest is the body of the create route. The owner comes
+// from the caller and the path, never from the body.
+type CreateSavedViewRequest struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Scope       SavedViewScope  `json:"scope"`
+	Definition  json.RawMessage `json:"definition"`
+	IsDefault   bool            `json:"is_default"`
+}
+
+// UpdateSavedViewRequest is the body of the update route. Revision is the
+// revision the caller loaded; a nil Revision is rejected.
+type UpdateSavedViewRequest struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Definition  json.RawMessage `json:"definition"`
+	Revision    *int            `json:"revision"`
+}
+
+// SavedViewList is the list response: the views the caller can see for one
+// team and source, and the view the default rules pick.
+type SavedViewList struct {
+	Views         []*SavedView `json:"views"`
+	DefaultViewID *SavedViewID `json:"default_view_id"`
+}

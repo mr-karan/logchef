@@ -503,6 +503,15 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Post("/generate-sql", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGenerateAISQL)
 	teamSourceOps.Post("/query-shares", s.requireTeamHasSource(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare).Name(string(audit.QueryShareCreate))
 
+	// Saved Explorer views (RFC 0007). Core decides the scope rules.
+	teamSourceOps.Get("/views", s.requireTeamHasSource(models.TokenScopeSavedViewsRead), s.handleListSavedViews)
+	teamSourceOps.Post("/views", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleCreateSavedView).Name(string(audit.SavedViewCreate))
+	teamSourceOps.Get("/views/:viewID", s.requireTeamHasSource(models.TokenScopeSavedViewsRead), s.handleGetSavedView)
+	teamSourceOps.Put("/views/:viewID", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleUpdateSavedView).Name(string(audit.SavedViewUpdate))
+	teamSourceOps.Delete("/views/:viewID", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleDeleteSavedView).Name(string(audit.SavedViewDelete))
+	teamSourceOps.Put("/views/:viewID/default", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleSetSavedViewDefault).Name(string(audit.SavedViewSetDefault))
+	teamSourceOps.Delete("/views/:viewID/default", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleClearSavedViewDefault).Name(string(audit.SavedViewClearDefault))
+
 	// LogchefQL endpoints - query language parsing and translation
 	teamSourceOps.Post("/logchefql/translate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
 	teamSourceOps.Post("/logchefql/validate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax

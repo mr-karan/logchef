@@ -102,3 +102,23 @@ func headersFingerprint(headers map[string]string) string {
 	}
 	return b.String()
 }
+
+// SavedViewFields records a saved view. The filter is LogchefQL text, so it
+// is recorded as its language and a digest.
+func SavedViewFields(v *models.SavedView) *Fields {
+	d := v.Definition
+	f := NewFields().
+		Set("name", v.Name).
+		Set("scope", v.Scope).
+		Set("source_id", v.SourceID).
+		Set("team_id", v.TeamID).
+		Set("revision", v.Revision).
+		Set("is_default", v.IsDefault).
+		Set("column_count", len(d.Columns)).
+		Set("display_mode", d.DisplayMode).
+		Set("time_range", d.TimeRange)
+	if d.Filter == nil {
+		return f.Set("filter_language", nil)
+	}
+	return f.Set("filter_language", models.QueryLanguageLogchefQL).Digest("filter", *d.Filter)
+}
