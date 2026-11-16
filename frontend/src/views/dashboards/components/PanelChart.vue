@@ -49,6 +49,9 @@ const model = computed(() => result.value.model ?? emptyModel);
 const horizontal = computed(() => props.viz.orientation === "horizontal" && mark.value === "bar");
 const mark = computed(() => props.viz.mark ?? "line");
 const stacked = computed(() => chartStacked(props.viz));
+// One series stacks on nothing, so its values sit past the bar end like grouped bars.
+const labelsInside = computed(() => stacked.value && model.value.series.length > 1);
+const labelsDropped = ref(false);
 const x = (row: ChartRow) => row.x;
 const accessors = computed(() => model.value.series.map(s => (row: ChartRow) => row.values.get(s.key)?.coordinate ?? Number.NaN));
 const colors = computed(() => model.value.series.map(s => s.color));
@@ -168,7 +171,10 @@ const tooltipTemplate = (datum: ChartRow | undefined) => datum ? tooltip(datum) 
 function barLabels(svg: SVGSVGElement) {
   svg.querySelectorAll(pointLabelSelector).forEach(e => e.classList.add('panel-chart__point-value'));
   svg.querySelectorAll('.panel-chart__value').forEach(e => e.remove());
+  labelsDropped.value = false;
   if (!props.viz.show_values || !labelsFit.value || mark.value !== "bar") return;
+  let dropped = false;
+  const drop = (text: SVGTextElement) => { text.remove(); dropped = true; };
   const groups = svg.querySelectorAll(`.${StackedBar.selectors.barGroup}, .${GroupedBar.selectors.barGroup}`);
   groups.forEach((group, rowIndex) => {
     const row = model.value.rows[rowIndex];
@@ -184,7 +190,7 @@ function barLabels(svg: SVGSVGElement) {
       text.setAttribute('class', 'panel-chart__value');
       text.textContent = value.text;
       bar.parentNode?.append(text);
-      if (!stacked.value) {
+      if (!labelsInside.value) {
         // Grouped bars carry their value just past the bar end, in the text colour.
         const negative = value.coordinate < 0;
         if (horizontal.value) {
@@ -192,13 +198,13 @@ function barLabels(svg: SVGSVGElement) {
           text.setAttribute('y', String(box.y + box.height / 2));
           text.setAttribute('text-anchor', negative ? 'end' : 'start');
           text.setAttribute('dominant-baseline', 'central');
-          if (box.height < 10) text.remove();
+          if (box.height < 10) drop(text);
         } else {
           text.setAttribute('x', String(box.x + box.width / 2));
           text.setAttribute('y', String(negative ? box.y + box.height + 4 : box.y - 4));
           text.setAttribute('text-anchor', 'middle');
           text.setAttribute('dominant-baseline', negative ? 'hanging' : 'auto');
-          if (text.getComputedTextLength() > box.width + 6) text.remove();
+          if (text.getComputedTextLength() > box.width + 6) drop(text);
         }
         return;
       }
@@ -210,9 +216,10 @@ function barLabels(svg: SVGSVGElement) {
       // Unovis cannot resolve a CSS variable nested inside hsl(), so fall back to the fill the browser computed.
       const fill = chartLabelColor(getHexValue(series.color, text) ?? getHexValue(getComputedStyle(bar).fill, bar));
       if (fill) text.style.fill = fill;
-      if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) text.remove();
+      if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) drop(text);
     });
   });
+  labelsDropped.value = dropped;
 }
 </script>
 
@@ -222,7 +229,7 @@ function barLabels(svg: SVGSVGElement) {
     <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <template v-else>
       <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
-        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: horizontal && !stacked && viz.show_values ? 44 : 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
+        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: horizontal && !labelsInside && viz.show_values ? 44 : 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
           <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="categoryAngle" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
           <VisAxis :type="horizontal ? 'x' : 'y'" :tick-values="extent" tick-text-color="var(--muted-foreground)" :tick-format="yTick" :tick-line="false" :domain-line="false" />
           <VisStackedBar :data="model.rows" v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.3" :bar-max-width="40" :rounded-corners="3" />
@@ -246,7 +253,7 @@ function barLabels(svg: SVGSVGElement) {
           <span v-for="series in model.series" :key="series.key">{{ series.label }} {{ model.rows[active].values.get(series.key)?.exact ?? t('panelChart.null') }}. </span>
         </template>
       </div>
-      <p v-if="viz.show_values && plotWidthAvailable > 0 && (mark === 'bar' ? !labelsFit : labelStride > 1)" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
+      <p v-if="viz.show_values && plotWidthAvailable > 0 && (mark === 'bar' ? !labelsFit || labelsDropped : labelStride > 1)" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
       <div v-if="viz.legend !== false && model.series.length > 1" class="panel-chart__legend" :aria-label="t('panelChart.seriesLegend')"><span v-for="series in model.series" :key="series.key"><i :style="{ background: series.color }" />{{ series.label }}</span></div>
       <p v-for="notice in model.notices" :key="notice" role="status" class="text-xs text-muted-foreground">{{ notice }}</p>
     </template>
