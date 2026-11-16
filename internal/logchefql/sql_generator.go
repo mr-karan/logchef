@@ -2,10 +2,13 @@ package logchefql
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/queryescape"
+	"github.com/mr-karan/logchef/internal/template"
 )
 
 // SQLGenerator converts an AST into ClickHouse SQL
@@ -493,4 +496,282 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) (s
 
 func unsupportedASTNode(node ASTNode) *ParseError {
 	return &ParseError{Code: ErrUnsupportedFeature, Message: fmt.Sprintf("unsupported LogchefQL node type %T", node)}
+}
+
+// SQLAggregation is an aggregation compiled to ClickHouse SQL. The time
+// bucket waits for the query builder, which knows the timestamp column and
+// the timezone.
+type SQLAggregation struct {
+	info     *AggregationInfo
+	interval template.Interval
+	// fieldKeys and values are the select items in written order, each
+	// "<expression> AS `<name>`".
+	fieldKeys []string
+	// keyRefs is how GROUP BY and ORDER BY name each output column: the
+	// expression of a field key, the quoted name otherwise. A dotted name
+	// such as `j.host` would read the JSON subcolumn and not the alias.
+	keyRefs map[string]string
+	values  []string
+	node    *AggregationNode
+	limit   int
+	orderBy []string
+}
+
+// Info describes the result of the aggregation.
+func (a *SQLAggregation) Info() *AggregationInfo { return a.info }
+
+// ref names an output column in GROUP BY and ORDER BY.
+func (a *SQLAggregation) ref(name string) string {
+	if expr, ok := a.keyRefs[name]; ok {
+		return expr
+	}
+	return queryescape.ClickHouseIdentifier(name)
+}
+
+var numberTypePattern = regexp.MustCompile(`^(u?int(8|16|32|64|128|256)|b?float(16|32|64)|decimal(32|64|128|256)?(\(.*\))?)$`)
+
+var percentiles = map[AggFunc]string{AggP50: "0.5", AggP75: "0.75", AggP90: "0.9", AggP95: "0.95", AggP99: "0.99"}
+
+// GenerateAggregation compiles the aggregation of a query. requestInterval is
+// the window of a time key that has none of its own.
+func (g *SQLGenerator) GenerateAggregation(node *AggregationNode, requestInterval string) (*SQLAggregation, *ParseError) {
+	info := node.Info(requestInterval)
+	agg := &SQLAggregation{info: info, node: node, limit: node.Limit, keyRefs: map[string]string{}}
+
+	for _, key := range node.By {
+		if !key.Time {
+			continue
+		}
+		if info.Interval == "" {
+			return nil, aggregationError(key.pos, "this query buckets by time, so the request needs an interval")
+		}
+		interval, ok := template.ParseInterval(info.Interval)
+		if !ok {
+			return nil, aggregationError(key.pos, "invalid interval %q: use one of %s", info.Interval, strings.Join(template.IntervalWindows(), ", "))
+		}
+		agg.interval = interval
+	}
+	for _, key := range node.By {
+		if key.Time {
+			continue
+		}
+		field := g.resolveField(key.Field)
+		if field.resolutionError != nil {
+			return nil, field.resolutionError
+		}
+		expr := field.sql
+		if isDynamicType(field.columnType) {
+			// ClickHouse rejects a Dynamic group key. A missing path reads
+			// as "", the group that a missing text field has.
+			expr = "toString(" + expr + ")"
+		}
+		agg.fieldKeys = append(agg.fieldKeys, expr+" AS "+queryescape.ClickHouseIdentifier(key.Name))
+		agg.keyRefs[key.Name] = expr
+	}
+	for _, value := range node.Aggregates {
+		expr, err := g.aggregateExpression(value)
+		if err != nil {
+			return nil, err
+		}
+		agg.values = append(agg.values, expr+" AS "+queryescape.ClickHouseIdentifier(value.Name))
+	}
+	if err := checkOutputNames(node, g.columnExists); err != nil {
+		return nil, err
+	}
+	agg.orderBy = aggregationOrder(node, info, agg.ref)
+	return agg, nil
+}
+
+func (g *SQLGenerator) aggregateExpression(agg Aggregate) (string, *ParseError) {
+	if agg.Func == AggCount {
+		return "count()", nil
+	}
+	field := g.resolveField(agg.Field)
+	if field.resolutionError != nil {
+		return "", field.resolutionError
+	}
+	if agg.Func == AggCountDistinct {
+		switch {
+		case field.columnType == "" || g.isStringType(field.columnType):
+			return fmt.Sprintf("uniqExactIf(%s, %s != '')", field.sql, field.sql), nil
+		case isDynamicType(field.columnType):
+			// toString reads a missing path and an empty text as "".
+			return fmt.Sprintf("uniqExactIf(%s, toString(%s) != '')", field.sql, field.sql), nil
+		}
+		return fmt.Sprintf("uniqExact(%s)", field.sql), nil
+	}
+	number, err := g.numberExpression(agg, field)
+	if err != nil {
+		return "", err
+	}
+	if quantile, ok := percentiles[agg.Func]; ok {
+		return fmt.Sprintf("quantileOrNull(%s)(%s)", quantile, number), nil
+	}
+	return fmt.Sprintf("%sOrNull(%s)", agg.Func, number), nil
+}
+
+// numberExpression is the number that sum, avg, min, max and the percentiles
+// read from a field. Text that is not a number becomes NULL, which every
+// aggregate skips.
+func (g *SQLGenerator) numberExpression(agg Aggregate, field sqlField) (string, *ParseError) {
+	columnType := strings.ToLower(unwrapType(field.columnType))
+	switch {
+	case numberTypePattern.MatchString(columnType):
+		return field.sql, nil
+	case columnType == "" || g.isStringType(field.columnType):
+		return "toFloat64OrNull(" + field.sql + ")", nil
+	case isDynamicType(field.columnType):
+		return "toFloat64OrNull(toString(" + field.sql + "))", nil
+	default:
+		return "", aggregationError(agg.pos, "%s needs a number field. %q is %s", agg.Func, getFieldName(agg.Field), field.columnType)
+	}
+}
+
+// isDynamicType reports a Dynamic type, the type of a native JSON path with
+// no declared type.
+func isDynamicType(columnType string) bool {
+	return strings.EqualFold(unwrapType(columnType), "dynamic")
+}
+
+// checkOutputNames rejects an output name that is a column of the source,
+// other than the field that a group key names. ClickHouse reads an alias
+// inside WHERE, so `count() as level` would replace the column level in the
+// filter.
+func checkOutputNames(node *AggregationNode, isColumn func(string) bool) *ParseError {
+	for _, key := range node.By {
+		if !isColumn(key.Name) {
+			continue
+		}
+		if field, ok := key.Field.(string); ok && field == key.Name {
+			continue
+		}
+		if key.Time && !key.aliased {
+			return aggregationError(key.pos, "the time bucket is named %q, which is a column of this source. Name it with \"as\", as in time as bucket", key.Name)
+		}
+		return outputNameError(key.pos, key.Name)
+	}
+	for _, value := range node.Aggregates {
+		if isColumn(value.Name) {
+			return outputNameError(value.pos, value.Name)
+		}
+	}
+	return nil
+}
+
+func outputNameError(pos Position, name string) *ParseError {
+	return aggregationError(pos, "the name %q is a column of this source, and ClickHouse would read it in the filter. Choose another name with \"as\"", name)
+}
+
+// aggregationOrder is the ORDER BY of the result: the sort stage, or the
+// default order of the shape, then every key ascending so the order is total.
+func aggregationOrder(node *AggregationNode, info *AggregationInfo, ref func(string) string) []string {
+	var order []string
+	first := ""
+	switch {
+	case node.Sort != nil:
+		first = node.Sort.Name
+		direction := " ASC"
+		if node.Sort.Desc {
+			direction = " DESC"
+		}
+		order = append(order, ref(first)+direction)
+	case info.Shape == ShapeGrouped:
+		for _, col := range info.Columns {
+			if col.Role == RoleValue {
+				first = col.Name
+				order = append(order, ref(first)+" DESC")
+				break
+			}
+		}
+	}
+	for _, col := range info.Columns {
+		if col.Role != RoleValue && col.Name != first {
+			order = append(order, ref(col.Name)+" ASC")
+		}
+	}
+	return order
+}
+
+// maxBuckets is the most time buckets one aggregation may return.
+const maxBuckets = 1000
+
+// checkBuckets rejects a time range that the bucket window cuts into more
+// than maxBuckets buckets, and names the smallest window that fits.
+func (a *SQLAggregation) checkBuckets(start, end timeBound) *ParseError {
+	if a.interval.Window == "" {
+		return nil
+	}
+	from, err := start.time()
+	if err != nil {
+		return err
+	}
+	to, err := end.time()
+	if err != nil {
+		return err
+	}
+	span := to.Sub(from)
+	buckets := bucketCount(span, a.interval)
+	if buckets <= maxBuckets {
+		return nil
+	}
+	advice := "Shorten the range"
+	for _, window := range template.IntervalWindows() {
+		if interval, _ := template.ParseInterval(window); bucketCount(span, interval) <= maxBuckets {
+			advice = "Use " + window + " or longer"
+			break
+		}
+	}
+	return &ParseError{
+		Code:    ErrInvalidAggregation,
+		Message: fmt.Sprintf("%s over this range gives %d buckets. The maximum is %d. %s", a.interval.Window, buckets, maxBuckets, advice),
+	}
+}
+
+func bucketCount(span time.Duration, interval template.Interval) int64 {
+	window := time.Duration(interval.Seconds) * time.Second
+	return int64((span + window - 1) / window)
+}
+
+// writeQuery writes the aggregated SELECT with the time range and the filter
+// of the query. The timestamp column may be missing from the schema, so the
+// name rule checks it here too.
+func (a *SQLAggregation) writeQuery(query *strings.Builder, params QueryBuildParams, timeFilter, filter string) error {
+	if err := checkOutputNames(a.node, func(name string) bool { return name == params.TimestampField }); err != nil {
+		return err
+	}
+	items := make([]string, 0, len(a.info.Columns))
+	if a.interval.Window != "" {
+		items = append(items, fmt.Sprintf("toStartOfInterval(%s, %s, '%s') AS %s",
+			queryescape.ClickHouseIdentifier(params.TimestampField), a.interval.ClickHouse(),
+			queryescape.ClickHouseString(params.Timezone), queryescape.ClickHouseIdentifier(a.info.Columns[0].Name)))
+	}
+	items = append(items, a.fieldKeys...)
+	items = append(items, a.values...)
+
+	query.WriteString("SELECT " + strings.Join(items, ", ") + "\n")
+	query.WriteString("FROM " + params.TableName + "\n")
+	query.WriteString("WHERE " + timeFilter)
+	if filter != "" {
+		query.WriteString("\n  AND (" + filter + ")")
+	}
+	var groupBy []string
+	for _, col := range a.info.Columns {
+		if col.Role != RoleValue {
+			groupBy = append(groupBy, a.ref(col.Name))
+		}
+	}
+	if len(groupBy) > 0 {
+		query.WriteString("\nGROUP BY " + strings.Join(groupBy, ", "))
+	}
+	if len(a.orderBy) > 0 {
+		query.WriteString("\nORDER BY " + strings.Join(a.orderBy, ", "))
+	}
+	limit := a.limit
+	if params.Limit > 0 && (limit == 0 || params.Limit < limit) {
+		limit = params.Limit
+	}
+	if limit > 0 {
+		fmt.Fprintf(query, "\nLIMIT %d", limit)
+	}
+	return nil
 }

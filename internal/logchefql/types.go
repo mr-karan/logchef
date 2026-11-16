@@ -175,6 +175,9 @@ type TranslateResult struct {
 	Error        *ParseError       `json:"error,omitempty"`
 	Conditions   []FilterCondition `json:"conditions"`
 	FieldsUsed   []string          `json:"fields_used"`
+	// Aggregation is the compiled aggregation pipe. Nil for a query that
+	// returns log rows.
+	Aggregation *SQLAggregation `json:"-"`
 }
 
 // ValidateResult represents the result of validating a LogchefQL query

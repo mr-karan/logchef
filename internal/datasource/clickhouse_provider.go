@@ -41,6 +41,7 @@ func (p *ClickHouseProvider) Describe() Descriptor {
 			CapabilityLogContext,
 			CapabilityExports,
 			CapabilityLiveTail,
+			CapabilityLogchefQLAggregation,
 		},
 		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},
 		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
@@ -312,7 +313,16 @@ func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Sourc
 	if err != nil {
 		return nil, err
 	}
-	return client.QueryWithOptions(ctx, sql, opts)
+	result, err := client.QueryWithOptions(ctx, sql, opts)
+	return result, queryError(req, err)
+}
+
+// queryError explains the bounds of an aggregated query.
+func queryError(req QueryRequest, err error) error {
+	if err == nil || req.Aggregation == nil {
+		return err
+	}
+	return clickhouse.AggregationError(err)
 }
 
 // QueryLogsStream executes the query and streams rows into w instead of
@@ -331,7 +341,8 @@ func (p *ClickHouseProvider) QueryLogsStream(ctx context.Context, source *models
 	// Warnings are known at build time (LIMIT_APPLIED / LIMIT_CAPPED); deliver
 	// them up front so the writer can emit them alongside the streamed body.
 	w.SetWarnings(opts.Warnings)
-	return client.QueryStream(ctx, sql, opts, w)
+	stats, err := client.QueryStream(ctx, sql, opts, w)
+	return stats, queryError(req, err)
 }
 
 // buildQuery resolves the source's ClickHouse connection and builds the raw
@@ -362,6 +373,12 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 	opts := buildResult.QueryOptions(*req.QueryTimeout)
 	opts.MaxResponseBytes = req.MaxResponseBytes
 	opts.Warnings = queryWarningsForBuildResult(buildResult)
+	if req.Aggregation != nil {
+		opts.AggregationMaxMemoryBytes = req.AggregationMaxMemoryBytes
+		if opts.AggregationMaxMemoryBytes <= 0 {
+			opts.AggregationMaxMemoryBytes = DefaultAggregationMaxMemoryBytes
+		}
+	}
 	return client, buildResult.SQL, opts, nil
 }
 
@@ -1078,7 +1095,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 	// The service resolves cached column types before translation.
 	schema := buildLogchefQLSchema(source)
 
-	translateResult := logchefql.TranslateWithOptions(req.Query, schema, logchefql.TranslateOptions{AllowAggregation: req.AllowAggregation})
+	translateResult := logchefql.TranslateWithOptions(req.Query, schema, logchefql.TranslateOptions{AllowAggregation: req.AllowAggregation, Interval: req.Interval})
 	compiled := &CompiledLogchefQL{
 		Language:   models.QueryLanguageClickHouseSQL,
 		Valid:      translateResult.Valid,
@@ -1087,6 +1104,9 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 		FieldsUsed: translateResult.FieldsUsed,
 		FilterOnly: translateResult.SQL,
 		Query:      translateResult.SQL,
+	}
+	if translateResult.Aggregation != nil {
+		compiled.Aggregation = translateResult.Aggregation.Info()
 	}
 
 	if !translateResult.Valid {

@@ -75,7 +75,30 @@ func (c *Client) resultQuerySettings(ctx context.Context, opts QueryOptions) (cl
 	if c.flattensJSON(ctx) {
 		settings[flattenedJSONSetting] = 1
 	}
+	if opts.AggregationMaxMemoryBytes > 0 {
+		if err := c.boundAggregation(ctx, settings, opts.AggregationMaxMemoryBytes); err != nil {
+			return nil, err
+		}
+	}
 	return c.guarded(settings, modes, opts.TimeoutSeconds), nil
+}
+
+// AggregationMaxGroups is the most groups a LogchefQL aggregation may build.
+// It counts groups and does not bound memory.
+const AggregationMaxGroups = 100000
+
+// boundAggregation adds the bounds of a LogchefQL aggregation: the group
+// count, and the memory limit capped by the source's and the user's own
+// limits. group_by_overflow_mode is already throw, so a bound fails the query
+// and no partial aggregate returns.
+func (c *Client) boundAggregation(ctx context.Context, settings clickhouse.Settings, maxMemory int64) error {
+	userCap, err := c.memoryCap.get(ctx)
+	if err != nil {
+		return err
+	}
+	settings["max_rows_to_group_by"] = lowestLimit(AggregationMaxGroups, settingInt(c.querySettings["max_rows_to_group_by"]))
+	settings["max_memory_usage"] = lowestLimit(maxMemory, settingInt(c.querySettings["max_memory_usage"]), userCap)
+	return nil
 }
 
 // ownQuerySettings returns every setting one of Logchef's own queries sends,

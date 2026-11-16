@@ -527,7 +527,7 @@ func TestClickHouseProviderSourceMetadata(t *testing.T) {
 		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL}},
 		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
 		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
-		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "ai_sql_generation", "log_context", "exports", "live_tail"}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "ai_sql_generation", "log_context", "exports", "live_tail", "logchefql_aggregation"}},
 		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, true},
 	}
 	for _, tt := range tests {
@@ -595,14 +595,36 @@ func TestUpdateSourceNeverSendsStoredPasswordToNewHost(t *testing.T) {
 }
 
 // Live tail compiles with no opt-in and must reject an aggregation; the query
-// endpoint opts in and reads that the generator cannot compile it yet.
+// endpoint opts in and reads the aggregated SQL and its description.
 func TestCompileLogchefQLAggregationOptIn(t *testing.T) {
 	provider := &ClickHouseProvider{}
-	source := &models.Source{Columns: []models.ColumnInfo{{Name: "x", Type: "UInt8"}}}
-	for allow, want := range map[bool]string{false: logchefql.ErrAggregationNotAllowed, true: logchefql.ErrAggregationNotSupported} {
-		compiled, err := provider.CompileLogchefQL(context.Background(), source, LogchefQLCompileRequest{Query: "x=1 | count()", AllowAggregation: allow})
-		if err == nil || compiled == nil || compiled.Valid || compiled.Error == nil || compiled.Error.Code != want {
-			t.Fatalf("allow=%v: compiled=%+v err=%v, want %s", allow, compiled, err, want)
-		}
+	source := &models.Source{
+		MetaTSField: "timestamp",
+		Columns:     []models.ColumnInfo{{Name: "timestamp", Type: "DateTime"}, {Name: "x", Type: "UInt8"}, {Name: "service", Type: "String"}},
+	}
+	source.Connection.Database, source.Connection.TableName = "default", "logs"
+	req := LogchefQLCompileRequest{Query: "x=1 | count() by service", StartTime: "2026-11-15 00:00:00", EndTime: "2026-11-16 00:00:00", Timezone: "UTC"}
+
+	compiled, err := provider.CompileLogchefQL(context.Background(), source, req)
+	if err == nil || compiled == nil || compiled.Valid || compiled.Error == nil || compiled.Error.Code != logchefql.ErrAggregationNotAllowed {
+		t.Fatalf("default: compiled=%+v err=%v, want %s", compiled, err, logchefql.ErrAggregationNotAllowed)
+	}
+
+	req.AllowAggregation = true
+	compiled, err = provider.CompileLogchefQL(context.Background(), source, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "SELECT `service` AS `service`, count() AS `count`\n" +
+		"FROM default.logs\n" +
+		"WHERE `timestamp` BETWEEN toDateTime('2026-11-15 00:00:00', 'UTC') AND toDateTime('2026-11-16 00:00:00', 'UTC')\n" +
+		"  AND (`x` = 1)\n" +
+		"GROUP BY `service`\n" +
+		"ORDER BY `count` DESC, `service` ASC"
+	if compiled.Query != want || compiled.FilterOnly != "`x` = 1" {
+		t.Fatalf("query=\n%s\nfilter=%s", compiled.Query, compiled.FilterOnly)
+	}
+	if compiled.Aggregation == nil || compiled.Aggregation.Shape != logchefql.ShapeGrouped {
+		t.Fatalf("aggregation=%+v, want a grouped shape", compiled.Aggregation)
 	}
 }

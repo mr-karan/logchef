@@ -211,19 +211,20 @@ func TestAggregationJSONOmitsSource(t *testing.T) {
 	}
 }
 
-// No generator compiles an aggregation yet: a caller that did not opt in reads
-// AGGREGATION_NOT_ALLOWED, and one that did reads AGGREGATION_NOT_SUPPORTED.
+// A caller that did not opt in reads AGGREGATION_NOT_ALLOWED. One that did
+// compiles on ClickHouse and reads AGGREGATION_NOT_SUPPORTED on LogsQL.
 func TestTranslateAggregationDefaultDeny(t *testing.T) {
 	const query = "x=1 | count()"
 	const deny = "this feature needs log rows, and the query aggregates. Remove the pipe after the filter"
 	translators := []struct {
 		name      string
+		allowed   string // the error code when allowed, "" for none
 		translate func(allow bool) *ParseError
 	}{
-		{"clickhouse", func(allow bool) *ParseError {
+		{"clickhouse", "", func(allow bool) *ParseError {
 			return TranslateWithOptions(query, nil, TranslateOptions{AllowAggregation: allow}).Error
 		}},
-		{"logsql", func(allow bool) *ParseError {
+		{"logsql", ErrAggregationNotSupported, func(allow bool) *ParseError {
 			return TranslateToLogsQL(query, &LogsQLTranslateOptions{AllowAggregation: allow}).Error
 		}},
 	}
@@ -233,9 +234,9 @@ func TestTranslateAggregationDefaultDeny(t *testing.T) {
 			if denied == nil || denied.Code != ErrAggregationNotAllowed || denied.Message != deny {
 				t.Fatalf("default error=%+v, want %s %q", denied, ErrAggregationNotAllowed, deny)
 			}
-			unsupported := tr.translate(true)
-			if unsupported == nil || unsupported.Code != ErrAggregationNotSupported {
-				t.Fatalf("allowed error=%+v, want %s", unsupported, ErrAggregationNotSupported)
+			allowed := tr.translate(true)
+			if (allowed == nil) != (tr.allowed == "") || (allowed != nil && allowed.Code != tr.allowed) {
+				t.Fatalf("allowed error=%+v, want %q", allowed, tr.allowed)
 			}
 		})
 	}

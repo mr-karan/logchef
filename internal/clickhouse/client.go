@@ -57,6 +57,9 @@ type Client struct {
 	// throwModes are the overflow modes the server knows, sent as throw.
 	throwModes    serverFact[clickhouse.Settings]
 	flattenedJSON serverFact[bool]
+	// memoryCap is the user's max_memory_usage and its constraint, the
+	// lower when both are set, or 0 for none.
+	memoryCap serverFact[int64]
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -116,6 +119,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	}
 	client.throwModes = serverFact[clickhouse.Settings]{dials: &client.dials, read: client.readThrowModes}
 	client.flattenedJSON = serverFact[bool]{dials: &client.dials, read: client.readFlattenedJSON}
+	client.memoryCap = serverFact[int64]{dials: &client.dials, read: client.readMemoryCap}
 	dial := newDialContext(tlsCfg, dialTimeout)
 	options := &clickhouse.Options{
 		Addr: []string{host},

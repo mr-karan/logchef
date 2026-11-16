@@ -277,6 +277,9 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 		QueryTimeout:       timeout,
 		Aggregation:        compiled.Aggregation,
 	}
+	if compiled.Aggregation != nil {
+		params.AggregationMaxMemoryBytes = cfg.AggregationMaxMemoryBytes
+	}
 	if compiled.Language == models.QueryLanguageLogsQL {
 		startTime, endTime, err := ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
 		if err != nil {

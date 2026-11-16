@@ -25,7 +25,14 @@ type QueryRequest struct {
 	// the column names, order and types, and the query's own limit. Nil for
 	// a query that returns log rows.
 	Aggregation *logchefql.AggregationInfo
+	// AggregationMaxMemoryBytes bounds the memory of an aggregated query on
+	// ClickHouse. 0 means DefaultAggregationMaxMemoryBytes.
+	AggregationMaxMemoryBytes int64
 }
+
+// DefaultAggregationMaxMemoryBytes is the memory limit of an aggregated query
+// when the caller sets none: 2 GiB.
+const DefaultAggregationMaxMemoryBytes int64 = 2 << 30
 
 type HistogramRequest struct {
 	ExtraStreamFilters []string

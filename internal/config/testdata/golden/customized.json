@@ -102,7 +102,8 @@
     "MaxTimeoutSeconds": 300,
     "MCPCallTimeoutSeconds": 60,
     "MaxConcurrentPerUser": 3,
-    "MaxConcurrentGlobal": 30
+    "MaxConcurrentGlobal": 30,
+    "AggregationMaxMemoryBytes": 2147483648
   },
   "Export": {
     "InstanceID": "replica-a",
