@@ -38,6 +38,16 @@ services:
         volumes:
             - victorialogs-data:/victoria-logs-data
 
+    loki-local:
+        image: grafana/loki:3.7.6
+        network_mode: host
+        restart: on-failure
+        command:
+            - -config.file=/etc/loki/logchef.yaml
+        volumes:
+            - ./loki.yaml:/etc/loki/logchef.yaml:ro
+            - loki-data:/loki
+
     dex-local:
         image: dexidp/dex:v2.35.3
         network_mode: host
@@ -65,3 +75,4 @@ volumes:
     clickhouse-data:
     clickhouse-logs:
     victorialogs-data:
+    loki-data:

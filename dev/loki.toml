@@ -1,0 +1,49 @@
+data_dir = "/tmp/logchef-vector-loki"
+
+[sources.generate_loki]
+type = "demo_logs"
+format = "json"
+interval = 0.1
+
+[transforms.remap_loki]
+type = "remap"
+inputs = ["generate_loki"]
+source = '''
+ts = .timestamp
+event = parse_json!(.message)
+
+. = event
+.timestamp = ts
+.message = .request
+.trace_id = uuid_v4()
+
+status_code = to_int!(.status)
+.level = if status_code >= 500 {
+  "error"
+} else if status_code >= 400 {
+  "warn"
+} else {
+  "info"
+}
+'''
+
+[sinks.loki]
+type = "loki"
+inputs = ["remap_loki"]
+endpoint = "http://localhost:3100"
+tenant_id = "dev"
+encoding.codec = "json"
+remove_label_fields = true
+remove_structured_metadata_fields = true
+remove_timestamp = true
+
+[sinks.loki.labels]
+service_name = "loki-vector"
+env = "dev"
+level = "{{ level }}"
+
+[sinks.loki.structured_metadata]
+trace_id = "{{ trace_id }}"
+
+[sinks.loki.healthcheck]
+enabled = false
