@@ -161,5 +161,10 @@
     "RetentionDays": 365,
     "MaxRows": 1000000,
     "LogEvents": true
+  },
+  "Reports": {
+    "Enabled": true,
+    "QueryBudget": 300000000000,
+    "MaxConcurrentRuns": 2
   }
 }

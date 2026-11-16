@@ -34,6 +34,7 @@ func RunReports(t *testing.T, open Opener) {
 	t.Run("FailureStreak", func(t *testing.T) { testReportFailureStreak(t, ctx, s) })
 	t.Run("Prune", func(t *testing.T) { testReportPrune(t, ctx, s) })
 	t.Run("InterruptStale", func(t *testing.T) { testReportInterruptStale(t, ctx, s) })
+	t.Run("LatestRuns", func(t *testing.T) { testReportLatestRuns(t, ctx, s) })
 }
 
 var reportDaily = models.ReportSchedule{Frequency: models.ReportDaily, Minute: 0, Hour: new(9)}
@@ -246,10 +247,10 @@ func testReportStateAndClaim(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.PauseReport(ctx, r.ID, models.ReportPauseUser); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClaimReport(ctx, r.ID, claimer.ID); err != nil {
-		t.Fatal(err)
+	if err := s.ClaimReport(ctx, r.ID, claimer.ID); !errors.Is(err, models.ErrReportOwned) {
+		t.Fatalf("claiming a report with an active owner = %v, want ErrReportOwned", err)
 	}
-	check("claim keeps a user pause", models.ReportStatePaused, models.ReportPauseUser, 0)
+	check("a refused claim changes nothing", models.ReportStatePaused, models.ReportPauseUser, 0)
 
 	if err := s.PauseReport(ctx, r.ID, models.ReportPauseOwnerInactive); err != nil {
 		t.Fatal(err)
@@ -261,6 +262,21 @@ func testReportStateAndClaim(t *testing.T, ctx context.Context, s store.Store) {
 	if got, _ := s.GetReport(ctx, r.ID); got.OwnerID == nil || *got.OwnerID != claimer.ID {
 		t.Errorf("owner after claim = %v, want %d", got.OwnerID, claimer.ID)
 	}
+	late := mkUser(t, ctx, s, "state-late@test.dev")
+	if err := s.ClaimReport(ctx, r.ID, late.ID); !errors.Is(err, models.ErrReportOwned) {
+		t.Errorf("a second claim after the first = %v, want ErrReportOwned", err)
+	}
+
+	if err := s.PauseReport(ctx, r.ID, models.ReportPauseUser); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteUser(ctx, claimer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClaimReport(ctx, r.ID, late.ID); err != nil {
+		t.Fatalf("claiming a report with no owner = %v", err)
+	}
+	check("claim keeps a user pause", models.ReportStatePaused, models.ReportPauseUser, 0)
 	if err := s.ClaimReport(ctx, 1<<40, claimer.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("ClaimReport(missing) = %v, want ErrNotFound", err)
 	}
@@ -565,6 +581,33 @@ func testReportInterruptStale(t *testing.T, ctx context.Context, s store.Store) 
 	mustClaimRun(t, ctx, s, models.ReportRunClaim{ReportID: stale.ID, Trigger: models.ReportTriggerManual, ScheduledFor: time.Now(), HandlerBudget: time.Minute})
 	if _, err := s.CreateReportRun(ctx, models.ReportRunClaim{ReportID: live.ID, Trigger: models.ReportTriggerManual, ScheduledFor: time.Now(), HandlerBudget: time.Minute}); !errors.Is(err, models.ErrReportRunInFlight) {
 		t.Errorf("a run within the grace = %v, want it still in flight (run %d)", err, recent.ID)
+	}
+}
+
+func testReportLatestRuns(t *testing.T, ctx context.Context, s store.Store) {
+	twice, _, _ := mkSavedQueryReport(t, ctx, s, "latest-twice")
+	once, _, _ := mkSavedQueryReport(t, ctx, s, "latest-once")
+	never, _, _ := mkSavedQueryReport(t, ctx, s, "latest-never")
+	finishRun(t, ctx, s, twice.ID, models.ReportRunFailed)
+	newest := mustClaimRun(t, ctx, s, models.ReportRunClaim{ReportID: twice.ID, Trigger: models.ReportTriggerManual, ScheduledFor: time.Now(), HandlerBudget: time.Minute})
+	finishRun(t, ctx, s, once.ID, models.ReportRunSent)
+
+	runs, err := s.ListLatestReportRuns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[models.ReportID]*models.ReportRun{}
+	for _, run := range runs {
+		got[run.ReportID] = run
+	}
+	if got[twice.ID] == nil || got[twice.ID].ID != newest.ID || got[twice.ID].Status != models.ReportRunRunning {
+		t.Errorf("latest runs = %+v, want the running run %d of report %d", runs, newest.ID, twice.ID)
+	}
+	if got[once.ID] == nil || got[once.ID].Status != models.ReportRunSent {
+		t.Errorf("latest run of report %d = %+v, want sent", once.ID, got[once.ID])
+	}
+	if got[never.ID] != nil {
+		t.Errorf("report %d has no run, got %+v", never.ID, got[never.ID])
 	}
 }
 

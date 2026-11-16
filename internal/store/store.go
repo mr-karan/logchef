@@ -354,8 +354,10 @@ type ReportStore interface {
 	PauseReport(ctx context.Context, id models.ReportID, reason models.ReportPauseReason) error
 	// ResumeReport makes the report active and resets its failure streak.
 	ResumeReport(ctx context.Context, id models.ReportID) error
-	// ClaimReport makes owner the owner and lifts a pause for an inactive
-	// owner. Who may claim is decided by the caller.
+	// ClaimReport makes owner the owner of a report that has none, or whose
+	// owner is inactive, and lifts a pause for an inactive owner. Any other
+	// report returns models.ErrReportOwned, and a missing one
+	// models.ErrNotFound. Who may claim is decided by the caller.
 	ClaimReport(ctx context.Context, id models.ReportID, owner models.UserID) error
 	// TakeReportCooldown takes the manual-run or preview cooldown with one
 	// conditional update and reports whether it did. False means the last
@@ -387,6 +389,9 @@ type ReportStore interface {
 	// ListReportRuns returns up to limit runs, newest first, with ids below
 	// before; before 0 starts at the newest.
 	ListReportRuns(ctx context.Context, id models.ReportID, before models.ReportRunID, limit int) ([]*models.ReportRun, error)
+	// ListLatestReportRuns returns the newest run of every report that has
+	// one.
+	ListLatestReportRuns(ctx context.Context) ([]*models.ReportRun, error)
 	// InterruptStaleReportRuns marks running runs whose deadline passed more
 	// than grace ago interrupted, and returns how many.
 	InterruptStaleReportRuns(ctx context.Context, grace time.Duration) (int64, error)

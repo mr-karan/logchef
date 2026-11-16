@@ -33,7 +33,9 @@ type Querier interface {
 	// the request is unknown, expired or already decided.
 	ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOAuthAuthRequestDecisionParams) (OauthAuthRequest, error)
 	// A claim lends the new owner's access, so a pause for an inactive owner
-	// no longer applies.
+	// no longer applies. Only a report with no owner, or one paused because its
+	// owner is inactive, can be claimed; the condition sits in the update so
+	// two claims at once cannot both win.
 	ClaimReport(ctx context.Context, arg ClaimReportParams) (int64, error)
 	// Clear the default of one scope and source, except on keep_id. The partial
 	// unique index leaves at most one row. A NULL owner column compares as 0.
@@ -276,6 +278,8 @@ type Querier interface {
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, before string) ([]sql.NullString, error)
 	ListInterruptedExportJobs(ctx context.Context, arg ListInterruptedExportJobsParams) ([]ListInterruptedExportJobsRow, error)
+	// The newest run of every report, for the report list.
+	ListLatestReportRuns(ctx context.Context) ([]ReportRun, error)
 	ListManagedSavedViews(ctx context.Context) ([]SavedView, error)
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)

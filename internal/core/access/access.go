@@ -27,6 +27,8 @@ const (
 	AuthAssistant
 	// AuthSystem is trusted configuration or provisioning work.
 	AuthSystem
+	// AuthReport is a scheduled report running as its owner.
+	AuthReport
 )
 
 // assistantScopes are the read scopes the Ask Chef tools need.
@@ -35,6 +37,13 @@ var assistantScopes = []models.TokenScope{
 	models.TokenScopeSourcesRead,
 	models.TokenScopeLogsRead,
 	models.TokenScopeAlertsRead,
+}
+
+// reportScopes are the read scopes a report run needs.
+var reportScopes = []models.TokenScope{
+	models.TokenScopeLogsRead,
+	models.TokenScopeDashboardsRead,
+	models.TokenScopeSavedQueriesRead,
 }
 
 var (
@@ -99,14 +108,23 @@ func AssistantPrincipal(user *models.User) Principal {
 	return Principal{User: user, Method: AuthAssistant, scopes: slices.Clone(assistantScopes)}
 }
 
+// ReportPrincipal builds the principal a scheduled report uses for its owner.
+// It holds logs:read, dashboards:read and saved_queries:read, and it never
+// passes RequireGlobalAdmin: an unattended job reaches only the teams the
+// owner is a member of.
+func ReportPrincipal(owner *models.User) Principal {
+	return Principal{User: owner, Method: AuthReport, scopes: slices.Clone(reportScopes)}
+}
+
 // Scopes returns a copy of the credential's scopes. It is nil for sessions.
 func (p Principal) Scopes() []models.TokenScope {
 	return slices.Clone(p.scopes)
 }
 
 // Require returns ErrInsufficientScope unless the principal holds scope.
-// Sessions hold every scope. API tokens also honor the "*" scope. OAuth and
-// assistant principals need an exact match. Any other method is denied.
+// Sessions hold every scope. API tokens also honor the "*" scope. OAuth,
+// assistant and report principals need an exact match. Any other method is
+// denied.
 func (p Principal) Require(scope models.TokenScope) error {
 	switch p.Method {
 	case AuthSession:
@@ -117,7 +135,7 @@ func (p Principal) Require(scope models.TokenScope) error {
 		}
 	case AuthSystem:
 		return ErrInsufficientScope
-	case AuthOAuth, AuthAssistant:
+	case AuthOAuth, AuthAssistant, AuthReport:
 		if slices.Contains(p.scopes, scope) {
 			return nil
 		}
@@ -126,10 +144,10 @@ func (p Principal) Require(scope models.TokenScope) error {
 }
 
 // RequireGlobalAdmin returns ErrGlobalAdminRequired unless the user is a
-// global admin. It does not check scope. An OAuth or assistant principal is
-// never a global admin, whatever the user's role.
+// global admin. It does not check scope. An OAuth, assistant or report
+// principal is never a global admin, whatever the user's role.
 func (p Principal) RequireGlobalAdmin() error {
-	if p.Method == AuthOAuth || p.Method == AuthAssistant || p.User == nil || p.User.Role != models.UserRoleAdmin {
+	if p.Method == AuthOAuth || p.Method == AuthAssistant || p.Method == AuthReport || p.User == nil || p.User.Role != models.UserRoleAdmin {
 		return ErrGlobalAdminRequired
 	}
 	return nil

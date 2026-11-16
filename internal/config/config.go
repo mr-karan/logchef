@@ -39,6 +39,19 @@ type Config struct {
 	Provisioning   ProvisioningConfig   `koanf:"provisioning"`
 	Demo           DemoConfig           `koanf:"demo"`
 	Audit          AuditConfig          `koanf:"audit"`
+	Reports        ReportsConfig        `koanf:"reports"`
+}
+
+// ReportsConfig controls scheduled reports (RFC 0008).
+type ReportsConfig struct {
+	// Enabled serves the report routes; when false they answer 503.
+	Enabled bool `koanf:"enabled"`
+	// QueryBudget bounds the queries of one run, from 1 to 30 minutes. The
+	// run's handler deadline is this plus 5 minutes.
+	QueryBudget time.Duration `koanf:"query_budget"`
+	// MaxConcurrentRuns bounds the runs this replica executes at once.
+	// Later runs wait inside their own deadline.
+	MaxConcurrentRuns int `koanf:"max_concurrent_runs"`
 }
 
 // AuditConfig bounds the audit_events table and controls the audit log line.
@@ -520,6 +533,12 @@ const (
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
 
+	defaultReportsEnabled     = true
+	defaultReportsQueryBudget = 5 * time.Minute
+	defaultReportsMaxRuns     = 2
+	minReportsQueryBudget     = time.Minute
+	maxReportsQueryBudget     = 30 * time.Minute
+
 	defaultAuditRetentionDays = 365
 	defaultAuditMaxRows       = 1_000_000
 	defaultAuditLogEvents     = true
@@ -882,6 +901,10 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 		return err
 	}
 
+	if cfg.Reports.QueryBudget < minReportsQueryBudget || cfg.Reports.QueryBudget > maxReportsQueryBudget {
+		return fmt.Errorf("reports.query_budget must be from %s to %s, got %s", minReportsQueryBudget, maxReportsQueryBudget, cfg.Reports.QueryBudget)
+	}
+
 	if cfg.Demo.ShowLoginCredentials && !cfg.Demo.ReadOnly {
 		return fmt.Errorf("demo.show_login_credentials requires demo.read_only=true")
 	}
@@ -1022,6 +1045,11 @@ func defaultConfig() Config {
 			DefaultTTL:        defaultSharesDefaultTTL,
 			MaxQueryTextBytes: defaultSharesMaxQueryTextBytes,
 		},
+		Reports: ReportsConfig{
+			Enabled:           defaultReportsEnabled,
+			QueryBudget:       defaultReportsQueryBudget,
+			MaxConcurrentRuns: defaultReportsMaxRuns,
+		},
 		Audit: AuditConfig{
 			RetentionDays: defaultAuditRetentionDays,
 			MaxRows:       defaultAuditMaxRows,
@@ -1142,6 +1170,10 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	}
 	if cfg.Shares.MaxQueryTextBytes <= 0 {
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+
+	if cfg.Reports.MaxConcurrentRuns <= 0 {
+		cfg.Reports.MaxConcurrentRuns = defaultReportsMaxRuns
 	}
 
 	// Zero disables an audit bound; only a negative value is invalid.

@@ -394,6 +394,8 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
 
+	s.interruptStaleReportRuns(ctx)
+
 	now := time.Now().UTC()
 	if err := s.store.PruneExpiredQueryShares(ctx, now); err != nil {
 		s.log.Warn("failed to prune expired query shares", "error", err)

@@ -148,7 +148,7 @@ func requestActor(c fiber.Ctx) (audit.Actor, bool) {
 		return a, true
 	case access.AuthAssistant:
 		return userActor(p.User, models.AuditAuthAssistant), true
-	case access.AuthSystem:
+	case access.AuthSystem, access.AuthReport:
 	}
 	return audit.Actor{}, false
 }

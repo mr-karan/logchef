@@ -75,6 +75,10 @@ func QueryShareTarget(s *models.QueryShare) Target {
 	return Target{Type: "query_share", ID: models.RedactShareToken(s.Token), TeamID: s.TeamID, SourceID: &sourceID}
 }
 
+func ReportTarget(r *models.Report) Target {
+	return Target{Type: "report", ID: id(r.ID), Label: r.Name}
+}
+
 func SavedQueryTarget(q *models.SavedQuery) Target {
 	sourceID := q.SourceID
 	return Target{Type: "saved_query", ID: id(q.ID), Label: q.Name, SourceID: &sourceID}

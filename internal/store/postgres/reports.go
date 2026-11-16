@@ -121,7 +121,13 @@ func (s *Store) ResumeReport(ctx context.Context, id models.ReportID) error {
 
 func (s *Store) ClaimReport(ctx context.Context, id models.ReportID, owner models.UserID) error {
 	n, err := s.q.ClaimReport(ctx, sqlc.ClaimReportParams{OwnerID: int8Val(int64(owner)), ID: int64(id)})
-	return rowsChanged(n, err, "claiming report", id)
+	if err != nil || n > 0 {
+		return rowsChanged(n, err, "claiming report", id)
+	}
+	if _, err := s.GetReport(ctx, id); err != nil {
+		return err
+	}
+	return fmt.Errorf("claiming report %d: %w", id, models.ErrReportOwned)
 }
 
 func (s *Store) TakeReportCooldown(ctx context.Context, id models.ReportID, kind models.ReportCooldownKind) (bool, error) {
@@ -291,6 +297,20 @@ func (s *Store) ListReportRuns(ctx context.Context, id models.ReportID, before m
 	rows, err := s.q.ListReportRuns(ctx, sqlc.ListReportRunsParams{ReportID: int64(id), Before: int64(before), MaxRuns: int64(limit)})
 	if err != nil {
 		return nil, fmt.Errorf("error listing runs of report %d: %w", id, err)
+	}
+	out := make([]*models.ReportRun, len(rows))
+	for i := range rows {
+		if out[i], err = reportRunFromSQLC(&rows[i]); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListLatestReportRuns(ctx context.Context) ([]*models.ReportRun, error) {
+	rows, err := s.q.ListLatestReportRuns(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing the latest report runs: %w", err)
 	}
 	out := make([]*models.ReportRun, len(rows))
 	for i := range rows {

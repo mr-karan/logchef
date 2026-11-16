@@ -94,6 +94,36 @@ func TestRequireGlobalAdminRejectsOAuth(t *testing.T) {
 	}
 }
 
+// A report run reads logs, dashboards and saved queries as its owner, and
+// nothing else, even for a global admin.
+func TestReportPrincipalScopes(t *testing.T) {
+	t.Parallel()
+	p := ReportPrincipal(&models.User{Role: models.UserRoleAdmin})
+	if err := p.RequireGlobalAdmin(); !errors.Is(err, ErrGlobalAdminRequired) {
+		t.Fatalf("RequireGlobalAdmin = %v, want ErrGlobalAdminRequired", err)
+	}
+	for _, tc := range []struct {
+		scope models.TokenScope
+		ok    bool
+	}{
+		{models.TokenScopeLogsRead, true},
+		{models.TokenScopeDashboardsRead, true},
+		{models.TokenScopeSavedQueriesRead, true},
+		{models.TokenScopeAll, false},
+		{models.TokenScopeReportsRead, false},
+		{models.TokenScopeReportsWrite, false},
+		{models.TokenScopeSourcesRead, false},
+		{models.TokenScopeSavedQueriesWrite, false},
+		{models.TokenScopeSettingsRead, false},
+	} {
+		t.Run(string(tc.scope), func(t *testing.T) {
+			if err := p.Require(tc.scope); (err == nil) != tc.ok {
+				t.Fatalf("Require(%s) = %v, want ok=%v", tc.scope, err, tc.ok)
+			}
+		})
+	}
+}
+
 // Ask Chef reads only: it holds no write, admin or token scope.
 func TestAssistantPrincipalScopes(t *testing.T) {
 	t.Parallel()
@@ -212,6 +242,8 @@ func TestAuthorizeTeamSource(t *testing.T) {
 		{"global admin, team without the source", SessionPrincipal(f.admin), f.bareTeam, ErrSourceNotInTeam},
 		{"assistant for a member", AssistantPrincipal(f.member), f.team, nil},
 		{"assistant for a global admin outside the team", AssistantPrincipal(f.admin), f.team, ErrNotTeamMember},
+		{"report for a member", ReportPrincipal(f.member), f.team, nil},
+		{"report for a global admin outside the team", ReportPrincipal(f.admin), f.team, ErrNotTeamMember},
 		{"token without scope", APITokenPrincipal(f.member, noLogs), f.team, ErrInsufficientScope},
 		{"oauth without scope", Principal{User: f.member, Method: AuthOAuth}, f.team, ErrInsufficientScope},
 		{"unknown method", Principal{User: f.admin}, f.team, ErrInsufficientScope},
