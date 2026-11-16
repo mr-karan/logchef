@@ -164,6 +164,9 @@ type LogContextRequest struct {
 	BeforeOffset     int      `json:"before_offset"`               // Offset for before query (for pagination)
 	AfterOffset      int      `json:"after_offset"`                // Offset for after query (for pagination)
 	ExcludeBoundary  bool     `json:"exclude_boundary"`            // When true, excludes logs at exact timestamp (for pagination)
+	// StreamLabels are the target row's stream labels, which a Loki source
+	// needs to find the row's stream.
+	StreamLabels map[string]string `json:"stream_labels,omitempty"`
 }
 
 // LogContextResponse represents temporal context query results

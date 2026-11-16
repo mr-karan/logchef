@@ -87,4 +87,7 @@ type LogContextRequest struct {
 	AfterOffset     int
 	ExcludeBoundary bool
 	QueryTimeout    *int
+	// StreamLabels are the target row's stream labels. Loki reads context
+	// from that one stream; ClickHouse ignores them.
+	StreamLabels map[string]string
 }

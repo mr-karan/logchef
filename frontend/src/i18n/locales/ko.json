@@ -101,6 +101,7 @@
   "ui.noSourcesAvailable": "사용 가능한 소스가 없습니다",
   "ui.clear": "지우기",
   "ui.showContext": "컨텍스트 표시",
+  "ui.contextNeedsLogchefQL": "Loki의 컨텍스트에는 LogchefQL 쿼리가 필요합니다. 네이티브 파이프라인은 스트림 레이블을 변경할 수 있기 때문입니다",
   "ui.loading2": "불러오는 중…",
   "ui.local": "로컬",
   "ui.search": "검색",

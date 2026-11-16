@@ -94,15 +94,21 @@ type rangeRequest struct {
 	query string
 	start time.Time
 	step  time.Duration
+	// forward reads the oldest entries first instead of the newest.
+	forward bool
 }
 
 func (p *Provider) fetchPage(ctx context.Context, conn models.LokiConnectionInfo, r rangeRequest, end int64, limit int, maxBytes int64) (*rangePage, error) {
+	direction := "backward"
+	if r.forward {
+		direction = "forward"
+	}
 	params := lokiParams{
 		"query":     {r.query},
 		"start":     {nanos(r.start)},
 		"end":       {strconv.FormatInt(end, 10)},
 		"limit":     {strconv.Itoa(limit)},
-		"direction": {"backward"},
+		"direction": {direction},
 		"step":      {strconv.FormatInt(int64(r.step/time.Second), 10)},
 	}
 	body, err := p.get(ctx, conn, "/loki/api/v1/query_range", params, maxBytes)
@@ -377,8 +383,7 @@ func labelString(labels map[string]string) string {
 	return b.String()
 }
 
-// logResult writes each entry as a row of _time, _msg and its labels. A
-// label named _time or _msg loses to the column.
+// logResult writes each entry as a row of _time, _msg and its labels.
 func logResult(lp *logPager, limit int) *models.QueryResult {
 	entries := lp.entries
 	slices.SortFunc(entries, newestFirst)
@@ -389,14 +394,10 @@ func logResult(lp *logPager, limit int) *models.QueryResult {
 	names := map[string]struct{}{}
 	rows := make([]map[string]any, len(entries))
 	for i, entry := range entries {
-		row := make(map[string]any, len(entry.labels)+2)
-		for name, value := range entry.labels {
-			row[name] = value
+		for name := range entry.labels {
 			names[name] = struct{}{}
 		}
-		row["_time"] = time.Unix(0, entry.ts).UTC().Format(timeLayout)
-		row["_msg"] = entry.line
-		rows[i] = row
+		rows[i] = entry.row()
 	}
 	columns := []models.ColumnInfo{{Name: "_time", Type: timeColumnType}, {Name: "_msg", Type: stringColumnType}}
 	columns = append(columns, labelColumns(names, "_time", "_msg")...)
@@ -408,6 +409,18 @@ func logResult(lp *logPager, limit int) *models.QueryResult {
 		})
 	}
 	return result
+}
+
+// row writes the entry as _time, _msg and its labels. A label named _time
+// or _msg loses to the column.
+func (e logEntry) row() map[string]any {
+	row := make(map[string]any, len(e.labels)+2)
+	for name, value := range e.labels {
+		row[name] = value
+	}
+	row["_time"] = time.Unix(0, e.ts).UTC().Format(timeLayout)
+	row["_msg"] = e.line
+	return row
 }
 
 // metricResult writes each sample as a row of value, time and the series

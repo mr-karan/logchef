@@ -153,6 +153,8 @@ export interface LogContextRequest {
   before_offset?: number;
   after_offset?: number;
   exclude_boundary?: boolean;
+  /** A Loki row's stream labels, which identify the stream to read. */
+  stream_labels?: Record<string, string>;
 }
 
 export interface LogContextResponse {

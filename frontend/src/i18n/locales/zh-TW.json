@@ -101,6 +101,7 @@
   "ui.noSourcesAvailable": "沒有可用的資料來源",
   "ui.clear": "清除",
   "ui.showContext": "顯示上下文",
+  "ui.contextNeedsLogchefQL": "Loki 上的上下文需要 LogchefQL 查詢，因為原生管線可能會變更串流標籤",
   "ui.loading2": "正在載入…",
   "ui.local": "本機",
   "ui.search": "搜尋",

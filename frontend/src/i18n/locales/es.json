@@ -101,6 +101,7 @@
   "ui.noSourcesAvailable": "No hay fuentes disponibles",
   "ui.clear": "Borrar",
   "ui.showContext": "Mostrar contexto",
+  "ui.contextNeedsLogchefQL": "El contexto en Loki necesita una consulta LogchefQL, porque una canalización nativa puede cambiar las etiquetas del stream",
   "ui.loading2": "Cargando…",
   "ui.local": "Local",
   "ui.search": "Buscar",

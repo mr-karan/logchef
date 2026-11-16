@@ -62,6 +62,7 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 		BeforeOffset:    req.BeforeOffset,
 		AfterOffset:     req.AfterOffset,
 		ExcludeBoundary: req.ExcludeBoundary,
+		StreamLabels:    req.StreamLabels,
 	})
 	if err != nil {
 		return s.sendQueryError(c, sourceID, err, "Failed to retrieve log context", "Log context")
