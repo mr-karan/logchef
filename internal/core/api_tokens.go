@@ -82,6 +82,8 @@ var validTokenScopes = map[models.TokenScope]struct{}{
 	models.TokenScopeQuerySharesWrite:  {},
 	models.TokenScopeSettingsRead:      {},
 	models.TokenScopeSettingsWrite:     {},
+	models.TokenScopeReportsRead:       {},
+	models.TokenScopeReportsWrite:      {},
 }
 
 var readOnlyTokenScopes = []models.TokenScope{
@@ -97,6 +99,7 @@ var readOnlyTokenScopes = []models.TokenScope{
 	models.TokenScopeDashboardsRead,
 	models.TokenScopeQuerySharesRead,
 	models.TokenScopeSettingsRead,
+	models.TokenScopeReportsRead,
 }
 
 // ReadOnlyTokenScopes returns the common read-only preset used by service tokens.

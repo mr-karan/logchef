@@ -1665,3 +1665,206 @@ WHERE id IN (
     ORDER BY occurred_at ASC, id ASC
     LIMIT sqlc.arg(batch_size)::bigint
 );
+
+-- Scheduled reports (RFC 0008).
+
+-- name: CreateReport :one
+INSERT INTO reports (
+    name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id,
+    schedule_json, timezone, time_range, range_anchor, variables_json,
+    max_rows, skip_if_empty, attach_csv
+) VALUES (
+    sqlc.arg(name), sqlc.narg(owner_id), sqlc.arg(source_kind), sqlc.narg(dashboard_id),
+    sqlc.narg(tab_id), sqlc.narg(saved_query_id), sqlc.arg(schedule_json), sqlc.arg(timezone),
+    sqlc.narg(time_range), sqlc.arg(range_anchor), sqlc.arg(variables_json),
+    sqlc.arg(max_rows), sqlc.arg(skip_if_empty), sqlc.arg(attach_csv)
+)
+RETURNING id;
+
+-- name: GetReport :one
+SELECT * FROM reports WHERE id = sqlc.arg(id);
+
+-- name: ListReports :many
+SELECT * FROM reports ORDER BY name, id;
+
+-- name: ListReportsByOwner :many
+SELECT * FROM reports WHERE owner_id = sqlc.arg(owner_id) ORDER BY name, id;
+
+-- name: ListReportsForRecipient :many
+-- A user receives a report through a user row, a team row of a team the
+-- user belongs to, or an email row that matches the user's address.
+SELECT r.* FROM reports r
+WHERE EXISTS (
+    SELECT 1 FROM report_recipients rr
+    WHERE rr.report_id = r.id
+      AND (
+        (rr.kind = 'user' AND rr.user_id = sqlc.arg(user_id))
+        OR (rr.kind = 'team' AND rr.team_id IN (
+            SELECT tm.team_id FROM team_members tm WHERE tm.user_id = sqlc.arg(user_id)))
+        OR (rr.kind = 'email' AND lower(rr.email) = (
+            SELECT lower(u.email) FROM users u WHERE u.id = sqlc.arg(user_id)))
+      )
+)
+ORDER BY r.name, r.id;
+
+-- name: UpdateReport :execrows
+UPDATE reports
+SET name = sqlc.arg(name),
+    source_kind = sqlc.arg(source_kind),
+    dashboard_id = sqlc.narg(dashboard_id),
+    tab_id = sqlc.narg(tab_id),
+    saved_query_id = sqlc.narg(saved_query_id),
+    schedule_json = sqlc.arg(schedule_json),
+    timezone = sqlc.arg(timezone),
+    time_range = sqlc.narg(time_range),
+    range_anchor = sqlc.arg(range_anchor),
+    variables_json = sqlc.arg(variables_json),
+    max_rows = sqlc.arg(max_rows),
+    skip_if_empty = sqlc.arg(skip_if_empty),
+    attach_csv = sqlc.arg(attach_csv),
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: DeleteReport :execrows
+DELETE FROM reports WHERE id = sqlc.arg(id);
+
+-- name: PauseReport :execrows
+UPDATE reports
+SET state = 'paused',
+    pause_reason = sqlc.arg(pause_reason),
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: ResumeReport :execrows
+UPDATE reports
+SET state = 'active',
+    pause_reason = '',
+    consecutive_failures = 0,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: ClaimReport :execrows
+-- A claim lends the new owner's access, so a pause for an inactive owner
+-- no longer applies.
+UPDATE reports
+SET owner_id = sqlc.arg(owner_id),
+    state = CASE WHEN pause_reason = 'owner_inactive' THEN 'active' ELSE state END,
+    pause_reason = CASE WHEN pause_reason = 'owner_inactive' THEN '' ELSE pause_reason END,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: TakeReportManualRunCooldown :execrows
+-- clock_timestamp(), not now(): inside a transaction now() is the start of
+-- the transaction, and the cooldown must use the time of this statement.
+UPDATE reports
+SET last_manual_run_at = clock_timestamp()
+WHERE id = sqlc.arg(id)
+  AND (last_manual_run_at IS NULL
+       OR last_manual_run_at <= clock_timestamp() - make_interval(secs => sqlc.arg(window_seconds)::double precision));
+
+-- name: TakeReportPreviewCooldown :execrows
+UPDATE reports
+SET last_preview_at = clock_timestamp()
+WHERE id = sqlc.arg(id)
+  AND (last_preview_at IS NULL
+       OR last_preview_at <= clock_timestamp() - make_interval(secs => sqlc.arg(window_seconds)::double precision));
+
+-- name: ListReportRecipients :many
+SELECT * FROM report_recipients WHERE report_id = sqlc.arg(report_id) ORDER BY id;
+
+-- name: LockReport :one
+-- Holds the report row until the transaction ends, so two replacements of
+-- its recipients run one after the other instead of merging.
+SELECT id FROM reports WHERE id = sqlc.arg(id) FOR UPDATE;
+
+-- name: DeleteReportRecipients :exec
+DELETE FROM report_recipients WHERE report_id = sqlc.arg(report_id);
+
+-- name: InsertReportRecipient :exec
+INSERT INTO report_recipients (report_id, kind, user_id, team_id, email, added_by)
+VALUES (sqlc.arg(report_id), sqlc.arg(kind), sqlc.narg(user_id), sqlc.narg(team_id), sqlc.arg(email), sqlc.narg(added_by));
+
+-- name: DeleteReportUserRecipient :execrows
+DELETE FROM report_recipients
+WHERE report_id = sqlc.arg(report_id) AND kind = 'user' AND user_id = sqlc.arg(user_id);
+
+-- name: InsertRunningReportRun :one
+-- A conflict on either partial unique index inserts nothing and returns no
+-- row; the caller then tells the tick conflict from a run in flight.
+INSERT INTO report_runs (report_id, trigger, scheduled_for, actor_id, status, started_at, deadline_at)
+VALUES (
+    sqlc.arg(report_id), sqlc.arg(trigger), sqlc.arg(scheduled_for), sqlc.narg(actor_id), 'running',
+    clock_timestamp(),
+    clock_timestamp() + make_interval(secs => sqlc.arg(deadline_seconds)::double precision)
+)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: InsertSkippedReportTick :one
+INSERT INTO report_runs (report_id, trigger, scheduled_for, status, reason, started_at, finished_at)
+VALUES (
+    sqlc.arg(report_id), 'schedule', sqlc.arg(scheduled_for), 'skipped', sqlc.arg(reason),
+    clock_timestamp(), clock_timestamp()
+)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: ReportTickExists :one
+SELECT EXISTS(
+    SELECT 1 FROM report_runs
+    WHERE report_id = sqlc.arg(report_id) AND trigger = 'schedule'
+      AND scheduled_for = sqlc.arg(scheduled_for)
+);
+
+-- name: FinishReportRun :one
+UPDATE report_runs
+SET status = sqlc.arg(status),
+    reason = sqlc.arg(reason),
+    window_start = sqlc.narg(window_start),
+    window_end = sqlc.narg(window_end),
+    panels_json = sqlc.arg(panels_json),
+    deliveries_json = sqlc.arg(deliveries_json),
+    deadline_at = NULL,
+    finished_at = clock_timestamp()
+WHERE id = sqlc.arg(id) AND status = 'running'
+RETURNING report_id;
+
+-- name: CountReportFailure :one
+-- A failed run adds one to the streak; a sent or partial run ends it.
+UPDATE reports
+SET consecutive_failures = CASE sqlc.arg(status)::text
+        WHEN 'failed' THEN consecutive_failures + 1
+        WHEN 'sent' THEN 0
+        WHEN 'partial' THEN 0
+        ELSE consecutive_failures
+    END
+WHERE id = sqlc.arg(id)
+RETURNING consecutive_failures;
+
+-- name: PruneReportRuns :exec
+DELETE FROM report_runs
+WHERE report_runs.report_id = sqlc.arg(report_id)
+  AND report_runs.status <> 'running'
+  AND report_runs.id NOT IN (
+    SELECT keep.id FROM report_runs keep
+    WHERE keep.report_id = sqlc.arg(report_id)
+    ORDER BY keep.id DESC
+    LIMIT sqlc.arg(keep)
+  );
+
+-- name: ListReportRuns :many
+-- before = 0 starts at the newest run.
+SELECT * FROM report_runs
+WHERE report_id = sqlc.arg(report_id)
+  AND (sqlc.arg(before)::bigint = 0 OR id < sqlc.arg(before)::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg(max_runs)::bigint;
+
+-- name: InterruptStaleReportRuns :execrows
+UPDATE report_runs
+SET status = 'interrupted',
+    reason = 'process_stopped',
+    deadline_at = NULL,
+    finished_at = clock_timestamp()
+WHERE status = 'running'
+  AND deadline_at < clock_timestamp() - make_interval(secs => sqlc.arg(grace_seconds)::double precision);

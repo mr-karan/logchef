@@ -280,6 +280,59 @@ type QueryStatsDaily struct {
 	TotalDurationMs int64       `json:"total_duration_ms"`
 }
 
+type Report struct {
+	ID                  int64              `json:"id"`
+	Name                string             `json:"name"`
+	OwnerID             pgtype.Int8        `json:"owner_id"`
+	SourceKind          string             `json:"source_kind"`
+	DashboardID         pgtype.Int8        `json:"dashboard_id"`
+	TabID               pgtype.Text        `json:"tab_id"`
+	SavedQueryID        pgtype.Int8        `json:"saved_query_id"`
+	ScheduleJson        string             `json:"schedule_json"`
+	Timezone            string             `json:"timezone"`
+	TimeRange           pgtype.Text        `json:"time_range"`
+	RangeAnchor         string             `json:"range_anchor"`
+	VariablesJson       string             `json:"variables_json"`
+	MaxRows             int64              `json:"max_rows"`
+	SkipIfEmpty         bool               `json:"skip_if_empty"`
+	AttachCsv           bool               `json:"attach_csv"`
+	State               string             `json:"state"`
+	PauseReason         string             `json:"pause_reason"`
+	ConsecutiveFailures int64              `json:"consecutive_failures"`
+	LastManualRunAt     pgtype.Timestamptz `json:"last_manual_run_at"`
+	LastPreviewAt       pgtype.Timestamptz `json:"last_preview_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ReportRecipient struct {
+	ID        int64              `json:"id"`
+	ReportID  int64              `json:"report_id"`
+	Kind      string             `json:"kind"`
+	UserID    pgtype.Int8        `json:"user_id"`
+	TeamID    pgtype.Int8        `json:"team_id"`
+	Email     string             `json:"email"`
+	AddedBy   pgtype.Int8        `json:"added_by"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ReportRun struct {
+	ID             int64              `json:"id"`
+	ReportID       int64              `json:"report_id"`
+	Trigger        string             `json:"trigger"`
+	ScheduledFor   pgtype.Timestamptz `json:"scheduled_for"`
+	ActorID        pgtype.Int8        `json:"actor_id"`
+	Status         string             `json:"status"`
+	Reason         string             `json:"reason"`
+	WindowStart    pgtype.Timestamptz `json:"window_start"`
+	WindowEnd      pgtype.Timestamptz `json:"window_end"`
+	PanelsJson     string             `json:"panels_json"`
+	DeliveriesJson string             `json:"deliveries_json"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	DeadlineAt     pgtype.Timestamptz `json:"deadline_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+}
+
 type SavedQuery struct {
 	ID                int64              `json:"id"`
 	SourceID          int64              `json:"source_id"`

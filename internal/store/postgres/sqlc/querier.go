@@ -34,6 +34,9 @@ type Querier interface {
 	// Record the first decision on a pending, unexpired request. Zero rows means
 	// the request is unknown, expired or already decided.
 	ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOAuthAuthRequestDecisionParams) (OauthAuthRequest, error)
+	// A claim lends the new owner's access, so a pause for an inactive owner
+	// no longer applies.
+	ClaimReport(ctx context.Context, arg ClaimReportParams) (int64, error)
 	// Clear the default of one scope and source, except on keep_id. The partial
 	// unique index leaves at most one row. A NULL owner column compares as 0.
 	ClearSavedViewScopeDefault(ctx context.Context, arg ClearSavedViewScopeDefaultParams) ([]ClearSavedViewScopeDefaultRow, error)
@@ -50,6 +53,8 @@ type Querier interface {
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.
 	CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error)
+	// A failed run adds one to the streak; a sent or partial run ends it.
+	CountReportFailure(ctx context.Context, arg CountReportFailureParams) (int64, error)
 	// A NULL owner column compares as 0.
 	CountSavedViewsInScope(ctx context.Context, arg CountSavedViewsInScopeParams) (int64, error)
 	// Count shared (non-personal) collections that manage the given saved query
@@ -81,6 +86,8 @@ type Querier interface {
 	// Query Shares
 	// Persist an ad hoc query share token
 	CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error
+	// Scheduled reports (RFC 0008).
+	CreateReport(ctx context.Context, arg CreateReportParams) (int64, error)
 	// Saved Queries (cross-team, source-scoped)
 	// Insert a new saved query and return its id
 	CreateSavedQuery(ctx context.Context, arg CreateSavedQueryParams) (int64, error)
@@ -121,6 +128,9 @@ type Querier interface {
 	DeleteJob(ctx context.Context, arg DeleteJobParams) error
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
+	DeleteReport(ctx context.Context, id int64) (int64, error)
+	DeleteReportRecipients(ctx context.Context, reportID int64) error
+	DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error)
 	// Delete a saved query
 	DeleteSavedQuery(ctx context.Context, id int64) error
 	DeleteSavedView(ctx context.Context, id int64) (int64, error)
@@ -140,6 +150,7 @@ type Querier interface {
 	// The next run applies only while the job keeps the schedule the run used,
 	// so a schedule change made during the run is not overwritten.
 	FinishJob(ctx context.Context, arg FinishJobParams) (int64, error)
+	FinishReportRun(ctx context.Context, arg FinishReportRunParams) (int64, error)
 	// Get an API token by ID
 	GetAPIToken(ctx context.Context, id int64) (ApiToken, error)
 	// Get an API token by its hash (for authentication)
@@ -168,6 +179,7 @@ type Querier interface {
 	GetPersonalCollection(ctx context.Context, createdBy pgtype.Int8) (Collection, error)
 	// Retrieve an ad hoc query share by token with creator details
 	GetQueryShare(ctx context.Context, token string) (GetQueryShareRow, error)
+	GetReport(ctx context.Context, id int64) (Report, error)
 	// Look up one saved query by id
 	GetSavedQuery(ctx context.Context, id int64) (SavedQuery, error)
 	GetSavedView(ctx context.Context, id int64) (SavedView, error)
@@ -215,7 +227,13 @@ type Querier interface {
 	// Query history ---------------------------------------------------------------
 	// Record one executed query and return its id.
 	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
+	InsertReportRecipient(ctx context.Context, arg InsertReportRecipientParams) error
+	// A conflict on either partial unique index inserts nothing and returns no
+	// row; the caller then tells the tick conflict from a run in flight.
+	InsertRunningReportRun(ctx context.Context, arg InsertRunningReportRunParams) (ReportRun, error)
+	InsertSkippedReportTick(ctx context.Context, arg InsertSkippedReportTickParams) (ReportRun, error)
 	InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error
+	InterruptStaleReportRuns(ctx context.Context, graceSeconds float64) (int64, error)
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (bool, error)
 	// Check if a team is managed
@@ -271,6 +289,14 @@ type Querier interface {
 	ListQueryActivity(ctx context.Context, limit int32) ([]ListQueryActivityRow, error)
 	// List one user's recent history, newest first.
 	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
+	ListReportRecipients(ctx context.Context, reportID int64) ([]ReportRecipient, error)
+	// before = 0 starts at the newest run.
+	ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error)
+	ListReports(ctx context.Context) ([]Report, error)
+	ListReportsByOwner(ctx context.Context, ownerID pgtype.Int8) ([]Report, error)
+	// A user receives a report through a user row, a team row of a team the
+	// user belongs to, or an email row that matches the user's address.
+	ListReportsForRecipient(ctx context.Context, userID pgtype.Int8) ([]Report, error)
 	// List every saved query the user can see (any source attached to any of their teams)
 	ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error)
 	// List saved queries for a specific source, scoped to a user that has access to it
@@ -312,10 +338,14 @@ type Querier interface {
 	LockCollection(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock
 	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
+	// Holds the report row until the transaction ends, so two replacements of
+	// its recipients run one after the other instead of merging.
+	LockReport(ctx context.Context, id int64) (int64, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error)
 	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
+	PauseReport(ctx context.Context, arg PauseReportParams) (int64, error)
 	// Keeps every open episode and the newest N closed rows.
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Deletes up to batch_size of the oldest events that are older than before or
@@ -326,6 +356,7 @@ type Querier interface {
 	// Delete a user's history rows beyond the newest `offset` (the per-user cap),
 	// keeping history bounded on every insert.
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
+	PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error)
@@ -345,7 +376,9 @@ type Querier interface {
 	// Write derived columns for one revision, only while the row still holds that
 	// revision and is still stale. Changes neither revision nor updated_at.
 	RepairDashboardSummary(ctx context.Context, arg RepairDashboardSummaryParams) (int64, error)
+	ReportTickExists(ctx context.Context, arg ReportTickExistsParams) (bool, error)
 	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
+	ResumeReport(ctx context.Context, id int64) (int64, error)
 	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)
 	// Revoke the grant that owns an access-token ID hash or refresh-token hash,
 	// only when the grant belongs to the given client.
@@ -366,6 +399,10 @@ type Querier interface {
 	SetUserManaged(ctx context.Context, arg SetUserManagedParams) error
 	// Set (or clear) a user's local-auth bcrypt hash
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
+	// clock_timestamp(), not now(): inside a transaction now() is the start of
+	// the transaction, and the cooldown must use the time of this statement.
+	TakeReportManualRunCooldown(ctx context.Context, arg TakeReportManualRunCooldownParams) (int64, error)
+	TakeReportPreviewCooldown(ctx context.Context, arg TakeReportPreviewCooldownParams) (int64, error)
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)
@@ -391,6 +428,7 @@ type Querier interface {
 	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
+	UpdateReport(ctx context.Context, arg UpdateReportParams) (int64, error)
 	// Update a saved query's mutable fields
 	UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryParams) error
 	// Compare-and-swap on the caller's revision; no row means missing or stale.
