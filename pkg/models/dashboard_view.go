@@ -54,6 +54,18 @@ type DashboardViewViz struct {
 	OrderBy string
 	Reduce  DashboardStatReduce
 	Format  DashboardNumberFormat
+	// X, Y and Series are a chart's roles in result mode, and XScale its
+	// axis: "time", "category", or "auto" or "" for the x column's kind.
+	X      string
+	Y      []string
+	Series string
+	XScale string
+	// Label is a pie's or toplist's label role in result mode.
+	Label string
+	// MaxRows is a toplist's row cap, 0 when unset.
+	MaxRows int
+	// MinSlicePercent folds a pie's smaller slices, 0 when unset.
+	MinSlicePercent float64
 	// Columns holds the confirmed kind of a column by name.
 	Columns        map[string]string
 	VisibleColumns []string
@@ -122,6 +134,8 @@ func dashboardViewPanel(p *dashboardPanelV2) DashboardViewPanel {
 		},
 		Viz: DashboardViewViz{
 			Type: v.Type, Value: deref(v.Value), OrderBy: deref(v.OrderBy), Reduce: deref(v.Reduce),
+			X: deref(v.X), Y: slices.Clone(v.Y), Series: deref(v.Series), XScale: deref(v.XScale),
+			Label: deref(v.Label), MaxRows: deref(v.MaxRows), MinSlicePercent: deref(v.MinSlicePercent),
 			VisibleColumns: slices.Clone(v.VisibleColumns),
 		},
 	}

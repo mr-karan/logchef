@@ -1,0 +1,46 @@
+Edge traffic
+2026-11-15 18:00 IST to 2026-11-16 00:00 IST (Asia/Kolkata)
+
+== Requests by status ==
+Each bar covers 1h
+-- 2xx --
+2026-11-15 18:00 IST | 100
+2026-11-15 19:00 IST | 200
+2026-11-15 20:00 IST | 300
+2026-11-15 21:00 IST | 400
+2026-11-15 22:00 IST | 500
+2026-11-15 23:00 IST | 600
+-- 5xx --
+2026-11-15 18:00 IST | 0
+2026-11-15 19:00 IST | 1
+2026-11-15 20:00 IST | 2
+2026-11-15 21:00 IST | 3
+2026-11-15 22:00 IST | 4
+2026-11-15 23:00 IST | 5
+
+== Daily traffic ==
+-- bytes --
+2026-11-14 | 1.05M
+2026-11-15 | 3.15M
+-- hits --
+2026-11-14 | 12
+2026-11-15 | 30
+
+== Top paths ==
+/api/<script> | 70
+/login | 20
+/health | 10
+
+== Path share ==
+/api/<script> | 70 | 70.0%
+/login | 20 | 20.0%
+/health | 10 | 10.0%
+
+== Nothing yet ==
+No data
+
+--
+Runs as Owner One.
+Sources: edge_logs.
+Window: 2026-11-15 18:00 IST to 2026-11-16 00:00 IST, timezone Asia/Kolkata.
+Open in Logchef: https://logchef.example.com/dashboards/7

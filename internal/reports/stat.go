@@ -90,13 +90,13 @@ func declaredColumn(name, backendType string) frameColumn {
 
 // frameColumns types the result columns, adds a column that only rows
 // carry, and applies the confirmed kinds.
-func frameColumns(res *models.QueryResult, opts StatOptions) []frameColumn {
+func frameColumns(res *models.QueryResult, confirmed map[string]string, untyped bool) []frameColumn {
 	seen := make(map[string]bool, len(res.Columns))
 	var cols []frameColumn
 	add := func(name, backendType string) {
 		seen[name] = true
 		c := declaredColumn(name, backendType)
-		if kind, ok := opts.Columns[name]; ok {
+		if kind, ok := confirmed[name]; ok {
 			c.kind, c.repr = kind, ""
 			if kind == "number" {
 				c.repr = cmp.Or(declaredColumn(name, backendType).repr, "decimal")
@@ -106,7 +106,7 @@ func frameColumns(res *models.QueryResult, opts StatOptions) []frameColumn {
 	}
 	for _, c := range res.Columns {
 		backendType := c.Type
-		if opts.Untyped {
+		if untyped {
 			backendType = ""
 		}
 		add(c.Name, backendType)
@@ -323,7 +323,7 @@ func cellLabel(v any, c frameColumn, loc *time.Location) string {
 // ReduceStat reduces a result-mode frame to one value with the stat rules of
 // RFC 0003. A nil value means "No data".
 func ReduceStat(res *models.QueryResult, opts StatOptions, loc *time.Location) (*Number, string, error) {
-	cols := frameColumns(res, opts)
+	cols := frameColumns(res, opts.Columns, opts.Untyped)
 	if len(res.Logs) == 0 && len(cols) == 0 {
 		return nil, "", nil
 	}
