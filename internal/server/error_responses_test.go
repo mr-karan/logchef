@@ -323,7 +323,10 @@ func TestClickHouseQueryFailureResponses(t *testing.T) {
 		}
 	})
 	t.Run("admin authentication", func(t *testing.T) {
-		body, err := json.Marshal(map[string]any{"name": "auth-check", "meta_ts_field": "timestamp", "source_type": "clickhouse", "connection": models.ConnectionInfo{Host: addr, Username: "logchef_nonexistent_query_error_test_user", Database: "system", TableName: "numbers"}})
+		// The password is explicit because an update with a blank password and a
+		// new username is refused before ClickHouse is reached.
+		const password = "logchef_wrong_query_error_test_password"
+		body, err := json.Marshal(map[string]any{"name": "auth-check", "meta_ts_field": "timestamp", "source_type": "clickhouse", "connection": models.ConnectionInfo{Host: addr, Username: "logchef_nonexistent_query_error_test_user", Password: password, Database: "system", TableName: "numbers"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -333,7 +336,7 @@ func TestClickHouseQueryFailureResponses(t *testing.T) {
 			{http.MethodPut, fmt.Sprintf("/api/v1/admin/sources/%d", env.chSource)},
 		} {
 			got := doAuthzRequest(t, env.s, endpoint.method, endpoint.path, string(body), withSession(env.cookie))
-			if got.status != 400 || !strings.Contains(got.message, "authentication failed") || strings.Contains(got.message, addr) || strings.Contains(got.message, "nonexistent_query_error") {
+			if got.status != 400 || !strings.Contains(got.message, "authentication failed") || strings.Contains(got.message, addr) || strings.Contains(got.message, "nonexistent_query_error") || strings.Contains(got.message, password) {
 				t.Fatalf("%s status=%d message=%q, want safe authentication cause", endpoint.path, got.status, got.message)
 			}
 		}
