@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
@@ -285,7 +286,7 @@ func (p *OIDCProvider) GetIssuer() string {
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
-func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, nonce, verifier string) (*models.User, *models.Session, error) {
+func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, rec *audit.Recorder, log *slog.Logger, authCfg *config.AuthConfig, code, nonce, verifier string) (*models.User, *models.Session, error) {
 	idpCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
 	defer cancel()
 
@@ -335,7 +336,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		// email_verified gate above has already passed) before treating this
 		// as unauthorized access.
 		if errors.Is(err, core.ErrUserNotFound) {
-			provisioned, attempted, provErr := autoProvisionUser(ctx, db, log, authCfg.AutoProvision, claims.Email, claims.Name)
+			provisioned, attempted, provErr := autoProvisionUser(ctx, db, rec, log, authCfg.AutoProvision, claims.Email, claims.Name)
 			if provErr != nil {
 				return nil, nil, fmt.Errorf("failed to auto-provision user for email=%s: %w", claims.Email, provErr)
 			}

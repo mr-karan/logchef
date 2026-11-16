@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
@@ -35,7 +36,9 @@ func matchAllowedDomain(email string, allowedDomains []string) (string, bool) {
 // the email's domain isn't in the allowed list — callers should treat that
 // identically to "user not found". A non-nil error means auto-provisioning
 // was attempted (domain matched) but failed; the login must not proceed.
-func autoProvisionUser(ctx context.Context, db store.Store, log *slog.Logger, cfg config.AutoProvisionConfig, email, fullName string) (*models.User, bool, error) {
+// The user it creates and each membership it changes are audit events by the
+// system actor, with the matched domain in the detail.
+func autoProvisionUser(ctx context.Context, db store.Store, rec *audit.Recorder, log *slog.Logger, cfg config.AutoProvisionConfig, email, fullName string) (*models.User, bool, error) {
 	if !cfg.Enabled {
 		return nil, false, nil
 	}
@@ -46,9 +49,27 @@ func autoProvisionUser(ctx context.Context, db store.Store, log *slog.Logger, cf
 		return nil, false, nil
 	}
 
-	user, err := core.GetOrCreateAutoProvisionedUser(ctx, db, log, email, fullName)
+	user, created, err := core.GetOrCreateAutoProvisionedUser(ctx, db, log, email, fullName)
 	if err != nil {
 		return nil, true, err
+	}
+	record := func(action audit.Action, target audit.Target, before, after *audit.Fields) {
+		rec.Record(ctx, audit.Event{
+			Action:  action,
+			Outcome: models.AuditOutcomeSuccess,
+			Actor: audit.Actor{
+				Type:       models.AuditActorSystem,
+				Label:      "auth.auto_provision",
+				AuthMethod: models.AuditAuthStartup,
+			},
+			Target: target,
+			Before: before,
+			After:  after,
+			Detail: audit.NewFields().Set("domain", domain),
+		})
+	}
+	if created {
+		record(audit.UserCreate, audit.UserTarget(user), nil, audit.UserFields(user))
 	}
 
 	// Best-effort default team memberships: a missing team (or any membership
@@ -60,9 +81,16 @@ func autoProvisionUser(ctx context.Context, db store.Store, log *slog.Logger, cf
 			log.Warn("auto_provision default_team_ids: team not found, skipping", "team_id", id, "email", email, "error", err)
 			continue
 		}
-		if _, _, err := core.AddTeamMember(ctx, db, log, teamID, user.ID, models.TeamRoleMember); err != nil {
+		before, after, err := core.AddTeamMember(ctx, db, log, teamID, user.ID, models.TeamRoleMember)
+		if err != nil {
 			log.Warn("auto_provision default_team_ids: failed to add team membership, skipping", "team_id", id, "email", email, "error", err)
 			continue
+		}
+		switch {
+		case before == nil:
+			record(audit.TeamMemberAdd, audit.TeamMemberTarget(teamID, user.ID), nil, audit.TeamMemberFields(after))
+		case before.Role != after.Role:
+			record(audit.TeamMemberAdd, audit.TeamMemberTarget(teamID, user.ID), audit.TeamMemberFields(before), audit.TeamMemberFields(after))
 		}
 		joinedTeamIDs = append(joinedTeamIDs, id)
 	}

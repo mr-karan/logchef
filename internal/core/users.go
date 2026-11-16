@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -237,18 +238,19 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, princi
 // racing on a check-then-act window.
 //
 // The created user is left unmanaged (the DB default) so the provisioning
-// reconciler never adopts or deletes it.
-func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
+// reconciler never adopts or deletes it. created is true only for the call
+// whose insert made the user.
+func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (user *models.User, created bool, err error) {
 	email = models.NormalizeEmail(email)
 	if fullName == "" {
 		fullName = email
 	}
 	if err := validateUserCreation(email, fullName, models.UserRoleMember); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	now := time.Now().UTC()
-	user := &models.User{
+	user = &models.User{
 		Email:       email,
 		FullName:    fullName,
 		Role:        models.UserRoleMember,
@@ -267,16 +269,16 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 			existing, getErr := db.GetUserByEmail(ctx, email)
 			if getErr != nil {
 				log.Error("failed to re-fetch user after auto-provision conflict", "error", getErr, "email", email)
-				return nil, fmt.Errorf("error re-fetching user after conflict: %w", getErr)
+				return nil, false, fmt.Errorf("error re-fetching user after conflict: %w", getErr)
 			}
-			return existing, nil
+			return existing, false, nil
 		}
 		log.Error("error auto-provisioning user in db", "error", err, "email", email)
-		return nil, fmt.Errorf("error auto-provisioning user: %w", err)
+		return nil, false, fmt.Errorf("error auto-provisioning user: %w", err)
 	}
 
 	log.Debug("user auto-provisioned", "user_id", user.ID, "email", user.Email)
-	return user, nil
+	return user, true, nil
 }
 
 // requestMayRemoveAdmin reports whether an update could leave its target
@@ -501,8 +503,10 @@ func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger,
 	return deleted, nil
 }
 
-// InitAdminUsers ensures that specified admin users exist and are configured correctly.
-func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, adminEmails []string) error {
+// InitAdminUsers ensures that specified admin users exist and are configured
+// correctly. Each user it creates or promotes is recorded as an audit event by
+// the system actor.
+func InitAdminUsers(ctx context.Context, db store.Store, rec *audit.Recorder, log *slog.Logger, adminEmails []string) error {
 	if len(adminEmails) == 0 {
 		log.Warn("no admin emails configured, skipping admin user initialization")
 		return nil
@@ -520,12 +524,14 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 			if models.IsNotFound(err) {
 				// User doesn't exist, create a new admin user
 				log.Debug("creating admin user", "email", email)
-				_, createErr := CreateUser(ctx, db, log, access.SystemPrincipal(), email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
+				created, createErr := CreateUser(ctx, db, log, access.SystemPrincipal(), email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
 				if createErr != nil {
 					errMsg := fmt.Sprintf("failed to create admin user %s: %v", email, createErr)
 					log.Error(errMsg)
 					setupErrors = append(setupErrors, errors.New(errMsg))
+					continue
 				}
+				recordAdminUser(ctx, rec, audit.UserCreate, nil, created)
 				continue
 			}
 
@@ -536,28 +542,15 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 			continue // Try next email
 		}
 
-		// User exists, ensure it's an active admin
-		if existing != nil {
-			// Ensure existing user is an active admin
-			needsUpdate := false
-			if existing.Role != models.UserRoleAdmin {
-				existing.Role = models.UserRoleAdmin
-				needsUpdate = true
-			}
-			if existing.Status != models.UserStatusActive {
-				existing.Status = models.UserStatusActive
-				needsUpdate = true
-			}
-
-			if needsUpdate {
-				if err := db.UpdateUser(ctx, existing); err != nil {
-					errMsg := fmt.Sprintf("failed to update admin user %s: %v", email, err)
-					log.Error(errMsg)
-					setupErrors = append(setupErrors, errors.New(errMsg))
-				} else {
-					log.Info("updated existing user to active admin", "email", email, "user_id", existing.ID)
-				}
-			}
+		before, after, err := promoteToActiveAdmin(ctx, db, existing.ID)
+		switch {
+		case err != nil:
+			errMsg := fmt.Sprintf("failed to update admin user %s: %v", email, err)
+			log.Error(errMsg)
+			setupErrors = append(setupErrors, errors.New(errMsg))
+		case after != nil:
+			log.Info("updated existing user to active admin", "email", email, "user_id", after.ID)
+			recordAdminUser(ctx, rec, audit.UserUpdate, before, after)
 		}
 	}
 
@@ -588,4 +581,50 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 
 	log.Info("admin user initialization complete")
 	return nil
+}
+
+// promoteToActiveAdmin makes a user an active admin. It reads the user under
+// the row lock of the write and returns the user before and after, or two nil
+// users when the user already is an active admin.
+func promoteToActiveAdmin(ctx context.Context, db store.Store, userID models.UserID) (before, after *models.User, err error) {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		current, err := tx.GetUserForUpdate(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if current.Role == models.UserRoleAdmin && current.Status == models.UserStatusActive {
+			return nil
+		}
+		updated := *current
+		updated.Role, updated.Status = models.UserRoleAdmin, models.UserStatusActive
+		if err := tx.UpdateUser(ctx, &updated); err != nil {
+			return err
+		}
+		before, after = current, &updated
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
+}
+
+// recordAdminUser records a change that auth.admin_emails made at startup.
+func recordAdminUser(ctx context.Context, rec *audit.Recorder, action audit.Action, before, after *models.User) {
+	var beforeFields *audit.Fields
+	if before != nil {
+		beforeFields = audit.UserFields(before)
+	}
+	rec.Record(ctx, audit.Event{
+		Action:  action,
+		Outcome: models.AuditOutcomeSuccess,
+		Actor: audit.Actor{
+			Type:       models.AuditActorSystem,
+			Label:      "auth.admin_emails",
+			AuthMethod: models.AuditAuthStartup,
+		},
+		Target: audit.UserTarget(after),
+		Before: beforeFields,
+		After:  audit.UserFields(after),
+	})
 }

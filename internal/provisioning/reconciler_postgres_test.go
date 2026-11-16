@@ -60,7 +60,7 @@ func TestReconcilePostgresConcurrentDelete(t *testing.T) {
 				{Name: "old", Members: []config.ProvisionMember{{Email: "moving@example.com"}}},
 				{Name: "new"},
 			}}
-			if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+			if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 				t.Fatal(err)
 			}
 			user, err := db.GetUserByEmail(ctx, "moving@example.com")
@@ -83,7 +83,7 @@ func TestReconcilePostgresConcurrentDelete(t *testing.T) {
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 				}}
 			}}
-			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 			if !started {
 				t.Fatal("reconciliation did not remove membership")
 			}
@@ -142,7 +142,7 @@ func TestReconcilePostgresConcurrentAdoption(t *testing.T) {
 	defer cancel()
 	for _, name := range []string{"first", "second"} {
 		cfg := &config.ProvisioningConfig{ManageTeams: true, Teams: []config.ProvisionTeam{{Name: name}}}
-		if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+		if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -184,11 +184,13 @@ func TestReconcilePostgresConcurrentAdoption(t *testing.T) {
 				return nil
 			}
 			started = true
-			go func() { result <- Reconcile(ctx, secondConfig, secondObserved, nil, quietLogger(), nil) }()
+			go func() {
+				result <- Reconcile(ctx, secondConfig, secondObserved, nil, testRecorder(secondObserved), quietLogger(), nil)
+			}()
 			return waitForProvisioningContention(ctx, observer, name, progress)
 		}}
 	}}
-	firstErr := Reconcile(ctx, firstConfig, firstObserved, nil, quietLogger(), nil)
+	firstErr := Reconcile(ctx, firstConfig, firstObserved, nil, testRecorder(firstObserved), quietLogger(), nil)
 	if !started {
 		t.Fatal("reconciliation did not adopt users")
 	}
@@ -221,7 +223,7 @@ func TestReconcilePostgresConcurrentDeletePrunedMember(t *testing.T) {
 				{Name: "first", Members: []config.ProvisionMember{{Email: "former@example.com"}}},
 				{Name: "second", Members: []config.ProvisionMember{{Email: "former@example.com"}}},
 			}}
-			if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+			if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 				t.Fatal(err)
 			}
 			user, err := db.GetUserByEmail(ctx, "former@example.com")
@@ -272,7 +274,7 @@ func TestReconcilePostgresConcurrentDeletePrunedMember(t *testing.T) {
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 				}}
 			}}
-			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 			if !started {
 				t.Fatal("reconciliation did not remove membership")
 			}
@@ -283,7 +285,7 @@ func TestReconcilePostgresConcurrentDeletePrunedMember(t *testing.T) {
 			if _, err := db.GetUser(ctx, user.ID); !models.IsNotFound(err) {
 				t.Fatalf("user remains after delete: %v", err)
 			}
-			if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+			if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 				t.Fatalf("second reconciliation: %v", err)
 			}
 		})
@@ -299,14 +301,14 @@ func TestReconcilePostgresRejectsDuplicateTeamSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Teams: []config.ProvisionTeam{{Name: "team", Sources: []string{"logs", "logs"}}}}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err == nil || !strings.Contains(err.Error(), "duplicate source") {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err == nil || !strings.Contains(err.Error(), "duplicate source") {
 		t.Fatalf("expected duplicate source validation error, got %v", err)
 	}
 	if _, err := db.GetTeamByName(ctx, "team"); !models.IsNotFound(err) {
 		t.Fatalf("invalid config created a team: %v", err)
 	}
 	cfg.Teams[0].Sources = []string{"logs"}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
 	team, err := db.GetTeamByName(ctx, "team")

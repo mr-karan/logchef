@@ -11,14 +11,17 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -166,6 +169,19 @@ func newAuthTestDB(t *testing.T) *sqlite.DB {
 	return db
 }
 
+func testRecorder(db store.AuditStore) *audit.Recorder {
+	return audit.New(audit.Options{Store: db, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+}
+
+func auditEvents(t *testing.T, db *sqlite.DB) []models.AuditEvent {
+	t.Helper()
+	events, err := db.ListAuditEvents(context.Background(), models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListAuditEvents: %v", err)
+	}
+	return events
+}
+
 func testOIDCConfig(fake *fakeOIDCServer) *config.OIDCConfig {
 	return &config.OIDCConfig{
 		ProviderURL:  fake.srv.URL,
@@ -215,7 +231,7 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 		Name:          "New Hire",
 	}, "nonce")
 
-	user, session, err := provider.HandleCallback(ctx, db, log, authCfg, "code-first-login", "nonce", "test-pkce-verifier")
+	user, session, err := provider.HandleCallback(ctx, db, testRecorder(db), log, authCfg, "code-first-login", "nonce", "test-pkce-verifier")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -249,6 +265,22 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 	if member.Role != models.TeamRoleMember {
 		t.Errorf("team role = %q, want member", member.Role)
 	}
+
+	events := auditEvents(t, db)
+	if len(events) != 2 || events[0].Action != string(audit.UserCreate) || events[1].Action != string(audit.TeamMemberAdd) {
+		t.Fatalf("audit events = %+v, want user.create then team_member.add", events)
+	}
+	if events[0].TargetID != strconv.Itoa(int(user.ID)) || events[1].TeamID == nil || *events[1].TeamID != team.ID {
+		t.Errorf("targets = %s and team %v, want the user and the default team", events[0].TargetID, events[1].TeamID)
+	}
+	for _, e := range events {
+		if e.ActorType != models.AuditActorSystem || e.AuthMethod != models.AuditAuthStartup || e.ActorLabel != "auth.auto_provision" {
+			t.Errorf("%s actor = %s/%s/%q, want the auto-provisioning system actor", e.Action, e.ActorType, e.AuthMethod, e.ActorLabel)
+		}
+		if string(e.Detail) != `{"domain":"example.com"}` {
+			t.Errorf("%s detail = %s, want the matched domain", e.Action, e.Detail)
+		}
+	}
 }
 
 // TestHandleCallback_AutoProvisionDisabledRejects verifies that with
@@ -281,7 +313,7 @@ func TestHandleCallback_AutoProvisionDisabledRejects(t *testing.T) {
 		Name:          "Someone",
 	}, "nonce")
 
-	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-disabled", "nonce", "test-pkce-verifier")
+	_, _, err = provider.HandleCallback(ctx, db, testRecorder(db), log, authCfg, "code-disabled", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("HandleCallback error = %v, want ErrUnauthorizedUser", err)
 	}
@@ -320,7 +352,7 @@ func TestHandleCallback_AutoProvisionUnlistedDomainRejects(t *testing.T) {
 		Name:          "Outsider",
 	}, "nonce")
 
-	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-unlisted-domain", "nonce", "test-pkce-verifier")
+	_, _, err = provider.HandleCallback(ctx, db, testRecorder(db), log, authCfg, "code-unlisted-domain", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("HandleCallback error = %v, want ErrUnauthorizedUser", err)
 	}
@@ -367,7 +399,7 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			users[i], _, errs[i] = provider.HandleCallback(ctx, db, log, authCfg, codes[i], "nonce", "test-pkce-verifier")
+			users[i], _, errs[i] = provider.HandleCallback(ctx, db, testRecorder(db), log, authCfg, codes[i], "nonce", "test-pkce-verifier")
 		}(i)
 	}
 	wg.Wait()
@@ -379,6 +411,9 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 	}
 	if users[0].ID != users[1].ID {
 		t.Errorf("concurrent first logins resolved to different users: %d vs %d", users[0].ID, users[1].ID)
+	}
+	if events := auditEvents(t, db); len(events) != 1 || events[0].Action != string(audit.UserCreate) {
+		t.Errorf("audit events = %+v, want one user.create for two racing logins", events)
 	}
 }
 
@@ -410,7 +445,7 @@ func TestCallbackFailureLeavesLoggingToCaller(t *testing.T) {
 				t.Fatal(err)
 			}
 			logs.Reset()
-			_, _, err = p.HandleCallback(t.Context(), newAuthTestDB(t), log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
+			_, _, err = p.HandleCallback(t.Context(), newAuthTestDB(t), nil, log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}
