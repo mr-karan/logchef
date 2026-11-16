@@ -118,14 +118,16 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 // AST without comments. Literals and identifiers are written back verbatim, so
 // the output runs as parsed only where the parser and ClickHouse lex them alike.
 func FormatSelectQuery(rawSQL string) (string, error) {
-	selectQuery, err := parseSelectQuery(rawSQL)
+	selectQuery, err := ParseSelectQuery(rawSQL)
 	if err != nil {
 		return "", err
 	}
 	return formatSQL(selectQuery), nil
 }
 
-func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
+// ParseSelectQuery parses one SELECT statement and rejects identifiers that
+// ClickHouse would read differently from the parser.
+func ParseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 	// The parser lexer accepts ClickHouse's doubled apostrophes and keeps them
 	// in StringLiteral.Literal. Do not preprocess raw SQL: the formatter emits
 	// literal contents verbatim, while comments are intentionally omitted.
@@ -236,12 +238,18 @@ func decodeQuotedIdentifier(body string) (string, bool) {
 	return name.String(), true
 }
 
+// IdentName returns the name ClickHouse reads from ident. It reports false
+// for a quoted name with an escape that ClickHouse decodes differently.
+func IdentName(ident *clickhouseparser.Ident) (string, bool) {
+	if ident.QuoteType == clickhouseparser.Unquoted {
+		return ident.Name, true
+	}
+	return decodeQuotedIdentifier(ident.Name)
+}
+
 // identIs reports whether ClickHouse reads ident as name.
 func identIs(ident *clickhouseparser.Ident, name string) bool {
-	if ident.QuoteType == clickhouseparser.Unquoted {
-		return ident.Name == name
-	}
-	decoded, ok := decodeQuotedIdentifier(ident.Name)
+	decoded, ok := IdentName(ident)
 	return ok && decoded == name
 }
 
@@ -249,7 +257,7 @@ func identIs(ident *clickhouseparser.Ident, name string) bool {
 // default/max limit policy. The default limit is used for SQL without LIMIT;
 // the max limit is only a ceiling.
 func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
-	selectQuery, err := parseSelectQuery(rawSQL)
+	selectQuery, err := ParseSelectQuery(rawSQL)
 	if err != nil {
 		return QueryBuildResult{}, err
 	}
@@ -542,7 +550,7 @@ func legacyDefaultLimit(maxLimit int) int {
 // RemoveLimitClause parses the SQL and removes the statement's own LIMIT
 // clause. The branches of a set operation keep theirs.
 func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
-	selectQuery, err := parseSelectQuery(rawSQL)
+	selectQuery, err := ParseSelectQuery(rawSQL)
 	if err != nil {
 		return "", err
 	}
