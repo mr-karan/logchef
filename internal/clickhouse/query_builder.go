@@ -236,12 +236,18 @@ func decodeQuotedIdentifier(body string) (string, bool) {
 	return name.String(), true
 }
 
+// IdentName returns the name ClickHouse reads from ident. It reports false
+// for a quoted name with an escape that ClickHouse decodes differently.
+func IdentName(ident *clickhouseparser.Ident) (string, bool) {
+	if ident.QuoteType == clickhouseparser.Unquoted {
+		return ident.Name, true
+	}
+	return decodeQuotedIdentifier(ident.Name)
+}
+
 // identIs reports whether ClickHouse reads ident as name.
 func identIs(ident *clickhouseparser.Ident, name string) bool {
-	if ident.QuoteType == clickhouseparser.Unquoted {
-		return ident.Name == name
-	}
-	decoded, ok := decodeQuotedIdentifier(ident.Name)
+	decoded, ok := IdentName(ident)
 	return ok && decoded == name
 }
 

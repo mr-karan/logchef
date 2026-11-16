@@ -134,6 +134,14 @@ jobs:
           docker exec "$c" chmod 755 /var/lib/clickhouse/user_scripts/logchef_test_effect.sh
           docker exec "$c" clickhouse-client --query 'SYSTEM RELOAD FUNCTIONS'
           test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.functions WHERE name = 'logchef_test_effect'")" = 1
+      # The schema advisor gates read through a Distributed table over two
+      # shards, both this server.
+      - name: Install the two-shard test cluster
+        run: |
+          c=${{ job.services.clickhouse.id }}
+          docker cp internal/clickhouse/testdata/advisor_two_shards.xml "$c":/etc/clickhouse-server/config.d/
+          docker exec "$c" clickhouse-client --query 'SYSTEM RELOAD CONFIG'
+          test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.clusters WHERE cluster = 'logchef_two_shards'")" = 2
       - name: Query, schema, and lifecycle compatibility
         run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql -count=1
 
