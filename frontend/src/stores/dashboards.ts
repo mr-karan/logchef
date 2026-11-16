@@ -706,9 +706,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       return;
     }
     const effTtl = resolveEffectiveCacheTtl(dashboard.panels.cache_ttl_seconds, metaStore.dashboardCachePolicy);
-    // Send the directive ONLY when caching is actually on.
-    const cache: CacheDirective | undefined =
-      effTtl > 0 ? { scope: "dashboard", ttl_seconds: effTtl } : undefined;
+    // Every panel request carries the directive, even with caching off: the
+    // server admits it as a dashboard query instead of an explorer preview, so a
+    // refresh of more panels than the preview cap does not reject itself.
+    const cache: CacheDirective = { scope: "dashboard", ttl_seconds: Math.max(effTtl, 0) };
 
     // Compute the executed range ONCE so every panel in this refresh shares an
     // identical window — a prerequisite for cross-panel/-viewer cache collapse.

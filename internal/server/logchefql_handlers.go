@@ -260,6 +260,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		historyQuery:         req.Query,
 		historyLanguage:      models.QueryLanguageLogchefQL,
 		historyStart:         historyStart,
+		class:                queryClassFor(req.Cache),
 		cacheable:            cacheable,
 		cacheKey:             cacheKey,
 		cacheTTL:             effTTL,

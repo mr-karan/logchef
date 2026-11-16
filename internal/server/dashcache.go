@@ -30,6 +30,15 @@ var errCacheBudgetExceeded = errors.New("dashboard cache: response exceeds max_e
 // result cache. Eligible iff the cache is enabled, the directive opts into the
 // "dashboard" scope, and the clamped TTL (min of requested TTL and max_ttl) is
 // positive.
+// queryClassFor admits a request that carries a dashboard directive as a
+// dashboard query whether or not it is cached, and any other as a preview.
+func queryClassFor(cd *models.CacheDirective) QueryClass {
+	if cd != nil && cd.Scope == dashboardCacheScope {
+		return QueryClassDashboard
+	}
+	return QueryClassPreview
+}
+
 func (s *Server) dashboardCacheParams(cd *models.CacheDirective) (time.Duration, bool) {
 	if s.dashCache == nil || !s.dashCache.Enabled() {
 		return 0, false

@@ -255,16 +255,17 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 	sourceID, teamID, cfg := q.src.SourceID(), q.src.TeamID(), q.cfg
 	queryID := uuid.New().String()
 	streamCtx, cancel := context.WithCancel(c.Context())
+	maxPerUser, maxGlobal := s.admissionLimits(q.class)
 	if err := queryTracker.StartQueryWithID(
 		queryID,
-		QueryClassPreview,
+		q.class,
 		user.ID,
 		sourceID,
 		teamID,
 		q.trackedQuery,
 		cancel,
-		s.config.Query.MaxConcurrentPerUser,
-		s.config.Query.MaxConcurrentGlobal,
+		maxPerUser,
+		maxGlobal,
 	); err != nil {
 		cancel()
 		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {

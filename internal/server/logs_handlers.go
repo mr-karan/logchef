@@ -51,9 +51,10 @@ const (
 // panels under the interactive preview cap.
 func (s *Server) admissionLimits(class QueryClass) (maxPerUser, maxGlobal int) {
 	if class == QueryClassDashboard {
-		// The cache's fill semaphore already bounds concurrent fills globally,
-		// so admission only has to keep one user from taking the whole budget.
-		return s.config.DashboardCache.MaxConcurrentFills, 0
+		// The per-user cap is the cache's fill budget. Cached fills are also
+		// bounded by the fill semaphore; uncached panel queries (TTL 0, or the
+		// cache turned off) need the global query cap as well.
+		return s.config.DashboardCache.MaxConcurrentFills, s.config.Query.MaxConcurrentGlobal
 	}
 	return s.config.Query.MaxConcurrentPerUser, s.config.Query.MaxConcurrentGlobal
 }
@@ -252,6 +253,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error {
 		historyQuery:    req.QueryText,
 		historyLanguage: models.QueryLanguageClickHouseSQL,
 		historyStart:    params.StartTime,
+		class:           queryClassFor(req.Cache),
 		cacheable:       cacheable,
 		cacheKey:        cacheKey,
 		cacheTTL:        effTTL,
@@ -273,9 +275,11 @@ type previewQuery struct {
 	historyQuery         string
 	historyLanguage      models.QueryLanguage
 	historyStart         *time.Time // the request's start time, nil when it has none
-	cacheable            bool
-	cacheKey             [32]byte
-	cacheTTL             time.Duration
+	// class is QueryClassDashboard for a dashboard panel, cached or not.
+	class     QueryClass
+	cacheable bool
+	cacheKey  [32]byte
+	cacheTTL  time.Duration
 }
 
 // executePreviewQuery serves q from the dashboard cache when it is cacheable,
@@ -322,15 +326,16 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel()
 
+	maxPerUser, maxGlobal := s.admissionLimits(q.class)
 	queryID, err := queryTracker.StartQuery(
-		QueryClassPreview,
+		q.class,
 		user.ID,
 		sourceID,
 		teamID,
 		q.trackedQuery,
 		cancel,
-		s.config.Query.MaxConcurrentPerUser,
-		s.config.Query.MaxConcurrentGlobal,
+		maxPerUser,
+		maxGlobal,
 	)
 	if err != nil {
 		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
