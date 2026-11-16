@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bookmark, Check, ChevronDown } from 'lucide-vue-next'
+import { Bookmark, Check, ChevronDown, TriangleAlert } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -27,6 +27,9 @@ import type { SavedViewScope } from '@/api/savedViews'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useExploreStore } from '@/stores/explore'
+import { useExploreRuns } from '@/stores/exploreRuns'
+import { missingViewColumns } from '@/lib/savedViewLayout'
+import ManageViewsDialog from './ManageViewsDialog.vue'
 import { useSavedViewsStore, type DisplayMode } from '@/stores/savedViews'
 import { useTeamsStore } from '@/stores/teams'
 
@@ -39,6 +42,16 @@ const store = useSavedViewsStore()
 const auth = useAuthStore()
 const teams = useTeamsStore()
 const explore = useExploreStore()
+const runs = useExploreRuns()
+
+// An aggregation has its own columns, so only a result of log rows is compared with a view.
+const resultColumns = computed(() => {
+  const results = runs.results
+  return results && !results.aggregation && results.rows.length > 0 ? results.columns.map(column => column.name) : null
+})
+const missingColumns = computed(() => store.activeView && resultColumns.value ? missingViewColumns(store.activeView.definition, resultColumns.value) : [])
+const missingTitle = computed(() => `${t('explore.viewMissingColumns')}: ${missingColumns.value.join(', ')}`)
+const manageOpen = ref(false)
 
 // A view's filter is LogchefQL, and its range is relative, as the server requires.
 const shownFilter = computed(() => explore.activeMode === 'logchefql' && explore.logchefqlCode.trim() ? explore.logchefqlCode.trim() : null)
@@ -115,6 +128,9 @@ const groupLabel: Record<SavedViewScope, string> = {
         <Bookmark class="h-3.5 w-3.5 shrink-0" />
         <span class="truncate">{{ store.activeView?.name ?? t('explore.noView') }}</span>
         <span v-if="store.isModified" class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" :title="t('explore.viewModified')" data-testid="view-modified" />
+        <span v-if="missingColumns.length" class="shrink-0 text-amber-600 dark:text-amber-400" :title="missingTitle" :aria-label="missingTitle" role="img" data-testid="view-missing-columns">
+          <TriangleAlert class="h-3.5 w-3.5" />
+        </span>
         <ChevronDown class="h-3 w-3 shrink-0 opacity-60" />
       </Button>
     </DropdownMenuTrigger>
@@ -133,8 +149,11 @@ const groupLabel: Record<SavedViewScope, string> = {
       <DropdownMenuItem class="text-xs" @select="openSave">{{ t('explore.saveAsNewView') }}</DropdownMenuItem>
       <DropdownMenuItem v-if="store.activeView?.can_edit && store.isModified" class="text-xs" @select="update">{{ t('explore.updateView') }}</DropdownMenuItem>
       <DropdownMenuItem v-if="store.activeView" class="text-xs" @select="emit('reset')">{{ t('explore.resetToView') }}</DropdownMenuItem>
+      <DropdownMenuItem class="text-xs" @select="manageOpen = true">{{ t('explore.manageViews') }}</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+
+  <ManageViewsDialog v-if="manageOpen" v-model:open="manageOpen" :result-columns="resultColumns" @select="emit('select', $event)" />
 
   <Dialog v-model:open="saveOpen">
     <DialogContent class="sm:max-w-md">

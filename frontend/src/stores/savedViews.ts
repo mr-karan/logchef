@@ -6,6 +6,7 @@ import { isAbortError } from "@/api/error-handler";
 import { useActiveSavedViewStore } from "@/stores/activeSavedView";
 import {
   tableLayoutToDefinition,
+  withoutColumns,
   type SavedViewColumn,
   type SavedViewDefinition,
   type SavedViewLayout,
@@ -253,22 +254,16 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     }
   }
 
-  /** Writes the working copy to the active view. Returns null on failure, which the API client reports. */
-  async function updateActive(): Promise<SavedView | null> {
+  /** Writes a view at the revision it loaded. Returns null on failure, which the API client reports. */
+  async function updateView(view: SavedView, changes: Partial<Pick<SavedView, "name" | "description" | "definition">>): Promise<SavedView | null> {
     const target = scope.value;
-    const view = activeView.value;
-    if (!target || !view) return null;
-    const layout = currentLayout.value;
-    const { columns, sort, display_mode } = view.definition;
-    const definition: SavedViewDefinition = {
-      ...view.definition,
-      ...(columns && layout?.columns ? { columns: layout.columns } : {}),
-      ...(sort && layout?.sort ? { sort: layout.sort } : {}),
-      ...(display_mode !== undefined && workingDisplayMode.value ? { display_mode: workingDisplayMode.value } : {}),
-    };
+    if (!target) return null;
     try {
       const updated = (await savedViewsApi.update(target.teamId, target.sourceId, view.id, {
-        name: view.name, description: view.description, definition, revision: view.revision,
+        name: changes.name ?? view.name,
+        description: changes.description ?? view.description,
+        definition: changes.definition ?? view.definition,
+        revision: view.revision,
       })).data;
       if (!updated || scope.value !== target) return null;
       upsert(updated);
@@ -277,6 +272,76 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
       console.error("error updating saved view", error);
       return null;
     }
+  }
+
+  /** Writes the working copy to the active view. Returns null on failure, which the API client reports. */
+  async function updateActive(): Promise<SavedView | null> {
+    const view = activeView.value;
+    if (!view) return null;
+    const layout = currentLayout.value;
+    const { columns, sort, display_mode } = view.definition;
+    const definition: SavedViewDefinition = {
+      ...view.definition,
+      ...(columns && layout?.columns ? { columns: layout.columns } : {}),
+      ...(sort && layout?.sort ? { sort: layout.sort } : {}),
+      ...(display_mode !== undefined && workingDisplayMode.value ? { display_mode: workingDisplayMode.value } : {}),
+    };
+    return updateView(view, { definition });
+  }
+
+  /** Rewrites a view's columns and sort without the names a result lacks. */
+  function removeMissingColumns(view: SavedView, missing: readonly string[]): Promise<SavedView | null> {
+    return updateView(view, { definition: withoutColumns(view.definition, missing) });
+  }
+
+  /**
+   * Loads the list again for the shown team and source, keeping the active
+   * view. The server picks the default, so a default change or a delete
+   * reads it back. Returns whether the list loaded.
+   */
+  async function refresh(): Promise<boolean> {
+    const target = scope.value;
+    if (!target) return false;
+    try {
+      const list = await load(target.teamId, target.sourceId);
+      if (!list || scope.value !== target) return false;
+      views.value = [...list.views];
+      defaultViewId.value = list.default_view_id;
+      return true;
+    } catch (error) {
+      if (isAbortError(error)) return false;
+      throw error;
+    }
+  }
+
+  /** Deletes a view. Returns whether it was deleted; the API client reports a failure. */
+  async function remove(view: SavedView): Promise<boolean> {
+    const target = scope.value;
+    if (!target) return false;
+    try {
+      await savedViewsApi.remove(target.teamId, target.sourceId, view.id);
+    } catch (error) {
+      console.error("error deleting saved view", error);
+      return false;
+    }
+    if (scope.value !== target) return false;
+    views.value = views.value.filter((v) => v.id !== view.id);
+    await refresh();
+    return scope.value === target;
+  }
+
+  /** Makes a view the default of its scope, or clears its flag. Returns whether it changed. */
+  async function setDefault(view: SavedView, isDefault: boolean): Promise<boolean> {
+    const target = scope.value;
+    if (!target) return false;
+    try {
+      const request = isDefault ? savedViewsApi.setDefault : savedViewsApi.clearDefault;
+      await request(target.teamId, target.sourceId, view.id);
+    } catch (error) {
+      console.error("error changing the default view", error);
+      return false;
+    }
+    return refresh();
   }
 
   /** Discards the working copy of the active view and applies the view again. */
@@ -313,7 +378,12 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     setDisplayMode,
     newDefinition,
     saveAsNew,
+    updateView,
     updateActive,
+    removeMissingColumns,
+    refresh,
+    remove,
+    setDefault,
     resetActive,
   };
 });

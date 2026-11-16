@@ -112,3 +112,26 @@ export function sortingForResult(sorting: SortingState, resultColumnIds: readonl
   if (present.length) return present
   return resultColumnIds.includes(timestampField) ? [{ id: timestampField, desc: true }] : []
 }
+
+/**
+ * The column and sort names of a definition that a result lacks, each once,
+ * columns first. The table skips them for this result; the view keeps them.
+ */
+export function missingViewColumns(definition: SavedViewDefinition, resultColumnIds: readonly string[]): string[] {
+  const present = new Set(resultColumnIds)
+  const names = [...(definition.columns ?? []).map(column => column.name), ...(definition.sort ?? []).map(entry => entry.column)]
+  return [...new Set(names.filter(name => !present.has(name)))]
+}
+
+/** The definition without the named columns in `columns` and `sort`. A part left empty is dropped. */
+export function withoutColumns(definition: SavedViewDefinition, names: readonly string[]): SavedViewDefinition {
+  const removed = new Set(names)
+  const { columns, sort, ...rest } = definition
+  const keptColumns = columns?.filter(column => !removed.has(column.name))
+  const keptSort = sort?.filter(entry => !removed.has(entry.column))
+  return {
+    ...rest,
+    ...(keptColumns?.length ? { columns: keptColumns } : {}),
+    ...(keptSort?.length ? { sort: keptSort } : {}),
+  }
+}
