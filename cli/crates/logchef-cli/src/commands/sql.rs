@@ -39,6 +39,9 @@ const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
   # LogsQL against a VictoriaLogs source
   logchef sql '_time:1h error | stats by (service) count()' -S vl-logs
 
+  # LogQL against a Loki source (the window rides in the request)
+  logchef sql '{service_name=\"payments-api\"} |= \"error\"' --since 1h -S loki-logs
+
   # Stream a large result straight to a file (NDJSON), no memory spike
   logchef sql 'SELECT * FROM logs.app' --since 6h --stream --output jsonl > out.ndjson
 
@@ -51,7 +54,7 @@ const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
     FROM logs.app WHERE {{__time_filter}} AND service = {{service}} GROUP BY t ORDER BY t' \\
     --since 7d --interval 24h --var service=api")]
 pub struct SqlArgs {
-    /// Raw native query to execute. Use SQL for ClickHouse and LogsQL for VictoriaLogs. Use '-' to read from stdin.
+    /// Raw native query to execute. Use SQL for ClickHouse, LogsQL for VictoriaLogs and LogQL for Loki. Use '-' to read from stdin.
     sql: Option<String>,
 
     /// Team ID or name
@@ -291,6 +294,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         .await
         .context("Failed to fetch source")?;
     let is_victorialogs = source.source_type.eq_ignore_ascii_case("victorialogs");
+    let is_loki = source.source_type.eq_ignore_ascii_case("loki");
 
     // Time-range handling differs by engine:
     //   ClickHouse   — splice a `fromUnixTimestamp64Milli(...) BETWEEN` condition into the
@@ -300,11 +304,13 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     //                  VL provider applies as the query's `start`/`end` bounds
     //                  (see internal/victorialogs/querying.go QueryLogs).
     //                  Splicing ClickHouse SQL into LogsQL would be invalid.
+    //   Loki         — like VictoriaLogs, but Loki rejects a query without a
+    //                  range, so the default range applies when none is given.
     //   Time macros  — on either engine the server renders {{__from}},
     //                  {{__to}} and {{__time_filter}} from the request's
     //                  window, so the SQL stays untouched. A macro needs a
     //                  window, so the default range applies when none is given.
-    let (sql, window) = if uses_time_macro(&sql) {
+    let (sql, window) = if uses_time_macro(&sql) || is_loki {
         let default_since = ctx.defaults.since.clone();
         (sql, request_time_window(&args, ctx, Some(&default_since))?)
     } else if is_victorialogs {
@@ -332,6 +338,8 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     if args.show_sql {
         let (label, lang) = if is_victorialogs {
             ("Generated LogsQL", Some("logsql"))
+        } else if is_loki {
+            ("Generated LogQL", Some("logql"))
         } else {
             ("Generated ClickHouse SQL", Some("clickhouse-sql"))
         };
@@ -1219,7 +1227,7 @@ async fn prompt_source_interactive(
 fn prompt_sql_interactive() -> Result<String> {
     let sql = Text::new("Raw query:")
         .with_help_message(
-            "Enter a source-native query (SQL for ClickHouse, LogsQL for VictoriaLogs)",
+            "Enter a source-native query (SQL for ClickHouse, LogsQL for VictoriaLogs, LogQL for Loki)",
         )
         .prompt()
         .context("Failed to read raw query")?;

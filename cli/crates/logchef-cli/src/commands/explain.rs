@@ -13,7 +13,7 @@ use crate::ui;
 
 #[derive(Args)]
 #[command(after_help = "EXAMPLES:
-  # See the ClickHouse SQL / LogsQL a LogchefQL filter compiles to
+  # See the ClickHouse SQL / LogsQL / LogQL a LogchefQL filter compiles to
   logchef explain 'level=\"error\" and service=\"api\"' -t platform -S app-logs
 
   # Validate a filter's syntax in a script (exit stays 0; check the JSON)
@@ -76,7 +76,7 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
 
     // Translate without a time range: this reports the engine-agnostic
     // translation (filter conditions for ClickHouse, native LogsQL for
-    // VictoriaLogs) without executing anything.
+    // VictoriaLogs, LogQL for Loki) without executing anything.
     let mut request = TranslateRequest {
         variables: Vec::new(),
         query: args.query.clone(),

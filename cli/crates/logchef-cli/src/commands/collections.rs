@@ -295,6 +295,7 @@ fn collection_query_label(collection: &Collection) -> &str {
     match collection.query_language.as_str() {
         "logchefql" => "logchefql",
         "logsql" => "logsql",
+        "logql" => "logql",
         _ => "sql",
     }
 }

@@ -321,6 +321,7 @@ impl TranslateResponse {
     pub fn language_label(&self) -> &'static str {
         match self.generated_query_language.as_deref() {
             Some("logsql") => "LogsQL",
+            Some("logql") => "LogQL",
             Some("clickhouse-sql") => "ClickHouse SQL",
             _ => "query",
         }
@@ -504,7 +505,7 @@ pub type LogEntry = HashMap<String, serde_json::Value>;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct QueryStats {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "whole_millis")]
     pub execution_time_ms: i64,
     #[serde(default)]
     pub rows_read: i64,
@@ -711,6 +712,13 @@ impl CollectionQueryContent {
             })
             .collect()
     }
+}
+
+/// The server sends `execution_time_ms` as a JSON number that can carry a
+/// fraction (Loki reports sub-millisecond durations). The CLI shows whole
+/// milliseconds, so it rounds rather than rejecting the response.
+fn whole_millis<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+    Ok(f64::deserialize(deserializer)?.round() as i64)
 }
 
 #[cfg(test)]
