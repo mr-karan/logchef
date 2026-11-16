@@ -55,6 +55,8 @@ var auditExemptRoutes = []auditExemption{
 	{http.MethodPost, oauth.RevokePath, "internal/oauth records oauth_grant.revoke for this route"},
 	{http.MethodPost, MCPPath, "every MCP tool reads"},
 	{http.MethodDelete, MCPPath, "answers 405, the endpoint is stateless"},
+	{http.MethodPost, "/api/v1/reports/:reportID/run", "a report run stays in the run history of RFC 0008"},
+	{http.MethodPost, "/api/v1/reports/:reportID/preview", "runs the report's queries, stores nothing but the cooldown"},
 }
 
 // auditDecisionProblems names each mutating route that has neither a

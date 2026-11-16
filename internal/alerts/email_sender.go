@@ -24,10 +24,35 @@ const (
 )
 
 var (
-	errSMTPNotConfigured = errors.New("smtp is not configured")
+	// ErrSMTPNotConfigured means the SMTP host, port or from address is not set.
+	ErrSMTPNotConfigured = errors.New("smtp is not configured")
 	errSMTPTLS           = errors.New("smtp TLS failed")
 	errSMTPAuth          = errors.New("smtp authentication failed")
 )
+
+// SendClass says what a failed send means for a retry.
+type SendClass string
+
+const (
+	// SendTransient failed before the end of DATA, or got a 4xx reply. A
+	// retry cannot deliver a second copy.
+	SendTransient SendClass = "transient"
+	// SendPermanent got a 5xx reply or an authentication failure, or SMTP is
+	// not configured. A retry fails the same way.
+	SendPermanent SendClass = "permanent"
+	// SendUnknown lost the connection after the end of DATA was written and
+	// before the reply: the server may have accepted the message.
+	SendUnknown SendClass = "unknown"
+)
+
+// SendError is a failed SendMessage. Err is sanitized and safe to store.
+type SendError struct {
+	Class SendClass
+	Err   error
+}
+
+func (e *SendError) Error() string { return string(e.Class) + ": " + e.Err.Error() }
+func (e *SendError) Unwrap() error { return e.Err }
 
 type EmailSenderOptions struct {
 	Host          string
@@ -114,7 +139,7 @@ func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) 
 		}
 		var err error
 		if s.host == "" || s.port == 0 || s.from == "" {
-			err = errSMTPNotConfigured
+			err = ErrSMTPNotConfigured
 		} else {
 			err = s.sendEmail(ctx, recipient, s.buildMessage(notification, recipient))
 		}
@@ -190,6 +215,55 @@ func (s *EmailSender) buildBody(notification AlertNotification) string {
 		lines = append(lines, fmt.Sprintf("View: %s", notification.GeneratorURL))
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// SendMessage sends a prepared MIME message to one address and classifies a
+// failure. A 250 reply to the end of DATA is a delivery, whatever QUIT then
+// returns, so a caller that retries on SendTransient never sends a second
+// copy.
+func (s *EmailSender) SendMessage(ctx context.Context, to string, message []byte) error {
+	if s.host == "" || s.port == 0 || s.from == "" {
+		return &SendError{Class: SendPermanent, Err: ErrSMTPNotConfigured}
+	}
+	client, err := s.connect(ctx)
+	if err != nil {
+		return classifyBeforeDataEnd(err)
+	}
+	defer client.Close()
+	if err := client.Mail(s.from); err != nil {
+		return classifyBeforeDataEnd(err)
+	}
+	if err := client.Rcpt(to); err != nil {
+		return classifyBeforeDataEnd(err)
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return classifyBeforeDataEnd(err)
+	}
+	// On a failed write the end of DATA is never sent, so the server drops
+	// the partial message when the connection closes.
+	if _, err := writer.Write(message); err != nil {
+		return classifyBeforeDataEnd(err)
+	}
+	if err := writer.Close(); err != nil {
+		if _, ok := errors.AsType[*textproto.Error](err); ok {
+			return classifyBeforeDataEnd(err)
+		}
+		return &SendError{Class: SendUnknown, Err: sanitizeSMTPError(err)}
+	}
+	_ = client.Quit()
+	return nil
+}
+
+func classifyBeforeDataEnd(err error) error {
+	class := SendTransient
+	if reply, ok := errors.AsType[*textproto.Error](err); ok && reply.Code >= 500 {
+		class = SendPermanent
+	}
+	if errors.Is(err, errSMTPAuth) {
+		class = SendPermanent
+	}
+	return &SendError{Class: class, Err: sanitizeSMTPError(err)}
 }
 
 func (s *EmailSender) sendEmail(ctx context.Context, recipient string, message []byte) error {
@@ -295,8 +369,8 @@ func uniqueEmails(emails []string) []string {
 }
 
 func sanitizeSMTPError(err error) error {
-	if errors.Is(err, errSMTPNotConfigured) {
-		return errSMTPNotConfigured
+	if errors.Is(err, ErrSMTPNotConfigured) {
+		return ErrSMTPNotConfigured
 	}
 	if errors.Is(err, context.Canceled) {
 		return errors.New("smtp request canceled")

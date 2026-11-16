@@ -238,6 +238,16 @@ retention_days = 365
 max_rows = 1000000
 log_events = true
 
+[reports]
+# Scheduled reports email a saved query on demand or on a schedule. When
+# disabled, the report routes answer 503.
+enabled = true
+# Time one run may spend on its queries, from 1m to 30m. The run must finish
+# delivery within 5 minutes after it.
+query_budget = "5m"
+# Runs this replica executes at once. Later runs wait.
+max_concurrent_runs = 2
+
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access
 # -----------------------------------------------------------------------------

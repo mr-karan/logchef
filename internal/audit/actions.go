@@ -88,6 +88,13 @@ const (
 	SavedViewDelete       Action = "saved_view.delete"
 	SavedViewSetDefault   Action = "saved_view.set_default"
 	SavedViewClearDefault Action = "saved_view.clear_default"
+
+	ReportCreate Action = "report.create"
+	ReportUpdate Action = "report.update"
+	ReportDelete Action = "report.delete"
+	ReportPause  Action = "report.pause"
+	ReportResume Action = "report.resume"
+	ReportClaim  Action = "report.claim"
 )
 
 // Spec is the registration of one action.
@@ -129,6 +136,8 @@ var registrations = []struct {
 	{TeamSourceLink, false}, {TeamSourceUnlink, false},
 	{UserCreate, false}, {UserUpdate, false}, {UserDelete, false},
 	{SavedViewCreate, true}, {SavedViewUpdate, true}, {SavedViewDelete, true}, {SavedViewSetDefault, true}, {SavedViewClearDefault, true},
+	{ReportCreate, true}, {ReportUpdate, true}, {ReportDelete, false},
+	{ReportPause, false}, {ReportResume, false}, {ReportClaim, false},
 }
 
 // verbs is the closed list of verbs an action may use.
@@ -136,6 +145,7 @@ var verbs = []string{
 	"create", "update", "delete", "add", "remove", "link", "unlink", "approve",
 	"deny", "revoke", "resolve", "test", "login", "logout", "download", "export",
 	"set_default", "clear_default",
+	"pause", "resume", "claim",
 }
 
 var resourcePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)

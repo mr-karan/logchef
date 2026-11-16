@@ -11,6 +11,39 @@ import (
 // One view per audited object, sorted by object. A view names every field it
 // records and marks every credential with Secret.
 
+// ReportFields records a report's configuration: its source by kind and ID,
+// its schedule and its options. Variables are recorded by name only, because
+// a value can be a literal from a query.
+func ReportFields(r *models.Report) *Fields {
+	names := make([]string, 0, len(r.Variables))
+	for name := range r.Variables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	weekdays := make([]string, len(r.Schedule.Weekdays))
+	for i, d := range r.Schedule.Weekdays {
+		weekdays[i] = strconv.Itoa(d)
+	}
+	return NewFields().
+		Set("name", r.Name).
+		Set("source_kind", r.SourceKind).
+		Set("dashboard_id", r.DashboardID).
+		Set("tab_id", r.TabID).
+		Set("saved_query_id", r.SavedQueryID).
+		Set("schedule.frequency", r.Schedule.Frequency).
+		Set("schedule.minute", r.Schedule.Minute).
+		Set("schedule.hour", r.Schedule.Hour).
+		Set("schedule.weekdays", weekdays).
+		Set("schedule.day_of_month", r.Schedule.DayOfMonth).
+		Set("timezone", r.Timezone).
+		Set("time_range", r.TimeRange).
+		Set("range_anchor", r.RangeAnchor).
+		Set("variable_names", names).
+		Set("max_rows", r.MaxRows).
+		Set("skip_if_empty", r.SkipIfEmpty).
+		Set("attach_csv", r.AttachCSV)
+}
+
 // SettingFields records a system setting. The value is a secret when the
 // setting is sensitive or its key names a credential.
 func SettingFields(s *models.SystemSetting) *Fields {

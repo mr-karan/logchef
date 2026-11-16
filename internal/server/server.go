@@ -20,6 +20,7 @@ import (
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/internal/oauth"
@@ -83,6 +84,7 @@ type Server struct {
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
 	askChefTurns  askChefTurns
 	audit         *audit.Recorder
+	reports       *core.ReportRunner
 
 	localLoginLimiter *auth.LoginRateLimiter
 
@@ -239,6 +241,7 @@ func New(opts ServerOptions) *Server {
 	// first and still records its failure.
 	app.Use(s.auditMiddleware)
 	s.askChef = s.newAskChef(opts.AskChefChat)
+	s.reports = s.newReportRunner(opts)
 
 	s.reapInterruptedExportJobs(s.exportOwner)
 	s.setupRoutes()
@@ -552,6 +555,21 @@ func (s *Server) setupRoutes() {
 	dashboardRoutes.Get("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleGetDashboard)
 	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard).Name(string(audit.DashboardUpdate))
 	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard).Name(string(audit.DashboardDelete))
+
+	// Scheduled reports (RFC 0008). A report runs as its owner; who may see
+	// and change one is decided in core.
+	reportRoutes := api.Group("/reports", s.requireAuth, s.requireReportsEnabled)
+	reportRoutes.Get("/", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReports)
+	reportRoutes.Post("/", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleCreateReport).Name(string(audit.ReportCreate))
+	reportRoutes.Get("/:reportID", s.requireTokenScope(models.TokenScopeReportsRead), s.handleGetReport)
+	reportRoutes.Put("/:reportID", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleUpdateReport).Name(string(audit.ReportUpdate))
+	reportRoutes.Delete("/:reportID", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleDeleteReport).Name(string(audit.ReportDelete))
+	reportRoutes.Post("/:reportID/pause", s.requireTokenScope(models.TokenScopeReportsWrite), s.handlePauseReport).Name(string(audit.ReportPause))
+	reportRoutes.Post("/:reportID/resume", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleResumeReport).Name(string(audit.ReportResume))
+	reportRoutes.Post("/:reportID/claim", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleClaimReport).Name(string(audit.ReportClaim))
+	reportRoutes.Post("/:reportID/run", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleRunReport)
+	registerLimited(reportRoutes, fiber.MethodPost, "/:reportID/preview", queryLimiter, s.requireTokenScope(models.TokenScopeReportsRead), s.requireTokenScope(models.TokenScopeLogsRead), s.handlePreviewReport)
+	reportRoutes.Get("/:reportID/runs", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReportRuns)
 
 	// --- OAuth authorization server (only when auth.oauth.enabled) ---
 	if s.oauth != nil {

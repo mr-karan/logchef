@@ -833,3 +833,21 @@ func TestLoad_AuditDefaultsAndBounds(t *testing.T) {
 		t.Errorf("negative audit bounds = %+v, want the defaults", got)
 	}
 }
+
+func TestLoad_ReportsQueryBudgetBounds(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Reports.Enabled || cfg.Reports.QueryBudget != 5*time.Minute {
+		t.Errorf("reports = %+v, want enabled with a 5m budget", cfg.Reports)
+	}
+	for _, budget := range []string{"31m", "59s"} {
+		if _, err := Load(writeConfig(t, "\n[reports]\nquery_budget = \""+budget+"\"\n")); err == nil || !strings.Contains(err.Error(), "reports.query_budget") {
+			t.Errorf("query_budget %s: err = %v, want a reports.query_budget error", budget, err)
+		}
+	}
+	if _, err := Load(writeConfig(t, "\n[reports]\nquery_budget = \"30m\"\n")); err != nil {
+		t.Errorf("query_budget 30m: %v", err)
+	}
+}

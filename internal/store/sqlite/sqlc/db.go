@@ -414,6 +414,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listInterruptedExportJobsStmt, err = db.PrepareContext(ctx, listInterruptedExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query ListInterruptedExportJobs: %w", err)
 	}
+	if q.listLatestReportRunsStmt, err = db.PrepareContext(ctx, listLatestReportRuns); err != nil {
+		return nil, fmt.Errorf("error preparing query ListLatestReportRuns: %w", err)
+	}
 	if q.listManagedSavedViewsStmt, err = db.PrepareContext(ctx, listManagedSavedViews); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedSavedViews: %w", err)
 	}
@@ -1357,6 +1360,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listInterruptedExportJobsStmt: %w", cerr)
 		}
 	}
+	if q.listLatestReportRunsStmt != nil {
+		if cerr := q.listLatestReportRunsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listLatestReportRunsStmt: %w", cerr)
+		}
+	}
 	if q.listManagedSavedViewsStmt != nil {
 		if cerr := q.listManagedSavedViewsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedSavedViewsStmt: %w", cerr)
@@ -2006,6 +2014,7 @@ type Queries struct {
 	listDashboardSummariesStmt            *sql.Stmt
 	listExpiredExportJobPathsStmt         *sql.Stmt
 	listInterruptedExportJobsStmt         *sql.Stmt
+	listLatestReportRunsStmt              *sql.Stmt
 	listManagedSavedViewsStmt             *sql.Stmt
 	listManagedSourcesStmt                *sql.Stmt
 	listManagedTeamsStmt                  *sql.Stmt
@@ -2238,6 +2247,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listDashboardSummariesStmt:            q.listDashboardSummariesStmt,
 		listExpiredExportJobPathsStmt:         q.listExpiredExportJobPathsStmt,
 		listInterruptedExportJobsStmt:         q.listInterruptedExportJobsStmt,
+		listLatestReportRunsStmt:              q.listLatestReportRunsStmt,
 		listManagedSavedViewsStmt:             q.listManagedSavedViewsStmt,
 		listManagedSourcesStmt:                q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                  q.listManagedTeamsStmt,

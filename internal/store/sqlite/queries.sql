@@ -1790,13 +1790,16 @@ WHERE id = sqlc.arg(id);
 
 -- name: ClaimReport :execrows
 -- A claim lends the new owner's access, so a pause for an inactive owner
--- no longer applies.
+-- no longer applies. Only a report with no owner, or one paused because its
+-- owner is inactive, can be claimed; the condition sits in the update so
+-- two claims at once cannot both win.
 UPDATE reports
 SET owner_id = sqlc.arg(owner_id),
     state = CASE WHEN pause_reason = 'owner_inactive' THEN 'active' ELSE state END,
     pause_reason = CASE WHEN pause_reason = 'owner_inactive' THEN '' ELSE pause_reason END,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id)
+  AND (owner_id IS NULL OR pause_reason = 'owner_inactive');
 
 -- name: TakeReportManualRunCooldown :execrows
 UPDATE reports
@@ -1902,6 +1905,12 @@ WHERE report_id = sqlc.arg(report_id)
   AND (CAST(sqlc.arg(before) AS INTEGER) = 0 OR id < CAST(sqlc.arg(before) AS INTEGER))
 ORDER BY id DESC
 LIMIT sqlc.arg(max_runs);
+
+-- name: ListLatestReportRuns :many
+-- The newest run of every report, for the report list.
+SELECT * FROM report_runs
+WHERE id IN (SELECT MAX(latest.id) FROM report_runs latest GROUP BY latest.report_id)
+ORDER BY report_id;
 
 -- name: InterruptStaleReportRuns :execrows
 UPDATE report_runs

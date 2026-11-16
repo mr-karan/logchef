@@ -152,6 +152,8 @@ var (
 	ErrReportTickTaken = fmt.Errorf("%w: report tick already claimed", ErrConflict)
 	// ErrReportRunInFlight means another run of this report is running.
 	ErrReportRunInFlight = fmt.Errorf("%w: a run of this report is in flight", ErrConflict)
+	// ErrReportOwned means a claim found the report with an active owner.
+	ErrReportOwned = fmt.Errorf("%w: the report has an active owner", ErrConflict)
 )
 
 type ReportFrequency string

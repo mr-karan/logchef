@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -440,5 +441,35 @@ func TestSettingsSecretDestinationsRequireSession(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A run history can quote query text in its panel errors, so only the
+// report owner and global admins read it (RFC 0008).
+func TestReportRunErrorsStayWithOwnerAndAdmins(t *testing.T) {
+	e := newReportRouteEnv(t, true)
+	id := e.create("Daily 5xx")
+	ctx := context.Background()
+	run, err := e.db.CreateReportRun(ctx, models.ReportRunClaim{ReportID: models.ReportID(id), Trigger: models.ReportTriggerManual, ScheduledFor: time.Now().UTC(), ActorID: &e.owner.ID, HandlerBudget: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const quoted = "Unknown column secret_column in SELECT secret_column FROM logs"
+	if _, err := e.db.FinishReportRun(ctx, run.ID, models.ReportRunResult{
+		Status: models.ReportRunFailed, Reason: models.ReportReasonAllPanelsFailed,
+		Panels: []models.ReportPanelOutcome{{PanelID: "query", Status: models.ReportPanelFailed, Error: quoted}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/reports/%d/runs", id)
+	for _, c := range []struct {
+		user   *models.User
+		status int
+		quoted bool
+	}{{e.owner, http.StatusOK, true}, {e.admin, http.StatusOK, true}, {e.other, http.StatusNotFound, false}} {
+		got := e.do(c.user, "", http.MethodGet, path, "")
+		if got.status != c.status || strings.Contains(got.body, quoted) != c.quoted {
+			t.Errorf("%s: status %d, quoted %v; want %d, %v", c.user.Email, got.status, strings.Contains(got.body, quoted), c.status, c.quoted)
+		}
 	}
 }

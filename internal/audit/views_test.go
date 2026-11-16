@@ -81,6 +81,12 @@ var viewCases = []viewCase{
 			c.Auth.Password, c.Auth.Token,
 			tag+"-user", tag+"-pass", tag+"-path", tag+"-query", tag+"-literal")
 	}},
+	{"report", func(tag string) (*audit.Fields, []string) {
+		var r models.Report
+		fillStrings(reflect.ValueOf(&r), tag, "Report")
+		r.Variables = map[string]any{"service": tag + "-variable-value"}
+		return audit.ReportFields(&r), []string{tag + "-variable-value"}
+	}},
 	{"sensitive setting", func(tag string) (*audit.Fields, []string) {
 		var s models.SystemSetting
 		fillStrings(reflect.ValueOf(&s), tag, "Setting")

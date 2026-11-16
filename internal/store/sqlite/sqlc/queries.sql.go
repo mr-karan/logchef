@@ -325,6 +325,7 @@ SET owner_id = ?1,
     pause_reason = CASE WHEN pause_reason = 'owner_inactive' THEN '' ELSE pause_reason END,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?2
+  AND (owner_id IS NULL OR pause_reason = 'owner_inactive')
 `
 
 type ClaimReportParams struct {
@@ -333,7 +334,9 @@ type ClaimReportParams struct {
 }
 
 // A claim lends the new owner's access, so a pause for an inactive owner
-// no longer applies.
+// no longer applies. Only a report with no owner, or one paused because its
+// owner is inactive, can be claimed; the condition sits in the update so
+// two claims at once cannot both win.
 func (q *Queries) ClaimReport(ctx context.Context, arg ClaimReportParams) (int64, error) {
 	result, err := q.exec(ctx, q.claimReportStmt, claimReport, arg.OwnerID, arg.ID)
 	if err != nil {
@@ -4218,6 +4221,51 @@ func (q *Queries) ListInterruptedExportJobs(ctx context.Context, arg ListInterru
 	for rows.Next() {
 		var i ListInterruptedExportJobsRow
 		if err := rows.Scan(&i.ID, &i.FilePath, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatestReportRuns = `-- name: ListLatestReportRuns :many
+SELECT id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at FROM report_runs
+WHERE id IN (SELECT MAX(latest.id) FROM report_runs latest GROUP BY latest.report_id)
+ORDER BY report_id
+`
+
+// The newest run of every report, for the report list.
+func (q *Queries) ListLatestReportRuns(ctx context.Context) ([]ReportRun, error) {
+	rows, err := q.query(ctx, q.listLatestReportRunsStmt, listLatestReportRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRun{}
+	for rows.Next() {
+		var i ReportRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Trigger,
+			&i.ScheduledFor,
+			&i.ActorID,
+			&i.Status,
+			&i.Reason,
+			&i.WindowStart,
+			&i.WindowEnd,
+			&i.PanelsJson,
+			&i.DeliveriesJson,
+			&i.StartedAt,
+			&i.DeadlineAt,
+			&i.FinishedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

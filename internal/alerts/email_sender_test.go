@@ -98,7 +98,7 @@ func TestSMTPErrorCategories(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"not configured", errSMTPNotConfigured, "smtp is not configured"},
+		{"not configured", ErrSMTPNotConfigured, "smtp is not configured"},
 		{"refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "smtp connection refused"},
 		{"DNS", &net.DNSError{Name: "private.invalid", Err: "private lookup details"}, "smtp DNS lookup failed"},
 		{"TLS", &tls.CertificateVerificationError{Err: errors.New("private certificate details")}, "smtp TLS failed"},

@@ -1,5 +1,6 @@
 // Package reports turns a report's source into an email: the time window,
-// the rendered panels and the MIME message. It holds no HTTP or SMTP code.
+// the rendered panels, the MIME message, and the run's phases and delivery.
+// It holds no HTTP code, and it sends mail only through a Mailer.
 package reports
 
 import (
