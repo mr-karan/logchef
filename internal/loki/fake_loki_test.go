@@ -33,7 +33,8 @@ type rangeCall struct {
 }
 
 // fakeLoki serves query_range over a fixed set of entries with Loki's log
-// semantics: [start, end), newest first, at most limit entries. At a tie it
+// semantics: [start, end), newest first (oldest first for direction=forward),
+// at most limit entries. At a tie it
 // returns the entries in the reverse of Logchef's order, so a pager that
 // assumed one order at a boundary loses entries.
 type fakeLoki struct {
@@ -85,9 +86,10 @@ func (f *fakeLoki) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			selected = append(selected, e)
 		}
 	}
+	forward := call.direction == "forward"
 	slices.SortFunc(selected, func(a, b fakeEntry) int {
 		if a.ts != b.ts {
-			if a.ts > b.ts {
+			if (a.ts > b.ts) != forward {
 				return -1
 			}
 			return 1

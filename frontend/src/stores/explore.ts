@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
-import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
+import { exploreApi, buildTailUrl, subscribeToTail, type TailQueryLanguage } from "@/api/explore";
 import type {
   QuerySharePayload,
   QueryShareResponse,
@@ -188,8 +188,8 @@ export const useExploreStore = defineStore("explore", () => {
     ? "logchefql" : getCurrentSource() ? getNativeQueryLanguageForSource(getCurrentSource()) : null);
 
   // Live tail: the current source must advertise the capability, and the tail
-  // endpoint only accepts LogchefQL (either backend) or native logsql
-  // (VictoriaLogs). Native clickhouse-sql is rejected 400 server-side, so the
+  // endpoint accepts LogchefQL or a native language other than ClickHouse SQL
+  // (LogsQL, LogQL). Native clickhouse-sql is rejected 400 server-side, so the
   // toggle stays disabled there.
   const supportsLiveTail = computed(() => hasSourceCapability(getCurrentSource(), "live_tail"));
   // Live tail streams log rows, so an aggregation cannot run there.
@@ -197,7 +197,7 @@ export const useExploreStore = defineStore("explore", () => {
   const canArmLiveTail = computed(() => {
     if (!supportsLiveTail.value || !hasValidSource.value || liveTailNeedsLogRows.value) return false;
     if (state.data.value.activeMode === "logchefql") return true;
-    return getNativeQueryLanguageForSource(getCurrentSource()) === "logsql";
+    return getNativeQueryLanguageForSource(getCurrentSource()) !== "clickhouse-sql";
   });
 
   const variableStore = useVariableStore();
@@ -689,15 +689,17 @@ export const useExploreStore = defineStore("explore", () => {
     const sid = sourceId.value;
     if (!currentTeamId || !sid) return;
 
-    let queryLanguage: "logchefql" | "logsql";
+    let queryLanguage: TailQueryLanguage;
     let queryText: string;
+    const nativeLanguage = getNativeQueryLanguageForSource(source);
     if (state.data.value.activeMode === "logchefql") {
       queryLanguage = "logchefql";
       queryText = state.data.value.logchefqlCode || "";
-    } else {
-      // canArmLiveTail already guaranteed native === logsql here.
-      queryLanguage = "logsql";
+    } else if (nativeLanguage !== "clickhouse-sql") {
+      queryLanguage = nativeLanguage;
       queryText = state.data.value.nativeQuery || "";
+    } else {
+      return;
     }
 
     // Abort any prior stream and reset the buffer for a fresh session.

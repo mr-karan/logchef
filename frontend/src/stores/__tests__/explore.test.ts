@@ -113,6 +113,7 @@ vi.mock("@/api/windowed", async (importOriginal) => ({
   streamWindowedQuery: mocks.windowedStream,
 }));
 
+import { buildTailUrl } from "@/api/explore";
 import { useExploreStore, type OpenedLocation, type ViewQueryDefaults } from "../explore";
 import { useExploreRuns } from "../exploreRuns";
 import { useAskChefStore } from "../askChef";
@@ -1014,6 +1015,26 @@ describe("explore store", () => {
       store.setLogchefqlCode("level=error | count() by service");
       expect(store.canArmLiveTail).toBe(false);
       expect(store.liveTailNeedsLogRows).toBe(true);
+    });
+
+    it.each([
+      { sourceType: "loki", language: "logql" },
+      { sourceType: "victorialogs", language: "logsql" },
+    ] as const)("tails native $sourceType queries as $language", ({ sourceType, language }) => {
+      const { store } = exploreSource(makeSource({ id: 4, source_type: sourceType, capabilities: ["live_tail"] }));
+      store.setActiveMode("native");
+      store.setNativeQuery('{service_name="api"}');
+      expect(store.canArmLiveTail).toBe(true);
+      store.startLiveTail();
+      expect(vi.mocked(buildTailUrl)).toHaveBeenLastCalledWith(1, 4, '{service_name="api"}', language);
+      store.stopLiveTail();
+    });
+
+    it("does not tail native ClickHouse SQL", () => {
+      const { store } = exploreSource(makeSource({ id: 1, source_type: "clickhouse", capabilities: ["live_tail"] }));
+      store.setActiveMode("native");
+      store.setNativeQuery("SELECT 1");
+      expect(store.canArmLiveTail).toBe(false);
     });
   });
 });

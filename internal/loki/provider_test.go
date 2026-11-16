@@ -17,7 +17,7 @@ import (
 
 func TestDescribeListsOnlyWorkingCapabilities(t *testing.T) {
 	d := testProvider().Describe()
-	want := []datasource.Capability{datasource.CapabilitySchemaInspection, datasource.CapabilityHistogram, datasource.CapabilityFieldValues, datasource.CapabilitySourceInspection, datasource.CapabilityLogContext}
+	want := []datasource.Capability{datasource.CapabilitySchemaInspection, datasource.CapabilityHistogram, datasource.CapabilityFieldValues, datasource.CapabilitySourceInspection, datasource.CapabilityLiveTail, datasource.CapabilityLogContext}
 	if !slices.Equal(d.Capabilities, want) {
 		t.Fatalf("capabilities %v", d.Capabilities)
 	}
