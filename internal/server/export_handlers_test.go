@@ -15,6 +15,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -189,8 +190,9 @@ func TestExportQueriesClickHouse(t *testing.T) {
 				if operation == "job" {
 					handler = s.handleCreateExportJob
 				}
+				s.audit = testAuditRecorder(t, s.store)
 				app := fiber.New()
-				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
+				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler).Name(string(audit.LogExportCreate))
 				req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID),
 					strings.NewReader(tc.body))
 				req.Header.Set("Content-Type", "application/json")

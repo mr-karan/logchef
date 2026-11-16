@@ -71,6 +71,11 @@ var viewCases = []viewCase{
 		fillStrings(reflect.ValueOf(&g), tag, "Grant")
 		return audit.OAuthGrantFields(&g, "api"), nil
 	}},
+	{"log export", func(tag string) (*audit.Fields, []string) {
+		literal := tag + "-literal"
+		query := `SELECT * FROM logs WHERE session_id = '` + literal + `'`
+		return audit.LogExportFields(models.QueryLanguageClickHouseSQL, tag+":format;", 100, query), []string{literal}
+	}},
 	{"clickhouse source", func(tag string) (*audit.Fields, []string) {
 		var s models.Source
 		fillStrings(reflect.ValueOf(&s), tag, "Source")

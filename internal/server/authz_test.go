@@ -357,8 +357,8 @@ func authorizeTestSource(t *testing.T, db store.Store, sourceID models.SourceID)
 
 // withAuthorizedSource mounts POST h behind requireTeamHasSource, with a session
 // for user standing in for requireAuth.
-func withAuthorizedSource(app *fiber.App, s *Server, path string, user *models.User, h fiber.Handler) {
-	app.Post(path, func(c fiber.Ctx) error {
+func withAuthorizedSource(app *fiber.App, s *Server, path string, user *models.User, h fiber.Handler) fiber.Router {
+	return app.Post(path, func(c fiber.Ctx) error {
 		c.Locals("user", user)
 		c.Locals("auth_method", "session")
 		return c.Next()

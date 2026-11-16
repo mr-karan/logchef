@@ -20,6 +20,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -330,7 +331,7 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	app := fiber.New()
 	app.Use(requestContext(context.Background()))
 	path := fmt.Sprintf("/teams/%d/sources/%d/exports", team.ID, source.ID)
-	withAuthorizedSource(app, srv, "/teams/:teamID/sources/:sourceID/exports", user, srv.handleCreateExportJob)
+	withAuthorizedSource(app, srv, "/teams/:teamID/sources/:sourceID/exports", user, srv.handleCreateExportJob).Name(string(audit.LogExportCreate))
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"raw_sql":"SELECT number, sleepEachRow(0.00001) FROM system.numbers LIMIT 10000000","format":"csv","limit":10000000,"query_timeout":60}`))
 	req.Header.Set("Content-Type", "application/json")
 	response := testRequest(t, app, req)

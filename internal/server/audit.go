@@ -246,15 +246,38 @@ func (s *Server) recordRouteEvent(c fiber.Ctx, status int) {
 // must call Publish after the transaction commits, and then
 // markAuditRecorded.
 func (s *Server) addRouteEvent(ctx context.Context, c fiber.Ctx, b *audit.Batch, status int) error {
+	ev, err := s.stagedRouteEvent(c, status)
+	if err != nil {
+		return err
+	}
+	return b.Add(ctx, ev)
+}
+
+// recordRouteEventOrFail stores the route's event before the action it
+// describes runs, for an action that must not happen without a stored event.
+// On success the middleware records nothing more.
+func (s *Server) recordRouteEventOrFail(c fiber.Ctx, status int) error {
+	ev, err := s.stagedRouteEvent(c, status)
+	if err != nil {
+		return err
+	}
+	if err := s.audit.RecordOrFail(c.Context(), ev); err != nil {
+		return err
+	}
+	markAuditRecorded(c)
+	return nil
+}
+
+func (s *Server) stagedRouteEvent(c fiber.Ctx, status int) (audit.Event, error) {
 	st := stagedAudit(c)
 	if st == nil {
 		st = &auditStage{}
 	}
 	ev, ok := s.routeEvent(c, st, status)
 	if !ok {
-		return errors.New("audit: route " + c.Route().Name + " has no event for status " + strconv.Itoa(status))
+		return audit.Event{}, errors.New("audit: route " + c.Route().Name + " has no event for status " + strconv.Itoa(status))
 	}
-	return b.Add(ctx, ev)
+	return ev, nil
 }
 
 // markAuditRecorded tells the middleware that the handler stored the event.

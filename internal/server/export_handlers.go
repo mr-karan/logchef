@@ -78,14 +78,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source connection", models.DatabaseErrorType)
 	}
 
-	exportLimit := req.Limit
-	if exportLimit <= 0 {
-		exportLimit = s.config.Export.MaxRows
-	}
-	if exportLimit > s.config.Export.MaxRows {
-		exportLimit = s.config.Export.MaxRows
-	}
-
+	exportLimit := s.exportRowLimit(req.Limit)
 	qb := client.QueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
 	if err != nil {
@@ -110,6 +103,19 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
+	}
+
+	// No log data leaves the server without a stored event, so the event is
+	// stored before the query runs and a failed insert stops the export.
+	target := audit.ExportSourceTarget(teamID, sourceID)
+	auditSet(c, target, nil, audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, exportLimit, req.RawSQL))
+	if err := s.recordRouteEventOrFail(c, fiber.StatusOK); err != nil {
+		cancel()
+		queryTracker.RemoveQuery(queryID)
+		clearAuditFields(c)
+		auditTarget(c, target)
+		s.log.Error("export not started: audit event not stored", "error", err, "source_id", sourceID, "user_id", user.ID)
+		return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: the export did not start")
 	}
 
 	opts := buildResult.QueryOptions(*req.QueryTimeout)
@@ -239,6 +245,15 @@ func isExportFormatAllowed(format string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// exportRowLimit is the row limit an export runs with: the requested limit,
+// capped at export.max_rows, which also applies when none is requested.
+func (s *Server) exportRowLimit(requested int) int {
+	if requested <= 0 || requested > s.config.Export.MaxRows {
+		return s.config.Export.MaxRows
+	}
+	return requested
 }
 
 func exportContentType(format string) (contentType, extension string) {
