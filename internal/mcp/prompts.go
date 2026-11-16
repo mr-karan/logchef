@@ -53,8 +53,9 @@ func handleInvestigateErrorSpike(ctx context.Context, request mcp.GetPromptReque
 
 1. **Discover Schema**: Use the get_source_schema tool (team_id=%s, source_id=%s) to understand available columns and their types.
 
-2. **Assess Error Volume**: Use query_logchefql to count errors over the time range. Start broad:
-   - Query: severity_text=ERROR
+2. **Assess Error Volume**: Use query_logchefql with an aggregation pipe to count errors over the time range. Start broad:
+   - Query: severity_text=ERROR | count()
+   - Then split the count: severity_text=ERROR | count() by service_name | sort count desc | limit 10
    - Then narrow with get_log_histogram to visualize the spike pattern, grouping by severity_text.
 
 3. **Identify Error Patterns**: Use get_field_values to explore key dimensions:

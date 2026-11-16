@@ -21,7 +21,7 @@ import (
 type CompareWindowsParams struct {
 	TeamID       int    `json:"team_id" jsonschema:"Team ID"`
 	SourceID     int    `json:"source_id" jsonschema:"Source ID"`
-	Query        string `json:"query" jsonschema:"LogchefQL filter expression to run in both windows"`
+	Query        string `json:"query" jsonschema:"LogchefQL filter expression to run in both windows. Filter only: an aggregation pipe is rejected"`
 	Window1Start string `json:"window1_start" jsonschema:"Start time for window 1 (YYYY-MM-DD HH:MM:SS)"`
 	Window1End   string `json:"window1_end" jsonschema:"End time for window 1 (YYYY-MM-DD HH:MM:SS)"`
 	Window2Start string `json:"window2_start" jsonschema:"Start time for window 2 (YYYY-MM-DD HH:MM:SS)"`
@@ -240,7 +240,7 @@ func uniqueFields(fields []string) []string {
 
 func (t *tools) addAnalysisTools(s *server.MCPServer) {
 	compareWindowsTool := mcp.NewTool("compare_windows",
-		mcp.WithDescription("Compare returned log samples across two time windows. Runs the same LogchefQL filter in both windows. Row counts are not totals when a sample reaches its limit or is truncated. Percentage change is null for incomplete samples or a zero baseline."),
+		mcp.WithDescription("Compare returned log samples across two time windows. Runs the same LogchefQL filter in both windows (filter only, no aggregation pipe). Row counts are not totals when a sample reaches its limit or is truncated. Percentage change is null for incomplete samples or a zero baseline."),
 		mcp.WithInputSchema[CompareWindowsParams](),
 		mcp.WithOutputSchema[CompareWindowsResult](),
 		mcp.WithTitleAnnotation("Compare Time Windows"),

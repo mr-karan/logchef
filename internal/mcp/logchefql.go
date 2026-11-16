@@ -17,12 +17,13 @@ import (
 type QueryLogchefQLParams struct {
 	TeamID       int    `json:"team_id" jsonschema:"Team ID"`
 	SourceID     int    `json:"source_id" jsonschema:"Source ID"`
-	Query        string `json:"query" jsonschema:"LogchefQL filter expression (e.g. severity_text=ERROR and service=api). Empty string returns all logs."`
+	Query        string `json:"query" jsonschema:"LogchefQL filter expression (e.g. severity_text=ERROR and service=api) with an optional aggregation pipe (e.g. severity_text=ERROR | count() by service). Empty string returns all logs."`
 	StartTime    string `json:"start_time" jsonschema:"Start time (RFC3339 or YYYY-MM-DD HH:MM:SS)"`
 	EndTime      string `json:"end_time" jsonschema:"End time (RFC3339 or YYYY-MM-DD HH:MM:SS)"`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Max rows to return (1-500 default 100)"`
 	Timezone     string `json:"timezone,omitempty" jsonschema:"Timezone (default UTC)"`
 	QueryTimeout *int   `json:"query_timeout,omitempty" jsonschema:"Query timeout in seconds (default 60)"`
+	Interval     string `json:"interval,omitempty" jsonschema:"Bucket size of a by-time aggregation key with no window of its own: 1s 5s 10s 15s 30s 1m 5m 10m 15m 30m 1h 2h 3h 6h 12h or 24h"`
 }
 
 type TranslateLogchefQLParams struct {
@@ -33,6 +34,7 @@ type TranslateLogchefQLParams struct {
 	EndTime   string `json:"end_time" jsonschema:"End time (RFC3339 or YYYY-MM-DD HH:MM:SS)"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Row limit for generated SQL"`
 	Timezone  string `json:"timezone,omitempty" jsonschema:"Timezone (default UTC)"`
+	Interval  string `json:"interval,omitempty" jsonschema:"Bucket size of a by-time aggregation key with no window of its own: 1s 5s 10s 15s 30s 1m 5m 10m 15m 30m 1h 2h 3h 6h 12h or 24h"`
 }
 
 // --- Output schemas ---
@@ -44,6 +46,8 @@ type TranslateResult struct {
 	GeneratedQueryLanguage string                `json:"generated_query_language,omitempty"`
 	Error                  *logchefql.ParseError `json:"error,omitempty"`
 	Valid                  bool                  `json:"valid" jsonschema:"Whether the LogchefQL expression is valid"`
+	// Aggregation is absent for a query that returns log rows.
+	Aggregation *logchefql.AggregationInfo `json:"aggregation,omitempty" jsonschema:"The result shape and columns when the query aggregates. full_sql and generated_query are then the aggregated query and sql stays the filter"`
 }
 
 // logchefQLRun is one executed LogchefQL query and its tracked query ID.
@@ -87,6 +91,10 @@ func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest,
 		EndTime:      params.EndTime,
 		Timezone:     params.Timezone,
 		QueryTimeout: params.QueryTimeout,
+		Interval:     params.Interval,
+		// The tool returns whatever the query computes, so it runs an
+		// aggregation as well as a filter.
+		AllowAggregation: true,
 	})
 	if err != nil {
 		return t.errorResult(err), nil
@@ -97,7 +105,8 @@ func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest,
 		Logs: run.result.Logs, Columns: core.ResultColumns(run.prepared.Source, run.result), Stats: run.result.Stats, QueryID: run.queryID,
 		GeneratedSQL: compiled.Query, GeneratedQuery: compiled.Query,
 		GeneratedQueryLanguage: string(compiled.Language), Warnings: run.result.Warnings,
-		RowCount: len(run.result.Logs), TeamID: params.TeamID, SourceID: params.SourceID,
+		Aggregation: compiled.Aggregation,
+		RowCount:    len(run.result.Logs), TeamID: params.TeamID, SourceID: params.SourceID,
 		StartTime: params.StartTime, EndTime: params.EndTime,
 	}), nil
 }
@@ -118,6 +127,7 @@ func (t *tools) handleTranslateLogchefQL(ctx context.Context, _ mcp.CallToolRequ
 		EndTime:   params.EndTime,
 		Timezone:  params.Timezone,
 		Limit:     limit,
+		Interval:  params.Interval,
 	})
 	if err != nil {
 		return TranslateResult{}, t.queryError("logchefql translate failed", err)
@@ -130,6 +140,7 @@ func (t *tools) handleTranslateLogchefQL(ctx context.Context, _ mcp.CallToolRequ
 		GeneratedQueryLanguage: string(translation.Language),
 		Error:                  translation.Error,
 		Valid:                  translation.Valid,
+		Aggregation:            translation.Aggregation,
 	}, nil
 }
 
@@ -159,7 +170,7 @@ func (t *tools) handleValidateLogchefQL(ctx context.Context, _ mcp.CallToolReque
 
 func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 	queryTool := mcp.NewTool("query_logchefql",
-		mcp.WithDescription("Execute a LogchefQL query against a log source. LogchefQL is a simple filter syntax (e.g. 'severity_text=ERROR and service=api'). Time range is specified separately. Returns logs, columns, stats, and the generated SQL."),
+		mcp.WithDescription("Execute a LogchefQL query against a log source. LogchefQL is a filter syntax (e.g. 'severity_text=ERROR and service=api') with an optional aggregation pipe that counts and summarizes the matching logs instead of returning them: 'severity_text=ERROR | count() by service' or 'service=api | p95(duration_ms), avg(duration_ms) by time(5m)'. Functions: count, count_distinct, sum, avg, min, max, p50, p75, p90, p95, p99. 'by' takes up to 5 fields and one time bucket; bare 'time' needs the interval parameter. Optional '| sort <column> desc' and '| limit N' follow the aggregation. Time range is specified separately. Returns logs (the result rows when the query aggregates), columns, stats, the generated SQL, and an aggregation object that describes an aggregated result."),
 		mcp.WithInputSchema[QueryLogchefQLParams](),
 		mcp.WithOutputSchema[QueryResult](),
 		mcp.WithTitleAnnotation("Query LogchefQL"),
@@ -168,7 +179,7 @@ func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 	s.AddTool(queryTool, mcp.NewTypedToolHandler(t.handleQueryLogchefQL))
 
 	translateTool := mcp.NewTool("translate_logchefql",
-		mcp.WithDescription("Translate LogchefQL to the source native query language without executing it. sql contains ClickHouse filter conditions; use full_sql or generated_query for histogram queries."),
+		mcp.WithDescription("Translate LogchefQL to the source native query language without executing it. sql contains ClickHouse filter conditions. For get_log_histogram, translate the filter without an aggregation pipe and pass its full_sql (ClickHouse) or generated_query (VictoriaLogs); the full_sql of an aggregated query is not a histogram query."),
 		mcp.WithInputSchema[TranslateLogchefQLParams](),
 		mcp.WithOutputSchema[TranslateResult](),
 		mcp.WithTitleAnnotation("Translate LogchefQL to SQL"),

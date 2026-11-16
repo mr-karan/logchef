@@ -37,7 +37,7 @@ type GetLogHistogramParams struct {
 	SourceID     int    `json:"source_id" jsonschema:"The ID of the source to generate histogram for"`
 	StartTime    string `json:"start_time,omitempty" jsonschema:"Inclusive start time (RFC3339)"`
 	EndTime      string `json:"end_time,omitempty" jsonschema:"End time (RFC3339)"`
-	RawSQL       string `json:"raw_sql" jsonschema:"Executable datasource-native query for histogram generation. Use translate_logchefql first; pass full_sql for ClickHouse or generated_query for VictoriaLogs."`
+	RawSQL       string `json:"raw_sql" jsonschema:"Executable datasource-native query of log rows for histogram generation. Use translate_logchefql on a filter first and pass its full_sql for ClickHouse or generated_query for VictoriaLogs. Never pass the translation of a query with an aggregation pipe (| count() ...): translate the filter before the pipe instead."`
 	Window       string `json:"window,omitempty" jsonschema:"Time window for histogram buckets (e.g. 1m 5m 1h 1d). Defaults to 1m."`
 	GroupBy      string `json:"group_by,omitempty" jsonschema:"Optional field to group histogram data by (e.g. severity_text or service_name)"`
 	Timezone     string `json:"timezone,omitempty" jsonschema:"Timezone for histogram timestamps (default UTC)"`
