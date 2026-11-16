@@ -1,6 +1,6 @@
 # RFC 0003: Dashboards v2
 
-Status: Accepted. Phases 1 to 9 and 11 are implemented on develop; phase 14 is in review.
+Status: Accepted. Phases 1 to 9, 11 and 14 shipped in v2.7.0.
 Date: 2026-11-12
 Authors: Karan Sharma
 
