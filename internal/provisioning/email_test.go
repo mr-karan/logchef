@@ -31,7 +31,7 @@ func TestReconcileEmailLength(t *testing.T) {
 			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
 				db := backend.open(t)
 				cfg := &config.ProvisioningConfig{ManageTeams: true, Teams: []config.ProvisionTeam{{Name: "Team", Members: []config.ProvisionMember{{Email: tc.email}}}}}
-				err := Reconcile(t.Context(), cfg, db, nil, quietLogger(), nil)
+				err := Reconcile(t.Context(), cfg, db, nil, testRecorder(db), quietLogger(), nil)
 				if !tc.rejected {
 					if err != nil {
 						t.Fatal(err)

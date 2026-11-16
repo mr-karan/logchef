@@ -100,7 +100,7 @@ func TestReconcilePostgresSourcePruneConcurrentDelete(t *testing.T) {
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 				}}
 			}}
-			reconcileErr := Reconcile(ctx, &config.ProvisioningConfig{ManageSources: true, Prune: true}, wrapped, nil, quietLogger(), nil)
+			reconcileErr := Reconcile(ctx, &config.ProvisioningConfig{ManageSources: true, Prune: true}, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 			if !started {
 				t.Fatalf("no source pruned: %v", reconcileErr)
 			}
@@ -129,7 +129,7 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "first"}, {Name: "second"}}}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	user := &models.User{Email: "inserted@example.com", FullName: "Late member", Role: models.UserRoleMember, Status: models.UserStatusActive}
@@ -160,7 +160,7 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no membership removed: %v", reconcileErr)
 	}
@@ -218,7 +218,7 @@ func TestReconcilePostgresConcurrentLoginAndMembershipWrites(t *testing.T) {
 		}}
 	}}
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "managed", Members: []config.ProvisionMember{{Email: user.Email}}}}}
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no user adopted: %v", reconcileErr)
 	}

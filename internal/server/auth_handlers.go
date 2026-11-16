@@ -259,7 +259,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("%w: missing PKCE verifier cookie", errInvalidState))
 	}
 
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret), verifier)
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.audit, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret), verifier)
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}

@@ -112,7 +112,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	})
 
 	// Initialize admin users based on configuration.
-	if err := core.InitAdminUsers(ctx, a.SQLite, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+	if err := core.InitAdminUsers(ctx, a.SQLite, a.Audit, a.Logger, a.Config.Auth.AdminEmails); err != nil {
 		a.Logger.Error("failed to initialize admin users", "error", err)
 		return fmt.Errorf("failed to initialize admin users: %w", err)
 	}
@@ -184,7 +184,7 @@ func (a *App) Initialize(ctx context.Context) error {
 			"prune", a.Config.Provisioning.Prune,
 			"dry_run", a.Config.Provisioning.DryRun,
 		)
-		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.Datasources, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.Datasources, a.Audit, a.Logger, a.Config.Auth.AdminEmails); err != nil {
 			return fmt.Errorf("provisioning reconciliation failed: %w", err)
 		}
 	}

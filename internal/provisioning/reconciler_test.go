@@ -69,7 +69,7 @@ func TestReconcile_TeamsMembersLinks(t *testing.T) {
 		}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), []string{"admin@example.com"}); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), []string{"admin@example.com"}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestReconcile_DryRunRollsBack(t *testing.T) {
 		Teams:       []config.ProvisionTeam{{Name: "ghost", Description: "should not persist"}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile dry-run: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestReconcile_SourceCreate(t *testing.T) {
 		}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -210,7 +210,7 @@ func TestReconcile_SourceAdopt(t *testing.T) {
 			},
 		}},
 	}
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestReconcile_SourcePrune(t *testing.T) {
 			Connection: map[string]any{"host": "127.0.0.1:1", "database": "default", "table_name": "logs"},
 		}},
 	}
-	if err := Reconcile(ctx, create, db, ds, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, create, db, ds, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile create: %v", err)
 	}
 	if findSource(t, db, "doomed") == nil {
@@ -249,7 +249,7 @@ func TestReconcile_SourcePrune(t *testing.T) {
 	}
 
 	prune := &config.ProvisioningConfig{ManageSources: true, Prune: true}
-	if err := Reconcile(ctx, prune, db, ds, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, prune, db, ds, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile prune: %v", err)
 	}
 	if findSource(t, db, "doomed") != nil {
@@ -274,7 +274,7 @@ func TestReconcile_TeamAdopt(t *testing.T) {
 		ManageTeams: true,
 		Teams:       []config.ProvisionTeam{{Name: "adopted", Description: "new desc"}},
 	}
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -318,7 +318,7 @@ func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 			},
 		}},
 	}
-	if err := Reconcile(ctx, pass1, db, ds, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, pass1, db, ds, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile pass1: %v", err)
 	}
 
@@ -336,7 +336,7 @@ func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 			Members: []config.ProvisionMember{{Email: "alice@example.com", Role: "admin"}},
 		}},
 	}
-	if err := Reconcile(ctx, pass2, db, ds, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, pass2, db, ds, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile pass2: %v", err)
 	}
 
@@ -397,7 +397,7 @@ func TestReconcile_IgnoresAutoProvisionedUsers(t *testing.T) {
 		}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, ds, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, ds, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 

@@ -22,7 +22,7 @@ func TestReconcile_LokiSourcesDifferingOnlyInPrincipal(t *testing.T) {
 			lokiProvisionSource("everything", "platform-admin", nil),
 		},
 	}
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestExportConfig_LokiRoundTrip(t *testing.T) {
 
 	first := newReconcileTestDB(t)
 	cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{src}}
-	if err := Reconcile(ctx, cfg, first, newTestDatasourceService(first), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, first, newTestDatasourceService(first), testRecorder(first), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	original := findSource(t, first, "Loki Demo")
@@ -84,7 +84,7 @@ func TestExportConfig_LokiRoundTrip(t *testing.T) {
 
 	second := newReconcileTestDB(t)
 	exported.ManageTeams = false
-	if err := Reconcile(ctx, exported, second, newTestDatasourceService(second), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, exported, second, newTestDatasourceService(second), testRecorder(second), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile exported config: %v", err)
 	}
 	imported := findSource(t, second, "Loki Demo")
@@ -108,7 +108,7 @@ func TestReconcile_LokiIdentityIsImmutable(t *testing.T) {
 	ctx := context.Background()
 	reconcile := func(src config.ProvisionSource) error {
 		cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{src}}
-		return Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil)
+		return Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil)
 	}
 
 	if err := reconcile(lokiProvisionSource("payments", "payments-readonly", nil)); err != nil {
@@ -161,7 +161,7 @@ func TestReconcile_LokiAdoptionKeepsIdentity(t *testing.T) {
 		ManageSources: true,
 		Sources:       []config.ProvisionSource{lokiProvisionSource("payments", "", nil)},
 	}
-	err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil)
+	err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil)
 	if err == nil || !strings.Contains(err.Error(), "cannot change after creation") {
 		t.Fatalf("adopting with another selector = %v, want the immutability error", err)
 	}

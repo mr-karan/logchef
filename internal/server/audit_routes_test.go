@@ -424,7 +424,11 @@ func TestAuditOIDCSessionEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev = e.only()
+	got := e.events()
+	if len(got) != 2 || got[0].Action != "user.create" || got[0].AuthMethod != models.AuditAuthStartup {
+		t.Fatalf("callback events %+v, want the auto-provisioned user.create, then session.login", got)
+	}
+	ev = got[1]
 	checkActorAndTarget(t, ev, "session.login", user, "user", strconv.Itoa(int(user.ID)))
 	if detailOf(t, ev)["method"] != "oidc" {
 		t.Errorf("detail %s, want method oidc", ev.Detail)
