@@ -59,9 +59,9 @@ func SettingFields(s *models.SystemSetting) *Fields {
 	return f.Set("value", s.Value)
 }
 
-// SourceFields records a source and its connection, with the password, the
-// VictoriaLogs token and the connection headers as secrets and the scope
-// query as a digest.
+// SourceFields records a source and its connection, with the passwords, the
+// tokens and the connection headers as secrets, and the VictoriaLogs scope
+// query and the Loki selector as digests.
 func SourceFields(s *models.Source) *Fields {
 	f := NewFields().
 		Set("name", s.Name).
@@ -73,6 +73,9 @@ func SourceFields(s *models.Source) *Fields {
 		Set("managed", s.Managed)
 	if s.IsVictoriaLogs() {
 		return victoriaLogsConnectionFields(f, s)
+	}
+	if s.IsLoki() {
+		return lokiConnectionFields(f, s)
 	}
 	c := s.Connection
 	f.Set("connection.host", c.Host).
@@ -114,6 +117,29 @@ func victoriaLogsConnectionFields(f *Fields, s *models.Source) *Fields {
 		Secret("connection.headers", headersFingerprint(c.Headers))
 	if o := c.Optimizer; o != nil {
 		f.Set("connection.optimizer.enabled", o.Enabled)
+	}
+	return f
+}
+
+func lokiConnectionFields(f *Fields, s *models.Source) *Fields {
+	c, err := s.LokiConnection()
+	if err != nil {
+		return f.Set("connection.unreadable", true)
+	}
+	f.URL("connection.base_url", c.BaseURL).
+		Set("connection.auth.mode", c.Auth.Mode).
+		Set("connection.auth.username", c.Auth.Username).
+		Secret("connection.auth.password", c.Auth.Password).
+		Secret("connection.auth.token", c.Auth.Token).
+		Set("connection.tenant_id", c.TenantID).
+		Digest("connection.selector", c.Selector).
+		Set("connection.principal", c.Principal).
+		Set("connection.parser", c.Parser).
+		Secret("connection.headers", headersFingerprint(c.Headers))
+	if l := c.Limits; l != nil {
+		f.Set("connection.limits.max_entries_per_query", l.MaxEntriesPerQuery).
+			Set("connection.limits.sidebar_lookback_seconds", l.SidebarLookbackSeconds).
+			Set("connection.limits.schema_lookback_seconds", l.SchemaLookbackSeconds)
 	}
 	return f
 }

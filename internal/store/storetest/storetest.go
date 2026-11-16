@@ -56,6 +56,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("WithTxNoNesting", func(t *testing.T) { testWithTxNoNesting(t, ctx, s) })
 	t.Run("ConcurrentAdminRemovals", func(t *testing.T) { testConcurrentAdminRemovals(t, s) })
 	t.Run("Audit", func(t *testing.T) { testAudit(t, ctx, s) })
+	t.Run("ForUpdateReads", func(t *testing.T) { testForUpdateReads(t, ctx, s) })
 }
 
 // --- helpers ---

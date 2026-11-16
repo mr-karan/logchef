@@ -121,7 +121,7 @@ func TestReconcilePostgresConcurrentAdminSourceDelete(t *testing.T) {
 	wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps {
 		return afterSourceUnlink{StoreOps: tx, after: func() error {
 			started = true
-			go func() { result <- service.DeleteSource(ctx, source.ID) }()
+			go func() { _, err := service.DeleteSource(ctx, source.ID); result <- err }()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}

@@ -2534,6 +2534,33 @@ func (q *Queries) GetSourceByNameForProvisioning(ctx context.Context, name strin
 	return i, err
 }
 
+const getSourceForUpdate = `-- name: GetSourceForUpdate :one
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Get a source by ID and lock the row until the transaction ends
+func (q *Queries) GetSourceForUpdate(ctx context.Context, id int64) (Source, error) {
+	row := q.db.QueryRow(ctx, getSourceForUpdate, id)
+	var i Source
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.MetaIsAutoCreated,
+		&i.MetaTsField,
+		&i.MetaSeverityField,
+		&i.Description,
+		&i.TtlDays,
+		&i.Managed,
+		&i.SecretRef,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SourceType,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
+	)
+	return i, err
+}
+
 const getSystemSetting = `-- name: GetSystemSetting :one
 
 SELECT key, value, value_type, category, description, is_sensitive, created_at, updated_at FROM system_settings
@@ -5730,6 +5757,16 @@ func (q *Queries) LockReport(ctx context.Context, id int64) (int64, error) {
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const lockSettingWrites = `-- name: LockSettingWrites :exec
+SELECT pg_advisory_xact_lock($1)
+`
+
+// Hold a transaction-scoped advisory lock, which also covers a key with no row
+func (q *Queries) LockSettingWrites(ctx context.Context, pgAdvisoryXactLock int64) error {
+	_, err := q.db.Exec(ctx, lockSettingWrites, pgAdvisoryXactLock)
+	return err
 }
 
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec

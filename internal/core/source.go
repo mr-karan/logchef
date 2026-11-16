@@ -77,24 +77,27 @@ func GetSource(ctx context.Context, ds *datasource.Service, id models.SourceID) 
 	return source, nil
 }
 
-// UpdateSource updates an existing source through the datasource service.
-func UpdateSource(ctx context.Context, ds *datasource.Service, id models.SourceID, req *models.UpdateSourceRequest) (*models.Source, error) {
-	source, err := ds.UpdateSource(ctx, id, req)
+// UpdateSource updates an existing source through the datasource service and
+// returns it before and after the write.
+func UpdateSource(ctx context.Context, ds *datasource.Service, id models.SourceID, req *models.UpdateSourceRequest) (before, after *models.Source, err error) {
+	before, after, err = ds.UpdateSource(ctx, id, req)
 	if err != nil {
-		return nil, normalizeDatasourceError(err)
+		return nil, nil, normalizeDatasourceError(err)
 	}
-	return source, nil
+	return before, after, nil
 }
 
-// DeleteSource removes a source and its provider state.
-func DeleteSource(ctx context.Context, ds *datasource.Service, id models.SourceID) error {
-	if err := ds.DeleteSource(ctx, id); err != nil {
+// DeleteSource removes a source and its provider state, and returns the
+// deleted source.
+func DeleteSource(ctx context.Context, ds *datasource.Service, id models.SourceID) (*models.Source, error) {
+	deleted, err := ds.DeleteSource(ctx, id)
+	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {
-			return ErrSourceNotFound
+			return nil, ErrSourceNotFound
 		}
-		return fmt.Errorf("error deleting source: %w", err)
+		return nil, fmt.Errorf("error deleting source: %w", err)
 	}
-	return nil
+	return deleted, nil
 }
 
 type SourceInspection = datasource.SourceInspection

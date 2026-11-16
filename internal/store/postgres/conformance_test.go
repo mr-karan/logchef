@@ -22,6 +22,7 @@ func TestConformance(t *testing.T) {
 	s := opener(dsn)(t)
 	storetest.Run(t, s)
 	t.Run("MembershipWritesSerialized", func(t *testing.T) { storetest.RunMembershipWritesSerialized(t, s) })
+	t.Run("ForUpdateSerialized", func(t *testing.T) { storetest.RunForUpdateSerialized(t, s) })
 	t.Run("DashboardSummaries", func(t *testing.T) {
 		conn, err := pgx.Connect(context.Background(), dsn)
 		if err != nil {

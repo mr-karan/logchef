@@ -87,6 +87,27 @@ var viewCases = []viewCase{
 		r.Variables = map[string]any{"service": tag + "-variable-value"}
 		return audit.ReportFields(&r), []string{tag + "-variable-value"}
 	}},
+	{"loki source", func(tag string) (*audit.Fields, []string) {
+		var s models.Source
+		fillStrings(reflect.ValueOf(&s), tag, "Source")
+		s.SourceType = models.SourceTypeLoki
+		var c models.LokiConnectionInfo
+		fillStrings(reflect.ValueOf(&c), tag, "Loki")
+		c.BaseURL = "https://" + tag + "-user:" + tag + "-pass@loki.example.com/" + tag + "-path?q=" + tag + "-query"
+		c.Selector = `{app="` + tag + `-literal"}`
+		raw, err := json.Marshal(c)
+		if err != nil {
+			panic(err)
+		}
+		s.ConnectionConfig = raw
+		var leaks []string
+		for k, v := range c.Headers {
+			leaks = append(leaks, k, v)
+		}
+		return audit.SourceFields(&s), append(leaks,
+			c.Auth.Password, c.Auth.Token,
+			tag+"-user", tag+"-pass", tag+"-path", tag+"-query", tag+"-literal")
+	}},
 	{"sensitive setting", func(tag string) (*audit.Fields, []string) {
 		var s models.SystemSetting
 		fillStrings(reflect.ValueOf(&s), tag, "Setting")
@@ -153,5 +174,68 @@ func TestSourceFieldsRecordPasswordChange(t *testing.T) {
 
 	if got := string(h.store.events[0].Changes); got != `{"connection.password":{"secret":true,"changed":true}}` {
 		t.Errorf("changes = %s", got)
+	}
+}
+
+// Marking a setting sensitive records the change of the flag, never the value
+// it held before.
+func TestSettingFieldsMarkedSensitiveRecordNoValue(t *testing.T) {
+	h := newMemHarness()
+	setting := models.SystemSetting{Key: "custom.webhook", Value: "plain-before", ValueType: "string", Category: "alerts"}
+	before := audit.SettingFields(&setting)
+	setting.IsSensitive = true
+	ev := event(audit.SettingUpdate)
+	ev.Before, ev.After = before, audit.SettingFields(&setting)
+	h.rec.Record(context.Background(), ev)
+
+	var changes map[string]map[string]any
+	if err := json.Unmarshal(h.store.events[0].Changes, &changes); err != nil {
+		t.Fatal(err)
+	}
+	if c := changes["is_sensitive"]; c["from"] != false || c["to"] != true {
+		t.Errorf("is_sensitive change = %v", c)
+	}
+	if c := changes["value"]; c["secret"] != true || c["from"] != nil || c["to"] != nil {
+		t.Errorf("value change = %v, want a secret marker", c)
+	}
+	if strings.Contains(string(h.store.events[0].Changes)+h.logs.String(), "plain-before") {
+		t.Error("the earlier value reached the event or the log line")
+	}
+}
+
+func TestSourceFieldsRecordLokiConnection(t *testing.T) {
+	h := newMemHarness()
+	loki := func(password, selector string) *audit.Fields {
+		raw, err := json.Marshal(models.LokiConnectionInfo{
+			BaseURL:  "https://loki.example.com",
+			Auth:     models.LokiAuth{Mode: "basic", Username: "reader", Password: password},
+			Selector: selector,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return audit.SourceFields(&models.Source{Name: "loki", SourceType: models.SourceTypeLoki, ConnectionConfig: raw})
+	}
+	ev := event(audit.SourceUpdate)
+	ev.Before, ev.After = loki("old-pw", `{app="api"}`), loki("new-pw", `{app="web"}`)
+	h.rec.Record(context.Background(), ev)
+
+	var changes map[string]map[string]any
+	if err := json.Unmarshal(h.store.events[0].Changes, &changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Errorf("changes = %s, want the password and the selector", h.store.events[0].Changes)
+	}
+	if c := changes["connection.auth.password"]; c["secret"] != true || c["changed"] != true {
+		t.Errorf("password change = %v", c)
+	}
+	if to, ok := changes["connection.selector"]["to"].(map[string]any); !ok || to["sha256"] == nil {
+		t.Errorf("selector change = %v, want a digest", changes["connection.selector"])
+	}
+	for _, leak := range []string{"old-pw", "new-pw", "api", "web"} {
+		if strings.Contains(string(h.store.events[0].Changes)+h.logs.String(), `"`+leak) {
+			t.Errorf("%q reached the event or the log line", leak)
+		}
 	}
 }

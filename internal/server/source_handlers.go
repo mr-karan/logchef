@@ -67,7 +67,7 @@ func (s *Server) handleCreateSource(c fiber.Ctx) error {
 		}
 		s.log.Info("source.create", attrs...)
 	}
-	auditTarget(c, audit.SourceTarget(createdSource))
+	auditSet(c, audit.SourceTarget(createdSource), nil, audit.SourceFields(createdSource))
 	return SendSuccess(c, fiber.StatusCreated, createdSource.ToResponse())
 }
 
@@ -85,7 +85,8 @@ func (s *Server) handleDeleteSource(c fiber.Ctx) error {
 	}
 
 	// Call core function to remove from manager and delete from DB.
-	if err := core.DeleteSource(c.Context(), s.datasources, sourceID); err != nil {
+	deleted, err := core.DeleteSource(c.Context(), s.datasources, sourceID)
+	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
@@ -93,7 +94,7 @@ func (s *Server) handleDeleteSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error deleting source", models.DatabaseErrorType)
 	}
 
-	auditTarget(c, audit.SourceIDTarget(sourceID))
+	auditSet(c, audit.SourceTarget(deleted), audit.SourceFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
 }
 
@@ -115,7 +116,7 @@ func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updatedSource, err := core.UpdateSource(c.Context(), s.datasources, sourceID, &req)
+	before, updatedSource, err := core.UpdateSource(c.Context(), s.datasources, sourceID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
@@ -131,7 +132,7 @@ func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error updating source", models.DatabaseErrorType)
 	}
 
-	auditTarget(c, audit.SourceTarget(updatedSource))
+	auditSet(c, audit.SourceTarget(updatedSource), audit.SourceFields(before), audit.SourceFields(updatedSource))
 	return SendSuccess(c, fiber.StatusOK, updatedSource.ToResponse())
 }
 

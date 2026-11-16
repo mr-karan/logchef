@@ -79,6 +79,12 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 	return mapSourceRowToModel(&sourceRow), nil
 }
 
+// GetSourceForUpdate retrieves a source by ID. Inside WithTx the read runs on
+// the transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetSourceForUpdate(ctx context.Context, id models.SourceID) (*models.Source, error) {
+	return db.GetSource(ctx, id)
+}
+
 // GetSourceByIdentityKey retrieves a single source by its provider-computed identity key.
 // It returns models.ErrNotFound if no matching source exists.
 func (db *DB) GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error) {

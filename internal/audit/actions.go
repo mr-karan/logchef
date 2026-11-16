@@ -129,8 +129,10 @@ var registrations = []struct {
 	{SavedQueryCreate, false}, {SavedQueryUpdate, false}, {SavedQueryDelete, false},
 	{ServiceAccountCreate, false}, {ServiceAccountDelete, false},
 	{SessionLogin, false}, {SessionLogout, false},
-	{SettingUpdate, false}, {SettingDelete, false}, {SettingTest, false},
-	{SourceCreate, false}, {SourceUpdate, false}, {SourceDelete, false},
+	// A setting test changes no object, so it has a target and a detail but
+	// no fields to stage.
+	{SettingUpdate, true}, {SettingDelete, true}, {SettingTest, false},
+	{SourceCreate, true}, {SourceUpdate, true}, {SourceDelete, true},
 	{TeamCreate, false}, {TeamUpdate, false}, {TeamDelete, false},
 	{TeamMemberAdd, false}, {TeamMemberRemove, false},
 	{TeamSourceLink, false}, {TeamSourceUnlink, false},
