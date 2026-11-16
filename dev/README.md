@@ -31,7 +31,7 @@ cd dev && ./ingest-loki.sh
 curl -s -H 'X-Scope-OrgID: dev' 'http://localhost:3100/loki/api/v1/labels'
 ```
 
-`just dev-ingest-logs` also streams demo logs into Loki through Vector (`loki.toml`, `service_name="loki-vector"`). Logchef cannot query Loki yet: the Loki source arrives with the provider work of RFC 0011.
+`just dev-ingest-logs` also streams demo logs into Loki through Vector (`loki.toml`, `service_name="loki-vector"`). `provisioning.toml` adds the "Loki Demo" source for tenant `dev`, linked to "Dev Team".
 
 ## Prerequisites
 

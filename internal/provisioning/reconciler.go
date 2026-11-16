@@ -141,6 +141,9 @@ func createOrAdoptSource(ctx context.Context, tx store.StoreOps, log *slog.Logge
 		if err != nil {
 			return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
 		}
+		if err := rejectLokiIdentityChange(unmanaged, adopted); err != nil {
+			return err
+		}
 		if err := tx.UpdateSource(ctx, adopted); err != nil {
 			return fmt.Errorf("failed to adopt source %q: %w", cfgSrc.Name, err)
 		}
@@ -186,6 +189,9 @@ func updateManagedSourceIfNeeded(ctx context.Context, tx store.StoreOps, log *sl
 	updated, err := sourceFromConfig(cfgSrc, existing.ID)
 	if err != nil {
 		return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+	}
+	if err := rejectLokiIdentityChange(existing, updated); err != nil {
+		return err
 	}
 	if err := tx.UpdateSource(ctx, updated); err != nil {
 		return fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
@@ -469,6 +475,17 @@ func sourceFromConfig(src config.ProvisionSource, id models.SourceID) (*models.S
 	}
 	source.ID = id
 	return &source, nil
+}
+
+// rejectLokiIdentityChange keeps the identity of a Loki source fixed, as the
+// API does: its team links and saved queries were granted for one URL, tenant,
+// selector and principal, and must not follow a changed one.
+func rejectLokiIdentityChange(existing, desired *models.Source) error {
+	if !existing.IsLoki() || existing.IdentityKey == desired.IdentityKey {
+		return nil
+	}
+	return fmt.Errorf("loki source %q: base_url, tenant_id, selector and principal cannot change after creation; "+
+		"declare a source with a new name for the new connection", existing.Name)
 }
 
 // updateTeamDescription updates a team's name/description, stamping updated_at.

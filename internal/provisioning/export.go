@@ -27,56 +27,10 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 	}
 
 	for _, src := range sources {
-		provisioned := config.ProvisionSource{
-			Name:              src.Name,
-			SourceType:        models.NormalizeSourceType(src.SourceType),
-			Description:       src.Description,
-			TTLDays:           src.TTLDays,
-			MetaTSField:       src.MetaTSField,
-			MetaSeverityField: src.MetaSeverityField,
+		provisioned, err := exportSource(src)
+		if err != nil {
+			return nil, err
 		}
-
-		switch models.NormalizeSourceType(src.SourceType) {
-		case models.SourceTypeVictoriaLogs:
-			conn, err := src.VictoriaLogsConnection()
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode victorialogs source %q: %w", src.Name, err)
-			}
-
-			if src.SecretRef != "" {
-				provisioned.SecretRef = src.SecretRef
-			} else {
-				switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
-				case "bearer":
-					if conn.Auth.Token != "" {
-						provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_TOKEN", sanitizeEnvName(src.Name))
-					}
-				case "basic":
-					if conn.Auth.Password != "" {
-						provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
-					}
-				}
-			}
-
-			conn.Auth.Password = ""
-			conn.Auth.Token = ""
-			if err := provisioned.SetConnectionConfig(conn); err != nil {
-				return nil, fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
-			}
-		default:
-			conn := src.Connection
-			if src.SecretRef != "" {
-				provisioned.SecretRef = src.SecretRef
-			} else if conn.Password != "" {
-				provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
-			}
-
-			conn.Password = ""
-			if err := provisioned.SetConnectionConfig(conn); err != nil {
-				return nil, fmt.Errorf("failed to encode clickhouse source %q: %w", src.Name, err)
-			}
-		}
-
 		cfg.Sources = append(cfg.Sources, provisioned)
 	}
 
@@ -117,6 +71,83 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 	}
 
 	return cfg, nil
+}
+
+// exportSource converts a stored source into its provisioning entry. A secret
+// is never exported: its place is taken by a secret_ref.
+func exportSource(src *models.Source) (config.ProvisionSource, error) {
+	provisioned := config.ProvisionSource{
+		Name:              src.Name,
+		SourceType:        models.NormalizeSourceType(src.SourceType),
+		Description:       src.Description,
+		TTLDays:           src.TTLDays,
+		MetaTSField:       src.MetaTSField,
+		MetaSeverityField: src.MetaSeverityField,
+	}
+
+	switch models.NormalizeSourceType(src.SourceType) {
+	case models.SourceTypeVictoriaLogs:
+		conn, err := src.VictoriaLogsConnection()
+		if err != nil {
+			return config.ProvisionSource{}, fmt.Errorf("failed to decode victorialogs source %q: %w", src.Name, err)
+		}
+
+		if src.SecretRef != "" {
+			provisioned.SecretRef = src.SecretRef
+		} else {
+			switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
+			case "bearer":
+				if conn.Auth.Token != "" {
+					provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_TOKEN", sanitizeEnvName(src.Name))
+				}
+			case "basic":
+				if conn.Auth.Password != "" {
+					provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
+				}
+			}
+		}
+
+		conn.Auth.Password = ""
+		conn.Auth.Token = ""
+		if err := provisioned.SetConnectionConfig(conn); err != nil {
+			return config.ProvisionSource{}, fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
+		}
+	case models.SourceTypeLoki:
+		conn, err := src.LokiConnection()
+		if err != nil {
+			return config.ProvisionSource{}, fmt.Errorf("failed to decode loki source %q: %w", src.Name, err)
+		}
+
+		if secret := lokiSecretField(&conn); src.SecretRef != "" {
+			provisioned.SecretRef = src.SecretRef
+		} else if secret != nil && *secret != "" {
+			suffix := "PASSWORD"
+			if normalizedAuthMode(conn.Auth.Mode) == "bearer" {
+				suffix = "TOKEN"
+			}
+			provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_%s", sanitizeEnvName(src.Name), suffix)
+		}
+
+		conn.Auth.Password = ""
+		conn.Auth.Token = ""
+		if err := provisioned.SetConnectionConfig(conn); err != nil {
+			return config.ProvisionSource{}, fmt.Errorf("failed to encode loki source %q: %w", src.Name, err)
+		}
+	default:
+		conn := src.Connection
+		if src.SecretRef != "" {
+			provisioned.SecretRef = src.SecretRef
+		} else if conn.Password != "" {
+			provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
+		}
+
+		conn.Password = ""
+		if err := provisioned.SetConnectionConfig(conn); err != nil {
+			return config.ProvisionSource{}, fmt.Errorf("failed to encode clickhouse source %q: %w", src.Name, err)
+		}
+	}
+
+	return provisioned, nil
 }
 
 func sanitizeEnvName(name string) string {

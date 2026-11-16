@@ -190,6 +190,19 @@
         "description": "Local VictoriaLogs datasource for LogsQL and datasource UI testing",
         "meta_ts_field": "_time",
         "meta_severity_field": "level"
+      },
+      {
+        "name": "Loki Demo",
+        "source_type": "loki",
+        "connection": {
+          "base_url": "http://127.0.0.1:3100",
+          "parser": "json",
+          "selector": "{service_name=~\".+\"}",
+          "tenant_id": "dev"
+        },
+        "description": "Local Loki datasource for LogQL testing (dev/ingest-loki.sh)",
+        "meta_ts_field": "_time",
+        "meta_severity_field": "level"
       }
     ],
     "teams": [
@@ -199,7 +212,8 @@
         "sources": [
           "HTTP Access Logs",
           "Syslog Logs",
-          "VictoriaLogs Demo"
+          "VictoriaLogs Demo",
+          "Loki Demo"
         ],
         "members": [
           {
