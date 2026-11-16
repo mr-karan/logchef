@@ -24,6 +24,7 @@ Logchef emits metrics across several categories:
 - **Authentication Metrics**: Login attempts and session management
 - **Authorization Metrics**: Access control failures and patterns
 - **ClickHouse Metrics**: Database connection and operation health
+- **Audit Metrics**: Audit events stored, failed and limited
 
 ## HTTP Metrics
 
@@ -110,6 +111,21 @@ Monitor database connection health and operation performance.
 **Key Use Cases:**
 - Monitor ClickHouse connection health per source
 - Set up alerts for database connectivity issues
+
+## Audit Metrics
+
+Track the [audit log](/operations/audit-log/). These counters have no
+per-user or per-source labels.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_audit_events_total` | Audit events by result: `stored` (inserted), `failed` (the insert failed; the `audit` log line has the event) or `limited` (the failed sign-in bound kept it out of the table) | Counter | `result` |
+| `logchef_audit_redactions_total` | Values the audit serializer replaced with `[redacted]` | Counter | - |
+| `logchef_audit_unstaged_total` | Events whose handler staged no target or no fields. Above zero means a route is missing its audit fields | Counter | - |
+
+**Key Use Cases:**
+- Alert on `increase(logchef_audit_events_total{result="failed"}[5m]) > 0`: events are reaching only the log line
+- A rising `limited` count is a burst of failed sign-ins, such as credential stuffing
 
 ## Example Queries
 

@@ -47,9 +47,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   share link carries a copy of the sender's layout. `logchef open --view` and
   `logchef views list` use views from the CLI, and the MCP tool
   `list_saved_views` lists them. The new Saved Views docs page covers it.
+- Audit log. Logchef records configuration changes, sign-ins (including
+  failed ones), OAuth consent and grant revocations, and log exports as audit
+  events, each with the actor, how they authenticated, the target and the
+  fields that changed. Credentials are recorded only as "changed", and query
+  text only as a digest. Provisioning runs, startup admins, OIDC
+  auto-provisioning and the report scheduler record their changes too. Global
+  admins browse and download events in Administration → Audit Log, and read
+  them through `GET /api/v1/admin/audit-events` and its NDJSON `/export` with
+  a session or an API token that has the new `audit:read` scope. Each event is
+  also written as a JSON log line with `msg` `audit` for shipping off the host.
+  API token creation and log exports fail closed: if the event cannot be
+  stored, the request answers 503 and no token or data leaves the server. The
+  new Audit Log docs page covers the event format, every action, retention and
+  the metrics.
 
 ### Upgrade notes
 
+- A new `[audit]` config section bounds the `audit_events` table:
+  `retention_days` (default 365) and `max_rows` (default 1,000,000), pruned
+  every five minutes, 5,000 rows at a time. `log_events` (default `true`)
+  writes each event as an `audit` log line; set it to `false` to turn the line
+  off. The new token scope `audit:read` is in no preset and is not an OAuth
+  scope: reading the audit log needs a global admin's session or API token.
 - Two token scopes are new, `saved_views:read` and `saved_views:write`. A token
   issued with an explicit scope list before this release, including one made
   with the Read-only preset, gets 403 on the saved view routes until it is

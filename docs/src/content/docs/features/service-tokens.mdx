@@ -59,7 +59,7 @@ account** and the picker filters to service principals only.
 
 | Preset | Scopes | Use case |
 |--------|--------|----------|
-| **Read-only** | every `:read` scope | Default for log shippers, dashboards, audit tools |
+| **Read-only** | the `:read` scopes except `reports:read` and `audit:read` | Default for log shippers and dashboards |
 | **Logs viewer** | `profile:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read` | Smallest footprint for "just run queries" |
 | **Logs analyst** | Logs viewer + `saved_queries:write`, `collections:write`, `query_shares:*` | Read logs and save/share queries |
 | **Alerts manager** | `alerts:*`, `logs:read`, `sources:read`, `saved_queries:read`, `profile:read` | Manage alert definitions end-to-end |
@@ -72,6 +72,12 @@ read them and `saved_views:write` to change them. The Read-only preset includes
 issued before saved views existed, with an explicit scope list, has neither and
 gets 403 on the [saved view routes](/features/saved-views/#api) until you
 reissue it with the scope.
+
+`audit:read` lets a token read the [audit log](/operations/audit-log/). No
+preset includes it, because events hold emails and IP addresses: add it by
+hand. The audit routes are for global admins, so the token's owner must be a
+global admin. An OAuth sign-in, such as `logchef auth` or an MCP client, cannot
+read the audit log whatever its scopes.
 
 You can deviate from any preset by toggling individual scopes after picking
 one. The active preset stays highlighted while the selection matches; once

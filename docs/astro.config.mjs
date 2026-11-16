@@ -248,6 +248,7 @@ Key areas of the docs:
             { label: "Database & High Availability", link: "/operations/database-backends" },
             { label: "Reverse Proxy", link: "/operations/reverse-proxy" },
             { label: "Metrics Reference", link: "/operations/metrics" },
+            { label: "Audit Log", link: "/operations/audit-log" },
             { label: "Contributing", link: "/contributing/setup" },
           ],
         },
