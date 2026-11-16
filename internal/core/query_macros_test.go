@@ -119,14 +119,14 @@ func TestTimezoneValidatedOnEveryEntryPoint(t *testing.T) {
 	}
 	for name, call := range entryPoints {
 		for _, timezone := range []string{"Asia/Kolkata'", "Asia Kolkata"} {
-			provider.requests = 0
+			provider.requests.Store(0)
 			err := call(timezone)
 			reqErr, ok := errors.AsType[*QueryRequestError](err)
 			if !ok || !strings.Contains(reqErr.Message, "invalid timezone") {
 				t.Errorf("%s with %q: error = %v, want an invalid timezone request error", name, timezone, err)
 			}
-			if provider.requests != 0 {
-				t.Errorf("%s with %q: %d requests reached the provider", name, timezone, provider.requests)
+			if provider.requests.Load() != 0 {
+				t.Errorf("%s with %q: %d requests reached the provider", name, timezone, provider.requests.Load())
 			}
 		}
 		if err := call("Asia/Kolkata"); err != nil {
