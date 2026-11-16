@@ -11,6 +11,7 @@ import type { ResolvedSavedQuery, SavedQuery, SavedQueryContent } from "@/api/sa
 import type { ExploreTarget } from "@/lib/exploreLocation";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
+import { useActiveSavedViewStore } from "@/stores/activeSavedView";
 import { useContextStore } from "@/stores/context";
 import { useBaseStore } from "./base";
 import { useExploreAIStore } from "./exploreAI";
@@ -344,6 +345,11 @@ export const useExploreStore = defineStore("explore", () => {
 
     if (sourceId.value) {
       params.source = sourceId.value.toString();
+    }
+
+    const viewId = useActiveSavedViewStore().viewParameter(teamsStore.currentTeamId, sourceId.value || null);
+    if (viewId !== null) {
+      params.view = viewId.toString();
     }
 
     const isEditorQuery = query.mode === editorQuery.value.mode && query.text === editorQuery.value.text;

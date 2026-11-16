@@ -15,7 +15,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useLocalStorage } from '@vueuse/core'
 import { useColumnState } from '@/composables/useColumnState'
-import { sortingForResult, type SavedViewLayout, type TableViewSeed } from '@/lib/savedViewLayout'
+import { sortingForResult, tableLayoutToDefinition, type SavedViewLayout, type TableViewSeed } from '@/lib/savedViewLayout'
 import { Button } from '@/components/ui/button'
 import { GripVertical, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -48,6 +48,7 @@ interface Props {
     sourceId: string
     teamId: number | null
     viewSeed?: TableViewSeed | null // The saved view the layout and sort start from
+    layoutResetToken?: number // A change discards the view's working copy and seeds from the view again
     source?: Pick<Source, 'source_type' | 'capabilities'> | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
@@ -577,11 +578,25 @@ const emit = defineEmits<{
     (e: 'clear-column-filter', column: string): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
     (e: 'working-layout', value: SavedViewLayout): void
+    (e: 'table-layout', value: SavedViewLayout): void
 }>();
 
 watch(workingLayout, layout => {
     if (layout) emit('working-layout', layout)
 }, { deep: true, immediate: true })
+
+// With no view, the layout on screen is what Save as new view takes.
+const tableLayout = computed(() => props.viewSeed ? null : tableLayoutToDefinition({
+    columnOrder: columnOrder.value,
+    columnSizing: columnSizing.value,
+    columnVisibility: columnVisibility.value,
+}, sorting.value))
+
+watch(tableLayout, layout => {
+    if (layout) emit('table-layout', layout)
+}, { deep: true, immediate: true })
+
+watch(() => props.layoutResetToken, () => resetTableStateToDefaults())
 
 const handleDrillDown = (value: { column: string, value: unknown, operator: FilterOperator }) => {
     if (props.activeMode !== 'logchefql') return;

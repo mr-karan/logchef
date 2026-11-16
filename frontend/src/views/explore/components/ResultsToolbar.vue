@@ -8,6 +8,7 @@ import { useExploreRuns } from '@/stores/exploreRuns'
 import { truncationMessage } from '@/utils/truncation'
 import GroupBySelector from './GroupBySelector.vue'
 import StreamPicker from './StreamPicker.vue'
+import ViewPicker from './ViewPicker.vue'
 import {
   Tooltip,
   TooltipContent,
@@ -46,6 +47,7 @@ const emit = defineEmits<{
   (e: 'update:displayMode', mode: 'table' | 'compact' | 'json'): void
   (e: 'export'): void
   (e: 'add-fast-filter', field: string): void
+  (e: 'select-view', viewId: number | null): void
 }>()
 
 const runs = useExploreRuns()
@@ -163,6 +165,8 @@ const warningText = computed(() => {
       </TooltipProvider>
 
       <div v-if="!aggregated" class="h-4 w-px bg-border mx-1" />
+
+      <ViewPicker :display-mode="displayMode" @select="emit('select-view', $event)" />
 
       <!-- View Mode Toggles -->
       <div v-if="!aggregated" class="flex items-center bg-muted rounded-md p-0.5">

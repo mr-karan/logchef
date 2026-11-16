@@ -14,6 +14,7 @@ import { sourcesApi, type Source } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
 import { exploreApi, type QueryParams } from "@/api/explore";
 import { savedQueriesApi, type ResolvedSavedQuery } from "@/api/savedQueries";
+import { savedViewsApi, type SavedViewList } from "@/api/savedViews";
 import { streamWindowedQuery, type WindowedEvent, type WindowedRequest } from "@/api/windowed";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
@@ -22,6 +23,7 @@ import { useMetaStore } from "@/stores/meta";
 import { useExploreStore } from "@/stores/explore";
 import { useExploreRuns } from "@/stores/exploreRuns";
 import { useSourcesStore } from "@/stores/sources";
+import { useSavedViewsStore } from "@/stores/savedViews";
 import { useExploreHistogramStore } from "@/stores/exploreHistogram";
 import { useVariableStore } from "@/stores/variables";
 import { epochMs, parseZoneId, sqlTimeCondition, type TimeWindow } from "@/utils/timeWindow";
@@ -48,6 +50,8 @@ vi.mock("@/api/windowed", async (importOriginal) => {
 
 // Real router, history and stores. Only the HTTP API boundaries are stubbed.
 const ok = <T>(data: T) => Promise.resolve({ status: "success" as const, data });
+const noViews: SavedViewList = { views: [], default_view_id: null };
+let savedViewList: SavedViewList = noViews;
 const team: UserTeamMembership = { id: 1, name: "payments", description: "", created_at: "", updated_at: "", member_count: 1, role: "member" };
 const source: Source = {
   id: 3,
@@ -141,6 +145,7 @@ describe("Explorer history navigation", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     localStorage.clear();
+    savedViewList = noViews;
     i18n.global.locale.value = "en";
   });
 
@@ -153,6 +158,7 @@ describe("Explorer history navigation", () => {
     vi.spyOn(sourcesApi, "getTeamSource").mockImplementation(
       (_teamId: number, sourceId: number) => ok(sourceById(sourceId)) as never,
     );
+    vi.spyOn(savedViewsApi, "list").mockImplementation(() => ok(savedViewList) as never);
     const query = vi.spyOn(logchefqlApi, "query").mockReturnValue(ok(noLogs) as never);
     vi.spyOn(logchefqlApi, "validate").mockReturnValue(ok({ valid: true }) as never);
     vi.spyOn(exploreApi, "getHistogramData").mockReturnValue(ok({ data: [], granularity: "1m" }) as never);
@@ -562,6 +568,66 @@ describe("Explorer history navigation", () => {
     await router.push({ path: "/logs/explore", query: { team: "1", source: "4" } });
     await settle();
     expect(readRecentSources("1").map(recent => recent.sourceId)).toEqual([4, 3]);
+  });
+
+  function savedView(id: number, name: string) {
+    return {
+      id, source_id: 3, scope: "personal" as const, name, description: "",
+      definition: { version: 1 as const, columns: [{ name: "msg" }] },
+      is_default: false, managed: false, revision: 1, created_at: "", updated_at: "", can_edit: true, can_set_default: true,
+    };
+  }
+
+  it("opens a URL's view under the query it names and keeps view in the URL", async () => {
+    savedViewList = { views: [savedView(12, "errors")], default_view_id: null };
+    const { router, query, toastError } = await mountExplorer({ team: "1", source: "3", view: "12", q: 'level="error"', t: "1h" });
+    await settle();
+    expect(useSavedViewsStore().activeViewId).toBe(12);
+    expect(router.currentRoute.value.query).toMatchObject({ view: "12", q: 'level="error"' });
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'level="error"' });
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("drops a view the caller cannot read with one toast and still runs the query", async () => {
+    const { router, query, toastError } = await mountExplorer({ team: "1", source: "3", view: "99", q: 'level="error"' });
+    await settle();
+    expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t("explore.viewUnavailable"), expect.anything());
+    expect(router.currentRoute.value.query.view).toBeUndefined();
+    expect(useSavedViewsStore().activeViewId).toBeNull();
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'level="error"' });
+  });
+
+  it("opens with no view and one toast when the views fail to load", async () => {
+    const { router, toastError } = await mountExplorer({ team: "1", source: "3", view: "12" }, () => {
+      vi.spyOn(savedViewsApi, "list").mockRejectedValue({ status: "error", message: "down", error_type: "ServerError" });
+    });
+    await settle();
+    expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t("explore.viewsLoadFailed"), expect.anything());
+    expect(router.currentRoute.value.query.view).toBeUndefined();
+  });
+
+  it("opens a source under the remembered view", async () => {
+    savedViewList = { views: [savedView(12, "errors")], default_view_id: null };
+    localStorage.setItem("logchef-activeView-1-3", "12");
+    const { router } = await mountExplorer();
+    await settle();
+    expect(router.currentRoute.value.query.view).toBe("12");
+  });
+
+  it("picks a view without running the query again and remembers it", async () => {
+    savedViewList = { views: [savedView(12, "errors")], default_view_id: null };
+    const { router, nav, query } = await mountExplorer();
+    await settle();
+    const runs = query.mock.calls.length;
+    const shownQuery = router.currentRoute.value.query.q;
+    nav.selectView(12);
+    await settle();
+    expect(router.currentRoute.value.query).toMatchObject({ view: "12", q: shownQuery });
+    nav.selectView(null);
+    await settle();
+    expect(router.currentRoute.value.query.view).toBeUndefined();
+    expect(query.mock.calls.length).toBe(runs);
+    expect(localStorage.getItem("logchef-activeView-1-3")).toBe("null");
   });
 
   function expectOpen(

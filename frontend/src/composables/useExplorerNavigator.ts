@@ -18,6 +18,8 @@ import { useExploreStore, type OpenedLocation, type RunQuery, type RunRequest } 
 import { useExploreRuns, type Execution } from '@/stores/exploreRuns'
 import type { Paging } from '@/stores/exploreWindowed'
 import { useSourcesStore } from '@/stores/sources'
+import { useSavedViewsStore } from '@/stores/savedViews'
+import type { SavedViewList } from '@/api/savedViews'
 import { useTeamsStore } from '@/stores/teams'
 import type { TimeWindow } from '@/utils/timeWindow'
 
@@ -60,6 +62,7 @@ export function useExplorerNavigator() {
   const context = useContextStore()
   const sources = useSourcesStore()
   const teams = useTeamsStore()
+  const savedViews = useSavedViewsStore()
   const { toast } = useToast()
 
   const status = ref<ExplorerStatus>('loading')
@@ -135,8 +138,9 @@ export function useExplorerNavigator() {
           const resolved = await resolve(target, id, attempt > 0)
           if (id !== navId) return
           if (!resolved) continue
-          const { list, details, generation, sourceNotice, ...location } = resolved
+          const { list, details, generation, sourceNotice, views, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
+          const viewEntry = savedViews.enter(location.teamId, location.sourceId, views, sourceNotice ? null : target.viewId)
           const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location)
           applyChoice()
           status.value = 'ready'
@@ -144,6 +148,8 @@ export function useExplorerNavigator() {
           if (auth.user && location.sourceId !== null) recordRecentSource(String(auth.user.id), location.teamId, location.sourceId, Date.now())
           runs.enter(shouldRun && !sourceNotice ? editorAsk() : null)
           if (sourceNotice) toast({ title: i18n.global.t('explore.linkOpenFailed'), description: sourceNotice, variant: 'destructive', duration: TOAST_DURATION.ERROR })
+          if (viewEntry === 'unavailable') toast({ title: i18n.global.t('explore.viewUnavailable'), variant: 'destructive', duration: TOAST_DURATION.ERROR })
+          if (viewEntry === 'failed') toast({ title: i18n.global.t('explore.viewsLoadFailed'), variant: 'destructive', duration: TOAST_DURATION.ERROR })
           if (sourceNotice) void record('replace', { team: String(location.teamId), ...(location.sourceId === null ? {} : { source: String(location.sourceId) }) })
           else replay()
           return
@@ -179,7 +185,7 @@ export function useExplorerNavigator() {
   }
 
   /** Loads everything the location needs and resolves its team and source. */
-  async function resolve({ teamId, sourceId, target }: ExploreLocation, id: number, refresh = false): Promise<(OpenedLocation & { list: Source[]; details: Source | null; generation: number; sourceNotice: string | null }) | null> {
+  async function resolve({ teamId, sourceId, target }: ExploreLocation, id: number, refresh = false): Promise<(OpenedLocation & { list: Source[]; details: Source | null; generation: number; sourceNotice: string | null; views: SavedViewList | null }) | null> {
     // A link that names its team and source loads them while the teams load.
     const early = teamId === null || target.kind === 'share' || target.kind === 'saved' ? null : loadNamedSources(teamId, sourceId, refresh)
     if (teams.teams.length === 0) {
@@ -221,11 +227,16 @@ export function useExplorerNavigator() {
     }
     if (id !== navId || generation !== sources.getMetadataGeneration()) return null
     const source = pickSource(team, list, sourceId)
+    // The views load beside the details, so the table seeds from the view on its first render.
+    const viewLoad = source === null ? null : savedViews.load(team, source)
+    viewLoad?.catch(() => undefined)
     const details = source === null ? null : await (source === sourceId && early?.details ? early.details : loadDetails(team, source, refresh)).catch(error => { throw navigationError(error, 'source') })
     const sourceNotice = sourceId !== null && sourceId !== source && details
       ? i18n.global.t('explore.sourceUnavailableFallback', { sourceId, sourceName: details.name })
       : null
-    return { teamId: team, sourceId: source, content, list, details, generation, sourceNotice }
+    const views = viewLoad === null ? null : await viewLoad
+    if (id !== navId) return null
+    return { teamId: team, sourceId: source, content, list, details, generation, sourceNotice, views }
   }
 
   function loadDetails(team: number, source: number, refresh: boolean) {
@@ -282,6 +293,16 @@ export function useExplorerNavigator() {
     const query = { team: context.teamId ?? undefined, source: saved.source_id, id: saved.id }
     if (sameExploreLocation(route.query, query)) return openRoute(true)
     await router.push({ path: EXPLORE_PATH, query })
+  }
+
+  /** Makes a view, or no view, active and records it in the URL. The query on screen stays. */
+  function selectView(viewId: number | null) {
+    savedViews.pick(viewId)
+    if (status.value !== 'ready' || !shown) return
+    const query = { ...shown }
+    delete query.view
+    if (viewId !== null) query.view = String(viewId)
+    void record('replace', query)
   }
 
   /** Runs with the window and records it in the URL, even when unchanged. */
@@ -351,5 +372,5 @@ export function useExplorerNavigator() {
     if (status.value === 'ready' && runs.current?.status !== 'validating') void runs.page(action)
   }
 
-  return { status, error, pending, selectTeam, selectSource, openSavedQuery, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
+  return { status, error, pending, selectTeam, selectSource, openSavedQuery, selectView, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
 }
