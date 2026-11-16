@@ -80,6 +80,12 @@ func SavedQueryTarget(q *models.SavedQuery) Target {
 	return Target{Type: "saved_query", ID: id(q.ID), Label: q.Name, SourceID: &sourceID}
 }
 
+// SavedViewTarget is a view, with its source and, for a team view, its team.
+func SavedViewTarget(v *models.SavedView) Target {
+	sourceID := v.SourceID
+	return Target{Type: "saved_view", ID: id(v.ID), Label: v.Name, TeamID: v.TeamID, SourceID: &sourceID}
+}
+
 // SessionUserTarget is the user a session.login or session.logout applies
 // to. A failed sign-in has no user, so its label is the attempted email.
 func SessionUserTarget(userID *models.UserID, email string) Target {

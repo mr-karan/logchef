@@ -540,8 +540,8 @@ func TestOAuthIssuerIdentification(t *testing.T) {
 	if !as.AuthorizationResponseIssParameterSupported || prm.Resource != testMCPResource {
 		t.Fatalf("metadata %+v PRM %+v", as, prm)
 	}
-	if slices.Contains(prm.ScopesSupported, "offline_access") || len(prm.ScopesSupported) != 7 {
-		t.Fatalf("PRM scopes %v, want the seven read scopes only", prm.ScopesSupported)
+	if slices.Contains(prm.ScopesSupported, "offline_access") || len(prm.ScopesSupported) != 8 {
+		t.Fatalf("PRM scopes %v, want the eight read scopes only", prm.ScopesSupported)
 	}
 }
 

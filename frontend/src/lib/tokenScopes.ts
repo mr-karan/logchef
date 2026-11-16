@@ -13,6 +13,8 @@ export type TokenScope =
   | "logs:read"
   | "saved_queries:read"
   | "saved_queries:write"
+  | "saved_views:read"
+  | "saved_views:write"
   | "collections:read"
   | "collections:write"
   | "alerts:read"
@@ -44,6 +46,7 @@ export const READ_ONLY_SCOPES: TokenScope[] = [
   "dashboards:read",
   "query_shares:read",
   "settings:read",
+  "saved_views:read",
 ];
 
 export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
@@ -60,6 +63,8 @@ export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
   { value: "logs:read", labelKey: "tokens.scopes.logsRead", descriptionKey: "tokens.scopeDescriptions.logsRead", groupKey: "tokens.groups.logs" },
   { value: "saved_queries:read", labelKey: "tokens.scopes.savedQueriesRead", descriptionKey: "tokens.scopeDescriptions.savedQueriesRead", groupKey: "tokens.groups.logs" },
   { value: "saved_queries:write", labelKey: "tokens.scopes.savedQueriesWrite", descriptionKey: "tokens.scopeDescriptions.savedQueriesWrite", groupKey: "tokens.groups.logs" },
+  { value: "saved_views:read", labelKey: "tokens.scopes.savedViewsRead", descriptionKey: "tokens.scopeDescriptions.savedViewsRead", groupKey: "tokens.groups.logs" },
+  { value: "saved_views:write", labelKey: "tokens.scopes.savedViewsWrite", descriptionKey: "tokens.scopeDescriptions.savedViewsWrite", groupKey: "tokens.groups.logs" },
   { value: "collections:read", labelKey: "tokens.scopes.collectionsRead", descriptionKey: "tokens.scopeDescriptions.collectionsRead", groupKey: "tokens.groups.collections" },
   { value: "collections:write", labelKey: "tokens.scopes.collectionsWrite", descriptionKey: "tokens.scopeDescriptions.collectionsWrite", groupKey: "tokens.groups.collections" },
   { value: "alerts:read", labelKey: "tokens.scopes.alertsRead", descriptionKey: "tokens.scopeDescriptions.alertsRead", groupKey: "tokens.groups.alerts" },

@@ -73,6 +73,8 @@ const (
 	TokenScopeSettingsWrite     TokenScope = "settings:write"
 	TokenScopeReportsRead       TokenScope = "reports:read"
 	TokenScopeReportsWrite      TokenScope = "reports:write"
+	TokenScopeSavedViewsRead    TokenScope = "saved_views:read"
+	TokenScopeSavedViewsWrite   TokenScope = "saved_views:write"
 )
 
 // TeamRole represents the possible team member roles
