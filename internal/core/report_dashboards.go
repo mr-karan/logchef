@@ -1,8 +1,8 @@
 package core
 
-// Dashboard reports (RFC 0008 unit R6): load the dashboard, select the
-// tab, authorize each panel for the owner and run the stat and table
-// panels. Charts, toplists and pies render as unsupported until unit R7.
+// Dashboard reports (RFC 0008 units R6 and R7): load the dashboard, select
+// the tab, authorize each panel for the owner and run it. A stat becomes a
+// tile, a table a table, and a chart, toplist or pie a bar table.
 
 import (
 	"cmp"
@@ -116,8 +116,8 @@ func (rr *ReportRunner) planDashboard(ctx context.Context, r *models.Report, own
 	return plan, nil, nil
 }
 
-// dashboardPanelJob runs one stat or table panel as the dashboard view
-// would, at the report's window, and renders it.
+// dashboardPanelJob runs one panel as the dashboard view would, at the
+// report's window, and renders it.
 func (rr *ReportRunner) dashboardPanelJob(src access.AuthorizedSource, p models.DashboardViewPanel, report reports.Window, dayStart bool, loc *time.Location, at time.Time, maxRows int) *reports.PanelJob {
 	return &reports.PanelJob{ID: p.ID, Title: p.Title, Run: func(ctx context.Context) (reports.PanelOutput, error) {
 		w, err := reports.PanelWindow(&p.Query, report, dayStart, loc, at)
@@ -125,9 +125,12 @@ func (rr *ReportRunner) dashboardPanelJob(src access.AuthorizedSource, p models.
 			return reports.PanelOutput{}, err
 		}
 		var out reports.PanelOutput
-		if p.Query.Mode == models.DashboardQueryModeCount {
+		switch {
+		case p.Query.Mode == models.DashboardQueryModeCount && p.Viz.Type == models.DashboardVizStat:
 			out, err = rr.runCountStat(ctx, src, &p, w, loc)
-		} else {
+		case p.Query.Mode == models.DashboardQueryModeCount:
+			out, err = rr.runCountBars(ctx, src, &p, w, loc)
+		default:
 			out, err = rr.runResultPanel(ctx, src, &p, w, loc, maxRows)
 		}
 		if err != nil {
@@ -171,10 +174,23 @@ func (rr *ReportRunner) runResultPanel(ctx context.Context, src access.Authorize
 	if err != nil {
 		return reports.PanelOutput{}, err
 	}
-	if p.Viz.Type == models.DashboardVizTable {
-		return tableOutput(p.ID, p.Title, reports.VisibleColumns(res, p.Viz.VisibleColumns), loc, maxRows), nil
-	}
 	v := &p.Viz
+	switch v.Type {
+	case models.DashboardVizTable:
+		return tableOutput(p.ID, p.Title, reports.VisibleColumns(res, v.VisibleColumns), loc, maxRows), nil
+	case models.DashboardVizChart:
+		bars, err := reports.ResultChartBars(res, reports.ChartOptions{
+			X: v.X, Y: v.Y, Series: v.Series, XScale: v.XScale, Format: v.Format, Columns: v.Columns, Untyped: untyped,
+		}, loc)
+		return barsOutput(bars, len(res.Logs), res.Stats.Truncation), err
+	case models.DashboardVizToplist, models.DashboardVizPie:
+		bars, err := reports.ResultListBars(res, reports.ListOptions{
+			Pie: v.Type == models.DashboardVizPie, Label: v.Label, Value: v.Value, MaxRows: v.MaxRows,
+			MinSlicePercent: v.MinSlicePercent, Format: v.Format, Columns: v.Columns, Untyped: untyped,
+		}, loc)
+		return barsOutput(bars, len(res.Logs), res.Stats.Truncation), err
+	case models.DashboardVizStat:
+	}
 	n, label, err := reports.ReduceStat(res, reports.StatOptions{
 		Value: v.Value, Reduce: cmp.Or(v.Reduce, models.DashboardStatReduceLast), OrderBy: v.OrderBy,
 		Columns: v.Columns, Untyped: untyped,
@@ -190,12 +206,19 @@ func (rr *ReportRunner) runResultPanel(ctx context.Context, src access.Authorize
 	}, nil
 }
 
-// runCountStat runs a count panel through the histogram path and reduces
-// its buckets. A LogchefQL panel compiles to the source's native query
-// first, as the dashboard view does.
-func (rr *ReportRunner) runCountStat(ctx context.Context, src access.AuthorizedSource, p *models.DashboardViewPanel, w reports.Window, loc *time.Location) (reports.PanelOutput, error) {
+// countHistogram is a count panel's histogram: its buckets, the window
+// they use and whether they keep the window start's zone offset, as
+// VictoriaLogs buckets do. A LogchefQL panel compiles to the source's
+// native query first, as the dashboard view does. window picks the
+// histogram window once the query language is known.
+type countHistogram struct {
+	data        []datasource.HistogramBucket
+	granularity string
+	fixedOffset bool
+}
+
+func (rr *ReportRunner) runCountHistogram(ctx context.Context, src access.AuthorizedSource, q *models.DashboardViewQuery, w reports.Window, loc *time.Location, window func(fixedOffset bool) string) (countHistogram, error) {
 	_, timeout := rr.reportQueryConfig()
-	q := &p.Query
 	start, end := w.Start.UTC().Format(time.RFC3339), w.End.UTC().Format(time.RFC3339)
 	text, language := q.Text, q.Language
 	if language == models.QueryLanguageLogchefQL {
@@ -203,27 +226,76 @@ func (rr *ReportRunner) runCountStat(ctx context.Context, src access.AuthorizedS
 			Query: q.Text, StartTime: start, EndTime: end, Timezone: loc.String(), Limit: q.TranslateLimit,
 		})
 		if err != nil {
-			return reports.PanelOutput{}, err
+			return countHistogram{}, err
 		}
 		text, language = compiled.Query, compiled.Language
 	}
-	interval := reports.ResolveInterval(q.Interval, w)
+	fixedOffset := language == models.QueryLanguageLogsQL
+	interval := window(fixedOffset)
 	hist, err := RunHistogram(ctx, rr.DS, src, models.APIHistogramRequest{
 		QueryText: text, Window: interval, GroupBy: q.GroupBy,
 		StartTime: start, EndTime: end, Timezone: loc.String(), QueryTimeout: &timeout,
 	})
 	if err != nil {
+		return countHistogram{}, err
+	}
+	return countHistogram{data: hist.Data, granularity: cmp.Or(hist.Granularity, interval), fixedOffset: fixedOffset}, nil
+}
+
+// runCountStat runs a count panel through the histogram path and reduces
+// its buckets.
+func (rr *ReportRunner) runCountStat(ctx context.Context, src access.AuthorizedSource, p *models.DashboardViewPanel, w reports.Window, loc *time.Location) (reports.PanelOutput, error) {
+	hist, err := rr.runCountHistogram(ctx, src, &p.Query, w, loc, func(bool) string { return reports.ResolveInterval(p.Query.Interval, w) })
+	if err != nil {
 		return reports.PanelOutput{}, err
 	}
-	buckets := make([]reports.CountRow, len(hist.Data))
-	for i, b := range hist.Data {
+	buckets := make([]reports.CountRow, len(hist.data))
+	for i, b := range hist.data {
 		buckets[i] = reports.CountRow{At: b.Bucket, Count: int64(b.LogCount)}
 	}
-	rows, err := reports.CountRows(buckets, cmp.Or(hist.Granularity, interval), w, loc, language == models.QueryLanguageLogsQL)
+	rows, err := reports.CountRows(buckets, hist.granularity, w, loc, hist.fixedOffset)
 	if err != nil {
 		return reports.PanelOutput{}, err
 	}
 	n, label := reports.ReduceCount(rows, cmp.Or(p.Viz.Reduce, models.DashboardStatReduceSum), loc)
 	tile := reports.FormatTile(&n, label, p.Viz.Format)
-	return reports.PanelOutput{Panel: reports.Panel{Stat: &tile}, Rows: len(hist.Data), Empty: len(hist.Data) == 0}, nil
+	return reports.PanelOutput{Panel: reports.Panel{Stat: &tile}, Rows: len(hist.data), Empty: len(hist.data) == 0}, nil
+}
+
+// runCountBars runs a count chart, toplist or pie. A chart asks for the
+// window that gives at most reports.MaxBars bars; a toplist or a pie adds
+// up every bucket, so it keeps the panel's interval.
+func (rr *ReportRunner) runCountBars(ctx context.Context, src access.AuthorizedSource, p *models.DashboardViewPanel, w reports.Window, loc *time.Location) (reports.PanelOutput, error) {
+	chart := p.Viz.Type == models.DashboardVizChart
+	hist, err := rr.runCountHistogram(ctx, src, &p.Query, w, loc, func(fixedOffset bool) string {
+		if chart {
+			return reports.BarWindow(p.Query.Interval, w, loc, fixedOffset)
+		}
+		return reports.ResolveInterval(p.Query.Interval, w)
+	})
+	if err != nil {
+		return reports.PanelOutput{}, err
+	}
+	buckets := make([]reports.SeriesBucket, len(hist.data))
+	for i, b := range hist.data {
+		buckets[i] = reports.SeriesBucket{At: b.Bucket, Count: int64(b.LogCount), Series: reports.CountSeries{Value: b.GroupValue, Null: b.IsNull, Other: b.IsOther}}
+	}
+	var bars *reports.Bars
+	if chart {
+		bars, err = reports.CountChartBars(buckets, p.Query.GroupBy != "", hist.granularity, w, loc, hist.fixedOffset, p.Viz.Format)
+	} else {
+		bars, err = reports.CountListBars(buckets, reports.ListOptions{Pie: p.Viz.Type == models.DashboardVizPie, MaxRows: p.Viz.MaxRows, MinSlicePercent: p.Viz.MinSlicePercent, Format: p.Viz.Format})
+	}
+	return barsOutput(bars, len(hist.data), models.TruncationNone), err
+}
+
+// barsOutput is a bar panel's output. An error leaves it unused.
+func barsOutput(bars *reports.Bars, rows int, truncation models.Truncation) reports.PanelOutput {
+	if bars == nil {
+		return reports.PanelOutput{}
+	}
+	return reports.PanelOutput{
+		Panel: reports.Panel{Bars: bars},
+		Rows:  rows, Truncation: truncation, Empty: len(bars.Blocks) == 0,
+	}
 }

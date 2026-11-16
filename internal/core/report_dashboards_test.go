@@ -101,14 +101,18 @@ func panelStatuses(run *models.ReportRun) string {
 	return strings.Join(parts, " ")
 }
 
-func TestDashboardReportSendsStatAndTable(t *testing.T) {
+func TestDashboardReportSendsStatChartAndTable(t *testing.T) {
 	e := newDashboardReportEnv(t)
+	e.histogram = func(_ context.Context, req datasource.HistogramRequest) (*datasource.HistogramResult, error) {
+		at := req.EndTime.Add(-time.Hour).Truncate(time.Hour)
+		return &datasource.HistogramResult{Granularity: req.Window, Data: []datasource.HistogramBucket{{Bucket: at, LogCount: 4321}}}, nil
+	}
 	r := e.createDashboardReport("main")
 	run := e.run(r, e.owner, ReportRunToMe)
 	if run.Status != models.ReportRunSent {
 		t.Fatalf("run = %s/%s, want sent; panels %+v deliveries %+v", run.Status, run.Reason, run.Panels, run.Deliveries)
 	}
-	if got := panelStatuses(run); got != "stat:ok chart:unsupported table:ok" {
+	if got := panelStatuses(run); got != "stat:ok chart:ok table:ok" {
 		t.Errorf("panels in reading order = %q", got)
 	}
 	if run.WindowEnd.Sub(*run.WindowStart) != 6*time.Hour {
@@ -119,13 +123,16 @@ func TestDashboardReportSendsStatAndTable(t *testing.T) {
 		t.Fatalf("sent %d messages, want 1", len(sent))
 	}
 	html := sent[0].msg.HTML
-	for _, want := range []string{"1.5 KiB", "api-1", "503", "This panel is not shown in email.", "Fixed window", fmt.Sprintf("/dashboards/%d?tab=main", e.dashboard.ID)} {
+	for _, want := range []string{"1.5 KiB", "api-1", "503", ">4,321<", "Each bar covers ", "Fixed window", fmt.Sprintf("/dashboards/%d?tab=main", e.dashboard.ID)} {
 		if !strings.Contains(html, want) {
 			t.Errorf("email lacks %q", want)
 		}
 	}
-	if strings.Count(html, "Fixed window") != 1 {
-		t.Errorf("want the fixed-window note on the table only, the stat takes the range")
+	if strings.Contains(html, "This panel is not shown in email.") {
+		t.Errorf("the chart is marked unsupported")
+	}
+	if strings.Count(html, "Fixed window") != 2 {
+		t.Errorf("want the fixed-window note on the chart and the table, as the dashboard chip shows it; the stat takes the range")
 	}
 	stat, chart, table := strings.Index(html, "Bytes served"), strings.Index(html, "Errors over time"), strings.Index(html, "Recent errors")
 	if stat >= chart || chart >= table {
@@ -198,7 +205,7 @@ func TestDashboardReportLocksPanelsTheOwnerLost(t *testing.T) {
 	if run.Status != models.ReportRunPartial || run.Reason != models.ReportReasonPanelLocked {
 		t.Fatalf("run = %s/%s, want partial/panel_locked; panels %+v", run.Status, run.Reason, run.Panels)
 	}
-	if got := panelStatuses(run); got != "stat:ok chart:unsupported table:ok count:locked" {
+	if got := panelStatuses(run); got != "stat:ok chart:empty table:ok count:locked" {
 		t.Errorf("panels = %q", got)
 	}
 	if html := e.mailer.messages()[0].msg.HTML; !strings.Contains(html, "The report owner no longer has access to this panel.") {
@@ -339,5 +346,53 @@ func TestDashboardReportClaim(t *testing.T) {
 	}
 	if _, after, err := ClaimReport(ctx, e.db, access.SessionPrincipal(member), r.ID); err != nil || after.OwnerID == nil || *after.OwnerID != member.ID {
 		t.Fatalf("claim by a team member = %+v, %v", after, err)
+	}
+}
+
+// TestDashboardReportCountChartBars covers the 24-bar rule through the run:
+// a 7-day range asks for 12-hour buckets, and a 30-day range asks for
+// 24 hours and adds pairs of days into 15 bars.
+func TestDashboardReportCountChartBars(t *testing.T) {
+	e := newDashboardReportEnv(t)
+	var windows []string
+	e.histogram = func(_ context.Context, req datasource.HistogramRequest) (*datasource.HistogramResult, error) {
+		windows = append(windows, req.Window)
+		var data []datasource.HistogramBucket
+		if req.Window == "24h" {
+			for day := range 30 {
+				data = append(data, datasource.HistogramBucket{Bucket: req.StartTime.AddDate(0, 0, day), LogCount: day + 1})
+			}
+		}
+		return &datasource.HistogramResult{Granularity: req.Window, Data: data}, nil
+	}
+	r := e.createDashboardReport("main")
+	for _, tc := range []struct{ timeRange, window string }{{"7d", "12h"}, {"30d", "24h"}} {
+		in := e.input("main")
+		in.TimeRange = &tc.timeRange
+		in.RangeAnchor = models.ReportAnchorDayStart
+		if _, _, err := UpdateReport(context.Background(), e.db, access.SessionPrincipal(e.owner), r.ID, in); err != nil {
+			t.Fatal(err)
+		}
+		windows = nil
+		run := e.run(r, e.owner, ReportRunToMe)
+		if run.Status != models.ReportRunSent {
+			t.Fatalf("%s: run = %s/%s, panels %+v", tc.timeRange, run.Status, run.Reason, run.Panels)
+		}
+		if len(windows) != 1 || windows[0] != tc.window {
+			t.Errorf("%s: histogram windows = %v, want [%s]", tc.timeRange, windows, tc.window)
+		}
+	}
+	text := e.mailer.messages()[1].msg.Text
+	if !strings.Contains(text, "Each bar covers 2 days") {
+		t.Errorf("the 30-day email does not say each bar covers two days:\n%s", text)
+	}
+	// Day d holds d+1 logs, so bar b adds days 2b and 2b+1: 4b+3.
+	for b := range 15 {
+		if !strings.Contains(text, fmt.Sprintf(" | %d\n", 4*b+3)) {
+			t.Errorf("the 30-day email lacks bar %d with %d logs", b, 4*b+3)
+		}
+	}
+	if strings.Contains(text, " | 63\n") {
+		t.Errorf("the 30-day email has a 16th bar")
 	}
 }

@@ -45,12 +45,14 @@ type Document struct {
 }
 
 // Panel is one rendered panel. A failed, locked or unsupported panel has
-// no Table and no Stat; an empty table has a Table with no rows.
+// no Table, Stat or Bars; an empty table has a Table with no rows, and
+// empty bars have no block.
 type Panel struct {
 	ID     string
 	Title  string
 	Table  *Table
 	Stat   *Tile
+	Bars   *Bars
 	Failed bool
 	// Locked marks a panel whose source the report owner no longer reaches.
 	Locked bool
@@ -70,8 +72,8 @@ type Rendered struct {
 }
 
 // Render writes the HTML and text bodies. To keep the HTML under
-// MaxBodyBytes it halves the rows per table until the body fits or tables
-// show minRowsShown rows, then replaces panels from the end with their
+// MaxBodyBytes it halves the rows per table and per bar block until the
+// body fits or they show minRowsShown rows, then replaces panels from the end with their
 // title and a link. maxRows is the report's rows per table.
 func Render(doc Document, maxRows int) (Rendered, error) {
 	cut := make([]bool, len(doc.Panels))
@@ -144,6 +146,29 @@ type panelView struct {
 	Rows        [][]Cell
 	MoreRows    int
 	Truncation  string
+	Bars        *barsView
+}
+
+type barsView struct {
+	Blocks     []barBlockView
+	MoreSeries int
+	Percent    bool
+	Notes      []string
+}
+
+type barBlockView struct {
+	Title    string
+	Rows     []BarRow
+	MoreRows int
+}
+
+func barsViewOf(b *Bars, rows int) *barsView {
+	v := &barsView{MoreSeries: b.MoreSeries, Percent: b.Percent, Notes: b.Notes}
+	for _, block := range b.Blocks {
+		shown := block.Rows[:min(rows, len(block.Rows))]
+		v.Blocks = append(v.Blocks, barBlockView{Title: block.Title, Rows: shown, MoreRows: len(block.Rows) - len(shown)})
+	}
+	return v
 }
 
 func panelViews(doc Document, rows int, cut []bool) []panelView {
@@ -160,6 +185,11 @@ func panelViews(doc Document, rows int, cut []bool) []panelView {
 			v.Empty = p.Table.TotalRows == 0
 			v.MoreRows = p.Table.TotalRows - len(shown)
 			v.Truncation = truncationLabel(p.Table.Truncation, p.Table.TotalRows)
+		}
+		if p.Bars != nil && !cut[i] {
+			v.Bars = barsViewOf(p.Bars, rows)
+			v.Empty = len(p.Bars.Blocks) == 0
+			v.Truncation = truncationLabel(p.Bars.Truncation, p.Bars.Rows)
 		}
 		views[i] = v
 	}
@@ -179,7 +209,7 @@ var htmlBody = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 <div style="font-size:18px;font-weight:bold;">{{.Name}}</div>
 <div style="font-size:13px;color:#52525b;margin-top:4px;">{{.From}} to {{.To}} ({{.Zone}})</div>
 </td></tr>
-{{range .Panels}}<tr><td style="padding:16px 24px;border-bottom:1px solid #e4e4e7;">
+{{range $panel := .Panels}}<tr><td style="padding:16px 24px;border-bottom:1px solid #e4e4e7;">
 <div style="font-size:15px;font-weight:bold;margin-bottom:8px;">{{.Title}}</div>
 {{if .Note}}<div style="font-size:12px;color:#71717a;margin:-4px 0 8px;">{{.Note}}</div>
 {{end}}{{if .Cut}}<div style="font-size:13px;color:#52525b;">This panel was left out to keep the email small.{{if $.SourceURL}} <a href="{{$.SourceURL}}" style="color:#2563eb;">Open it in Logchef</a>.{{end}}</div>
@@ -189,6 +219,15 @@ var htmlBody = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 {{else if .Stat}}{{if .Truncation}}<div style="font-size:12px;color:#a16207;margin-bottom:6px;">{{.Truncation}}</div>
 {{end}}<div style="font-size:28px;font-weight:bold;">{{if .Stat.Value}}{{.Stat.Value}}{{else}}No data{{end}}</div>
 {{if .Stat.RowLabel}}<div style="font-size:12px;color:#52525b;margin-top:4px;">{{.Stat.RowLabel}}</div>
+{{end}}{{else if .Bars}}{{if .Truncation}}<div style="font-size:12px;color:#a16207;margin-bottom:6px;">{{.Truncation}}</div>
+{{end}}{{range .Bars.Notes}}<div style="font-size:12px;color:#71717a;margin-bottom:6px;">{{.}}</div>
+{{end}}{{if .Empty}}<div style="font-size:13px;color:#52525b;">No data</div>
+{{end}}{{range .Bars.Blocks}}{{if .Title}}<div style="font-size:13px;font-weight:bold;margin:8px 0 4px;">{{.Title}}</div>
+{{end}}<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;">
+{{range .Rows}}<tr><td width="30%" style="padding:3px 6px;width:30%;border-bottom:1px solid #f4f4f5;">{{.Label}}</td><td width="50%" style="padding:3px 6px;width:50%;border-bottom:1px solid #f4f4f5;">{{if .Width}}<table role="presentation" cellpadding="0" cellspacing="0" width="{{.Width}}%" style="width:{{.Width}}%;"><tr><td style="background:#3b82f6;height:10px;line-height:10px;font-size:0;">&nbsp;</td></tr></table>{{end}}</td><td align="right" style="padding:3px 6px;white-space:nowrap;border-bottom:1px solid #f4f4f5;">{{.Value}}</td>{{if $panel.Bars.Percent}}<td align="right" style="padding:3px 6px;white-space:nowrap;border-bottom:1px solid #f4f4f5;color:#52525b;">{{.Percent}}</td>{{end}}</tr>
+{{end}}</table>
+{{if .MoreRows}}<div style="font-size:12px;color:#52525b;margin-top:6px;">{{if $.SourceURL}}<a href="{{$.SourceURL}}" style="color:#2563eb;">{{.MoreRows}} more rows</a>{{else}}{{.MoreRows}} more rows{{end}}</div>
+{{end}}{{end}}{{if .Bars.MoreSeries}}<div style="font-size:12px;color:#52525b;margin-top:6px;">{{if $.SourceURL}}<a href="{{$.SourceURL}}" style="color:#2563eb;">{{.Bars.MoreSeries}} more series</a>{{else}}{{.Bars.MoreSeries}} more series{{end}}</div>
 {{end}}{{else if .Empty}}<div style="font-size:13px;color:#52525b;">No rows</div>
 {{else}}{{if .Truncation}}<div style="font-size:12px;color:#a16207;margin-bottom:6px;">{{.Truncation}}</div>
 {{end}}<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;">
@@ -257,23 +296,12 @@ func renderText(doc Document, rows int, cut []bool) string {
 			if p.Stat.RowLabel != "" {
 				b.WriteString(p.Stat.RowLabel + "\n")
 			}
+		case p.Bars != nil:
+			writeBarsText(&b, p)
 		case p.Empty:
 			b.WriteString("No rows\n")
 		default:
-			if p.Truncation != "" {
-				b.WriteString(p.Truncation + "\n")
-			}
-			b.WriteString(strings.Join(p.Columns, " | ") + "\n")
-			for _, row := range p.Rows {
-				texts := make([]string, len(row))
-				for i, c := range row {
-					texts[i] = strings.Join(strings.Fields(c.Text), " ")
-				}
-				b.WriteString(strings.Join(texts, " | ") + "\n")
-			}
-			if p.MoreRows > 0 {
-				fmt.Fprintf(&b, "%d more rows\n", p.MoreRows)
-			}
+			writeTableText(&b, p)
 		}
 	}
 	b.WriteString("\n--\n")
@@ -294,4 +322,51 @@ func renderText(doc Document, rows int, cut []bool) string {
 		fmt.Fprintf(&b, "Report settings: %s\n", doc.ReportURL)
 	}
 	return b.String()
+}
+
+func writeBarsText(b *strings.Builder, p *panelView) {
+	if p.Truncation != "" {
+		b.WriteString(p.Truncation + "\n")
+	}
+	for _, note := range p.Bars.Notes {
+		b.WriteString(note + "\n")
+	}
+	if p.Empty {
+		b.WriteString("No data\n")
+	}
+	for _, block := range p.Bars.Blocks {
+		if block.Title != "" {
+			b.WriteString("-- " + block.Title + " --\n")
+		}
+		for _, row := range block.Rows {
+			line := strings.Join(strings.Fields(row.Label), " ") + " | " + row.Value
+			if p.Bars.Percent {
+				line += " | " + row.Percent
+			}
+			b.WriteString(line + "\n")
+		}
+		if block.MoreRows > 0 {
+			fmt.Fprintf(b, "%d more rows\n", block.MoreRows)
+		}
+	}
+	if p.Bars.MoreSeries > 0 {
+		fmt.Fprintf(b, "%d more series\n", p.Bars.MoreSeries)
+	}
+}
+
+func writeTableText(b *strings.Builder, p *panelView) {
+	if p.Truncation != "" {
+		b.WriteString(p.Truncation + "\n")
+	}
+	b.WriteString(strings.Join(p.Columns, " | ") + "\n")
+	for _, row := range p.Rows {
+		texts := make([]string, len(row))
+		for i, c := range row {
+			texts[i] = strings.Join(strings.Fields(c.Text), " ")
+		}
+		b.WriteString(strings.Join(texts, " | ") + "\n")
+	}
+	if p.MoreRows > 0 {
+		fmt.Fprintf(b, "%d more rows\n", p.MoreRows)
+	}
 }

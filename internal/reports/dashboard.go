@@ -39,14 +39,14 @@ func SelectDashboardPanels(view *models.DashboardView, tabID string) ([]models.D
 }
 
 // Renders reports whether this release renders the panel's visualization.
-// Charts, toplists and pies are unsupported until RFC 0008 unit R7, and a
-// LogQL panel until Loki sources declare their capabilities.
+// A LogQL panel is unsupported until Loki sources declare their
+// capabilities.
 func Renders(p *models.DashboardViewPanel) bool {
 	if p.Query.Language == models.QueryLanguageLogQL {
 		return false
 	}
 	switch p.Viz.Type {
-	case models.DashboardVizStat:
+	case models.DashboardVizStat, models.DashboardVizChart, models.DashboardVizToplist, models.DashboardVizPie:
 		return true
 	case models.DashboardVizTable:
 		return p.Query.Mode == models.DashboardQueryModeResult
@@ -157,15 +157,12 @@ func CountRows(buckets []CountRow, granularity string, w Window, loc *time.Locat
 	for _, b := range buckets {
 		totals[b.At.UnixMilli()] += b.Count
 	}
-	bounds := bucketBounds(w, step, loc, fixedOffset)
-	if (bounds.last-bounds.first)/step.Milliseconds() > maxCountBuckets {
-		return nil, errors.New("too many count buckets; choose a shorter range")
+	grid, err := bucketGrid(w, step, loc, fixedOffset)
+	if err != nil {
+		return nil, err
 	}
-	var rows []CountRow
-	for ts := bounds.first; ts <= bounds.last; ts = bounds.next(ts) {
-		if len(rows) > maxCountBuckets {
-			return nil, errors.New("too many count buckets; choose a shorter range")
-		}
+	rows := make([]CountRow, 0, len(grid))
+	for _, ts := range grid {
 		rows = append(rows, CountRow{At: time.UnixMilli(ts), Count: totals[ts]})
 		delete(totals, ts)
 	}
@@ -182,6 +179,25 @@ type CountRow struct {
 	At    time.Time
 	Count int64
 }
+
+// bucketGrid is the start of every bucket from the one that holds the window
+// start to the one that holds its end, in time order.
+func bucketGrid(w Window, step time.Duration, loc *time.Location, fixedOffset bool) ([]int64, error) {
+	bounds := bucketBounds(w, step, loc, fixedOffset)
+	if (bounds.last-bounds.first)/step.Milliseconds() > maxCountBuckets {
+		return nil, errTooManyBuckets
+	}
+	var grid []int64
+	for ts := bounds.first; ts <= bounds.last; ts = bounds.next(ts) {
+		if len(grid) > maxCountBuckets {
+			return nil, errTooManyBuckets
+		}
+		grid = append(grid, ts)
+	}
+	return grid, nil
+}
+
+var errTooManyBuckets = errors.New("too many count buckets; choose a shorter range")
 
 type bounds struct {
 	first, last int64
