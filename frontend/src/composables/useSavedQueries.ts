@@ -288,7 +288,7 @@ export function useSavedQueries() {
         name?: string;
         description?: string;
         query_content: string;
-        query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
+        query_language: 'logchefql' | 'clickhouse-sql' | 'logsql' | 'logql';
         editor_mode: 'builder' | 'native';
       }
   ) {

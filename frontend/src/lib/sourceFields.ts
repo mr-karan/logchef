@@ -1,4 +1,5 @@
 import type { Source } from "@/api/sources";
+import { isSchemalessSource } from "@/lib/queryMetadata";
 
 interface SourceFieldLike {
   name: string;
@@ -138,7 +139,7 @@ export function isSystemField(
   fieldName: string,
 ): boolean {
   const normalized = normalizeFieldName(fieldName);
-  if (source?.source_type === "victorialogs") {
+  if (isSchemalessSource(source)) {
     if (VICTORIALOGS_SYSTEM_FIELDS.has(normalized)) {
       return true;
     }

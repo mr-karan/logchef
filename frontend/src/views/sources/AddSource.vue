@@ -17,21 +17,28 @@ import { getErrorMessage } from "@/api/types";
 import type { Source } from "@/api/sources";
 import ClickHouseSourceForm from "./components/ClickHouseSourceForm.vue";
 import VictoriaLogsSourceForm from "./components/VictoriaLogsSourceForm.vue";
+import LokiSourceForm from "./components/LokiSourceForm.vue";
+import { getSourceTypeLabel } from "@/lib/queryMetadata";
 import {
   buildClickHouseConnection,
   buildClickHouseValidationRequest,
+  buildLokiConnection,
+  buildLokiValidationRequest,
   buildVictoriaLogsConnection,
   buildVictoriaLogsValidationRequest,
   clickHouseFormStateFromSource,
   createDefaultClickHouseFormState,
+  createDefaultLokiFormState,
   createDefaultVictoriaLogsFormState,
   generateClickHouseSchema,
   isClickHouseActivityValid,
+  lokiFormStateFromSource,
   serializeConnectionSnapshot,
   sourceTypeFromSource,
   victoriaLogsFormStateFromSource,
   type ClickHouseSourceFormState,
   type DatasourceType,
+  type LokiSourceFormState,
   type VictoriaLogsSourceFormState,
 } from "./components/sourceFormModels";
 
@@ -58,6 +65,8 @@ const description = ref("");
 const clickHouseForm = ref<ClickHouseSourceFormState>(createDefaultClickHouseFormState());
 const victoriaLogsForm = ref<VictoriaLogsSourceFormState>(createDefaultVictoriaLogsFormState());
 const victoriaLogsTTLDays = ref("0");
+const lokiForm = ref<LokiSourceFormState>(createDefaultLokiFormState());
+const originalLokiAuthMode = ref("none");
 
 const isValidating = ref(false);
 const validationMessage = ref<string | null>(null);
@@ -67,17 +76,31 @@ const originalConnectionSnapshot = ref("");
 const hasStoredClickHousePassword = ref(false);
 const originalClickHouseIdentity = ref({ host: "", username: "" });
 
-const currentConnectionSnapshot = computed(() =>
-  sourceType.value === "clickhouse"
-    ? serializeConnectionSnapshot(buildClickHouseConnection(clickHouseForm.value))
-    : serializeConnectionSnapshot(buildVictoriaLogsConnection(victoriaLogsForm.value))
-);
+function activeConnection() {
+  switch (sourceType.value) {
+    case "clickhouse":
+      return buildClickHouseConnection(clickHouseForm.value);
+    case "loki":
+      return buildLokiConnection(lokiForm.value);
+    default:
+      return buildVictoriaLogsConnection(victoriaLogsForm.value);
+  }
+}
 
-const activeValidationFingerprint = computed(() =>
-  sourceType.value === "clickhouse"
-    ? JSON.stringify(buildClickHouseValidationRequest(clickHouseForm.value))
-    : JSON.stringify(buildVictoriaLogsValidationRequest(victoriaLogsForm.value))
-);
+function activeValidationRequest() {
+  switch (sourceType.value) {
+    case "clickhouse":
+      return buildClickHouseValidationRequest(clickHouseForm.value);
+    case "loki":
+      return buildLokiValidationRequest(lokiForm.value);
+    default:
+      return buildVictoriaLogsValidationRequest(victoriaLogsForm.value);
+  }
+}
+
+const currentConnectionSnapshot = computed(() => serializeConnectionSnapshot(activeConnection()));
+
+const activeValidationFingerprint = computed(() => JSON.stringify(activeValidationRequest()));
 
 const activeSchema = computed(() => generateClickHouseSchema(clickHouseForm.value));
 const hasConnectionChanges = computed(() => currentConnectionSnapshot.value !== originalConnectionSnapshot.value);
@@ -147,19 +170,27 @@ const isValid = computed(() => {
     return isClickHouseActivityValid(state.activity);
   }
 
-  const state = victoriaLogsForm.value;
+  const state = sourceType.value === "loki" ? lokiForm.value : victoriaLogsForm.value;
   if (!state.baseURL.trim() || !state.metaTSField.trim()) {
     return false;
   }
+  if (sourceType.value === "loki" && !lokiForm.value.selector.trim()) {
+    return false;
+  }
+  // A blank secret on edit keeps the stored one. Loki keeps it for any change
+  // but a new auth mode, since its base URL cannot change.
+  const needsSecret = !isEditMode.value || (sourceType.value === "loki"
+    ? lokiForm.value.authMode !== originalLokiAuthMode.value
+    : hasConnectionChanges.value);
   if (state.authMode === "basic") {
     if (!state.username.trim()) {
       return false;
     }
-    if ((!isEditMode.value || hasConnectionChanges.value) && !state.password) {
+    if (needsSecret && !state.password) {
       return false;
     }
   }
-  if (state.authMode === "bearer" && (!isEditMode.value || hasConnectionChanges.value) && !state.token) {
+  if (state.authMode === "bearer" && needsSecret && !state.token) {
     return false;
   }
   return true;
@@ -182,7 +213,7 @@ watch(sourceType, () => {
 });
 
 function handleSourceTypeChange(value: unknown) {
-  sourceType.value = value === "victorialogs" ? "victorialogs" : "clickhouse";
+  sourceType.value = value === "victorialogs" || value === "loki" ? value : "clickhouse";
 }
 
 function setOriginalConnectionSnapshot() {
@@ -208,11 +239,19 @@ function prefillFormFromSource(source: Source, isCopy = false) {
     hasStoredClickHousePassword.value = !isCopy && Boolean((source.connection as { has_password?: boolean } | undefined)?.has_password);
     victoriaLogsForm.value = createDefaultVictoriaLogsFormState();
     victoriaLogsTTLDays.value = "0";
+    lokiForm.value = createDefaultLokiFormState();
+  } else if (sourceType.value === "loki") {
+    hasStoredClickHousePassword.value = false;
+    lokiForm.value = lokiFormStateFromSource(source);
+    originalLokiAuthMode.value = isCopy ? "" : lokiForm.value.authMode;
+    clickHouseForm.value = createDefaultClickHouseFormState();
+    victoriaLogsForm.value = createDefaultVictoriaLogsFormState();
   } else {
     hasStoredClickHousePassword.value = false;
     victoriaLogsForm.value = victoriaLogsFormStateFromSource(source);
     victoriaLogsTTLDays.value = String(source.ttl_days ?? 0);
     clickHouseForm.value = createDefaultClickHouseFormState();
+    lokiForm.value = createDefaultLokiFormState();
   }
 
   formError.value = null;
@@ -229,12 +268,7 @@ async function handleValidateConnection() {
   validationError.value = null;
 
   try {
-    const request =
-      sourceType.value === "clickhouse"
-        ? buildClickHouseValidationRequest(clickHouseForm.value)
-        : buildVictoriaLogsValidationRequest(victoriaLogsForm.value);
-
-    const result = await sourcesStore.validateSourceConnection(request);
+    const result = await sourcesStore.validateSourceConnection(activeValidationRequest());
     if (result.success && result.data) {
       validationMessage.value = result.data.message;
       isValidated.value = true;
@@ -282,6 +316,12 @@ async function submitForm() {
         if (hasConnectionChanges.value) {
           updatePayload.connection = buildClickHouseConnection(clickHouseForm.value);
         }
+      } else if (sourceType.value === "loki") {
+        updatePayload.meta_ts_field = lokiForm.value.metaTSField.trim();
+        updatePayload.meta_severity_field = lokiForm.value.metaSeverityField.trim();
+        if (hasConnectionChanges.value) {
+          updatePayload.connection = buildLokiConnection(lokiForm.value);
+        }
       } else {
         updatePayload.ttl_days = Number(victoriaLogsTTLDays.value || 0);
         updatePayload.meta_ts_field = victoriaLogsForm.value.metaTSField.trim();
@@ -301,7 +341,18 @@ async function submitForm() {
     }
 
     const payload =
-      sourceType.value === "clickhouse"
+      sourceType.value === "loki"
+        ? {
+            name: sourceName.value.trim(),
+            source_type: "loki",
+            meta_is_auto_created: false,
+            meta_ts_field: lokiForm.value.metaTSField.trim(),
+            meta_severity_field: lokiForm.value.metaSeverityField.trim(),
+            connection: buildLokiConnection(lokiForm.value),
+            description: description.value.trim(),
+            ttl_days: 0,
+          }
+        : sourceType.value === "clickhouse"
         ? {
             name: sourceName.value.trim(),
             source_type: "clickhouse",
@@ -329,8 +380,10 @@ async function submitForm() {
     const result = await sourcesStore.createSource(payload);
     if (result.success) {
       router.push({ name: "Sources" });
+    } else if (sourceType.value === "loki" && result.error?.error_type === "ConflictError") {
+      formError.value = t("sources.lokiDuplicateIdentity");
     } else {
-        formError.value = result.error?.message || t("sources.createFailed");
+      formError.value = result.error?.message || t("sources.createFailed");
     }
   } catch (error) {
     console.error("Error saving source:", error);
@@ -431,7 +484,7 @@ onMounted(async () => {
             <RadioGroup
               :aria-label="t('sources.datasourceType')"
               :model-value="sourceType"
-              class="grid gap-3 md:grid-cols-2"
+              class="grid gap-3 md:grid-cols-3"
               @update:model-value="handleSourceTypeChange"
             >
               <Card
@@ -465,12 +518,27 @@ onMounted(async () => {
                   </div>
                 </CardContent>
               </Card>
+              <Card
+                :class="{ 'border-primary shadow-sm': sourceType === 'loki', 'border-muted-foreground/20': sourceType !== 'loki' }"
+                class="cursor-pointer gap-0 rounded-md py-0 transition-colors hover:border-primary/70"
+                @click="sourceType = 'loki'"
+              >
+                <CardContent class="flex items-start gap-3 p-4">
+                  <RadioGroupItem value="loki" id="source_type_loki" />
+                  <div class="space-y-1">
+                    <Label for="source_type_loki" class="cursor-pointer font-medium">Grafana Loki</Label>
+                    <p class="text-sm text-muted-foreground">
+                      {{ t("sources.lokiDescription") }}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
             </RadioGroup>
           </div>
 
           <div v-else class="grid gap-2 md:max-w-sm">
             <Label for="source_type">{{ t("sources.datasourceType") }}</Label>
-            <Input id="source_type" :model-value="sourceType === 'clickhouse' ? 'ClickHouse' : 'VictoriaLogs'" disabled />
+            <Input id="source_type" :model-value="getSourceTypeLabel(sourceType)" disabled />
           </div>
 
           <div class="grid gap-2">
@@ -498,6 +566,17 @@ onMounted(async () => {
         <ClickHouseSourceForm
           v-if="sourceType === 'clickhouse'"
           v-model="clickHouseForm"
+          :is-edit-mode="isEditMode"
+          :is-validating="isValidating"
+          :is-validated="isValidated"
+          :validation-message="validationMessage"
+          :validation-error="validationError"
+          @validate="handleValidateConnection"
+        />
+
+        <LokiSourceForm
+          v-else-if="sourceType === 'loki'"
+          v-model="lokiForm"
           :is-edit-mode="isEditMode"
           :is-validating="isValidating"
           :is-validated="isValidated"

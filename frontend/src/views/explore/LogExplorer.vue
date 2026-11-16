@@ -36,6 +36,7 @@ import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSo
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
+import { getLokiSelector } from "@/api/sources";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
@@ -978,6 +979,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery"
                     :tsField="sourceDetails?._meta_ts_field || 'timestamp'"
                     :tableName="sourcesStore.getCurrentSourceTableName || ''" 
+                    :streamSelector="getLokiSelector(sourceDetails) || ''"
                     :showFieldsPanel="showFieldsPanel"
                     :isExecuting="isExecutingQuery"
                     :canExecute="canExecuteQuery"

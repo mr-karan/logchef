@@ -8,7 +8,7 @@ process.env.TZ = "Asia/Kolkata";
 const utc = zoneFromPreference("utc");
 const anchor = epochMs(Date.UTC(2026, 9, 19, 20, 45));
 
-function command(window: TimeWindow, language: "logchefql" | "clickhouse-sql" | "logsql" = "logchefql"): string {
+function command(window: TimeWindow, language: "logchefql" | "clickhouse-sql" | "logsql" | "logql" = "logchefql"): string {
   return generateCliCommand({
     teamId: 1,
     sourceId: 3,
@@ -50,5 +50,9 @@ describe("generateCliCommand", () => {
       `logchef sql 'level="error"' -t 1 -S 3 --from "2026-10-19T00:00:00.000Z" --to "2026-10-19T20:45:00.000Z" --timeout 30`,
     );
     expect(command(relative("today"), "clickhouse-sql")).toBe(`logchef sql 'level="error"' -t 1 -S 3 --timeout 30`);
+  });
+
+  it("adds the window to native Loki LogQL", () => {
+    expect(command(relative("15m"), "logql")).toBe(`logchef sql 'level="error"' -t 1 -S 3 -s 15m --timeout 30`);
   });
 });

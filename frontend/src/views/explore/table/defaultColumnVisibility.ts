@@ -6,16 +6,13 @@ import {
   isContextFieldName,
   isSystemField,
 } from '@/lib/sourceFields'
+import { isSchemalessSource } from '@/lib/queryMetadata'
 const MAX_VICTORIALOGS_VISIBLE_COLUMNS = 6
 
 // Before the visible-column cap, schemaless sources saved every field any query
 // returned as visible. Saved visibility without this version is not the user's
 // choice, so schemaless sources discard it. Order and widths are kept.
 export const COLUMN_VISIBILITY_VERSION = 2
-
-function isSchemalessSource(source: Pick<Source, 'source_type'> | null | undefined): boolean {
-  return source?.source_type === 'victorialogs'
-}
 
 function getColumnIds(columns: ColumnDef<Record<string, any>>[]): string[] {
   return columns.map(column => column.id).filter((id): id is string => Boolean(id))

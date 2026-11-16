@@ -53,7 +53,7 @@ const { t } = useI18n();
 interface SqlMonacoEditorProps {
   value: string;
   theme: MonacoThemeName;
-  language: "clickhouse-sql" | "logchefql";
+  language: "clickhouse-sql" | "logql" | "logchefql";
   schema: Record<string, { type: string }>;
   teamId: number;
   sourceId: number;

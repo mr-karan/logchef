@@ -1,4 +1,4 @@
-export type TemplateDialect = 'clickhouse-sql' | 'logsql' | 'logchefql';
+export type TemplateDialect = 'clickhouse-sql' | 'logsql' | 'logql' | 'logchefql';
 
 export interface ExtractedVariable {
     name: string;
@@ -41,6 +41,8 @@ function quotedOrCommentEnd(query: string, start: number, dialect: TemplateDiale
     }
     const quote = query[start];
     if (quote !== "'" && quote !== '"' && (quote !== '`' || dialect === 'logchefql')) return start;
+    // LogQL has no single-quoted strings.
+    if (quote === "'" && dialect === 'logql') return start;
     for (let i = start + 1; i < query.length; i++) {
         if (query[i] === '\\' && (quote !== '`' || dialect === 'clickhouse-sql')) { i++; continue; }
         if (query[i] === quote) {
@@ -80,10 +82,14 @@ function hasVariable(content: string, dialect: TemplateDialect): boolean {
 
 export function extractTemplateVariables(query: string, dialect: TemplateDialect = 'clickhouse-sql'): ExtractedVariable[] {
     const variables = new Map<string, boolean>();
-    const collect = (content: string, optional: boolean) => {
+    const collect = (content: string, optional: boolean, inString = false) => {
         for (const match of content.matchAll(variablePattern())) {
             const name = match[1];
             if (isBuiltinMacro(name)) continue;
+            // Inside a LogQL string, {{name}} belongs to line_format and
+            // label_format, such as {{__line__}} or {{now}}. A LogQL variable
+            // goes outside quotes, where it renders as a quoted string.
+            if (inString && dialect === 'logql') continue;
             variables.set(name, optional && (variables.get(name) ?? true));
         }
     };
@@ -92,7 +98,7 @@ export function extractTemplateVariables(query: string, dialect: TemplateDialect
         for (let i = 0; i < content.length;) {
             const end = quotedOrCommentEnd(content, i, dialect);
             if (end > i) {
-                if ("'\"`$".includes(content[i])) collect(content.slice(i, end), optional);
+                if ("'\"`$".includes(content[i])) collect(content.slice(i, end), optional, true);
                 i = end;
                 continue;
             }

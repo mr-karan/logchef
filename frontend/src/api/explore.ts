@@ -222,7 +222,7 @@ export interface QueryShareResponse {
 // Persistent, server-backed query history (cross-device). Backed by
 // GET /api/v1/me/query-history, which returns the caller's recent queries
 // across all teams/sources, newest-first. See issue #58.
-export type QueryHistoryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type QueryHistoryLanguage = "logchefql" | "clickhouse-sql" | "logsql" | "logql";
 
 export interface QueryHistoryRecord {
   id: number;
