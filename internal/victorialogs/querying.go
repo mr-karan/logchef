@@ -163,8 +163,9 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		stats.TruncatedReason = truncatedReason
 	}
 
+	// An aggregated result gets no LIMIT_APPLIED: stats.truncation reports a cut.
 	warnings := make([]models.QueryWarning, 0, 2)
-	if req.Limit <= 0 {
+	if req.Limit <= 0 && req.Aggregation == nil {
 		warnings = append(warnings, models.QueryWarning{
 			Code:    "LIMIT_APPLIED",
 			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", limit),

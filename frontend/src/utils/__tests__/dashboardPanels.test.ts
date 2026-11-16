@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   snapPanelWidth,
+  panelSeedState,
+  takePanelSeed,
   clampPanelHeight,
   normalizeDashboardLayout,
   packLayout,
@@ -909,5 +911,14 @@ describe("panel time validation", () => {
     expect(resultInterval("auto")).toEqual({});
     expect(resultInterval(undefined)).toEqual({});
     expect(resultInterval("1h")).toEqual({ interval: "1h" });
+  });
+});
+
+describe("panel seed", () => {
+  it("is taken from the history entry once", () => {
+    const seed = { title: "count() by service", team_id: 1, source_id: 2, query: { mode: "result" as const, language: "logchefql" as const, text: "| count() by service" }, viz: { type: "table" as const } };
+    window.history.replaceState({ ...window.history.state, ...panelSeedState(seed) }, "");
+    expect(takePanelSeed()).toEqual(seed);
+    expect(takePanelSeed()).toBeNull();
   });
 });

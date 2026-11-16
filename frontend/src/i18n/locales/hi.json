@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "पूरा परिणाम",
   "alerts.groupsFiring": "{count} फायरिंग",
   "alerts.testGroupsTotal": "समूह: {count}",
-  "alerts.testGroupsShown": "{total} में से पहले {shown} दिखाए जा रहे हैं"
+  "alerts.testGroupsShown": "{total} में से पहले {shown} दिखाए जा रहे हैं",
+  "explore.chartView": "चार्ट",
+  "explore.chartNeedsOneGroupField": "चार्ट के लिए एक ही समूह फ़ील्ड चाहिए",
+  "explore.chartNeedsOneValue": "चार्ट के लिए एक ही मान चाहिए",
+  "explore.addToDashboard": "डैशबोर्ड में जोड़ें",
+  "explore.addToDashboardDescription": "ऐसा डैशबोर्ड चुनें जिसे आप संपादित कर सकते हैं।",
+  "explore.chooseDashboard": "डैशबोर्ड चुनें",
+  "explore.noEditableDashboards": "ऐसा कोई डैशबोर्ड नहीं जिसे आप संपादित कर सकें। डैशबोर्ड पेज पर एक बनाएँ।",
+  "ui.liveTailNeedsLogRows": "लाइव टेल के लिए लॉग पंक्तियाँ चाहिए। फ़िल्टर के बाद का एग्रीगेशन हटाएँ।"
 }

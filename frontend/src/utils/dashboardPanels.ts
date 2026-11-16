@@ -1,3 +1,4 @@
+import type { HistoryState } from "vue-router";
 import { validatePresentation } from "./panelPresentation";
 import {
   DASHBOARD_PANELS_VERSION,
@@ -94,6 +95,25 @@ export function dashboardCopyName(name: string, format: (name: string) => string
 export function clampDashboardName(name: string): string {
   const points = Array.from(name);
   return points.length > MAX_DASHBOARD_NAME_CODE_POINTS ? points.slice(0, MAX_DASHBOARD_NAME_CODE_POINTS).join("") : name;
+}
+
+/** A panel that another page hands a dashboard to open in the builder. */
+export type PanelSeed = Pick<DashboardQueryPanel, "title" | "team_id" | "source_id" | "query" | "viz">;
+
+const PANEL_SEED_KEY = "logchefPanelSeed";
+
+/** The history state that carries `seed` to the dashboard a navigation opens. */
+export function panelSeedState(seed: PanelSeed): HistoryState {
+  // History state holds plain JSON values.
+  return { [PANEL_SEED_KEY]: JSON.parse(JSON.stringify(seed)) };
+}
+
+/** Takes the seed from the current history entry, so a reload or Back does not add it again. */
+export function takePanelSeed(): PanelSeed | null {
+  const state = window.history.state;
+  const seed: PanelSeed | null = state?.[PANEL_SEED_KEY] ?? null;
+  if (seed) window.history.replaceState({ ...state, [PANEL_SEED_KEY]: null }, "");
+  return seed;
 }
 
 /** A fresh query panel shell: a line chart with no source yet. */

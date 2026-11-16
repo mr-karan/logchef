@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "Resultado completo",
   "alerts.groupsFiring": "{count} disparados",
   "alerts.testGroupsTotal": "Grupos: {count}",
-  "alerts.testGroupsShown": "se muestran los primeros {shown} de {total}"
+  "alerts.testGroupsShown": "se muestran los primeros {shown} de {total}",
+  "explore.chartView": "Gráfico",
+  "explore.chartNeedsOneGroupField": "Un gráfico necesita un solo campo de grupo",
+  "explore.chartNeedsOneValue": "Un gráfico necesita un solo valor",
+  "explore.addToDashboard": "Añadir al panel",
+  "explore.addToDashboardDescription": "Elige un panel que puedas editar.",
+  "explore.chooseDashboard": "Elige un panel",
+  "explore.noEditableDashboards": "No hay ningún panel que puedas editar. Crea uno en la página Paneles.",
+  "ui.liveTailNeedsLogRows": "El seguimiento en vivo necesita filas de log. Quita la agregación después del filtro."
 }

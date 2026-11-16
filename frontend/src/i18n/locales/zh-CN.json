@@ -1799,5 +1799,13 @@
   "alerts.wholeResult": "整个结果",
   "alerts.groupsFiring": "{count} 个触发中",
   "alerts.testGroupsTotal": "分组：{count}",
-  "alerts.testGroupsShown": "显示 {total} 个中的前 {shown} 个"
+  "alerts.testGroupsShown": "显示 {total} 个中的前 {shown} 个",
+  "explore.chartView": "图表",
+  "explore.chartNeedsOneGroupField": "图表只能有一个分组字段",
+  "explore.chartNeedsOneValue": "图表只能有一个值",
+  "explore.addToDashboard": "添加到仪表盘",
+  "explore.addToDashboardDescription": "选择一个你可以编辑的仪表盘。",
+  "explore.chooseDashboard": "选择仪表盘",
+  "explore.noEditableDashboards": "没有你可以编辑的仪表盘。请在仪表盘页面创建一个。",
+  "ui.liveTailNeedsLogRows": "实时追踪需要日志行。请删除过滤条件之后的聚合。"
 }

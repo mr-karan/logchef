@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "整個結果",
   "alerts.groupsFiring": "{count} 個觸發中",
   "alerts.testGroupsTotal": "分組：{count}",
-  "alerts.testGroupsShown": "顯示 {total} 個中的前 {shown} 個"
+  "alerts.testGroupsShown": "顯示 {total} 個中的前 {shown} 個",
+  "explore.chartView": "圖表",
+  "explore.chartNeedsOneGroupField": "圖表只能有一個分組欄位",
+  "explore.chartNeedsOneValue": "圖表只能有一個值",
+  "explore.addToDashboard": "新增至儀表板",
+  "explore.addToDashboardDescription": "選擇一個你可以編輯的儀表板。",
+  "explore.chooseDashboard": "選擇儀表板",
+  "explore.noEditableDashboards": "沒有你可以編輯的儀表板。請在儀表板頁面建立一個。",
+  "ui.liveTailNeedsLogRows": "即時追蹤需要日誌列。請移除篩選條件之後的彙總。"
 }

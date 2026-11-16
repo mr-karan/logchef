@@ -30,9 +30,12 @@ interface Props {
   columnSubset?: string[];
   columnFormats?: Record<string, ColumnFormat>;
   rules?: TableRule[];
+  // Columns whose non-null cells are buttons that emit their raw value.
+  clickableColumns?: string[];
 }
 const preferences = usePreferencesStore();
 const props = defineProps<Props>();
+const emit = defineEmits<{ (e: "cell-click", column: string, value: unknown): void }>();
 const typedFrame = computed(() => frameWithKinds(props.frame, props.kinds));
 const rows = computed(() => typedFrame.value.rows);
 
@@ -98,6 +101,12 @@ const displayColumns = computed<string[]>(() => {
 function cellValue(row: Record<string, unknown>, column: string): string {
   return formattedTableCell(row[column], typedFrame.value.columns.find((c) => c.name === column), props.columnFormats?.[column], preferences.zone);
 }
+function rawCell(idx: number, column: string): unknown {
+  return typedFrame.value.rawRows[page.value * PAGE_SIZE + idx]?.[column] ?? null;
+}
+function clickable(idx: number, column: string): boolean {
+  return !!props.clickableColumns?.includes(column) && rawCell(idx, column) !== null;
+}
 function cellTitle(row: Record<string, unknown>, column: string): string {
   const value = row[column], format = props.columnFormats?.[column];
   return format?.kind !== "time" && (isExact(value) || typeof value === "number")
@@ -136,7 +145,13 @@ const notices = computed(() => {
               :style="paletteStyle(tableRuleColor(row, rules, col, typedFrame.columns, name => cellValue(row, name)), true)"
               :title="cellTitle(row, col)"
             >
-              {{ cellValue(row, col) }}
+              <button
+                v-if="clickable(idx, col)"
+                type="button"
+                class="panel-table__cell-button"
+                @click="emit('cell-click', col, rawCell(idx, col))"
+              >{{ cellValue(row, col) }}</button>
+              <template v-else>{{ cellValue(row, col) }}</template>
             </TableCell>
           </TableRow>
         </TableBody>
@@ -205,6 +220,18 @@ const notices = computed(() => {
   font-variant-numeric: tabular-nums;
   padding-top: 0.3rem;
   padding-bottom: 0.3rem;
+}
+.panel-table__cell-button {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  border-radius: 0.25rem;
+}
+.panel-table__cell-button:hover,
+.panel-table__cell-button:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
 }
 .panel-table__footer {
   flex-shrink: 0;

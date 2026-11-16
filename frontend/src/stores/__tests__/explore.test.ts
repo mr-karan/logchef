@@ -1,3 +1,4 @@
+import { calculateOptimalGranularity } from "@/services/HistogramService";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
@@ -38,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   exploreGetLogs: vi.fn(),
   exploreCreateQueryShare: vi.fn(),
   histogramFetch: vi.fn(),
+  windowedStream: vi.fn(),
 }));
 
 vi.mock("@/stores/sources", async () => {
@@ -105,6 +107,11 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
     logchefqlApi: { ...actual.logchefqlApi, query: mocks.logchefqlQuery, validate: mocks.logchefqlValidate },
   };
 });
+
+vi.mock("@/api/windowed", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/api/windowed")>()),
+  streamWindowedQuery: mocks.windowedStream,
+}));
 
 import { useExploreStore, type OpenedLocation } from "../explore";
 import { useExploreRuns } from "../exploreRuns";
@@ -855,6 +862,51 @@ describe("explore store", () => {
       runs.run(store.editorQuery);
       await settled(runs);
       expect(runs.results?.compilation).toEqual({ conditions: [], fieldsUsed: [] });
+    });
+  });
+
+  describe("aggregations", () => {
+    const COUNT_BY_TIME = "| count() by time";
+    const aggregation = { shape: "timeseries", interval: "1m", limit: 0, columns: [{ name: "time", role: "time", type: "DateTime" }, { name: "count", role: "value", type: "UInt64" }] };
+
+    it("sends the histogram interval, keeps the aggregation and fetches no histogram", async () => {
+      const { runs } = exploreSource(CH_SOURCE);
+      mocks.logchefqlQuery.mockResolvedValue(ok({ ...NO_LOGS, generated_sql: "SELECT 1", aggregation }));
+      mocks.histogramFetch.mockClear();
+
+      runs.run({ mode: "logchefql", text: COUNT_BY_TIME });
+      await settled(runs);
+
+      // The bucket of the histogram that the same window would draw.
+      const request = requestsFor(COUNT_BY_TIME)[0];
+      expect(request.interval).toBe(calculateOptimalGranularity(request.start_time, request.end_time));
+      expect(runs.results?.aggregation).toEqual(aggregation);
+      expect(runs.isHistogramEligible).toBe(false);
+      expect(mocks.histogramFetch).not.toHaveBeenCalled();
+    });
+
+    it("skips windowed search, which rejects an aggregation", async () => {
+      const optimized = makeSource({ id: 2, source_type: "victorialogs", connection: { base_url: "http://victorialogs:9428", optimizer: { enabled: true } } as unknown as Source["connection"] });
+      const { runs } = exploreSource(optimized);
+      mocks.logchefqlQuery.mockResolvedValue(ok({ ...NO_LOGS, aggregation }));
+      mocks.windowedStream.mockClear();
+
+      runs.run({ mode: "logchefql", text: COUNT_BY_TIME });
+      await settled(runs);
+
+      expect(mocks.windowedStream).not.toHaveBeenCalled();
+      expect(runs.error).toBeNull();
+      expect(runs.results?.aggregation).toEqual(aggregation);
+    });
+
+    it("cannot start live tail on an aggregation", () => {
+      const { store } = exploreSource(makeSource({ id: 1, source_type: "clickhouse", capabilities: ["live_tail"] }));
+      store.setActiveMode("logchefql");
+      store.setLogchefqlCode("level=error");
+      expect(store.canArmLiveTail).toBe(true);
+      store.setLogchefqlCode("level=error | count() by service");
+      expect(store.canArmLiveTail).toBe(false);
+      expect(store.liveTailNeedsLogRows).toBe(true);
     });
   });
 });

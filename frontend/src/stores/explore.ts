@@ -20,6 +20,7 @@ import { useVariableStore, type VariableState } from "@/stores/variables";
 import { epochMs, resolveWindow, sameWindow, type ResolvedWindow, type TimeWindow } from '@/utils/timeWindow';
 import { decodeDraftWindow, decodeStoredRange, encodeStoredRange, encodeWindowForUrl, type DraftTime } from '@/utils/timeWindowCodec';
 import type { Source } from '@/api/sources';
+import { isAggregation } from '@/utils/logchefql/aggregation';
 import {
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
@@ -186,8 +187,10 @@ export const useExploreStore = defineStore("explore", () => {
   // (VictoriaLogs). Native clickhouse-sql is rejected 400 server-side, so the
   // toggle stays disabled there.
   const supportsLiveTail = computed(() => hasSourceCapability(getCurrentSource(), "live_tail"));
+  // Live tail streams log rows, so an aggregation cannot run there.
+  const liveTailNeedsLogRows = computed(() => state.data.value.activeMode === "logchefql" && isAggregation(state.data.value.logchefqlCode));
   const canArmLiveTail = computed(() => {
-    if (!supportsLiveTail.value || !hasValidSource.value) return false;
+    if (!supportsLiveTail.value || !hasValidSource.value || liveTailNeedsLogRows.value) return false;
     if (state.data.value.activeMode === "logchefql") return true;
     return getNativeQueryLanguageForSource(getCurrentSource()) === "logsql";
   });
@@ -912,6 +915,7 @@ export const useExploreStore = defineStore("explore", () => {
     liveDroppedCount: computed(() => state.data.value.liveDroppedCount),
     supportsLiveTail,
     canArmLiveTail,
+    liveTailNeedsLogRows,
 
     // Live tail actions
     startLiveTail,

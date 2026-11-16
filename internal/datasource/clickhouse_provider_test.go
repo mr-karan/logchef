@@ -628,3 +628,19 @@ func TestCompileLogchefQLAggregationOptIn(t *testing.T) {
 		t.Fatalf("aggregation=%+v, want a grouped shape", compiled.Aggregation)
 	}
 }
+
+// A limit the server added warns on log rows. An aggregated result reports a
+// cut through stats.truncation only, so one row never reads "first 1000 rows".
+func TestQueryWarningsForBuildResult(t *testing.T) {
+	added := clickhouse.QueryBuildResult{LimitAdded: true, AppliedLimit: 1000}
+	if got := queryWarningsForBuildResult(added, false); len(got) != 1 || got[0].Code != "LIMIT_APPLIED" {
+		t.Fatalf("log rows warnings=%+v, want LIMIT_APPLIED", got)
+	}
+	if got := queryWarningsForBuildResult(added, true); len(got) != 0 {
+		t.Fatalf("aggregated warnings=%+v, want none", got)
+	}
+	capped := clickhouse.QueryBuildResult{LimitCapped: true, AppliedLimit: 100}
+	if got := queryWarningsForBuildResult(capped, true); len(got) != 1 || got[0].Code != "LIMIT_CAPPED" {
+		t.Fatalf("aggregated capped warnings=%+v, want LIMIT_CAPPED", got)
+	}
+}

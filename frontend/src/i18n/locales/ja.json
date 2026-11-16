@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "結果全体",
   "alerts.groupsFiring": "{count} 件発火中",
   "alerts.testGroupsTotal": "グループ: {count}",
-  "alerts.testGroupsShown": "{total} 件中最初の {shown} 件を表示"
+  "alerts.testGroupsShown": "{total} 件中最初の {shown} 件を表示",
+  "explore.chartView": "チャート",
+  "explore.chartNeedsOneGroupField": "チャートにはグループフィールドが 1 つだけ必要です",
+  "explore.chartNeedsOneValue": "チャートには値が 1 つだけ必要です",
+  "explore.addToDashboard": "ダッシュボードに追加",
+  "explore.addToDashboardDescription": "編集できるダッシュボードを選択してください。",
+  "explore.chooseDashboard": "ダッシュボードを選択",
+  "explore.noEditableDashboards": "編集できるダッシュボードがありません。ダッシュボードページで作成してください。",
+  "ui.liveTailNeedsLogRows": "ライブテールにはログ行が必要です。フィルターの後の集計を削除してください。"
 }

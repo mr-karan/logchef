@@ -1,7 +1,7 @@
 import { histogramBucketBounds, type BucketAlignment, type ResolvedWindow } from "./timeWindow";
 import { fillBucketGaps, parseGranularityToMilliseconds } from "./histogram-chart";
 import type { ColumnKind, ConfirmedColumn, StatCompare, StatReduce } from "@/api/dashboards";
-import type { HistogramDataPoint, QueryStats, Truncation, LimitSource } from "@/api/explore";
+import type { AggregationInfo, HistogramDataPoint, QueryStats, Truncation, LimitSource } from "@/api/explore";
 import { subtractExact, ratioExact, addExact, averageExact, compareExact, exactString, isExact, parseExact, type FrameNumber, type ExactNumber } from "./exactNumber";
 
 export interface FrameColumn {
@@ -54,6 +54,44 @@ export function resultFrame(input: {
     truncation: input.stats?.truncation ?? "none", notices: [],
   };
   return frameWithKinds(frame);
+}
+
+// Buckets times series that a gap fill may add. Past it the chart keeps its gaps.
+const MAX_FILLED_ROWS = 100_000;
+
+/**
+ * The frame of an aggregated LogchefQL result with its empty buckets added for a
+ * chart, once per series: 0 for count and count_distinct, and null for every
+ * other value, which has no value without rows. A result cut by a cap or by its
+ * own limit stage is left as it is: a row it lacks may hold data, not a zero.
+ */
+export function fillAggregationGaps(frame: PanelFrame, info: AggregationInfo, range: ResolvedWindow, alignment: BucketAlignment): PanelFrame {
+  const time = info.columns.find((c) => c.role === "time");
+  const groups = info.columns.filter((c) => c.role === "group");
+  const step = parseGranularityToMilliseconds(info.interval);
+  if (!time || groups.length > 1 || !step || !frame.rows.length || frame.truncation !== "none" || info.limit > 0) return frame;
+  const group = groups[0];
+  const series = new Map<string, unknown>();
+  const present = new Map<number, Set<string>>();
+  frame.rows.forEach((row, index) => {
+    const ts = Date.parse(String(row[time.name]));
+    if (!Number.isFinite(ts)) return;
+    const raw = group ? frame.rawRows[index][group.name] ?? null : null;
+    const key = JSON.stringify(raw);
+    series.set(key, raw);
+    present.set(ts, (present.get(ts) ?? new Set<string>()).add(key));
+  });
+  const buckets = [...present].map(([ts, keys]) => ({ ts, keys })).sort((a, b) => a.ts - b.ts);
+  if (!buckets.length) return frame;
+  const bounds = histogramBucketBounds(range, step, alignment);
+  if (((bounds.last - bounds.first) / step + 1) * series.size > MAX_FILLED_ROWS) return frame;
+  const filled = fillBucketGaps(buckets, step, (ts) => ({ ts, keys: new Set<string>() }), bounds);
+  const empty = Object.fromEntries(info.columns.filter((c) => c.role === "value").map((c) => [c.name, c.type === "UInt64" ? "0" : null]));
+  const added: Record<string, unknown>[] = [];
+  for (const bucket of filled) for (const [key, raw] of series) {
+    if (!bucket.keys.has(key)) added.push({ [time.name]: new Date(bucket.ts).toISOString(), ...(group ? { [group.name]: raw } : {}), ...empty });
+  }
+  return added.length ? frameWithKinds({ ...frame, rawRows: [...frame.rawRows, ...added] }) : frame;
 }
 
 export function countFrame(buckets: HistogramDataPoint[], interval: string | null, grouped: boolean, notice?: string | null, range?: ResolvedWindow, alignment: BucketAlignment = "calendar"): PanelFrame {

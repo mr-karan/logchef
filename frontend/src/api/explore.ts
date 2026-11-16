@@ -87,6 +87,21 @@ export interface QueryStats {
   truncation?: Truncation;
 }
 
+/** What an output column of a LogchefQL aggregation holds. */
+export type AggregationRole = "time" | "group" | "value";
+export type AggregationShape = "scalar" | "grouped" | "timeseries" | "grouped_timeseries";
+
+/** The description of an aggregated LogchefQL result (RFC 0005). */
+export interface AggregationInfo {
+  shape: AggregationShape;
+  // Time first, then group keys, then values, each in written order.
+  columns: { name: string; role: AggregationRole; type: string }[];
+  // The bucket window in use, such as "5m". "" without a time key.
+  interval: string;
+  // The query's own limit stage, or 0.
+  limit: number;
+}
+
 export interface QueryWarning {
   code: string;
   message: string;
