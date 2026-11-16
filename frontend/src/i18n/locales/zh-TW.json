@@ -830,6 +830,7 @@
   "dashboards.chipIntervalHint": "時間區間大小 {interval}",
   "dashboards.chipIntervalRaisedHint": "在此範圍內使用 {chosen} 會產生超過 1,000 個時間區間，因此面板使用了 {used}。",
   "dashboards.fixedOffsetNotice": "{zone} 在 {at} 從 {before} 變為 {after}。VictoriaLogs 的時間區間維持最初的偏移量，因此變更之後的時間區間不從當地午夜開始。",
+  "dashboards.utcBucketNotice": "Loki 在 UTC 邊界開始分桶，因此與 {zone} 的當地時間不對齊。",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "傳送中斷",
   "alerts.deliveryFailed": "Delivery failed",

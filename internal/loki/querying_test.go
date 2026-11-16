@@ -117,11 +117,10 @@ func TestInspectSource(t *testing.T) {
 func TestLaterUnitsAreValidationErrors(t *testing.T) {
 	p := testProvider()
 	source := testSource(t, models.LokiConnectionInfo{BaseURL: "http://loki.test"})
-	_, histogramErr := p.Histogram(t.Context(), source, datasource.HistogramRequest{})
 	_, valuesErr := p.GetFieldValues(t.Context(), source, datasource.FieldValuesRequest{})
 	_, allValuesErr := p.GetAllFieldValues(t.Context(), source, datasource.AllFieldValuesRequest{})
 	_, alertErr := p.EvaluateAlert(t.Context(), source, datasource.AlertQueryRequest{})
-	for _, err := range []error{histogramErr, valuesErr, allValuesErr, alertErr} {
+	for _, err := range []error{valuesErr, allValuesErr, alertErr} {
 		if _, ok := errors.AsType[*datasource.ValidationError](err); !ok {
 			t.Fatalf("error %v, want a validation error", err)
 		}

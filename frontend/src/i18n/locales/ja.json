@@ -830,6 +830,7 @@
   "dashboards.chipIntervalHint": "バケットサイズ {interval}",
   "dashboards.chipIntervalRaisedHint": "この範囲で {chosen} を使うとバケットが 1,000 個を超えるため、パネルは {used} を使用しました。",
   "dashboards.fixedOffsetNotice": "{zone} は {at} に {before} から {after} に変わりました。VictoriaLogs のバケットは最初のオフセットを保つため、変更後のバケットは現地の午前 0 時から始まりません。",
+  "dashboards.utcBucketNotice": "Loki はバケットを UTC の境界で開始するため、{zone} の現地時刻とは揃いません。",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "配信が中断されました",
   "alerts.deliveryFailed": "Delivery failed",

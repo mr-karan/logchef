@@ -656,6 +656,33 @@ describe("dashboards store — #119/#120 hardening", () => {
     expect(body.query_language).toBe("logsql");
   });
 
+  // --- RFC 0011: native LogQL on Loki sources ------------------------------
+  it("runs a native logql count panel through histogram without translate", async () => {
+    const store = await loadEditableDashboard();
+    await store.enterEdit();
+    store.upsertDraftPanel(chartPanel("lk", { language: "logql", text: '{service_name="api"} | json' }));
+    await vi.waitFor(() => expect(mocks.histogram).toHaveBeenCalledTimes(1));
+    expect(mocks.translate).not.toHaveBeenCalled();
+    const [, , body] = mocks.histogram.mock.calls[0];
+    expect(body.query_text).toBe('{service_name="api"} | json');
+    expect(body.query_language).toBe("logql");
+  });
+
+  it("runs a native logql result panel through logs/query and reads its sample strings untyped", async () => {
+    const text = 'sum by (level) (count_over_time({service_name=~".+"}[{{__interval}}]))';
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { logs: [{ time: "2026-11-12T00:00:00Z", value: "00012", level: "error" }], columns: [{ name: "value", type: "String" }, { name: "time", type: "DateTime" }, { name: "level", type: "String" }] } });
+    const store = await loadEditableDashboard();
+    await store.enterEdit();
+    store.upsertDraftPanel({ ...tablePanel("lr"), query: { mode: "result", language: "logql", text, interval: "5m" } });
+    await vi.waitFor(() => expect(store.getPanelState("lr").status).toBe("success"));
+    expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
+    const [, , body] = mocks.logsQuery.mock.calls[0];
+    expect(body).toMatchObject({ query_text: text, query_language: "logql", interval: "5m" });
+    const frame = store.getPanelState("lr").frame;
+    expect(frame?.columns.find((c) => c.name === "value")).toMatchObject({ backendType: null });
+    expect(frame?.rows[0].value).toBe("00012");
+  });
+
   // --- A11: invalidate panelStates on draft type change --------------------
   it("invalidates panelStates[id] when a draft panel's type changes (#120 A11)", async () => {
     const store = await loadEditableDashboard();
@@ -884,12 +911,13 @@ describe("dashboards store — schema 2 request parity", () => {
         { id: "today", title: "Current day", layout: [
           { id: "c", x: 0, y: 0, w: 5, h: 2 }, { id: "s", x: 5, y: 0, w: 7, h: 2 }, { id: "p", x: 0, y: 2, w: 3, h: 9 },
         ] },
-        { id: "week", title: "Last 7 days", layout: [{ id: "t", x: 0, y: 0, w: 12, h: 3 }] },
+        { id: "week", title: "Last 7 days", layout: [{ id: "t", x: 0, y: 0, w: 12, h: 3 }, { id: "l", x: 0, y: 3, w: 12, h: 3 }] },
       ],
       panels: [
         { id: "c", kind: "query", title: "chart", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "level=error", group_by: " service ", interval: "24h", translate_limit: 50, range: "today-6d" }, viz: { type: "chart", mark: "bar", stack: "none", legend: false } },
         { id: "s", kind: "query", title: "stat", team_id: 1, source_id: 1, query: { mode: "result", language: "logsql", text: "* | stats count() as n" }, viz: { type: "stat", value: "n", order_by: "at", columns: { n: { kind: "number", confidence: "confirmed" }, at: { kind: "time", confidence: "confirmed" } }, reduce: "last", compare: { mode: "previous_row", good: "up" }, sparkline: true, thresholds: [{ value: null, color: "green" }, { value: "100", color: "red" }], color_mode: "background", format: { decimals: 2 } } },
         { id: "p", kind: "query", title: "pie", team_id: 1, source_id: 1, query: { mode: "count", language: "logchefql", text: "", group_by: "host", interval: "auto" }, viz: { type: "pie", donut: true } },
+        { id: "l", kind: "query", title: "loki", team_id: 1, source_id: 1, query: { mode: "count", language: "logql", text: '{service_name="api"}', interval: "auto" }, viz: { type: "chart", mark: "bar", stack: "none" } },
         { id: "t", kind: "query", title: "table", team_id: 1, source_id: 1, query: { mode: "result", language: "clickhouse-sql", text: "SELECT 1 FROM logs WHERE {{__time_filter}}", limit: 100, interval: "1h", range: "7d" }, viz: { type: "table", visible_columns: ["message", "host"], rules: [{ columns: ["message"], op: "contains", value: "retry", scope: "row", color: "red" }], column_formats: { host: { kind: "number", decimals: 2 } }, columns: { host: { kind: "category", confidence: "confirmed" } } } },
       ],
     };
@@ -991,6 +1019,39 @@ describe("VictoriaLogs fixed-offset count grids", () => {
       expect(frameCellText(reduceStat(frame, { value: "count", reduce: "min", count: true }).value)).toBe("2");
       expect(frameCellText(reduceStat(frame, { value: "count", reduce: "last", count: true }).value)).toBe(String(2 * times.length));
     }
+  });
+});
+
+describe("Loki UTC count grids", () => {
+  beforeEach(() => { setActivePinia(createPinia()); vi.clearAllMocks(); });
+  afterEach(() => { resetLocalTimeZone(); });
+  async function preview(zone: string, interval: "1m" | "1h" | "24h", start: string, end: string, times: string[]) {
+    setLocalTimeZone(zone);
+    usePreferencesStore().preferences.timezone = "local";
+    const store = useDashboardsStore();
+    store.setWindow({ kind: "absolute", start: epochMs(Date.parse(start)), end: epochMs(Date.parse(end)) });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: times.map((bucket) => ({ bucket, log_count: 2 })), granularity: interval } });
+    await store.previewPanel(chartPanel("loki", { language: "logql", text: '{service_name="api"}', interval }));
+    return store.previewState?.frame;
+  }
+
+  it.each([
+    { zone: "Asia/Kolkata", interval: "1h", start: "2026-11-12T00:15:00Z", end: "2026-11-12T03:15:00Z", times: ["2026-11-12T00:00:00Z", "2026-11-12T01:00:00Z", "2026-11-12T02:00:00Z", "2026-11-12T03:00:00Z"] },
+    { zone: "Europe/Berlin", interval: "24h", start: "2026-11-12T06:00:00Z", end: "2026-11-14T06:00:00Z", times: ["2026-11-12T00:00:00Z", "2026-11-13T00:00:00Z", "2026-11-14T00:00:00Z"] },
+    // An aligned end is exclusive: Loki returns no bucket that starts at it.
+    { zone: "Asia/Kolkata", interval: "1h", start: "2026-11-12T00:00:00Z", end: "2026-11-12T03:00:00Z", times: ["2026-11-12T00:00:00Z", "2026-11-12T01:00:00Z", "2026-11-12T02:00:00Z"] },
+  ] as const)("fills $interval buckets on UTC boundaries in $zone and says so", async ({ zone, interval, start, end, times }) => {
+    const frame = await preview(zone, interval, start, end, [...times]);
+    expect(frame?.rawRows.map((row) => row.time)).toEqual(times);
+    expect(frame?.notices).toEqual([`Loki starts buckets on UTC boundaries, so they do not line up with local time in ${zone}.`]);
+  });
+
+  it.each([
+    ["a UTC viewer", "UTC", "1h"],
+    ["a bucket that the zone's offset divides", "Asia/Kolkata", "1m"],
+  ] as const)("stays quiet for %s", async (_name, zone, interval) => {
+    const frame = await preview(zone, interval, "2026-11-12T00:00:00Z", "2026-11-12T03:00:00Z", ["2026-11-12T00:00:00Z"]);
+    expect(frame?.notices).toEqual([]);
   });
 });
 

@@ -830,6 +830,7 @@
   "dashboards.chipIntervalHint": "버킷 크기 {interval}",
   "dashboards.chipIntervalRaisedHint": "이 범위에서 {chosen}을(를) 쓰면 버킷이 1,000개를 넘으므로 패널이 {used}을(를) 사용했습니다.",
   "dashboards.fixedOffsetNotice": "{zone}이(가) {at}에 {before}에서 {after}(으)로 바뀌었습니다. VictoriaLogs 버킷은 처음 오프셋을 유지하므로 변경 이후 버킷은 현지 자정에 시작하지 않습니다.",
+  "dashboards.utcBucketNotice": "Loki는 버킷을 UTC 경계에서 시작하므로 {zone}의 현지 시간과 맞지 않습니다.",
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "전송 중단",
   "alerts.deliveryFailed": "Delivery failed",

@@ -35,7 +35,7 @@ const MAX_DASHBOARD_CACHE_TTL_SECONDS = 86400;
 
 const VALID_VIZ_TYPES: readonly DashboardVizType[] = ["stat", "chart", "pie", "toplist", "table"];
 // Mirrors pkg/models.QueryLanguage's Valid() set (server: query.go).
-const VALID_QUERY_LANGUAGES: readonly PanelQueryLanguage[] = ["logchefql", "clickhouse-sql", "logsql"];
+const VALID_QUERY_LANGUAGES: readonly PanelQueryLanguage[] = ["logchefql", "clickhouse-sql", "logsql", "logql"];
 
 /** The empty schema 2 blob a new dashboard starts from. */
 export function emptyDashboardPanels(): DashboardPanels {

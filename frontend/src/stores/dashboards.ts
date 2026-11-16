@@ -46,6 +46,7 @@ import {
   epochMs,
   formatInZone,
   relativeWindow,
+  zoneOffsetMs,
   resolveWindow,
   toRfc3339,
   type BucketAlignment,
@@ -321,6 +322,27 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     });
   }
 
+  // Loki starts every count bucket at a multiple of the window since the
+  // epoch, in UTC. When the zone's offset is not a multiple of the window, the
+  // buckets do not start on local boundaries, and the panel says so.
+  function utcBucketNotice(range: ResolvedWindow, window: string): string | null {
+    const step = parseGranularityToMilliseconds(window);
+    if (!step) return null;
+    const offsets = [zoneOffsetMs(range.start, range.zone), zoneOffsetMs(range.end, range.zone)];
+    if (offsets.every((offset) => offset % step === 0)) return null;
+    return i18n.global.t("dashboards.utcBucketNotice", { zone: range.zone });
+  }
+
+  function countAlignment(language: PanelQueryLanguage): BucketAlignment {
+    if (language === "logsql") return "fixed-offset";
+    if (language === "logql") return "utc";
+    return "calendar";
+  }
+
+  function isNativeLanguage(language: PanelQueryLanguage): boolean {
+    return language === "clickhouse-sql" || language === "logsql" || language === "logql";
+  }
+
   function getPanelState(panelId: string): PanelState {
     return state.data.value.panelStates[panelId] ?? { status: "idle" };
   }
@@ -434,9 +456,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // ---- Panel execution ----------------------------------------------------
 
   // Resolve a panel's query to the native query text the histogram endpoint wants
-  // (SQL for ClickHouse sources, LogsQL for VictoriaLogs), plus the language of
-  // that native text. ClickHouse-SQL and native LogsQL panels already carry the
-  // source's native query — run them verbatim. Only LogchefQL goes through the
+  // (SQL for ClickHouse sources, LogsQL for VictoriaLogs, LogQL for Loki), plus
+  // the language of that native text. Native panels already carry the source's
+  // native query — run them verbatim. Only LogchefQL goes through the
   // shared compile, exactly the multi-datasource path the explorer uses.
   // (A logsql panel used to fall through here and get compiled as LogchefQL,
   // silently breaking VictoriaLogs panels — see #119 A4.)
@@ -445,7 +467,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     range: ResolvedWindow,
     signal: AbortSignal
   ): Promise<{ query: string; language: PanelQueryLanguage }> {
-    if (panel.query.language === "clickhouse-sql" || panel.query.language === "logsql") {
+    if (isNativeLanguage(panel.query.language)) {
       return { query: panel.query.text, language: panel.query.language };
     }
     const resp = await dashboardPanelApi.translate(
@@ -508,18 +530,18 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const data = unwrap(resp);
       const buckets = data?.data ?? [];
 
-      const frame = countFrame(buckets, data?.granularity ?? window, !!groupBy, data?.notice, range, nativeLanguage === "logsql" ? "fixed-offset" : "calendar");
-      const offsetNotice = nativeLanguage === "logsql" ? fixedOffsetNotice(range, window) : null;
+      const frame = countFrame(buckets, data?.granularity ?? window, !!groupBy, data?.notice, range, countAlignment(nativeLanguage));
+      const offsetNotice = nativeLanguage === "logsql" ? fixedOffsetNotice(range, window) : nativeLanguage === "logql" ? utcBucketNotice(range, window) : null;
       if (offsetNotice) frame.notices.push(offsetNotice);
       return { status: buckets.length ? "success" : "empty", frame, interval: window, intervalRaised: raised };
     }
 
     // Result queries share one frame, independent of the visualization.
     const limit = clampTableLimit(panel.query.limit);
-    // Native queries (ClickHouse SQL, VictoriaLogs LogsQL) run verbatim through
-    // the logs/query endpoint. Only LogchefQL takes the compile path below;
-    // routing a logsql panel there used to break VictoriaLogs tables (#119 A4).
-    if (panel.query.language === "clickhouse-sql" || panel.query.language === "logsql") {
+    // Native queries (ClickHouse SQL, VictoriaLogs LogsQL, Loki LogQL) run
+    // verbatim through the logs/query endpoint. Only LogchefQL takes the compile
+    // path below; routing a logsql panel there used to break VictoriaLogs tables (#119 A4).
+    if (isNativeLanguage(panel.query.language)) {
       // The interval feeds {{__interval}}. The server ignores it in a query without the macro.
       const { window, raised } = resolveInterval(panel.query.interval, range);
       const sqlBody: SqlQueryRequestBody = {
@@ -537,7 +559,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       const rows = data?.data ?? data?.logs ?? [];
       return {
         status: rows.length ? "success" : "empty",
-        frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: panel.query.language === "logsql", stats: data?.stats }),
+        // LogsQL and LogQL report no column types, and LogQL samples are strings.
+        frame: resultFrame({ columns: data?.columns ?? [], rows, untyped: panel.query.language !== "clickhouse-sql", stats: data?.stats }),
         stats: data?.stats,
         interval: window,
         intervalRaised: raised,
