@@ -4,7 +4,7 @@ import { severityLabels, alertStateLabels, instanceStateLabels } from "@/i18n/al
 
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
+import { ArrowLeft, Bell, BellOff, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +23,11 @@ import { useToast } from "@/composables/useToast";
 import { alertHistoryExploreQuery } from "@/utils/alertExplore";
 import AlertDeliveryStatus from "@/components/alerts/AlertDeliveryStatus.vue";
 import AlertForm from "@/components/alerts/AlertForm.vue";
+import SilenceForm from "@/components/alerts/SilenceForm.vue";
+import { useSilencesStore } from "@/stores/silences";
+import { activeSilencesFor, groupMatchers } from "@/utils/alertSilences";
+import { useIntervalFn, useNow } from "@vueuse/core";
+import type { AlertSilenceRequest } from "@/api/silences";
 import { EmptyState, LoadingState } from "@/components/layout";
 import type { Alert, AlertHistoryEntry, AlertInstance, UpdateAlertRequest } from "@/api/alerts";
 import { formatAlertGroup } from "@/utils/alertGroups";
@@ -40,6 +45,7 @@ const askChef = useAskChefStore();
 const teamsStore = useTeamsStore();
 const { toast } = useToast();
 const preferencesStore = usePreferencesStore();
+const silencesStore = useSilencesStore();
 
 function formatEventTime(timestamp: string): string {
   const date = new Date(timestamp);
@@ -155,6 +161,36 @@ async function loadHistory() {
     alertHistoryStore.loadHistory(alertId.value),
     alertHistoryStore.loadInstances(alertId.value),
   ]);
+}
+
+// The silenced badge needs the source's silences, and the alert can load after the tab opens.
+watch(() => (currentTab.value === "history" ? alert.value?.source_id : undefined), (sourceId) => {
+  if (sourceId) void silencesStore.fetchSilences(sourceId);
+}, { immediate: true });
+
+// Ticks so the badge drops when a silence ends while the page is open.
+const now = useNow({ scheduler: (tick) => useIntervalFn(tick, 30_000) });
+function isSilenced(instance: AlertInstance): boolean {
+  return !!alert.value && activeSilencesFor(silencesStore.silencesOf(alert.value.source_id), alert.value, instance.group, now.value.getTime()).length > 0;
+}
+
+// Silence opens the silence form for this rule and group, for one hour from now.
+const silenceOpen = ref(false);
+const silencePreset = ref<AlertSilenceRequest | null>(null);
+function openSilence(instance: AlertInstance) {
+  if (!alert.value) return;
+  const now = Date.now();
+  silencePreset.value = {
+    source_id: alert.value.source_id,
+    alert_id: alert.value.id,
+    matchers: groupMatchers(alert.value, instance.group),
+    comment: "",
+    schedule_kind: "once",
+    starts_at: new Date(now).toISOString(),
+    ends_at: new Date(now + 3_600_000).toISOString(),
+    weekly: null,
+  };
+  silenceOpen.value = true;
 }
 
 async function handleResolve(groupKey: string, message: string) {
@@ -285,13 +321,21 @@ watch([alertId, currentTab], ([id, tab]) => {
                 <TableRow v-for="instance in instances" :key="instance.group_key">
                   <TableCell class="font-mono text-xs">{{ groupLabel(instance.group) }}</TableCell>
                   <TableCell>
-                    <Badge :variant="instanceVariant(instance.state)" class="text-xs">
-                      {{ t(instanceStateLabels[instance.state]) }}
-                    </Badge>
+                    <div class="flex items-center gap-1.5">
+                      <Badge :variant="instanceVariant(instance.state)" class="text-xs">
+                        {{ t(instanceStateLabels[instance.state]) }}
+                      </Badge>
+                      <Badge v-if="isSilenced(instance)" variant="outline" class="text-xs gap-1">
+                        <BellOff class="h-3 w-3" />{{ t('silences.silenced') }}
+                      </Badge>
+                    </div>
                   </TableCell>
                   <TableCell class="tabular-nums">{{ instance.value ?? '' }}</TableCell>
                   <TableCell class="text-sm text-muted-foreground">{{ formatEventTime(instance.state_since) }}</TableCell>
-                  <TableCell class="text-right">
+                  <TableCell class="text-right space-x-2">
+                    <Button variant="outline" size="sm" @click="openSilence(instance)">
+                      {{ t('silences.silence') }}
+                    </Button>
                     <Button
                       v-if="instance.state !== 'ok'"
                       variant="outline"
@@ -428,6 +472,15 @@ watch([alertId, currentTab], ([id, tab]) => {
         </Card>
       </TabsContent>
     </Tabs>
+
+    <SilenceForm
+      v-if="alert"
+      v-model:open="silenceOpen"
+      :source-id="alert.source_id"
+      :rules="[alert]"
+      :silence="null"
+      :preset="silencePreset"
+    />
 
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog

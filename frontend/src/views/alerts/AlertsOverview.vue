@@ -38,6 +38,7 @@ import {
   SortHeader,
 } from "@/components/layout";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
+import AlertsTabs from "@/components/alerts/AlertsTabs.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
 import { useTeamsStore } from "@/stores/teams";
@@ -285,6 +286,8 @@ onMounted(async () => {
         </Button>
       </template>
     </PageHeader>
+
+    <AlertsTabs />
 
     <Card>
       <CardHeader class="flex items-start justify-between gap-4 space-y-0">
