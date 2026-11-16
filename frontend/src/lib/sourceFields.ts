@@ -124,6 +124,9 @@ export function isClickToLoadField(type: string): boolean {
   const lower = unwrapFieldType(type).toLowerCase();
   return (
     lower === "string" ||
+    // A Loki stream label. Its values come from a metric query, so it loads
+    // on click like a string.
+    lower === "label" ||
     /^u?int\d/.test(lower) ||
     /^float\d/.test(lower) ||
     /^decimal/.test(lower)
