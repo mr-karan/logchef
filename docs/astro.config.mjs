@@ -195,6 +195,7 @@ Key areas of the docs:
           items: [
             { label: "Collections & Saved Queries", link: "/features/collections" },
             { label: "Dashboards", link: "/features/dashboards" },
+            { label: "Dashboard Gallery", link: "/features/dashboard-gallery" },
             { label: "Alerting", link: "/features/alerting" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "User Management", link: "/core/user-management" },
