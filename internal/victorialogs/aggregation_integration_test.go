@@ -31,7 +31,7 @@ func TestIntegrationLogchefQLAggregation(t *testing.T) {
 		{"_time": at(45 * time.Minute), "_msg": "r3", "test_run": runID, "service": "web", "d": "20"},
 		{"_time": at(100 * time.Minute), "_msg": "r4", "test_run": runID, "mixed": "100"},
 	}
-	ingestRecords(t, baseURL, records)
+	ingestRecords(t, baseURL, records, "")
 
 	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: baseURL, Scope: models.VictoriaLogsScope{Query: fmt.Sprintf(`test_run:=%q`, runID)}})
 	provider := newTestProvider(nil)
@@ -154,4 +154,69 @@ func TestIntegrationLogchefQLAggregation(t *testing.T) {
 			t.Fatalf("rows=%v truncation=%q, want 2 rows cut by the row limit", result.Logs, result.Stats.Truncation)
 		}
 	})
+}
+
+// TestIntegrationLogchefQLAggregationIntegerField runs the number functions
+// over a field that VictoriaLogs stores as an integer column. A block whose
+// values are all integers, as JSON numbers or as digit strings, is stored as
+// uint or int64, and on v1.52.0 `if (f:*)` matches no row of such a block
+// inside stats, while a top-level `f:*` does. The web stream has rows without
+// the field and with it empty, so the number functions skip those rows and
+// count() still counts them, as the RFC 0005 construct table says.
+func TestIntegrationLogchefQLAggregationIntegerField(t *testing.T) {
+	baseURL := integrationBaseURL(t)
+	runID := newTestRunID(t)
+
+	start := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+	end := start.Add(time.Hour)
+	at := start.Add(10 * time.Minute).Format(time.RFC3339)
+	var records []map[string]any
+	for i := range 12 {
+		// 101 to 112: more distinct values than a dictionary column holds.
+		records = append(records, map[string]any{"_time": at, "_msg": "api", "test_run": runID, "service": "api", "ms": 101 + i})
+	}
+	for i := range 12 {
+		records = append(records, map[string]any{"_time": at, "_msg": "neg", "test_run": runID, "service": "neg", "ms": fmt.Sprint(-1000 - 7*i)})
+	}
+	records = append(records,
+		map[string]any{"_time": at, "_msg": "web", "test_run": runID, "service": "web", "ms": 7},
+		map[string]any{"_time": at, "_msg": "web", "test_run": runID, "service": "web", "ms": 9},
+		map[string]any{"_time": at, "_msg": "web", "test_run": runID, "service": "web", "ms": 20},
+		map[string]any{"_time": at, "_msg": "web", "test_run": runID, "service": "web", "ms": ""},
+		map[string]any{"_time": at, "_msg": "web", "test_run": runID, "service": "web"},
+	)
+	// One stream per service keeps the api and neg blocks integer-only.
+	ingestRecords(t, baseURL, records, "service")
+
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: baseURL, Scope: models.VictoriaLogsScope{Query: fmt.Sprintf(`test_run:=%q`, runID)}})
+	provider := newTestProvider(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	waitForFixtures(t, provider, source, queryWindow{start: start, end: end}, len(records))
+
+	compiled, err := provider.CompileLogchefQL(ctx, source, datasource.LogchefQLCompileRequest{
+		Query:            "| count(), sum(ms), avg(ms), min(ms), max(ms), p50(ms) by service | sort service",
+		AllowAggregation: true,
+		StartTime:        start.Format(time.RFC3339), EndTime: end.Format(time.RFC3339), Timezone: "UTC",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("LogsQL: %s", compiled.Query)
+	result, err := provider.QueryLogs(ctx, source, datasource.QueryRequest{
+		RawQuery: compiled.Query, StartTime: &start, EndTime: &end, MaxLimit: 1000, Aggregation: compiled.Aggregation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// quantile returns a stored value, the one at index n/2, so the median
+	// of 12 values is the 7th smallest.
+	want := []map[string]any{
+		{"service": "api", "count": "12", "sum_ms": 1278.0, "avg_ms": 106.5, "min_ms": 101.0, "max_ms": 112.0, "p50_ms": 107.0},
+		{"service": "neg", "count": "12", "sum_ms": -12462.0, "avg_ms": -1038.5, "min_ms": -1077.0, "max_ms": -1000.0, "p50_ms": -1035.0},
+		{"service": "web", "count": "5", "sum_ms": 36.0, "avg_ms": 12.0, "min_ms": 7.0, "max_ms": 20.0, "p50_ms": 9.0},
+	}
+	if !reflect.DeepEqual(result.Logs, want) {
+		t.Fatalf("rows=%v, want %v", result.Logs, want)
+	}
 }

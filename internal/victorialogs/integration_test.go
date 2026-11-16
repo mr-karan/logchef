@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -79,12 +80,12 @@ func ingestFixtures(t *testing.T, baseURL, runID string, base time.Time, rows []
 			"test_run":    runID,
 		}
 	}
-	ingestRecords(t, baseURL, records)
+	ingestRecords(t, baseURL, records, "")
 }
 
 // ingestRecords pushes records via the jsonline insert API. Each record needs
-// _time and _msg.
-func ingestRecords(t *testing.T, baseURL string, records []map[string]any) {
+// _time and _msg. streamFields, when set, is the _stream_fields list.
+func ingestRecords(t *testing.T, baseURL string, records []map[string]any, streamFields string) {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -96,6 +97,9 @@ func ingestRecords(t *testing.T, baseURL string, records []map[string]any) {
 	}
 
 	endpoint := strings.TrimRight(baseURL, "/") + "/insert/jsonline?_time_field=_time&_msg_field=_msg"
+	if streamFields != "" {
+		endpoint += "&_stream_fields=" + url.QueryEscape(streamFields)
+	}
 	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
 	if err != nil {
 		t.Fatalf("create ingest request: %v", err)
