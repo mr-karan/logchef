@@ -648,11 +648,14 @@ SET last_state = 'firing',
 WHERE id = ?;
 
 -- name: ListActiveAlertsDue :many
+-- last_evaluated_at is stamped when an evaluation finishes, a little after the
+-- tick that started it, so slack_seconds (half the evaluation interval) lets an
+-- alert run on the tick nearest its frequency instead of one tick late.
 SELECT * FROM alerts
 WHERE is_active = 1
   AND (
         last_evaluated_at IS NULL
-        OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds')
+        OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds', '+' || CAST(sqlc.arg(slack_seconds) AS INTEGER) || ' seconds')
       );
 
 -- Alert history queries

@@ -192,7 +192,10 @@ type Querier interface {
 	IsTeamManaged(ctx context.Context, id int64) (bool, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
-	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
+	// last_evaluated_at is stamped when an evaluation finishes, a little after the
+	// tick that started it, so slack_seconds (half the evaluation interval) lets an
+	// alert run on the tick nearest its frequency instead of one tick late.
+	ListActiveAlertsDue(ctx context.Context, slackSeconds int64) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	// List alerts for one source
 	ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error)

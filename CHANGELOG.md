@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Alerts run at their configured frequency again. Each evaluation was stamped
+  after its query finished, so the next tick saw slightly less than the
+  frequency elapsed and skipped the alert: a 60-second alert ran every 2
+  minutes and a 5-minute alert every 6. The scheduler now runs an alert on the
+  evaluation tick nearest its frequency.
+
 ## [2.7.0] - 2026-11-15
 
 Dashboards grow up. Panels run SQL as written and show the result as stats

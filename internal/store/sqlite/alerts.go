@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
@@ -135,8 +136,8 @@ func (db *DB) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*m
 }
 
 // ListActiveAlertsDue returns alerts that need evaluation.
-func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := db.readQueries.ListActiveAlertsDue(ctx)
+func (db *DB) ListActiveAlertsDue(ctx context.Context, slack time.Duration) ([]*models.Alert, error) {
+	rows, err := db.readQueries.ListActiveAlertsDue(ctx, int64(slack/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active alerts: %w", err)
 	}

@@ -90,11 +90,7 @@ func (m *Manager) Start(ctx context.Context) {
 		m.log.Debug("alerting disabled")
 		return
 	}
-	ctx, m.cancel = context.WithCancel(ctx)
-	interval := m.cfg.EvaluationInterval
-	if interval <= 0 {
-		interval = time.Minute
-	}
+	interval := m.evaluationInterval()
 	ctx, m.cancel = context.WithCancel(ctx)
 	m.wg.Add(1)
 	m.lifecycleMu.Unlock()
@@ -152,11 +148,22 @@ func (m *Manager) StopWithContext(ctx context.Context) error {
 	}
 }
 
+// evaluationInterval is how often the evaluation loop ticks.
+func (m *Manager) evaluationInterval() time.Duration {
+	if m.cfg.EvaluationInterval <= 0 {
+		return time.Minute
+	}
+	return m.cfg.EvaluationInterval
+}
+
 func (m *Manager) evaluateCycle(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	alerts, err := m.db.ListActiveAlertsDue(ctx)
+	// Alerts are stamped when their evaluation finishes, after the tick that
+	// started it. Half an interval of slack runs each alert on the tick nearest
+	// its frequency; without it every alert ran one tick late.
+	alerts, err := m.db.ListActiveAlertsDue(ctx, m.evaluationInterval()/2)
 	if err != nil {
 		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to fetch alerts for evaluation", "error", err)
 		return

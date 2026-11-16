@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -121,8 +122,8 @@ func (s *Store) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]
 }
 
 // ListActiveAlertsDue returns alerts that need evaluation.
-func (s *Store) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := s.q.ListActiveAlertsDue(ctx)
+func (s *Store) ListActiveAlertsDue(ctx context.Context, slack time.Duration) ([]*models.Alert, error) {
+	rows, err := s.q.ListActiveAlertsDue(ctx, int64(slack/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active alerts: %w", err)
 	}

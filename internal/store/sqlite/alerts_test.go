@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/store/storetest"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -58,7 +59,7 @@ func setLastEvaluatedAt(t *testing.T, ctx context.Context, db *DB, alertID model
 
 func dueAlertIDs(t *testing.T, ctx context.Context, db *DB) map[models.AlertID]bool {
 	t.Helper()
-	due, err := db.ListActiveAlertsDue(ctx)
+	due, err := db.ListActiveAlertsDue(ctx, 0)
 	if err != nil {
 		t.Fatalf("ListActiveAlertsDue: %v", err)
 	}
@@ -159,6 +160,37 @@ func TestListActiveAlertsDue_TimestampFormats(t *testing.T) {
 		if due[ids[i]] != tc.wantDue {
 			t.Errorf("%s: due = %v, want %v", tc.name, due[ids[i]], tc.wantDue)
 		}
+	}
+}
+
+// An alert evaluated just after one tick sees slightly less than its
+// frequency elapsed at the next tick. Without slack it waited a whole extra
+// tick, so a 60s alert ran every 120s.
+func TestListActiveAlertsDue_SlackForEvaluationLag(t *testing.T) {
+	db := newTxTestDB(t)
+	ctx := context.Background()
+	alertID := createTestAlert(t, ctx, db, createTestSource(t, ctx, db), "lagged", 60, true)
+	setLastEvaluatedAt(t, ctx, db, alertID, "strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-58 seconds')")
+
+	due, err := db.ListActiveAlertsDue(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range due {
+		if a.ID == alertID {
+			t.Fatal("alert due with no slack before its full frequency elapsed")
+		}
+	}
+	due, err = db.ListActiveAlertsDue(ctx, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range due {
+		found = found || a.ID == alertID
+	}
+	if !found {
+		t.Error("alert evaluated 58s ago with a 60s frequency not due on this tick")
 	}
 }
 

@@ -110,7 +110,7 @@ func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
 	if after.LastTriggeredAt == nil || !after.LastTriggeredAt.Equal(*before.LastTriggeredAt) {
 		t.Errorf("trigger timestamp changed from %v to %v", before.LastTriggeredAt, after.LastTriggeredAt)
 	}
-	due, err := db.ListActiveAlertsDue(ctx)
+	due, err := db.ListActiveAlertsDue(ctx, 0)
 	if err != nil || len(due) != 0 {
 		t.Errorf("due after evaluation error = %d alerts, %v; want none", len(due), err)
 	}

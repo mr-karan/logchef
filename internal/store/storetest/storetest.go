@@ -902,7 +902,7 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 
 	// A never-evaluated active alert is due (LastEvaluatedAt IS NULL). This is
 	// the path whose dialect-specific time math differs between backends.
-	due, err := s.ListActiveAlertsDue(ctx)
+	due, err := s.ListActiveAlertsDue(ctx, 0)
 	if err != nil {
 		t.Fatalf("ListActiveAlertsDue: %v", err)
 	}
@@ -917,6 +917,7 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	}
 
 	testAlertEvaluationState(t, ctx, s, a.ID)
+	testAlertDueSlack(t, ctx, s, src.ID)
 
 	// History round-trip.
 	val := 12.0
@@ -943,6 +944,56 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if err := s.DeleteAlert(ctx, a.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("DeleteAlert(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+// testAlertDueSlack covers the scheduler's view of an alert it just
+// evaluated. last_evaluated_at lands slightly after the tick that started the
+// evaluation, so the next tick, one frequency later, sees a little less than
+// a full frequency elapsed. Slack lets that tick count as due.
+func testAlertDueSlack(t *testing.T, ctx context.Context, s store.Store, sourceID models.SourceID) {
+	t.Helper()
+	a := &models.Alert{
+		SourceID:          sourceID,
+		Name:              "due slack",
+		QueryLanguage:     models.QueryLanguageClickHouseSQL,
+		EditorMode:        models.AlertEditorModeNative,
+		Query:             "SELECT count() FROM logs",
+		LookbackSeconds:   300,
+		ThresholdOperator: models.AlertThresholdGreaterThan,
+		ThresholdValue:    10,
+		FrequencySeconds:  60,
+		Severity:          models.AlertSeverityWarning,
+		IsActive:          true,
+		LastState:         models.AlertStateResolved,
+	}
+	if err := s.CreateAlert(ctx, a); err != nil {
+		t.Fatalf("CreateAlert: %v", err)
+	}
+	if err := s.MarkAlertEvaluated(ctx, a.ID); err != nil {
+		t.Fatalf("MarkAlertEvaluated: %v", err)
+	}
+	isDue := func(slack time.Duration) bool {
+		t.Helper()
+		due, err := s.ListActiveAlertsDue(ctx, slack)
+		if err != nil {
+			t.Fatalf("ListActiveAlertsDue(%v): %v", slack, err)
+		}
+		for _, d := range due {
+			if d.ID == a.ID {
+				return true
+			}
+		}
+		return false
+	}
+	// Just evaluated, 60s frequency: well short of due either way.
+	if isDue(0) || isDue(30*time.Second) {
+		t.Fatal("alert due immediately after evaluation")
+	}
+	// Slack covering the whole frequency makes the just-evaluated alert due,
+	// which is what a tick arriving moments short of 60s elapsed looks like.
+	if !isDue(60 * time.Second) {
+		t.Error("alert not due with slack covering its frequency")
 	}
 }
 

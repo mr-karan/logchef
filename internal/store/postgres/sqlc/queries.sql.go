@@ -2251,12 +2251,15 @@ SELECT id, source_id, name, description, query, condition_json, lookback_seconds
 WHERE is_active = true
   AND (
         last_evaluated_at IS NULL
-        OR last_evaluated_at <= now() - frequency_seconds * interval '1 second'
+        OR last_evaluated_at <= now() - (frequency_seconds - $1::bigint) * interval '1 second'
       )
 `
 
-func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
-	rows, err := q.db.Query(ctx, listActiveAlertsDue)
+// last_evaluated_at is stamped when an evaluation finishes, a little after the
+// tick that started it, so slack_seconds (half the evaluation interval) lets an
+// alert run on the tick nearest its frequency instead of one tick late.
+func (q *Queries) ListActiveAlertsDue(ctx context.Context, slackSeconds int64) ([]Alert, error) {
+	rows, err := q.db.Query(ctx, listActiveAlertsDue, slackSeconds)
 	if err != nil {
 		return nil, err
 	}
