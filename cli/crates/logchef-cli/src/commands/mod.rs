@@ -18,6 +18,7 @@ pub mod sources;
 pub mod sql;
 pub mod tail;
 pub mod teams;
+pub mod views;
 pub mod whoami;
 
 use anyhow::{Context, Result};

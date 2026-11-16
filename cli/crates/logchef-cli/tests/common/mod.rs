@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PAT: &str = "logchef_test_pat";
 pub const CODE: &str = "test-code";
-pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read";
+pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read";
 
 /// An isolated HOME with a fake browser launcher on PATH. Any attempt to open
 /// a browser writes to `browser_log`.
@@ -238,6 +238,10 @@ pub struct ServerState {
     pub bearer_seen: Vec<String>,
     /// Advertised as `ui_url` in /api/v1/meta when set.
     pub ui_url: Option<String>,
+    /// Replaces the advertised `scopes_supported`, to act as an older server.
+    pub scopes_supported: Option<Vec<String>>,
+    /// The response of the saved views list on source 2 of team 1.
+    pub saved_views: Option<serde_json::Value>,
     pub saved_query: serde_json::Value,
     pub native_requests: Vec<serde_json::Value>,
     pub translate_requests: Vec<serde_json::Value>,
@@ -423,6 +427,10 @@ fn route(
             )
         }
 
+        ("GET", "/api/v1/teams/1/sources/2/views") => (
+            200,
+            serde_json::json!({"status": "success", "data": state.lock().unwrap().saved_views.clone()}),
+        ),
         ("GET", "/api/v1/saved-queries") => (
             200,
             serde_json::json!({"status": "success", "data": [state.lock().unwrap().saved_query.clone()]}),
@@ -483,6 +491,9 @@ fn route(
         ("GET", "/.well-known/oauth-authorization-server") => (
             200,
             serde_json::json!({
+                "scopes_supported": state.lock().unwrap().scopes_supported.clone().unwrap_or_else(
+                    || format!("{READ_SCOPES} offline_access").split(' ').map(String::from).collect()
+                ),
                 "issuer": base,
                 "authorization_endpoint": format!("{base}/oauth/authorize"),
                 "token_endpoint": format!("{base}/oauth/token"),

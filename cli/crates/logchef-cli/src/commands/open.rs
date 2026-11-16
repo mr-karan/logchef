@@ -6,6 +6,7 @@ use logchef_core::timerange::wall_clock_to_epoch_millis;
 use url::Url;
 
 use crate::cli::GlobalArgs;
+use crate::commands::views::resolve_view;
 use crate::commands::{resolve_source, resolve_team};
 use crate::session;
 
@@ -20,6 +21,9 @@ use crate::session;
 
   # Open a raw native (ClickHouse SQL / VictoriaLogs LogsQL / Loki LogQL) query
   logchef open 'SELECT * FROM logs.app WHERE level=' --sql -t 2 -S 2
+
+  # Open the explorer with a saved view, by id or name
+  logchef open -t 2 -S 2 --view 'Checkout errors'
 
   # Just print the URL (don't launch a browser)
   logchef open 'level=\"error\"' -t 2 -S 2 --since 15m --print")]
@@ -55,6 +59,10 @@ pub struct OpenArgs {
     #[arg(long, short = 'l')]
     limit: Option<u64>,
 
+    /// Saved view to apply, by id or name (see `logchef views list`)
+    #[arg(long)]
+    view: Option<String>,
+
     /// Print the URL instead of opening a browser
     #[arg(long)]
     print: bool,
@@ -81,11 +89,22 @@ pub async fn run(args: OpenArgs, global: GlobalArgs) -> Result<()> {
     //   q            LogchefQL          | sql   raw native query
     //   t            relative time      | start/end  absolute epoch-MILLISECONDS
     //   limit        row cap
+    //   view         saved view id
     // Relative `t` wins over absolute `start`/`end` in the UI, so only one is set.
     let mut pairs: Vec<(&str, String)> = vec![
         ("team", team_id.to_string()),
         ("source", source_id.to_string()),
     ];
+
+    if let Some(view) = args
+        .view
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        let view_id = resolve_view(client, team_id, source_id, view).await?;
+        pairs.push(("view", view_id.to_string()));
+    }
 
     if let Some(query) = args
         .query

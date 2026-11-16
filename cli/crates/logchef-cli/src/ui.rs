@@ -434,6 +434,15 @@ fn hint_for_core(err: &logchef_core::Error) -> Option<String> {
             status: Some(401), ..
         } => Some("token invalid or expired — run `logchef auth`".into()),
         Error::Api {
+            status: Some(403),
+            message,
+            ..
+        } if message.contains("required scope") => Some(
+            "the credential lacks a scope this command needs — run `logchef auth` again (a \
+             sign-in from an older CLI lacks saved_views:read), or use an API token with the scope"
+                .into(),
+        ),
+        Error::Api {
             status: Some(403), ..
         } => Some("no access to that team/source — check `logchef whoami`".into()),
         Error::Api {
@@ -463,6 +472,20 @@ fn hint_for_error_type(kind: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_scope_says_to_sign_in_again() {
+        let err = anyhow::Error::new(logchef_core::Error::api_with_type(
+            Some(403),
+            "API token does not have the required scope",
+            Some("AuthorizationError".into()),
+        ));
+        assert!(
+            hint_for_error(&err)
+                .unwrap()
+                .contains("run `logchef auth` again")
+        );
+    }
 
     #[test]
     fn thousands_groups_digits() {

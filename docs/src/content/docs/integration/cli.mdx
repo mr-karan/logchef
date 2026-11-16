@@ -701,6 +701,7 @@ logchef open 'level="error"' --since 15m --print
 | `--from` | | Absolute start (`YYYY-MM-DD HH:MM:SS`, effective timezone). Requires `--to` | |
 | `--to` | | Absolute end (`YYYY-MM-DD HH:MM:SS`, effective timezone). Requires `--from` | |
 | `--limit` | `-l` | Row limit to preselect | |
+| `--view` | | Saved view to apply, by ID or name (see `logchef views list`) | |
 | `--print` | | Print the URL instead of opening a browser | `false` |
 
 #### Open Examples
@@ -712,7 +713,37 @@ logchef open 'SELECT * FROM logs.app WHERE level=' --sql -t production -S app-lo
 # Open an absolute-range investigation
 logchef open 'recipient~"user@example.com"' \
   --from '2026-06-30 00:00:00' --to '2026-06-30 23:59:59'
+
+# Open the explorer with a saved view, by ID or name
+logchef open -t production -S app-logs --view 'Checkout errors'
 ```
+
+`--view` takes a number as a view ID. Any other value is a view name, looked up among the views you can see for the team and source. A view name can exist once in each scope (personal, team and source). If the name matches more than one view, the command exits with an error and lists each match with its ID and scope. Pass the ID instead.
+
+### Saved Views
+
+The `views list` command lists the saved Explorer views of a source: your personal views, the team's views and the source's views. It is read-only. Create and edit views in the web UI.
+
+```bash
+logchef views list -t production -S app-logs
+```
+
+```
+ID     NAME                           SCOPE     DEFAULT  SETS
+--------------------------------------------------------------------------------
+3      Checkout errors                personal  yes      columns, filter
+7      Wide                           team      scope    columns, sort
+```
+
+`DEFAULT` is `yes` on the view the Explorer opens with: your personal default, else the team default, else the source default. It is `scope` on the default of a scope that a narrower default outranks. `SETS` names the parts of the Explorer that the view sets.
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--output` | | `text` or `json` (the server's list response) | `text` |
+
+A browser sign-in made before saved views existed does not hold the `saved_views:read` scope, so `views list` and `open --view <name>` answer that the token lacks the required scope. Run `logchef auth` again to sign in with it.
 
 ### Saved Queries
 

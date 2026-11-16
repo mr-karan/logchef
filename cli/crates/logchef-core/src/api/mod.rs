@@ -538,6 +538,15 @@ impl Client {
         Ok(response.data)
     }
 
+    pub async fn list_saved_views(&self, team_id: i64, source_id: i64) -> Result<SavedViewList> {
+        let response: ApiResponse<SavedViewList> = self
+            .get(&format!(
+                "/api/v1/teams/{team_id}/sources/{source_id}/views"
+            ))
+            .await?;
+        Ok(response.data)
+    }
+
     pub async fn get_saved_query(&self, query_id: i64) -> Result<Collection> {
         let response: ApiResponse<Collection> = self
             .get(&format!("/api/v1/saved-queries/{}", query_id))
