@@ -419,6 +419,7 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	if err := s.store.PruneExpiredQueryShares(ctx, now); err != nil {
 		s.log.Warn("failed to prune expired query shares", "error", err)
 	}
+	s.pruneAuditEvents(ctx, now)
 
 	// Unlink files first, then delete rows. If the process dies between
 	// the two steps, the next cycle re-lists the same rows and ignores
@@ -443,6 +444,27 @@ func (s *Server) cleanupExpiredBackgroundState() {
 
 	if err := s.store.DeleteExpiredOAuthRows(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired OAuth rows", "error", err)
+	}
+}
+
+// auditPruneBatch bounds the audit rows one cleanup run deletes. A backlog
+// above it drains over the following runs.
+const auditPruneBatch = 5000
+
+// pruneAuditEvents applies audit.retention_days and audit.max_rows. It is
+// idempotent, so every replica may run it, and it records no audit event.
+func (s *Server) pruneAuditEvents(ctx context.Context, now time.Time) {
+	var before time.Time
+	if days := s.config.Audit.RetentionDays; days > 0 {
+		before = now.AddDate(0, 0, -days)
+	}
+	deleted, err := s.store.PruneAuditEvents(ctx, before, s.config.Audit.MaxRows, auditPruneBatch)
+	if err != nil {
+		s.log.Warn("failed to prune audit events", "error", err)
+		return
+	}
+	if deleted > 0 {
+		s.log.Info("pruned audit events", "deleted", deleted)
 	}
 }
 
