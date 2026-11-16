@@ -162,6 +162,7 @@ var toolScopes = map[string][]models.TokenScope{
 	"get_log_histogram":        {models.TokenScopeLogsRead},
 	"list_saved_queries":       {models.TokenScopeSavedQueriesRead},
 	"get_saved_query":          {models.TokenScopeSavedQueriesRead},
+	"list_saved_views":         {models.TokenScopeSavedViewsRead},
 	"query_logchefql":          {models.TokenScopeLogsRead},
 	"translate_logchefql":      {models.TokenScopeLogsRead},
 	"validate_logchefql":       {models.TokenScopeLogsRead},

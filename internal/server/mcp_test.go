@@ -304,6 +304,37 @@ func TestMCPScopesAndAdmission(t *testing.T) {
 	}
 }
 
+// RFC 0007 V9: an MCP client whose OAuth token holds saved_views:read sees
+// list_saved_views and calls it.
+func TestMCPListSavedViewsWithOAuthScope(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	team, src := mkTestTeam(t, e.db, "views", e.user)
+	view := &models.SavedView{
+		SourceID: src.ID, Scope: models.SavedViewScopeTeam, TeamID: &team.ID, Name: "errors",
+		Definition: models.SavedViewDefinition{Version: models.SavedViewDefinitionVersion, Columns: []models.SavedViewColumn{{Name: "msg"}}},
+	}
+	if err := e.db.CreateSavedView(context.Background(), view); err != nil {
+		t.Fatal(err)
+	}
+
+	p := newPKCE()
+	params := mcpNativeAuthorizeParams(p, "http://localhost:8787/callback")
+	params.Set("scope", "saved_views:read")
+	token := e.tokens(params, p).AccessToken
+	names := toolNames(t, e.mcpCall(token, protocolLegacy, "tools/list", "", map[string]any{}))
+	if !slices.Equal(names, []string{"get_meta", "list_saved_views"}) {
+		t.Fatalf("saved_views:read tools %v", names)
+	}
+	got := structured(t, e.mcpCall(token, protocolLegacy, "tools/call", "", map[string]any{
+		"name": "list_saved_views", "arguments": map[string]any{"team_id": team.ID, "source_id": src.ID},
+	})).(map[string]any)
+	views := got["views"].([]any)
+	if len(views) != 1 || views[0].(map[string]any)["name"] != "errors" {
+		t.Fatalf("list_saved_views = %v", got)
+	}
+}
+
 // Integration decision 1 through /mcp: an admin's MCP token sees only the
 // teams, sources, saved queries and alerts of its memberships.
 func TestMCPAdminIsMembershipOnly(t *testing.T) {

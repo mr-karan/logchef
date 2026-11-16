@@ -54,6 +54,11 @@ type GetSavedQueryParams struct {
 	QueryID int `json:"query_id" jsonschema:"The ID of the saved query to retrieve"`
 }
 
+type ListSavedViewsParams struct {
+	TeamID   int `json:"team_id" jsonschema:"The ID of the team that has access to the source"`
+	SourceID int `json:"source_id" jsonschema:"The ID of the source whose views to list"`
+}
+
 // --- Output schemas ---
 
 type SchemaColumnResult struct {
@@ -199,6 +204,30 @@ func (t *tools) listSavedQueries(ctx context.Context, sourceID int) ([]*models.S
 	return core.ListSavedQueriesForUser(ctx, t.deps.DB, t.deps.Log, p.User.ID)
 }
 
+func (t *tools) handleListSavedViews(ctx context.Context, _ mcp.CallToolRequest, args ListSavedViewsParams) (*models.SavedViewList, error) {
+	list, err := t.listSavedViews(ctx, args.TeamID, args.SourceID)
+	if err != nil {
+		return nil, t.storeError("list saved views", err)
+	}
+	return list, nil
+}
+
+func (t *tools) listSavedViews(ctx context.Context, teamID, sourceID int) (*models.SavedViewList, error) {
+	src, err := t.authorizeSource(ctx, teamID, sourceID, models.TokenScopeSavedViewsRead)
+	if err != nil {
+		return nil, err
+	}
+	p, err := principalFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	caller, err := core.NewSavedViewCaller(ctx, t.deps.DB, p, src)
+	if err != nil {
+		return nil, err
+	}
+	return core.ListSavedViews(ctx, t.deps.DB, caller)
+}
+
 func (t *tools) handleGetSavedQuery(ctx context.Context, _ mcp.CallToolRequest, args GetSavedQueryParams) (SavedQueryResult, error) {
 	got, err := t.getSavedQuery(ctx, args.QueryID)
 	if err != nil {
@@ -287,6 +316,15 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		readOnlyTool,
 	)
 	s.AddTool(listSavedQueriesTool, mcp.NewStructuredToolHandler(t.handleListSavedQueries))
+
+	listSavedViewsTool := mcp.NewTool("list_saved_views",
+		mcp.WithDescription("List the saved Explorer views of a source that the caller can see: their personal views, the team's views and the source's views, ordered by scope then name. A view sets the Explorer's columns, column order and widths, sort, display mode, and optionally a LogchefQL filter and a relative time range. Use it to learn which columns a team reads for a source, or to give a person a view id (the Explorer URL parameter view=<id>). default_view_id is the view the Explorer opens with: the personal default, else the team default, else the source default."),
+		mcp.WithInputSchema[ListSavedViewsParams](),
+		mcp.WithOutputSchema[models.SavedViewList](),
+		mcp.WithTitleAnnotation("List Saved Views"),
+		readOnlyTool,
+	)
+	s.AddTool(listSavedViewsTool, mcp.NewStructuredToolHandler(t.handleListSavedViews))
 
 	getSavedQueryTool := mcp.NewTool("get_saved_query",
 		mcp.WithDescription("Get a single saved query by ID. Returns name, description, query_type, query_content, source, and metadata."),
