@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- LogchefQL aggregations. A pipe after the filter counts and summarizes the
+  matching logs: `level=error | count() by service`. The functions are
+  `count`, `count_distinct`, `sum`, `avg`, `min`, `max` and `p50` to `p99`,
+  with up to 5 `by` keys, a `time` or `time(5m)` bucket, and optional
+  `| sort` and `| limit` stages. The same text runs on ClickHouse and
+  VictoriaLogs. The Explorer shows the result as a chart or a table,
+  dashboard panels in result mode chart it, `logchef query` prints it as a
+  table (with `--interval` for a bare `time` key), and MCP `query_logchefql`
+  returns it. Live tail, the histogram and other features that need log rows
+  refuse an aggregation. On ClickHouse an aggregation is bounded to 100,000
+  groups and `query.aggregation_max_memory_bytes` (default 2 GiB). The new
+  Aggregations docs page covers the syntax, limits and backend differences.
 - Alert rules can group by result columns in native mode. A ClickHouse query
   with `GROUP BY service` or a LogsQL `stats by (service)` and **Group by**
   `service` fire and resolve each service on its own, with one notification

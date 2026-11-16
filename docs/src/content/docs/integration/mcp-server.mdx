@@ -93,9 +93,36 @@ with an error that names the field to send.
 
 | Tool | Description |
 |------|-------------|
-| `query_logchefql` | Run a LogchefQL query |
+| `query_logchefql` | Run a LogchefQL query, including an aggregation |
 | `translate_logchefql` | Translate LogchefQL to the source's native language without running it |
 | `validate_logchefql` | Check LogchefQL syntax without running it |
+
+#### Aggregations
+
+`query_logchefql` runs an [aggregation pipe](/guide/aggregations), such as
+`severity_text=ERROR | count() by service` or
+`service=api | p95(duration_ms), avg(duration_ms) by time(5m)`, so an
+assistant can count and group without writing SQL or LogsQL for one backend.
+
+- `logs` holds the result rows and `columns` their names and types. The
+  `aggregation` object gives the shape, the bucket size and the columns in
+  order, each with its role: `time`, `group` or `value`.
+- A bare `by time` key needs the `interval` argument, a size from `1s` to
+  `24h`. Without it the call fails with "this query buckets by time, so the
+  request needs an interval". `time(5m)` sets the size in the query.
+- `limit` (1 to 500, default 100) caps the result rows, as does a `| limit`
+  in the query.
+- `translate_logchefql` takes `interval` too and returns the `aggregation`
+  object. On VictoriaLogs `generated_query` holds the aggregated LogsQL. On
+  ClickHouse `sql` stays the filter, and `full_sql` and `generated_query` hold
+  the aggregated SQL only when the call has `start_time`, `end_time` and
+  `timezone`.
+- `compare_windows` and the field value tools take a filter only, and reject
+  an aggregation with "this feature needs log rows, and the query aggregates.
+  Remove the pipe after the filter".
+- `get_log_histogram` needs a query of log rows. Translate the filter without
+  the pipe and pass its `full_sql` (ClickHouse) or `generated_query`
+  (VictoriaLogs).
 
 ### Investigation and analysis
 
@@ -143,7 +170,7 @@ Two prompts guide an investigation.
 
 | Prompt | Arguments | Description |
 |--------|-----------|-------------|
-| `investigate_error_spike` | `team_id` and `source_id` (required), `time_range` (optional, default last hour) | Schema discovery, error volume, patterns, timeline, and root cause |
+| `investigate_error_spike` | `team_id` and `source_id` (required), `time_range` (optional, default last hour) | Schema discovery, error volume with `\| count()` and `\| count() by service_name`, patterns, timeline, and root cause |
 | `investigate_alert` | `alert_id` (required), `team_id` and `source_id` (optional) | Alert configuration, history, matching logs, and a summary |
 
 ## Investigation panel

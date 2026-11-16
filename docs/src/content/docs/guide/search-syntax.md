@@ -3,7 +3,7 @@ title: Search Syntax
 description: Learn LogchefQL, Logchef's search syntax for filtering and querying logs without writing SQL.
 ---
 
-**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL.
+**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL, and to count and summarize them with an [aggregation pipe](/guide/aggregations).
 
 LogchefQL is the quick-filter language shared across supported datasources:
 
@@ -137,6 +137,11 @@ service="api" | timestamp log_attributes.user_id log_attributes.endpoint
 
 The selected fields appear as columns in the result set, making it easy to focus on the data you need.
 
+A pipe whose first item is a function call, such as `| count() by service`,
+is an aggregation and not a field list. [Aggregations](/guide/aggregations)
+has the syntax. `| count` without parentheses still selects the field named
+`count`.
+
 ## Examples
 
 ### Finding Errors
@@ -269,7 +274,7 @@ For advanced queries that go beyond LogchefQL's capabilities, you can switch to 
 
 Native mode gives you direct access to backend-specific capabilities, including:
 
-- ClickHouse aggregations (`COUNT`, `SUM`, `AVG`, etc.)
+- Aggregations that a LogchefQL [aggregation pipe](/guide/aggregations) does not cover, such as arithmetic between aggregates or a filter on an aggregated value
 - VictoriaLogs-specific LogsQL pipes and processing operators
 - Subqueries
 - Joins
@@ -284,10 +289,11 @@ In SQL mode, your query executes exactly as written. Time range and limit contro
 2. **Use parentheses for complex logic**: `(a or b) and c` is clearer than relying on operator precedence
 3. **Use nested field access**: Don't flatten your logs. Query them directly
 4. **Use the pipe operator**: Select only the fields you need for faster queries
-5. **Switch to SQL mode**: For aggregations and advanced analysis
+5. **Aggregate with a pipe**: `level=error | count() by service` counts without SQL. Switch to native mode for ratios, joins and subqueries
 
 ## Next steps
 
+- Count, sum and take percentiles with [Aggregations](/guide/aggregations)
 - See [Query Examples](/guide/examples) for LogchefQL patterns applied to real scenarios
 - Review the [Query Interface](/user-guide/query-interface) for time controls and result views
 - Try the [Field Values Sidebar](/features/field-sidebar) to build filters without typing
