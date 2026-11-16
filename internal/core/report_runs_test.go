@@ -60,6 +60,8 @@ type reportEnv struct {
 	rr     *ReportRunner
 	// query answers every panel query; the default returns one row.
 	query func(ctx context.Context, req datasource.QueryRequest) (*models.QueryResult, error)
+	// histogram answers every count panel; the default has no buckets.
+	histogram func(ctx context.Context, req datasource.HistogramRequest) (*datasource.HistogramResult, error)
 }
 
 const reportQueryContent = `{"version":1,"sourceId":%d,"limit":100,"content":"SELECT status FROM logs WHERE day = {{day}}","variables":[{"name":"day","type":"day","label":"Day","inputType":"date","value":"","defaultValue":"today"}]}`
@@ -87,9 +89,17 @@ func newReportEnv(t *testing.T) *reportEnv {
 			Logs:    []map[string]any{{"status": 503}},
 		}, nil
 	}
-	provider := &fakeProvider{queryLogsFn: func(ctx context.Context, _ *models.Source, req datasource.QueryRequest) (*models.QueryResult, error) {
-		return e.query(ctx, req)
-	}}
+	e.histogram = func(_ context.Context, req datasource.HistogramRequest) (*datasource.HistogramResult, error) {
+		return &datasource.HistogramResult{Granularity: req.Window}, nil
+	}
+	provider := &fakeProvider{
+		queryLogsFn: func(ctx context.Context, _ *models.Source, req datasource.QueryRequest) (*models.QueryResult, error) {
+			return e.query(ctx, req)
+		},
+		histogramFn: func(ctx context.Context, _ *models.Source, req datasource.HistogramRequest) (*datasource.HistogramResult, error) {
+			return e.histogram(ctx, req)
+		},
+	}
 	e.rr = &ReportRunner{
 		DB: db,
 		DS: newFakeDatasourceService(db, discardLogger(), provider),
@@ -486,9 +496,10 @@ func TestReportValidation(t *testing.T) {
 		{"recipients", func(in *ReportInput) {
 			in.Recipients = []json.RawMessage{json.RawMessage(`{"kind":"email","email":"x@example.com"}`)}
 		}, ErrInvalidReport, "recipients"},
-		{"dashboard source", func(in *ReportInput) {
-			in.Source = ReportSourceRef{Kind: models.ReportSourceDashboard, DashboardID: new(1)}
-		}, ErrInvalidReport, "source.kind"},
+		{"missing dashboard", func(in *ReportInput) {
+			in.Source = ReportSourceRef{Kind: models.ReportSourceDashboard, DashboardID: new(9999)}
+		}, ErrInvalidReport, "source.dashboard_id"},
+		{"unknown source kind", func(in *ReportInput) { in.Source.Kind = "saved_view" }, ErrInvalidReport, "source.kind"},
 		{"missing saved query", func(in *ReportInput) { in.Source.SavedQueryID = new(9999) }, ErrInvalidReport, "source.saved_query_id"},
 		{"bad schedule", func(in *ReportInput) { in.Schedule = json.RawMessage(`{"frequency":"daily","minute":0}`) }, ErrInvalidReport, "schedule.hour"},
 		{"schedule with an unknown field", func(in *ReportInput) { in.Schedule = json.RawMessage(`{"frequency":"hourly","minute":0,"every":"5m"}`) }, ErrInvalidReport, "schedule"},

@@ -11,7 +11,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReportScheduleFields from "./ReportScheduleFields.vue";
 import { useReportsStore } from "@/stores/reports";
-import type { Report, ReportInput, ReportRangeAnchor, ReportSchedule } from "@/api/reports";
+import type { Report, ReportInput, ReportRangeAnchor, ReportSchedule, ReportSourceRef } from "@/api/reports";
 import { REPORT_TIME_RANGES, isCalendarRange, savedQueryVariables, splitValues } from "@/utils/reportSchedule";
 import { usePreferencesStore } from "@/stores/preferences";
 
@@ -20,6 +20,8 @@ const props = defineProps<{
   report: Report | null;
   /** Preselects this saved query for a new report. */
   savedQueryId?: number | null;
+  /** Preselects this dashboard for a new report. */
+  dashboardId?: number | null;
   /** Starts a new report as a copy of this one. */
   copyOf?: Report | null;
 }>();
@@ -40,7 +42,11 @@ const saved = ref("");
 // is saved, so Preview and Send test work right after the first save.
 const current = ref<Report | null>(null);
 const name = ref("");
+const sourceKind = ref<ReportSourceRef["kind"]>("saved_query");
 const savedQueryId = ref<number | null>(null);
+const dashboardId = ref<number | null>(null);
+// "" sends every tab.
+const tabId = ref("");
 const schedule = ref<ReportSchedule>({ frequency: "daily", hour: 9, minute: 0 });
 const timezone = ref(defaultZone);
 const timeRange = ref("24h");
@@ -62,9 +68,13 @@ function load(report: Report | null) {
   current.value = report;
   name.value = report?.name ?? (base ? t("common.copyName", { name: base.name }).slice(0, 200) : "");
   savedQueryId.value = base?.source.saved_query_id ?? props.savedQueryId ?? null;
+  dashboardId.value = base?.source.dashboard_id ?? (base ? null : props.dashboardId ?? null);
+  sourceKind.value = dashboardId.value !== null ? "dashboard" : "saved_query";
+  tabId.value = base?.source.tab_id ?? "";
   schedule.value = base ? { ...base.schedule } : { frequency: "daily", hour: 9, minute: 0 };
   timezone.value = base?.timezone ?? defaultZone;
-  timeRange.value = base?.time_range ?? "24h";
+  // A dashboard report without a range takes the dashboard's default.
+  timeRange.value = base?.time_range ?? (sourceKind.value === "dashboard" ? "" : "24h");
   anchor.value = base?.range_anchor ?? "send_time";
   const stored = Object.entries(base?.variables ?? {});
   storedLists.value = new Set(stored.filter(([, v]) => Array.isArray(v)).map(([k]) => k));
@@ -88,7 +98,30 @@ const selectedQuery = computed({
 });
 
 
-const savedQuery = computed(() => store.savedQueries.find((q) => q.id === savedQueryId.value) ?? null);
+const selectedDashboard = computed({
+  get: () => (dashboardId.value === null ? "" : String(dashboardId.value)),
+  set: (value: string) => {
+    const next = value === "" ? null : Number(value);
+    if (next !== dashboardId.value) tabId.value = "";
+    dashboardId.value = next;
+  },
+});
+const isDashboard = computed(() => sourceKind.value === "dashboard");
+// A saved query needs a range; a dashboard starts on its own default.
+const selectedKind = computed({
+  get: () => sourceKind.value,
+  set: (kind: ReportSourceRef["kind"]) => {
+    if (kind === sourceKind.value) return;
+    sourceKind.value = kind;
+    timeRange.value = kind === "dashboard" ? "" : "24h";
+  },
+});
+watch(dashboardId, (id) => {
+  if (id !== null) void store.fetchDashboardTabs(id);
+}, { immediate: true });
+const tabs = computed(() => store.tabsOf(dashboardId.value));
+
+const savedQuery = computed(() => (isDashboard.value ? null : store.savedQueries.find((q) => q.id === savedQueryId.value) ?? null));
 const declared = computed(() => (savedQuery.value ? savedQueryVariables(savedQuery.value) : []));
 const ranges = computed(() => (REPORT_TIME_RANGES as readonly string[]).includes(timeRange.value) ? REPORT_TIME_RANGES : [timeRange.value, ...REPORT_TIME_RANGES]);
 const calendar = computed(() => isCalendarRange(timeRange.value));
@@ -102,13 +135,15 @@ function isList(name: string): boolean {
 
 const input = computed<ReportInput>(() => ({
   name: name.value.trim(),
-  source: { kind: "saved_query", saved_query_id: savedQueryId.value ?? undefined },
+  source: isDashboard.value
+    ? { kind: "dashboard", dashboard_id: dashboardId.value ?? undefined, ...(tabId.value ? { tab_id: tabId.value } : {}) }
+    : { kind: "saved_query", saved_query_id: savedQueryId.value ?? undefined },
   schedule: schedule.value,
   timezone: timezone.value,
   time_range: timeRange.value,
   range_anchor: anchor.value,
   // Only set values: an empty one falls back to the saved query's default.
-  variables: Object.fromEntries(Object.entries(variables.value).filter(([, v]) => v.trim()).map(([k, v]) => [k, isList(k) ? splitValues(v) : v.trim()])),
+  variables: isDashboard.value ? {} : Object.fromEntries(Object.entries(variables.value).filter(([, v]) => v.trim()).map(([k, v]) => [k, isList(k) ? splitValues(v) : v.trim()])),
   max_rows: maxRows.value,
   skip_if_empty: skipIfEmpty.value,
 }));
@@ -118,10 +153,12 @@ watch(open, (isOpen) => {
   if (!isOpen) return;
   load(props.report);
   void store.fetchSavedQueries();
+  void store.fetchDashboards();
 }, { immediate: true });
 
 const missingVariable = computed(() => declared.value.some((v) => !v.optional && !v.fallback && !variables.value[v.name]?.trim()));
-const canSave = computed(() => !!input.value.name && savedQueryId.value !== null && maxRows.value >= 5 && maxRows.value <= 100 && !missingVariable.value);
+const hasSource = computed(() => (isDashboard.value ? dashboardId.value !== null : savedQueryId.value !== null));
+const canSave = computed(() => !!input.value.name && hasSource.value && maxRows.value >= 5 && maxRows.value <= 100 && !missingVariable.value);
 const saving = computed(() => store.isLoadingOperation("saveReport"));
 const readOnly = computed(() => !!current.value && !current.value.can_edit);
 
@@ -194,6 +231,29 @@ function warningText(code: string): string {
           <section class="space-y-3">
             <h3 class="text-sm font-medium">{{ t("reports.sectionSource") }}</h3>
             <div class="space-y-1.5">
+              <Label for="report-source-kind">{{ t("reports.sourceKind") }}</Label>
+              <NativeSelect id="report-source-kind" v-model="selectedKind" class="w-full" :disabled="!!current">
+                <NativeSelectOption value="saved_query">{{ t("reports.savedQuery") }}</NativeSelectOption>
+                <NativeSelectOption value="dashboard">{{ t("reports.dashboard") }}</NativeSelectOption>
+              </NativeSelect>
+            </div>
+            <div v-if="isDashboard" class="grid gap-3 sm:grid-cols-2">
+              <div class="space-y-1.5">
+                <Label for="report-dashboard">{{ t("reports.dashboard") }}</Label>
+                <NativeSelect id="report-dashboard" class="w-full" v-model="selectedDashboard">
+                  <NativeSelectOption value="" disabled>{{ t("reports.pickDashboard") }}</NativeSelectOption>
+                  <NativeSelectOption v-for="d in store.dashboards" :key="d.id" :value="String(d.id)">{{ d.name }}</NativeSelectOption>
+                </NativeSelect>
+              </div>
+              <div class="space-y-1.5">
+                <Label for="report-tab">{{ t("reports.tab") }}</Label>
+                <NativeSelect id="report-tab" class="w-full" v-model="tabId" :disabled="dashboardId === null">
+                  <NativeSelectOption value="">{{ t("reports.allTabs") }}</NativeSelectOption>
+                  <NativeSelectOption v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.title }}</NativeSelectOption>
+                </NativeSelect>
+              </div>
+            </div>
+            <div v-else class="space-y-1.5">
               <Label for="report-source">{{ t("reports.savedQuery") }}</Label>
               <NativeSelect id="report-source" class="w-full" v-model="selectedQuery">
                 <NativeSelectOption value="" disabled>{{ t("reports.pickSavedQuery") }}</NativeSelectOption>
@@ -221,7 +281,8 @@ function warningText(code: string): string {
               <div class="space-y-1.5">
                 <Label for="report-range">{{ t("reports.timeRange") }}</Label>
                 <NativeSelect id="report-range" v-model="timeRange" class="w-full">
-                  <NativeSelectOption v-for="r in ranges" :key="r" :value="r">{{ r }}</NativeSelectOption>
+                  <NativeSelectOption v-if="isDashboard" value="">{{ t("reports.dashboardDefaultRange") }}</NativeSelectOption>
+                  <NativeSelectOption v-for="r in ranges.filter(Boolean)" :key="r" :value="r">{{ r }}</NativeSelectOption>
                 </NativeSelect>
               </div>
               <div class="space-y-1.5">

@@ -2,7 +2,8 @@
 import { useI18n } from "vue-i18n";
 
 import { computed } from "vue";
-import { RefreshCw, ChevronDown } from "lucide-vue-next";
+import { useRouter } from "vue-router";
+import { RefreshCw, ChevronDown, CalendarClock } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DateTimePicker } from "@/components/date-time-picker";
 import { useDashboardsStore } from "@/stores/dashboards";
+import { useMetaStore } from "@/stores/meta";
 import { usePreferencesStore } from "@/stores/preferences";
 import { epochMs, formatInZone } from "@/utils/timeWindow";
 
@@ -19,6 +21,13 @@ const { t } = useI18n();
 
 const store = useDashboardsStore();
 const preferencesStore = usePreferencesStore();
+const metaStore = useMetaStore();
+const router = useRouter();
+
+function scheduleReport() {
+  const id = store.current?.id;
+  if (id) void router.push({ name: "Reports", query: { dashboard: String(id) } });
+}
 
 const REFRESH_OPTIONS = [
   { get label() { return t('ui.off'); }, ms: 0 },
@@ -100,6 +109,17 @@ function manualRefresh() {
       @click="manualRefresh"
     >
       <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': isRefreshing }" />
+    </Button>
+
+    <!-- A report sends email, which a read-only demo does not. -->
+    <Button
+      v-if="!metaStore.demoReadOnly"
+      variant="outline"
+      size="sm"
+      class="h-8 gap-1 text-xs"
+      @click="scheduleReport"
+    >
+      <CalendarClock class="h-3.5 w-3.5" />{{ t('reports.scheduleReport') }}
     </Button>
 
     <span

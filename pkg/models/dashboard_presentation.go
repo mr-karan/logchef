@@ -22,27 +22,7 @@ func dashboardExact(raw json.RawMessage) (*big.Rat, bool) {
 			return nil, false
 		}
 	}
-	if len(literal) > 512 {
-		return nil, false
-	}
-	m := dashboardDecimalLiteral.FindStringSubmatch(literal)
-	if m == nil {
-		return nil, false
-	}
-	exponent := 0
-	if m[4] != "" {
-		exponent, _ = strconv.Atoi(m[4])
-	}
-	digits := strings.TrimLeft(m[2]+m[3], "0")
-	if digits == "" {
-		return new(big.Rat), true
-	}
-	trimmed := strings.TrimRight(digits, "0")
-	scale := len(m[3]) - exponent - (len(digits) - len(trimmed))
-	if len(trimmed) > 100 || scale < -400 || scale > 400 {
-		return nil, false
-	}
-	coefficient, ok := new(big.Int).SetString(m[1]+trimmed, 10)
+	coefficient, scale, ok := ParseExactDecimal(literal)
 	if !ok {
 		return nil, false
 	}
@@ -52,6 +32,40 @@ func dashboardExact(raw json.RawMessage) (*big.Rat, bool) {
 	}
 	return new(big.Rat).SetFrac(coefficient, power), true
 }
+
+// ParseExactDecimal reads a decimal literal such as "-12.50" or "3e-4" as
+// coefficient times 10^-scale, with trailing zeros of the coefficient
+// removed, so wide integers and decimals keep every digit. It is the parser
+// of RFC 0003 that the dashboards and frontend/src/utils/exactNumber.ts
+// share; ok is false for anything else or past its bounds.
+func ParseExactDecimal(literal string) (coefficient *big.Int, scale int, ok bool) {
+	if len(literal) > 512 {
+		return nil, 0, false
+	}
+	m := dashboardDecimalLiteral.FindStringSubmatch(literal)
+	if m == nil {
+		return nil, 0, false
+	}
+	exponent := 0
+	if m[4] != "" {
+		exponent, _ = strconv.Atoi(m[4])
+	}
+	digits := strings.TrimLeft(m[2]+m[3], "0")
+	if digits == "" {
+		return new(big.Int), 0, true
+	}
+	trimmed := strings.TrimRight(digits, "0")
+	scale = len(m[3]) - exponent - (len(digits) - len(trimmed))
+	if len(trimmed) > 100 || scale < -400 || scale > 400 {
+		return nil, 0, false
+	}
+	coefficient, ok = new(big.Int).SetString(m[1]+trimmed, 10)
+	if !ok {
+		return nil, 0, false
+	}
+	return coefficient, scale, true
+}
+
 func absDashboardScale(n int) int {
 	if n < 0 {
 		return -n

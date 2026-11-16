@@ -185,16 +185,36 @@ func (rr *ReportRunner) noticeOwnerOfPause(ctx context.Context, r *models.Report
 	}
 }
 
-// reportPlan is a report ready to run: its owner, its source, its window
-// and its authorized panel queries.
+// reportPlan is a report ready to run: its owner, its window, and its
+// panels, each authorized for the owner at this run.
 type reportPlan struct {
-	report     *models.Report
-	owner      *models.User
-	query      *models.SavedQuery
-	sourceName string
-	loc        *time.Location
-	window     reports.Window
-	jobs       []reports.PanelJob
+	report  *models.Report
+	owner   *models.User
+	loc     *time.Location
+	window  reports.Window
+	sources []string
+	// sourceURL opens the dashboard or saved query, "" without a UI URL.
+	sourceURL string
+	panels    []plannedPanel
+}
+
+// plannedPanel is a panel that runs (job set), or one that the owner can
+// no longer reach or that email does not show (fixed set).
+type plannedPanel struct {
+	job    *reports.PanelJob
+	fixed  reports.Panel
+	status models.ReportPanelStatus
+	// teamID is the panel's team on a dashboard and 0 for a saved query,
+	// which any team with sourceID reaches.
+	teamID   models.TeamID
+	sourceID models.SourceID
+}
+
+func lockedPanel(id, title string, teamID models.TeamID, sourceID models.SourceID) plannedPanel {
+	return plannedPanel{
+		fixed:  reports.Panel{ID: id, Title: title, Locked: true},
+		status: models.ReportPanelLocked, teamID: teamID, sourceID: sourceID,
+	}
 }
 
 // runStop ends a run before any query, by an owner rule or a source fault.
@@ -231,9 +251,20 @@ func (rr *ReportRunner) plan(ctx context.Context, r *models.Report, at time.Time
 	if owner.Status != models.UserStatusActive {
 		return nil, stop(models.ReportRunSkipped, models.ReportReasonOwnerInactive), nil
 	}
-	if r.SourceKind != models.ReportSourceSavedQuery || r.SavedQueryID == nil {
-		return nil, stop(models.ReportRunFailed, models.ReportReasonSourceInvalid), nil
+	loc, err := time.LoadLocation(r.Timezone)
+	if err != nil {
+		return nil, sourceInvalid(err), nil
 	}
+	switch {
+	case r.SourceKind == models.ReportSourceSavedQuery && r.SavedQueryID != nil:
+		return rr.planSavedQuery(ctx, r, owner, loc, at)
+	case r.SourceKind == models.ReportSourceDashboard && r.DashboardID != nil:
+		return rr.planDashboard(ctx, r, owner, loc, at)
+	}
+	return nil, stop(models.ReportRunFailed, models.ReportReasonSourceInvalid), nil
+}
+
+func (rr *ReportRunner) planSavedQuery(ctx context.Context, r *models.Report, owner *models.User, loc *time.Location, at time.Time) (*reportPlan, *runStop, error) {
 	sq, err := rr.DB.GetSavedQuery(ctx, *r.SavedQueryID)
 	if err != nil {
 		if models.IsNotFound(err) {
@@ -242,10 +273,6 @@ func (rr *ReportRunner) plan(ctx context.Context, r *models.Report, at time.Time
 		return nil, nil, fmt.Errorf("loading saved query %d: %w", *r.SavedQueryID, err)
 	}
 	content, err := savedQueryContent(sq)
-	if err != nil {
-		return nil, sourceInvalid(err), nil
-	}
-	loc, err := time.LoadLocation(r.Timezone)
 	if err != nil {
 		return nil, sourceInvalid(err), nil
 	}
@@ -269,8 +296,32 @@ func (rr *ReportRunner) plan(ctx context.Context, r *models.Report, at time.Time
 	if err != nil {
 		return nil, nil, fmt.Errorf("loading source %d: %w", sq.SourceID, err)
 	}
-	job := reports.PanelJob{ID: reportPanelID, Title: sq.Name, Run: rr.savedQueryRun(src, sq, content, r.Timezone, window, variables)}
-	return &reportPlan{report: r, owner: owner, query: sq, sourceName: source.Name, loc: loc, window: window, jobs: []reports.PanelJob{job}}, nil, nil
+	run := rr.savedQueryRun(src, sq, content, r.Timezone, window, variables)
+	maxRows := r.MaxRows
+	job := &reports.PanelJob{ID: reportPanelID, Title: sq.Name, Run: func(ctx context.Context) (reports.PanelOutput, error) {
+		res, err := run(ctx)
+		if err != nil {
+			return reports.PanelOutput{}, err
+		}
+		return tableOutput(reportPanelID, sq.Name, res, loc, maxRows), nil
+	}}
+	plan := &reportPlan{
+		report: r, owner: owner, loc: loc, window: window, sources: []string{source.Name},
+		panels: []plannedPanel{{job: job, sourceID: sq.SourceID}},
+	}
+	if rr.UIURL != "" {
+		plan.sourceURL = fmt.Sprintf("%s/logs/saved/%d", rr.UIURL, sq.ID)
+	}
+	return plan, nil, nil
+}
+
+// tableOutput renders a result as an email table.
+func tableOutput(id, title string, res *models.QueryResult, loc *time.Location, maxRows int) reports.PanelOutput {
+	table := reports.RenderTable(res, loc, maxRows)
+	return reports.PanelOutput{
+		Panel: reports.Panel{ID: id, Title: title, Table: &table},
+		Rows:  len(res.Logs), Truncation: res.Stats.Truncation, Empty: len(res.Logs) == 0,
+	}
 }
 
 // authorizeOwner passes the owner's report principal through
@@ -285,7 +336,13 @@ func (rr *ReportRunner) authorizeOwner(ctx context.Context, owner *models.User, 
 		return access.AuthorizedSource{}, false, nil
 	}
 	team := slices.MinFunc(teams, func(a, b *models.Team) int { return cmp.Compare(a.ID, b.ID) })
-	src, err := access.AuthorizeTeamSource(ctx, rr.DB, access.ReportPrincipal(owner), team.ID, sourceID, models.TokenScopeLogsRead)
+	return authorizeReportSource(ctx, rr.DB, owner, team.ID, sourceID)
+}
+
+// authorizeReportSource authorizes the owner's report principal for one
+// team and source. ok is false when the owner cannot reach it.
+func authorizeReportSource(ctx context.Context, db store.StoreOps, owner *models.User, teamID models.TeamID, sourceID models.SourceID) (access.AuthorizedSource, bool, error) {
+	src, err := access.AuthorizeTeamSource(ctx, db, access.ReportPrincipal(owner), teamID, sourceID, models.TokenScopeLogsRead)
 	switch {
 	case errors.Is(err, access.ErrNotTeamMember), errors.Is(err, access.ErrSourceNotInTeam), errors.Is(err, access.ErrInsufficientScope):
 		return access.AuthorizedSource{}, false, nil
@@ -295,11 +352,17 @@ func (rr *ReportRunner) authorizeOwner(ctx context.Context, owner *models.User, 
 	return src, true, nil
 }
 
+// reportQueryConfig bounds a report's panel queries: the result size and
+// the query timeout.
+func (rr *ReportRunner) reportQueryConfig() (cfg config.QueryConfig, timeoutSeconds int) {
+	cfg = rr.Query
+	cfg.MaxResponseBytes = min(cfg.MaxResponseBytes, maxReportResultBytes)
+	return cfg, min(models.DefaultQueryTimeoutSeconds, cfg.MaxTimeoutSeconds)
+}
+
 // savedQueryRun runs the saved query through the paths HTTP and MCP share.
 func (rr *ReportRunner) savedQueryRun(src access.AuthorizedSource, sq *models.SavedQuery, content *models.SavedQueryContent, tz string, w reports.Window, variables []models.TemplateVariable) func(context.Context) (*models.QueryResult, error) {
-	cfg := rr.Query
-	cfg.MaxResponseBytes = min(cfg.MaxResponseBytes, maxReportResultBytes)
-	timeout := min(models.DefaultQueryTimeoutSeconds, cfg.MaxTimeoutSeconds)
+	cfg, timeout := rr.reportQueryConfig()
 	limit := min(content.Limit, maxReportQueryRows)
 	start, end := w.Start.UTC().Format(time.RFC3339), w.End.UTC().Format(time.RFC3339)
 	return func(ctx context.Context) (*models.QueryResult, error) {
@@ -327,36 +390,47 @@ type renderedRun struct {
 // runAndRender runs the panels until queryDeadline, decides the outcomes
 // that end a run before delivery, and renders the email.
 func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, queryDeadline time.Time) (*renderedRun, error) {
-	results := reports.RunPanels(ctx, queryDeadline, plan.jobs)
-	out := &renderedRun{panels: make([]models.ReportPanelOutcome, len(results))}
+	var jobs []reports.PanelJob
+	for _, p := range plan.panels {
+		if p.job != nil {
+			jobs = append(jobs, *p.job)
+		}
+	}
+	results := reports.RunPanels(ctx, queryDeadline, jobs)
+	out := &renderedRun{panels: make([]models.ReportPanelOutcome, len(plan.panels))}
 	doc := reports.Document{
 		ReportName: plan.report.Name,
 		Location:   plan.loc,
 		Window:     plan.window,
 		Owner:      cmp.Or(plan.owner.FullName, plan.owner.Email),
-		Sources:    []string{plan.sourceName},
+		Sources:    plan.sources,
+		SourceURL:  plan.sourceURL,
 	}
 	if rr.UIURL != "" {
-		doc.SourceURL = fmt.Sprintf("%s/logs/saved/%d", rr.UIURL, plan.query.ID)
 		doc.ReportURL = fmt.Sprintf("%s/reports/%d", rr.UIURL, plan.report.ID)
 	}
-	failed, timedOut, empty := 0, 0, 0
-	for i, res := range results {
+	ran, failed, timedOut, empty := 0, 0, 0, 0
+	for i, p := range plan.panels {
+		if p.job == nil {
+			out.panels[i] = models.ReportPanelOutcome{PanelID: p.fixed.ID, Title: p.fixed.Title, Status: p.status}
+			doc.Panels = append(doc.Panels, p.fixed)
+			continue
+		}
+		res := results[ran]
+		ran++
 		o := models.ReportPanelOutcome{PanelID: res.Job.ID, Title: res.Job.Title}
-		panel := reports.Panel{ID: res.Job.ID, Title: res.Job.Title}
+		panel := res.Output.Panel
 		switch {
 		case res.Err != nil:
-			o.Status, o.Error, panel.Failed = models.ReportPanelFailed, res.Err.Error(), true
+			o.Status, o.Error = models.ReportPanelFailed, res.Err.Error()
+			panel = reports.Panel{ID: res.Job.ID, Title: res.Job.Title, Failed: true}
 			failed++
 			if errors.Is(res.Err, reports.ErrQueryBudget) {
 				timedOut++
 			}
 		default:
-			table := reports.RenderTable(res.Result, plan.loc, plan.report.MaxRows)
-			panel.Table = &table
-			o.Rows, o.Truncation = len(res.Result.Logs), res.Result.Stats.Truncation
-			o.Status = models.ReportPanelOK
-			if o.Rows == 0 {
+			o.Rows, o.Truncation, o.Status = res.Output.Rows, res.Output.Truncation, models.ReportPanelOK
+			if res.Output.Empty {
 				o.Status = models.ReportPanelEmpty
 				empty++
 			}
@@ -365,13 +439,13 @@ func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, quer
 		doc.Panels = append(doc.Panels, panel)
 	}
 	switch {
-	case failed == len(results) && timedOut == failed:
+	case ran > 0 && failed == ran && timedOut == failed:
 		out.stop = stop(models.ReportRunFailed, models.ReportReasonTimeout)
 		return out, nil
-	case failed == len(results):
+	case ran > 0 && failed == ran:
 		out.stop = stop(models.ReportRunFailed, models.ReportReasonAllPanelsFailed)
 		return out, nil
-	case empty == len(results) && plan.report.SkipIfEmpty:
+	case ran > 0 && empty == ran && plan.report.SkipIfEmpty:
 		out.stop = stop(models.ReportRunSkipped, models.ReportReasonEmpty)
 		return out, nil
 	}
@@ -430,7 +504,7 @@ func (rr *ReportRunner) execute(ctx context.Context, run *models.ReportRun, r *m
 			Target:  strconv.FormatInt(int64(u.ID), 10),
 			Via:     "direct",
 		}
-		if reason, err := rr.userCannotReceive(ctx, u, plan.query.SourceID); err != nil {
+		if reason, err := rr.userCannotReceive(ctx, u, plan); err != nil {
 			return models.ReportRunResult{}, err
 		} else if reason != "" {
 			res.Deliveries = append(res.Deliveries, models.ReportDelivery{
@@ -461,19 +535,37 @@ func (rr *ReportRunner) runRecipients(ctx context.Context, run *models.ReportRun
 	return []*models.User{u}, nil
 }
 
-// userCannotReceive applies the per-user test of RFC 0008 for a saved
-// query: an active human account with an address, and a team of the user's
-// own that has the source. It returns the skip reason, or "".
-func (rr *ReportRunner) userCannotReceive(ctx context.Context, u *models.User, sourceID models.SourceID) (string, error) {
+// userCannotReceive applies the per-user test of RFC 0008: an active human
+// account with an address that reaches every panel the email shows data
+// of. A saved query is reached through any team of the user's own that has
+// its source; a dashboard panel through the panel's team. It returns the
+// skip reason, or "".
+//
+// Until per-recipient locking (RFC 0008 unit R8), a user who cannot reach
+// one of the panels gets no email, rather than one with that panel locked.
+func (rr *ReportRunner) userCannotReceive(ctx context.Context, u *models.User, plan *reportPlan) (string, error) {
 	if u.Status != models.UserStatusActive || u.AccountType == models.UserAccountTypeService || u.Email == "" {
 		return "inactive", nil
 	}
-	reach, err := rr.DB.UserHasSourceAccess(ctx, u.ID, sourceID)
-	if err != nil {
-		return "", fmt.Errorf("checking source access of user %d: %w", u.ID, err)
-	}
-	if !reach {
-		return string(models.ReportReasonNoAccess), nil
+	for _, p := range plan.panels {
+		if p.status == models.ReportPanelLocked || p.status == models.ReportPanelUnsupported {
+			continue
+		}
+		var (
+			reach bool
+			err   error
+		)
+		if p.teamID == 0 {
+			reach, err = rr.DB.UserHasSourceAccess(ctx, u.ID, p.sourceID)
+		} else {
+			reach, err = UserHasAccessToTeamSource(ctx, rr.DB, rr.Log, u.ID, p.teamID, p.sourceID)
+		}
+		if err != nil {
+			return "", fmt.Errorf("checking source access of user %d: %w", u.ID, err)
+		}
+		if !reach {
+			return string(models.ReportReasonNoAccess), nil
+		}
 	}
 	return "", nil
 }
@@ -509,12 +601,12 @@ func (rr *ReportRunner) Preview(ctx context.Context, p access.Principal, id mode
 		case models.ReportReasonNoOwner, models.ReportReasonOwnerInactive:
 			return nil, ErrReportOwnerUnavailable
 		case models.ReportReasonNoAccess:
-			return nil, fmt.Errorf("%w: the report owner cannot view its saved query", ErrReportForbidden)
+			return nil, fmt.Errorf("%w: the report owner cannot view its source", ErrReportForbidden)
 		default:
 		}
-		return nil, invalidReport("the report's saved query can no longer run: %s", halt.reason)
+		return nil, invalidReport("the report's source can no longer run: %s", halt.reason)
 	}
-	reason, err := rr.userCannotReceive(ctx, p.User, plan.query.SourceID)
+	reason, err := rr.userCannotReceive(ctx, p.User, plan)
 	if err != nil {
 		return nil, err
 	}

@@ -10,15 +10,15 @@ import (
 )
 
 func TestRunPanelsQueryDeadline(t *testing.T) {
-	fast := PanelJob{ID: "fast", Run: func(context.Context) (*models.QueryResult, error) {
-		return &models.QueryResult{Logs: []map[string]any{{"n": 1}}}, nil
+	fast := PanelJob{ID: "fast", Run: func(context.Context) (PanelOutput, error) {
+		return PanelOutput{Rows: 1}, nil
 	}}
-	slow := PanelJob{ID: "slow", Run: func(ctx context.Context) (*models.QueryResult, error) {
+	slow := PanelJob{ID: "slow", Run: func(ctx context.Context) (PanelOutput, error) {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return PanelOutput{}, ctx.Err()
 	}}
-	broken := PanelJob{ID: "broken", Run: func(context.Context) (*models.QueryResult, error) {
-		return nil, errors.New("syntax error")
+	broken := PanelJob{ID: "broken", Run: func(context.Context) (PanelOutput, error) {
+		return PanelOutput{}, errors.New("syntax error")
 	}}
 	deadline := time.Now().Add(200 * time.Millisecond)
 	start := time.Now()
@@ -29,7 +29,7 @@ func TestRunPanelsQueryDeadline(t *testing.T) {
 	if !errors.Is(got[0].Err, ErrQueryBudget) {
 		t.Errorf("slow panel error = %v, want ErrQueryBudget", got[0].Err)
 	}
-	if got[1].Err != nil || got[1].Result == nil || len(got[1].Result.Logs) != 1 {
+	if got[1].Err != nil || got[1].Output.Rows != 1 {
 		t.Errorf("fast panel = %+v, want its result", got[1])
 	}
 	if got[2].Err == nil || errors.Is(got[2].Err, ErrQueryBudget) {
@@ -39,7 +39,7 @@ func TestRunPanelsQueryDeadline(t *testing.T) {
 
 func TestRunPanelsPastTheDeadlineStartsNothing(t *testing.T) {
 	ran := false
-	job := PanelJob{ID: "p", Run: func(context.Context) (*models.QueryResult, error) { ran = true; return &models.QueryResult{}, nil }}
+	job := PanelJob{ID: "p", Run: func(context.Context) (PanelOutput, error) { ran = true; return PanelOutput{}, nil }}
 	got := RunPanels(context.Background(), time.Now().Add(-time.Second), []PanelJob{job})
 	if ran || !errors.Is(got[0].Err, ErrQueryBudget) {
 		t.Errorf("ran = %v, err = %v, want no run and ErrQueryBudget", ran, got[0].Err)
@@ -49,6 +49,7 @@ func TestRunPanelsPastTheDeadlineStartsNothing(t *testing.T) {
 func TestDeliveryOutcome(t *testing.T) {
 	ok := []models.ReportPanelOutcome{{Status: models.ReportPanelOK}}
 	failedPanel := []models.ReportPanelOutcome{{Status: models.ReportPanelOK}, {Status: models.ReportPanelFailed}}
+	lockedPanel := []models.ReportPanelOutcome{{Status: models.ReportPanelOK}, {Status: models.ReportPanelLocked}}
 	sent := models.ReportDelivery{Status: models.ReportDeliverySent}
 	failed := models.ReportDelivery{Status: models.ReportDeliveryFailed, Reason: "smtp message rejected by server"}
 	notConfigured := models.ReportDelivery{Status: models.ReportDeliveryFailed, Reason: ErrMailNotConfigured.Error()}
@@ -64,6 +65,7 @@ func TestDeliveryOutcome(t *testing.T) {
 	}{
 		{"all sent", ok, []models.ReportDelivery{sent}, models.ReportRunSent, ""},
 		{"a failed panel", failedPanel, []models.ReportDelivery{sent}, models.ReportRunPartial, models.ReportReasonPanelFailed},
+		{"a panel locked for the owner", lockedPanel, []models.ReportDelivery{sent}, models.ReportRunPartial, models.ReportReasonPanelLocked},
 		{"one delivery failed", ok, []models.ReportDelivery{sent, failed}, models.ReportRunPartial, models.ReportReasonDeliveryFailed},
 		{"one delivery unknown", ok, []models.ReportDelivery{sent, unknown}, models.ReportRunPartial, models.ReportReasonDeliveryUnknown},
 		{"one recipient past the deadline", ok, []models.ReportDelivery{sent, late}, models.ReportRunPartial, models.ReportReasonDeadline},
