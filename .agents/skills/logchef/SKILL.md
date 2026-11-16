@@ -83,7 +83,8 @@ Wrap every query in **single quotes** so the shell doesn't expand `"`, `!`, `|`,
 Just filtering logs?  ................  query  '<logchefql>'   (both backends)
 Want to see the SQL/LogsQL first?  ...  explain '<logchefql>' (no scan)
 How many / when / spikes?  ...........  histogram '<logchefql>'
-Aggregation / join / DISTINCT / thing
+Count / sum / p95 per group?  ........  query  '<filter> | count() by service'
+Join / expression / thing
 LogchefQL can't express?  ............  sql '<ClickHouse SQL or LogsQL>'
 ```
 
@@ -109,6 +110,7 @@ bare full-text search — every clause needs a field.
 logchef query 'level="error" and service="payment-api"' -s 1h
 logchef query 'status>=500 and path!~"/health"' -s 15m
 logchef query 'level="error" | _timestamp service msg' -s 15m   # select columns with |
+logchef query 'level="error" | count() by service' -s 1h        # aggregate with | func()
 
 # VictoriaLogs source (identical LogchefQL — server translates to LogsQL)
 logchef query 'level="error" and app="checkout"' -t platform -S vl-app -s 1h
@@ -225,7 +227,7 @@ logchef skills get core --full   # this guide + all references
 Deep dives — load the one that matches the task:
 
 - `references/logchefql.md` — LogchefQL grammar: operators, values, nested/Map
-  fields, the `|` select pipe, what each operator translates to.
+  fields, the `|` select and aggregation pipes, what each operator translates to.
 - `references/logsql-victorialogs.md` — LogsQL for VictoriaLogs sources via `sql`:
   field filters, `_time:` ranges, `| stats` and other pipes, gotchas.
 - `references/clickhouse-sql.md` — raw ClickHouse SQL via `sql`: time injection,

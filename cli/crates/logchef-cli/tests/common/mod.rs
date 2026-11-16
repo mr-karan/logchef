@@ -246,6 +246,13 @@ pub struct ServerState {
     pub source_type: Option<String>,
     /// The `stats` of a logs/query response on source 2 of team 1.
     pub query_stats: serde_json::Value,
+    /// Replaces the status and body of the next query responses on source 2.
+    pub query_response: Option<(u16, serde_json::Value)>,
+    /// The `data` of each translate response in turn. When empty, a valid
+    /// translation with `full_sql`.
+    pub translate_responses: std::collections::VecDeque<serde_json::Value>,
+    /// The status and body of the live-tail endpoint on source 2.
+    pub tail_response: Option<(u16, serde_json::Value)>,
 }
 
 pub struct FakeServer {
@@ -427,11 +434,22 @@ fn route(
         }
         ("POST", "/api/v1/teams/1/sources/2/logchefql/translate") => {
             let body: serde_json::Value = serde_json::from_str(&req.body).unwrap();
-            state.lock().unwrap().translate_requests.push(body);
-            (
-                200,
-                serde_json::json!({"status":"success","data":{"valid":true,"full_sql":"SELECT translated"}}),
-            )
+            let mut s = state.lock().unwrap();
+            s.translate_requests.push(body);
+            let data = s.translate_responses.pop_front().unwrap_or_else(
+                || serde_json::json!({"valid":true,"full_sql":"SELECT translated"}),
+            );
+            (200, serde_json::json!({"status":"success","data":data}))
+        }
+        ("POST", "/api/v1/teams/1/sources/2/logchefql/validate") => (
+            200,
+            serde_json::json!({"status":"success","data":{"valid":true}}),
+        ),
+        ("GET", "/api/v1/teams/1/sources/2/logs/tail") => {
+            state.lock().unwrap().tail_response.clone().unwrap_or((
+                404,
+                serde_json::json!({"status": "error", "message": "not found"}),
+            ))
         }
         (
             "POST",
@@ -440,6 +458,9 @@ fn route(
             let mut s = state.lock().unwrap();
             s.native_requests
                 .push(serde_json::from_str(&req.body).unwrap());
+            if let Some(response) = &s.query_response {
+                return response.clone();
+            }
             (
                 200,
                 serde_json::json!({"status": "success", "data": {

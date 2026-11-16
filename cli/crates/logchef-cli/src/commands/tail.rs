@@ -212,6 +212,11 @@ async fn run_sse(
                     backoff = Duration::from_millis(500);
                     resp
                 }
+                // The server refused the query itself, such as an
+                // aggregation or a syntax error. A retry gets the same answer.
+                Err(err) if is_rejected_request(&err) => {
+                    return Err(anyhow::Error::new(err).context("Tail failed"));
+                }
                 Err(err) => {
                     eprintln!("tail: connection failed ({err}); reconnecting");
                     tokio::select! {
@@ -292,6 +297,16 @@ async fn run_sse(
             _ = sleep(wait) => {}
         }
     }
+}
+
+/// A 4xx answer other than a timeout or a rate limit: the request itself is
+/// wrong, so reconnecting cannot help.
+fn is_rejected_request(err: &logchef_core::Error) -> bool {
+    matches!(
+        err,
+        logchef_core::Error::Api { status: Some(status), .. }
+            if (400..500).contains(status) && *status != 408 && *status != 429
+    )
 }
 
 /// The SSE frames the tail endpoint emits (see tail_handlers.go). Heartbeat
@@ -448,12 +463,20 @@ async fn run_poll(
             timezone: Some(time_range.timezone),
             limit: Some(args.limit),
             query_timeout: Some(args.timeout),
+            interval: None,
         };
 
         let response = client
             .query_logchefql(team_id, source_id, &request)
             .await
             .context("Tail query failed")?;
+        // The query endpoint runs an aggregation, so the denial that the SSE
+        // tail gets from the server is made here.
+        if response.aggregation.is_some() {
+            anyhow::bail!(
+                "Tail failed: this feature needs log rows, and the query aggregates. Remove the pipe after the filter, or run it with `logchef query`"
+            );
+        }
 
         let returned = response.entries().len();
         let mut entries = response.entries().iter().collect::<Vec<_>>();

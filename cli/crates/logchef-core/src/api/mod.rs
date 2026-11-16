@@ -672,6 +672,7 @@ mod tests {
             timezone: Some("UTC".to_owned()),
             limit: Some(100),
             query_timeout: Some(30),
+            interval: None,
         };
 
         let result = client.query_logchefql(1, 2, &request).await;

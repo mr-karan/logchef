@@ -378,6 +378,7 @@ async fn run_collection(
             timezone: Some(time_range.timezone),
             limit: Some(limit),
             query_timeout: None,
+            interval: None,
         };
         client
             .query_logchefql(team_id, source_id, &request)

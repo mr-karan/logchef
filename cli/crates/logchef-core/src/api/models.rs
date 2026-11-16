@@ -178,6 +178,10 @@ pub struct QueryRequest {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_timeout: Option<u32>,
+    /// The bucket size of a `by time` aggregation key that has no window of
+    /// its own, such as `5m`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -275,6 +279,10 @@ pub struct TranslateRequest {
     pub timezone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// The bucket size of a `by time` aggregation key that has no window of
+    /// its own, such as `5m`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,6 +299,8 @@ pub struct TranslateResponse {
     pub valid: bool,
     #[serde(default)]
     pub error: Option<QueryParseError>,
+    #[serde(default)]
+    pub aggregation: Option<AggregationInfo>,
 }
 
 impl TranslateResponse {
@@ -438,6 +448,34 @@ pub struct QueryResponse {
     pub generated_query_language: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Present when the LogchefQL query aggregates: the rows are the result
+    /// rows, not log rows.
+    #[serde(default)]
+    pub aggregation: Option<AggregationInfo>,
+}
+
+/// The result of an aggregated LogchefQL query, as the server describes it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregationInfo {
+    /// `scalar`, `grouped`, `timeseries` or `grouped_timeseries`.
+    pub shape: String,
+    /// Time first, then group keys, then values, each in written order.
+    pub columns: Vec<AggregationColumn>,
+    /// The bucket window in use, such as `5m`. Empty without a time key.
+    #[serde(default)]
+    pub interval: String,
+    /// The query's own `limit` stage, or 0.
+    #[serde(default)]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregationColumn {
+    pub name: String,
+    /// `time`, `group` or `value`.
+    pub role: String,
+    #[serde(rename = "type")]
+    pub column_type: String,
 }
 
 impl QueryResponse {
@@ -839,6 +877,7 @@ mod template_request_tests {
             timezone: None,
             limit: None,
             query_timeout: None,
+            interval: None,
         };
         let native = serde_json::to_value(native).unwrap();
         let dsl = serde_json::to_value(dsl).unwrap();

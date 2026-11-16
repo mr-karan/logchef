@@ -93,6 +93,35 @@ logchef query '| service_name msg' -s 5m          # no filter, just these column
 The timestamp column is included by the server as needed for ordering; list it
 explicitly if you want it shown.
 
+## Aggregating — the `| func()` pipe
+
+A pipe whose first item is a function call aggregates instead of selecting
+columns. The same text runs on ClickHouse and VictoriaLogs.
+
+```bash
+logchef query 'level="error" | count() by service' -s 1h
+logchef query 'level="error" | count() as errors, count_distinct(user_id) as users by service | sort errors desc | limit 10' -s 1h
+logchef query 'service="api" | p95(duration_ms), avg(duration_ms) by time(5m)' -s 1h
+logchef query '| count() by time' -s 1h --interval 5m
+```
+
+- Functions: `count()`, `count_distinct(f)`, `sum(f)`, `avg(f)`, `min(f)`,
+  `max(f)`, `p50(f)`, `p75(f)`, `p90(f)`, `p95(f)`, `p99(f)`. Up to 10, comma
+  separated. Percentiles are approximate.
+- `by` takes up to 5 keys: fields, and at most one `time` bucket. `time(5m)`
+  names its window; bare `time` takes the window from `--interval` and fails
+  without it. A field literally named `time` is written `"time"`.
+- Column names: `count`, `func_field` (`p95(log.duration)` is
+  `p95_log_duration`), the key path as written, `time`. Rename with `as`.
+- `| sort <column> [asc|desc]` and `| limit N` (1 to 10000) follow the
+  aggregation. `limit` is rejected with `time` and a field key together.
+- Default order: grouped results by the first value, descending; time series
+  by `time`, ascending.
+- Output: `text` and `table` print the result columns; `json`/`jsonl` print
+  the rows as they are, and `json` adds an `aggregation` object (shape and
+  columns).
+- `tail` and `histogram` need log rows and reject an aggregation.
+
 ## Combining conditions
 
 ```bash
@@ -119,8 +148,8 @@ expected.
 
 ## When LogchefQL isn't enough
 
-LogchefQL filters and selects columns; it does not aggregate, join, or dedupe.
-For `count()`, `GROUP BY`, `DISTINCT`, subqueries, or window functions, drop to
-`logchef sql` (see `clickhouse-sql.md`) or, on VictoriaLogs, LogsQL `| stats`
-(see `logsql-victorialogs.md`). For counts-over-time specifically, try
-`logchef histogram` first — it stays in LogchefQL and is cheap.
+LogchefQL filters, selects columns and aggregates; it does not join, compute
+expressions (`sum(a) / count()`), or filter after an aggregation. For those,
+subqueries, or window functions, drop to `logchef sql` (see
+`clickhouse-sql.md`) or, on VictoriaLogs, LogsQL `| stats` (see
+`logsql-victorialogs.md`).
