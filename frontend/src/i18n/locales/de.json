@@ -1176,6 +1176,7 @@
   "reports.optional": "Optional",
   "reports.maxRows": "Zeilen pro Tabelle",
   "reports.skipIfEmpty": "Überspringen, wenn keine Zeilen vorhanden sind",
+  "reports.attachCSV": "Zeilen als CSV-Datei anhängen",
   "reports.preview": "Vorschau",
   "reports.previewTitle": "E-Mail-Vorschau",
   "reports.sendTest": "Test an mich senden",

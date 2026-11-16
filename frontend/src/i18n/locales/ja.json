@@ -1176,6 +1176,7 @@
   "reports.optional": "任意",
   "reports.maxRows": "表ごとの行数",
   "reports.skipIfEmpty": "行がないときはスキップ",
+  "reports.attachCSV": "行を CSV ファイルとして添付",
   "reports.preview": "プレビュー",
   "reports.previewTitle": "メールのプレビュー",
   "reports.sendTest": "自分にテスト送信",

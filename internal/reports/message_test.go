@@ -2,6 +2,7 @@ package reports
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"io"
 	"mime"
@@ -151,5 +152,71 @@ func TestBuildMessageHeaderInjection(t *testing.T) {
 	}
 	if msg.Header.Get("Bcc") != "" || len(msg.Header["Subject"]) != 1 {
 		t.Errorf("a subject with CR LF added a header: %v", msg.Header)
+	}
+}
+
+// TestBuildMessageWithAnAttachment parses a message with a CSV: a
+// multipart/mixed body holds the text and HTML alternative, then the file.
+func TestBuildMessageWithAnAttachment(t *testing.T) {
+	data := []byte("status,n\n" + strings.Repeat("503,1\n", 200))
+	raw, err := BuildMessage(Message{
+		From: mail.Address{Address: "logchef@example.com"}, To: mail.Address{Address: "user@example.com"},
+		Subject: "x", Date: time.Now(), Text: "text body", HTML: "<p>html body</p>",
+		Attachments: []Attachment{{Name: "Résumé-2026-11-16.csv", ContentType: "text/csv; charset=utf-8", Data: data}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/mixed" {
+		t.Fatalf("content type = %q, %v; want multipart/mixed", mediaType, err)
+	}
+	outer := multipart.NewReader(msg.Body, params["boundary"])
+	alt, err := outer.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	altType, altParams, err := mime.ParseMediaType(alt.Header.Get("Content-Type"))
+	if err != nil || altType != "multipart/alternative" {
+		t.Fatalf("first part = %q, %v; want multipart/alternative", altType, err)
+	}
+	inner := multipart.NewReader(alt, altParams["boundary"])
+	for _, want := range []string{"text/plain", "text/html"} {
+		p, err := inner.NextPart()
+		if err != nil || !strings.HasPrefix(p.Header.Get("Content-Type"), want) {
+			t.Fatalf("alternative part = %v, %v; want %s", p, err, want)
+		}
+	}
+	file, err := outer.NextPart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.FileName() != "Résumé-2026-11-16.csv" || !strings.HasPrefix(file.Header.Get("Content-Type"), "text/csv") {
+		t.Errorf("attachment = %q, %q", file.FileName(), file.Header.Get("Content-Type"))
+	}
+	encoded, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(encoded)), "\r\n") {
+		if len(line) > base64LineLength {
+			t.Fatalf("base64 line of %d bytes", len(line))
+		}
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(string(encoded), "\r\n", ""))
+	if err != nil || !bytes.Equal(decoded, data) {
+		t.Fatalf("attachment decodes to %d bytes, %v; want the %d bytes sent", len(decoded), err, len(data))
+	}
+	for line := range strings.SplitSeq(string(raw), "\r\n") {
+		if len(line) > 998 {
+			t.Fatalf("line of %d bytes, over the SMTP limit", len(line))
+		}
+	}
+	if _, err := outer.NextPart(); !errors.Is(err, io.EOF) {
+		t.Errorf("want two parts, got more: %v", err)
 	}
 }

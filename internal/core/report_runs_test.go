@@ -511,7 +511,6 @@ func TestReportValidation(t *testing.T) {
 		{"max_rows below 5", func(in *ReportInput) { in.MaxRows = new(4) }, ErrInvalidReport, "max_rows"},
 		{"max_rows above 100", func(in *ReportInput) { in.MaxRows = new(101) }, ErrInvalidReport, "max_rows"},
 		{"undeclared variable", func(in *ReportInput) { in.Variables = map[string]any{"host": "a"} }, ErrInvalidReport, "variables"},
-		{"attach_csv", func(in *ReportInput) { in.AttachCSV = true }, ErrInvalidReport, "attach_csv"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := e.input()

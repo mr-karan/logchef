@@ -19,15 +19,16 @@ const defaultReportRunsLimit = 20
 // datasources and the instance SMTP settings.
 func (s *Server) newReportRunner(opts ServerOptions) *core.ReportRunner {
 	return &core.ReportRunner{
-		DB:          s.store,
-		DS:          opts.Datasources,
-		Query:       s.config.Query,
-		Mailer:      reports.NewSMTPMailer(s.store),
-		Audit:       s.audit,
-		Log:         s.log.With("component", "reports"),
-		UIURL:       uiURL(&s.config.Server),
-		QueryBudget: s.config.Reports.QueryBudget,
-		Slots:       make(chan struct{}, s.config.Reports.MaxConcurrentRuns),
+		DB:                 s.store,
+		DS:                 opts.Datasources,
+		Query:              s.config.Query,
+		Mailer:             reports.NewSMTPMailer(s.store),
+		Audit:              s.audit,
+		Log:                s.log.With("component", "reports"),
+		UIURL:              uiURL(&s.config.Server),
+		QueryBudget:        s.config.Reports.QueryBudget,
+		Slots:              make(chan struct{}, s.config.Reports.MaxConcurrentRuns),
+		MaxAttachmentBytes: s.config.Reports.MaxAttachmentBytes,
 	}
 }
 

@@ -13,10 +13,11 @@ import (
 
 // MailMessage is one report email before it is addressed.
 type MailMessage struct {
-	Subject string
-	Date    time.Time
-	Text    string
-	HTML    string
+	Subject     string
+	Date        time.Time
+	Text        string
+	HTML        string
+	Attachments []Attachment
 }
 
 // Mailer sends one message to one address through the instance SMTP
@@ -70,7 +71,7 @@ func (m *SMTPMailer) Send(ctx context.Context, to mail.Address, msg MailMessage)
 	if err != nil {
 		return &MailError{Class: MailPermanent, Err: fmt.Errorf("smtp_from is not an email address")}
 	}
-	raw, err := BuildMessage(Message{From: *from, To: to, Subject: msg.Subject, Date: msg.Date, Text: msg.Text, HTML: msg.HTML})
+	raw, err := BuildMessage(Message{From: *from, To: to, Subject: msg.Subject, Date: msg.Date, Text: msg.Text, HTML: msg.HTML, Attachments: msg.Attachments})
 	if err != nil {
 		return &MailError{Class: MailPermanent, Err: err}
 	}

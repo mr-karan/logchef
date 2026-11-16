@@ -247,6 +247,9 @@ enabled = true
 query_budget = "5m"
 # Runs this replica executes at once. Later runs wait.
 max_concurrent_runs = 2
+# Largest CSV attachment in bytes, before base64 adds about a third. A larger
+# file ends at the last whole row that fits, and the email says so.
+max_attachment_bytes = 5242880
 
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access

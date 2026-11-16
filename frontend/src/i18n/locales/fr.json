@@ -1176,6 +1176,7 @@
   "reports.optional": "Facultatif",
   "reports.maxRows": "Lignes par tableau",
   "reports.skipIfEmpty": "Ignorer s’il n’y a aucune ligne",
+  "reports.attachCSV": "Joindre les lignes en fichier CSV",
   "reports.preview": "Aperçu",
   "reports.previewTitle": "Aperçu de l’e-mail",
   "reports.sendTest": "M’envoyer un test",

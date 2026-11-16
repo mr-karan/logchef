@@ -1930,6 +1930,7 @@
   "reports.optional": "可选",
   "reports.maxRows": "每个表格的行数",
   "reports.skipIfEmpty": "没有行时跳过",
+  "reports.attachCSV": "将行作为 CSV 文件附加",
   "reports.preview": "预览",
   "reports.previewTitle": "邮件预览",
   "reports.sendTest": "发送测试给我",
