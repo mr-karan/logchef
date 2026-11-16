@@ -767,6 +767,35 @@ describe("dashboards store — schema 2 request parity", () => {
     expect(frame?.rows[0].n).toBe("00123");
   });
 
+  it("sends a LogchefQL result panel's interval, for a `by time` key that names no window", async () => {
+    const panel: DashboardQueryPanel = { ...tablePanel("by-time"), query: { mode: "result", language: "logchefql", text: "| count() by time", interval: "5m" } };
+    await runPanels(panel);
+    expect(mocks.logchefqlQuery.mock.calls[0][2].interval).toBe("5m");
+  });
+
+  it("keeps the declared types of an aggregated VictoriaLogs result", async () => {
+    const aggregation = { shape: "grouped", interval: "", limit: 0, columns: [
+      { name: "service", role: "group", type: "String" },
+      { name: "sum_bytes", role: "value", type: "Float64" },
+      { name: "avg_bytes", role: "value", type: "Float64" },
+      { name: "p95_duration_ms", role: "value", type: "Float64" },
+    ] };
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: {
+      logs: [{ service: "api", sum_bytes: 1200, avg_bytes: 400.5, p95_duration_ms: null }],
+      columns: aggregation.columns.map(({ name, type }) => ({ name, type })),
+      generated_query_language: "logsql",
+      aggregation,
+    } });
+    const store = await runPanels(tablePanel("vl-agg"));
+    const frame = store.getPanelState("vl-agg").frame;
+    for (const name of ["sum_bytes", "avg_bytes", "p95_duration_ms"]) {
+      expect(frame?.columns.find((c) => c.name === name)).toMatchObject({ kind: "number", repr: "float", confidence: "declared", backendType: "Float64" });
+    }
+    expect(frame?.rows[0]).toMatchObject({ service: "api", sum_bytes: 1200, avg_bytes: 400.5, p95_duration_ms: null });
+    expect(frame?.notices).toEqual([]);
+    expect(store.getPanelState("vl-agg").aggregation).toEqual(aggregation);
+  });
+
   it("runs result SQL as written and reuses the frame for role, reducer, kind, format and visualization edits", async () => {
     mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [{ n: "9007199254740993" }], columns: [{ name: "n", type: "UInt64" }] } });
     const panel: DashboardQueryPanel = { ...tablePanel("computed"), query: { mode: "result", language: "clickhouse-sql", text: "SELECT sum(amount) AS n", limit: 1000 }, viz: { type: "stat", value: "n" } };

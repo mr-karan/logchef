@@ -29,7 +29,8 @@ import { usePreferencesStore } from "@/stores/preferences";
 import type { DashboardQueryPanel, DashboardViz } from "@/api/dashboards";
 import { execSignature } from "@/utils/dashboardRuntime";
 import { panelBuilderKind, resultInterval, type PanelBuilderKind } from "@/utils/dashboardPanels";
-import { suggestViz, withSuggestedRoles } from "@/utils/panelCharts";
+import { suggestAggregationViz, suggestViz, withAggregationRoles, withSuggestedRoles } from "@/utils/panelCharts";
+import { isAggregation } from "@/utils/logchefql/aggregation";
 import type { DraftPanelPatch } from "@/stores/dashboards";
 
 const { t } = useI18n();
@@ -147,6 +148,13 @@ function setQueryMode(mode: "count" | "result") {
   patchPanel({ query: mode === "result" ? { mode, language, text, interval: resultInterval(p.query.interval).interval, group_by: undefined, translate_limit: undefined } : { mode, language, text, limit: undefined, interval: p.query.interval ?? "auto" }, viz });
 }
 
+// Count mode charts the histogram of a filter, so an aggregation moves the panel to result mode.
+function onQueryText(text: string) {
+  patchPanel({ query: { text } });
+  const p = panel.value;
+  if (p?.query.mode === "count" && p.query.language === "logchefql" && isAggregation(text)) setQueryMode("result");
+}
+
 function setVisualization(viz: DashboardViz) {
   previousCountPanel = null;
   suggestNextVisualization = false;
@@ -241,7 +249,10 @@ const previewState = computed(() => store.previewState ?? undefined);
 watch(() => previewState.value?.frame, (frame) => {
   const p = panel.value;
   if (!frame || p?.query.mode !== "result" || previewState.value?.querySignature !== execSignature(p)) return;
-  const viz = suggestNextVisualization ? suggestViz(frame) : withSuggestedRoles(frame, p.viz);
+  const aggregation = previewState.value?.aggregation;
+  const viz = aggregation
+    ? suggestNextVisualization ? suggestAggregationViz(frame, aggregation) : withAggregationRoles(frame, p.viz, aggregation)
+    : suggestNextVisualization ? suggestViz(frame) : withSuggestedRoles(frame, p.viz);
   suggestNextVisualization = false;
   patchPanel({ viz });
 });
@@ -461,7 +472,7 @@ function onOpenChange(value: boolean) {
                   :table-name="tableName"
                   :is-executing="isPreviewing"
                   :visible="open"
-                  @change="(v: string) => patchPanel({ query: { text: v } })"
+                  @change="onQueryText"
                   @submit="runNow"
                 />
                 <div v-else class="flex h-full items-center justify-center text-xs text-muted-foreground">
