@@ -26,17 +26,23 @@ import {
 import type { SavedViewScope } from '@/api/savedViews'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { useExploreStore } from '@/stores/explore'
 import { useSavedViewsStore, type DisplayMode } from '@/stores/savedViews'
 import { useTeamsStore } from '@/stores/teams'
 
 const props = defineProps<{ displayMode: DisplayMode }>()
-const emit = defineEmits<{ (e: 'select', viewId: number | null): void }>()
+const emit = defineEmits<{ (e: 'select', viewId: number | null): void; (e: 'reset'): void }>()
 
 const { t } = useI18n()
 const { toast } = useToast()
 const store = useSavedViewsStore()
 const auth = useAuthStore()
 const teams = useTeamsStore()
+const explore = useExploreStore()
+
+// A view's filter is LogchefQL, and its range is relative, as the server requires.
+const shownFilter = computed(() => explore.activeMode === 'logchefql' && explore.logchefqlCode.trim() ? explore.logchefqlCode.trim() : null)
+const shownTimeRange = computed(() => explore.window.kind === 'relative' && /^\d+[smhdw]$/.test(explore.window.spec) ? explore.window.spec : null)
 
 const scopes: SavedViewScope[] = ['personal', 'team', 'source']
 const groups = computed(() => scopes
@@ -55,13 +61,14 @@ const saving = ref(false)
 const name = ref('')
 const description = ref('')
 const scope = ref<SavedViewScope>('personal')
-const include = ref({ columns: true, sort: true, displayMode: true })
+// Filter and time range start unchecked: most layouts apply to any query.
+const include = ref({ columns: true, sort: true, displayMode: true, filter: false, timeRange: false })
 
 function openSave() {
   name.value = ''
   description.value = ''
   scope.value = 'personal'
-  include.value = { columns: true, sort: true, displayMode: true }
+  include.value = { columns: true, sort: true, displayMode: true, filter: false, timeRange: false }
   saveOpen.value = true
 }
 
@@ -73,7 +80,7 @@ async function save() {
       name: name.value.trim(),
       description: description.value.trim(),
       scope: scope.value,
-      definition: store.newDefinition(include.value, props.displayMode),
+      definition: store.newDefinition(include.value, { displayMode: props.displayMode, filter: shownFilter.value, timeRange: shownTimeRange.value }),
     })
     if (!created) return
     saveOpen.value = false
@@ -117,6 +124,7 @@ const groupLabel: Record<SavedViewScope, string> = {
         <DropdownMenuItem v-for="view in group.views" :key="view.id" class="text-xs" @select="emit('select', view.id)">
           <Check class="h-3.5 w-3.5" :class="view.id === store.activeViewId ? 'opacity-100' : 'opacity-0'" />
           <span class="truncate">{{ view.name }}</span>
+          <span v-if="view.id === store.defaultViewId" class="ml-auto shrink-0 text-[10px] text-muted-foreground" data-testid="view-default">{{ t('explore.viewDefault') }}</span>
         </DropdownMenuItem>
       </template>
       <DropdownMenuLabel v-if="groups.length === 0" class="text-xs font-normal text-muted-foreground">{{ t('explore.noSavedViews') }}</DropdownMenuLabel>
@@ -124,7 +132,7 @@ const groupLabel: Record<SavedViewScope, string> = {
       <DropdownMenuItem v-if="store.activeView" class="text-xs" @select="emit('select', null)">{{ t('explore.noView') }}</DropdownMenuItem>
       <DropdownMenuItem class="text-xs" @select="openSave">{{ t('explore.saveAsNewView') }}</DropdownMenuItem>
       <DropdownMenuItem v-if="store.activeView?.can_edit && store.isModified" class="text-xs" @select="update">{{ t('explore.updateView') }}</DropdownMenuItem>
-      <DropdownMenuItem v-if="store.activeView" class="text-xs" @select="store.resetActive()">{{ t('explore.resetToView') }}</DropdownMenuItem>
+      <DropdownMenuItem v-if="store.activeView" class="text-xs" @select="emit('reset')">{{ t('explore.resetToView') }}</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
 
@@ -161,6 +169,14 @@ const groupLabel: Record<SavedViewScope, string> = {
           <label class="flex items-center gap-2 text-sm">
             <Checkbox :model-value="include.displayMode" @update:model-value="value => (include.displayMode = value === true)" />
             {{ t('explore.viewIncludeDisplayMode') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm" :class="{ 'opacity-50': shownFilter === null }">
+            <Checkbox :model-value="include.filter && shownFilter !== null" :disabled="shownFilter === null" data-testid="view-include-filter" @update:model-value="value => (include.filter = value === true)" />
+            {{ t('explore.viewIncludeFilter') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm" :class="{ 'opacity-50': shownTimeRange === null }">
+            <Checkbox :model-value="include.timeRange && shownTimeRange !== null" :disabled="shownTimeRange === null" data-testid="view-include-time-range" @update:model-value="value => (include.timeRange = value === true)" />
+            {{ t('explore.viewIncludeTimeRange') }}
           </label>
         </fieldset>
         <DialogFooter>

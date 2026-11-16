@@ -9,6 +9,7 @@ import type {
 } from "@/api/explore";
 import type { ResolvedSavedQuery, SavedQuery, SavedQueryContent } from "@/api/savedQueries";
 import type { ExploreTarget } from "@/lib/exploreLocation";
+import type { SavedViewDefinition } from "@/lib/savedViewLayout";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useActiveSavedViewStore } from "@/stores/activeSavedView";
@@ -18,7 +19,7 @@ import { useExploreAIStore } from "./exploreAI";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
-import { epochMs, resolveWindow, sameWindow, type ResolvedWindow, type TimeWindow } from '@/utils/timeWindow';
+import { epochMs, relativeWindow, resolveWindow, sameWindow, type ResolvedWindow, type TimeWindow } from '@/utils/timeWindow';
 import { decodeDraftWindow, decodeStoredRange, encodeStoredRange, encodeWindowForUrl, type DraftTime } from '@/utils/timeWindowCodec';
 import type { Source } from '@/api/sources';
 import { isAggregation } from '@/utils/logchefql/aggregation';
@@ -64,6 +65,9 @@ type ExploreDraft = DraftTime & {
 type StoredDraftFields = Partial<Omit<ExploreDraft, "version" | "window">> & { version?: unknown };
 
 const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
+
+/** A saved view's query defaults (RFC 0007). They fill what a location leaves open and never overwrite it. */
+export type ViewQueryDefaults = Pick<SavedViewDefinition, "filter" | "time_range">;
 
 /** Everything needed to show an Explorer location: every id checked, every fetch done. */
 export interface OpenedLocation {
@@ -444,16 +448,18 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.activeMode = normalizeModeForSource(state.data.value.activeMode, source);
   }
 
-  function openDraft() {
+  // Each opener takes `viewWindow`, the active view's range, for a location
+  // that names no range. A stored draft keeps its own.
+  function openDraft(viewWindow: TimeWindow | null) {
     if (!state.data.value.window) assignWindow(DEFAULT_WINDOW);
     state.data.value.logchefqlCode = '';
     state.data.value.nativeQuery = '';
     state.data.value.activeMode = getDefaultModeForSource();
-    restoreDraftForCurrentContext();
+    if (!restoreDraftForCurrentContext() && viewWindow) assignWindow(viewWindow);
   }
 
-  function openQuery({ mode, text, window, limit }: Extract<ExploreTarget, { kind: 'query' }>) {
-    assignWindow(window ?? DEFAULT_WINDOW);
+  function openQuery({ mode, text, window, limit }: Extract<ExploreTarget, { kind: 'query' }>, viewWindow: TimeWindow | null) {
+    assignWindow(window ?? viewWindow ?? DEFAULT_WINDOW);
     if (limit && limit > 0) state.data.value.limit = limit;
     if (mode) state.data.value.activeMode = mode;
     state.data.value.logchefqlCode = state.data.value.activeMode === 'logchefql' ? text : '';
@@ -461,7 +467,7 @@ export const useExploreStore = defineStore("explore", () => {
     if (text && templateDialect.value) useVariables().ensureVariablesFromSql(text, templateDialect.value);
   }
 
-  function openSavedQuery(saved: ResolvedSavedQuery, content: SavedQueryContent) {
+  function openSavedQuery(saved: ResolvedSavedQuery, content: SavedQueryContent, viewWindow: TimeWindow | null) {
     const metadata = resolveSavedQueryMetadata({
       query_language: saved.query_language,
       editor_mode: saved.editor_mode,
@@ -498,7 +504,7 @@ export const useExploreStore = defineStore("explore", () => {
       format: "saved-query",
       version: typeof content.version === "number" ? content.version : 1,
       prefZone: preferencesStore.zone,
-    }) ?? timeWindow.value;
+    }) ?? viewWindow ?? timeWindow.value;
     assignWindow(window);
 
     state.data.value.savedQuerySnapshot = { mode: resolvedMode, queryContent, limit, window };
@@ -519,7 +525,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
-  function openShare(share: QueryShareResponse) {
+  function openShare(share: QueryShareResponse, viewWindow: TimeWindow | null) {
     const payload = share.payload;
 
     state.data.value.activeShareToken = share.token;
@@ -537,7 +543,7 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.limit = payload.limit;
     }
     assignWindow(
-      decodeStoredRange(payload.time_range, { format: "share", version: payload.version, timezone: payload.timezone }) ?? timeWindow.value,
+      decodeStoredRange(payload.time_range, { format: "share", version: payload.version, timezone: payload.timezone }) ?? viewWindow ?? timeWindow.value,
     );
 
     suppressSharedVariableTracking = true;
@@ -555,11 +561,53 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
+  // Default SQL that a run generated is not the user's text.
+  const editorIsEmpty = () => {
+    const { logchefqlCode, nativeQuery, showsDefaultSql } = state.data.value;
+    return !logchefqlCode.trim() && (showsDefaultSql || !nativeQuery.trim());
+  };
+
+  function setViewFilter(filter: string) {
+    state.data.value.activeMode = "logchefql";
+    state.data.value.logchefqlCode = filter;
+    state.data.value.nativeQuery = "";
+    state.data.value.showsDefaultSql = false;
+  }
+
   /**
-   * Shows one location's team, source and content. Returns whether it has
+   * Fills an empty editor with a view's filter in LogchefQL mode. Returns
+   * whether it did, so the caller runs it.
+   */
+  function fillViewFilter(filter: string): boolean {
+    if (!editorIsEmpty() || !supportsLogchefQLForSource()) return false;
+    setViewFilter(filter);
+    clearShareSelectionIfDirty();
+    persistDraft();
+    return true;
+  }
+
+  /**
+   * Reset to view: the view's filter replaces the editor text and its range
+   * replaces the window. A part the view does not set stays. Returns whether
+   * the query changed, so the caller runs it.
+   */
+  function resetToViewQuery({ filter, time_range }: ViewQueryDefaults): boolean {
+    const window = time_range === undefined ? null : relativeWindow(time_range);
+    const fillsFilter = filter !== undefined && supportsLogchefQLForSource();
+    if (!window && !fillsFilter) return false;
+    if (window) assignWindow(window);
+    if (fillsFilter) setViewFilter(filter);
+    clearShareSelectionIfDirty();
+    persistDraft();
+    return true;
+  }
+
+  /**
+   * Shows one location's team, source and content, with the active view's
+   * query defaults filling what it leaves open. Returns whether it has
    * something to run.
    */
-  function open(location: OpenedLocation): boolean {
+  function open(location: OpenedLocation, viewDefaults: ViewQueryDefaults = {}): boolean {
     // Stream filters name another source's streams.
     if (location.sourceId !== contextStore.sourceId) selectedStreams.value = {};
     contextStore.selectTeam(location.teamId);
@@ -571,11 +619,18 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.showsDefaultSql = false;
 
     const { content } = location;
-    if (content.kind === 'draft') openDraft();
-    else if (content.kind === 'query') openQuery(content);
-    else if (content.kind === 'saved') openSavedQuery(content.saved, content.queryContent);
-    else openShare(content.share);
+    // The Explorer has no seconds unit, so a seconds range keeps the window in
+    // use, as a saved query's does.
+    const viewWindow = viewDefaults.time_range === undefined ? null : relativeWindow(viewDefaults.time_range);
+    if (content.kind === 'draft') openDraft(viewWindow);
+    else if (content.kind === 'query') openQuery(content, viewWindow);
+    else if (content.kind === 'saved') openSavedQuery(content.saved, content.queryContent, viewWindow);
+    else openShare(content.share, viewWindow);
     fitModeToSource(getCurrentSource());
+
+    // A URL with q or sql names a query, even an empty one.
+    const namesQuery = content.kind !== 'draft' && !(content.kind === 'query' && content.mode === null);
+    if (location.sourceId !== null && !namesQuery && viewDefaults.filter !== undefined) fillViewFilter(viewDefaults.filter);
 
     clearError();
     // A link that names an empty SQL query opens it without running default SQL.
@@ -901,6 +956,8 @@ export const useExploreStore = defineStore("explore", () => {
     clearActiveSavedQuerySelection,
     markSavedQuery,
     resetQueryToDefaults,
+    fillViewFilter,
+    resetToViewQuery,
     persistDraft,
     getLogContext,
     createQueryShare,

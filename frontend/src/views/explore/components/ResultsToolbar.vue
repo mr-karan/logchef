@@ -48,6 +48,7 @@ const emit = defineEmits<{
   (e: 'export'): void
   (e: 'add-fast-filter', field: string): void
   (e: 'select-view', viewId: number | null): void
+  (e: 'reset-view'): void
 }>()
 
 const runs = useExploreRuns()
@@ -166,7 +167,7 @@ const warningText = computed(() => {
 
       <div v-if="!aggregated" class="h-4 w-px bg-border mx-1" />
 
-      <ViewPicker :display-mode="displayMode" @select="emit('select-view', $event)" />
+      <ViewPicker :display-mode="displayMode" @select="emit('select-view', $event)" @reset="emit('reset-view')" />
 
       <!-- View Mode Toggles -->
       <div v-if="!aggregated" class="flex items-center bg-muted rounded-md p-0.5">

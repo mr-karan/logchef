@@ -141,7 +141,7 @@ export function useExplorerNavigator() {
           const { list, details, generation, sourceNotice, views, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
           const viewEntry = savedViews.enter(location.teamId, location.sourceId, views, sourceNotice ? null : target.viewId)
-          const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location)
+          const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location, savedViews.activeView?.definition)
           applyChoice()
           status.value = 'ready'
           reportExploreLanding(requestedPath, location)
@@ -295,10 +295,15 @@ export function useExplorerNavigator() {
     await router.push({ path: EXPLORE_PATH, query })
   }
 
-  /** Makes a view, or no view, active and records it in the URL. The query on screen stays. */
+  /**
+   * Makes a view, or no view, active and records it in the URL. The query on
+   * screen stays; an empty editor takes the view's filter and runs it.
+   */
   function selectView(viewId: number | null) {
     savedViews.pick(viewId)
     if (status.value !== 'ready' || !shown) return
+    const filter = savedViews.activeView?.definition.filter
+    if (filter !== undefined && explore.fillViewFilter(filter)) return rerun()
     const query = { ...shown }
     delete query.view
     if (viewId !== null) query.view = String(viewId)
@@ -329,11 +334,23 @@ export function useExplorerNavigator() {
     chosen = {}
   }
 
+  /** Applies the active view again. Its filter and range replace the editor's and run. */
+  function resetView() {
+    savedViews.resetActive()
+    const view = savedViews.activeView
+    if (view && status.value === 'ready' && explore.resetToViewQuery(view.definition)) rerun()
+  }
+
   /** Resets the editor to the defaults and runs them. */
   function newQuery() {
     if (status.value !== 'ready') return
-    navId++
     explore.resetQueryToDefaults()
+    rerun()
+  }
+
+  // Runs the editor's query in place of what this location ran and records it.
+  function rerun() {
+    navId++
     runs.enter(explore.editorQuery)
     replay()
   }
@@ -372,5 +389,5 @@ export function useExplorerNavigator() {
     if (status.value === 'ready' && runs.current?.status !== 'validating') void runs.page(action)
   }
 
-  return { status, error, pending, selectTeam, selectSource, openSavedQuery, selectView, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
+  return { status, error, pending, selectTeam, selectSource, openSavedQuery, selectView, resetView, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
 }

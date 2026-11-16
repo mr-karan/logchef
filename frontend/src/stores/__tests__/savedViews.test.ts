@@ -71,6 +71,35 @@ describe("saved views store: which view is active", () => {
     expect(store.activeViewId).toBeNull();
   });
 
+  it("opens the default view when the browser remembers no choice", () => {
+    const store = useSavedViewsStore();
+    const withDefault = { views: [view(1), view(2)], default_view_id: 2 };
+    store.enter(2, 5, withDefault, null);
+    expect(store.activeViewId).toBe(2);
+    expect(store.defaultViewId).toBe(2);
+    // The URL's view wins over the default.
+    store.enter(2, 5, withDefault, 1);
+    expect(store.activeViewId).toBe(1);
+  });
+
+  it("keeps a remembered pick, including No view, over the default", () => {
+    const store = useSavedViewsStore();
+    const withDefault = { views: [view(1), view(2)], default_view_id: 2 };
+    localStorage.setItem("logchef-activeView-2-5", "1");
+    store.enter(2, 5, withDefault, null);
+    expect(store.activeViewId).toBe(1);
+    localStorage.setItem("logchef-activeView-2-5", "null");
+    store.enter(2, 5, withDefault, null);
+    expect(store.activeViewId).toBeNull();
+  });
+
+  it("falls back to the default when the remembered view no longer exists", () => {
+    localStorage.setItem("logchef-activeView-2-5", "7");
+    const store = useSavedViewsStore();
+    store.enter(2, 5, { views: [view(1), view(2)], default_view_id: 2 }, null);
+    expect(store.activeViewId).toBe(2);
+  });
+
   it("writes the view to the URL only for its own team and source", () => {
     const store = useSavedViewsStore();
     store.enter(2, 5, list(view(1)), 1);
@@ -131,9 +160,14 @@ describe("saved views store: working copy", () => {
     const store = useSavedViewsStore();
     store.enter(2, 5, list(), null);
     store.reportTableLayout(null, { columns: [{ name: "a" }, { name: "b", width: 90 }], sort: [{ column: "a", desc: true }] });
-    expect(store.newDefinition({ columns: true, sort: false, displayMode: true }, "table")).toEqual({
+    const shown = { displayMode: "table" as const, filter: 'level="error"', timeRange: "1h" };
+    const parts = { columns: true, sort: false, displayMode: true, filter: false, timeRange: false };
+    expect(store.newDefinition(parts, shown)).toEqual({
       version: 1, columns: [{ name: "a" }, { name: "b", width: 90 }], display_mode: "table",
     });
+    expect(store.newDefinition({ ...parts, filter: true, timeRange: true }, shown)).toMatchObject({ filter: 'level="error"', time_range: "1h" });
+    // A part the Explorer cannot express as a view is left out even when checked.
+    expect(store.newDefinition({ ...parts, filter: true, timeRange: true }, { ...shown, filter: null, timeRange: null })).not.toHaveProperty("filter");
     const created = view(3, { name: "errors" });
     api.create.mockResolvedValue({ data: created });
     expect(await store.saveAsNew({ name: "errors", description: "", scope: "personal", definition: { version: 1 } })).toEqual(created);
@@ -149,7 +183,7 @@ describe("saved views store: working copy", () => {
     const store = useSavedViewsStore();
     store.enter(2, 5, list(view(1)), 1);
     expect(store.isModified).toBe(true);
-    expect(store.newDefinition({ columns: true, sort: false, displayMode: false }, "compact").columns).toEqual([{ name: "msg", width: 500 }, { name: "level" }]);
+    expect(store.newDefinition({ columns: true, sort: false, displayMode: false, filter: false, timeRange: false }, { displayMode: "compact", filter: null, timeRange: null }).columns).toEqual([{ name: "msg", width: 500 }, { name: "level" }]);
     api.update.mockResolvedValue({ data: view(1, { revision: 2 }) });
     await store.updateActive();
     expect(api.update.mock.lastCall?.[3].definition.columns).toEqual([{ name: "msg", width: 500 }, { name: "level" }]);

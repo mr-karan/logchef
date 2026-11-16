@@ -1088,6 +1088,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @select-view="nav.selectView"
+                @reset-view="nav.resetView"
                 @export="handleExport"
               />
 

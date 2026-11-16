@@ -113,7 +113,7 @@ vi.mock("@/api/windowed", async (importOriginal) => ({
   streamWindowedQuery: mocks.windowedStream,
 }));
 
-import { useExploreStore, type OpenedLocation } from "../explore";
+import { useExploreStore, type OpenedLocation, type ViewQueryDefaults } from "../explore";
 import { useExploreRuns } from "../exploreRuns";
 import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
@@ -147,10 +147,10 @@ function makeSource(overrides: Partial<Source> = {}): Source {
 }
 
 // Opens what an Explorer URL names, as the navigator does once the team and source are loaded.
-function openUrl(params: Record<string, string>): boolean {
+function openUrl(params: Record<string, string>, viewDefaults?: ViewQueryDefaults): boolean {
   const { teamId, sourceId, target } = parseExploreLocation(params);
   if (target.kind === "saved" || target.kind === "share") throw new Error("openUrl opens drafts and queries only");
-  return useExploreStore().open({ teamId: teamId ?? 1, sourceId, content: target });
+  return useExploreStore().open({ teamId: teamId ?? 1, sourceId, content: target }, viewDefaults);
 }
 
 function savedQuery(overrides: Partial<ResolvedSavedQuery>): ResolvedSavedQuery {
@@ -282,6 +282,108 @@ describe("explore store", () => {
       // Raw LogchefQL must NOT leak into nativeQuery without translation.
       // The default SQL generator in executeQuery will produce a valid query.
       expect(store.nativeQuery).toBe("");
+    });
+  });
+
+  describe("saved view query defaults", () => {
+    const errors: ViewQueryDefaults = { filter: 'level="error"', time_range: "1h" };
+    const storeDraft = (logchefqlCode: string) => localStorage.setItem("logchef.explore.draft.1.1", JSON.stringify({
+      version: 1, mode: "logchefql", nativeQuery: "", logchefqlCode, limit: 100, relativeTime: "7d", absoluteStart: null, absoluteEnd: null, timezone: null, variables: [],
+    }));
+
+    beforeEach(() => {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
+    });
+
+    it("fills an empty editor and a location with no range or stored draft", () => {
+      const store = useExploreStore();
+      store.setActiveMode("native");
+      expect(openUrl({ team: "1", source: "1" }, errors)).toBe(true);
+      expect(store.activeMode).toBe("logchefql");
+      expect(store.logchefqlCode).toBe('level="error"');
+      expect(store.window).toEqual(relative("1h"));
+    });
+
+    it("keeps the query and range that a URL names", () => {
+      const store = useExploreStore();
+      openUrl({ team: "1", source: "1", q: "status=500", t: "15m" }, errors);
+      expect(store.logchefqlCode).toBe("status=500");
+      expect(store.window).toEqual(relative("15m"));
+      // An empty q still names a query.
+      openUrl({ team: "1", source: "1", q: "", t: "15m" }, errors);
+      expect(store.logchefqlCode).toBe("");
+    });
+
+    it("applies the range to a URL that names a query and no range", () => {
+      const store = useExploreStore();
+      openUrl({ team: "1", source: "1", q: "status=500" }, errors);
+      expect(store.logchefqlCode).toBe("status=500");
+      expect(store.window).toEqual(relative("1h"));
+    });
+
+    it("applies the range to a saved query without one and keeps the saved query in the URL", () => {
+      const store = useExploreStore();
+      const saved = savedQuery({ query_content: JSON.stringify({ version: 1, limit: 100, content: "status=500" }) });
+      store.open({ teamId: 1, sourceId: 1, content: savedContent(saved) }, errors);
+      expect(store.window).toEqual(relative("1h"));
+      expect(store.logchefqlCode).toBe("status=500");
+      expect(store.urlQueryParameters).toMatchObject({ id: "7" });
+    });
+
+    it("fills the filter into a URL that names only a range", () => {
+      const store = useExploreStore();
+      openUrl({ team: "1", source: "1", t: "15m" }, errors);
+      expect(store.logchefqlCode).toBe('level="error"');
+      expect(store.window).toEqual(relative("15m"));
+    });
+
+    it("keeps a stored draft's text and range", () => {
+      storeDraft('host="a"');
+      const store = useExploreStore();
+      openUrl({ team: "1", source: "1" }, errors);
+      expect(store.logchefqlCode).toBe('host="a"');
+      expect(store.window).toEqual(relative("7d"));
+    });
+
+    it("fills an empty stored draft's editor and keeps its range", () => {
+      storeDraft("");
+      const store = useExploreStore();
+      openUrl({ team: "1", source: "1" }, errors);
+      expect(store.logchefqlCode).toBe('level="error"');
+      expect(store.window).toEqual(relative("7d"));
+    });
+
+    it("fills no filter on a source without LogchefQL", () => {
+      mocks.sourcesState.currentSourceDetails = SQL_ONLY_SOURCE;
+      const store = useExploreStore();
+      openUrl({ team: "1", source: String(SQL_ONLY_SOURCE.id) }, errors);
+      expect(store.activeMode).toBe("native");
+      expect(store.logchefqlCode).toBe("");
+    });
+
+    it("fills an editor that shows only default SQL and never typed text", () => {
+      const store = useExploreStore();
+      store.setActiveMode("native");
+      store.showDefaultSql("SELECT * FROM logs");
+      expect(store.fillViewFilter('level="error"')).toBe(true);
+      expect(store.activeMode).toBe("logchefql");
+      expect(store.nativeQuery).toBe("");
+      store.setLogchefqlCode("status=500");
+      expect(store.fillViewFilter('level="warn"')).toBe(false);
+      expect(store.logchefqlCode).toBe("status=500");
+    });
+
+    it("replaces the editor text and range on Reset to view", () => {
+      const store = useExploreStore();
+      openUrl({ team: "1", source: "1", q: "status=500", t: "15m" });
+      expect(store.resetToViewQuery(errors)).toBe(true);
+      expect(store.logchefqlCode).toBe('level="error"');
+      expect(store.window).toEqual(relative("1h"));
+      // A view that sets neither part leaves the query alone.
+      store.setLogchefqlCode("status=500");
+      expect(store.resetToViewQuery({})).toBe(false);
+      expect(store.logchefqlCode).toBe("status=500");
     });
   });
 

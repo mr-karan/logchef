@@ -23,6 +23,15 @@ export interface SaveViewParts {
   columns: boolean;
   sort: boolean;
   displayMode: boolean;
+  filter: boolean;
+  timeRange: boolean;
+}
+
+/** What the Explorer shows besides the table layout. Null where a view cannot hold it. */
+export interface ShownExplorerState {
+  displayMode: DisplayMode;
+  filter: string | null;
+  timeRange: string | null;
 }
 
 const SCOPE_ORDER: Record<SavedViewScope, number> = { personal: 0, team: 1, source: 2 };
@@ -86,6 +95,8 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
   const active = useActiveSavedViewStore();
   const { scope, viewId: activeViewId } = storeToRefs(active);
   const views = ref<SavedView[]>([]);
+  // The view the server's default rules pick for the caller.
+  const defaultViewId = ref<number | null>(null);
   const workingDisplayMode = ref<DisplayMode | null>(null);
   // The last layout the table reported, and the view it belongs to.
   const tableLayout = shallowRef<{ viewId: number | null; layout: SavedViewLayout } | null>(null);
@@ -160,11 +171,13 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
 
   /**
    * Shows a location's views. The view the URL names wins when the caller
-   * can read it; otherwise the browser's remembered choice applies.
+   * can read it. Otherwise the browser's remembered choice applies, where a
+   * remembered No view stops the search, and then the default view.
    */
   function enter(teamId: number, sourceId: number | null, list: SavedViewList | null, requestedViewId: number | null): ViewEntry {
     scope.value = sourceId === null ? null : { teamId, sourceId };
     views.value = list ? [...list.views] : [];
+    defaultViewId.value = list?.default_view_id ?? null;
     tableLayout.value = null;
     if (sourceId === null) {
       activeViewId.value = null;
@@ -181,7 +194,8 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     }
     const key = rememberedKey();
     const remembered = key ? readStorage(key) : undefined;
-    activeViewId.value = typeof remembered === "number" && views.value.some((v) => v.id === remembered) ? remembered : null;
+    const listed = (id: unknown) => (typeof id === "number" && views.value.some((v) => v.id === id) ? id : null);
+    activeViewId.value = remembered === null ? null : listed(remembered) ?? listed(defaultViewId.value);
     return "ready";
   }
 
@@ -204,8 +218,8 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     writeStorage(`logchef-viewDisplayMode-${suffix.value}`, { viewId: seed.viewId, revision: seed.revision, displayMode: mode });
   }
 
-  /** The definition a new view takes from the working layout and the display mode on screen. */
-  function newDefinition(parts: SaveViewParts, shownDisplayMode: DisplayMode): SavedViewDefinition {
+  /** The definition a new view takes from the working layout and what the Explorer shows. */
+  function newDefinition(parts: SaveViewParts, shown: ShownExplorerState): SavedViewDefinition {
     const layout = currentLayout.value;
     const definition = activeView.value?.definition;
     const columns = layout?.columns ?? definition?.columns;
@@ -214,7 +228,9 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
       version: 1,
       ...(parts.columns && columns ? { columns } : {}),
       ...(parts.sort && sort ? { sort } : {}),
-      ...(parts.displayMode ? { display_mode: shownDisplayMode } : {}),
+      ...(parts.displayMode ? { display_mode: shown.displayMode } : {}),
+      ...(parts.filter && shown.filter !== null ? { filter: shown.filter } : {}),
+      ...(parts.timeRange && shown.timeRange !== null ? { time_range: shown.timeRange } : {}),
     };
   }
 
@@ -283,6 +299,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
 
   return {
     views,
+    defaultViewId,
     activeViewId,
     activeView,
     activeSeed,
