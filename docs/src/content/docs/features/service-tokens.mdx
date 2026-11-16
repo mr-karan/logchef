@@ -66,6 +66,13 @@ account** and the picker filters to service principals only.
 | **Source admin** | `sources:*`, `settings:read`, `profile:read` | Provision/update sources |
 | **Full access** | `*` | Equivalent to a logged-in session; last resort |
 
+Saved Explorer views have their own scopes: `saved_views:read` to list and
+read them and `saved_views:write` to change them. The Read-only preset includes
+`saved_views:read`; the Logs viewer and Logs analyst presets do not. A token
+issued before saved views existed, with an explicit scope list, has neither and
+gets 403 on the [saved view routes](/features/saved-views/#api) until you
+reissue it with the scope.
+
 You can deviate from any preset by toggling individual scopes after picking
 one. The active preset stays highlighted while the selection matches; once
 you customize, it falls back to a scope count badge.

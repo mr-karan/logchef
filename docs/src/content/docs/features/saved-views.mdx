@@ -1,0 +1,243 @@
+---
+title: Saved Views
+description: Save an Explorer layout for a source under a name, share it with your team or every team, and pick the view a source opens with.
+---
+
+A saved view is a named Explorer setup for one source. It can hold the visible
+columns with their order and widths, the sort, the display mode, a default
+filter and a default time range. Pick a view and the table changes; the query
+you typed stays.
+
+A view is not a saved query. A saved query is one query and replaces the editor
+text when you open it. A view stays active while you run other queries under it.
+
+## What a view holds
+
+Every part is optional. A part the view does not set leaves that part of the
+Explorer as it is.
+
+| Part | Applies to |
+|------|------------|
+| Columns and widths | Table mode. Listed columns show in that order, with the timestamp column kept first; every other column is hidden |
+| Sort | Table mode. Orders the rows the query returned, in the browser. It never changes the query's `ORDER BY` |
+| Display mode | Table, compact or JSON |
+| Filter | A LogchefQL query that fills an empty editor |
+| Time range | A relative range, such as `15m`, `1h` or `7d`, that fills when the link names no range |
+
+## Who sees a view
+
+A view has one of three scopes. Each scope has its own names, so "Errors" can
+exist once as a personal view, once as a team view and once as a source view.
+
+| | Personal | Team | Source |
+|---|---|---|---|
+| Visible to | Only you | Members of the team, on that team's Explorer | Every team that has the source |
+| Create, edit, delete | You | Team admins, team editors and global admins | Global admins |
+| Set or clear the default | You | Team admins and global admins | Global admins |
+
+A view grants no access to data. You see a source's views only on a team that
+has the source, and losing the source loses its views. A global admin cannot
+see another user's personal views. Deleting a user deletes their personal
+views.
+
+## Save and pick a view
+
+The view picker sits in the results toolbar, beside the display mode buttons.
+It shows the active view's name, or **No view**. Its menu lists your views in
+three groups, **Personal**, **Team** and **Source**, and marks the source's
+default with **Default**.
+
+| Action | Effect |
+|--------|--------|
+| Pick a view | Applies the view's layout. If the editor is empty, the view's filter fills it and runs |
+| **No view** | Returns to the layout you had before you picked a view. It is kept apart from every view |
+| **Save as new view** | Saves the layout on screen under a name, with a description and a scope |
+| **Update view** | Writes your changes to the active view. Shown when the view is modified and you can edit it |
+| **Reset to view** | Applies the view again. Its filter replaces the editor text and its time range replaces the window, then the query runs |
+| **Manage views** | Opens the list of views for the source |
+
+The save dialog offers only the scopes you can create in: **Only me**, **This
+team** and **Every team with this source**. Under **Include** you pick the
+parts to save. **Columns and widths**, **Sort** and **Display mode** are checked
+by default. **Filter** and **Time range** are unchecked, because most layouts
+apply to any query. **Filter** can be checked only when the editor holds
+LogchefQL, and **Time range** only when the window is a relative range.
+
+When you change the columns, widths, sort or display mode under a view, the
+picker marks the view **Modified**. The change is kept in this browser, and a
+reload keeps it. When someone updates the view, the next load of the Explorer
+replaces your local changes with theirs. Changing the display mode under a view
+that sets one does not change your display mode preference.
+
+## Which view a source opens with
+
+The Explorer takes the first of these that applies:
+
+1. `view=<id>` in the URL, when you can see that view.
+2. The layout carried by a share link. See [Share a view](#share-a-view).
+3. The view you last picked for this team and source, in this browser. If you
+   last picked **No view**, the search stops here.
+4. The default view: your personal default, else the team default, else the
+   source default.
+5. No view.
+
+A `view` in the URL that you cannot see stops the search: the Explorer shows
+a toast and opens with the share's layout if the link has one, else with no
+view. The same happens when the list of views fails to load.
+
+A new default does not move people who already picked a view in their
+browser. A remembered view that was deleted falls back to the default.
+
+## Filter and time range defaults
+
+A view's filter and time range fill empty places. They never overwrite what
+you have.
+
+- The **filter** applies when the view becomes active, on open or when you
+  pick it, and the editor is empty. The Explorer switches to LogchefQL, sets
+  the text and runs it.
+- The **time range** applies when the link names no range: a fresh Explorer,
+  a link with a query and no time, or a saved query or share without a range.
+- A link that names a query keeps it, and a draft you were writing keeps its
+  text and range.
+- Picking a view while the editor has text changes only the layout, so the
+  conditions you added from the table headers stay in the query.
+- **Reset to view** is the one action that replaces the editor text with the
+  view's filter.
+
+The Explorer's time picker has no seconds unit. The API accepts a range such as
+`30s`, but the Explorer ignores it and keeps the window in use. The save dialog
+never writes one.
+
+## Manage views
+
+**Manage views** lists the views for the source, with search and sorting by
+name and by **Visible to**.
+
+- **Rename** and **Set as default** or **Clear default** are inline.
+- The row menu has **Duplicate** and **Delete**. Delete asks for confirmation.
+- Duplicate adds "(copy)" to the name. It keeps the scope when you can edit
+  the view, and otherwise makes a personal copy, so you can start from a team
+  or source view you cannot change.
+- A view you cannot edit, and every **Managed** view, shows only Duplicate.
+
+### Missing columns
+
+A view keeps working when the source loses a column it names. The table shows
+the columns that exist, in the view's order, and skips the rest. If none of
+the view's columns is in a result, the table shows its automatic layout for
+that result and returns to the view's layout when a result has them. When a result
+with rows lacks a column or sort column of the active view, the picker shows a
+warning mark. Its tooltip names the columns, for example "Not in this result:
+user_agent". An aggregation result has its own columns and shows no mark.
+
+**Remove missing columns** in the row menu saves the view without those names.
+A sort left with no entry is dropped.
+
+## Share a view
+
+**Copy the URL.** While a view is active, the Explorer URL carries `view=<id>`.
+A teammate who can see the view opens the link with it. Someone who cannot,
+such as a teammate given your personal view, sees "The view in this link is
+not available. Explorer opened without it." The query still runs.
+
+**Share link.** The share button puts a copy of your layout in the share: the
+columns, widths, sort and display mode. It holds no view id, so the share
+opens for anyone with access to the source and keeps working after the view is
+deleted. The recipient sees the picker labeled **Shared layout**. Their own
+layouts and views are not touched. A `view` in the same URL wins over the
+shared layout.
+
+Picking a view or **No view** ends the shared layout. Picking **No view** is
+remembered like any other pick, so the next time the recipient opens that
+source in the same browser, it opens with no view.
+
+If the server refuses the share with the layout, for example because the
+layout makes it too large, the Explorer offers **Share without layout**, which
+shares the query alone.
+
+## Managed views
+
+A managed view belongs to provisioning. It shows **Managed** in Manage views
+and offers only Duplicate, and the API answers 403 to an update, a delete or a
+default change. A managed view that is the source default stays the default:
+setting another source view as default answers 403.
+
+## CLI and MCP
+
+- `logchef open --view <id|name>` opens the Explorer with a view, and
+  `logchef views list` lists the views of a source. See
+  [Saved Views in the CLI](/integration/cli/#saved-views).
+- The MCP tool `list_saved_views` returns the views you can see for one team
+  and source, with the default view's id. MCP cannot create or change views. See
+  [MCP Server](/integration/mcp-server/#saved-queries-views-and-alerts).
+
+A CLI sign-in made before saved views existed lacks the `saved_views:read`
+scope. Run `logchef auth` again.
+
+## API
+
+All routes are under `/api/v1/teams/:teamID/sources/:sourceID`.
+
+| Method and path | Token scope | Purpose |
+|-----------------|-------------|---------|
+| `GET /views` | `saved_views:read` | The views you can see here, and `default_view_id` |
+| `POST /views` | `saved_views:write` | Create a view: `name`, `description`, `scope`, `definition`, optional `is_default` |
+| `GET /views/:viewID` | `saved_views:read` | One view |
+| `PUT /views/:viewID` | `saved_views:write` | Update `name`, `description` and `definition`, with the `revision` you loaded |
+| `DELETE /views/:viewID` | `saved_views:write` | Delete a view |
+| `PUT /views/:viewID/default` | `saved_views:write` | Make the view the default of its scope |
+| `DELETE /views/:viewID/default` | `saved_views:write` | Clear the default flag |
+
+The list holds your personal views, the team's views and the source views,
+ordered by scope and then by name. Each view has `can_edit` and
+`can_set_default` for the caller.
+
+An update with a stale `revision` answers 409, and so does a name already
+taken in the scope. A view you cannot see answers 404, not 403, so the route
+does not confirm that a private view exists. The scope of a view never
+changes; duplicate it instead.
+
+### Definition
+
+The `definition` is a JSON object. The server rejects an unknown key.
+
+```json
+{
+  "version": 1,
+  "columns": [{ "name": "timestamp", "width": 190 }, { "name": "level" }, { "name": "msg", "width": 640 }],
+  "sort": [{ "column": "timestamp", "desc": true }],
+  "display_mode": "table",
+  "filter": "level = \"error\"",
+  "time_range": "1h"
+}
+```
+
+| Field | Rule |
+|-------|------|
+| `version` | Required. `1` |
+| `columns` | Optional. 1 to 200 entries, no name twice |
+| `columns[].name` | Required. 1 to 512 bytes. Not checked against the source schema |
+| `columns[].width` | Optional. 50 to 3,000 pixels. Absent means automatic |
+| `sort` | Optional. 1 to 3 entries, most significant first, each a `column` and a `desc` boolean |
+| `display_mode` | Optional. `table`, `compact` or `json` |
+| `filter` | Optional. Valid LogchefQL, up to 8,192 bytes. The source must support LogchefQL |
+| `time_range` | Optional. A number and a unit `s`, `m`, `h`, `d` or `w`. The Explorer ignores seconds. An absolute range is not allowed |
+
+### Limits
+
+| Bound | Value |
+|-------|-------|
+| Views per scope and source | 50. A create past it answers 409, for example "You have 50 views for this source. Delete one first." |
+| Name | 200 characters |
+| Description | 2,000 characters |
+| Definition | 65,536 bytes |
+
+## Token scopes
+
+Two token scopes cover views. `saved_views:read` lists and reads them;
+`saved_views:write` creates, edits and deletes them and sets defaults. New
+tokens made with the **Read-only** preset include `saved_views:read`. A token
+issued before saved views existed, with its own list of scopes, has neither
+and gets 403 on these routes until you issue one with the scope. A **Full
+access** token reaches them. See [Service Tokens](/features/service-tokens).
