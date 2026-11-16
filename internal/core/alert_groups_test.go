@@ -77,7 +77,7 @@ func TestUpdateGroupByClosesEpisodes(t *testing.T) {
 	}
 
 	renamed := "renamed"
-	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &renamed}); err != nil {
+	if _, _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &renamed}); err != nil {
 		t.Fatal(err)
 	}
 	if open, err := db.ListOpenAlertHistory(ctx, alert.ID); err != nil || len(open) != 1 {
@@ -85,7 +85,7 @@ func TestUpdateGroupByClosesEpisodes(t *testing.T) {
 	}
 
 	groupBy := []string{"service"}
-	updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{GroupBy: &groupBy})
+	_, updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{GroupBy: &groupBy})
 	if err != nil {
 		t.Fatal(err)
 	}

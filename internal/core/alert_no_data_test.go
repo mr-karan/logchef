@@ -49,14 +49,14 @@ func TestAlertNoDataPolicyAndNotifyOnResolve(t *testing.T) {
 	}
 
 	policy := models.AlertNoDataNoData
-	updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{NoDataPolicy: &policy})
+	_, updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{NoDataPolicy: &policy})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.NoDataPolicy != models.AlertNoDataNoData || !updated.NotifyOnResolve {
 		t.Fatalf("after policy edit = %q, %v; want no_data with resolve notifications kept", updated.NoDataPolicy, updated.NotifyOnResolve)
 	}
-	updated, err = UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{NotifyOnResolve: &off})
+	_, updated, err = UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{NotifyOnResolve: &off})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestAlertNoDataPolicyAndNotifyOnResolve(t *testing.T) {
 		t.Fatalf("after notify edit = %q, %v; want no_data without resolve notifications", updated.NoDataPolicy, updated.NotifyOnResolve)
 	}
 	bad := models.AlertNoDataPolicy("ignore")
-	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{NoDataPolicy: &bad}); !errors.Is(err, ErrInvalidAlertConfiguration) {
+	if _, _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{NoDataPolicy: &bad}); !errors.Is(err, ErrInvalidAlertConfiguration) {
 		t.Fatalf("UpdateAlert(no_data_policy ignore) err = %v, want a 400", err)
 	}
 }
@@ -134,7 +134,7 @@ func TestUpdateGroupByDropsOkInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	groupBy := []string{"region"}
-	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{GroupBy: &groupBy}); err != nil {
+	if _, _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{GroupBy: &groupBy}); err != nil {
 		t.Fatal(err)
 	}
 	if instances, err := db.ListAlertInstances(ctx, alert.ID); err != nil || len(instances) != 0 {

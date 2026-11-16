@@ -657,3 +657,9 @@ func (db *DB) MarkAlertInstanceNotified(ctx context.Context, alertID models.Aler
 	}
 	return nil
 }
+
+// GetAlertForUpdate retrieves the row with GetAlert. Inside WithTx the read runs on
+// the transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetAlertForUpdate(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
+	return db.GetAlert(ctx, alertID)
+}

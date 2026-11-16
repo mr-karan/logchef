@@ -626,3 +626,15 @@ func (s *Store) MarkAlertInstanceNotified(ctx context.Context, alertID models.Al
 	}
 	return nil
 }
+
+// GetAlertForUpdate locks the row until the transaction ends, then reads it with
+// GetAlert.
+func (s *Store) GetAlertForUpdate(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
+	if _, err := s.q.LockAlert(ctx, int64(alertID)); err != nil {
+		if notFound(err) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("locking %v for update: %w", alertID, err)
+	}
+	return s.GetAlert(ctx, alertID)
+}

@@ -245,7 +245,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	}
 
 	// Editing to point at team-b (a foreign team) must be forbidden.
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
+	_, _, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
 	if !errors.Is(err, ErrDashboardForbidden) {
 		t.Fatalf("update to foreign team: err = %v, want ErrDashboardForbidden", err)
 	}
@@ -256,7 +256,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	if err := db.UpdateUser(ctx, admin); err != nil {
 		t.Fatalf("UpdateUser(admin): %v", err)
 	}
-	if _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
+	if _, _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
 		t.Fatalf("admin update to team-b: %v", err)
 	}
 }
@@ -567,7 +567,8 @@ func TestUpdateDashboardClientContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return UpdateDashboard(ctx, db, log, dash.ID, creator, client, &models.UpdateDashboardRequest{Name: "d", Panels: body, Revision: &current.Revision})
+		_, updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, client, &models.UpdateDashboardRequest{Name: "d", Panels: body, Revision: &current.Revision})
+		return updated, err
 	}
 	stored := func() string {
 		t.Helper()
@@ -825,7 +826,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 		t.Fatalf("new dashboard revision = %d, want 1", dash.Revision)
 	}
 
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
+	_, _, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d2", Panels: panelBlob(team.ID, src.ID),
 	})
 	if !errors.Is(err, ErrDashboardRevisionRequired) {
@@ -833,7 +834,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 	}
 
 	loaded := dash.Revision
-	updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
+	_, updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d3", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if err != nil {
@@ -843,7 +844,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 		t.Fatalf("update returned name %q revision %d, want d3 at revision 2", updated.Name, updated.Revision)
 	}
 
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
+	_, _, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d4", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if !errors.Is(err, ErrDashboardConflict) {

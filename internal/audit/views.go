@@ -325,3 +325,121 @@ func AlertSilenceFields(s *models.AlertSilence) *Fields {
 	}
 	return f
 }
+
+// SavedQueryFields records a saved query. The query content holds the query
+// text, so it is recorded as a digest.
+func SavedQueryFields(q *models.SavedQuery) *Fields {
+	return NewFields().
+		Set("name", q.Name).
+		Set("description", q.Description).
+		Set("source_id", q.SourceID).
+		Set("created_from_team_id", q.CreatedFromTeamID).
+		Set("query_language", q.QueryLanguage).
+		Set("editor_mode", q.EditorMode).
+		Digest("query_content", q.QueryContent)
+}
+
+// CollectionFields records a collection.
+func CollectionFields(c *models.Collection) *Fields {
+	return NewFields().
+		Set("name", c.Name).
+		Set("description", c.Description).
+		Set("is_personal", c.IsPersonal)
+}
+
+// CollectionMemberFields records a direct collection membership and its role.
+func CollectionMemberFields(m *models.CollectionMember) *Fields {
+	return NewFields().
+		Set("collection_id", m.CollectionID).
+		Set("user_id", m.UserID).
+		Set("role", m.Role)
+}
+
+// CollectionTeamFields records a collection shared with a team.
+func CollectionTeamFields(collectionID int, teamID models.TeamID) *Fields {
+	return NewFields().
+		Set("collection_id", collectionID).
+		Set("team_id", teamID)
+}
+
+// CollectionItemFields records a link between a collection and a saved query.
+func CollectionItemFields(l *models.CollectionItemLink) *Fields {
+	return NewFields().
+		Set("collection_id", l.CollectionID).
+		Set("saved_query_id", l.SavedQueryID).
+		Set("kind", l.Kind).
+		Set("sort_order", l.SortOrder)
+}
+
+// DashboardFields records a dashboard by its summary: the panel blob can be
+// far larger than an event, so only its revision and counts are recorded.
+func DashboardFields(d *models.Dashboard) *Fields {
+	summary := models.SummarizeDashboardPanels(d.PanelsJSON)
+	return NewFields().
+		Set("name", d.Name).
+		Set("description", d.Description).
+		Set("revision", d.Revision).
+		Set("panel_count", summary.PanelCount).
+		Set("tab_count", summary.TabCount)
+}
+
+// AlertFields records an alert rule. The query and the condition hold query
+// text, and a label or annotation value can hold a link or a credential that
+// the serializer cannot see inside a map, so all of them are digests. Label
+// names are recorded as typed.
+func AlertFields(a *models.Alert) *Fields {
+	destinations := make([]string, len(a.DestinationIDs))
+	for i, d := range a.DestinationIDs {
+		destinations[i] = strconv.FormatInt(int64(d), 10)
+	}
+	return NewFields().
+		Set("name", a.Name).
+		Set("description", a.Description).
+		Set("source_id", a.SourceID).
+		Set("query_language", a.QueryLanguage).
+		Set("editor_mode", a.EditorMode).
+		Digest("query", a.Query).
+		Digest("condition", a.ConditionJSON).
+		Set("lookback_seconds", a.LookbackSeconds).
+		Set("threshold_operator", a.ThresholdOperator).
+		Set("threshold_value", a.ThresholdValue).
+		Set("frequency_seconds", a.FrequencySeconds).
+		Set("severity", a.Severity).
+		Set("label_names", sortedKeys(a.Labels)).
+		Digest("labels", strings.Join(keyValues(a.Labels), "\n")).
+		Digest("annotations", strings.Join(keyValues(a.Annotations), "\n")).
+		Set("destination_ids", destinations).
+		Set("group_by", a.GroupBy).
+		Set("no_data_policy", a.NoDataPolicy).
+		Set("notify_on_resolve", a.NotifyOnResolve).
+		Set("is_active", a.IsActive)
+}
+
+// QueryShareFields records a share link. The token is a bearer credential and
+// is never recorded; the payload holds the query, so it is a digest.
+func QueryShareFields(s *models.QueryShare) *Fields {
+	return NewFields().
+		Set("source_id", s.SourceID).
+		Set("team_id", s.TeamID).
+		Set("expires_at", s.ExpiresAt).
+		Digest("payload", string(s.Payload))
+}
+
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// keyValues renders a map as sorted "key=value" strings.
+func keyValues(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	sort.Strings(out)
+	return out
+}

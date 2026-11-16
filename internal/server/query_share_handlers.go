@@ -75,8 +75,7 @@ func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create share link", models.GeneralErrorType)
 	}
 
-	auditTarget(c, audit.QueryShareTarget(share))
-	auditDetail(c, "expires_at", share.ExpiresAt)
+	auditSet(c, audit.QueryShareTarget(share), nil, audit.QueryShareFields(share))
 	return SendSuccess(c, fiber.StatusCreated, queryShareResponse(share, buildQueryShareURL(c, s.config.Server.FrontendURL, token)))
 }
 
@@ -164,7 +163,9 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete share link", models.GeneralErrorType)
 	}
-	auditTarget(c, audit.QueryShareTarget(share))
+	// A share has no update, so the row read before the delete is the row
+	// that the delete removed.
+	auditSet(c, audit.QueryShareTarget(share), audit.QueryShareFields(share), nil)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 

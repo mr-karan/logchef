@@ -181,7 +181,10 @@ func TestReconcilePostgresConcurrentCollectionDelete(t *testing.T) {
 				return nil
 			}
 			started = true
-			go func() { result <- core.DeleteCollection(ctx, db, quietLogger(), collection.ID, owner.ID) }()
+			go func() {
+				_, err := core.DeleteCollection(ctx, db, quietLogger(), collection.ID, owner.ID)
+				result <- err
+			}()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}

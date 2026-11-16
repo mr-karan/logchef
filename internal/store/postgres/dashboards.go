@@ -194,3 +194,15 @@ func (s *Store) DeleteDashboard(ctx context.Context, id int) error {
 	}
 	return nil
 }
+
+// GetDashboardForUpdate locks the row until the transaction ends, then reads it with
+// GetDashboard.
+func (s *Store) GetDashboardForUpdate(ctx context.Context, id int) (*models.Dashboard, error) {
+	if _, err := s.q.LockDashboard(ctx, int64(id)); err != nil {
+		if notFound(err) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("locking %v for update: %w", id, err)
+	}
+	return s.GetDashboard(ctx, id)
+}

@@ -163,6 +163,56 @@ var viewCases = []viewCase{
 		s.IsSensitive = false
 		return audit.SettingFields(&s), []string{s.Value}
 	}},
+	{"saved query", func(tag string) (*audit.Fields, []string) {
+		var q models.SavedQuery
+		fillStrings(reflect.ValueOf(&q), tag, "SavedQuery")
+		q.QueryContent = `{"content":"SELECT * FROM logs WHERE session_id = '` + tag + `-literal'"}`
+		return audit.SavedQueryFields(&q), []string{tag + "-literal"}
+	}},
+	{"collection", func(tag string) (*audit.Fields, []string) {
+		var c models.Collection
+		fillStrings(reflect.ValueOf(&c), tag, "Collection")
+		return audit.CollectionFields(&c), nil
+	}},
+	{"collection member", func(tag string) (*audit.Fields, []string) {
+		var m models.CollectionMember
+		fillStrings(reflect.ValueOf(&m), tag, "CollectionMember")
+		return audit.CollectionMemberFields(&m), nil
+	}},
+	{"collection item", func(tag string) (*audit.Fields, []string) {
+		var l models.CollectionItemLink
+		fillStrings(reflect.ValueOf(&l), tag, "CollectionItemLink")
+		return audit.CollectionItemFields(&l), nil
+	}},
+	{"dashboard", func(tag string) (*audit.Fields, []string) {
+		var d models.Dashboard
+		fillStrings(reflect.ValueOf(&d), tag, "Dashboard")
+		d.PanelsJSON = []byte(`{"schema":2,"panels":[{"id":"p1","title":"` + tag + `-panel","query":"` + tag + `-literal"}]}`)
+		return audit.DashboardFields(&d), []string{tag + "-panel", tag + "-literal"}
+	}},
+	{"alert", func(tag string) (*audit.Fields, []string) {
+		var a models.Alert
+		fillStrings(reflect.ValueOf(&a), tag, "Alert")
+		a.Query = `SELECT count() FROM logs WHERE session_id = '` + tag + `-literal'`
+		a.Labels = map[string]string{
+			"api_token": tag + "-label-token",
+			"runbook":   "https://" + tag + "-user:" + tag + "-pass@example.com/private?token=" + tag + "-query",
+		}
+		var leaks []string
+		for k, v := range a.Annotations {
+			leaks = append(leaks, k, v)
+		}
+		return audit.AlertFields(&a), append(leaks, tag+"-literal", a.ConditionJSON, a.GeneratorURL,
+			tag+"-label-token", tag+"-user", tag+"-pass", tag+"-query")
+	}},
+	{"query share", func(tag string) (*audit.Fields, []string) {
+		var q models.QueryShare
+		fillStrings(reflect.ValueOf(&q), tag, "QueryShare")
+		q.Payload = []byte(`{"query":"` + tag + `-literal"}`)
+		// QueryShareFields records no string, so the probe gives the suite a
+		// recorded one; the leak checks on the token and the payload count.
+		return audit.QueryShareFields(&q).Set("probe", tag+":probe;"), []string{q.Token, tag + "-literal"}
+	}},
 	{"sensitive setting by key", func(tag string) (*audit.Fields, []string) {
 		var s models.SystemSetting
 		fillStrings(reflect.ValueOf(&s), tag, "Setting")

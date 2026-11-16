@@ -239,54 +239,55 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 // UpdateAlert updates an existing alert rule and its job. A change of group_by closes every
 // open episode with "rule changed", because the old group keys no longer
 // name any group of the new result. Destinations the editor adds must be
-// usable by the editor; the ones the rule has stay.
-func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, user *models.User, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+// usable by the editor; the ones the rule has stay. It returns the rule before
+// and after the write, both read in the write's transaction under the row
+// lock.
+func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, user *models.User, alertID models.AlertID, req *models.UpdateAlertRequest) (before, after *models.Alert, err error) {
 	if req == nil {
-		return nil, ErrInvalidAlertConfiguration
+		return nil, nil, ErrInvalidAlertConfiguration
 	}
 
 	existing, err := db.GetAlert(ctx, alertID)
 	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, ErrAlertNotFound
+			return nil, nil, ErrAlertNotFound
 		}
 		log.Error("failed to load alert for update", "alert_id", alertID, "error", err)
-		return nil, fmt.Errorf("failed to load alert: %w", err)
+		return nil, nil, fmt.Errorf("failed to load alert: %w", err)
 	}
 
 	previous := *existing
 	if err := applyAlertUpdates(existing, req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// An unchanged query skips the SQL check so owners can still pause, rename
 	// or delete an alert whose stored query the parser rejects. Evaluation
 	// still refuses to run it.
 	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode
 	if err := validateAlertModel(ctx, db, ds, existing.SourceID, existing, queryChanged); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
 	groupByChanged := !slices.Equal(existing.GroupBy, previous.GroupBy)
 	err = db.WithTx(ctx, func(tx store.StoreOps) error {
-		return writeAlertUpdate(ctx, tx, user, existing, previous.DestinationIDs, req.DestinationIDs, groupByChanged)
+		var err error
+		if before, err = writeAlertUpdate(ctx, tx, user, existing, previous.DestinationIDs, req.DestinationIDs, groupByChanged); err != nil {
+			return err
+		}
+		after, err = tx.GetAlert(ctx, alertID)
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, ErrInvalidAlertConfiguration) || errors.Is(err, ErrDestinationForbidden) {
-			return nil, err
+			return nil, nil, err
 		}
 		if models.IsNotFound(err) {
-			return nil, ErrAlertNotFound
+			return nil, nil, ErrAlertNotFound
 		}
 		log.Error("failed to update alert", "alert_id", alertID, "error", err)
-		return nil, fmt.Errorf("failed to update alert: %w", err)
+		return nil, nil, fmt.Errorf("failed to update alert: %w", err)
 	}
-
-	updated, err := db.GetAlert(ctx, alertID)
-	if err != nil {
-		log.Warn("alert updated but fetching updated record failed", "alert_id", alertID, "error", err)
-		return existing, nil
-	}
-	return updated, nil
+	return before, after, nil
 }
 
 func applyAlertUpdates(alert *models.Alert, req *models.UpdateAlertRequest) error {
@@ -379,42 +380,47 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	}
 }
 
-// writeAlertUpdate writes an edited rule in the caller's transaction. The job
-// row is written before the alert row, the order in which an evaluation's
-// commit locks them, so an edit cannot deadlock with it. Requested
-// destinations replace the rule's; a group_by change closes the open
-// episodes and drops every instance.
-func writeAlertUpdate(ctx context.Context, tx store.StoreOps, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) error {
+// writeAlertUpdate writes an edited rule in the caller's transaction and
+// returns the rule it replaced, read under the row lock. The job row is
+// written before the alert row, the order in which an evaluation's commit
+// locks them, so an edit cannot deadlock with it. Requested destinations
+// replace the rule's; a group_by change closes the open episodes and drops
+// every instance.
+func writeAlertUpdate(ctx context.Context, tx store.StoreOps, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) (*models.Alert, error) {
 	if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert)); err != nil {
-		return err
+		return nil, err
+	}
+	before, err := tx.GetAlertForUpdate(ctx, alert.ID)
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.UpdateAlert(ctx, alert); err != nil {
-		return err
+		return nil, err
 	}
 	if requested != nil {
 		ids, err := resolveAlertDestinations(ctx, tx, user, *requested, current)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := tx.SetAlertDestinations(ctx, alert.ID, ids); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if !groupByChanged {
-		return nil
+		return before, nil
 	}
 	open, err := tx.ListOpenAlertHistory(ctx, alert.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(open) > 0 {
 		if err := tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed"); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	// The no_data and keep policies also track ok groups, which have no
 	// episode to close.
-	return tx.DeleteAlertInstances(ctx, alert.ID)
+	return before, tx.DeleteAlertInstances(ctx, alert.ID)
 }
 
 // validateFrequency applies the floor of the rule's job schedule. A stored rule
@@ -426,24 +432,30 @@ func validateFrequency(seconds int) error {
 	return nil
 }
 
-// DeleteAlert removes an alert rule and its job.
-func DeleteAlert(ctx context.Context, db store.Store, log *slog.Logger, alertID models.AlertID) error {
+// DeleteAlert removes an alert rule and its job, and returns the rule it
+// deleted, read under the row lock of the delete.
+func DeleteAlert(ctx context.Context, db store.Store, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
+	var deleted *models.Alert
 	// Job row first, as in UpdateAlert.
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if err := alerts.DeleteEvaluationJob(ctx, tx, alertID); err != nil {
+			return err
+		}
+		var err error
+		if deleted, err = tx.GetAlertForUpdate(ctx, alertID); err != nil {
 			return err
 		}
 		return tx.DeleteAlert(ctx, alertID)
 	})
 	if err != nil {
 		if models.IsNotFound(err) {
-			return ErrAlertNotFound
+			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to delete alert", "alert_id", alertID, "error", err)
-		return fmt.Errorf("failed to delete alert: %w", err)
+		return nil, fmt.Errorf("failed to delete alert: %w", err)
 	}
 	log.Info("alert deleted", "alert_id", alertID)
-	return nil
+	return deleted, nil
 }
 
 // ListAlertsBySource returns all alerts for a source.

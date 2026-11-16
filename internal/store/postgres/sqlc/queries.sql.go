@@ -6299,6 +6299,18 @@ func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string)
 	return items, nil
 }
 
+const lockAlert = `-- name: LockAlert :one
+SELECT id FROM alerts WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Lock an alert row until the transaction ends
+func (q *Queries) LockAlert(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockAlert, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const lockCollection = `-- name: LockCollection :one
 SELECT id FROM collections WHERE id = $1 FOR UPDATE
 `
@@ -6307,6 +6319,18 @@ SELECT id FROM collections WHERE id = $1 FOR UPDATE
 // share write authorizes, mutates and selects its response against one state.
 func (q *Queries) LockCollection(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRow(ctx, lockCollection, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockDashboard = `-- name: LockDashboard :one
+SELECT id FROM dashboards WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Lock a dashboard row until the transaction ends
+func (q *Queries) LockDashboard(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDashboard, id)
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err
@@ -6330,6 +6354,18 @@ SELECT id FROM reports WHERE id = $1 FOR UPDATE
 // its recipients run one after the other instead of merging.
 func (q *Queries) LockReport(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRow(ctx, lockReport, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockSavedQuery = `-- name: LockSavedQuery :one
+SELECT id FROM saved_queries WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Lock a saved query row until the transaction ends
+func (q *Queries) LockSavedQuery(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSavedQuery, id)
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err

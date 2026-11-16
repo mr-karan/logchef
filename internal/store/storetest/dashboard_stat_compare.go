@@ -48,14 +48,14 @@ func testDashboardStatCompare(t *testing.T, ctx context.Context, s store.Store) 
 		}
 	}
 	req := &models.UpdateDashboardRequest{Name: "Trend", Panels: raw, Revision: &dash.Revision}
-	if _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, stale, req); !errors.Is(err, core.ErrDashboardClientStale) {
+	if _, _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, stale, req); !errors.Is(err, core.ErrDashboardClientStale) {
 		t.Fatalf("stale update: %v", err)
 	}
 	stored := loadDashboard(t, ctx, s, dash.ID)
 	if stored.Revision != dash.Revision {
 		t.Fatal("rejected write changed revision")
 	}
-	if _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, current, req); err != nil {
+	if _, _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, current, req); err != nil {
 		t.Fatal(err)
 	}
 }

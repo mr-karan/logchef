@@ -47,7 +47,7 @@ func testDashboardPresentation(t *testing.T, ctx context.Context, s store.Store)
 		if parseErr != nil {
 			t.Fatal(parseErr)
 		}
-		if _, writeErr := core.UpdateDashboard(ctx, s, log, dash.ID, owner, client, &models.UpdateDashboardRequest{Name: "Trend", Panels: raw, Revision: &dash.Revision}); !errors.Is(writeErr, core.ErrDashboardClientStale) {
+		if _, _, writeErr := core.UpdateDashboard(ctx, s, log, dash.ID, owner, client, &models.UpdateDashboardRequest{Name: "Trend", Panels: raw, Revision: &dash.Revision}); !errors.Is(writeErr, core.ErrDashboardClientStale) {
 			t.Fatalf("missing %s update: %v", missing, writeErr)
 		}
 		resp, readErr := core.BuildDashboardResponse(ctx, s, log, owner, client, dash)
@@ -62,14 +62,14 @@ func testDashboardPresentation(t *testing.T, ctx context.Context, s store.Store)
 		}
 	}
 	req := &models.UpdateDashboardRequest{Name: "Trend", Panels: raw, Revision: &dash.Revision}
-	if _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, stale, req); !errors.Is(err, core.ErrDashboardClientStale) {
+	if _, _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, stale, req); !errors.Is(err, core.ErrDashboardClientStale) {
 		t.Fatalf("stale update: %v", err)
 	}
 	stored := loadDashboard(t, ctx, s, dash.ID)
 	if stored.Revision != dash.Revision {
 		t.Fatal("rejected write changed revision")
 	}
-	if _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, current, req); err != nil {
+	if _, _, err := core.UpdateDashboard(ctx, s, log, dash.ID, owner, current, req); err != nil {
 		t.Fatal(err)
 	}
 }
