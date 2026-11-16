@@ -100,6 +100,7 @@
   "ui.noSourcesAvailable": "没有可用的数据源",
   "ui.clear": "清除",
   "ui.showContext": "显示上下文",
+  "ui.contextNeedsLogchefQL": "Loki 上的上下文需要 LogchefQL 查询，因为原生管道可能会更改流标签",
   "ui.loading2": "正在加载…",
   "ui.local": "本地",
   "ui.search": "搜索",

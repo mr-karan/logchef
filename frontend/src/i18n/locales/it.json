@@ -101,6 +101,7 @@
   "ui.noSourcesAvailable": "Nessuna sorgente disponibile",
   "ui.clear": "Cancella",
   "ui.showContext": "Mostra contesto",
+  "ui.contextNeedsLogchefQL": "Il contesto su Loki richiede una query LogchefQL, perché una pipeline nativa può modificare le etichette dello stream",
   "ui.loading2": "Caricamento…",
   "ui.local": "Locale",
   "ui.search": "Cerca",

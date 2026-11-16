@@ -101,6 +101,7 @@
   "ui.noSourcesAvailable": "कोई स्रोत उपलब्ध नहीं है",
   "ui.clear": "साफ़ करें",
   "ui.showContext": "संदर्भ दिखाएँ",
+  "ui.contextNeedsLogchefQL": "Loki पर संदर्भ के लिए LogchefQL क्वेरी चाहिए, क्योंकि नेटिव पाइपलाइन स्ट्रीम लेबल बदल सकती है",
   "ui.loading2": "लोड हो रहा है…",
   "ui.local": "स्थानीय",
   "ui.search": "खोजें",

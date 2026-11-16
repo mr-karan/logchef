@@ -101,6 +101,7 @@
   "ui.noSourcesAvailable": "Aucune source disponible",
   "ui.clear": "Effacer",
   "ui.showContext": "Afficher le contexte",
+  "ui.contextNeedsLogchefQL": "Le contexte sur Loki nécessite une requête LogchefQL, car un pipeline natif peut modifier les labels du flux",
   "ui.loading2": "Chargement…",
   "ui.local": "Local",
   "ui.search": "Rechercher",

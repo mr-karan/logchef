@@ -28,8 +28,7 @@ import { getDefaultColumnOrder } from './defaultColumnOrder'
 import { createContentMeasurer, waitForContentFonts } from './contentSizing'
 import type { ColumnSizingState } from '@tanstack/vue-table'
 import { getVisibleColumnRange } from './columnVirtualization'
-import type { Source } from '@/api/sources'
-import { hasSourceCapability } from '@/lib/queryMetadata'
+import { logContextState, rowStreamLabels, type LogContextSource } from '@/lib/logContext'
 import TableControls from './TableControls.vue'
 import ColumnFilterButton from './ColumnFilterButton.vue'
 import CellContextMenu, { type CellMenuTarget } from './CellContextMenu.vue'
@@ -49,7 +48,7 @@ interface Props {
     teamId: number | null
     viewSeed?: TableViewSeed | null // The saved view the layout and sort start from
     layoutResetToken?: number // A change discards the view's working copy and seeds from the view again
-    source?: Pick<Source, 'source_type' | 'capabilities'> | null
+    source?: LogContextSource | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
@@ -80,9 +79,7 @@ const severityFieldName = computed(() => props.severityField || 'severity_text')
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
-// Context modal state (only for sources advertising the log_context capability;
-// the backend 400s otherwise, e.g. VictoriaLogs)
-const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
+const logContext = computed(() => logContextState(props.source, props.activeMode))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 
@@ -808,11 +805,13 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                         {{ view === 'fields' ? t('explore.detailFields') : t('explore.detailJson') }}
                                                     </button>
                                                 </div>
-                                                <Button 
-                                                    v-if="supportsLogContext"
-                                                    variant="outline" 
-                                                    size="sm" 
+                                                <Button
+                                                    v-if="logContext !== 'none'"
+                                                    variant="outline"
+                                                    size="sm"
                                                     class="h-7 text-xs"
+                                                    :disabled="logContext === 'native-loki'"
+                                                    :title="logContext === 'native-loki' ? t('ui.contextNeedsLogchefQL') : undefined"
                                                     @click.stop="openContextModal(row.original)"
                                                 >
                                                     <Clock class="h-3 w-3 mr-1" />
@@ -851,6 +850,7 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
         :team-id="props.teamId ?? 0"
         :log="contextLog"
         :timestamp-field="timestampFieldName"
+        :stream-labels="rowStreamLabels(props.source, contextLog)"
         @update:is-open="showContextModal = $event"
     />
 </template>

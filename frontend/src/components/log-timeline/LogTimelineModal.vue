@@ -27,6 +27,7 @@ const props = defineProps<{
     teamId: number
     log: Record<string, any>
     timestampField?: string
+    streamLabels?: Record<string, string>
 }>()
 
 const emit = defineEmits<{
@@ -137,7 +138,8 @@ async function loadContextLogs() {
             timestamp,
             timestamp_rfc3339: timestampRFC3339,
             before_limit: batchSize.value,
-            after_limit: batchSize.value
+            after_limit: batchSize.value,
+            stream_labels: props.streamLabels,
         }, props.teamId)
 
         if (requestId !== contextRequestId) return
@@ -207,6 +209,7 @@ async function loadMore(direction: 'before' | 'after') {
             after_limit: direction === 'after' ? batchSize.value : 0,
             before_offset: currentBeforeOffset,
             after_offset: currentAfterOffset,
+            stream_labels: props.streamLabels,
         }, props.teamId)
 
         if (requestId !== contextRequestId) return

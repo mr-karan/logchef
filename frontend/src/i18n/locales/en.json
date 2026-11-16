@@ -99,6 +99,7 @@
   "ui.noSourcesAvailable": "No sources available",
   "ui.clear": "Clear",
   "ui.showContext": "Show Context",
+  "ui.contextNeedsLogchefQL": "Context on Loki needs a LogchefQL query, because a native pipeline can change stream labels",
   "ui.loading2": "Loading…",
   "ui.local": "Local",
   "ui.search": "Search…",
