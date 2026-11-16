@@ -36,8 +36,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the same path as evaluation, so a query that saves also runs. A
   query without macros runs unchanged.
 
+- Saved Explorer views. A view holds a source's visible columns with their
+  order and widths, the sort, the display mode, and optionally a LogchefQL
+  filter and a relative time range that fill an empty editor and an unset
+  window. A view is personal, shared with a team, or shared with every team
+  that has the source, and each scope can set a default view. The picker in
+  the results toolbar saves, picks, updates and resets views; Manage views
+  renames, duplicates, deletes and sets defaults, and removes columns a source
+  no longer has. The Explorer URL names the active view as `view=<id>`, and a
+  share link carries a copy of the sender's layout. `logchef open --view` and
+  `logchef views list` use views from the CLI, and the MCP tool
+  `list_saved_views` lists them. The new Saved Views docs page covers it.
+
 ### Upgrade notes
 
+- Two token scopes are new, `saved_views:read` and `saved_views:write`. A token
+  issued with an explicit scope list before this release, including one made
+  with the Read-only preset, gets 403 on the saved view routes until it is
+  reissued with the scope. Full access tokens are unaffected. A CLI sign-in
+  made before this release lacks `saved_views:read`: run `logchef auth` again.
+  An MCP client signed in before this release does not see `list_saved_views`
+  until it signs in again.
 - Alert state moves to a per-rule instance table (SQLite migration 000043,
   Postgres 000017). Back up the metadata database first, and stop every old
   replica before a new one starts: the migration rebuilds the SQLite `alerts`

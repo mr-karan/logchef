@@ -194,6 +194,7 @@ Key areas of the docs:
           label: "Features",
           items: [
             { label: "Collections & Saved Queries", link: "/features/collections" },
+            { label: "Saved Views", link: "/features/saved-views" },
             { label: "Dashboards", link: "/features/dashboards" },
             { label: "Dashboard Gallery", link: "/features/dashboard-gallery" },
             { label: "Alerting", link: "/features/alerting" },
