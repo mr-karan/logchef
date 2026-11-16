@@ -38,6 +38,8 @@ export interface AlertFormState {
   threshold_value: number;
   frequency_seconds: number;
   severity: Alert["severity"];
+  no_data_policy: Alert["no_data_policy"];
+  notify_on_resolve: boolean;
   is_active: boolean;
   labels: Array<{ id: number; key: string; value: string }>;
   annotations: Array<{ id: number; key: string; value: string }>;
@@ -150,6 +152,8 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     threshold_value: 1,
     frequency_seconds: 300,
     severity: "warning",
+    no_data_policy: "zero",
+    notify_on_resolve: true,
     is_active: true,
     labels: [],
     annotations: [],
@@ -515,6 +519,8 @@ WHERE ${timeFilter}`,
       form.threshold_value = 1;
       form.frequency_seconds = 300;
       form.severity = "warning";
+      form.no_data_policy = "zero";
+      form.notify_on_resolve = true;
       form.is_active = true;
       form.labels = [];
       form.annotations = [];
@@ -544,6 +550,8 @@ WHERE ${timeFilter}`,
     form.threshold_value = alert.threshold_value;
     form.frequency_seconds = alert.frequency_seconds;
     form.severity = alert.severity;
+    form.no_data_policy = alert.no_data_policy;
+    form.notify_on_resolve = alert.notify_on_resolve;
     form.is_active = alert.is_active;
     labelCounter.value = 0;
     annotationCounter.value = 0;
@@ -580,6 +588,7 @@ WHERE ${timeFilter}`,
         threshold_operator: form.threshold_operator,
         threshold_value: form.threshold_value,
         group_by: groupBy.value,
+        no_data_policy: form.no_data_policy,
       });
       testQueryResult.value = result.data;
     } catch (error: any) {
@@ -627,7 +636,7 @@ WHERE ${timeFilter}`,
   });
 
   watch(
-    () => [form.query, form.threshold_operator, form.threshold_value, form.group_by],
+    () => [form.query, form.threshold_operator, form.threshold_value, form.group_by, form.no_data_policy],
     () => {
       testQueryResult.value = null;
       testQueryError.value = null;
@@ -668,6 +677,8 @@ WHERE ${timeFilter}`,
       annotations: annotationsRecord,
       destination_ids: form.destination_ids,
       group_by: groupBy.value,
+      no_data_policy: form.no_data_policy,
+      notify_on_resolve: form.notify_on_resolve,
     };
 
     if (props.mode === "create") {

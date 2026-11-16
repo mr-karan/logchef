@@ -55,7 +55,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert, at tim
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to extract alert result: %w", err))
 		return fmt.Errorf("failed to extract alert result: %w", err)
 	}
-	return m.commitEvaluation(ctx, alert, alert.EvalSeq, samples)
+	return m.commitEvaluation(ctx, alert, alert.EvalSeq, samples, at)
 }
 
 // episode is the open state of one group: its newest open history row and
@@ -82,32 +82,40 @@ func openEpisodes(instances []*models.AlertInstance, open []*models.AlertHistory
 	return episodes
 }
 
-// currentInstance returns the firing instance of an open episode. A row
-// without a matching instance is adopted with notified unset, so the row's
-// delivery bookkeeping decides retries as it did before instances existed.
+// currentInstance returns the instance of an open episode. A row without a
+// matching instance is adopted in the row's state with notified unset, so the
+// row's delivery bookkeeping decides retries as it did before instances
+// existed.
 func currentInstance(instance *models.AlertInstance, open *models.AlertHistoryEntry) *models.AlertInstance {
 	if instance != nil && instance.HistoryID != nil && *instance.HistoryID == open.ID {
 		return instance
 	}
 	historyID := open.ID
+	state := models.AlertInstanceStateFiring
+	if open.Status == models.AlertStatusNoData {
+		state = models.AlertInstanceStateNoData
+	}
 	return &models.AlertInstance{
 		AlertID:    open.AlertID,
 		GroupKey:   open.GroupKey,
 		Group:      open.Group,
-		State:      models.AlertInstanceStateFiring,
+		State:      state,
 		Value:      open.Value,
 		StateSince: open.TriggeredAt,
 		HistoryID:  &historyID,
 	}
 }
 
-// fireStep is one group's firing change. A step that does not notify only
-// records the evaluation on its instance.
-type fireStep struct {
+// openStep is one group's change into, or stay in, firing or no_data. A step
+// that does not notify only records the evaluation on its instance.
+type openStep struct {
 	change   Change
+	status   models.AlertStatus
 	instance models.AlertInstance
 	// history is the open episode, nil until a new one is written.
-	history      *models.AlertHistoryEntry
+	history *models.AlertHistoryEntry
+	// moved is set when an open episode changes between firing and no_data.
+	moved        bool
 	payload      map[string]any
 	message      string
 	notify       bool
@@ -122,16 +130,23 @@ type resolveStep struct {
 	change  Change
 	history *models.AlertHistoryEntry
 	message string
+	notify  bool
 }
 
 // evaluationPlan is what one evaluation writes, then sends.
 type evaluationPlan struct {
-	fires      []*fireStep
-	resolves   []*resolveStep
+	opens    []*openStep
+	resolves []*resolveStep
+	// tracks are the ok instances that the no_data and keep policies keep.
+	tracks []models.AlertInstance
+	// untracks are the group keys whose instance goes without an episode to close.
+	untracks   []string
+	state      models.AlertState
+	at         time.Time
 	newEpisode bool
 }
 
-func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq int64, samples []Sample) error {
+func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq int64, samples []Sample, at time.Time) error {
 	var mc *messageContext
 	messages := func() *messageContext {
 		if mc == nil {
@@ -139,7 +154,11 @@ func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq
 		}
 		return mc
 	}
-	plan, err := m.planEvaluation(ctx, alert, samples, messages)
+	plan, err := m.planEvaluation(ctx, alert, samples, at, messages)
+	if errors.Is(err, ErrTooManyGroups) {
+		m.recordEvaluationError(ctx, alert, err)
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -156,20 +175,22 @@ func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq
 			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", err)
 		}
 	}
-	for _, step := range plan.fires {
+	for _, step := range plan.opens {
 		if step.notify {
-			m.deliverFiring(ctx, alert, step)
+			m.deliverOpen(ctx, alert, step)
 		}
 	}
 	for _, step := range plan.resolves {
-		m.deliverResolved(ctx, alert, step, messages())
+		if step.notify {
+			m.deliverResolved(ctx, alert, step, messages())
+		}
 	}
 	return nil
 }
 
-// planEvaluation reads the open episodes, runs Transition and decides what
-// each changed group writes.
-func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, samples []Sample, messages func() *messageContext) (*evaluationPlan, error) {
+// planEvaluation reads the tracked groups, runs Transition and decides what
+// each group writes.
+func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, samples []Sample, at time.Time, messages func() *messageContext) (*evaluationPlan, error) {
 	instances, err := m.db.ListAlertInstances(ctx, alert.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alert instances: %w", err)
@@ -179,45 +200,113 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 		return nil, fmt.Errorf("failed to list open alert history: %w", err)
 	}
 	episodes := openEpisodes(instances, open)
-	tracked := make([]Instance, 0, len(episodes))
+	stored := make(map[string]*models.AlertInstance, len(instances))
+	tracked := make([]Instance, 0, len(instances)+len(episodes))
 	for _, entry := range open {
 		if ep, ok := episodes[entry.GroupKey]; ok && ep.history == entry {
-			tracked = append(tracked, Instance{GroupKey: ep.instance.GroupKey, Group: ep.instance.Group, State: ep.instance.State})
+			tracked = append(tracked, trackedInstance(ep.instance))
+		}
+	}
+	for _, instance := range instances {
+		stored[instance.GroupKey] = instance
+		// An ok instance has no episode; the no_data and keep policies keep it.
+		if _, ok := episodes[instance.GroupKey]; !ok && instance.State == models.AlertInstanceStateOK {
+			tracked = append(tracked, trackedInstance(instance))
 		}
 	}
 
-	plan := &evaluationPlan{}
-	for _, change := range Transition(Rule{Operator: alert.ThresholdOperator, Threshold: alert.ThresholdValue}, tracked, samples) {
+	rule := Rule{
+		Operator:  alert.ThresholdOperator,
+		Threshold: alert.ThresholdValue,
+		NoData:    alert.NoDataPolicy.OrZero(),
+		Grouped:   len(alert.GroupBy) > 0,
+	}
+	changes, err := Transition(rule, tracked, samples, at)
+	if err != nil {
+		return nil, err
+	}
+	plan := &evaluationPlan{state: models.AlertStateResolved, at: at}
+	for _, change := range changes {
 		m.log.Debug("alert evaluation complete",
 			"alert_id", alert.ID,
 			"alert_name", alert.Name,
 			"group_key", change.GroupKey,
 			"value", change.Value,
+			"sampled", change.Sampled,
 			"threshold", alert.ThresholdValue,
 			"operator", alert.ThresholdOperator,
 			"from", change.From,
 			"to", change.To)
 		ep := episodes[change.GroupKey]
 		switch {
-		case change.To == models.AlertInstanceStateFiring:
-			plan.fires = append(plan.fires, m.planFire(alert, ep.instance, ep.history, change, messages))
+		case change.To != models.AlertInstanceStateOK:
+			current := ep.instance
+			if current == nil {
+				// A tracked ok group keeps its last value and sighting.
+				current = stored[change.GroupKey]
+			}
+			plan.opens = append(plan.opens, m.planOpen(alert, rule, current, ep.history, change, at, messages))
+			plan.state = summaryState(plan.state, change.To)
 		case change.Closes():
 			plan.resolves = append(plan.resolves, &resolveStep{
 				change:  change,
 				history: ep.history,
-				message: fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, change.Value),
+				message: resolveMessage(alert, change),
+				notify:  alert.NotifyOnResolve,
 			})
+			if !change.Untracked {
+				plan.tracks = append(plan.tracks, okInstance(alert.ID, nil, change, at))
+			}
+		case change.Untracked:
+			if _, ok := stored[change.GroupKey]; ok {
+				plan.untracks = append(plan.untracks, change.GroupKey)
+			}
+		case change.Sampled:
+			plan.tracks = append(plan.tracks, okInstance(alert.ID, stored[change.GroupKey], change, at))
 		}
 	}
 	return plan, nil
 }
 
+// trackedInstance is the Transition input of a stored instance.
+func trackedInstance(instance *models.AlertInstance) Instance {
+	lastSeen := instance.StateSince
+	if instance.LastSeenAt != nil {
+		lastSeen = *instance.LastSeenAt
+	}
+	return Instance{GroupKey: instance.GroupKey, Group: instance.Group, State: instance.State, LastSeen: lastSeen}
+}
+
+// summaryState folds one group's state into the rule's last_state: firing
+// when any group fires, else no_data when any group has no data.
+func summaryState(current models.AlertState, group models.AlertInstanceState) models.AlertState {
+	switch {
+	case group == models.AlertInstanceStateFiring:
+		return models.AlertStateFiring
+	case group == models.AlertInstanceStateNoData && current != models.AlertStateFiring:
+		return models.AlertStateNoData
+	default:
+		return current
+	}
+}
+
+func resolveMessage(alert *models.Alert, change Change) string {
+	switch {
+	case change.Forgotten:
+		return fmt.Sprintf("group forgotten after %d hours without data", int(ForgetAfter.Hours()))
+	case !change.Sampled && change.Untracked && change.GroupKey == "" && len(alert.GroupBy) > 0:
+		return fmt.Sprintf("alert %s resolved: the query returns rows again", alert.Name)
+	default:
+		return fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, change.Value)
+	}
+}
+
 // write commits the plan inside the evaluation's eval_seq transaction: the
-// firing episodes and their delivery reservations, the closed episodes and
-// the rule's summary state.
+// open episodes and their delivery reservations, the closed episodes, the ok
+// instances and the rule's summary state.
 func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertID models.AlertID) error {
-	for _, step := range plan.fires {
-		if err := plan.writeFire(ctx, tx, alertID, step); err != nil {
+	for _, step := range plan.opens {
+		if err := plan.writeOpen(ctx, tx, alertID, step); err != nil {
 			return err
 		}
 	}
@@ -226,24 +315,42 @@ func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertI
 			return err
 		}
 	}
-	if len(plan.fires) > 0 {
-		return tx.MarkAlertTriggered(ctx, alertID)
+	for _, groupKey := range plan.untracks {
+		if err := tx.DeleteAlertInstance(ctx, alertID, groupKey); err != nil {
+			return err
+		}
 	}
-	return tx.MarkAlertEvaluated(ctx, alertID)
+	for i := range plan.tracks {
+		if err := tx.UpsertAlertInstance(ctx, &plan.tracks[i]); err != nil {
+			return err
+		}
+	}
+	return tx.MarkAlertEvaluated(ctx, alertID, plan.state)
 }
 
-func (plan *evaluationPlan) writeFire(ctx context.Context, tx store.StoreOps, alertID models.AlertID, step *fireStep) error {
+func (plan *evaluationPlan) writeOpen(ctx context.Context, tx store.StoreOps, alertID models.AlertID, step *openStep) error {
 	switch {
 	case step.history == nil:
-		value := step.change.Value
-		history, err := tx.InsertAlertHistory(ctx, alertID, step.change.GroupKey, step.change.Group, models.AlertStatusTriggered, &value, step.message, step.payload)
+		var value *float64
+		if step.status == models.AlertStatusTriggered {
+			value = &step.change.Value
+		}
+		history, err := tx.InsertAlertHistory(ctx, alertID, step.change.GroupKey, step.change.Group, step.status, value, step.message, step.payload)
 		if err != nil {
 			return err
 		}
 		step.history = history
-		step.instance.StateSince = history.TriggeredAt
+		step.instance.StateSince = plan.at
 		step.instance.HistoryID = &history.ID
 		plan.newEpisode = true
+	case step.moved:
+		if err := tx.SetOpenAlertHistoryStatus(ctx, step.history.ID, step.status, step.message); err != nil {
+			return err
+		}
+		if err := tx.UpdateAlertHistoryPayload(ctx, step.history.ID, step.payload); err != nil {
+			return err
+		}
+		step.instance.StateSince = plan.at
 	case step.payload != nil:
 		if err := tx.UpdateAlertHistoryPayload(ctx, step.history.ID, step.payload); err != nil {
 			return err
@@ -266,24 +373,41 @@ func (m *Manager) deliverResolved(ctx context.Context, alert *models.Alert, step
 	entry.Message = step.message
 	entry.ResolvedAt = &now
 	entry.Status = models.AlertStatusResolved
-	if entry.Value == nil {
+	if entry.Value == nil && step.change.Sampled {
 		value := step.change.Value
 		entry.Value = &value
 	}
-	if err := m.sendResolved(ctx, mc, entry, step.change.Value, nil); err != nil {
+	value := step.change.Value
+	if !step.change.Sampled && entry.Value != nil {
+		value = *entry.Value
+	}
+	if err := m.sendResolved(ctx, mc, entry, value, nil); err != nil {
 		m.log.Warn("failed to send resolved alert notifications", "alert_id", alert.ID, "group_key", step.change.GroupKey, "error", err)
 		return
 	}
 	m.log.Debug("resolved alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 }
 
-// planFire decides what one firing group writes and whether it notifies. An
-// open episode (prev and current set) notifies again only while its instance
-// is not notified and its delivery bookkeeping asks for a retry.
-func (m *Manager) planFire(alert *models.Alert, current *models.AlertInstance, prev *models.AlertHistoryEntry, change Change, messages func() *messageContext) *fireStep {
-	step := &fireStep{change: change, instance: firingInstance(alert.ID, current, change), history: prev}
+// planOpen decides what one group in firing or no_data writes and whether it
+// notifies. An open episode in the same state notifies again only while its
+// instance is not notified and its delivery bookkeeping asks for a retry. An
+// open episode that moves between firing and no_data notifies its new state.
+func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.AlertInstance, prev *models.AlertHistoryEntry, change Change, at time.Time, messages func() *messageContext) *openStep {
+	status := models.AlertStatusTriggered
+	if change.To == models.AlertInstanceStateNoData {
+		status = models.AlertStatusNoData
+	}
+	step := &openStep{change: change, status: status, instance: openInstance(alert.ID, rule, current, change, at), history: prev}
+	step.moved = prev != nil && change.From != change.To
 	attempts, retry := deliveryRetryState(prev)
-	if prev != nil && (current.Notified || !retry) {
+	if prev == nil {
+		step.instance.Notified = false
+		step.instance.HistoryID = nil
+	}
+	if step.moved {
+		attempts, retry = 0, false
+		step.instance.Notified = false
+	} else if prev != nil && (current.Notified || !retry) {
 		step.instance.Notified = true
 		if attempts >= maxDeliveryAttempts && prev.Payload["delivery_in_progress"] == true {
 			prev.Payload["delivery_in_progress"] = false
@@ -298,23 +422,32 @@ func (m *Manager) planFire(alert *models.Alert, current *models.AlertInstance, p
 	}
 
 	value := change.Value
-	m.log.Info("alert triggered",
-		"alert_id", alert.ID,
-		"alert_name", alert.Name,
-		"group_key", change.GroupKey,
-		"severity", alert.Severity,
-		"value", value,
-		"threshold", alert.ThresholdValue,
-		"operator", alert.ThresholdOperator)
+	if status == models.AlertStatusNoData {
+		m.log.Info("alert has no data", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", change.GroupKey, "severity", alert.Severity)
+		step.message = fmt.Sprintf("alert %s has no data: the query returned no row", alert.Name)
+	} else {
+		m.log.Info("alert triggered",
+			"alert_id", alert.ID,
+			"alert_name", alert.Name,
+			"group_key", change.GroupKey,
+			"severity", alert.Severity,
+			"value", value,
+			"threshold", alert.ThresholdValue,
+			"operator", alert.ThresholdOperator)
+		step.message = fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
+	}
 
 	mc := messages()
-	labels, annotations := mc.metadata(models.AlertStatusTriggered, value, change.Group)
-	step.message = fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
-	notificationHistory := prev
-	if notificationHistory == nil {
-		notificationHistory = &models.AlertHistoryEntry{TriggeredAt: time.Now().UTC(), Message: step.message, GroupKey: change.GroupKey, Group: change.Group}
+	labels, annotations := mc.metadata(status, value, change.Group)
+	notificationHistory := &models.AlertHistoryEntry{TriggeredAt: at, Message: step.message, GroupKey: change.GroupKey, Group: change.Group}
+	if prev != nil {
+		entry := *prev
+		if step.moved {
+			entry.Message = step.message
+		}
+		notificationHistory = &entry
 	}
-	notification := mc.notification(notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
+	notification := mc.notification(notificationHistory, labels, annotations, status, value)
 	if retry {
 		notification.deliveryTargets = pendingDeliveryTargets(prev.Payload)
 		notification.attemptedTargets = storedDeliveryTargets(prev.Payload, "delivery_attempted")
@@ -329,7 +462,7 @@ func (m *Manager) planFire(alert *models.Alert, current *models.AlertInstance, p
 	maps.Copy(payload, map[string]any{
 		"labels":                     copyStringMap(labels),
 		"annotations":                copyStringMap(annotations),
-		"status":                     string(models.AlertStatusTriggered),
+		"status":                     string(status),
 		"delivery_failed":            false,
 		"delivery_in_progress":       true,
 		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
@@ -347,9 +480,9 @@ func (m *Manager) planFire(alert *models.Alert, current *models.AlertInstance, p
 	return step
 }
 
-// deliverFiring sends one group's firing notification after its reservation
-// committed, then records the outcome.
-func (m *Manager) deliverFiring(ctx context.Context, alert *models.Alert, step *fireStep) {
+// deliverOpen sends one group's firing or no-data notification after its
+// reservation committed, then records the outcome.
+func (m *Manager) deliverOpen(ctx context.Context, alert *models.Alert, step *openStep) {
 	step.notification.TriggeredAt = step.history.TriggeredAt
 	results := m.deliver(ctx, step.notification)
 	deliveryErr := results.Err()
@@ -376,19 +509,40 @@ func (m *Manager) deliverFiring(ctx context.Context, alert *models.Alert, step *
 	m.recordDeliveryOutcome(ctx, alert.ID, step.change.GroupKey, step.history.ID, payload, deliveryErr == nil || step.attempts >= maxDeliveryAttempts)
 }
 
-// firingInstance is the instance after a firing evaluation. A new episode
-// gets its start and history id when the row is written.
-func firingInstance(alertID models.AlertID, current *models.AlertInstance, change Change) models.AlertInstance {
+// openInstance is the instance after an evaluation that left the group in
+// firing or no_data. A new episode gets its start and history id when the row
+// is written. The value is the one read, or 0 that the zero policy compared;
+// a group without a row under the other policies keeps its last value.
+func openInstance(alertID models.AlertID, rule Rule, current *models.AlertInstance, change Change, at time.Time) models.AlertInstance {
 	instance := models.AlertInstance{AlertID: alertID, GroupKey: change.GroupKey, Group: change.Group}
 	if current != nil {
 		instance = *current
 	}
-	instance.State = models.AlertInstanceStateFiring
-	value := change.Value
-	instance.Value = &value
+	instance.State = change.To
+	if change.Sampled || rule.NoData == models.AlertNoDataZero {
+		value := change.Value
+		instance.Value = &value
+	}
 	if change.Sampled {
-		now := time.Now().UTC()
-		instance.LastSeenAt = &now
+		seen := at
+		instance.LastSeenAt = &seen
+	}
+	return instance
+}
+
+// okInstance is the instance of an ok group that the no_data and keep
+// policies track. current is its stored ok instance, nil when the group was
+// untracked or just closed an episode.
+func okInstance(alertID models.AlertID, current *models.AlertInstance, change Change, at time.Time) models.AlertInstance {
+	instance := models.AlertInstance{AlertID: alertID, GroupKey: change.GroupKey, Group: change.Group, State: models.AlertInstanceStateOK, StateSince: at}
+	if current != nil && current.State == models.AlertInstanceStateOK {
+		instance = *current
+	}
+	if change.Sampled {
+		value := change.Value
+		seen := at
+		instance.Value = &value
+		instance.LastSeenAt = &seen
 	}
 	return instance
 }

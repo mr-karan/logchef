@@ -366,7 +366,7 @@ describe("Explorer history navigation", () => {
     await settle();
     await router.push('/admin');
     await enablePalette();
-    const alert: Alert = { id: 5, source_id: 3, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', condition_json: 'status>=500', lookback_seconds: 3600, threshold_operator: 'gt', threshold_value: 0, frequency_seconds: 60, severity: 'warning', destination_ids: [], is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
+    const alert: Alert = { id: 5, source_id: 3, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', condition_json: 'status>=500', lookback_seconds: 3600, threshold_operator: 'gt', threshold_value: 0, frequency_seconds: 60, severity: 'warning', destination_ids: [], no_data_policy: 'zero', notify_on_resolve: true, is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
     const entry: AlertHistoryEntry = { id: 9, alert_id: 5, group_key: '', status: 'triggered', triggered_at: '2026-10-20T00:00:00Z', created_at: '' };
     vi.mocked(alertsApi.list).mockResolvedValue({ status: 'success', data: [alert] });
     const waiting = deferred();
@@ -417,7 +417,7 @@ describe("Explorer history navigation", () => {
     await settle();
     await router.push('/admin');
     await enablePalette();
-    const alert: Alert = { id: 5, source_id: 3, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', condition_json: 'status>=500', lookback_seconds: 300, threshold_operator: 'gt', threshold_value: 5, frequency_seconds: 60, severity: 'warning', destination_ids: [], is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
+    const alert: Alert = { id: 5, source_id: 3, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', condition_json: 'status>=500', lookback_seconds: 300, threshold_operator: 'gt', threshold_value: 5, frequency_seconds: 60, severity: 'warning', destination_ids: [], no_data_policy: 'zero', notify_on_resolve: true, is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
     const entry: AlertHistoryEntry = { id: 9, alert_id: 5, group_key: '', status: 'triggered', triggered_at: '2026-10-20T00:00:00Z', created_at: '' };
     vi.mocked(alertsApi.list).mockResolvedValue({ status: 'success', data: [alert] });
     vi.spyOn(alertsApi, 'get').mockResolvedValue({ status: 'success', data: alert });

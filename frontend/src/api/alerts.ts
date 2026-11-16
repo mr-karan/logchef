@@ -3,9 +3,12 @@ import type { AlertEditorMode, QueryLanguage } from "@/lib/queryMetadata";
 
 export type AlertThresholdOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
 export type AlertSeverity = "info" | "warning" | "critical";
+/** What a group without a row in the result means. */
+export type AlertNoDataPolicy = "zero" | "no_data" | "keep";
 
 export interface AlertInstanceCounts {
   firing: number;
+  no_data: number;
   ok: number;
 }
 
@@ -28,9 +31,11 @@ export interface Alert {
   generator_url?: string;
   destination_ids: number[];
   group_by?: string[] | null;
+  no_data_policy: AlertNoDataPolicy;
+  notify_on_resolve: boolean;
   instance_counts?: AlertInstanceCounts;
   is_active: boolean;
-  last_state: "firing" | "resolved";
+  last_state: "firing" | "resolved" | "no_data";
   last_evaluated_at?: string | null;
   last_triggered_at?: string | null;
   created_by?: number | null;
@@ -42,7 +47,7 @@ export interface AlertInstance {
   alert_id: number;
   group_key: string;
   group: Record<string, string>;
-  state: "ok" | "firing";
+  state: "ok" | "firing" | "no_data";
   value?: number | null;
   state_since: string;
   last_seen_at?: string | null;
@@ -54,7 +59,7 @@ export interface AlertHistoryEntry {
   alert_id: number;
   group_key: string;
   group?: Record<string, string>;
-  status: "triggered" | "resolved" | "error";
+  status: "triggered" | "resolved" | "error" | "no_data";
   triggered_at: string;
   resolved_at?: string | null;
   value?: number | null;
@@ -81,6 +86,8 @@ export interface CreateAlertRequest {
   generator_url?: string;
   destination_ids?: number[];
   group_by?: string[];
+  no_data_policy?: AlertNoDataPolicy;
+  notify_on_resolve?: boolean;
   is_active: boolean;
 }
 
@@ -101,6 +108,8 @@ export interface UpdateAlertRequest {
   generator_url?: string;
   destination_ids?: number[];
   group_by?: string[];
+  no_data_policy?: AlertNoDataPolicy;
+  notify_on_resolve?: boolean;
   is_active?: boolean;
 }
 
@@ -120,6 +129,7 @@ export interface TestAlertQueryRequest {
   threshold_operator: AlertThresholdOperator;
   threshold_value: number;
   group_by?: string[];
+  no_data_policy?: AlertNoDataPolicy;
 }
 
 export interface AlertSample {
@@ -137,6 +147,8 @@ export interface TestAlertQueryResponse {
   /** Grouped rules only: at most 20 samples, out of groups_total. */
   samples: AlertSample[];
   groups_total: number;
+  /** The result had no row; the rule's no-data policy decides what that means. */
+  no_data: boolean;
 }
 
 export const alertsApi = {

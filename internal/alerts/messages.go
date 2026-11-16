@@ -79,7 +79,12 @@ func (mc *messageContext) metadata(status models.AlertStatus, value float64, gro
 		annotations["condition_json"] = alert.ConditionJSON
 	}
 	annotations["threshold"] = fmt.Sprintf("%s %.4f", alert.ThresholdOperator, alert.ThresholdValue)
-	annotations["value"] = strconv.FormatFloat(value, 'f', 4, 64)
+	if status == models.AlertStatusNoData {
+		// A group without data has no value to report.
+		annotations["reason"] = "no_data"
+	} else {
+		annotations["value"] = strconv.FormatFloat(value, 'f', 4, 64)
+	}
 	annotations["status"] = string(status)
 	annotations["frequency_seconds"] = strconv.Itoa(alert.FrequencySeconds)
 	if alert.LookbackSeconds > 0 {

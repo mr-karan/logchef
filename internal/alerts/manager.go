@@ -78,8 +78,9 @@ func (noopSender) Send(_ context.Context, _ AlertNotification) DeliveryResults {
 }
 
 // ManualResolve closes the open episode of one group, or of every group when
-// groupKey is nil, and sends one resolved notification per closed group. It
-// returns models.ErrNotFound when nothing is open.
+// groupKey is nil, and sends one resolved notification per closed group when
+// the rule notifies on resolve. It returns models.ErrNotFound when nothing is
+// open.
 func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, groupKey *string, message string) error {
 	alert, err := m.db.GetAlert(ctx, alertID)
 	if err != nil {
@@ -109,6 +110,9 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, gro
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
 
+	if !alert.NotifyOnResolve {
+		return nil
+	}
 	mc := m.newMessageContext(ctx, alert)
 	now := time.Now().UTC()
 	for _, entry := range entries {

@@ -191,6 +191,8 @@ const alert = {
   frequency_seconds: 60,
   severity: "critical",
   destination_ids: [],
+  no_data_policy: "zero",
+  notify_on_resolve: true,
   is_active: true,
   last_state: "firing",
   created_at: "2026-10-01T00:00:00Z",

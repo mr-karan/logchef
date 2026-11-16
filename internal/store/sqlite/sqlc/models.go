@@ -36,6 +36,7 @@ type Alert struct {
 	GroupByJson       sql.NullString `json:"group_by_json"`
 	NoDataPolicy      string         `json:"no_data_policy"`
 	EvalSeq           int64          `json:"eval_seq"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
 }
 
 type AlertDestination struct {

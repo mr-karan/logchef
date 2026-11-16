@@ -834,11 +834,13 @@ INSERT INTO alerts (
     annotations_json,
     generator_url,
     group_by_json,
+    no_data_policy,
+    notify_on_resolve,
     is_active,
     created_by
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq, notify_on_resolve
 `
 
 type CreateAlertParams struct {
@@ -858,6 +860,8 @@ type CreateAlertParams struct {
 	AnnotationsJson   sql.NullString `json:"annotations_json"`
 	GeneratorUrl      sql.NullString `json:"generator_url"`
 	GroupByJson       sql.NullString `json:"group_by_json"`
+	NoDataPolicy      string         `json:"no_data_policy"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
 	IsActive          int64          `json:"is_active"`
 	CreatedBy         sql.NullInt64  `json:"created_by"`
 }
@@ -881,6 +885,8 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		arg.AnnotationsJson,
 		arg.GeneratorUrl,
 		arg.GroupByJson,
+		arg.NoDataPolicy,
+		arg.NotifyOnResolve,
 		arg.IsActive,
 		arg.CreatedBy,
 	)
@@ -912,6 +918,7 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.GroupByJson,
 		&i.NoDataPolicy,
 		&i.EvalSeq,
+		&i.NotifyOnResolve,
 	)
 	return i, err
 }
@@ -1977,7 +1984,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq FROM alerts WHERE id = ?
+SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq, notify_on_resolve FROM alerts WHERE id = ?
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -2010,6 +2017,7 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.GroupByJson,
 		&i.NoDataPolicy,
 		&i.EvalSeq,
+		&i.NotifyOnResolve,
 	)
 	return i, err
 }
@@ -2290,7 +2298,7 @@ func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (Job, error) {
 
 const getLatestUnresolvedAlertHistory = `-- name: GetLatestUnresolvedAlertHistory :one
 SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
-WHERE alert_id = ? AND status = 'triggered'
+WHERE alert_id = ? AND status IN ('triggered', 'no_data')
 ORDER BY triggered_at DESC, id DESC
 LIMIT 1
 `
@@ -2794,7 +2802,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 
 const getTriggeredAlertHistoryAlertID = `-- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
-WHERE id = ? AND status = 'triggered'
+WHERE id = ? AND status IN ('triggered', 'no_data')
 `
 
 func (q *Queries) GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error) {
@@ -3349,7 +3357,7 @@ SET payload_json = json_set(json_remove(payload_json, '$.delivery_deadline_at'),
     '$.delivery_failed', json('true'),
     '$.delivery_error', 'delivery interrupted',
     '$.delivery_retries_exhausted', json(CASE WHEN COALESCE(json_extract(payload_json, '$.delivery_attempts'), 1) >= 3 THEN 'true' ELSE 'false' END))
-WHERE status = 'triggered'
+WHERE status IN ('triggered', 'no_data')
   AND json_extract(payload_json, '$.delivery_in_progress') = 1
   AND (CAST(?1 AS INTEGER) = 0 OR id = ?1)
   AND (CAST(?2 AS INTEGER) = 0 OR alert_id = ?2)
@@ -3639,7 +3647,7 @@ func (q *Queries) ListAlertInstances(ctx context.Context, alertID int64) ([]Aler
 }
 
 const listAlertsBySource = `-- name: ListAlertsBySource :many
-SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq FROM alerts
+SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq, notify_on_resolve FROM alerts
 WHERE source_id = ?
 ORDER BY updated_at DESC, created_at DESC
 `
@@ -3681,6 +3689,7 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 			&i.GroupByJson,
 			&i.NoDataPolicy,
 			&i.EvalSeq,
+			&i.NotifyOnResolve,
 		); err != nil {
 			return nil, err
 		}
@@ -3696,7 +3705,7 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 }
 
 const listAlertsForUser = `-- name: ListAlertsForUser :many
-SELECT a.id, a.source_id, a.name, a.description, a.query_language, a.editor_mode, a."query", a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.created_by, a.created_at, a.updated_at, a.group_by_json, a.no_data_policy, a.eval_seq FROM alerts a
+SELECT a.id, a.source_id, a.name, a.description, a.query_language, a.editor_mode, a."query", a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.created_by, a.created_at, a.updated_at, a.group_by_json, a.no_data_policy, a.eval_seq, a.notify_on_resolve FROM alerts a
 WHERE a.source_id IN (
     SELECT DISTINCT ts.source_id
     FROM team_sources ts
@@ -3743,6 +3752,7 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 			&i.GroupByJson,
 			&i.NoDataPolicy,
 			&i.EvalSeq,
+			&i.NotifyOnResolve,
 		); err != nil {
 			return nil, err
 		}
@@ -4778,7 +4788,7 @@ func (q *Queries) ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]O
 
 const listOpenAlertGroupHistoryIDs = `-- name: ListOpenAlertGroupHistoryIDs :many
 SELECT id FROM alert_history
-WHERE alert_id = ?1 AND group_key = ?2 AND status = 'triggered'
+WHERE alert_id = ?1 AND group_key = ?2 AND status IN ('triggered', 'no_data')
 `
 
 type ListOpenAlertGroupHistoryIDsParams struct {
@@ -4811,7 +4821,7 @@ func (q *Queries) ListOpenAlertGroupHistoryIDs(ctx context.Context, arg ListOpen
 
 const listOpenAlertHistory = `-- name: ListOpenAlertHistory :many
 SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
-WHERE alert_id = ?1 AND status = 'triggered'
+WHERE alert_id = ?1 AND status IN ('triggered', 'no_data')
 ORDER BY triggered_at DESC, id DESC
 `
 
@@ -6284,14 +6294,22 @@ func (q *Queries) LockReport(ctx context.Context, id int64) (int64, error) {
 
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
-SET last_state = 'resolved',
+SET last_triggered_at = CASE WHEN ?1 = 'firing' AND last_state <> 'firing' THEN strftime('%Y-%m-%dT%H:%M:%SZ', 'now') ELSE last_triggered_at END,
+    last_state = ?1,
     last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?
+WHERE id = ?2
 `
 
-func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, id)
+type MarkAlertEvaluatedParams struct {
+	LastState string `json:"last_state"`
+	ID        int64  `json:"id"`
+}
+
+// Records an evaluation and the rule's summary state. last_triggered_at moves
+// when the rule starts firing.
+func (q *Queries) MarkAlertEvaluated(ctx context.Context, arg MarkAlertEvaluatedParams) error {
+	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, arg.LastState, arg.ID)
 	return err
 }
 
@@ -6321,20 +6339,6 @@ UPDATE alerts SET last_state = 'resolved', eval_seq = eval_seq + 1, updated_at =
 
 func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.markAlertResolvedStmt, markAlertResolved, id)
-	return err
-}
-
-const markAlertTriggered = `-- name: MarkAlertTriggered :exec
-UPDATE alerts
-SET last_state = 'firing',
-    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END,
-    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?
-`
-
-func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.markAlertTriggeredStmt, markAlertTriggered, id)
 	return err
 }
 
@@ -6375,11 +6379,11 @@ func (q *Queries) PauseReport(ctx context.Context, arg PauseReportParams) (int64
 const pruneAlertHistory = `-- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = ?
-  AND target.status <> 'triggered'
+  AND target.status NOT IN ('triggered', 'no_data')
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
-    WHERE keep.alert_id = ? AND keep.status <> 'triggered'
+    WHERE keep.alert_id = ? AND keep.status NOT IN ('triggered', 'no_data')
     ORDER BY keep.triggered_at DESC, keep.id DESC
     LIMIT ?
  )
@@ -6616,13 +6620,16 @@ const refreshAlertState = `-- name: RefreshAlertState :exec
 UPDATE alerts
 SET last_state = CASE WHEN EXISTS (
         SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'firing'
-    ) THEN 'firing' ELSE 'resolved' END,
+    ) THEN 'firing' WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'no_data'
+    ) THEN 'no_data' ELSE 'resolved' END,
     eval_seq = eval_seq + 1,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?1
 `
 
-// After a manual resolve of one group: the rule is firing while any group fires.
+// After a manual resolve of one group: the rule is firing while any group
+// fires, else no_data while any group has no data.
 func (q *Queries) RefreshAlertState(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.refreshAlertStateStmt, refreshAlertState, id)
 	return err
@@ -6818,7 +6825,7 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?1
-WHERE alert_id = ?2 AND group_key = ?3 AND status = 'triggered'
+WHERE alert_id = ?2 AND group_key = ?3 AND status IN ('triggered', 'no_data')
 `
 
 type ResolveAlertGroupHistoryParams struct {
@@ -6837,7 +6844,7 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?1
-WHERE alert_id = ?2 AND status = 'triggered'
+WHERE alert_id = ?2 AND status IN ('triggered', 'no_data')
 `
 
 type ResolveAlertHistoryForAlertParams struct {
@@ -7040,6 +7047,27 @@ type SetOAuthAuthRequestGrantParams struct {
 func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error {
 	_, err := q.exec(ctx, q.setOAuthAuthRequestGrantStmt, setOAuthAuthRequestGrant, arg.GrantID, arg.ID)
 	return err
+}
+
+const setOpenAlertHistoryStatus = `-- name: SetOpenAlertHistoryStatus :one
+UPDATE alert_history
+SET status = ?, message = ?
+WHERE id = ? AND status IN ('triggered', 'no_data')
+RETURNING id
+`
+
+type SetOpenAlertHistoryStatusParams struct {
+	Status  string         `json:"status"`
+	Message sql.NullString `json:"message"`
+	ID      int64          `json:"id"`
+}
+
+// An open episode that moves between firing and no_data.
+func (q *Queries) SetOpenAlertHistoryStatus(ctx context.Context, arg SetOpenAlertHistoryStatusParams) (int64, error) {
+	row := q.queryRow(ctx, q.setOpenAlertHistoryStatusStmt, setOpenAlertHistoryStatus, arg.Status, arg.Message, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const setSavedViewDefaultFlag = `-- name: SetSavedViewDefaultFlag :one
@@ -7366,6 +7394,8 @@ SET name = ?,
     annotations_json = ?,
     generator_url = ?,
     group_by_json = ?,
+    no_data_policy = ?,
+    notify_on_resolve = ?,
     is_active = ?,
     eval_seq = eval_seq + 1,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
@@ -7389,6 +7419,8 @@ type UpdateAlertParams struct {
 	AnnotationsJson   sql.NullString `json:"annotations_json"`
 	GeneratorUrl      sql.NullString `json:"generator_url"`
 	GroupByJson       sql.NullString `json:"group_by_json"`
+	NoDataPolicy      string         `json:"no_data_policy"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
 	IsActive          int64          `json:"is_active"`
 	ID                int64          `json:"id"`
 }
@@ -7410,6 +7442,8 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 		arg.AnnotationsJson,
 		arg.GeneratorUrl,
 		arg.GroupByJson,
+		arg.NoDataPolicy,
+		arg.NotifyOnResolve,
 		arg.IsActive,
 		arg.ID,
 	)
@@ -7421,7 +7455,7 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
-WHERE id = ? AND status = 'triggered'
+WHERE id = ? AND status IN ('triggered', 'no_data')
 RETURNING id
 `
 

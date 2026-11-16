@@ -7,7 +7,7 @@ import type { AlertHistoryEntry } from "@/api/alerts";
 
 const props = defineProps<{ entry: AlertHistoryEntry }>();
 const now = ref(Date.now());
-const deliveryActive = computed(() => props.entry.status === "triggered"
+const deliveryActive = computed(() => (props.entry.status === "triggered" || props.entry.status === "no_data")
   && !props.entry.resolved_at && props.entry.payload?.delivery_in_progress === true);
 watch(deliveryActive, (active, _, onCleanup) => {
   now.value = Date.now();

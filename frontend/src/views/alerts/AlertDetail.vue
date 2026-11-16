@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
+import { severityLabels, alertStateLabels, instanceStateLabels } from "@/i18n/alertLabels";
 
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -168,6 +168,17 @@ async function handleResolve(groupKey: string, message: string) {
   }
 }
 
+// An episode stays open while its group fires or has no data.
+function isOpen(entry: AlertHistoryEntry): boolean {
+  return (entry.status === "triggered" || entry.status === "no_data") && !entry.resolved_at;
+}
+
+function instanceVariant(state: AlertInstance["state"]): "destructive" | "outline" | "secondary" {
+  if (state === "firing") return "destructive";
+  if (state === "no_data") return "outline";
+  return "secondary";
+}
+
 function groupLabel(group: AlertInstance["group"] | undefined): string {
   return formatAlertGroup(group) || t("alerts.wholeResult");
 }
@@ -274,15 +285,15 @@ watch([alertId, currentTab], ([id, tab]) => {
                 <TableRow v-for="instance in instances" :key="instance.group_key">
                   <TableCell class="font-mono text-xs">{{ groupLabel(instance.group) }}</TableCell>
                   <TableCell>
-                    <Badge :variant="instance.state === 'firing' ? 'destructive' : 'secondary'" class="text-xs">
-                      {{ instance.state === 'firing' ? t('alerts.stateFiring') : t('alerts.stateOk') }}
+                    <Badge :variant="instanceVariant(instance.state)" class="text-xs">
+                      {{ t(instanceStateLabels[instance.state]) }}
                     </Badge>
                   </TableCell>
                   <TableCell class="tabular-nums">{{ instance.value ?? '' }}</TableCell>
                   <TableCell class="text-sm text-muted-foreground">{{ formatEventTime(instance.state_since) }}</TableCell>
                   <TableCell class="text-right">
                     <Button
-                      v-if="instance.state === 'firing'"
+                      v-if="instance.state !== 'ok'"
                       variant="outline"
                       size="sm"
                       @click="handleResolve(instance.group_key, 'Manually resolved')"
@@ -329,6 +340,8 @@ watch([alertId, currentTab], ([id, tab]) => {
                       'flex items-center justify-center rounded-full p-1 ring-4 ring-background',
                       entry.status === 'triggered' && !entry.resolved_at
                         ? 'bg-destructive text-destructive-foreground'
+                        : entry.status === 'no_data' && !entry.resolved_at
+                        ? 'bg-amber-500 text-white'
                         : entry.status === 'resolved' || entry.resolved_at
                         ? 'bg-green-500 text-white'
                         : entry.status === 'error'
@@ -336,7 +349,7 @@ watch([alertId, currentTab], ([id, tab]) => {
                         : 'bg-muted text-muted-foreground'
                     ]"
                   >
-                    <AlertCircle v-if="entry.status === 'triggered' && !entry.resolved_at" class="h-3.5 w-3.5" />
+                    <AlertCircle v-if="isOpen(entry)" class="h-3.5 w-3.5" />
                     <CheckCircle2 v-else-if="entry.status === 'resolved' || entry.resolved_at" class="h-3.5 w-3.5" />
                     <AlertTriangle v-else-if="entry.status === 'error'" class="h-3.5 w-3.5" />
                     <Clock v-else class="h-3.5 w-3.5" />
@@ -392,7 +405,7 @@ watch([alertId, currentTab], ([id, tab]) => {
                         {{ t('askChef.investigate') }}
                       </Button>
                       <Button
-                        v-if="entry.status === 'triggered' && !entry.resolved_at"
+                        v-if="isOpen(entry)"
                         variant="outline"
                         size="sm"
                         @click="handleResolve(entry.group_key, 'Manually resolved')"

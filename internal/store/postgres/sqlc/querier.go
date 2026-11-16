@@ -386,10 +386,11 @@ type Querier interface {
 	LockReport(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock, which also covers a key with no row
 	LockSettingWrites(ctx context.Context, pgAdvisoryXactLock int64) error
-	MarkAlertEvaluated(ctx context.Context, id int64) error
+	// Records an evaluation and the rule's summary state. last_triggered_at moves
+	// when the rule starts firing.
+	MarkAlertEvaluated(ctx context.Context, arg MarkAlertEvaluatedParams) error
 	MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error)
 	MarkAlertResolved(ctx context.Context, id int64) error
-	MarkAlertTriggered(ctx context.Context, id int64) error
 	// Provisioning adopts a view; the definition and revision stay as they are.
 	MarkSavedViewManaged(ctx context.Context, id int64) (int64, error)
 	PauseReport(ctx context.Context, arg PauseReportParams) (int64, error)
@@ -412,7 +413,8 @@ type Querier interface {
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error)
-	// After a manual resolve of one group: the rule is firing while any group fires.
+	// After a manual resolve of one group: the rule is firing while any group
+	// fires, else no_data while any group has no data.
 	RefreshAlertState(ctx context.Context, id int64) error
 	ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error)
 	// Remove a link of either kind
@@ -448,6 +450,8 @@ type Querier interface {
 	// other kind.
 	SetCollectionItemKind(ctx context.Context, arg SetCollectionItemKindParams) (int64, error)
 	SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error
+	// An open episode that moves between firing and no_data.
+	SetOpenAlertHistoryStatus(ctx context.Context, arg SetOpenAlertHistoryStatusParams) (int64, error)
 	SetSavedViewDefaultFlag(ctx context.Context, arg SetSavedViewDefaultFlagParams) (int64, error)
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error

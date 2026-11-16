@@ -3,6 +3,7 @@ package alerts
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -24,5 +25,5 @@ func (m *Manager) evaluateValue(ctx context.Context, alert *models.Alert, value 
 	if err != nil {
 		return fmt.Errorf("failed to read alert: %w", err)
 	}
-	return m.commitEvaluation(ctx, alert, stored.EvalSeq, []Sample{{Value: value}})
+	return m.commitEvaluation(ctx, alert, stored.EvalSeq, []Sample{{Value: value}}, time.Now())
 }

@@ -570,9 +570,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.markAlertResolvedStmt, err = db.PrepareContext(ctx, markAlertResolved); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertResolved: %w", err)
 	}
-	if q.markAlertTriggeredStmt, err = db.PrepareContext(ctx, markAlertTriggered); err != nil {
-		return nil, fmt.Errorf("error preparing query MarkAlertTriggered: %w", err)
-	}
 	if q.markSavedViewManagedStmt, err = db.PrepareContext(ctx, markSavedViewManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkSavedViewManaged: %w", err)
 	}
@@ -662,6 +659,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.setOAuthAuthRequestGrantStmt, err = db.PrepareContext(ctx, setOAuthAuthRequestGrant); err != nil {
 		return nil, fmt.Errorf("error preparing query SetOAuthAuthRequestGrant: %w", err)
+	}
+	if q.setOpenAlertHistoryStatusStmt, err = db.PrepareContext(ctx, setOpenAlertHistoryStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query SetOpenAlertHistoryStatus: %w", err)
 	}
 	if q.setSavedViewDefaultFlagStmt, err = db.PrepareContext(ctx, setSavedViewDefaultFlag); err != nil {
 		return nil, fmt.Errorf("error preparing query SetSavedViewDefaultFlag: %w", err)
@@ -1680,11 +1680,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing markAlertResolvedStmt: %w", cerr)
 		}
 	}
-	if q.markAlertTriggeredStmt != nil {
-		if cerr := q.markAlertTriggeredStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing markAlertTriggeredStmt: %w", cerr)
-		}
-	}
 	if q.markSavedViewManagedStmt != nil {
 		if cerr := q.markSavedViewManagedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing markSavedViewManagedStmt: %w", cerr)
@@ -1833,6 +1828,11 @@ func (q *Queries) Close() error {
 	if q.setOAuthAuthRequestGrantStmt != nil {
 		if cerr := q.setOAuthAuthRequestGrantStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setOAuthAuthRequestGrantStmt: %w", cerr)
+		}
+	}
+	if q.setOpenAlertHistoryStatusStmt != nil {
+		if cerr := q.setOpenAlertHistoryStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setOpenAlertHistoryStatusStmt: %w", cerr)
 		}
 	}
 	if q.setSavedViewDefaultFlagStmt != nil {
@@ -2226,7 +2226,6 @@ type Queries struct {
 	markAlertEvaluatedStmt                 *sql.Stmt
 	markAlertInstanceNotifiedStmt          *sql.Stmt
 	markAlertResolvedStmt                  *sql.Stmt
-	markAlertTriggeredStmt                 *sql.Stmt
 	markSavedViewManagedStmt               *sql.Stmt
 	pauseReportStmt                        *sql.Stmt
 	pruneAlertHistoryStmt                  *sql.Stmt
@@ -2257,6 +2256,7 @@ type Queries struct {
 	saveOAuthAuthCodeStmt                  *sql.Stmt
 	setCollectionItemKindStmt              *sql.Stmt
 	setOAuthAuthRequestGrantStmt           *sql.Stmt
+	setOpenAlertHistoryStatusStmt          *sql.Stmt
 	setSavedViewDefaultFlagStmt            *sql.Stmt
 	setSourceManagedStmt                   *sql.Stmt
 	setTeamManagedStmt                     *sql.Stmt
@@ -2479,7 +2479,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAlertEvaluatedStmt:                 q.markAlertEvaluatedStmt,
 		markAlertInstanceNotifiedStmt:          q.markAlertInstanceNotifiedStmt,
 		markAlertResolvedStmt:                  q.markAlertResolvedStmt,
-		markAlertTriggeredStmt:                 q.markAlertTriggeredStmt,
 		markSavedViewManagedStmt:               q.markSavedViewManagedStmt,
 		pauseReportStmt:                        q.pauseReportStmt,
 		pruneAlertHistoryStmt:                  q.pruneAlertHistoryStmt,
@@ -2510,6 +2509,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		saveOAuthAuthCodeStmt:                  q.saveOAuthAuthCodeStmt,
 		setCollectionItemKindStmt:              q.setCollectionItemKindStmt,
 		setOAuthAuthRequestGrantStmt:           q.setOAuthAuthRequestGrantStmt,
+		setOpenAlertHistoryStatusStmt:          q.setOpenAlertHistoryStatusStmt,
 		setSavedViewDefaultFlagStmt:            q.setSavedViewDefaultFlagStmt,
 		setSourceManagedStmt:                   q.setSourceManagedStmt,
 		setTeamManagedStmt:                     q.setTeamManagedStmt,

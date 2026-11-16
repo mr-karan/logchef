@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/notify"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // smtpDialTimeout is the SMTP budget inside an alert delivery attempt.
@@ -43,11 +44,18 @@ func emailSubject(notification AlertNotification) string {
 		// Group values come from log data; keep them on one header line.
 		name += " [" + strings.Map(dropLineBreaks, formatGroup(notification.Group)) + "]"
 	}
-	return fmt.Sprintf("[Logchef] %s (%s) %s", name, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
+	return fmt.Sprintf("[Logchef] %s (%s) %s", name, strings.ToUpper(string(notification.Severity)), statusLabel(notification.Status))
+}
+
+func statusLabel(status models.AlertStatus) string {
+	if status == models.AlertStatusNoData {
+		return "NO DATA"
+	}
+	return strings.ToUpper(string(status))
 }
 
 func (s *EmailSender) buildBody(notification AlertNotification) string {
-	status := strings.ToUpper(string(notification.Status))
+	status := statusLabel(notification.Status)
 	severity := strings.ToUpper(string(notification.Severity))
 	lines := []string{
 		fmt.Sprintf("Alert: %s", notification.AlertName),
@@ -62,10 +70,12 @@ func (s *EmailSender) buildBody(notification AlertNotification) string {
 	} else if notification.SourceID > 0 {
 		lines = append(lines, fmt.Sprintf("Source ID: %d", notification.SourceID))
 	}
-	lines = append(lines,
-		fmt.Sprintf("Value: %.4f", notification.Value),
-		fmt.Sprintf("Threshold: %s %.4f", notification.ThresholdOp, notification.ThresholdValue),
-	)
+	if notification.Status == models.AlertStatusNoData {
+		lines = append(lines, "Value: no data")
+	} else {
+		lines = append(lines, fmt.Sprintf("Value: %.4f", notification.Value))
+	}
+	lines = append(lines, fmt.Sprintf("Threshold: %s %.4f", notification.ThresholdOp, notification.ThresholdValue))
 	if notification.FrequencySecs > 0 {
 		lines = append(lines, fmt.Sprintf("Frequency: %ds", notification.FrequencySecs))
 	}

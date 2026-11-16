@@ -138,9 +138,9 @@ func (db *DB) alertsWithDestinations(ctx context.Context, rows []sqlc.Alert) ([]
 	return alerts, db.attachDestinationIDs(ctx, alerts...)
 }
 
-// MarkAlertEvaluated updates state after evaluation finishes without triggering.
-func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
-	if err := db.writeQueries.MarkAlertEvaluated(ctx, int64(alertID)); err != nil {
+// MarkAlertEvaluated records an evaluation that left the rule in state.
+func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID, state models.AlertState) error {
+	if err := db.writeQueries.MarkAlertEvaluated(ctx, sqlc.MarkAlertEvaluatedParams{LastState: string(state), ID: int64(alertID)}); err != nil {
 		return fmt.Errorf("failed to mark alert evaluated: %w", err)
 	}
 	return nil
@@ -150,14 +150,6 @@ func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) er
 func (db *DB) TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
 	if err := db.writeQueries.TouchAlertEvaluated(ctx, int64(alertID)); err != nil {
 		return fmt.Errorf("failed to touch alert evaluated: %w", err)
-	}
-	return nil
-}
-
-// MarkAlertTriggered updates state when an alert fires.
-func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
-	if err := db.writeQueries.MarkAlertTriggered(ctx, int64(alertID)); err != nil {
-		return fmt.Errorf("failed to mark alert triggered: %w", err)
 	}
 	return nil
 }
@@ -277,6 +269,21 @@ func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, gro
 	return nil
 }
 
+// SetOpenAlertHistoryStatus moves an open episode between triggered and no_data.
+func (db *DB) SetOpenAlertHistoryStatus(ctx context.Context, historyID int64, status models.AlertStatus, message string) error {
+	if _, err := db.writeQueries.SetOpenAlertHistoryStatus(ctx, sqlc.SetOpenAlertHistoryStatusParams{
+		Status:  string(status),
+		Message: nullString(message),
+		ID:      historyID,
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
+		}
+		return fmt.Errorf("failed to set alert history status: %w", err)
+	}
+	return nil
+}
+
 // UpdateAlertHistoryPayload updates the payload of an existing alert history entry.
 func (db *DB) UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error {
 	payloadJSON, err := marshalPayload(payload)
@@ -367,6 +374,8 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 		AnnotationsJson:   nullString(annotationsJSON),
 		GeneratorUrl:      nullString(alert.GeneratorURL),
 		GroupByJson:       nullString(groupByJSON),
+		NoDataPolicy:      string(alert.NoDataPolicy.OrZero()),
+		NotifyOnResolve:   boolToInt(alert.NotifyOnResolve),
 		IsActive:          boolToInt(alert.IsActive),
 	}
 	if alert.CreatedBy != nil {
@@ -396,6 +405,8 @@ func alertUpdateParams(alert *models.Alert) (sqlc.UpdateAlertParams, error) {
 		AnnotationsJson:   createParams.AnnotationsJson,
 		GeneratorUrl:      createParams.GeneratorUrl,
 		GroupByJson:       createParams.GroupByJson,
+		NoDataPolicy:      createParams.NoDataPolicy,
+		NotifyOnResolve:   createParams.NotifyOnResolve,
 		IsActive:          createParams.IsActive,
 		ID:                int64(alert.ID),
 	}, nil
@@ -446,6 +457,8 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 		Annotations:       annotations,
 		GeneratorURL:      row.GeneratorUrl.String,
 		GroupBy:           groupBy,
+		NoDataPolicy:      models.AlertNoDataPolicy(row.NoDataPolicy),
+		NotifyOnResolve:   row.NotifyOnResolve == 1,
 		IsActive:          row.IsActive == 1,
 		LastState:         models.AlertState(row.LastState),
 		EvalSeq:           row.EvalSeq,
@@ -610,6 +623,22 @@ func (db *DB) UpsertAlertInstance(ctx context.Context, instance *models.AlertIns
 	}
 	if err := db.writeQueries.UpsertAlertInstance(ctx, params); err != nil {
 		return fmt.Errorf("failed to upsert alert instance: %w", err)
+	}
+	return nil
+}
+
+// DeleteAlertInstance removes the instance of (alert, group), if any.
+func (db *DB) DeleteAlertInstance(ctx context.Context, alertID models.AlertID, groupKey string) error {
+	if err := db.writeQueries.DeleteAlertInstance(ctx, sqlc.DeleteAlertInstanceParams{AlertID: int64(alertID), GroupKey: groupKey}); err != nil {
+		return fmt.Errorf("failed to delete alert instance: %w", err)
+	}
+	return nil
+}
+
+// DeleteAlertInstances removes every instance of the alert.
+func (db *DB) DeleteAlertInstances(ctx context.Context, alertID models.AlertID) error {
+	if err := db.writeQueries.DeleteAlertInstances(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to delete alert instances: %w", err)
 	}
 	return nil
 }

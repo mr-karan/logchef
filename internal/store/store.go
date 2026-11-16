@@ -227,9 +227,10 @@ type AlertStore interface {
 	GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error)
 	ListAlertsBySource(ctx context.Context, sourceID models.SourceID) ([]*models.Alert, error)
 	ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*models.Alert, error)
-	MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error
+	// MarkAlertEvaluated records an evaluation that left the rule in state,
+	// and sets last_triggered_at when the rule starts firing.
+	MarkAlertEvaluated(ctx context.Context, alertID models.AlertID, state models.AlertState) error
 	TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error
-	MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error
 	// InsertAlertHistory records an entry for one group; groupKey is "" and
 	// group nil for an ungrouped rule and for evaluation errors.
 	InsertAlertHistory(ctx context.Context, alertID models.AlertID, groupKey string, group map[string]string, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error)
@@ -249,6 +250,9 @@ type AlertStore interface {
 	// instances that remain. It returns models.ErrNotFound when the group has
 	// no open episode.
 	ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string) error
+	// SetOpenAlertHistoryStatus moves an open episode between triggered and
+	// no_data, and returns models.ErrNotFound when the episode is closed.
+	SetOpenAlertHistoryStatus(ctx context.Context, historyID int64, status models.AlertStatus, message string) error
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)
 	// PruneAlertHistory keeps every open episode and the newest keep closed entries.
@@ -262,6 +266,9 @@ type AlertStore interface {
 	// that has instances.
 	CountAlertInstances(ctx context.Context, alertIDs []models.AlertID) (map[models.AlertID]models.AlertInstanceCounts, error)
 	UpsertAlertInstance(ctx context.Context, instance *models.AlertInstance) error
+	DeleteAlertInstance(ctx context.Context, alertID models.AlertID, groupKey string) error
+	// DeleteAlertInstances removes every instance of the alert.
+	DeleteAlertInstances(ctx context.Context, alertID models.AlertID) error
 	// MarkAlertInstanceNotified sets notified on the instance whose open
 	// episode is historyID, and returns models.ErrNotFound when there is none.
 	MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error
