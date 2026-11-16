@@ -251,6 +251,7 @@ logchef query 'level="error" and service="api"' --since 1h
 | `--from` | | Absolute start time (ISO 8601) | |
 | `--to` | | Absolute end time (ISO 8601) | |
 | `--limit` | `-l` | Maximum number of results | 100 |
+| `--interval` | | Bucket size of a bare `by time` key in an [aggregation](#aggregate-with-logchefql): `1s` to `24h` | |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
@@ -318,6 +319,36 @@ logchef query 'method="GET"' --dry-run
 # Use absolute time range
 logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
 ```
+
+#### Aggregate with LogchefQL
+
+An [aggregation pipe](/guide/aggregations) after the filter counts and summarizes the
+matching logs instead of printing them:
+
+```bash
+# Errors per service, the top 10
+logchef query 'level="error" | count() by service | limit 10' --since 1h
+
+# p95 latency per service in 5-minute buckets
+logchef query 'service=api | p95(duration_ms) by time, service' --since 1h --interval 5m
+
+# The rows as JSON, with the aggregation object
+logchef query 'status>=500 | count() by host' --output json | jq '.aggregation.columns'
+```
+
+- `text` and `table` output print the result columns in order, with no timestamp
+  in front. `--output json` adds the `aggregation` object (shape, interval and
+  columns) next to the rows, and `jsonl` prints one row per line.
+- A bare `by time` key needs `--interval`. Without it the command prints
+  "this query buckets by time, so the request needs an interval" and exits 1.
+  `time(5m)` sets the size in the query and needs no flag.
+- `--limit` (default 100) caps the result rows too, and a `| limit` in the
+  query applies as well. The smaller one wins.
+- `tail`, `tail --poll` and `histogram` need log rows. They refuse an
+  aggregation and exit 1.
+- `saved-queries` and `collections` run a saved aggregation, but they have no
+  `--interval` and their `text` output prints each result row as a log line.
+  Run an aggregation with `logchef query` for the table output.
 
 ### Raw Native Queries
 
@@ -460,6 +491,7 @@ logchef explain 'level="error" and service="api"' -t production -S app-logs
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--interval` | | Bucket size of a bare `by time` key in an aggregation | |
 | `--output` | | Output format (`text`, `json`, `jsonl`) | `text` |
 
 #### Explain Examples
@@ -470,7 +502,13 @@ logchef explain 'status>=500'
 
 # Validate a filter's syntax in a script (exit stays 0; check the JSON)
 logchef explain 'status>=500' --output json | jq '.valid'
+
+# See the query an aggregation compiles to
+logchef explain 'level="error" | count() by service | limit 10'
 ```
+
+ClickHouse builds an aggregated query only for a time range, so `explain`
+compiles an aggregation over the default `since` range of the context.
 
 :::tip[`explain` vs `--explain`/`--show-sql`]
 `explain` is a translate-and-validate step that **never executes**. The `--explain` / `--show-sql` flags on `query` and `sql` trace the generated backend query on stderr but **still run** it. Use `explain` when you only want to see or check the query; use the flags when you want the results and the query.
