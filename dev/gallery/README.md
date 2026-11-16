@@ -73,6 +73,6 @@ shots set the viewport height to the dashboard's height.
   removed. Each run writes to a new tenant (`ProjectID` is the Unix time of the
   run) and points the Worker logs source at it. Older tenants expire with the
   7-day retention.
-- The dashboards set a 60-second result cache. With a TTL of 0, uncached panel
-  queries count against the per-user limit of 3 concurrent queries, and one of
-  the four stat panels fails with "Too many active preview queries".
+- The dashboards turn the result cache off (TTL 0), so every shot runs its
+  panels live. A dashboard with more panels than the per-user preview limit
+  still loads, because panel queries are admitted as dashboard queries.
