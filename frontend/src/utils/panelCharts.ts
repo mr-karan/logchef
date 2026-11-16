@@ -14,11 +14,17 @@ export interface ChartRow { key: string; x: number; label: () => string; values:
 export interface ChartModel { rows: ChartRow[]; series: ChartSeries[]; time: boolean; notices: string[] }
 export interface ListItem extends ChartSeries { value: ChartValue; percentage: number; displayPercentage: number }
 
+// HTTP status classes keep one meaning everywhere: 2xx green, 4xx amber, 5xx red.
+const STATUS_CLASS_COLORS: Record<string, string> = {
+  "1": "var(--panel-gray)", "2": "var(--panel-green)", "3": "var(--panel-blue)", "4": "var(--panel-amber)", "5": "var(--panel-red)",
+};
+
 export function chartColors(key: string, text: string, other = false, used = new Set<string>()): Pick<ChartSeries, "color"> {
   let hash = 0;
   for (const char of key) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) | 0;
   const semantic = /^(error|err|fatal|critical|crit|alert|emerg|emergency|warn|warning|info|information|notice|debug|trace|verbose|get|post|put|delete|patch|options|head)$/i.test(text);
-  const preferred = other ? "var(--panel-chart-other)" : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})`;
+  const status = /^([1-5])xx$/i.exec(text)?.[1];
+  const preferred = other ? "var(--panel-chart-other)" : status ? STATUS_CLASS_COLORS[status] : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})`;
   let color = preferred;
   for (let offset = 1; used.has(color) && offset <= 12; offset++) color = `var(--panel-chart-${(Math.abs(hash) + offset) % 12 + 1})`;
   if (used.has(color)) color = `hsl(${(used.size * 137.508) % 360} 65% var(--panel-chart-generated-lightness))`;
