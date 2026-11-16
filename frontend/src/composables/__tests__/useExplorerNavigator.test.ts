@@ -1372,6 +1372,27 @@ describe("Explorer history navigation", () => {
     expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), share: "tok" });
   });
 
+  it("opens a share's layout over the remembered view, writes no view, and lets a URL view win", async () => {
+    const layout = { version: 1, columns: [{ name: "host", width: 200 }] };
+    savedViewList = { views: [savedView(12, "errors")], default_view_id: null };
+    localStorage.setItem(`logchef-activeView-1-${otherSource.id}`, "12");
+    const { router } = await mountExplorer({ share: "tok" }, () => {
+      vi.spyOn(exploreApi, "getQueryShare").mockReturnValue(ok({ ...shareOnOtherSource, payload: { ...shareOnOtherSource.payload, layout } }) as never);
+    });
+    await settle();
+    const views = useSavedViewsStore();
+    expect(views.sharedLayout).toEqual(layout);
+    expect(views.activeViewId).toBeNull();
+    expect(router.currentRoute.value.query).toMatchObject({ share: "tok" });
+    expect(router.currentRoute.value.query.view).toBeUndefined();
+    expect(localStorage.getItem(`logchef-activeView-1-${otherSource.id}`)).toBe("12");
+
+    await router.push({ path: "/logs/explore", query: { share: "tok", view: "12" } });
+    await settle();
+    expect(views.activeViewId).toBe(12);
+    expect(views.sharedLayout).toBeNull();
+  });
+
   it("shows the server's error for a share link it cannot open, and runs nothing", async () => {
     const { query, nav } = await mountExplorer({ share: "gone" }, () => {
       vi.spyOn(exploreApi, "getQueryShare").mockRejectedValue({ status: "error", message: "Share link expired", error_type: "NotFoundError" });

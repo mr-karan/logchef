@@ -2,6 +2,7 @@ import { apiClient, type RequestOptions } from "./apiUtils";
 import { apiBaseURL } from "./config";
 import { streamSSE } from "./eventStream";
 import type { TemplateVariable } from "./logchefql";
+import type { SavedViewDefinition } from "@/lib/savedViewLayout";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
 // tens of seconds, and the shared axios client otherwise aborts after 10s.
@@ -206,6 +207,9 @@ export interface QuerySharePayload {
     isRequired?: boolean;
     options?: Array<{ value: string; label?: string }>;
   }>;
+  // The sender's table layout (RFC 0007): columns, sort and display mode. A
+  // share made before layouts, or without one, has none.
+  layout?: SavedViewDefinition;
 }
 
 export interface QueryShareResponse {

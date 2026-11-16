@@ -261,6 +261,11 @@ describe("explore store", () => {
       await store.createQueryShare();
 
       expect(mocks.exploreCreateQueryShare.mock.lastCall?.[1]).toMatchObject({ mode: "sql", query: "SELECT 1" });
+      expect(mocks.exploreCreateQueryShare.mock.lastCall?.[1]).not.toHaveProperty("layout");
+
+      const layout = { version: 1 as const, columns: [{ name: "host", width: 200 }], display_mode: "compact" as const };
+      await store.createQueryShare(layout);
+      expect(mocks.exploreCreateQueryShare.mock.lastCall?.[1]).toMatchObject({ query: "SELECT 1", layout });
     });
 
     it("leaves the share selection untouched on a no-op mode switch", async () => {

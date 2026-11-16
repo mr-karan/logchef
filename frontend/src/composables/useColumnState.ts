@@ -84,9 +84,11 @@ export function useColumnState(options: ColumnStateOptions) {
     return teamId == null || !sourceId ? null : `${teamId}-${sourceId}`
   })
   const tableStateKey = computed(() => scopeSuffix.value && `logchef-tableState-${scopeSuffix.value}`)
-  const storageKey = computed(() => seed.value && scopeSuffix.value
-    ? `logchef-viewState-${scopeSuffix.value}`
-    : tableStateKey.value)
+  // A shared layout has no key: it reads and writes no stored state.
+  const storageKey = computed(() => {
+    if (!seed.value) return tableStateKey.value
+    return seed.value.viewId === null ? null : scopeSuffix.value && `logchef-viewState-${scopeSuffix.value}`
+  })
   // The view's working copy while a result shows none of its columns; the
   // table shows the automatic layout for that result meanwhile.
   const stashedViewLayout = shallowRef<TableColumnLayout | null>(null)
@@ -303,7 +305,8 @@ export function useColumnState(options: ColumnStateOptions) {
     if (!key || !isReadyToPersist.value || !toValue(options.columns).length) return
     if (view && stashedViewLayout.value) return
     if (saveTimer !== null) clearTimeout(saveTimer)
-    pendingWrite = view ? {
+    // A shared layout has no key, so a seed here always has a view id.
+    pendingWrite = view?.viewId != null ? {
       key,
       state: {
         viewId: view.viewId,

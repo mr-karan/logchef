@@ -228,3 +228,142 @@ describe("saved views store: manage", () => {
     expect(store.activeViewId).toBe(7);
   });
 });
+
+describe("saved views store: a share's layout", () => {
+  const layout: SavedViewDefinition = { version: 1, columns: [{ name: "host", width: 200 }], sort: [{ column: "host", desc: true }], display_mode: "compact" };
+  const storage = () => Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]));
+
+  it("wins over a remembered view and changes no stored state", () => {
+    localStorage.setItem("logchef-activeView-2-5", "1");
+    const before = storage();
+    const store = useSavedViewsStore();
+    expect(store.enter(2, 5, list(view(1), view(2)), null, layout)).toBe("ready");
+    expect(store.activeViewId).toBeNull();
+    expect(store.sharedLayout).toEqual(layout);
+    expect(store.activeSeed).toMatchObject({ viewId: null, definition: layout });
+    expect(store.displayMode).toBe("compact");
+    store.setDisplayMode("json");
+    store.reportTableLayout(null, { columns: [{ name: "host", width: 260 }] });
+    expect(store.displayMode).toBe("json");
+    expect(storage()).toEqual(before);
+    // No view id reaches the URL.
+    expect(useActiveSavedViewStore().viewParameter(2, 5)).toBeNull();
+  });
+
+  it("wins over the default view", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, { views: [view(1)], default_view_id: 1 }, null, layout);
+    expect(store.activeViewId).toBeNull();
+    expect(store.sharedLayout).toEqual(layout);
+  });
+
+  it("gives way to a view the URL names beside the share", () => {
+    const store = useSavedViewsStore();
+    expect(store.enter(2, 5, list(view(1), view(2)), 2, layout)).toBe("ready");
+    expect(store.activeViewId).toBe(2);
+    expect(store.sharedLayout).toBeNull();
+  });
+
+  it("applies when the URL's view is not readable", () => {
+    const store = useSavedViewsStore();
+    expect(store.enter(2, 5, list(view(1)), 99, layout)).toBe("unavailable");
+    expect(store.activeViewId).toBeNull();
+    expect(store.sharedLayout).toEqual(layout);
+  });
+
+  it("is skipped by a share without a layout, which opens under the remembered view or the default", () => {
+    localStorage.setItem("logchef-activeView-2-5", "1");
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1), view(2)), null, undefined);
+    expect(store.activeViewId).toBe(1);
+    expect(store.sharedLayout).toBeNull();
+    localStorage.clear();
+    store.enter(2, 5, { views: [view(1), view(2)], default_view_id: 2 }, null, undefined);
+    expect(store.activeViewId).toBe(2);
+  });
+
+  it("ignores a layout that does not parse", () => {
+    localStorage.setItem("logchef-activeView-2-5", "1");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1)), null, { version: 1, columns: "host" });
+    expect(store.sharedLayout).toBeNull();
+    expect(store.activeViewId).toBe(1);
+  });
+
+  it("ends when the user picks, and the next location resolves again", () => {
+    localStorage.setItem("logchef-activeView-2-5", "1");
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1), view(2)), null, layout);
+    store.pick(null);
+    expect(store.sharedLayout).toBeNull();
+    expect(store.activeSeed).toBeNull();
+
+    store.enter(2, 5, list(view(1), view(2)), null, layout);
+    store.pick(2);
+    expect(store.activeViewId).toBe(2);
+    expect(store.sharedLayout).toBeNull();
+
+    store.enter(2, 5, list(view(1), view(2)), null, layout);
+    store.enter(2, 5, list(view(1), view(2)), null);
+    expect(store.sharedLayout).toBeNull();
+    expect(store.activeViewId).toBe(2);
+  });
+
+  it("keeps edits to the parts the share sets when the table seeds again, in memory only", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(), null, layout);
+    const revision = store.activeSeed?.revision;
+    store.reportTableLayout(null, { columns: [{ name: "host", width: 420 }, { name: "msg" }], sort: [{ column: "msg", desc: false }] });
+    store.setDisplayMode("table");
+    expect(store.activeSeed).toEqual({
+      viewId: null,
+      revision,
+      definition: { version: 1, columns: [{ name: "host", width: 420 }, { name: "msg" }], sort: [{ column: "msg", desc: false }], display_mode: "table" },
+    });
+    expect(store.displayMode).toBe("table");
+    expect(Object.keys(localStorage).filter((key) => key.startsWith("logchef-"))).toEqual([]);
+
+    // A share that sets only the display mode keeps the table's own columns.
+    store.enter(2, 5, list(), null, { version: 1, display_mode: "json" });
+    store.reportTableLayout(null, { columns: [{ name: "msg" }] });
+    expect(store.activeSeed?.definition).toEqual({ version: 1, display_mode: "json" });
+  });
+
+  it("seeds the table again each time a share opens", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(), null, layout);
+    const first = store.activeSeed;
+    store.enter(2, 5, list(), null, layout);
+    expect(store.activeSeed?.revision).not.toBe(first?.revision);
+  });
+
+  it("saves as a new view from the shared layout", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(), null, layout);
+    const parts = { columns: true, sort: true, displayMode: true, filter: false, timeRange: false };
+    const shown = { displayMode: "compact" as const, filter: null, timeRange: null };
+    expect(store.newDefinition(parts, shown)).toEqual(layout);
+    store.reportTableLayout(null, { columns: [{ name: "host", width: 260 }], sort: [{ column: "host", desc: false }] });
+    expect(store.newDefinition(parts, shown)).toMatchObject({ columns: [{ name: "host", width: 260 }], sort: [{ column: "host", desc: false }] });
+  });
+});
+
+describe("saved views store: the layout a share carries", () => {
+  it("takes the working layout and the shown display mode, never a query part", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1, {}, { filter: "level=error", time_range: "1h", sort: [{ column: "ts", desc: true }] })), 1);
+    expect(store.shareLayout("json")).toEqual({
+      version: 1, columns: [{ name: "msg", width: 300 }, { name: "level" }], sort: [{ column: "ts", desc: true }], display_mode: "json",
+    });
+    store.reportTableLayout(1, { columns: [{ name: "level", width: 90 }] });
+    expect(store.shareLayout("table")).toEqual({ version: 1, columns: [{ name: "level", width: 90 }], sort: [{ column: "ts", desc: true }], display_mode: "table" });
+  });
+
+  it("takes the table's layout with no view", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1)), null);
+    store.reportTableLayout(null, { columns: [{ name: "msg" }], sort: [{ column: "ts", desc: false }] });
+    expect(store.shareLayout("table")).toEqual({ version: 1, columns: [{ name: "msg" }], sort: [{ column: "ts", desc: false }], display_mode: "table" });
+  });
+});

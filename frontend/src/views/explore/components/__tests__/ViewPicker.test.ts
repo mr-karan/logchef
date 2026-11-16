@@ -37,11 +37,11 @@ function view(id: number, scope: SavedView["scope"], name: string, can_edit = tr
   };
 }
 
-async function mount(views: SavedView[], active: number | null, defaultViewId: number | null = null) {
+async function mount(views: SavedView[], active: number | null, defaultViewId: number | null = null, sharedLayout?: unknown) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const store = useSavedViewsStore();
-  store.enter(2, 5, { views, default_view_id: defaultViewId }, active);
+  store.enter(2, 5, { views, default_view_id: defaultViewId }, active, sharedLayout);
   const selected: (number | null)[] = [];
   const host = document.createElement("div");
   document.body.append(host);
@@ -165,4 +165,16 @@ it("warns when a result with rows lacks a view column and names it", async () =>
   runs.state.results = result(["count"], 3, { kind: "count" });
   await nextTick();
   expect(mark()).toBeNull();
+});
+
+it("names a share's layout and offers No view and Save as new view", async () => {
+  const { host, selected } = await mount([view(1, "personal", "errors")], null, null, { version: 1, columns: [{ name: "host" }] });
+  expect(host.textContent).toContain("Shared layout");
+  const items = await openMenu(host);
+  const labels = items.map(item => item.textContent?.trim());
+  expect(labels).toEqual(expect.arrayContaining(["No view", "Save as new view"]));
+  expect(labels).not.toContain("Reset to view");
+  items.find(item => item.textContent?.trim() === "No view")!.click();
+  await nextTick();
+  expect(selected).toEqual([null]);
 });

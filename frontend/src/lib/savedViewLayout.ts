@@ -23,9 +23,13 @@ export interface SavedViewDefinition {
 /** The parts of a definition that the table owns. */
 export type SavedViewLayout = Pick<SavedViewDefinition, 'columns' | 'sort'>
 
-/** The view the table seeds from. The id and revision decide whether a stored working copy still applies. */
+/**
+ * The view the table seeds from. The id and revision decide whether a stored
+ * working copy still applies. A null id is a share's layout, which the table
+ * holds in memory and never stores.
+ */
 export interface TableViewSeed {
-  viewId: number
+  viewId: number | null
   revision: number
   definition: SavedViewDefinition
 }

@@ -140,7 +140,8 @@ export function useExplorerNavigator() {
           if (!resolved) continue
           const { list, details, generation, sourceNotice, views, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
-          const viewEntry = savedViews.enter(location.teamId, location.sourceId, views, sourceNotice ? null : target.viewId)
+          const shareLayout = location.content.kind === 'share' && !sourceNotice ? location.content.share.payload.layout : undefined
+          const viewEntry = savedViews.enter(location.teamId, location.sourceId, views, sourceNotice ? null : target.viewId, shareLayout)
           const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location, savedViews.activeView?.definition)
           applyChoice()
           status.value = 'ready'

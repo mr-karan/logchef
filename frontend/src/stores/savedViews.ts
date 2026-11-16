@@ -37,6 +37,15 @@ export interface ShownExplorerState {
 
 const SCOPE_ORDER: Record<SavedViewScope, number> = { personal: 0, team: 1, source: 2 };
 
+// A share's layout as the server stored it. Shares made before the server
+// validated layouts may hold anything under the key.
+const sharedLayoutSchema = z.object({
+  version: z.literal(1),
+  columns: z.array(z.object({ name: z.string().min(1), width: z.number().optional() })).min(1).optional(),
+  sort: z.array(z.object({ column: z.string().min(1), desc: z.boolean() })).min(1).optional(),
+  display_mode: z.enum(["table", "compact", "json"]).optional(),
+});
+
 const displayModeState = z.object({
   viewId: z.number(),
   revision: z.number(),
@@ -105,13 +114,18 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
   const layoutResetToken = ref(0);
   // Bumped when this store changes the table's stored layout.
   const storageVersion = ref(0);
+  // The layout of the share the Explorer opened, held in memory with no view
+  // id. Its revision counts shared layouts, so the table seeds from each one.
+  const sharedSeed = shallowRef<TableViewSeed | null>(null);
+  let sharedLayoutCount = 0;
 
   const suffix = computed(() => (scope.value ? `${scope.value.teamId}-${scope.value.sourceId}` : null));
   const activeView = computed(() => views.value.find((v) => v.id === activeViewId.value) ?? null);
   const activeSeed = computed<TableViewSeed | null>(() =>
-    activeView.value ? { viewId: activeView.value.id, revision: activeView.value.revision, definition: activeView.value.definition } : null,
+    activeView.value ? { viewId: activeView.value.id, revision: activeView.value.revision, definition: activeView.value.definition } : sharedSeed.value,
   );
-  const viewSetsDisplayMode = computed(() => activeView.value?.definition.display_mode !== undefined);
+  const sharedLayout = computed(() => sharedSeed.value?.definition ?? null);
+  const viewSetsDisplayMode = computed(() => activeSeed.value?.definition.display_mode !== undefined);
   /** The display mode the active view imposes, or null when the user preference applies. */
   const displayMode = computed(() => (viewSetsDisplayMode.value ? workingDisplayMode.value : null));
   // The layout the table last reported, or the one it stored when no table
@@ -123,7 +137,8 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
   });
 
   function storedLayout(seed: TableViewSeed | null): SavedViewLayout | null {
-    if (!suffix.value) return null;
+    // A shared layout is never stored.
+    if (!suffix.value || seed?.viewId === null) return null;
     const parsed = storedTableState.safeParse(readStorage(`logchef-${seed ? "viewState" : "tableState"}-${suffix.value}`));
     if (!parsed.success) return null;
     if (seed && (parsed.data.viewId !== seed.viewId || parsed.data.revision !== seed.revision)) return null;
@@ -172,26 +187,46 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
 
   /**
    * Shows a location's views. The view the URL names wins when the caller
-   * can read it. Otherwise the browser's remembered choice applies, where a
+   * can read it. Then the layout of the share the URL names, held in memory
+   * only. Otherwise the browser's remembered choice applies, where a
    * remembered No view stops the search, and then the default view.
    */
-  function enter(teamId: number, sourceId: number | null, list: SavedViewList | null, requestedViewId: number | null): ViewEntry {
+  function enter(
+    teamId: number,
+    sourceId: number | null,
+    list: SavedViewList | null,
+    requestedViewId: number | null,
+    shareLayout?: unknown,
+  ): ViewEntry {
     scope.value = sourceId === null ? null : { teamId, sourceId };
     views.value = list ? [...list.views] : [];
     defaultViewId.value = list?.default_view_id ?? null;
     tableLayout.value = null;
+    sharedSeed.value = null;
     if (sourceId === null) {
       activeViewId.value = null;
       return "ready";
     }
-    if (!list) {
+    const shared = parseSharedLayout(shareLayout);
+    const useShared = () => {
       activeViewId.value = null;
+      sharedSeed.value = shared && { viewId: null, revision: ++sharedLayoutCount, definition: shared };
+    };
+    if (!list) {
+      useShared();
       return "failed";
     }
     if (requestedViewId !== null) {
-      const readable = views.value.some((v) => v.id === requestedViewId);
-      activeViewId.value = readable ? requestedViewId : null;
-      return readable ? "ready" : "unavailable";
+      if (views.value.some((v) => v.id === requestedViewId)) {
+        activeViewId.value = requestedViewId;
+        return "ready";
+      }
+      useShared();
+      return "unavailable";
+    }
+    if (shared) {
+      useShared();
+      return "ready";
     }
     const key = rememberedKey();
     const remembered = key ? readStorage(key) : undefined;
@@ -200,8 +235,16 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     return "ready";
   }
 
-  /** Makes a view, or no view, active and remembers the pick for this team and source. */
+  function parseSharedLayout(layout: unknown): SavedViewDefinition | null {
+    if (layout === undefined || layout === null) return null;
+    const parsed = sharedLayoutSchema.safeParse(layout);
+    if (!parsed.success) console.warn("ignoring an invalid shared layout", parsed.error);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** Makes a view, or no view, active and remembers the pick for this team and source. A pick ends a shared layout. */
   function pick(viewId: number | null) {
+    sharedSeed.value = null;
     activeViewId.value = viewId;
     tableLayout.value = null;
     const key = rememberedKey();
@@ -210,19 +253,40 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
 
   function reportTableLayout(viewId: number | null, layout: SavedViewLayout) {
     tableLayout.value = { viewId, layout };
+    const shared = sharedSeed.value?.definition;
+    if (viewId === null && shared) {
+      reviseSharedLayout({
+        ...(shared.columns && layout.columns ? { columns: layout.columns } : {}),
+        ...(shared.sort && layout.sort ? { sort: layout.sort } : {}),
+      });
+    }
+  }
+
+  // A shared layout has no stored working copy, and the table remounts for
+  // every result. The seed takes the edits, so the next table starts from
+  // them; its revision stays, so the mounted table does not seed again.
+  function reviseSharedLayout(change: Partial<SavedViewDefinition>) {
+    const seed = sharedSeed.value;
+    if (!seed) return;
+    const definition = { ...seed.definition, ...change };
+    if (JSON.stringify(definition) !== JSON.stringify(seed.definition)) sharedSeed.value = { ...seed, definition };
   }
 
   function setDisplayMode(mode: DisplayMode) {
     const seed = activeSeed.value;
     if (!seed || !viewSetsDisplayMode.value || !suffix.value) return;
     workingDisplayMode.value = mode;
+    if (seed.viewId === null) {
+      reviseSharedLayout({ display_mode: mode });
+      return;
+    }
     writeStorage(`logchef-viewDisplayMode-${suffix.value}`, { viewId: seed.viewId, revision: seed.revision, displayMode: mode });
   }
 
   /** The definition a new view takes from the working layout and what the Explorer shows. */
   function newDefinition(parts: SaveViewParts, shown: ShownExplorerState): SavedViewDefinition {
     const layout = currentLayout.value;
-    const definition = activeView.value?.definition;
+    const definition = activeSeed.value?.definition;
     const columns = layout?.columns ?? definition?.columns;
     const sort = layout?.sort ?? definition?.sort;
     return {
@@ -233,6 +297,14 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
       ...(parts.filter && shown.filter !== null ? { filter: shown.filter } : {}),
       ...(parts.timeRange && shown.timeRange !== null ? { time_range: shown.timeRange } : {}),
     };
+  }
+
+  /** The working layout a share carries: its columns, sort and display mode, never a query part. */
+  function shareLayout(displayMode: DisplayMode): SavedViewDefinition {
+    return newDefinition(
+      { columns: true, sort: true, displayMode: true, filter: false, timeRange: false },
+      { displayMode, filter: null, timeRange: null },
+    );
   }
 
   function upsert(view: SavedView) {
@@ -368,6 +440,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     activeViewId,
     activeView,
     activeSeed,
+    sharedLayout,
     displayMode,
     isModified,
     layoutResetToken,
@@ -377,6 +450,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     reportTableLayout,
     setDisplayMode,
     newDefinition,
+    shareLayout,
     saveAsNew,
     updateView,
     updateActive,

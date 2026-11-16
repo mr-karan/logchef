@@ -126,7 +126,7 @@ const groupLabel: Record<SavedViewScope, string> = {
     <DropdownMenuTrigger as-child>
       <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs max-w-[14rem]" :aria-label="t('explore.viewPicker')" data-testid="view-picker">
         <Bookmark class="h-3.5 w-3.5 shrink-0" />
-        <span class="truncate">{{ store.activeView?.name ?? t('explore.noView') }}</span>
+        <span class="truncate">{{ store.activeView?.name ?? (store.sharedLayout ? t('explore.sharedLayout') : t('explore.noView')) }}</span>
         <span v-if="store.isModified" class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" :title="t('explore.viewModified')" data-testid="view-modified" />
         <span v-if="missingColumns.length" class="shrink-0 text-amber-600 dark:text-amber-400" :title="missingTitle" :aria-label="missingTitle" role="img" data-testid="view-missing-columns">
           <TriangleAlert class="h-3.5 w-3.5" />
@@ -145,7 +145,7 @@ const groupLabel: Record<SavedViewScope, string> = {
       </template>
       <DropdownMenuLabel v-if="groups.length === 0" class="text-xs font-normal text-muted-foreground">{{ t('explore.noSavedViews') }}</DropdownMenuLabel>
       <DropdownMenuSeparator />
-      <DropdownMenuItem v-if="store.activeView" class="text-xs" @select="emit('select', null)">{{ t('explore.noView') }}</DropdownMenuItem>
+      <DropdownMenuItem v-if="store.activeView || store.sharedLayout" class="text-xs" @select="emit('select', null)">{{ t('explore.noView') }}</DropdownMenuItem>
       <DropdownMenuItem class="text-xs" @select="openSave">{{ t('explore.saveAsNewView') }}</DropdownMenuItem>
       <DropdownMenuItem v-if="store.activeView?.can_edit && store.isModified" class="text-xs" @select="update">{{ t('explore.updateView') }}</DropdownMenuItem>
       <DropdownMenuItem v-if="store.activeView" class="text-xs" @select="emit('reset')">{{ t('explore.resetToView') }}</DropdownMenuItem>
