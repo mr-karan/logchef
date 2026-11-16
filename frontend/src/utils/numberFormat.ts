@@ -28,12 +28,19 @@ function grouped(value: ExactNumber, decimals: number | undefined, grouping: boo
   return parts.map((p, i) => p.value + (i === lastInteger ? decimal + localized : "")).join("");
 }
 
+// A prefix such as a currency symbol goes after the minus sign: -₹0.69, not ₹-0.69.
+function signed(n: ExactNumber, prefix: string | undefined, digits: (n: ExactNumber) => string, locale?: string): string {
+  if (!prefix || n.coefficient >= 0n) return `${prefix ?? ""}${digits(n)}`;
+  const minus = new Intl.NumberFormat(locale).formatToParts(-1).find((p) => p.type === "minusSign")?.value ?? "-";
+  return `${minus}${prefix}${digits({ ...n, coefficient: -n.coefficient })}`;
+}
+
 export function formatNumber(value: FrameNumber, format: NumberFormat = {}, options: { locale?: string; compact?: boolean } = {}): { text: string; exact: string } {
   const scale = parseExact(format.scale ?? 1);
   let scaled = isExact(value) && scale ? multiplyExact(value, scale) : typeof value === "number" ? parseExact(value * (format.scale ?? 1)) : null;
   if (!scaled) return { text: "Overflow", exact: "Overflow" };
   const baseUnit = format.unit === "bytes" ? " B" : format.unit === "duration_ms" ? " ms" : format.unit === "duration_s" ? " s" : format.unit === "percent" ? "%" : "";
-  const exact = `${format.prefix ?? ""}${grouped(scaled, undefined, format.grouping ?? true, options.locale)}${baseUnit}${format.suffix ?? ""}`;
+  const exact = `${signed(scaled, format.prefix, (n) => grouped(n, undefined, format.grouping ?? true, options.locale), options.locale)}${baseUnit}${format.suffix ?? ""}`;
   let unit = baseUnit;
   const decimals = format.decimals ?? 2;
   const magnitude = (n: ExactNumber) => ({ ...n, coefficient: n.coefficient < 0n ? -n.coefficient : n.coefficient });
@@ -65,5 +72,5 @@ export function formatNumber(value: FrameNumber, format: NumberFormat = {}, opti
     unit = suffixes[exponent] + unit;
   }
   const rounded = roundExact(scaled, decimals);
-  return { text: `${format.prefix ?? ""}${grouped(rounded, format.decimals, format.grouping ?? true, options.locale)}${unit}${format.suffix ?? ""}`, exact };
+  return { text: `${signed(rounded, format.prefix, (n) => grouped(n, format.decimals, format.grouping ?? true, options.locale), options.locale)}${unit}${format.suffix ?? ""}`, exact };
 }
