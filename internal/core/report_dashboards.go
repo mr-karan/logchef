@@ -71,7 +71,7 @@ func (rr *ReportRunner) planDashboard(ctx context.Context, r *models.Report, own
 		return nil, sourceInvalid(err), nil
 	}
 
-	plan := &reportPlan{report: r, owner: owner, loc: loc, window: window}
+	plan := &reportPlan{report: r, owner: owner, loc: loc, window: window, sourceNames: map[models.SourceID]string{}}
 	if rr.UIURL != "" {
 		plan.sourceURL = fmt.Sprintf("%s/dashboards/%d", rr.UIURL, d.ID)
 		if r.TabID != "" {
@@ -90,6 +90,7 @@ func (rr *ReportRunner) planDashboard(ctx context.Context, r *models.Report, own
 			}
 			if err == nil {
 				plan.sources = append(plan.sources, source.Name)
+				plan.sourceNames[p.SourceID] = source.Name
 			}
 		}
 		src, ok, err := authorizeReportSource(ctx, rr.DB, owner, p.TeamID, p.SourceID)

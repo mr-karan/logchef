@@ -589,6 +589,7 @@ func (s *Server) setupRoutes() {
 	reportRoutes := api.Group("/reports", s.requireAuth, s.requireReportsEnabled)
 	reportRoutes.Get("/", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReports)
 	reportRoutes.Post("/", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleCreateReport).Name(string(audit.ReportCreate))
+	reportRoutes.Get("/recipient-options", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReportRecipientOptions)
 	reportRoutes.Get("/:reportID", s.requireTokenScope(models.TokenScopeReportsRead), s.handleGetReport)
 	reportRoutes.Put("/:reportID", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleUpdateReport).Name(string(audit.ReportUpdate))
 	reportRoutes.Delete("/:reportID", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleDeleteReport).Name(string(audit.ReportDelete))
@@ -598,6 +599,7 @@ func (s *Server) setupRoutes() {
 	reportRoutes.Post("/:reportID/run", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleRunReport)
 	registerLimited(reportRoutes, fiber.MethodPost, "/:reportID/preview", queryLimiter, s.requireTokenScope(models.TokenScopeReportsRead), s.requireTokenScope(models.TokenScopeLogsRead), s.handlePreviewReport)
 	reportRoutes.Get("/:reportID/runs", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReportRuns)
+	reportRoutes.Delete("/:reportID/recipients/me", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleRemoveMyReportRecipient).Name(string(audit.ReportRecipientRemove))
 
 	// --- OAuth authorization server (only when auth.oauth.enabled) ---
 	if s.oauth != nil {

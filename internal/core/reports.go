@@ -122,9 +122,6 @@ func validateReport(ctx context.Context, db store.StoreOps, owner *models.User, 
 	if strings.ContainsAny(in.Name, "\r\n") {
 		return nil, invalidReport("name must not contain a line break")
 	}
-	if len(in.Recipients) > 0 {
-		return nil, invalidReport("recipients: a report is sent to its owner for now; user, team and email recipients are not supported yet")
-	}
 	maxRows := defaultReportMaxRows
 	if in.MaxRows != nil {
 		maxRows = *in.MaxRows
@@ -377,24 +374,41 @@ func resolveDayValue(v any, loc *time.Location, at time.Time) any {
 	return v
 }
 
+// SavedReport is a report with its recipient rows, as a save stores them.
+type SavedReport struct {
+	Report     *models.Report
+	Recipients []models.ReportRecipient
+}
+
 // CreateReport validates in and stores an active report owned by the
-// caller.
-func CreateReport(ctx context.Context, db store.StoreOps, p access.Principal, in *ReportInput) (*models.Report, error) {
+// caller, with its recipients.
+func CreateReport(ctx context.Context, db store.StoreOps, p access.Principal, in *ReportInput) (*SavedReport, error) {
 	r, err := validateReport(ctx, db, p.User, in, time.Now())
 	if err != nil {
+		return nil, err
+	}
+	recipients, err := parseReportRecipients(in.Recipients, p.User)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkNewRecipients(ctx, db, p, nil, recipients); err != nil {
 		return nil, err
 	}
 	r.OwnerID = &p.User.ID
 	if err := db.CreateReport(ctx, r); err != nil {
 		return nil, fmt.Errorf("creating report: %w", err)
 	}
-	return r, nil
+	if err := db.ReplaceReportRecipients(ctx, r.ID, recipients); err != nil {
+		return nil, fmt.Errorf("storing recipients of report %d: %w", r.ID, err)
+	}
+	return &SavedReport{Report: r, Recipients: recipients}, nil
 }
 
-// UpdateReport replaces the edited fields of a report the caller may edit.
-// The source check uses the owner, also when a global admin edits. It
-// returns the report before and after the change.
-func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID, in *ReportInput) (before, after *models.Report, err error) {
+// UpdateReport replaces the edited fields and the recipients of a report
+// the caller may edit. The source check uses the owner, also when a global
+// admin edits; a recipient row the save adds must be one the caller may
+// add. It returns the report before and after the change.
+func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID, in *ReportInput) (before, after *SavedReport, err error) {
 	existing, err := GetReportForEditor(ctx, db, p, id)
 	if err != nil {
 		return nil, nil, err
@@ -409,6 +423,17 @@ func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id
 	if err != nil {
 		return nil, nil, err
 	}
+	held, err := db.ListReportRecipients(ctx, id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing recipients of report %d: %w", id, err)
+	}
+	recipients, err := parseReportRecipients(in.Recipients, owner)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := checkNewRecipients(ctx, db, p, held, recipients); err != nil {
+		return nil, nil, err
+	}
 	r.ID = existing.ID
 	if err := db.UpdateReport(ctx, r); err != nil {
 		if models.IsNotFound(err) {
@@ -416,7 +441,33 @@ func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id
 		}
 		return nil, nil, fmt.Errorf("updating report %d: %w", id, err)
 	}
-	return existing, r, nil
+	if err := db.ReplaceReportRecipients(ctx, id, recipients); err != nil {
+		if models.IsNotFound(err) {
+			return nil, nil, ErrReportNotFound
+		}
+		return nil, nil, fmt.Errorf("storing recipients of report %d: %w", id, err)
+	}
+	return &SavedReport{Report: existing, Recipients: held}, &SavedReport{Report: r, Recipients: recipients}, nil
+}
+
+// GetReportForViewer returns the report to its owner, a global admin or a
+// recipient. full is false for a recipient who may not edit it, who gets
+// the reduced view. Anyone else gets ErrReportNotFound.
+func GetReportForViewer(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID) (r *models.Report, full bool, err error) {
+	if r, err = reloadReport(ctx, db, id); err != nil {
+		return nil, false, err
+	}
+	if canEditReport(p, r) {
+		return r, true, nil
+	}
+	received, err := db.ListReportsForRecipient(ctx, p.User.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing reports sent to user %d: %w", p.User.ID, err)
+	}
+	if !slices.ContainsFunc(received, func(x *models.Report) bool { return x.ID == id }) {
+		return nil, false, ErrReportNotFound
+	}
+	return r, false, nil
 }
 
 // DeleteReport deletes a report the caller may edit and returns it.
@@ -532,12 +583,14 @@ func reloadReport(ctx context.Context, db store.StoreOps, id models.ReportID) (*
 type ReportScope string
 
 const (
-	ReportScopeMine ReportScope = "mine"
-	ReportScopeAll  ReportScope = "all"
+	ReportScopeMine     ReportScope = "mine"
+	ReportScopeReceived ReportScope = "received"
+	ReportScopeAll      ReportScope = "all"
 )
 
-// ListReports lists the caller's reports, or every report for a global
-// admin with scope all.
+// ListReports lists the caller's reports, the reports sent to the caller,
+// or every report for a global admin with scope all. A report the caller
+// receives but may not edit is in its reduced view.
 func ListReports(ctx context.Context, d ReportDeps, p access.Principal, scope ReportScope) ([]*ReportResponse, error) {
 	var (
 		list []*models.Report
@@ -546,13 +599,15 @@ func ListReports(ctx context.Context, d ReportDeps, p access.Principal, scope Re
 	switch scope {
 	case ReportScopeMine:
 		list, err = d.DB.ListReportsByOwner(ctx, p.User.ID)
+	case ReportScopeReceived:
+		list, err = d.DB.ListReportsForRecipient(ctx, p.User.ID)
 	case ReportScopeAll:
 		if p.RequireGlobalAdmin() != nil {
 			return nil, fmt.Errorf("%w: scope all needs a global admin", ErrReportForbidden)
 		}
 		list, err = d.DB.ListReports(ctx)
 	default:
-		return nil, invalidReport("scope must be mine or all")
+		return nil, invalidReport("scope must be mine, received or all")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("listing reports: %w", err)
@@ -601,15 +656,16 @@ type ReportResponse struct {
 	MaxRows     int                      `json:"max_rows"`
 	SkipIfEmpty bool                     `json:"skip_if_empty"`
 	AttachCSV   bool                     `json:"attach_csv"`
-	Recipients  []models.ReportRecipient `json:"recipients"`
-	Owner       *ReportOwner             `json:"owner"`
-	State       models.ReportState       `json:"state"`
-	PauseReason models.ReportPauseReason `json:"pause_reason"`
-	LastRun     *ReportLastRun           `json:"last_run"`
-	CanEdit     bool                     `json:"can_edit"`
-	Warnings    []ReportWarning          `json:"warnings"`
-	CreatedAt   time.Time                `json:"created_at"`
-	UpdatedAt   time.Time                `json:"updated_at"`
+	// Recipients is set on the response of one report to its editors.
+	Recipients  []ReportRecipientResponse `json:"recipients,omitempty"`
+	Owner       *ReportOwner              `json:"owner"`
+	State       models.ReportState        `json:"state"`
+	PauseReason models.ReportPauseReason  `json:"pause_reason"`
+	LastRun     *ReportLastRun            `json:"last_run"`
+	CanEdit     bool                      `json:"can_edit"`
+	Warnings    []ReportWarning           `json:"warnings"`
+	CreatedAt   time.Time                 `json:"created_at"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
 }
 
 // buildReportResponses reads the owners, the saved queries and the newest
@@ -664,9 +720,28 @@ func buildReportResponses(ctx context.Context, d ReportDeps, p access.Principal,
 				resp.Owner = &ReportOwner{ID: u.ID, Name: u.FullName, Email: u.Email}
 			}
 		}
+		if !resp.CanEdit {
+			resp = recipientView(resp)
+		}
 		out = append(out, resp)
 	}
 	return out, nil
+}
+
+// recipientView is the reduced report a recipient who may not edit it
+// reads: its name, owner, source name, schedule and timezone. The
+// recipients, the variables, the options and the runs stay with its
+// editors.
+func recipientView(full *ReportResponse) *ReportResponse {
+	return &ReportResponse{
+		ID:       full.ID,
+		Name:     full.Name,
+		Source:   ReportSourceResponse{ReportSourceRef: ReportSourceRef{Kind: full.Source.Kind}, Name: full.Source.Name},
+		Schedule: full.Schedule,
+		Timezone: full.Timezone,
+		Owner:    full.Owner,
+		Warnings: []ReportWarning{},
+	}
 }
 
 func reportResponse(p access.Principal, r *models.Report, last *models.ReportRun) *ReportResponse {
@@ -684,7 +759,6 @@ func reportResponse(p access.Principal, r *models.Report, last *models.ReportRun
 		MaxRows:     r.MaxRows,
 		SkipIfEmpty: r.SkipIfEmpty,
 		AttachCSV:   r.AttachCSV,
-		Recipients:  []models.ReportRecipient{},
 		State:       r.State,
 		PauseReason: r.PauseReason,
 		CanEdit:     canEditReport(p, r),
@@ -707,6 +781,12 @@ func BuildReportResponse(ctx context.Context, d ReportDeps, p access.Principal, 
 		return nil, err
 	}
 	resp := list[0]
+	if !resp.CanEdit {
+		return resp, nil
+	}
+	if resp.Recipients, err = reportRecipientResponses(ctx, d.DB, r.ID); err != nil {
+		return nil, err
+	}
 	if d.UIURL == "" {
 		resp.Warnings = append(resp.Warnings, ReportWarning{Code: "no_frontend_url"})
 	}
@@ -783,4 +863,30 @@ func ListReportRuns(ctx context.Context, db store.StoreOps, p access.Principal, 
 		return nil, invalidReport("limit must be 1 to %d", models.ReportRunHistoryLimit)
 	}
 	return db.ListReportRuns(ctx, id, before, limit)
+}
+
+// reportRecipientResponses reads a report's rows with the names they show
+// as.
+func reportRecipientResponses(ctx context.Context, db store.StoreOps, id models.ReportID) ([]ReportRecipientResponse, error) {
+	rows, err := db.ListReportRecipients(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("listing recipients of report %d: %w", id, err)
+	}
+	allUsers, err := db.ListUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing users: %w", err)
+	}
+	users := make(map[models.UserID]*models.User, len(allUsers))
+	for _, u := range allUsers {
+		users[u.ID] = u
+	}
+	allTeams, err := db.ListTeams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing teams: %w", err)
+	}
+	teams := make(map[models.TeamID]string, len(allTeams))
+	for _, t := range allTeams {
+		teams[t.ID] = t.Name
+	}
+	return recipientResponses(rows, users, teams), nil
 }

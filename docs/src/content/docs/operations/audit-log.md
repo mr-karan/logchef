@@ -94,6 +94,7 @@ before the change records nothing, except a failed sign-in.
 | OAuth grant | `oauth_grant.revoke` | A grant is revoked: by the user in Connected apps, by the client at `/oauth/revoke`, or by the server on a replayed code or refresh token |
 | Query share | `query_share.create`, `query_share.delete` | A share link is created or deleted |
 | Report | `report.create`, `report.update`, `report.delete`, `report.pause`, `report.resume`, `report.claim` | A scheduled report's configuration changes, or it is paused (by a user or by the scheduler), resumed, or claimed by a new owner. Report runs and sends are in the report's own run history |
+| Report recipient | `report_recipient.remove` | A direct recipient takes themself off a report. Recipients that the owner adds or removes are in the `recipients` field of `report.create` and `report.update` |
 | Saved query | `saved_query.create`, `saved_query.update`, `saved_query.delete` | A saved query changes |
 | Saved view | `saved_view.create`, `saved_view.update`, `saved_view.delete`, `saved_view.set_default`, `saved_view.clear_default` | An Explorer view changes or becomes or stops being a default |
 | Schema advisor dismissal | `schema_advisor_dismissal.create`, `schema_advisor_dismissal.delete` | An admin dismisses or restores a schema advisor finding |

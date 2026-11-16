@@ -79,8 +79,14 @@ func (s *Server) sendReport(c fiber.Ctx, status int, r *models.Report) error {
 	return SendSuccess(c, status, resp)
 }
 
-// handleListReports lists the caller's reports, or every report for a
-// global admin with scope=all.
+// reportAuditFields records a saved report with its recipient rows.
+func reportAuditFields(r *core.SavedReport) *audit.Fields {
+	return audit.ReportFields(r.Report).Set("recipients", audit.ReportRecipients(r.Recipients))
+}
+
+// handleListReports lists the caller's reports (scope=mine), the reports
+// sent to the caller (scope=received), or every report for a global admin
+// (scope=all).
 func (s *Server) handleListReports(c fiber.Ctx) error {
 	scope := core.ReportScope(c.Query("scope", string(core.ReportScopeMine)))
 	list, err := core.ListReports(c.Context(), s.reportDeps(), principalFromLocals(c), scope)
@@ -95,12 +101,12 @@ func (s *Server) handleCreateReport(c fiber.Ctx) error {
 	if err := c.Bind().Body(&in); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	r, err := core.CreateReport(c.Context(), s.store, principalFromLocals(c), &in)
+	saved, err := core.CreateReport(c.Context(), s.store, principalFromLocals(c), &in)
 	if err != nil {
 		return s.sendReportError(c, err, "create the report")
 	}
-	auditSet(c, audit.ReportTarget(r), nil, audit.ReportFields(r))
-	return s.sendReport(c, fiber.StatusCreated, r)
+	auditSet(c, audit.ReportTarget(saved.Report), nil, reportAuditFields(saved))
+	return s.sendReport(c, fiber.StatusCreated, saved.Report)
 }
 
 func (s *Server) handleGetReport(c fiber.Ctx) error {
@@ -108,7 +114,8 @@ func (s *Server) handleGetReport(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	r, err := core.GetReportForEditor(c.Context(), s.store, principalFromLocals(c), id)
+	// A recipient who may not edit the report reads its reduced view.
+	r, _, err := core.GetReportForViewer(c.Context(), s.store, principalFromLocals(c), id)
 	if err != nil {
 		return s.sendReportError(c, err, "load the report")
 	}
@@ -128,8 +135,8 @@ func (s *Server) handleUpdateReport(c fiber.Ctx) error {
 	if err != nil {
 		return s.sendReportError(c, err, "update the report")
 	}
-	auditSet(c, audit.ReportTarget(after), audit.ReportFields(before), audit.ReportFields(after))
-	return s.sendReport(c, fiber.StatusOK, after)
+	auditSet(c, audit.ReportTarget(after.Report), reportAuditFields(before), reportAuditFields(after))
+	return s.sendReport(c, fiber.StatusOK, after.Report)
 }
 
 func (s *Server) handleDeleteReport(c fiber.Ctx) error {
@@ -184,6 +191,34 @@ func (s *Server) handleClaimReport(c fiber.Ctx) error {
 	auditTarget(c, audit.ReportTarget(after))
 	auditDetail(c, "previous_owner_id", before.OwnerID)
 	return s.sendReport(c, fiber.StatusOK, after)
+}
+
+// handleRemoveMyReportRecipient takes the caller off a report they receive
+// directly. A team recipient stays: only a direct recipient removes
+// themself.
+func (s *Server) handleRemoveMyReportRecipient(c fiber.Ctx) error {
+	id, err := parseReportID(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	p := principalFromLocals(c)
+	if _, err := core.RemoveMyReportRecipient(c.Context(), s.store, p, id); err != nil {
+		return s.sendReportError(c, err, "remove you from the report")
+	}
+	auditTarget(c, audit.ReportRecipientTarget(id, "user:"+strconv.FormatInt(int64(p.User.ID), 10)))
+	auditDetail(c, "kind", models.ReportRecipientUser)
+	auditDetail(c, "user_id", p.User.ID)
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// handleListReportRecipientOptions lists the users and teams the caller
+// may add as recipients.
+func (s *Server) handleListReportRecipientOptions(c fiber.Ctx) error {
+	options, err := core.ListReportRecipientOptions(c.Context(), s.store, principalFromLocals(c))
+	if err != nil {
+		return s.sendReportError(c, err, "list recipient options")
+	}
+	return SendSuccess(c, fiber.StatusOK, options)
 }
 
 type reportRunRequest struct {

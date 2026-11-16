@@ -161,3 +161,9 @@ func AlertSilenceTarget(s *models.AlertSilence) Target {
 	sourceID := s.SourceID
 	return Target{Type: "alert_silence", ID: id(s.ID), Label: s.Comment, SourceID: &sourceID}
 }
+
+// ReportRecipientTarget is one recipient row of a report by its kind and
+// target, such as user:7.
+func ReportRecipientTarget(reportID models.ReportID, recipient string) Target {
+	return Target{Type: "report_recipient", ID: id(reportID) + "/" + recipient}
+}

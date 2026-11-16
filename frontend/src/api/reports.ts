@@ -22,13 +22,25 @@ export type ReportState = "active" | "paused";
 export type ReportPauseReason = "" | "user" | "owner_inactive" | "failures";
 export type ReportRunStatus = "running" | "sent" | "partial" | "skipped" | "failed" | "interrupted";
 export type ReportRunTrigger = "schedule" | "manual";
-export type ReportScope = "mine" | "all";
+export type ReportScope = "mine" | "received" | "all";
 
 export interface ReportSourceRef {
   kind: "saved_query" | "dashboard";
   saved_query_id?: number;
   dashboard_id?: number;
   tab_id?: string;
+}
+
+/** A user or team row. A team expands to its members when a report runs. */
+export type ReportRecipientInput = { kind: "user"; user_id: number } | { kind: "team"; team_id: number };
+
+/** A recipient row as an editor reads it, with the name it shows as. */
+export type ReportRecipient = ReportRecipientInput & { name: string; email?: string };
+
+/** The users and teams the caller may add as recipients. */
+export interface ReportRecipientOptions {
+  users: { id: number; name: string; email: string }[];
+  teams: { id: number; name: string }[];
 }
 
 export interface ReportInput {
@@ -42,6 +54,8 @@ export interface ReportInput {
   max_rows: number;
   skip_if_empty: boolean;
   attach_csv: boolean;
+  /** An empty list sends the report to its owner alone. */
+  recipients: ReportRecipientInput[];
 }
 
 export interface ReportWarning {
@@ -61,6 +75,8 @@ export interface Report {
   max_rows: number;
   skip_if_empty: boolean;
   attach_csv: boolean;
+  /** Set on one report read by its editor; a list leaves it out. */
+  recipients?: ReportRecipient[];
   owner: { id: number; name: string; email: string } | null;
   state: ReportState;
   pause_reason: ReportPauseReason;
@@ -122,5 +138,9 @@ export const reportsApi = {
   claim: (id: number) => apiClient.post<Report>(`/reports/${id}/claim`),
   run: (id: number, recipients: "me" | "all") => apiClient.post<ReportRun>(`/reports/${id}/run`, { recipients }),
   preview: (id: number) => apiClient.post<ReportPreview>(`/reports/${id}/preview`),
+  recipientOptions: () => apiClient.get<ReportRecipientOptions>("/reports/recipient-options"),
+  // Leaving answers 204 with no body; a failure rejects with its envelope.
+  leave: async (id: number): Promise<APIResponse<null>> =>
+    (await apiClient.delete<null>(`/reports/${id}/recipients/me`)) || { status: "success", data: null },
   runs: (id: number, before = 0, limit = 20) => apiClient.get<ReportRun[]>(`/reports/${id}/runs?before=${before}&limit=${limit}`),
 };

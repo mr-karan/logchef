@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
-import { CalendarClock, History, Pause, Pencil, Play, Plus, Search, UserCheck } from "lucide-vue-next";
+import { BellOff, CalendarClock, History, Pause, Pencil, Play, Plus, Search, UserCheck } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -93,7 +93,11 @@ async function openFromRoute() {
     const listed = store.reports.find((r) => r.id === id);
     if (listed) return openEdit(listed);
     const result = await store.getReport(id);
-    if (result.success && result.data) openEdit(result.data);
+    // A recipient who may not edit the report finds it among those sent to them.
+    if (result.success && result.data) {
+      if (result.data.can_edit) openEdit(result.data);
+      else await store.fetchReports("received");
+    }
     return;
   }
   const savedQuery = Number(route.query.saved_query);
@@ -126,12 +130,23 @@ async function doDelete() {
   if (deleteTarget.value) await store.deleteReport(deleteTarget.value.id);
 }
 
+// --- Stop receiving ---------------------------------------------------------
+const leaveTarget = ref<Report | null>(null);
+const leaveOpen = ref(false);
+function confirmLeave(r: Report) {
+  leaveTarget.value = r;
+  leaveOpen.value = true;
+}
+async function doLeave() {
+  if (leaveTarget.value) await store.leaveReport(leaveTarget.value.id);
+}
+
 function claimable(r: Report): boolean {
   return !r.owner || r.pause_reason === "owner_inactive";
 }
 
 onMounted(async () => {
-  await store.fetchReports(isAdmin.value ? store.scope : "mine");
+  await store.fetchReports(!isAdmin.value && store.scope === "all" ? "mine" : store.scope);
   await openFromRoute();
 });
 </script>
@@ -147,10 +162,11 @@ onMounted(async () => {
     </PageHeader>
 
     <div class="flex flex-wrap items-center gap-3">
-      <Tabs v-if="isAdmin" :model-value="store.scope" @update:model-value="setScope">
+      <Tabs :model-value="store.scope" @update:model-value="setScope">
         <TabsList>
           <TabsTrigger value="mine">{{ t("reports.tabMine") }}</TabsTrigger>
-          <TabsTrigger value="all">{{ t("reports.tabAll") }}</TabsTrigger>
+          <TabsTrigger value="received">{{ t("reports.tabReceived") }}</TabsTrigger>
+          <TabsTrigger v-if="isAdmin" value="all">{{ t("reports.tabAll") }}</TabsTrigger>
         </TabsList>
       </Tabs>
       <SearchInput v-model="search" class="flex-1" :placeholder="t('reports.search')" />
@@ -188,7 +204,8 @@ onMounted(async () => {
         <TableRow v-for="r in rows" :key="r.id" :data-report-id="r.id">
           <TableCell class="py-3">
             <div class="flex items-center gap-2">
-              <button type="button" class="font-medium text-left hover:underline" @click="openEdit(r)">{{ r.name }}</button>
+              <button v-if="r.can_edit" type="button" class="font-medium text-left hover:underline" @click="openEdit(r)">{{ r.name }}</button>
+              <span v-else class="font-medium">{{ r.name }}</span>
               <Badge v-if="r.state === 'paused'" variant="outline">{{ t(`reports.paused_${r.pause_reason || 'user'}`) }}</Badge>
             </div>
           </TableCell>
@@ -202,11 +219,17 @@ onMounted(async () => {
               <Badge :variant="runStatusVariant(r.last_run.status)">{{ t(`reports.status_${r.last_run.status}`) }}</Badge>
               <div class="text-xs text-muted-foreground mt-0.5">{{ when(r.last_run.started_at) }}</div>
             </template>
-            <span v-else class="text-muted-foreground">{{ t("reports.never") }}</span>
+            <!-- Runs stay with the report's editors; a recipient sees none. -->
+            <span v-else-if="r.can_edit" class="text-muted-foreground">{{ t("reports.never") }}</span>
           </TableCell>
           <TableCell class="py-3 text-sm" :class="!r.owner && 'text-muted-foreground'">{{ ownerName(r) }}</TableCell>
           <TableCell class="py-3 text-right">
-            <div class="inline-flex items-center gap-0.5">
+            <div v-if="!r.can_edit" class="inline-flex items-center gap-0.5">
+              <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('reports.leave')" :aria-label="t('reports.leave')" @click="confirmLeave(r)">
+                <BellOff class="h-4 w-4" />
+              </Button>
+            </div>
+            <div v-else class="inline-flex items-center gap-0.5">
               <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" :aria-label="t('ui.edit')" @click="openEdit(r)">
                 <Pencil class="h-4 w-4" />
               </Button>
@@ -251,6 +274,15 @@ onMounted(async () => {
       destructive
       @confirm="doDelete"
       @cancel="deleteTarget = null"
+    />
+    <ConfirmDialog
+      v-model:open="leaveOpen"
+      :title="t('reports.leaveTitle')"
+      :description="t('reports.leaveDescription', { name: leaveTarget?.name ?? '' })"
+      :confirm-text="t('reports.leave')"
+      destructive
+      @confirm="doLeave"
+      @cancel="leaveTarget = null"
     />
   </div>
 </template>

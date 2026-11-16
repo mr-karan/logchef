@@ -445,3 +445,22 @@ func keyValues(m map[string]string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ReportRecipients records a report's recipient rows as kind:target, such
+// as user:7 or team:3, sorted, so an update shows the rows it added and
+// removed.
+func ReportRecipients(rows []models.ReportRecipient) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		switch {
+		case r.UserID != nil:
+			out = append(out, "user:"+strconv.FormatInt(int64(*r.UserID), 10))
+		case r.TeamID != nil:
+			out = append(out, "team:"+strconv.FormatInt(int64(*r.TeamID), 10))
+		default:
+			out = append(out, string(r.Kind)+":"+r.Email)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

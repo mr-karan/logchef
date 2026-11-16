@@ -36,8 +36,7 @@ const (
 )
 
 // ReportRunRecipients selects who a manual run sends to: the caller, or
-// every recipient of the report, which is its owner until recipient rows
-// exist.
+// every recipient of the report.
 type ReportRunRecipients string
 
 const (
@@ -195,6 +194,9 @@ type reportPlan struct {
 	loc     *time.Location
 	window  reports.Window
 	sources []string
+	// sourceNames names each source in sources, so a recipient's footer
+	// names only the sources of the panels that recipient reaches.
+	sourceNames map[models.SourceID]string
 	// sourceURL opens the dashboard or saved query, "" without a UI URL.
 	sourceURL string
 	panels    []plannedPanel
@@ -317,7 +319,8 @@ func (rr *ReportRunner) planSavedQuery(ctx context.Context, r *models.Report, ow
 	}}
 	plan := &reportPlan{
 		report: r, owner: owner, loc: loc, window: window, sources: []string{source.Name},
-		panels: []plannedPanel{{job: job, sourceID: sq.SourceID}},
+		sourceNames: map[models.SourceID]string{sq.SourceID: source.Name},
+		panels:      []plannedPanel{{job: job, sourceID: sq.SourceID}},
 	}
 	if rr.UIURL != "" {
 		plan.sourceURL = fmt.Sprintf("%s/logs/saved/%d", rr.UIURL, sq.ID)
@@ -390,10 +393,13 @@ func (rr *ReportRunner) savedQueryRun(src access.AuthorizedSource, sq *models.Sa
 	}
 }
 
-// renderedRun is a run whose panels ran and whose email is built.
+// renderedRun is a run whose panels ran and whose email is built as the
+// owner sees it.
 type renderedRun struct {
-	panels   []models.ReportPanelOutcome
-	rendered reports.Rendered
+	panels []models.ReportPanelOutcome
+	// doc is the email as the owner sees it; a recipient's copy locks the
+	// panels that recipient cannot reach.
+	doc reports.Document
 	// csv is the saved query's rows as a file, when the report attaches
 	// them and the query ran.
 	csv  *reports.CSVFile
@@ -455,6 +461,7 @@ func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, quer
 		out.panels[i] = o
 		doc.Panels = append(doc.Panels, panel)
 	}
+	out.doc = doc
 	switch {
 	case ran > 0 && failed == ran && timedOut == failed:
 		out.stop = stop(models.ReportRunFailed, models.ReportReasonTimeout)
@@ -466,7 +473,8 @@ func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, quer
 		out.stop = stop(models.ReportRunSkipped, models.ReportReasonEmpty)
 		return out, nil
 	}
-	rendered, err := reports.Render(doc, plan.report.MaxRows)
+	// A recipient's copy only locks panels, so it fits when this one does.
+	_, err := reports.Render(doc, plan.report.MaxRows)
 	if errors.Is(err, reports.ErrBodyTooLarge) {
 		out.stop = stop(models.ReportRunFailed, models.ReportReasonAllPanelsFailed)
 		return out, nil
@@ -474,8 +482,57 @@ func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, quer
 	if err != nil {
 		return nil, err
 	}
-	out.rendered = rendered
 	return out, nil
+}
+
+// renderFor renders the email with the panels in locked replaced by the
+// recipient's locked placeholder, and a footer that names only the sources
+// of the panels left: a panel locked for the owner names none either.
+// Copies with the same locks render once.
+func (out *renderedRun) renderFor(plan *reportPlan, locked []bool, cache map[string]reports.Rendered) (reports.Rendered, error) {
+	var key strings.Builder
+	doc := out.doc
+	doc.Panels = slices.Clone(out.doc.Panels)
+	doc.Sources = nil
+	for i, p := range plan.panels {
+		if name, ok := plan.sourceNames[p.sourceID]; ok && !locked[i] && p.status != models.ReportPanelLocked && !slices.Contains(doc.Sources, name) {
+			doc.Sources = append(doc.Sources, name)
+		}
+	}
+	for i, l := range locked {
+		if l {
+			doc.Panels[i] = reports.Panel{ID: doc.Panels[i].ID, Title: doc.Panels[i].Title, Restricted: true}
+			key.WriteByte('1')
+		} else {
+			key.WriteByte('0')
+		}
+	}
+	if r, ok := cache[key.String()]; ok {
+		return r, nil
+	}
+	r, err := reports.Render(doc, plan.report.MaxRows)
+	if err != nil {
+		return reports.Rendered{}, err
+	}
+	cache[key.String()] = r
+	return r, nil
+}
+
+func lockedIDs(panels []plannedPanel, locked []bool) []string {
+	var ids []string
+	for i, l := range locked {
+		if l {
+			ids = append(ids, panelID(panels[i]))
+		}
+	}
+	return ids
+}
+
+func panelID(p plannedPanel) string {
+	if p.job != nil {
+		return p.job.ID
+	}
+	return p.fixed.ID
 }
 
 func (rr *ReportRunner) execute(ctx context.Context, run *models.ReportRun, r *models.Report, to ReportRunRecipients) (models.ReportRunResult, error) {
@@ -504,52 +561,76 @@ func (rr *ReportRunner) execute(ctx context.Context, run *models.ReportRun, r *m
 		return res, nil
 	}
 
-	users, err := rr.runRecipients(ctx, run, plan, to)
+	people, err := rr.runRecipients(ctx, run, r.ID, to)
 	if err != nil {
 		return models.ReportRunResult{}, err
 	}
-	msg := reports.MailMessage{
-		Subject: reports.Subject(r.Name, run.ScheduledFor, plan.loc),
-		Date:    time.Now(),
-		Text:    rendered.rendered.Text,
-		HTML:    rendered.rendered.HTML,
+	reach, err := rr.newRecipientReach(ctx, plan)
+	if err != nil {
+		return models.ReportRunResult{}, err
 	}
-	// Every recipient that receives the message passed the saved-query
-	// test below, so the file goes only to users who reach its source.
+	base := reports.MailMessage{Subject: reports.Subject(r.Name, run.ScheduledFor, plan.loc), Date: time.Now()}
+	// Every recipient that receives the message reaches the saved query,
+	// whose one panel would be locked otherwise, so the file goes only to
+	// users who reach its source.
 	if rendered.csv != nil && !rendered.csv.HeaderTooLarge {
-		msg.Attachments = []reports.Attachment{{
+		base.Attachments = []reports.Attachment{{
 			Name:        reports.CSVName(r.Name, run.ScheduledFor, plan.loc),
 			ContentType: "text/csv; charset=utf-8",
 			Data:        rendered.csv.Data,
 		}}
 	}
-	for _, u := range users {
+	cache := map[string]reports.Rendered{}
+	for i, person := range people {
+		u := person.User
 		recipient := reports.Recipient{
 			Address: mail.Address{Name: u.FullName, Address: u.Email},
 			Class:   models.ReportDeliveryUser,
 			Target:  strconv.FormatInt(int64(u.ID), 10),
-			Via:     "direct",
+			Via:     person.Via,
 		}
-		if reason, err := rr.userCannotReceive(ctx, u, plan); err != nil {
-			return models.ReportRunResult{}, err
-		} else if reason != "" {
+		skip := func(reason string) {
 			res.Deliveries = append(res.Deliveries, models.ReportDelivery{
 				Class: recipient.Class, Target: recipient.Target, Via: recipient.Via,
 				Status: models.ReportDeliverySkipped, Reason: reason,
 			})
+		}
+		if i >= reports.MaxResolvedRecipients {
+			skip(reports.SkipRecipientLimit)
 			continue
 		}
-		res.Deliveries = append(res.Deliveries, reports.Delivery{Mailer: rr.Mailer, Sleep: rr.Sleep}.Deliver(ctx, recipient, msg, deadlines.Delivery))
+		if reason := reports.CanReceive(u); reason != "" {
+			skip(reason)
+			continue
+		}
+		locked, reachable, err := reach.lockedFor(ctx, rr.DB, u)
+		if err != nil {
+			return models.ReportRunResult{}, err
+		}
+		if reachable == 0 {
+			skip(string(models.ReportReasonNoAccess))
+			res.Deliveries[len(res.Deliveries)-1].LockedPanels = lockedIDs(plan.panels, locked)
+			continue
+		}
+		body, err := rendered.renderFor(plan, locked, cache)
+		if err != nil {
+			return models.ReportRunResult{}, err
+		}
+		msg := base
+		msg.Text, msg.HTML = body.Text, body.HTML
+		d := reports.Delivery{Mailer: rr.Mailer, Sleep: rr.Sleep}.Deliver(ctx, recipient, msg, deadlines.Delivery)
+		d.LockedPanels = lockedIDs(plan.panels, locked)
+		res.Deliveries = append(res.Deliveries, d)
 	}
 	res.Status, res.Reason = reports.DeliveryOutcome(res.Panels, res.Deliveries)
 	return res, nil
 }
 
-// runRecipients is the caller for a test sent to them, and the owner for a
-// run sent to every recipient.
-func (rr *ReportRunner) runRecipients(ctx context.Context, run *models.ReportRun, plan *reportPlan, to ReportRunRecipients) ([]*models.User, error) {
+// runRecipients is the caller for a test sent to them, and every recipient
+// row resolved into people now for a run sent to all.
+func (rr *ReportRunner) runRecipients(ctx context.Context, run *models.ReportRun, id models.ReportID, to ReportRunRecipients) ([]reports.Resolved, error) {
 	if to == ReportRunToAll {
-		return []*models.User{plan.owner}, nil
+		return rr.resolveRunRecipients(ctx, id)
 	}
 	if run.ActorID == nil {
 		return nil, fmt.Errorf("manual run %d has no actor to send to", run.ID)
@@ -558,42 +639,7 @@ func (rr *ReportRunner) runRecipients(ctx context.Context, run *models.ReportRun
 	if err != nil {
 		return nil, fmt.Errorf("loading the caller of run %d: %w", run.ID, err)
 	}
-	return []*models.User{u}, nil
-}
-
-// userCannotReceive applies the per-user test of RFC 0008: an active human
-// account with an address that reaches every panel the email shows data
-// of. A saved query is reached through any team of the user's own that has
-// its source; a dashboard panel through the panel's team. It returns the
-// skip reason, or "".
-//
-// Until per-recipient locking (RFC 0008 unit R8), a user who cannot reach
-// one of the panels gets no email, rather than one with that panel locked.
-func (rr *ReportRunner) userCannotReceive(ctx context.Context, u *models.User, plan *reportPlan) (string, error) {
-	if u.Status != models.UserStatusActive || u.AccountType == models.UserAccountTypeService || u.Email == "" {
-		return "inactive", nil
-	}
-	for _, p := range plan.panels {
-		if p.status == models.ReportPanelLocked || p.status == models.ReportPanelUnsupported {
-			continue
-		}
-		var (
-			reach bool
-			err   error
-		)
-		if p.teamID == 0 {
-			reach, err = rr.DB.UserHasSourceAccess(ctx, u.ID, p.sourceID)
-		} else {
-			reach, err = UserHasAccessToTeamSource(ctx, rr.DB, rr.Log, u.ID, p.teamID, p.sourceID)
-		}
-		if err != nil {
-			return "", fmt.Errorf("checking source access of user %d: %w", u.ID, err)
-		}
-		if !reach {
-			return string(models.ReportReasonNoAccess), nil
-		}
-	}
-	return "", nil
+	return []reports.Resolved{{User: u, Via: "direct"}}, nil
 }
 
 // ReportPreview is the email the caller would receive.
@@ -632,12 +678,19 @@ func (rr *ReportRunner) Preview(ctx context.Context, p access.Principal, id mode
 		}
 		return nil, invalidReport("the report's source can no longer run: %s", halt.reason)
 	}
-	reason, err := rr.userCannotReceive(ctx, p.User, plan)
+	if reason := reports.CanReceive(p.User); reason != "" {
+		return nil, fmt.Errorf("%w: a run would send you nothing (%s)", ErrReportForbidden, reason)
+	}
+	reach, err := rr.newRecipientReach(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
-	if reason != "" {
-		return nil, fmt.Errorf("%w: a run would send you nothing (%s)", ErrReportForbidden, reason)
+	locked, reachable, err := reach.lockedFor(ctx, rr.DB, p.User)
+	if err != nil {
+		return nil, err
+	}
+	if reachable == 0 {
+		return nil, fmt.Errorf("%w: a run would send you nothing (%s)", ErrReportForbidden, models.ReportReasonNoAccess)
 	}
 	rendered, err := rr.runAndRender(ctx, plan, at.Add(rr.QueryBudget))
 	if err != nil {
@@ -652,5 +705,9 @@ func (rr *ReportRunner) Preview(ctx context.Context, p access.Principal, id mode
 		}
 		return nil, invalidReport("a run would send nothing (%s) %s", rendered.stop.reason, strings.Join(errs, "; "))
 	}
-	return &ReportPreview{Subject: reports.Subject(r.Name, at, plan.loc), HTML: rendered.rendered.HTML}, nil
+	body, err := rendered.renderFor(plan, locked, map[string]reports.Rendered{})
+	if err != nil {
+		return nil, err
+	}
+	return &ReportPreview{Subject: reports.Subject(r.Name, at, plan.loc), HTML: body.HTML}, nil
 }

@@ -90,7 +90,7 @@ func (e *dashboardReportEnv) createDashboardReport(tab string) *models.Report {
 	if err != nil {
 		e.t.Fatalf("CreateReport: %v", err)
 	}
-	return r
+	return r.Report
 }
 
 func panelStatuses(run *models.ReportRun) string {
@@ -260,14 +260,14 @@ func TestDashboardReportUpgradesASchema1Blob(t *testing.T) {
 		limit = req.Limit
 		return &models.QueryResult{Columns: []models.ColumnInfo{{Name: "status", Type: "UInt16"}}, Logs: []map[string]any{{"status": 418}}}, nil
 	}
-	r, err := CreateReport(context.Background(), e.db, access.SessionPrincipal(e.owner), &ReportInput{
+	saved, err := CreateReport(context.Background(), e.db, access.SessionPrincipal(e.owner), &ReportInput{
 		Name: "Old dashboard", Source: ReportSourceRef{Kind: models.ReportSourceDashboard, DashboardID: &d.ID, TabID: models.DashboardMainTabID},
 		Schedule: json.RawMessage(`{"frequency":"hourly","minute":5}`), Timezone: "UTC",
 	})
 	if err != nil {
 		t.Fatalf("CreateReport: %v", err)
 	}
-	run := e.run(r, e.owner, ReportRunToMe)
+	run := e.run(saved.Report, e.owner, ReportRunToMe)
 	if run.Status != models.ReportRunSent || panelStatuses(run) != "t1:ok" {
 		t.Fatalf("run = %s/%s, panels %+v", run.Status, run.Reason, run.Panels)
 	}
@@ -319,11 +319,11 @@ func TestDashboardReportValidation(t *testing.T) {
 		}
 	})
 	t.Run("no time range keeps the dashboard default", func(t *testing.T) {
-		r, err := CreateReport(ctx, e.db, p, e.input("main"))
+		saved, err := CreateReport(ctx, e.db, p, e.input("main"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if r.TimeRange != "" || r.SourceKind != models.ReportSourceDashboard || r.TabID != "main" {
+		if r := saved.Report; r.TimeRange != "" || r.SourceKind != models.ReportSourceDashboard || r.TabID != "main" {
 			t.Errorf("report = %+v", r)
 		}
 	})
