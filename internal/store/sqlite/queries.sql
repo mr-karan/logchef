@@ -1686,6 +1686,11 @@ WHERE source_id = sqlc.arg(source_id)
   AND COALESCE(user_id, 0) = sqlc.arg(user_id)
   AND COALESCE(team_id, 0) = sqlc.arg(team_id);
 
+-- name: MarkSavedViewManaged :one
+-- Provisioning adopts a view; the definition and revision stay as they are.
+UPDATE saved_views SET managed = 1 WHERE id = ?
+RETURNING id;
+
 -- name: ListManagedSavedViews :many
 SELECT * FROM saved_views WHERE managed = 1
 ORDER BY source_id, name, id;

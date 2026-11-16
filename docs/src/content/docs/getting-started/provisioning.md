@@ -168,6 +168,43 @@ query = "{app=\"payments\"} kubernetes.namespace:=prod"
 
 The provisioning format is now nested and datasource-native. ClickHouse sources must use `source_type` plus the nested `connection` block rather than top-level `host` / `database` / `table_name` fields.
 
+### Source Views
+
+A source can declare saved Explorer views. A declared view is a source view: every team that reaches the source sees it in the Explorer's view picker. Provisioning manages it, so the UI shows it without edit actions and the API refuses to change or delete it. Team and personal views stay in the UI.
+
+```toml
+[[sources]]
+name = "nginx"
+# ... connection ...
+
+  [[sources.views]]
+  name = "Access"
+  description = "Requests that failed"
+  default = true
+  display_mode = "table"
+  time_range = "1h"
+  filter = 'status >= 400'
+  sort = [{ column = "timestamp", desc = true }]
+  columns = [{ name = "timestamp", width = 190 }, { name = "status" }, { name = "request_uri", width = 520 }]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique per source, up to 200 characters. Provisioning matches a stored view by source and name |
+| `description` | No | Up to 2,000 characters |
+| `default` | No | Makes the view the source default. At most one view per source |
+| `columns` | No | Visible columns in order, 1 to 200 entries. `name` is the column, `width` an optional width from 50 to 3,000 pixels. Columns not listed are hidden |
+| `sort` | No | 1 to 3 entries, most significant first. `column` and an optional `desc` |
+| `display_mode` | No | `table`, `compact` or `json` |
+| `filter` | No | A LogchefQL query that fills an empty editor, up to 8,192 bytes |
+| `time_range` | No | A relative range in minutes, hours, days or weeks: `15m`, `1h`, `7d`, `2w` |
+
+A field you leave out leaves that part of the Explorer as it is. A source holds at most 50 declared views.
+
+Logchef checks every view at startup with the rules the API uses and refuses to start on an error that names the source and the view. The `filter` must parse as LogchefQL. `time_range` must not use seconds: the Explorer's time picker has no seconds unit, so `30s` is an error.
+
+The source default follows the file. A view with `default = true` takes the default from any other source view, including one an admin set in the UI. When no declared view has `default = true`, provisioning clears a default it set before and leaves a default set in the UI alone.
+
 ### Team Fields
 
 | Field | Required | Description |
@@ -219,6 +256,7 @@ When you first enable provisioning on an existing Logchef instance, resources de
 
 - A source named "Production Logs" in config matches an existing source named "Production Logs" in the DB
 - Matched resources are adopted (marked as managed) and updated to match config
+- A declared view matches an existing source view of the same source and name. It keeps its id, so links to it keep working
 - Unmatched config entries create new resources
 
 No special migration flag is needed. Adoption happens automatically on name match.
@@ -230,6 +268,8 @@ With `prune = false` (default), managed resources removed from config are **kept
 ```
 WARN managed source not in config (prune=false, keeping)  name="Old Source"
 ```
+
+A managed view that its source no longer declares is kept and logged the same way. With `prune = true` it is deleted. A source view created in the UI is never pruned.
 
 With `prune = true`, they are **deleted**. Be careful:
 
@@ -258,7 +298,7 @@ curl -s https://logchef.example.com/api/v1/admin/provisioning/export \
   -H "Authorization: Bearer <token>" | jq .
 ```
 
-This returns a JSON representation of all sources, teams, and memberships, useful as a starting point for writing your `provisioning.toml`.
+This returns a JSON representation of all sources with their source views, teams, and memberships, useful as a starting point for writing your `provisioning.toml`. Exported views import unchanged: no revision moves and no default changes.
 
 ## Inline vs Separate File
 

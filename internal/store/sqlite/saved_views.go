@@ -178,6 +178,15 @@ func (db *DB) CountSavedViewsInScope(ctx context.Context, key models.SavedViewSc
 	return int(n), nil
 }
 
+// MarkSavedViewManaged hands a view to provisioning, or returns
+// models.ErrNotFound.
+func (db *DB) MarkSavedViewManaged(ctx context.Context, id models.SavedViewID) error {
+	if _, err := db.writeQueries.MarkSavedViewManaged(ctx, int64(id)); err != nil {
+		return fmt.Errorf("marking saved view %d managed: %w", id, translateNotFound(err))
+	}
+	return nil
+}
+
 // ListManagedSavedViews returns every managed view.
 func (db *DB) ListManagedSavedViews(ctx context.Context) ([]*models.SavedView, error) {
 	rows, err := db.readQueries.ListManagedSavedViews(ctx)

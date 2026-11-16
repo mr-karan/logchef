@@ -170,7 +170,9 @@ func parseSavedViewDefinition(ctx context.Context, db store.StoreOps, ds *dataso
 	return def, nil
 }
 
-func savedViewText(rawName, rawDescription string) (name, description string, err error) {
+// SavedViewText trims a view's name and description and applies their
+// rules. The API and provisioning both use it.
+func SavedViewText(rawName, rawDescription string) (name, description string, err error) {
 	name = strings.TrimSpace(rawName)
 	description = strings.TrimSpace(rawDescription)
 	if name == "" {
@@ -248,7 +250,7 @@ func editableSavedView(ctx context.Context, db store.StoreOps, c SavedViewCaller
 // authorized team (team). It counts the scope and inserts in one
 // transaction; with IsDefault it also takes the scope's default there.
 func CreateSavedView(ctx context.Context, db store.Store, ds *datasource.Service, c SavedViewCaller, req *models.CreateSavedViewRequest) (*models.SavedView, error) {
-	name, description, err := savedViewText(req.Name, req.Description)
+	name, description, err := SavedViewText(req.Name, req.Description)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +340,7 @@ func UpdateSavedView(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 	if req.Revision == nil {
 		return nil, nil, fmt.Errorf("%w: revision is required", ErrInvalidSavedView)
 	}
-	name, description, err := savedViewText(req.Name, req.Description)
+	name, description, err := SavedViewText(req.Name, req.Description)
 	if err != nil {
 		return nil, nil, err
 	}

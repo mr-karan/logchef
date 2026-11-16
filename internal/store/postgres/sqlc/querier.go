@@ -390,6 +390,8 @@ type Querier interface {
 	MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error)
 	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
+	// Provisioning adopts a view; the definition and revision stay as they are.
+	MarkSavedViewManaged(ctx context.Context, id int64) (int64, error)
 	PauseReport(ctx context.Context, arg PauseReportParams) (int64, error)
 	// Keeps every open episode and the newest N closed rows.
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
