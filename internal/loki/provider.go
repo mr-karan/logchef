@@ -125,6 +125,7 @@ func (p *Provider) Describe() datasource.Descriptor {
 			datasource.CapabilitySourceInspection,
 			datasource.CapabilityLiveTail,
 			datasource.CapabilityLogContext,
+			datasource.CapabilityAISQLGeneration,
 		},
 		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogQL},
 		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},

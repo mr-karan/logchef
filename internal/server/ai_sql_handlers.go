@@ -43,16 +43,30 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 
 	// The target language is chosen deterministically from the source backend
 	// and the editor mode. The model never chooses the backend.
-	target := deriveAITarget(source.SourceType, req.Mode)
+	in := ai.GenerateQueryInput{
+		Target:               deriveAITarget(source.SourceType, req.Mode),
+		NaturalLanguageQuery: req.NaturalLanguageQuery,
+		Schema:               schemaJSON,
+		TableName:            tableName,
+		CurrentQuery:         req.CurrentQuery,
+	}
+	if in.Target == ai.TargetLogQL {
+		conn, err := source.LokiConnection()
+		if err != nil {
+			s.log.Error("failed to read loki connection for AI", "source_id", source.ID, "error", err)
+			return SendErrorWithType(c, http.StatusInternalServerError, "Failed to read source connection", models.GeneralErrorType)
+		}
+		in.StreamSelector, in.Parser = conn.Selector, conn.Parser
+	}
 
-	generatedQuery, err := s.callAIToGenerateSQL(c.Context(), req, target, schemaJSON, tableName)
+	generatedQuery, err := s.callAIToGenerateSQL(c.Context(), in)
 	if err != nil {
 		return err
 	}
 
 	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{
 		SQLQuery: generatedQuery,
-		Language: string(target),
+		Language: string(in.Target),
 	})
 }
 
@@ -65,14 +79,20 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 //	(ClickHouse,   logchefql) -> LogchefQL
 //	(VictoriaLogs, native) -> LogsQL
 //	(VictoriaLogs, logchefql) -> LogchefQL
+//	(Loki,         native) -> LogQL
+//	(Loki,         logchefql) -> LogchefQL
 func deriveAITarget(sourceType models.SourceType, mode string) ai.TargetLanguage {
 	if mode == string(models.QueryLanguageLogchefQL) {
 		return ai.TargetLogchefQL
 	}
-	if sourceType == models.SourceTypeVictoriaLogs {
+	switch sourceType {
+	case models.SourceTypeVictoriaLogs:
 		return ai.TargetLogsQL
+	case models.SourceTypeLoki:
+		return ai.TargetLogQL
+	default:
+		return ai.TargetClickHouseSQL
 	}
-	return ai.TargetClickHouseSQL
 }
 
 func (s *Server) validateAIConfig() func(fiber.Ctx) error {
@@ -158,7 +178,7 @@ func formatSchemaForAI(source *models.Source) (string, error) {
 	return string(schemaJSON), nil
 }
 
-func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, target ai.TargetLanguage, schemaJSON, tableName string) (string, error) {
+func (s *Server) callAIToGenerateSQL(ctx context.Context, in ai.GenerateQueryInput) (string, error) {
 	aiCtx, cancel := context.WithTimeout(ctx, AIRequestTimeout)
 	defer cancel()
 
@@ -180,13 +200,7 @@ func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQL
 		Timeout:         AIRequestTimeout,
 	}, s.log)
 
-	generatedQuery, err := gen.GenerateQuery(aiCtx, ai.GenerateQueryInput{
-		Target:               target,
-		NaturalLanguageQuery: req.NaturalLanguageQuery,
-		Schema:               schemaJSON,
-		TableName:            tableName,
-		CurrentQuery:         req.CurrentQuery,
-	})
+	generatedQuery, err := gen.GenerateQuery(aiCtx, in)
 	if err != nil {
 		if errors.Is(err, ai.ErrInvalidSQLGeneratedByAI) {
 			return "", fmt.Errorf("AI could not generate a valid query: %w", err)

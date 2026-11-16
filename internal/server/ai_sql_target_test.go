@@ -18,9 +18,12 @@ func TestDeriveAITarget(t *testing.T) {
 		{"clickhouse logchefql", models.SourceTypeClickHouse, "logchefql", ai.TargetLogchefQL},
 		{"victorialogs native", models.SourceTypeVictoriaLogs, "native", ai.TargetLogsQL},
 		{"victorialogs logchefql", models.SourceTypeVictoriaLogs, "logchefql", ai.TargetLogchefQL},
+		{"loki native", models.SourceTypeLoki, "native", ai.TargetLogQL},
+		{"loki logchefql", models.SourceTypeLoki, "logchefql", ai.TargetLogchefQL},
 		// Back-compat: empty/absent mode is treated as native.
 		{"clickhouse empty mode defaults native", models.SourceTypeClickHouse, "", ai.TargetClickHouseSQL},
 		{"victorialogs empty mode defaults native", models.SourceTypeVictoriaLogs, "", ai.TargetLogsQL},
+		{"loki empty mode defaults native", models.SourceTypeLoki, "", ai.TargetLogQL},
 		// Unrecognized mode is treated as native, not logchefql.
 		{"clickhouse unknown mode defaults native", models.SourceTypeClickHouse, "builder", ai.TargetClickHouseSQL},
 	}
