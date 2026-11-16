@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { computed } from 'vue'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { RefreshCw, Search, FilterX, WrapText, ListPlus } from 'lucide-vue-next'
+import { RefreshCw, Search, WrapText, ListPlus } from 'lucide-vue-next'
 import DataTablePagination from './data-table-pagination.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import type { Table } from './tableFeatures'
@@ -52,11 +52,7 @@ const globalFilter = computed({
 // Check if table has rows
 const hasRows = computed(() => props.table && props.table.getRowModel().rows?.length > 0)
 
-// Column filters are client-side (see data-table.vue / columnFilter.ts) and only
-// ever filter the currently loaded result page - surface that plainly here.
-const hasColumnFilters = computed(() => (props.table?.atoms.columnFilters.get()?.length ?? 0) > 0)
 const filteredRowCount = computed(() => props.table?.getFilteredRowModel().rows.length ?? 0)
-const totalRowCount = computed(() => props.table?.getCoreRowModel().rows.length ?? 0)
 
 const pageRange = computed(() => {
   const { pageIndex, pageSize } = props.table.atoms.pagination.get()
@@ -71,10 +67,6 @@ function addSearchToQuery() {
   if (!props.searchQueryField || !searchTerm.value) return
   emit('add-search-to-query', props.searchQueryField, searchTerm.value)
 }
-
-function clearColumnFilters() {
-  props.table.resetColumnFilters()
-}
 </script>
 
 <template>
@@ -86,27 +78,6 @@ function clearColumnFilters() {
       <span v-else-if="hasRows" data-result-range>
         {{ t('explore.resultRange', { start: pageRange.start.toLocaleString(), end: pageRange.end.toLocaleString(), total: pageRange.total.toLocaleString() }) }}
       </span>
-
-      <!-- Column filter indicator - client-side filtering of the loaded page only -->
-      <template v-if="hasColumnFilters">
-        <span v-if="!isLoading && hasRows" class="text-muted-foreground/40">·</span>
-        <span
-          class="text-primary font-medium"
-          :title="t('ui.columnFiltersOnlyNarrowTheRowsAlreadyLoadedOnThisPage')"
-        >
-          {{ t('explore.filteredRows', { count: filteredRowCount.toLocaleString(), total: totalRowCount.toLocaleString() }) }}
-        </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          class="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-          :title="t('ui.clearAllColumnFilters')"
-          @click="clearColumnFilters"
-        >
-          <FilterX class="h-3 w-3 mr-1" />
-          {{ t('ui.clearFilters') }}
-        </Button>
-      </template>
     </div>
 
     <!-- Right zone: 3 clusters separated by subtle dividers -->
@@ -136,7 +107,7 @@ function clearColumnFilters() {
 
       <div v-if="showSearch" class="h-5 w-px bg-border" />
 
-      <!-- Search: filters the loaded rows only, like the column filters -->
+      <!-- Search: filters the loaded rows only -->
       <div v-if="showSearch" class="hidden md:flex items-center gap-1">
         <div class="relative w-48 lg:w-64">
           <Search class="absolute left-2 top-1.5 h-4 w-4 text-muted-foreground" />

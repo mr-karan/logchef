@@ -39,7 +39,7 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
-import { addSelectField, appendCondition, buildCondition, type FilterOperator } from "@/utils/logchefql/filters";
+import { addSelectField, appendCondition, buildCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
@@ -289,6 +289,21 @@ const handleDrillDown = (data: { column: string; value: unknown; operator: Filte
   nextTick(() => {
     queryEditorRef.value?.focus(true);
   });
+};
+
+// Header filters edit the query like the cell menu, then rerun it.
+const columnFilters = computed(() => activeMode.value === "logchefql" ? filteredColumns(logchefQuery.value ?? "") : []);
+
+const handleApplyColumnFilter = (data: { column: string; operator: FilterOperator; value: string | number }) => {
+  if (activeMode.value !== "logchefql") return;
+  logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(fieldPath([data.column]), data.operator, data.value));
+  nav.run();
+};
+
+const handleClearColumnFilter = (column: string) => {
+  if (activeMode.value !== "logchefql") return;
+  logchefQuery.value = removeColumnConditions(logchefQuery.value ?? "", column);
+  nav.run();
 };
 
 // Projects a nested field as an extra column; top-level columns are shown by the table itself.
@@ -1115,8 +1130,11 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :regex-highlights="regexHighlights"
                     :active-mode="activeMode"
                     :display-mode="displayMode"
+                    v-bind="displayMode === 'table' ? { filteredColumns: columnFilters } : {}"
                     @drill-down="handleDrillDown"
                     @add-column="handleAddColumn"
+                    @apply-column-filter="handleApplyColumnFilter"
+                    @clear-column-filter="handleClearColumnFilter"
                     @update:display-mode="displayMode = $event"
                   />
 

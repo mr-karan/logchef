@@ -5,7 +5,6 @@ import type { Column, ColumnDef, Row } from "./tableFeatures";
 import { formatTimestamp } from "@/lib/utils";
 import { getStandardSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';
-import { columnFilterFn } from './columnFilter';
 import { compareTimestamps } from './timestampSort';
 import { getOutcomeTone, type OutcomeTone } from './outcomeTone';
 import { classifyCellValue, type CellValueKind } from './cellTypography';
@@ -334,9 +333,6 @@ export function createColumns(
       },
 
       enableHiding: true,
-      enableColumnFilter: true,
-      // Client-side filtering of the currently loaded result page (see columnFilter.ts).
-      filterFn: columnFilterFn,
     };
   });
 }

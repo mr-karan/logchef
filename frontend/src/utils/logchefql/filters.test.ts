@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addSelectField, appendCondition, buildCondition, containsTerm, fieldPath, filterChoices, isLongValue } from './filters'
+import { addSelectField, appendCondition, buildCondition, containsTerm, fieldPath, filterChoices, filteredColumns, isLongValue, removeColumnConditions } from './filters'
 
 describe('buildCondition', () => {
   it('escapes backslashes before quotes so an escaped JSON line survives', () => {
@@ -77,5 +77,49 @@ describe('filterChoices', () => {
     const line = 'processed batch 42 for account placeholder after retrying upstream call to inventory'
     expect(filterChoices(line).include).toEqual({ operator: '~', value: 'processed batch 42 for account placeholder after retrying' })
     expect(filterChoices('checkout-api', 'checkout').exclude).toEqual({ operator: '!~', value: 'checkout' })
+  })
+})
+
+describe('filteredColumns', () => {
+  it('lists the columns compared by top-level and-terms', () => {
+    expect(filteredColumns('level="error" and status>=500 and status<600 | timestamp msg')).toEqual(['level', 'status'])
+    expect(filteredColumns('"user agent"~"curl" AND host!="a"')).toEqual(['user agent', 'host'])
+  })
+
+  it('skips groups, nested paths and keywords inside values or names', () => {
+    expect(filteredColumns('(a=1 or b=2) and c=3')).toEqual(['c'])
+    expect(filteredColumns('msg.http.status=500 and brand="x and y"')).toEqual(['brand'])
+    expect(filteredColumns('color="red" and operator=1')).toEqual(['color', 'operator'])
+  })
+
+  it('reports nothing for a top-level or, an empty query or a projection only', () => {
+    expect(filteredColumns('a=1 or b=2')).toEqual([])
+    expect(filteredColumns('a=1 and b=2 or c=3')).toEqual([])
+    expect(filteredColumns('')).toEqual([])
+    expect(filteredColumns('| timestamp msg')).toEqual([])
+  })
+})
+
+describe('removeColumnConditions', () => {
+  it('drops every top-level condition on the column and keeps the rest', () => {
+    expect(removeColumnConditions('status>=500 and level="error" and status<600', 'status')).toBe('level="error"')
+    expect(removeColumnConditions('(a=1 or b=2) and c=3 | timestamp msg', 'c')).toBe('(a=1 or b=2) | timestamp msg')
+    expect(removeColumnConditions('"user agent"~"curl" and host="a"', 'user agent')).toBe('host="a"')
+  })
+
+  it('keeps the projection when the last condition goes', () => {
+    expect(removeColumnConditions('level="error" | timestamp msg', 'level')).toBe('| timestamp msg')
+    expect(removeColumnConditions('level="error"', 'level')).toBe('')
+  })
+
+  it('leaves the query untouched when nothing matches or the query has a top-level or', () => {
+    expect(removeColumnConditions('level = "error"  and host="a"', 'status')).toBe('level = "error"  and host="a"')
+    expect(removeColumnConditions('level="error" or level="warn"', 'level')).toBe('level="error" or level="warn"')
+    expect(removeColumnConditions('msg.level="error"', 'msg')).toBe('msg.level="error"')
+  })
+
+  it('removes what appendCondition added', () => {
+    const query = appendCondition('a=1 or b=2', buildCondition('status', '>', 499))
+    expect(removeColumnConditions(query, 'status')).toBe('(a=1 or b=2)')
   })
 })

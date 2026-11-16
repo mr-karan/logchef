@@ -1,4 +1,7 @@
-export type FilterOperator = '=' | '!=' | '~' | '!~'
+export type FilterOperator = '=' | '!=' | '~' | '!~' | '>' | '>=' | '<' | '<='
+
+export const TEXT_OPERATORS: readonly FilterOperator[] = ['=', '!=', '~', '!~']
+export const NUMBER_OPERATORS: readonly FilterOperator[] = ['=', '!=', '>', '>=', '<', '<=']
 
 // Values longer than this are filtered with "contains"; an exact match on a
 // whole log line almost never matches anything else.
@@ -81,6 +84,68 @@ export function appendCondition(query: string, condition: string): string {
   // Extra parentheses are harmless; a missing pair changes the meaning.
   const grouped = /\bor\b/i.test(where) ? `(${where})` : where
   return joinPipe(`${grouped} and ${condition}`, select)
+}
+
+// Splits a filter expression at its top-level `and`s. With a top-level `or`
+// no single term constrains every row, so there is nothing to report or remove.
+function topLevelTerms(where: string): string[] | null {
+  const terms: string[] = []
+  let quote = ''
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < where.length; i++) {
+    const char = where[i]
+    if (quote) {
+      if (char === '\\') i++
+      else if (char === quote) quote = ''
+      continue
+    }
+    if (char === '"' || char === "'") quote = char
+    else if (char === '(') depth++
+    else if (char === ')') depth--
+    else if (depth === 0 && /[\s)]/.test(where[i - 1] ?? ' ')) {
+      const keyword = /^(and|or)(?=[\s(])/i.exec(where.slice(i))?.[1]
+      if (keyword?.toLowerCase() === 'or') return null
+      if (keyword) {
+        terms.push(where.slice(start, i).trim())
+        start = i + keyword.length
+      }
+    }
+  }
+  terms.push(where.slice(start).trim())
+  return terms.filter(Boolean)
+}
+
+const SEGMENT = String.raw`@?[a-zA-Z_][a-zA-Z0-9_:@-]*|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`
+const COMPARISON_FIELD = new RegExp(String.raw`^((?:${SEGMENT})(?:\s*\.\s*(?:${SEGMENT}))*)\s*(?:!=|!~|>=|<=|[=~><])`)
+
+function unquoteSegment(segment: string): string {
+  if (segment.startsWith('"') || segment.startsWith("'")) return segment.slice(1, -1).replace(/\\(.)/g, '$1')
+  return segment
+}
+
+// The top-level column a comparison term filters, or null for a group, a
+// nested path, or anything else.
+function termColumn(term: string): string | null {
+  const path = COMPARISON_FIELD.exec(term)?.[1]
+  if (!path) return null
+  const segments = path.match(new RegExp(SEGMENT, 'g')) ?? []
+  return segments.length === 1 ? unquoteSegment(segments[0]) : null
+}
+
+// Columns that a top-level `and` term of the query compares.
+export function filteredColumns(query: string): string[] {
+  const terms = topLevelTerms(splitPipe(query).where) ?? []
+  return [...new Set(terms.map(termColumn).filter((column): column is string => column !== null))]
+}
+
+export function removeColumnConditions(query: string, column: string): string {
+  const { where, select } = splitPipe(query)
+  const terms = topLevelTerms(where)
+  if (!terms) return query
+  const kept = terms.filter(term => termColumn(term) !== column)
+  if (kept.length === terms.length) return query
+  return joinPipe(kept.join(' and '), select)
 }
 
 export function hasSelect(query: string): boolean {
