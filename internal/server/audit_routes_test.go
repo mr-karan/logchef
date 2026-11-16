@@ -57,6 +57,7 @@ var auditExemptRoutes = []auditExemption{
 	{http.MethodDelete, MCPPath, "answers 405, the endpoint is stateless"},
 	{http.MethodPost, "/api/v1/reports/:reportID/run", "a report run stays in the run history of RFC 0008"},
 	{http.MethodPost, "/api/v1/reports/:reportID/preview", "runs the report's queries, stores nothing but the cooldown"},
+	{http.MethodPost, "/api/v1/admin/sources/:sourceID/advisor/refresh", "analysis run, recorded in schema_advisor_reports"},
 }
 
 // auditDecisionProblems names each mutating route that has neither a

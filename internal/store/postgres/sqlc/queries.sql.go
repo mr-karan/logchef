@@ -2563,6 +2563,24 @@ func (q *Queries) GetSavedView(ctx context.Context, id int64) (SavedView, error)
 	return i, err
 }
 
+const getSchemaAdvisorReport = `-- name: GetSchemaAdvisorReport :one
+SELECT source_id, generated_at, generated_by, window_days, report
+FROM schema_advisor_reports WHERE source_id = $1
+`
+
+func (q *Queries) GetSchemaAdvisorReport(ctx context.Context, sourceID int64) (SchemaAdvisorReport, error) {
+	row := q.db.QueryRow(ctx, getSchemaAdvisorReport, sourceID)
+	var i SchemaAdvisorReport
+	err := row.Scan(
+		&i.SourceID,
+		&i.GeneratedAt,
+		&i.GeneratedBy,
+		&i.WindowDays,
+		&i.Report,
+	)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, user_id, expires_at, created_at FROM sessions WHERE id = $1
 `
@@ -7785,6 +7803,36 @@ func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
 		arg.Misfire,
 		arg.GraceSeconds,
 		arg.Enabled,
+	)
+	return err
+}
+
+const upsertSchemaAdvisorReport = `-- name: UpsertSchemaAdvisorReport :exec
+INSERT INTO schema_advisor_reports (source_id, generated_at, generated_by, window_days, report)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (source_id) DO UPDATE SET
+    generated_at = excluded.generated_at,
+    generated_by = excluded.generated_by,
+    window_days = excluded.window_days,
+    report = excluded.report
+`
+
+type UpsertSchemaAdvisorReportParams struct {
+	SourceID    int64              `json:"source_id"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	GeneratedBy pgtype.Int8        `json:"generated_by"`
+	WindowDays  int64              `json:"window_days"`
+	Report      string             `json:"report"`
+}
+
+// A refresh replaces the source's report.
+func (q *Queries) UpsertSchemaAdvisorReport(ctx context.Context, arg UpsertSchemaAdvisorReportParams) error {
+	_, err := q.db.Exec(ctx, upsertSchemaAdvisorReport,
+		arg.SourceID,
+		arg.GeneratedAt,
+		arg.GeneratedBy,
+		arg.WindowDays,
+		arg.Report,
 	)
 	return err
 }

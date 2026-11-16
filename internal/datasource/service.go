@@ -46,6 +46,8 @@ type Service struct {
 	inspectionFill singleflight.Group
 	activityFill   singleflight.Group
 	activitySlots  chan struct{}
+	advisorRuns    singleflight.Group
+	advisorSlots   chan struct{}
 }
 
 type Capability string
@@ -83,6 +85,7 @@ func NewService(db store.Store, log *slog.Logger) *Service {
 		inspections:   make(map[models.SourceID]inspectionCacheEntry),
 		activities:    make(map[models.SourceID]activityCacheEntry),
 		activitySlots: make(chan struct{}, 2),
+		advisorSlots:  make(chan struct{}, schemaAdvisorMaxRuns),
 	}
 }
 

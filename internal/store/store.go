@@ -1,6 +1,6 @@
 // Package store defines the backend-agnostic contract for logchef's application
 // metadata — users, teams, sources, sessions, saved queries, collections,
-// saved views, alerts, background jobs, scheduled reports, API tokens, system settings, export jobs, user preferences, query
+// saved views, alerts, background jobs, scheduled reports, schema advisor reports, API tokens, system settings, export jobs, user preferences, query
 // shares, OAuth authorization state and audit events. (Log data lives in ClickHouse and is not part of this contract.)
 //
 // Concrete implementations live in sub-packages — store/sqlite (the default,
@@ -368,6 +368,16 @@ type QueryHistoryStore interface {
 	PruneQueryShapeStats(ctx context.Context, before string) error
 }
 
+// SchemaAdvisorStore persists the schema advisor report of each source
+// (RFC 0010).
+type SchemaAdvisorStore interface {
+	// GetSchemaAdvisorReport returns models.ErrNotFound before the source's
+	// first analysis.
+	GetSchemaAdvisorReport(ctx context.Context, sourceID models.SourceID) (*models.StoredSchemaAdvisorReport, error)
+	// UpsertSchemaAdvisorReport replaces the source's report.
+	UpsertSchemaAdvisorReport(ctx context.Context, report *models.StoredSchemaAdvisorReport) error
+}
+
 // ReportStore persists scheduled reports (RFC 0008), their recipients and
 // their runs. Every time it compares or writes for a claim or a cooldown is
 // the database clock, so replicas agree.
@@ -643,6 +653,7 @@ type StoreOps interface {
 	JobStore
 	ReportStore
 	QueryHistoryStore
+	SchemaAdvisorStore
 	ExportJobStore
 	QueryShareStore
 	ProvisioningStore

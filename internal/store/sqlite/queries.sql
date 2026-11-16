@@ -1346,6 +1346,20 @@ WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since);
 -- name: PruneQueryShapeStats :exec
 DELETE FROM query_shape_stats_daily WHERE bucket_date < ?;
 
+-- name: GetSchemaAdvisorReport :one
+SELECT source_id, generated_at, generated_by, window_days, report
+FROM schema_advisor_reports WHERE source_id = ?;
+
+-- name: UpsertSchemaAdvisorReport :exec
+-- A refresh replaces the source's report.
+INSERT INTO schema_advisor_reports (source_id, generated_at, generated_by, window_days, report)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (source_id) DO UPDATE SET
+    generated_at = excluded.generated_at,
+    generated_by = excluded.generated_by,
+    window_days = excluded.window_days,
+    report = excluded.report;
+
 -- OAuth authorization server ------------------------------------------------
 -- Times are Unix milliseconds (see 000033_oauth.up.sql). Every *_hash
 -- argument is an HMAC hex digest, never a plaintext code or token.

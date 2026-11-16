@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // MatchKind is how a query compares one column or path.
 type MatchKind string
 
@@ -136,4 +138,15 @@ type QueryShapeCoverage struct {
 	// lower bound.
 	NullLookbackCount  int64  `json:"null_lookback_count"`
 	MaxLookbackSeconds *int64 `json:"max_lookback_s,omitempty"`
+}
+
+// StoredSchemaAdvisorReport is the last report of one source. A refresh
+// replaces it.
+type StoredSchemaAdvisorReport struct {
+	SourceID    SourceID
+	GeneratedAt time.Time
+	// GeneratedBy is nil for a scheduled run, or once the user is deleted.
+	GeneratedBy *UserID
+	WindowDays  int
+	Report      SchemaAdvisorReport
 }
