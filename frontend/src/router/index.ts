@@ -103,6 +103,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "routes.createAlert", palette: { icon: "newAlert" } },
       },
       {
+        path: "alerts/silences",
+        name: "AlertSilences",
+        component: lazy("AlertSilences", () => import("@/views/alerts/AlertSilences.vue")),
+        meta: { title: "routes.alertSilences", palette: { icon: "silences", contextual: true } },
+      },
+      {
         path: "alerts/:alertID",
         name: "AlertDetail",
         component: lazy("AlertDetail", () => import("@/views/alerts/AlertDetail.vue")),

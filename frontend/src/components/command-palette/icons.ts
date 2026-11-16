@@ -2,6 +2,7 @@ import type { Component } from "vue";
 import {
   Activity,
   Bell,
+  BellOff,
   BellPlus,
   BookOpen,
   Bookmark,
@@ -39,6 +40,7 @@ export const PALETTE_ICONS = {
   library: FolderOpen,
   alerts: Bell,
   newAlert: BellPlus,
+  silences: BellOff,
   dashboards: LayoutDashboard,
   sources: Database,
   newSource: Plus,

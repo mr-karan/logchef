@@ -120,7 +120,7 @@ describe('buildPaletteView', () => {
     const result = view('ale')
     expect(result.mode).toBe('search')
     expect(result.groups[0].id).toBe('pages')
-    expect(ids(result, 'pages').slice(0, 2)).toEqual(['page:AlertsOverview', 'page:AlertCreate'])
+    expect(ids(result, 'pages').slice(0, 3)).toEqual(['page:AlertSilences', 'page:AlertsOverview', 'page:AlertCreate'])
     expect(ids(result, 'actions')).toContain('action:addAlert')
     expect(ids(result, 'alerts')).toEqual(['alert:5'])
     expect(itemById(result, 'alert:5')).toMatchObject({ detail: 'Platform/app_logs', meta: 'Firing' })
@@ -335,7 +335,7 @@ describe('buildPaletteView', () => {
 
   describe('permissions', () => {
     const pages = (viewer: Viewer) => ids(view('', context({ viewer })), 'goto').map((id) => id.replace('page:', ''))
-    const everyone = ['LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'Dashboards']
+    const everyone = ['LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'AlertSilences', 'Dashboards']
     const settings = ['Profile', 'Preferences', 'ConnectedApps']
 
     it('shows admins every page', () => {

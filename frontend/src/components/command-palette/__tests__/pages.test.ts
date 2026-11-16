@@ -22,7 +22,7 @@ describe('palette pages', () => {
   it('lists pages in route declaration order with real paths and titles', () => {
     const pages = routePages(router)
     expect(pages.map((page) => page.name)).toEqual([
-      'LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'Dashboards',
+      'LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'AlertSilences', 'Dashboards',
       'ManageUsers', 'ServiceTokens', 'Teams', 'Sources', 'NewSource', 'SourceInspection',
       'AdminSettings', 'AdminQueryActivity', 'AdminAuditLog', 'Profile', 'Preferences', 'ConnectedApps',
     ])
