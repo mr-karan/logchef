@@ -286,7 +286,7 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, q.params, writer)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+				s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
 					time.Since(start).Milliseconds(), int64(writer.rows))
 			} else if writer.begun {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", q.mode)
@@ -311,7 +311,7 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
-		s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+		s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
 			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
 	}()
 

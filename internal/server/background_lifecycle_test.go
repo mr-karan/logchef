@@ -407,7 +407,7 @@ func TestQueryHistoryBackpressure(t *testing.T) {
 	before := runtime.NumGoroutine()
 	start := time.Now()
 	for range 512 {
-		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("history submission blocked for %s", elapsed)
@@ -429,7 +429,7 @@ func TestHistoryDrainsOnShutdown(t *testing.T) {
 	}()
 	<-ready
 	for range 64 {
-		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
 	}
 	go func() { <-srv.baseCtx.Done(); close(release) }()
 	if err := srv.Shutdown(context.Background()); err != nil {
@@ -480,7 +480,7 @@ func TestHistoryShutdownCountsUndrainedEntries(t *testing.T) {
 	}()
 	<-ready
 	for range 64 {
-		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
 	}
 	deadline := time.Now().Add(time.Second)
 	for len(srv.historyQueue) == 64 && time.Now().Before(deadline) {

@@ -251,6 +251,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error {
 		requestedLimit:  req.Limit,
 		historyQuery:    req.QueryText,
 		historyLanguage: models.QueryLanguageClickHouseSQL,
+		historyStart:    params.StartTime,
 		cacheable:       cacheable,
 		cacheKey:        cacheKey,
 		cacheTTL:        effTTL,
@@ -271,6 +272,7 @@ type previewQuery struct {
 	requestedLimit       int
 	historyQuery         string
 	historyLanguage      models.QueryLanguage
+	historyStart         *time.Time // the request's start time, nil when it has none
 	cacheable            bool
 	cacheKey             [32]byte
 	cacheTTL             time.Duration
@@ -355,7 +357,7 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 		"limit_applied", result.Stats.LimitApplied,
 		"truncated", result.Stats.Truncated,
 	)
-	s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+	s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
 		int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
 
 	return SendSuccess(c, fiber.StatusOK, q.bufferedResponse(result, queryID))

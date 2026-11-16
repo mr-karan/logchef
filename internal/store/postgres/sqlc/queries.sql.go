@@ -2762,6 +2762,51 @@ func (q *Queries) HoldJob(ctx context.Context, arg HoldJobParams) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const incrementQueryShapeStats = `-- name: IncrementQueryShapeStats :exec
+
+INSERT INTO query_shape_stats_daily (
+    bucket_date, source_id, query_language, shape_hash, shape,
+    query_count, total_duration_ms, total_rows, max_lookback_s
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
+DO UPDATE SET
+    query_count = query_shape_stats_daily.query_count + EXCLUDED.query_count,
+    total_duration_ms = query_shape_stats_daily.total_duration_ms + EXCLUDED.total_duration_ms,
+    total_rows = query_shape_stats_daily.total_rows + EXCLUDED.total_rows,
+    max_lookback_s = GREATEST(query_shape_stats_daily.max_lookback_s, EXCLUDED.max_lookback_s)
+`
+
+type IncrementQueryShapeStatsParams struct {
+	BucketDate      string      `json:"bucket_date"`
+	SourceID        int64       `json:"source_id"`
+	QueryLanguage   string      `json:"query_language"`
+	ShapeHash       string      `json:"shape_hash"`
+	Shape           string      `json:"shape"`
+	QueryCount      int64       `json:"query_count"`
+	TotalDurationMs int64       `json:"total_duration_ms"`
+	TotalRows       int64       `json:"total_rows"`
+	MaxLookbackS    pgtype.Int8 `json:"max_lookback_s"`
+}
+
+// Query shape stats daily rollup (RFC 0010) ------------------------------------
+// Add one increment to a shape's daily row: sum the three counters and keep
+// the larger max_lookback_s (GREATEST ignores NULL, so a NULL lookback never
+// replaces a known one).
+func (q *Queries) IncrementQueryShapeStats(ctx context.Context, arg IncrementQueryShapeStatsParams) error {
+	_, err := q.db.Exec(ctx, incrementQueryShapeStats,
+		arg.BucketDate,
+		arg.SourceID,
+		arg.QueryLanguage,
+		arg.ShapeHash,
+		arg.Shape,
+		arg.QueryCount,
+		arg.TotalDurationMs,
+		arg.TotalRows,
+		arg.MaxLookbackS,
+	)
+	return err
+}
+
 const incrementQueryStats = `-- name: IncrementQueryStats :exec
 
 INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
@@ -4497,6 +4542,75 @@ func (q *Queries) ListQueryHistory(ctx context.Context, arg ListQueryHistoryPara
 	return items, nil
 }
 
+const listQueryShapeStats = `-- name: ListQueryShapeStats :many
+SELECT
+    query_language,
+    shape_hash,
+    shape,
+    SUM(query_count)::bigint AS query_count,
+    SUM(total_duration_ms)::bigint AS total_duration_ms,
+    SUM(total_rows)::bigint AS total_rows,
+    COUNT(max_lookback_s)::bigint AS lookback_rows,
+    COALESCE(MAX(max_lookback_s), 0)::bigint AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = $1
+  AND bucket_date >= $2
+  AND shape_hash NOT IN ('unanalyzed', 'overflow')
+GROUP BY query_language, shape_hash, shape
+ORDER BY query_count DESC, query_language ASC, shape_hash ASC
+LIMIT $3::bigint
+`
+
+type ListQueryShapeStatsParams struct {
+	SourceID int64  `json:"source_id"`
+	Since    string `json:"since"`
+	RowLimit int64  `json:"row_limit"`
+}
+
+type ListQueryShapeStatsRow struct {
+	QueryLanguage   string `json:"query_language"`
+	ShapeHash       string `json:"shape_hash"`
+	Shape           string `json:"shape"`
+	QueryCount      int64  `json:"query_count"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
+	TotalRows       int64  `json:"total_rows"`
+	LookbackRows    int64  `json:"lookback_rows"`
+	MaxLookbackS    int64  `json:"max_lookback_s"`
+}
+
+// A source's analyzed shapes on/after `since`, summed over days, most used
+// first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
+// counts them. lookback_rows is 0 when no row has a lookback, and then
+// max_lookback_s means nothing.
+func (q *Queries) ListQueryShapeStats(ctx context.Context, arg ListQueryShapeStatsParams) ([]ListQueryShapeStatsRow, error) {
+	rows, err := q.db.Query(ctx, listQueryShapeStats, arg.SourceID, arg.Since, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueryShapeStatsRow{}
+	for rows.Next() {
+		var i ListQueryShapeStatsRow
+		if err := rows.Scan(
+			&i.QueryLanguage,
+			&i.ShapeHash,
+			&i.Shape,
+			&i.QueryCount,
+			&i.TotalDurationMs,
+			&i.TotalRows,
+			&i.LookbackRows,
+			&i.MaxLookbackS,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReportRecipients = `-- name: ListReportRecipients :many
 SELECT id, report_id, kind, user_id, team_id, email, added_by, created_at FROM report_recipients WHERE report_id = $1 ORDER BY id
 `
@@ -5788,6 +5902,15 @@ func (q *Queries) PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHi
 	return err
 }
 
+const pruneQueryShapeStats = `-- name: PruneQueryShapeStats :exec
+DELETE FROM query_shape_stats_daily WHERE bucket_date < $1
+`
+
+func (q *Queries) PruneQueryShapeStats(ctx context.Context, bucketDate string) error {
+	_, err := q.db.Exec(ctx, pruneQueryShapeStats, bucketDate)
+	return err
+}
+
 const pruneReportRuns = `-- name: PruneReportRuns :exec
 DELETE FROM report_runs
 WHERE report_runs.report_id = $1
@@ -5808,6 +5931,52 @@ type PruneReportRunsParams struct {
 func (q *Queries) PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error {
 	_, err := q.db.Exec(ctx, pruneReportRuns, arg.ReportID, arg.Keep)
 	return err
+}
+
+const queryShapeCoverage = `-- name: QueryShapeCoverage :one
+SELECT
+    COUNT(DISTINCT bucket_date)::bigint AS days,
+    COALESCE(SUM(query_count), 0)::bigint AS query_count,
+    COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'unanalyzed'), 0)::bigint AS unanalyzed_count,
+    COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'overflow'), 0)::bigint AS overflow_count,
+    COALESCE(SUM(query_count) FILTER (WHERE max_lookback_s IS NULL), 0)::bigint AS null_lookback_count,
+    COUNT(max_lookback_s)::bigint AS lookback_rows,
+    COALESCE(MAX(max_lookback_s), 0)::bigint AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = $1 AND bucket_date >= $2
+`
+
+type QueryShapeCoverageParams struct {
+	SourceID int64  `json:"source_id"`
+	Since    string `json:"since"`
+}
+
+type QueryShapeCoverageRow struct {
+	Days              int64 `json:"days"`
+	QueryCount        int64 `json:"query_count"`
+	UnanalyzedCount   int64 `json:"unanalyzed_count"`
+	OverflowCount     int64 `json:"overflow_count"`
+	NullLookbackCount int64 `json:"null_lookback_count"`
+	LookbackRows      int64 `json:"lookback_rows"`
+	MaxLookbackS      int64 `json:"max_lookback_s"`
+}
+
+// Totals over every rollup row of a source on/after `since`, not only the rows
+// that ListQueryShapeStats returns. lookback_rows is 0 when no row has a
+// lookback, and then max_lookback_s means nothing.
+func (q *Queries) QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error) {
+	row := q.db.QueryRow(ctx, queryShapeCoverage, arg.SourceID, arg.Since)
+	var i QueryShapeCoverageRow
+	err := row.Scan(
+		&i.Days,
+		&i.QueryCount,
+		&i.UnanalyzedCount,
+		&i.OverflowCount,
+		&i.NullLookbackCount,
+		&i.LookbackRows,
+		&i.MaxLookbackS,
+	)
+	return i, err
 }
 
 const queryVolumeByDay = `-- name: QueryVolumeByDay :many

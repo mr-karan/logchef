@@ -8,18 +8,26 @@ import (
 )
 
 // recordQueryHistory queues a best-effort write without blocking the query.
-func (s *Server) recordQueryHistory(user *models.User, teamID models.TeamID, sourceID models.SourceID, queryText string, language models.QueryLanguage, durationMs, rowCount int64) {
+// start is the query's start time, nil when the request had none.
+func (s *Server) recordQueryHistory(user *models.User, teamID models.TeamID, source *models.Source, start *time.Time, queryText string, language models.QueryLanguage, durationMs, rowCount int64) {
 	if user == nil {
 		return
 	}
 	entry := &models.QueryHistory{
 		UserID:        user.ID,
 		TeamID:        teamID,
-		SourceID:      sourceID,
+		SourceID:      source.ID,
 		QueryText:     queryText,
 		QueryLanguage: models.NormalizeQueryLanguage(language),
 		DurationMs:    durationMs,
 		RowCount:      rowCount,
+	}
+	if start != nil {
+		lookback := max(int64(time.Since(*start)/time.Second), 0)
+		entry.LookbackSeconds = &lookback
+	}
+	if source.IsClickHouse() {
+		entry.SourceDatabase, entry.SourceTable = source.Connection.Database, source.Connection.TableName
 	}
 	s.backgroundMu.Lock()
 	defer s.backgroundMu.Unlock()
@@ -97,8 +105,11 @@ func (s *Server) writeQueryHistory(parent context.Context, entry *models.QueryHi
 			s.log.Warn("failed to record query history", "error", err, "user_id", entry.UserID, "source_id", entry.SourceID)
 		}
 	}
-	bucketDate := time.Now().UTC().Format("2006-01-02")
+	now := time.Now()
+	bucketDate := now.UTC().Format("2006-01-02")
 	if err := s.store.IncrementQueryStats(ctx, bucketDate, entry.UserID, entry.TeamID, entry.SourceID, entry.QueryLanguage, entry.DurationMs); err != nil {
 		s.log.Warn("failed to increment query stats", "error", err, "user_id", entry.UserID, "source_id", entry.SourceID)
 	}
+	// A shape holds no user data, so it is recorded in demo mode too.
+	s.recordQueryShape(parent, now, entry)
 }

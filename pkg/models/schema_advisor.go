@@ -96,3 +96,44 @@ type SchemaAdvisorReport struct {
 	Findings          []SchemaFinding `json:"findings"`
 	Notes             []string        `json:"notes,omitempty"`
 }
+
+// Shape hashes that stand for no single shape in query_shape_stats_daily.
+const (
+	ShapeHashUnanalyzed = "unanalyzed" // the query could not be analyzed
+	ShapeHashOverflow   = "overflow"   // the process saw too many shapes for the source that day
+)
+
+// QueryShapeUsage is one shape's usage in query_shape_stats_daily: one day's
+// row, or several days summed.
+type QueryShapeUsage struct {
+	QueryLanguage   QueryLanguage `json:"query_language"`
+	ShapeHash       string        `json:"shape_hash"`
+	Shape           FilterShape   `json:"shape"`
+	QueryCount      int64         `json:"query_count"`
+	TotalDurationMs int64         `json:"total_duration_ms"`
+	TotalRows       int64         `json:"total_rows"`
+	// MaxLookbackSeconds is the largest now - start_time of the counted
+	// queries, nil when none had a start time.
+	MaxLookbackSeconds *int64 `json:"max_lookback_s,omitempty"`
+}
+
+// QueryShapeIncrement adds usage to one source's shape on one UTC day.
+type QueryShapeIncrement struct {
+	BucketDate string // YYYY-MM-DD, UTC
+	SourceID   SourceID
+	Usage      QueryShapeUsage
+}
+
+// QueryShapeCoverage summarizes every rollup row of a source in a window, so
+// the advisor can tell how complete the usage record is.
+type QueryShapeCoverage struct {
+	Days            int64 `json:"days"`
+	QueryCount      int64 `json:"query_count"`
+	UnanalyzedCount int64 `json:"unanalyzed_count"`
+	OverflowCount   int64 `json:"overflow_count"`
+	// NullLookbackCount counts queries in rows where no query had a start
+	// time. A row mixing both kinds keeps its largest lookback, so this is a
+	// lower bound.
+	NullLookbackCount  int64  `json:"null_lookback_count"`
+	MaxLookbackSeconds *int64 `json:"max_lookback_s,omitempty"`
+}

@@ -324,6 +324,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.holdJobStmt, err = db.PrepareContext(ctx, holdJob); err != nil {
 		return nil, fmt.Errorf("error preparing query HoldJob: %w", err)
 	}
+	if q.incrementQueryShapeStatsStmt, err = db.PrepareContext(ctx, incrementQueryShapeStats); err != nil {
+		return nil, fmt.Errorf("error preparing query IncrementQueryShapeStats: %w", err)
+	}
 	if q.incrementQueryStatsStmt, err = db.PrepareContext(ctx, incrementQueryStats); err != nil {
 		return nil, fmt.Errorf("error preparing query IncrementQueryStats: %w", err)
 	}
@@ -441,6 +444,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listQueryHistoryStmt, err = db.PrepareContext(ctx, listQueryHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueryHistory: %w", err)
 	}
+	if q.listQueryShapeStatsStmt, err = db.PrepareContext(ctx, listQueryShapeStats); err != nil {
+		return nil, fmt.Errorf("error preparing query ListQueryShapeStats: %w", err)
+	}
 	if q.listReportRecipientsStmt, err = db.PrepareContext(ctx, listReportRecipients); err != nil {
 		return nil, fmt.Errorf("error preparing query ListReportRecipients: %w", err)
 	}
@@ -543,8 +549,14 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.pruneQueryHistoryForUserStmt, err = db.PrepareContext(ctx, pruneQueryHistoryForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneQueryHistoryForUser: %w", err)
 	}
+	if q.pruneQueryShapeStatsStmt, err = db.PrepareContext(ctx, pruneQueryShapeStats); err != nil {
+		return nil, fmt.Errorf("error preparing query PruneQueryShapeStats: %w", err)
+	}
 	if q.pruneReportRunsStmt, err = db.PrepareContext(ctx, pruneReportRuns); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneReportRuns: %w", err)
+	}
+	if q.queryShapeCoverageStmt, err = db.PrepareContext(ctx, queryShapeCoverage); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryShapeCoverage: %w", err)
 	}
 	if q.queryVolumeByDayStmt, err = db.PrepareContext(ctx, queryVolumeByDay); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryVolumeByDay: %w", err)
@@ -1210,6 +1222,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing holdJobStmt: %w", cerr)
 		}
 	}
+	if q.incrementQueryShapeStatsStmt != nil {
+		if cerr := q.incrementQueryShapeStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing incrementQueryShapeStatsStmt: %w", cerr)
+		}
+	}
 	if q.incrementQueryStatsStmt != nil {
 		if cerr := q.incrementQueryStatsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing incrementQueryStatsStmt: %w", cerr)
@@ -1405,6 +1422,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listQueryHistoryStmt: %w", cerr)
 		}
 	}
+	if q.listQueryShapeStatsStmt != nil {
+		if cerr := q.listQueryShapeStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listQueryShapeStatsStmt: %w", cerr)
+		}
+	}
 	if q.listReportRecipientsStmt != nil {
 		if cerr := q.listReportRecipientsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listReportRecipientsStmt: %w", cerr)
@@ -1575,9 +1597,19 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing pruneQueryHistoryForUserStmt: %w", cerr)
 		}
 	}
+	if q.pruneQueryShapeStatsStmt != nil {
+		if cerr := q.pruneQueryShapeStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing pruneQueryShapeStatsStmt: %w", cerr)
+		}
+	}
 	if q.pruneReportRunsStmt != nil {
 		if cerr := q.pruneReportRunsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing pruneReportRunsStmt: %w", cerr)
+		}
+	}
+	if q.queryShapeCoverageStmt != nil {
+		if cerr := q.queryShapeCoverageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryShapeCoverageStmt: %w", cerr)
 		}
 	}
 	if q.queryVolumeByDayStmt != nil {
@@ -1984,6 +2016,7 @@ type Queries struct {
 	getUserPreferencesStmt                *sql.Stmt
 	getUserTeamForSourceStmt              *sql.Stmt
 	holdJobStmt                           *sql.Stmt
+	incrementQueryShapeStatsStmt          *sql.Stmt
 	incrementQueryStatsStmt               *sql.Stmt
 	insertAlertHistoryStmt                *sql.Stmt
 	insertAuditEventStmt                  *sql.Stmt
@@ -2023,6 +2056,7 @@ type Queries struct {
 	listOpenAlertHistoryStmt              *sql.Stmt
 	listQueryActivityStmt                 *sql.Stmt
 	listQueryHistoryStmt                  *sql.Stmt
+	listQueryShapeStatsStmt               *sql.Stmt
 	listReportRecipientsStmt              *sql.Stmt
 	listReportRunsStmt                    *sql.Stmt
 	listReportsStmt                       *sql.Stmt
@@ -2057,7 +2091,9 @@ type Queries struct {
 	pruneAuditEventsStmt                  *sql.Stmt
 	pruneExpiredQuerySharesStmt           *sql.Stmt
 	pruneQueryHistoryForUserStmt          *sql.Stmt
+	pruneQueryShapeStatsStmt              *sql.Stmt
 	pruneReportRunsStmt                   *sql.Stmt
+	queryShapeCoverageStmt                *sql.Stmt
 	queryVolumeByDayStmt                  *sql.Stmt
 	reapInterruptedExportJobsStmt         *sql.Stmt
 	refreshAlertStateStmt                 *sql.Stmt
@@ -2217,6 +2253,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserPreferencesStmt:                q.getUserPreferencesStmt,
 		getUserTeamForSourceStmt:              q.getUserTeamForSourceStmt,
 		holdJobStmt:                           q.holdJobStmt,
+		incrementQueryShapeStatsStmt:          q.incrementQueryShapeStatsStmt,
 		incrementQueryStatsStmt:               q.incrementQueryStatsStmt,
 		insertAlertHistoryStmt:                q.insertAlertHistoryStmt,
 		insertAuditEventStmt:                  q.insertAuditEventStmt,
@@ -2256,6 +2293,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listOpenAlertHistoryStmt:              q.listOpenAlertHistoryStmt,
 		listQueryActivityStmt:                 q.listQueryActivityStmt,
 		listQueryHistoryStmt:                  q.listQueryHistoryStmt,
+		listQueryShapeStatsStmt:               q.listQueryShapeStatsStmt,
 		listReportRecipientsStmt:              q.listReportRecipientsStmt,
 		listReportRunsStmt:                    q.listReportRunsStmt,
 		listReportsStmt:                       q.listReportsStmt,
@@ -2290,7 +2328,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneAuditEventsStmt:                  q.pruneAuditEventsStmt,
 		pruneExpiredQuerySharesStmt:           q.pruneExpiredQuerySharesStmt,
 		pruneQueryHistoryForUserStmt:          q.pruneQueryHistoryForUserStmt,
+		pruneQueryShapeStatsStmt:              q.pruneQueryShapeStatsStmt,
 		pruneReportRunsStmt:                   q.pruneReportRunsStmt,
+		queryShapeCoverageStmt:                q.queryShapeCoverageStmt,
 		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,
 		reapInterruptedExportJobsStmt:         q.reapInterruptedExportJobsStmt,
 		refreshAlertStateStmt:                 q.refreshAlertStateStmt,
