@@ -124,10 +124,15 @@ const authzTestTokenSecret = "authz-test-secret-0123456789abcdef"
 
 // newAuthzTestServer builds the full server (all middleware and routes) on a
 // fresh SQLite store.
-func newAuthzTestServer(t *testing.T) *Server {
+// newAuthzTestServer builds a server; logs, if given, is its logger. The
+// logger goes in before New, whose goroutines read it.
+func newAuthzTestServer(t *testing.T, logs ...*slog.Logger) *Server {
 	t.Helper()
 	db := newServerTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if len(logs) > 0 {
+		logger = logs[0]
+	}
 	cfg := &config.Config{}
 	cfg.Auth.APITokenSecret = authzTestTokenSecret
 	s := New(ServerOptions{

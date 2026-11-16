@@ -417,7 +417,10 @@ func TestClickHouseResourceFailureResponses(t *testing.T) {
 	if addr == "" {
 		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR for read-only ClickHouse checks")
 	}
-	env := newErrorResponseServer(t, vlUpstream)
+	// The logger goes in before New: replacing s.log afterwards races with
+	// the server's background goroutines. Each case resets the buffer.
+	var logs syncLogBuffer
+	env := newErrorResponseServer(t, vlUpstream, slog.New(slog.NewTextHandler(&logs, nil)))
 	configureErrorResponseClickHouse(t, env, addr)
 	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.chSource)
 	for _, tc := range []struct {
@@ -436,8 +439,7 @@ func TestClickHouseResourceFailureResponses(t *testing.T) {
 		{"remote cast 70", "SELECT accurateCast(number, 'UInt8') FROM remote('127.0.0.2', system.numbers) LIMIT 1000 SETTINGS prefer_localhost_replica=0", 400, "accurateCast"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var logs bytes.Buffer
-			env.s.log = slog.New(slog.NewTextHandler(&logs, nil))
+			logs.Reset()
 			body, err := json.Marshal(map[string]string{"query_text": tc.query})
 			if err != nil {
 				t.Fatal(err)
