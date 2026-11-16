@@ -48,6 +48,8 @@ type Querier interface {
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
+	// Instance counts of the given alerts, one row per (alert, state).
+	CountAlertInstancesByState(ctx context.Context, alertIds []int64) ([]CountAlertInstancesByStateRow, error)
 	// Counts the events that match the filters, stopping at max_rows.
 	CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error)
 	// Count the teams shared with a collection that the user currently belongs to.
@@ -109,6 +111,7 @@ type Querier interface {
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
+	DeleteAlertInstance(ctx context.Context, arg DeleteAlertInstanceParams) error
 	DeleteAlertInstances(ctx context.Context, alertID int64) error
 	DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
@@ -281,6 +284,9 @@ type Querier interface {
 	// Get all teams managed by provisioning config
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]OauthGrant, error)
+	ListOpenAlertGroupHistoryIDs(ctx context.Context, arg ListOpenAlertGroupHistoryIDsParams) ([]int64, error)
+	// Every open episode of the alert, newest first.
+	ListOpenAlertHistory(ctx context.Context, alertID int64) ([]AlertHistory, error)
 	// Most recent query_history rows across all users, newest first, enriched with
 	// the executing user's email and the source's display name. LEFT JOIN on
 	// sources so history survives a deleted source (source_name is NULL then).
@@ -360,6 +366,8 @@ type Querier interface {
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error)
+	// After a manual resolve of one group: the rule is firing while any group fires.
+	RefreshAlertState(ctx context.Context, id int64) error
 	ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error)
 	// Remove a link of either kind
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) (int64, error)
@@ -377,6 +385,7 @@ type Querier interface {
 	// revision and is still stale. Changes neither revision nor updated_at.
 	RepairDashboardSummary(ctx context.Context, arg RepairDashboardSummaryParams) (int64, error)
 	ReportTickExists(ctx context.Context, arg ReportTickExistsParams) (bool, error)
+	ResolveAlertGroupHistory(ctx context.Context, arg ResolveAlertGroupHistoryParams) error
 	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
 	ResumeReport(ctx context.Context, id int64) (int64, error)
 	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)

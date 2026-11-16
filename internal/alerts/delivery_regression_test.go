@@ -90,14 +90,14 @@ type historyReadBarrier struct {
 	afterRead func()
 }
 
-func (s *historyReadBarrier) GetLatestUnresolvedAlertHistory(ctx context.Context, id models.AlertID) (*models.AlertHistoryEntry, error) {
-	entry, err := s.Store.GetLatestUnresolvedAlertHistory(ctx, id)
+func (s *historyReadBarrier) ListOpenAlertHistory(ctx context.Context, id models.AlertID) ([]*models.AlertHistoryEntry, error) {
+	entries, err := s.Store.ListOpenAlertHistory(ctx, id)
 	if s.afterRead != nil {
 		f := s.afterRead
 		s.afterRead = nil
 		f()
 	}
-	return entry, err
+	return entries, err
 }
 
 func TestManualResolveWinsEvaluationRace(t *testing.T) {
@@ -122,7 +122,7 @@ func TestManualResolveWinsEvaluationRace(t *testing.T) {
 			}
 			var resolvedPayload map[string]any
 			manual := func() {
-				if err := m.ManualResolve(t.Context(), alert.ID, "manual resolution"); err != nil {
+				if err := m.ManualResolve(t.Context(), alert.ID, nil, "manual resolution"); err != nil {
 					t.Fatal(err)
 				}
 				rows, err := db.ListAlertHistory(t.Context(), alert.ID, 1)
@@ -224,7 +224,7 @@ func TestDeliveryRecovery(t *testing.T) {
 					t.Run(fmt.Sprintf("legacy duplicates manual=%v repeat recovery=%v", manual, repeatRecovery), func(t *testing.T) {
 						db, alert, logger := open(t)
 						for i := range 3 {
-							if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "legacy firing", map[string]any{"delivery_in_progress": i == 0, "delivery_failed": false}); err != nil {
+							if _, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "legacy firing", map[string]any{"delivery_in_progress": i == 0, "delivery_failed": false}); err != nil {
 								t.Fatal(err)
 							}
 						}
@@ -239,7 +239,7 @@ func TestDeliveryRecovery(t *testing.T) {
 						})
 						m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
 						if manual {
-							if err := m.ManualResolve(t.Context(), alert.ID, "manual resolution"); err != nil {
+							if err := m.ManualResolve(t.Context(), alert.ID, nil, "manual resolution"); err != nil {
 								t.Fatal(err)
 							}
 						} else if err := m.handleResolved(t.Context(), alert, 0); err != nil {
@@ -283,7 +283,7 @@ func TestDeliveryRecovery(t *testing.T) {
 								t.Fatal(err)
 							}
 						}
-						entry, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+						entry, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{
 							"delivery_attempts": attempts, "delivery_failed": false, "delivery_in_progress": true,
 							"delivery_pending":     []string{"webhook:pending"},
 							"delivery_deadline_at": "2026-01-01T00:01:00Z",
@@ -336,7 +336,7 @@ func TestDeliveryRecovery(t *testing.T) {
 			}
 			t.Run("interrupted final attempt", func(t *testing.T) {
 				db, alert, logger := open(t)
-				entry, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+				entry, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{
 					"delivery_attempts": 3, "delivery_failed": false, "delivery_in_progress": true,
 					"delivery_retries_exhausted": true,
 					"delivery_deadline_at":       "2026-01-01T00:01:00Z",
@@ -389,7 +389,7 @@ func TestDeliveryRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 				payload["delivery_pending"] = []string{string(deliveryTargetID("webhook", second.URL))}
-				if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", payload); err != nil {
+				if _, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", payload); err != nil {
 					t.Fatal(err)
 				}
 				m := NewManager(Options{DB: db, Logger: logger, Sender: NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})})
@@ -410,7 +410,7 @@ func TestDeliveryRecovery(t *testing.T) {
 				m := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
 				m.sender = alertSenderFunc(func(ctx context.Context, n AlertNotification) error {
 					if n.Status == models.AlertStatusTriggered {
-						if err := m.ManualResolve(ctx, alert.ID, "manual resolution"); err != nil {
+						if err := m.ManualResolve(ctx, alert.ID, nil, "manual resolution"); err != nil {
 							t.Fatal(err)
 						}
 					}

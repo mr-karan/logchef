@@ -17,6 +17,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { TestAlertQueryResponse } from "@/api/alerts";
 import type { AlertFormState, ConditionTemplate, QueryTemplate } from "@/composables/useAlertForm";
+import { formatAlertGroup } from "@/utils/alertGroups";
 
 const { t } = useI18n();
 
@@ -202,12 +203,45 @@ defineProps<{
       </div>
     </template>
 
+    <div class="space-y-2">
+      <Label for="alert-group-by">{{ t('alerts.groupBy') }}</Label>
+      <Input
+        id="alert-group-by"
+        v-model="form.group_by"
+        placeholder="service, region"
+        :disabled="disabled || form.editor_mode !== 'native'"
+        class="font-mono text-sm"
+      />
+      <p v-if="form.editor_mode !== 'native'" class="text-xs text-muted-foreground">
+        {{ t('alerts.groupByNeedsNativeQuery') }}
+      </p>
+    </div>
+
     <!-- Test Query Results -->
     <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
       <div class="flex items-start justify-between gap-4">
         <div class="flex-1 space-y-1">
           <h4 class='text-sm font-medium'>{{ t('ui.testResult') }}</h4>
-          <div class="flex items-baseline gap-3">
+          <div v-if="testQueryResult.groups_total > 0" class="space-y-2">
+            <div class="text-sm text-muted-foreground">
+              {{ t('alerts.testGroupsTotal', { count: testQueryResult.groups_total }) }}
+              <template v-if="testQueryResult.samples.length < testQueryResult.groups_total">
+                · {{ t('alerts.testGroupsShown', { shown: testQueryResult.samples.length, total: testQueryResult.groups_total }) }}
+              </template>
+            </div>
+            <table class="w-full text-sm">
+              <tbody>
+                <tr v-for="sample in testQueryResult.samples" :key="formatAlertGroup(sample.group)" class="border-t">
+                  <td class="py-1 pr-3 font-mono text-xs">{{ formatAlertGroup(sample.group) }}</td>
+                  <td class="py-1 pr-3 tabular-nums text-right">{{ sample.value }}</td>
+                  <td class="py-1 text-muted-foreground">
+                    {{ sample.threshold_met ? t('ui.thresholdMet') : t('ui.thresholdNotMet') }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="flex items-baseline gap-3">
             <span class="text-2xl font-semibold tabular-nums">{{ testQueryResult.value }}</span>
             <span class="text-sm text-muted-foreground">
               {{ testQueryResult.threshold_met ? t('ui.thresholdMet') : t('ui.thresholdNotMet') }}

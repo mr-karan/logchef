@@ -149,7 +149,25 @@ func (s *Server) handleGetAlert(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
+	if err := core.AttachAlertInstanceCounts(c.Context(), s.store, []*models.Alert{alert}); err != nil {
+		s.log.Error("failed to count alert instances", "alert_id", alert.ID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load alert", models.GeneralErrorType)
+	}
 	return SendSuccess(c, fiber.StatusOK, alert)
+}
+
+// handleListAlertInstances returns the alert's groups, firing first.
+func (s *Server) handleListAlertInstances(c fiber.Ctx) error {
+	alert, _, ok := s.loadAlertWithVisibility(c)
+	if !ok {
+		return nil
+	}
+	instances, err := core.ListAlertInstances(c.Context(), s.store, alert.ID)
+	if err != nil {
+		s.log.Error("failed to list alert instances", "alert_id", alert.ID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alert instances", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusOK, instances)
 }
 
 // handleUpdateAlert updates an alert. Allowed only for the creator or a global admin.
@@ -203,7 +221,8 @@ func (s *Server) handleDeleteAlert(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert deleted"})
 }
 
-// handleResolveAlert manually resolves the most recent triggered history entry.
+// handleResolveAlert manually resolves one group, named by group_key, or every
+// group of the alert.
 func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 	alert, user, ok := s.loadAlertWithVisibility(c)
 	if !ok {
@@ -219,7 +238,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 	}
 
 	if s.alertsManager != nil {
-		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, strings.TrimSpace(req.Message)); err != nil {
+		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, req.GroupKey, strings.TrimSpace(req.Message)); err != nil {
 			if models.IsNotFound(err) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
@@ -227,7 +246,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 		}
 	} else {
-		if err := core.ResolveAlert(c.Context(), s.store, s.log, alert.ID, strings.TrimSpace(req.Message)); err != nil {
+		if err := core.ResolveAlert(c.Context(), s.store, s.log, alert.ID, req.GroupKey, strings.TrimSpace(req.Message)); err != nil {
 			if errors.Is(err, core.ErrAlertNotFound) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
@@ -235,6 +254,9 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 		}
 	}
 	auditTarget(c, audit.AlertTarget(alert))
+	if req.GroupKey != nil {
+		auditDetail(c, "group_key", *req.GroupKey)
+	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert resolved"})
 }
 

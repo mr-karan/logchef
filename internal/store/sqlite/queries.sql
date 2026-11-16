@@ -573,10 +573,11 @@ INSERT INTO alerts (
     recipient_user_ids_json,
     webhook_urls_json,
     generator_url,
+    group_by_json,
     is_active,
     created_by
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetAlert :one
@@ -617,6 +618,7 @@ SET name = ?,
     recipient_user_ids_json = ?,
     webhook_urls_json = ?,
     generator_url = ?,
+    group_by_json = ?,
     is_active = ?,
     eval_seq = eval_seq + 1,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
@@ -690,17 +692,39 @@ RETURNING alert_id;
 -- name: DeleteAlertInstances :exec
 DELETE FROM alert_instances WHERE alert_id = ?;
 
+-- name: DeleteAlertInstance :exec
+DELETE FROM alert_instances WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key);
+
+-- name: CountAlertInstancesByState :many
+-- Instance counts of the given alerts, one row per (alert, state).
+SELECT alert_id, state, COUNT(*) AS instances
+FROM alert_instances
+WHERE alert_id IN (sqlc.slice(alert_ids))
+GROUP BY alert_id, state;
+
+-- name: RefreshAlertState :exec
+-- After a manual resolve of one group: the rule is firing while any group fires.
+UPDATE alerts
+SET last_state = CASE WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'firing'
+    ) THEN 'firing' ELSE 'resolved' END,
+    eval_seq = eval_seq + 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = sqlc.arg(id);
+
 -- Alert history queries
 
 -- name: InsertAlertHistory :one
 INSERT INTO alert_history (
     alert_id,
+    group_key,
+    group_json,
     status,
     value,
     message,
     payload_json
 )
-VALUES (?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: InterruptAlertDeliveries :exec
@@ -737,6 +761,23 @@ SELECT * FROM alert_history
 WHERE alert_id = ? AND status = 'triggered'
 ORDER BY triggered_at DESC, id DESC
 LIMIT 1;
+
+-- name: ListOpenAlertHistory :many
+-- Every open episode of the alert, newest first.
+SELECT * FROM alert_history
+WHERE alert_id = sqlc.arg(alert_id) AND status = 'triggered'
+ORDER BY triggered_at DESC, id DESC;
+
+-- name: ListOpenAlertGroupHistoryIDs :many
+SELECT id FROM alert_history
+WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status = 'triggered';
+
+-- name: ResolveAlertGroupHistory :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    message = sqlc.arg(message)
+WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status = 'triggered';
 
 -- name: GetAlertHistoryEntry :one
 SELECT * FROM alert_history

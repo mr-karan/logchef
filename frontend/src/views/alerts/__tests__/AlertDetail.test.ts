@@ -20,7 +20,7 @@ function alert(id: number): Alert {
 
 function history(id: number, message: string): AlertHistoryEntry[] {
   return [{
-    id, alert_id: id, status: 'triggered', message,
+    id, alert_id: id, group_key: '', status: 'triggered', message,
     triggered_at: '2026-01-01T00:00:00Z', created_at: '2026-01-01T00:00:00Z',
   }]
 }
@@ -118,6 +118,21 @@ describe('AlertDetail route changes', () => {
 
     router.back()
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/alerts/1?tab=history'))
+  })
+
+  it('lists the groups and resolves one by its key', async () => {
+    await loadFirstHistory()
+    request('/alerts/1/instances').succeed([
+      { alert_id: 1, group_key: '["checkout"]', group: { service: 'checkout' }, state: 'firing', value: 12, state_since: '2026-01-01T00:00:00Z' },
+      { alert_id: 1, group_key: '["search"]', group: { service: 'search' }, state: 'firing', value: 30, state_since: '2026-01-01T00:00:00Z' },
+    ])
+    await vi.waitFor(() => expect(host.textContent).toContain('service=search'))
+    const row = [...host.querySelectorAll('tr')].find(tr => tr.textContent?.includes('service=checkout'))
+    const resolve = [...(row?.querySelectorAll('button') ?? [])].find(button => button.textContent?.trim() === 'Resolve')
+    if (!resolve) throw new Error('Missing resolve action for checkout')
+    resolve.click()
+    await vi.waitFor(() => expect(network.requests.some(r => r.config.url === '/alerts/1/resolve')).toBe(true))
+    expect(JSON.parse(String(request('/alerts/1/resolve').config.data))).toEqual({ message: 'Manually resolved', group_key: '["checkout"]' })
   })
 
   it('leaves the tab out of the overview query', async () => {

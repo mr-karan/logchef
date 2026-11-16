@@ -1041,5 +1041,16 @@
   "panelStyle.none": "कोई नहीं",
   "panelStyle.minutes": "मिनट",
   "panelStyle.seconds": "सेकंड",
-  "panelStyle.millis": "मिलीसेकंड"
+  "panelStyle.millis": "मिलीसेकंड",
+  "alerts.groupBy": "इसके अनुसार समूह",
+  "alerts.groupByNeedsNativeQuery": "समूह के लिए नेटिव क्वेरी आवश्यक है।",
+  "alerts.groups": "समूह",
+  "alerts.group": "समूह",
+  "alerts.since": "से",
+  "alerts.stateOk": "ठीक",
+  "alerts.noGroupFiring": "कोई समूह फायर नहीं हो रहा है।",
+  "alerts.wholeResult": "पूरा परिणाम",
+  "alerts.groupsFiring": "{count} फायरिंग",
+  "alerts.testGroupsTotal": "समूह: {count}",
+  "alerts.testGroupsShown": "{total} में से पहले {shown} दिखाए जा रहे हैं"
 }

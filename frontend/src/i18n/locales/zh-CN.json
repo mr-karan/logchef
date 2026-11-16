@@ -1787,5 +1787,16 @@
   "panelStyle.none": "无",
   "panelStyle.minutes": "分钟",
   "panelStyle.seconds": "秒",
-  "panelStyle.millis": "毫秒"
+  "panelStyle.millis": "毫秒",
+  "alerts.groupBy": "分组依据",
+  "alerts.groupByNeedsNativeQuery": "分组需要原生查询。",
+  "alerts.groups": "分组",
+  "alerts.group": "分组",
+  "alerts.since": "起始",
+  "alerts.stateOk": "正常",
+  "alerts.noGroupFiring": "没有正在触发的分组。",
+  "alerts.wholeResult": "整个结果",
+  "alerts.groupsFiring": "{count} 个触发中",
+  "alerts.testGroupsTotal": "分组：{count}",
+  "alerts.testGroupsShown": "显示 {total} 个中的前 {shown} 个"
 }

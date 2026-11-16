@@ -5,7 +5,7 @@ import { loadAlertInvestigation } from '../alertInvestigation';
 import { latestTriggered } from '../ask';
 
 const alert: Alert = { id: 5, source_id: 12, name: 'Error rate', query_language: 'logchefql', editor_mode: 'condition', query: '', lookback_seconds: 300, threshold_operator: 'gt', threshold_value: 5, frequency_seconds: 60, severity: 'warning', recipient_user_ids: [], webhook_urls: [], is_active: true, last_state: 'resolved', created_at: '', updated_at: '' };
-const entry = (id: number, status: AlertHistoryEntry['status'], triggered_at: string): AlertHistoryEntry => ({ id, alert_id: 5, status, triggered_at, created_at: triggered_at });
+const entry = (id: number, status: AlertHistoryEntry['status'], triggered_at: string): AlertHistoryEntry => ({ id, alert_id: 5, group_key: '', status, triggered_at, created_at: triggered_at });
 const history = [entry(1, 'triggered', '2026-10-01T00:00:00Z'), entry(2, 'resolved', '2026-10-03T00:00:00Z'), entry(3, 'triggered', '2026-10-02T00:00:00Z')];
 afterEach(() => vi.restoreAllMocks());
 

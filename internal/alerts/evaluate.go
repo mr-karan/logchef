@@ -11,7 +11,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
-	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -48,7 +47,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return fmt.Errorf("alert query failed: %w", err)
 	}
 
-	samples, err := ungroupedSamples(result)
+	samples, err := SamplesFromResult(result, alert.GroupBy)
 	if err != nil {
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to extract alert result: %w", err))
 		return fmt.Errorf("failed to extract alert result: %w", err)
@@ -56,84 +55,322 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 	return m.commitEvaluation(ctx, alert, alert.EvalSeq, samples)
 }
 
-// ungroupedSamples reads the first column of the first row. No rows is no sample.
-func ungroupedSamples(result *models.QueryResult) ([]Sample, error) {
-	if result == nil || len(result.Logs) == 0 {
-		return nil, nil
-	}
-	value, err := util.ExtractFirstNumeric(result)
-	if err != nil {
-		return nil, err
-	}
-	return []Sample{{Value: value}}, nil
+// episode is the open state of one group: its newest open history row and
+// its instance.
+type episode struct {
+	instance *models.AlertInstance
+	history  *models.AlertHistoryEntry
 }
 
-func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq int64, samples []Sample) error {
-	instances, err := m.db.ListAlertInstances(ctx, alert.ID)
-	if err != nil {
-		return fmt.Errorf("failed to list alert instances: %w", err)
-	}
-	open, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
-	if err != nil {
-		if !models.IsNotFound(err) {
-			return fmt.Errorf("failed to check existing alert history: %w", err)
-		}
-		open = nil
-	}
-	current := currentInstance(instances, open)
-	var tracked []Instance
-	if current != nil {
-		tracked = []Instance{{GroupKey: current.GroupKey, Group: current.Group, State: current.State}}
-	}
-
-	// An ungrouped rule tracks at most the one group "", so there is one change.
-	change := Transition(Rule{Operator: alert.ThresholdOperator, Threshold: alert.ThresholdValue}, tracked, samples)[0]
-
-	m.log.Debug("alert evaluation complete",
-		"alert_id", alert.ID,
-		"alert_name", alert.Name,
-		"value", change.Value,
-		"threshold", alert.ThresholdValue,
-		"operator", alert.ThresholdOperator,
-		"from", change.From,
-		"to", change.To)
-
-	switch {
-	case change.To == models.AlertInstanceStateFiring:
-		return m.fire(ctx, alert, seq, current, open, change)
-	case change.Closes():
-		return m.resolve(ctx, alert, seq, open, change.Value)
-	default:
-		if err := m.commit(ctx, alert.ID, seq, func(tx store.StoreOps) error {
-			return tx.MarkAlertEvaluated(ctx, alert.ID)
-		}); err != nil && !models.IsConflict(err) {
-			return fmt.Errorf("failed to mark alert evaluated: %w", err)
-		}
-		return nil
-	}
-}
-
-// currentInstance returns the ungrouped rule's firing instance. The open
-// history row is the episode. A row without a matching instance is adopted
-// with notified unset, so the row's delivery bookkeeping decides retries as it
-// did before instances existed.
-func currentInstance(instances []*models.AlertInstance, open *models.AlertHistoryEntry) *models.AlertInstance {
-	if open == nil {
-		return nil
-	}
+// openEpisodes pairs each group's newest open history row with its instance.
+// open is newest first.
+func openEpisodes(instances []*models.AlertInstance, open []*models.AlertHistoryEntry) map[string]episode {
+	byKey := make(map[string]*models.AlertInstance, len(instances))
 	for _, instance := range instances {
-		if instance.GroupKey == "" && instance.HistoryID != nil && *instance.HistoryID == open.ID {
-			return instance
+		byKey[instance.GroupKey] = instance
+	}
+	episodes := make(map[string]episode, len(open))
+	for _, entry := range open {
+		if _, ok := episodes[entry.GroupKey]; ok {
+			continue
 		}
+		episodes[entry.GroupKey] = episode{instance: currentInstance(byKey[entry.GroupKey], entry), history: entry}
+	}
+	return episodes
+}
+
+// currentInstance returns the firing instance of an open episode. A row
+// without a matching instance is adopted with notified unset, so the row's
+// delivery bookkeeping decides retries as it did before instances existed.
+func currentInstance(instance *models.AlertInstance, open *models.AlertHistoryEntry) *models.AlertInstance {
+	if instance != nil && instance.HistoryID != nil && *instance.HistoryID == open.ID {
+		return instance
 	}
 	historyID := open.ID
 	return &models.AlertInstance{
 		AlertID:    open.AlertID,
+		GroupKey:   open.GroupKey,
+		Group:      open.Group,
 		State:      models.AlertInstanceStateFiring,
 		Value:      open.Value,
 		StateSince: open.TriggeredAt,
 		HistoryID:  &historyID,
 	}
+}
+
+// fireStep is one group's firing change. A step that does not notify only
+// records the evaluation on its instance.
+type fireStep struct {
+	change   Change
+	instance models.AlertInstance
+	// history is the open episode, nil until a new one is written.
+	history      *models.AlertHistoryEntry
+	payload      map[string]any
+	message      string
+	notify       bool
+	attempts     int
+	retry        bool
+	selected     []string
+	notification AlertNotification
+}
+
+// resolveStep is one group's closing change.
+type resolveStep struct {
+	change  Change
+	history *models.AlertHistoryEntry
+	message string
+}
+
+// evaluationPlan is what one evaluation writes, then sends.
+type evaluationPlan struct {
+	fires      []*fireStep
+	resolves   []*resolveStep
+	newEpisode bool
+}
+
+func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq int64, samples []Sample) error {
+	var mc *messageContext
+	messages := func() *messageContext {
+		if mc == nil {
+			mc = m.newMessageContext(ctx, alert)
+		}
+		return mc
+	}
+	plan, err := m.planEvaluation(ctx, alert, samples, messages)
+	if err != nil {
+		return err
+	}
+	err = m.commit(ctx, alert.ID, seq, func(tx store.StoreOps) error { return plan.write(ctx, tx, alert.ID) })
+	if err != nil {
+		// Nothing was reserved, so nothing is sent; the next tick evaluates again.
+		if !models.IsNotFound(err) && !models.IsConflict(err) {
+			m.log.Error("failed to commit alert evaluation", "alert_id", alert.ID, "error", err)
+		}
+		return nil
+	}
+	if plan.newEpisode {
+		if err := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); err != nil {
+			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", err)
+		}
+	}
+	for _, step := range plan.fires {
+		if step.notify {
+			m.deliverFiring(ctx, alert, step)
+		}
+	}
+	for _, step := range plan.resolves {
+		m.deliverResolved(ctx, alert, step, messages())
+	}
+	return nil
+}
+
+// planEvaluation reads the open episodes, runs Transition and decides what
+// each changed group writes.
+func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, samples []Sample, messages func() *messageContext) (*evaluationPlan, error) {
+	instances, err := m.db.ListAlertInstances(ctx, alert.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert instances: %w", err)
+	}
+	open, err := m.db.ListOpenAlertHistory(ctx, alert.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list open alert history: %w", err)
+	}
+	episodes := openEpisodes(instances, open)
+	tracked := make([]Instance, 0, len(episodes))
+	for _, entry := range open {
+		if ep, ok := episodes[entry.GroupKey]; ok && ep.history == entry {
+			tracked = append(tracked, Instance{GroupKey: ep.instance.GroupKey, Group: ep.instance.Group, State: ep.instance.State})
+		}
+	}
+
+	plan := &evaluationPlan{}
+	for _, change := range Transition(Rule{Operator: alert.ThresholdOperator, Threshold: alert.ThresholdValue}, tracked, samples) {
+		m.log.Debug("alert evaluation complete",
+			"alert_id", alert.ID,
+			"alert_name", alert.Name,
+			"group_key", change.GroupKey,
+			"value", change.Value,
+			"threshold", alert.ThresholdValue,
+			"operator", alert.ThresholdOperator,
+			"from", change.From,
+			"to", change.To)
+		ep := episodes[change.GroupKey]
+		switch {
+		case change.To == models.AlertInstanceStateFiring:
+			plan.fires = append(plan.fires, m.planFire(alert, ep.instance, ep.history, change, messages))
+		case change.Closes():
+			plan.resolves = append(plan.resolves, &resolveStep{
+				change:  change,
+				history: ep.history,
+				message: fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, change.Value),
+			})
+		}
+	}
+	return plan, nil
+}
+
+// write commits the plan inside the evaluation's eval_seq transaction: the
+// firing episodes and their delivery reservations, the closed episodes and
+// the rule's summary state.
+func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertID models.AlertID) error {
+	for _, step := range plan.fires {
+		if err := plan.writeFire(ctx, tx, alertID, step); err != nil {
+			return err
+		}
+	}
+	for _, step := range plan.resolves {
+		if err := tx.ResolveAlertGroup(ctx, alertID, step.change.GroupKey, step.message); err != nil {
+			return err
+		}
+	}
+	if len(plan.fires) > 0 {
+		return tx.MarkAlertTriggered(ctx, alertID)
+	}
+	return tx.MarkAlertEvaluated(ctx, alertID)
+}
+
+func (plan *evaluationPlan) writeFire(ctx context.Context, tx store.StoreOps, alertID models.AlertID, step *fireStep) error {
+	switch {
+	case step.history == nil:
+		value := step.change.Value
+		history, err := tx.InsertAlertHistory(ctx, alertID, step.change.GroupKey, step.change.Group, models.AlertStatusTriggered, &value, step.message, step.payload)
+		if err != nil {
+			return err
+		}
+		step.history = history
+		step.instance.StateSince = history.TriggeredAt
+		step.instance.HistoryID = &history.ID
+		plan.newEpisode = true
+	case step.payload != nil:
+		if err := tx.UpdateAlertHistoryPayload(ctx, step.history.ID, step.payload); err != nil {
+			return err
+		}
+	}
+	return tx.UpsertAlertInstance(ctx, &step.instance)
+}
+
+// deliverResolved sends one group's resolved notification after its episode
+// closed.
+func (m *Manager) deliverResolved(ctx context.Context, alert *models.Alert, step *resolveStep, mc *messageContext) {
+	m.log.Info("alert resolved",
+		"alert_id", alert.ID,
+		"alert_name", alert.Name,
+		"group_key", step.change.GroupKey,
+		"value", step.change.Value,
+		"threshold", alert.ThresholdValue)
+	now := time.Now().UTC()
+	entry := step.history
+	entry.Message = step.message
+	entry.ResolvedAt = &now
+	entry.Status = models.AlertStatusResolved
+	if entry.Value == nil {
+		value := step.change.Value
+		entry.Value = &value
+	}
+	if err := m.sendResolved(ctx, mc, entry, step.change.Value, nil); err != nil {
+		m.log.Warn("failed to send resolved alert notifications", "alert_id", alert.ID, "group_key", step.change.GroupKey, "error", err)
+		return
+	}
+	m.log.Debug("resolved alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
+}
+
+// planFire decides what one firing group writes and whether it notifies. An
+// open episode (prev and current set) notifies again only while its instance
+// is not notified and its delivery bookkeeping asks for a retry.
+func (m *Manager) planFire(alert *models.Alert, current *models.AlertInstance, prev *models.AlertHistoryEntry, change Change, messages func() *messageContext) *fireStep {
+	step := &fireStep{change: change, instance: firingInstance(alert.ID, current, change), history: prev}
+	attempts, retry := deliveryRetryState(prev)
+	if prev != nil && (current.Notified || !retry) {
+		step.instance.Notified = true
+		if attempts >= maxDeliveryAttempts && prev.Payload["delivery_in_progress"] == true {
+			prev.Payload["delivery_in_progress"] = false
+			delete(prev.Payload, "delivery_deadline_at")
+			prev.Payload["delivery_failed"] = true
+			prev.Payload["delivery_retries_exhausted"] = true
+			prev.Payload["delivery_error"] = "delivery interrupted"
+			step.payload = prev.Payload
+		}
+		m.log.Debug("suppressing duplicate alert notification", "alert_id", alert.ID, "group_key", change.GroupKey, "delivery_attempts", attempts)
+		return step
+	}
+
+	value := change.Value
+	m.log.Info("alert triggered",
+		"alert_id", alert.ID,
+		"alert_name", alert.Name,
+		"group_key", change.GroupKey,
+		"severity", alert.Severity,
+		"value", value,
+		"threshold", alert.ThresholdValue,
+		"operator", alert.ThresholdOperator)
+
+	mc := messages()
+	labels, annotations := mc.metadata(models.AlertStatusTriggered, value, change.Group)
+	step.message = fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
+	notificationHistory := prev
+	if notificationHistory == nil {
+		notificationHistory = &models.AlertHistoryEntry{TriggeredAt: time.Now().UTC(), Message: step.message, GroupKey: change.GroupKey, Group: change.Group}
+	}
+	notification := mc.notification(notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
+	if retry {
+		notification.deliveryTargets = pendingDeliveryTargets(prev.Payload)
+		notification.attemptedTargets = storedDeliveryTargets(prev.Payload, "delivery_attempted")
+	}
+	selected := notification.targetIDs()
+	attempted := notification.attemptedTargetIDs()
+	attempts++
+	payload := make(map[string]any)
+	if prev != nil {
+		maps.Copy(payload, prev.Payload)
+	}
+	maps.Copy(payload, map[string]any{
+		"labels":                     copyStringMap(labels),
+		"annotations":                copyStringMap(annotations),
+		"status":                     string(models.AlertStatusTriggered),
+		"delivery_failed":            false,
+		"delivery_in_progress":       true,
+		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
+		"delivery_attempted":         attempted,
+		"delivery_attempts":          attempts,
+		"delivery_pending":           selected,
+		"delivery_retries_exhausted": attempts >= maxDeliveryAttempts,
+	})
+	step.notify = true
+	step.attempts = attempts
+	step.retry = retry
+	step.selected = selected
+	step.payload = payload
+	step.notification = notification
+	return step
+}
+
+// deliverFiring sends one group's firing notification after its reservation
+// committed, then records the outcome.
+func (m *Manager) deliverFiring(ctx context.Context, alert *models.Alert, step *fireStep) {
+	step.notification.TriggeredAt = step.history.TriggeredAt
+	results := m.sender.Send(ctx, step.notification)
+	deliveryErr := results.Err()
+	// Removing every pending target leaves delivery failed until a current target succeeds.
+	if step.retry && len(step.selected) == 0 && len(results) == 0 {
+		deliveryErr = errors.New("no pending notification targets remain")
+	}
+	payload := step.payload
+	payload["delivery_in_progress"] = false
+	delete(payload, "delivery_deadline_at")
+	payload["delivery_pending"] = results.failedTargets()
+	payload["delivery_retries_exhausted"] = deliveryErr != nil && step.attempts >= maxDeliveryAttempts
+	delete(payload, "delivery_error")
+	payload["delivery_failed"] = deliveryErr != nil
+	if deliveryErr != nil {
+		payload["delivery_error"] = deliveryErr.Error()
+		m.log.Warn("failed to send alert notifications", "alert_id", alert.ID, "group_key", step.change.GroupKey, "error", deliveryErr)
+		if step.attempts == maxDeliveryAttempts {
+			m.log.Error("alert delivery retries exhausted", "alert_id", alert.ID, "history_id", step.history.ID, "attempts", step.attempts)
+		}
+	} else {
+		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
+	}
+	m.recordDeliveryOutcome(ctx, alert.ID, step.change.GroupKey, step.history.ID, payload, deliveryErr == nil || step.attempts >= maxDeliveryAttempts)
 }
 
 // firingInstance is the instance after a firing evaluation. A new episode
@@ -201,7 +438,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 		if err := tx.TouchAlertEvaluated(ctx, alert.ID); err != nil {
 			return err
 		}
-		_, err := tx.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)
+		_, err := tx.InsertAlertHistory(ctx, alert.ID, "", nil, models.AlertStatusError, nil, errorMessage, errorPayload)
 		return err
 	})
 	if models.IsConflict(err) {
@@ -218,95 +455,9 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 	}
 }
 
-// fire handles a firing evaluation. prevHistory and current are nil when the
-// change opens an episode. An open episode notifies again only while its
-// instance is not notified and its delivery bookkeeping asks for a retry.
-func (m *Manager) fire(ctx context.Context, alert *models.Alert, seq int64, current *models.AlertInstance, prevHistory *models.AlertHistoryEntry, change Change) error {
-	value := change.Value
-	instance := firingInstance(alert.ID, current, change)
-	deliveryAttempts, shouldRetryDelivery := deliveryRetryState(prevHistory)
-	if prevHistory != nil && (current.Notified || !shouldRetryDelivery) {
-		return m.suppressDuplicateDelivery(ctx, alert.ID, seq, instance, prevHistory, deliveryAttempts)
-	}
-
-	m.log.Info("alert triggered",
-		"alert_id", alert.ID,
-		"alert_name", alert.Name,
-		"severity", alert.Severity,
-		"value", value,
-		"threshold", alert.ThresholdValue,
-		"operator", alert.ThresholdOperator)
-
-	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusTriggered, value)
-
-	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
-
-	notificationHistory := prevHistory
-	if notificationHistory == nil {
-		notificationHistory = &models.AlertHistoryEntry{TriggeredAt: time.Now().UTC(), Message: message}
-	}
-	notification := m.buildNotification(ctx, alert, notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
-	if shouldRetryDelivery {
-		notification.deliveryTargets = pendingDeliveryTargets(prevHistory.Payload)
-		notification.attemptedTargets = storedDeliveryTargets(prevHistory.Payload, "delivery_attempted")
-	}
-	selectedTargets := notification.targetIDs()
-	attemptedIDs := notification.attemptedTargetIDs()
-	deliveryAttempts++
-	historyPayload := make(map[string]any)
-	if prevHistory != nil {
-		maps.Copy(historyPayload, prevHistory.Payload)
-	}
-	maps.Copy(historyPayload, map[string]any{
-		"labels":                     copyStringMap(labels),
-		"annotations":                copyStringMap(annotations),
-		"status":                     string(models.AlertStatusTriggered),
-		"delivery_failed":            false,
-		"delivery_in_progress":       true,
-		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
-		"delivery_attempted":         attemptedIDs,
-		"delivery_attempts":          deliveryAttempts,
-		"delivery_pending":           selectedTargets,
-		"delivery_retries_exhausted": deliveryAttempts >= maxDeliveryAttempts,
-	})
-
-	history, err := m.reserveTriggeredHistory(ctx, alert.ID, seq, instance, prevHistory, value, message, historyPayload)
-	if err != nil {
-		if !models.IsNotFound(err) && !models.IsConflict(err) {
-			m.log.Error("failed to reserve alert delivery attempt", "alert_id", alert.ID, "error", err)
-		}
-		return nil
-	}
-
-	notification.TriggeredAt = history.TriggeredAt
-	results := m.sender.Send(ctx, notification)
-	deliveryErr := results.Err()
-	// Removing every pending target leaves delivery failed until a current target succeeds.
-	if shouldRetryDelivery && len(selectedTargets) == 0 && len(results) == 0 {
-		deliveryErr = errors.New("no pending notification targets remain")
-	}
-	historyPayload["delivery_in_progress"] = false
-	delete(historyPayload, "delivery_deadline_at")
-	historyPayload["delivery_pending"] = results.failedTargets()
-	historyPayload["delivery_retries_exhausted"] = deliveryErr != nil && deliveryAttempts >= maxDeliveryAttempts
-	delete(historyPayload, "delivery_error")
-	historyPayload["delivery_failed"] = deliveryErr != nil
-	if deliveryErr != nil {
-		historyPayload["delivery_error"] = deliveryErr.Error()
-		m.log.Warn("failed to send alert notifications", "alert_id", alert.ID, "error", deliveryErr)
-		if deliveryAttempts == maxDeliveryAttempts {
-			m.log.Error("alert delivery retries exhausted", "alert_id", alert.ID, "history_id", history.ID, "attempts", deliveryAttempts)
-		}
-	} else {
-		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
-	}
-	m.recordDeliveryOutcome(ctx, alert.ID, history.ID, historyPayload, deliveryErr == nil || deliveryAttempts >= maxDeliveryAttempts)
-	return nil
-}
-
 // recordDeliveryOutcome writes the attempt's result. A settled episode, sent or
 // out of attempts, marks its instance notified in the same transaction.
-func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.AlertID, historyID int64, payload map[string]any, settled bool) {
+func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64, payload map[string]any, settled bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBookkeepingTimeout)
 	defer cancel()
 	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
@@ -316,7 +467,7 @@ func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.Aler
 		if !settled {
 			return nil
 		}
-		return tx.MarkAlertInstanceNotified(ctx, alertID, "", historyID)
+		return tx.MarkAlertInstanceNotified(ctx, alertID, groupKey, historyID)
 	})
 	switch {
 	case err == nil:
@@ -325,105 +476,4 @@ func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.Aler
 	default:
 		m.log.Error("failed to update alert history payload after delivery", "alert_id", alertID, "history_id", historyID, "error", err)
 	}
-}
-
-// suppressDuplicateDelivery records a firing evaluation of an episode that
-// owes no notification, and marks its instance notified.
-func (m *Manager) suppressDuplicateDelivery(ctx context.Context, alertID models.AlertID, seq int64, instance models.AlertInstance, history *models.AlertHistoryEntry, attempts int) error {
-	if attempts >= maxDeliveryAttempts && history.Payload["delivery_in_progress"] == true {
-		history.Payload["delivery_in_progress"] = false
-		delete(history.Payload, "delivery_deadline_at")
-		history.Payload["delivery_failed"] = true
-		history.Payload["delivery_retries_exhausted"] = true
-		history.Payload["delivery_error"] = "delivery interrupted"
-		if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, history.Payload); err != nil && !models.IsNotFound(err) {
-			m.log.Error("failed to record interrupted alert delivery", "alert_id", alertID, "history_id", history.ID, "error", err)
-		}
-	}
-	instance.Notified = true
-	if err := m.commit(ctx, alertID, seq, func(tx store.StoreOps) error {
-		if err := tx.UpsertAlertInstance(ctx, &instance); err != nil {
-			return err
-		}
-		return tx.TouchAlertEvaluated(ctx, alertID)
-	}); err != nil && !models.IsConflict(err) {
-		return err
-	}
-	m.log.Debug("suppressing duplicate alert notification", "alert_id", alertID, "delivery_attempts", attempts)
-	return nil
-}
-
-// reserveTriggeredHistory writes the episode, its instance and the delivery
-// reservation before the send, so a send never happens without a record.
-func (m *Manager) reserveTriggeredHistory(ctx context.Context, alertID models.AlertID, seq int64, instance models.AlertInstance, history *models.AlertHistoryEntry, value float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
-	newHistory := history == nil
-	err := m.commit(ctx, alertID, seq, func(tx store.StoreOps) error {
-		if newHistory {
-			var err error
-			history, err = tx.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, &value, message, payload)
-			if err != nil {
-				return err
-			}
-			instance.StateSince = history.TriggeredAt
-			instance.HistoryID = &history.ID
-		} else if err := tx.UpdateAlertHistoryPayload(ctx, history.ID, payload); err != nil {
-			return err
-		}
-		if err := tx.UpsertAlertInstance(ctx, &instance); err != nil {
-			return err
-		}
-		return tx.MarkAlertTriggered(ctx, alertID)
-	})
-	if err != nil {
-		return nil, err
-	}
-	if newHistory {
-		if err := m.db.PruneAlertHistory(ctx, alertID, m.cfg.HistoryLimit); err != nil {
-			m.log.Warn("failed to prune alert history", "alert_id", alertID, "error", err)
-		}
-	}
-	return history, nil
-}
-
-// resolve closes the open episode and sends the resolved notification.
-func (m *Manager) resolve(ctx context.Context, alert *models.Alert, seq int64, entry *models.AlertHistoryEntry, value float64) error {
-	m.log.Info("alert resolved",
-		"alert_id", alert.ID,
-		"alert_name", alert.Name,
-		"value", value,
-		"threshold", alert.ThresholdValue)
-
-	message := fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, value)
-	if err := m.commit(ctx, alert.ID, seq, func(tx store.StoreOps) error {
-		if err := tx.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-			return err
-		}
-		return tx.MarkAlertEvaluated(ctx, alert.ID)
-	}); err != nil {
-		if models.IsNotFound(err) || models.IsConflict(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to resolve alert history: %w", err)
-	}
-
-	now := time.Now().UTC()
-	entry.Message = message
-	entry.ResolvedAt = &now
-	entry.Status = models.AlertStatusResolved
-	if entry.Value == nil {
-		entry.Value = &value
-	}
-
-	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusResolved, value)
-	if annotations == nil {
-		annotations = make(map[string]string, 1)
-	}
-	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
-
-	if sendErr := m.sendNotification(ctx, alert, entry, labels, annotations, models.AlertStatusResolved, value); sendErr != nil {
-		m.log.Warn("failed to send resolved alert notifications", "alert_id", alert.ID, "error", sendErr)
-	} else {
-		m.log.Debug("resolved alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
-	}
-	return nil
 }

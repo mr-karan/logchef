@@ -148,7 +148,7 @@ func testAlertEvalSeq(t *testing.T, ctx context.Context, s store.Store, alert *m
 }
 
 func testResolveClearsInstances(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
-	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", nil)
+	entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "fired", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

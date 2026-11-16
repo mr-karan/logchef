@@ -156,7 +156,7 @@ func TestManagerDeliveryRetries(t *testing.T) {
 			attempts := 0
 			var historyID int64
 			if tc.legacy {
-				entry, err := db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+				entry, err := db.InsertAlertHistory(ctx, alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -289,7 +289,7 @@ func TestManagerReservationWriteFailureSendsNothing(t *testing.T) {
 			db, alert, _ := newManagerTestAlertAtPath(t, path)
 			ctx := t.Context()
 			if tc.seed {
-				if _, err := db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+				if _, err := db.InsertAlertHistory(ctx, alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{
 					"delivery_attempts": 1, "delivery_failed": true,
 				}); err != nil {
 					t.Fatal(err)
@@ -514,7 +514,7 @@ func createManagerTestAlert(t *testing.T, db store.Store) *models.Alert {
 func TestManagerEvaluatesAfterStartupSweepFailure(t *testing.T) {
 	path := sqlitetest.Path(t)
 	db, alert, logger := newManagerTestAlertAtPath(t, path)
-	if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true}); err != nil {
+	if _, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true}); err != nil {
 		t.Fatal(err)
 	}
 	failHistoryWrites(t, path, "BEFORE UPDATE OF payload_json ON alert_history")

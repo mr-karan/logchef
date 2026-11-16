@@ -475,7 +475,7 @@ func TestResolveAlertNoUnresolvedHistory(t *testing.T) {
 	}
 
 	// No alert_history row exists yet, so there is nothing to resolve.
-	if err := ResolveAlert(ctx, db, log, alert.ID, "manual resolve"); !errors.Is(err, ErrAlertNotFound) {
+	if err := ResolveAlert(ctx, db, log, alert.ID, nil, "manual resolve"); !errors.Is(err, ErrAlertNotFound) {
 		t.Errorf("ResolveAlert(no history) err = %v, want ErrAlertNotFound", err)
 	}
 }
@@ -613,7 +613,7 @@ func TestGenerateQueryWarningsNamesTruncationCause(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			warnings := generateQueryWarnings(query, time.Millisecond, &models.QueryResult{Logs: rows, Stats: tc.stats})
+			warnings := generateQueryWarnings(query, time.Millisecond, &models.QueryResult{Logs: rows, Stats: tc.stats}, false)
 			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], tc.prefix) {
 				t.Fatalf("warnings = %q, want one starting with %q", warnings, tc.prefix)
 			}

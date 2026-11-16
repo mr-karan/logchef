@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Alert rules can group by result columns in native mode. A ClickHouse query
+  with `GROUP BY service` or a LogsQL `stats by (service)` and **Group by**
+  `service` fire and resolve each service on its own, with one notification
+  per group and the group values in the labels. The alert page lists the
+  groups and resolves one at a time; the alert list shows "N firing". A
+  grouped result with a repeated group, a missing group column or more than
+  100 rows is an evaluation error, never a partial update.
+
 ### Upgrade notes
 
 - Alert state moves to a per-rule instance table (SQLite migration 000043,

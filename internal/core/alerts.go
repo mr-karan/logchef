@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
@@ -127,6 +129,29 @@ func validateWebhookURLs(urls []string) error {
 	return nil
 }
 
+// normalizeGroupBy trims the group column names and rejects a blank, a
+// repeated or a fifth name.
+func normalizeGroupBy(in []string) ([]string, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	if len(in) > models.MaxAlertGroupBy {
+		return nil, fmt.Errorf("group_by takes at most %d columns", models.MaxAlertGroupBy)
+	}
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return nil, fmt.Errorf("group_by has a blank column name")
+		}
+		if slices.Contains(out, name) {
+			return nil, fmt.Errorf("group_by names column %q twice", name)
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
 func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert, checkQuery bool) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
@@ -152,6 +177,12 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	alert.Description = strings.TrimSpace(alert.Description)
 	alert.Query = strings.TrimSpace(alert.Query)
 	alert.ConditionJSON = strings.TrimSpace(alert.ConditionJSON)
+	if alert.GroupBy, err = normalizeGroupBy(alert.GroupBy); err != nil {
+		return err
+	}
+	if len(alert.GroupBy) > 0 && alert.EditorMode != models.AlertEditorModeNative {
+		return fmt.Errorf("group_by needs a native query; a LogchefQL condition is evaluated ungrouped")
+	}
 
 	switch alert.EditorMode {
 	case models.AlertEditorModeNative:
@@ -216,6 +247,7 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		RecipientUserIDs:  recipientUserIDs,
 		WebhookURLs:       webhookURLs,
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
+		GroupBy:           req.GroupBy,
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
 	}
@@ -244,8 +276,10 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 	return alert, nil
 }
 
-// UpdateAlert updates an existing alert rule.
-func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+// UpdateAlert updates an existing alert rule. A change of group_by closes every
+// open episode with "rule changed", because the old group keys no longer
+// name any group of the new result.
+func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -281,7 +315,21 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
-	if err := db.UpdateAlert(ctx, existing); err != nil {
+	groupByChanged := !slices.Equal(existing.GroupBy, previous.GroupBy)
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.UpdateAlert(ctx, existing); err != nil {
+			return err
+		}
+		if !groupByChanged {
+			return nil
+		}
+		open, err := tx.ListOpenAlertHistory(ctx, alertID)
+		if err != nil || len(open) == 0 {
+			return err
+		}
+		return tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed")
+	})
+	if err != nil {
 		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
@@ -379,6 +427,9 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	if req.GeneratorURL != nil {
 		alert.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)
 	}
+	if req.GroupBy != nil {
+		alert.GroupBy = *req.GroupBy
+	}
 	if req.IsActive != nil {
 		alert.IsActive = *req.IsActive
 	}
@@ -399,20 +450,64 @@ func DeleteAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alert
 
 // ListAlertsBySource returns all alerts for a source.
 func ListAlertsBySource(ctx context.Context, db store.StoreOps, sourceID models.SourceID) ([]*models.Alert, error) {
-	alerts, err := db.ListAlertsBySource(ctx, sourceID)
+	list, err := db.ListAlertsBySource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	return alerts, nil
+	return list, AttachAlertInstanceCounts(ctx, db, list)
 }
 
 // ListAlertsForUser returns alerts the user can see (cross-source).
 func ListAlertsForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.Alert, error) {
-	alerts, err := db.ListAlertsForUser(ctx, userID)
+	list, err := db.ListAlertsForUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	return alerts, nil
+	return list, AttachAlertInstanceCounts(ctx, db, list)
+}
+
+// AttachAlertInstanceCounts sets InstanceCounts on every alert, zero counts
+// included, with one query for the whole list.
+func AttachAlertInstanceCounts(ctx context.Context, db store.StoreOps, list []*models.Alert) error {
+	ids := make([]models.AlertID, len(list))
+	for i, alert := range list {
+		ids[i] = alert.ID
+	}
+	counts, err := db.CountAlertInstances(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("failed to count alert instances: %w", err)
+	}
+	for _, alert := range list {
+		alertCounts := counts[alert.ID]
+		alert.InstanceCounts = &alertCounts
+	}
+	return nil
+}
+
+// MaxAlertInstancesListed bounds GET /alerts/:alertID/instances.
+const MaxAlertInstancesListed = 200
+
+// ListAlertInstances returns the alert's instances, firing first, at most
+// MaxAlertInstancesListed.
+func ListAlertInstances(ctx context.Context, db store.StoreOps, alertID models.AlertID) ([]*models.AlertInstance, error) {
+	instances, err := db.ListAlertInstances(ctx, alertID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert instances: %w", err)
+	}
+	slices.SortStableFunc(instances, func(a, b *models.AlertInstance) int {
+		return instanceStateRank(a.State) - instanceStateRank(b.State)
+	})
+	if len(instances) > MaxAlertInstancesListed {
+		instances = instances[:MaxAlertInstancesListed]
+	}
+	return instances, nil
+}
+
+func instanceStateRank(state models.AlertInstanceState) int {
+	if state == models.AlertInstanceStateFiring {
+		return 0
+	}
+	return 1
 }
 
 // UserCanEditAlert returns true if the user is the creator or a global admin.
@@ -439,22 +534,26 @@ func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.Ale
 	return history, nil
 }
 
-// ResolveAlert manually resolves every unresolved firing entry of the alert.
-func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, message string) error {
-	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alertID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrAlertNotFound
+// ResolveAlert manually resolves the open episode of one group, or of every
+// group when groupKey is nil. It sends nothing; the alerts manager does that
+// when it runs.
+func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, groupKey *string, message string) error {
+	var err error
+	if groupKey != nil {
+		err = db.ResolveAlertGroup(ctx, alertID, *groupKey, message)
+	} else {
+		var entry *models.AlertHistoryEntry
+		if entry, err = db.GetLatestUnresolvedAlertHistory(ctx, alertID); err == nil {
+			err = db.ResolveAlertHistory(ctx, entry.ID, message)
 		}
-		return fmt.Errorf("failed to find unresolved alert history: %w", err)
 	}
-	if err := db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
+	if err != nil {
 		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
-	log.Info("alert history resolved", "alert_id", alertID, "history_id", entry.ID)
+	log.Info("alert history resolved", "alert_id", alertID)
 	return nil
 }
 
@@ -496,6 +595,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		ThresholdValue:    req.ThresholdValue,
 		FrequencySeconds:  60,
 		Severity:          models.AlertSeverityWarning,
+		GroupBy:           req.GroupBy,
 	}
 	if err := validateAlertModel(ctx, ds, sourceID, tempAlert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
@@ -516,6 +616,10 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
+	if len(tempAlert.GroupBy) > 0 {
+		return groupedTestResponse(tempAlert, result, executionTime)
+	}
+
 	// Extract numeric value from result. No matching rows is not an error —
 	// ExtractFirstNumeric returns (0, nil) for an empty result — so check the
 	// row count independently and surface a warning, otherwise the user can't
@@ -524,7 +628,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	value, err := util.ExtractFirstNumeric(result)
 	var warnings []string
 	if len(result.Logs) == 0 {
-		warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
+		warnings = append(warnings, noRowsWarning)
 		value = 0
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
@@ -534,7 +638,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	thresholdMet := util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 
 	// Generate additional warnings
-	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result)...)
+	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result, false)...)
 
 	return &models.TestAlertQueryResponse{
 		Value:           value,
@@ -545,7 +649,43 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}, nil
 }
 
-func generateQueryWarnings(query string, executionTime time.Duration, result *models.QueryResult) []string {
+// groupedTestResponse reads the samples the scheduler would read. A result
+// the scheduler rejects, such as a duplicate group, is a 400 here.
+func groupedTestResponse(alert *models.Alert, result *models.QueryResult, executionTime time.Duration) (*models.TestAlertQueryResponse, error) {
+	samples, err := alerts.SamplesFromResult(result, alert.GroupBy)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+	resp := &models.TestAlertQueryResponse{
+		ExecutionTimeMs: executionTime.Milliseconds(),
+		RowsReturned:    len(result.Logs),
+		Samples:         make([]models.AlertSample, 0, min(len(samples), models.MaxTestAlertSamples)),
+		GroupsTotal:     len(samples),
+	}
+	for i, sample := range samples {
+		met := util.CompareAlertThreshold(sample.Value, alert.ThresholdValue, alert.ThresholdOperator)
+		resp.ThresholdMet = resp.ThresholdMet || met
+		if i == 0 {
+			resp.Value = sample.Value
+		}
+		if i < models.MaxTestAlertSamples {
+			resp.Samples = append(resp.Samples, models.AlertSample{Group: sample.Group, Value: sample.Value, ThresholdMet: met})
+		}
+	}
+	if len(samples) == 0 {
+		// The scheduler compares 0 for a rule with no rows and no firing group.
+		resp.ThresholdMet = util.CompareAlertThreshold(0, alert.ThresholdValue, alert.ThresholdOperator)
+		resp.Warnings = append(resp.Warnings, noRowsWarning)
+	}
+	resp.Warnings = append(resp.Warnings, generateQueryWarnings(alert.Query, executionTime, result, true)...)
+	return resp, nil
+}
+
+const noRowsWarning = "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison."
+
+// generateQueryWarnings flags slow or unbounded queries. A grouped rule reads
+// every row, so only an ungrouped one is warned about returning several.
+func generateQueryWarnings(query string, executionTime time.Duration, result *models.QueryResult, grouped bool) []string {
 	var warnings []string
 	queryLower := strings.ToLower(query)
 
@@ -559,6 +699,10 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 	// Warn if query doesn't have a time filter (for SQL queries)
 	if !strings.Contains(queryLower, "where") && !strings.Contains(queryLower, "interval") && !strings.Contains(queryLower, "now()") {
 		warnings = append(warnings, "Query appears to lack a time-based filter. Consider adding a time window (e.g., WHERE timestamp >= now() - INTERVAL 5 MINUTE) to improve performance and relevance.")
+	}
+
+	if grouped {
+		return warnings
 	}
 
 	// Warn if result set is unexpectedly large

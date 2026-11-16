@@ -1041,5 +1041,16 @@
   "panelStyle.none": "Nessuno",
   "panelStyle.minutes": "Minuti",
   "panelStyle.seconds": "Secondi",
-  "panelStyle.millis": "Millisecondi"
+  "panelStyle.millis": "Millisecondi",
+  "alerts.groupBy": "Raggruppa per",
+  "alerts.groupByNeedsNativeQuery": "Raggruppa per richiede una query nativa.",
+  "alerts.groups": "Gruppi",
+  "alerts.group": "Gruppo",
+  "alerts.since": "Da",
+  "alerts.stateOk": "OK",
+  "alerts.noGroupFiring": "Nessun gruppo è in allerta.",
+  "alerts.wholeResult": "Risultato intero",
+  "alerts.groupsFiring": "{count} in allerta",
+  "alerts.testGroupsTotal": "Gruppi: {count}",
+  "alerts.testGroupsShown": "mostrati i primi {shown} di {total}"
 }

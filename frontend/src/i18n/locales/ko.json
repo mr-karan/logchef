@@ -1041,5 +1041,16 @@
   "panelStyle.none": "없음",
   "panelStyle.minutes": "분",
   "panelStyle.seconds": "초",
-  "panelStyle.millis": "밀리초"
+  "panelStyle.millis": "밀리초",
+  "alerts.groupBy": "그룹화 기준",
+  "alerts.groupByNeedsNativeQuery": "그룹화하려면 네이티브 쿼리가 필요합니다.",
+  "alerts.groups": "그룹",
+  "alerts.group": "그룹",
+  "alerts.since": "시작",
+  "alerts.stateOk": "정상",
+  "alerts.noGroupFiring": "발생 중인 그룹이 없습니다.",
+  "alerts.wholeResult": "전체 결과",
+  "alerts.groupsFiring": "{count}개 발생 중",
+  "alerts.testGroupsTotal": "그룹: {count}",
+  "alerts.testGroupsShown": "{total}개 중 처음 {shown}개 표시"
 }

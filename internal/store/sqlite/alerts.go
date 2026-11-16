@@ -168,14 +168,20 @@ func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) er
 }
 
 // InsertAlertHistory records a history entry and returns the hydrated entry.
-func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
+func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, groupKey string, group map[string]string, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
 	payloadJSON, err := marshalPayload(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal history payload: %w", err)
 	}
+	groupJSON, err := marshalStringMap(group)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal history group: %w", err)
+	}
 
 	row, err := db.writeQueries.InsertAlertHistory(ctx, sqlc.InsertAlertHistoryParams{
 		AlertID:     int64(alertID),
+		GroupKey:    groupKey,
+		GroupJson:   nullString(groupJSON),
 		Status:      string(status),
 		Value:       nullFloat64(value),
 		Message:     nullString(message),
@@ -197,6 +203,15 @@ func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID model
 		return nil, fmt.Errorf("failed to get alert history: %w", err)
 	}
 	return alertHistoryFromSQLC(row)
+}
+
+// ListOpenAlertHistory returns every open episode of the alert, newest first.
+func (db *DB) ListOpenAlertHistory(ctx context.Context, alertID models.AlertID) ([]*models.AlertHistoryEntry, error) {
+	rows, err := db.readQueries.ListOpenAlertHistory(ctx, int64(alertID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list open alert history: %w", err)
+	}
+	return alertHistoryEntriesFromSQLC(rows)
 }
 
 // GetAlertHistoryEntry fetches one history entry of an alert.
@@ -238,6 +253,35 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 	return nil
 }
 
+// ResolveAlertGroup resolves the open episode of one group of the alert.
+func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string) error {
+	if !db.inTx {
+		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertGroup(ctx, alertID, groupKey, message) })
+	}
+	ids, err := db.writeQueries.ListOpenAlertGroupHistoryIDs(ctx, sqlc.ListOpenAlertGroupHistoryIDsParams{AlertID: int64(alertID), GroupKey: groupKey})
+	if err != nil {
+		return fmt.Errorf("failed to find open alert episode: %w", err)
+	}
+	if len(ids) == 0 {
+		return models.ErrNotFound
+	}
+	for _, id := range ids {
+		if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{HistoryID: id}); err != nil {
+			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
+		}
+	}
+	if err := db.writeQueries.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{AlertID: int64(alertID), GroupKey: groupKey, Message: nullString(message)}); err != nil {
+		return fmt.Errorf("failed to resolve alert episode: %w", err)
+	}
+	if err := db.writeQueries.DeleteAlertInstance(ctx, sqlc.DeleteAlertInstanceParams{AlertID: int64(alertID), GroupKey: groupKey}); err != nil {
+		return fmt.Errorf("failed to delete alert instance: %w", err)
+	}
+	if err := db.writeQueries.RefreshAlertState(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to refresh alert state: %w", err)
+	}
+	return nil
+}
+
 // UpdateAlertHistoryPayload updates the payload of an existing alert history entry.
 func (db *DB) UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error {
 	payloadJSON, err := marshalPayload(payload)
@@ -267,10 +311,13 @@ func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limi
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
 	}
 
+	return alertHistoryEntriesFromSQLC(rows)
+}
+
+func alertHistoryEntriesFromSQLC(rows []sqlc.AlertHistory) ([]*models.AlertHistoryEntry, error) {
 	history := make([]*models.AlertHistoryEntry, 0, len(rows))
 	for i := range rows {
-		row := rows[i]
-		entry, err := alertHistoryFromSQLC(row)
+		entry, err := alertHistoryFromSQLC(rows[i])
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode alert history: %w", err)
 		}
@@ -311,6 +358,10 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 	if err != nil {
 		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal webhook URLs: %w", err)
 	}
+	groupByJSON, err := marshalStringSlice(alert.GroupBy)
+	if err != nil {
+		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal group_by: %w", err)
+	}
 
 	params := sqlc.CreateAlertParams{
 		SourceID:             int64(alert.SourceID),
@@ -330,6 +381,7 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 		RecipientUserIdsJson: nullString(recipientUserIDsJSON),
 		WebhookUrlsJson:      nullString(webhookURLsJSON),
 		GeneratorUrl:         nullString(alert.GeneratorURL),
+		GroupByJson:          nullString(groupByJSON),
 		IsActive:             boolToInt(alert.IsActive),
 	}
 	if alert.CreatedBy != nil {
@@ -360,6 +412,7 @@ func alertUpdateParams(alert *models.Alert) (sqlc.UpdateAlertParams, error) {
 		RecipientUserIdsJson: createParams.RecipientUserIdsJson,
 		WebhookUrlsJson:      createParams.WebhookUrlsJson,
 		GeneratorUrl:         createParams.GeneratorUrl,
+		GroupByJson:          createParams.GroupByJson,
 		IsActive:             createParams.IsActive,
 		ID:                   int64(alert.ID),
 	}, nil
@@ -395,6 +448,10 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
 	}
+	groupBy, err := unmarshalStringSlice(row.GroupByJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode group_by: %w", err)
+	}
 
 	alert := &models.Alert{
 		ID:                models.AlertID(row.ID),
@@ -415,6 +472,7 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 		RecipientUserIDs:  recipientUserIDs,
 		WebhookURLs:       webhookURLs,
 		GeneratorURL:      row.GeneratorUrl.String,
+		GroupBy:           groupBy,
 		IsActive:          row.IsActive == 1,
 		LastState:         models.AlertState(row.LastState),
 		EvalSeq:           row.EvalSeq,
@@ -440,9 +498,16 @@ func alertHistoryFromSQLC(row sqlc.AlertHistory) (*models.AlertHistoryEntry, err
 		return nil, fmt.Errorf("failed to decode history payload: %w", err)
 	}
 
+	group, err := unmarshalStringMap(row.GroupJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode history group: %w", err)
+	}
+
 	entry := &models.AlertHistoryEntry{
 		ID:          row.ID,
 		AlertID:     models.AlertID(row.AlertID),
+		GroupKey:    row.GroupKey,
+		Group:       group,
 		Status:      models.AlertStatus(row.Status),
 		TriggeredAt: row.TriggeredAt,
 		Message:     row.Message.String,
@@ -525,6 +590,28 @@ func (db *DB) ListAlertInstances(ctx context.Context, alertID models.AlertID) ([
 		instances = append(instances, instance)
 	}
 	return instances, nil
+}
+
+// CountAlertInstances returns the instance counts of each given alert that has instances.
+func (db *DB) CountAlertInstances(ctx context.Context, alertIDs []models.AlertID) (map[models.AlertID]models.AlertInstanceCounts, error) {
+	counts := make(map[models.AlertID]models.AlertInstanceCounts)
+	if len(alertIDs) == 0 {
+		return counts, nil
+	}
+	ids := make([]int64, len(alertIDs))
+	for i, id := range alertIDs {
+		ids[i] = int64(id)
+	}
+	rows, err := db.readQueries.CountAlertInstancesByState(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count alert instances: %w", err)
+	}
+	for _, row := range rows {
+		alertCounts := counts[models.AlertID(row.AlertID)]
+		alertCounts.Add(models.AlertInstanceState(row.State), int(row.Instances))
+		counts[models.AlertID(row.AlertID)] = alertCounts
+	}
+	return counts, nil
 }
 
 // UpsertAlertInstance inserts or replaces the instance of (alert, group).

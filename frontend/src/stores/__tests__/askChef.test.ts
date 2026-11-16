@@ -201,6 +201,7 @@ const alert = {
 const entry = {
   id: 2,
   alert_id: 7,
+  group_key: "",
   status: "triggered",
   triggered_at: "2026-10-15T06:08:00Z",
   value: 23,

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
@@ -23,7 +24,8 @@ import { alertHistoryExploreQuery } from "@/utils/alertExplore";
 import AlertDeliveryStatus from "@/components/alerts/AlertDeliveryStatus.vue";
 import AlertForm from "@/components/alerts/AlertForm.vue";
 import { EmptyState, LoadingState } from "@/components/layout";
-import type { Alert, AlertHistoryEntry, UpdateAlertRequest } from "@/api/alerts";
+import type { Alert, AlertHistoryEntry, AlertInstance, UpdateAlertRequest } from "@/api/alerts";
+import { formatAlertGroup } from "@/utils/alertGroups";
 
 const { t, locale } = useI18n();
 
@@ -66,6 +68,11 @@ const historyEntries = computed(() => {
   // Only return entries if they belong to the current alert
   if (alertHistoryStore.currentAlertId !== alertId.value) return [];
   return alertHistoryStore.entries;
+});
+
+const instances = computed(() => {
+  if (alertHistoryStore.currentAlertId !== alertId.value) return [];
+  return alertHistoryStore.instances;
 });
 
 const isLoadingHistory = computed(() => {
@@ -144,18 +151,25 @@ async function investigate(entry: AlertHistoryEntry) {
 
 async function loadHistory() {
   if (!alertId.value) return;
-  await alertHistoryStore.loadHistory(alertId.value);
+  await Promise.all([
+    alertHistoryStore.loadHistory(alertId.value),
+    alertHistoryStore.loadInstances(alertId.value),
+  ]);
 }
 
-async function handleResolve(_historyId: number, message: string) {
+async function handleResolve(groupKey: string, message: string) {
   if (!alertId.value) return;
   const result = await alertHistoryStore.resolveAlert(
     alertId.value,
-    { message }
+    { message, group_key: groupKey }
   );
   if (result.success) {
     await loadHistory();
   }
+}
+
+function groupLabel(group: AlertInstance["group"] | undefined): string {
+  return formatAlertGroup(group) || t("alerts.wholeResult");
 }
 
 watch([alertId, currentTab], ([id, tab]) => {
@@ -239,7 +253,48 @@ watch([alertId, currentTab], ([id, tab]) => {
       </TabsContent>
 
       <!-- History Tab -->
-      <TabsContent value="history">
+      <TabsContent value="history" class="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ t('alerts.groups') }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p v-if="!instances.length" class="text-sm text-muted-foreground">{{ t('alerts.noGroupFiring') }}</p>
+            <Table v-else>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{{ t('alerts.group') }}</TableHead>
+                  <TableHead>{{ t('ui.status') }}</TableHead>
+                  <TableHead>{{ t('panelStyle.value') }}</TableHead>
+                  <TableHead>{{ t('alerts.since') }}</TableHead>
+                  <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="instance in instances" :key="instance.group_key">
+                  <TableCell class="font-mono text-xs">{{ groupLabel(instance.group) }}</TableCell>
+                  <TableCell>
+                    <Badge :variant="instance.state === 'firing' ? 'destructive' : 'secondary'" class="text-xs">
+                      {{ instance.state === 'firing' ? t('alerts.stateFiring') : t('alerts.stateOk') }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="tabular-nums">{{ instance.value ?? '' }}</TableCell>
+                  <TableCell class="text-sm text-muted-foreground">{{ formatEventTime(instance.state_since) }}</TableCell>
+                  <TableCell class="text-right">
+                    <Button
+                      v-if="instance.state === 'firing'"
+                      variant="outline"
+                      size="sm"
+                      @click="handleResolve(instance.group_key, 'Manually resolved')"
+                    >
+                      {{ t('ui.resolve') }}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle>{{ t('ui.alertHistory') }}</CardTitle>
@@ -303,6 +358,9 @@ watch([alertId, currentTab], ([id, tab]) => {
                         <span class="text-sm text-muted-foreground">
                           {{ formatEventTime(entry.triggered_at) }}
                         </span>
+                        <code v-if="entry.group_key" class="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                          {{ groupLabel(entry.group) }}
+                        </code>
                         <!-- Value Display Inline -->
                         <span v-if="entry.value != null" class="text-sm text-muted-foreground">
                           {{ t('ui.value') }} <code class='font-mono font-semibold'>{{ entry.value }}</code>
@@ -337,7 +395,7 @@ watch([alertId, currentTab], ([id, tab]) => {
                         v-if="entry.status === 'triggered' && !entry.resolved_at"
                         variant="outline"
                         size="sm"
-                        @click="handleResolve(entry.id, 'Manually resolved')"
+                        @click="handleResolve(entry.group_key, 'Manually resolved')"
                       >
                         {{ t('ui.resolve') }}
                       </Button>

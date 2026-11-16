@@ -1041,5 +1041,16 @@
   "panelStyle.none": "Keine",
   "panelStyle.minutes": "Minuten",
   "panelStyle.seconds": "Sekunden",
-  "panelStyle.millis": "Millisekunden"
+  "panelStyle.millis": "Millisekunden",
+  "alerts.groupBy": "Gruppieren nach",
+  "alerts.groupByNeedsNativeQuery": "Gruppieren nach erfordert eine native Abfrage.",
+  "alerts.groups": "Gruppen",
+  "alerts.group": "Gruppe",
+  "alerts.since": "Seit",
+  "alerts.stateOk": "OK",
+  "alerts.noGroupFiring": "Keine Gruppe löst aus.",
+  "alerts.wholeResult": "Gesamtes Ergebnis",
+  "alerts.groupsFiring": "{count} ausgelöst",
+  "alerts.testGroupsTotal": "Gruppen: {count}",
+  "alerts.testGroupsShown": "die ersten {shown} von {total} werden angezeigt"
 }
