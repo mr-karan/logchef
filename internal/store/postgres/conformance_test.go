@@ -67,6 +67,12 @@ func TestJobs(t *testing.T) {
 	storetest.RunJobs(t, opener(postgrestest.DSN(t)), true)
 }
 
+// TestReports runs the report store tests with separate pools, like
+// separate replicas.
+func TestReports(t *testing.T) {
+	storetest.RunReports(t, opener(postgrestest.DSN(t)))
+}
+
 func opener(dsn string) storetest.Opener {
 	return func(t *testing.T) store.Store {
 		t.Helper()

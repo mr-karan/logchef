@@ -318,6 +318,30 @@ func (q *Queries) ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOA
 	return i, err
 }
 
+const claimReport = `-- name: ClaimReport :execrows
+UPDATE reports
+SET owner_id = ?1,
+    state = CASE WHEN pause_reason = 'owner_inactive' THEN 'active' ELSE state END,
+    pause_reason = CASE WHEN pause_reason = 'owner_inactive' THEN '' ELSE pause_reason END,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2
+`
+
+type ClaimReportParams struct {
+	OwnerID sql.NullInt64 `json:"owner_id"`
+	ID      int64         `json:"id"`
+}
+
+// A claim lends the new owner's access, so a pause for an inactive owner
+// no longer applies.
+func (q *Queries) ClaimReport(ctx context.Context, arg ClaimReportParams) (int64, error) {
+	result, err := q.exec(ctx, q.claimReportStmt, claimReport, arg.OwnerID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const clearSavedViewScopeDefault = `-- name: ClearSavedViewScopeDefault :many
 UPDATE saved_views
 SET is_default = 0
@@ -576,6 +600,31 @@ func (q *Queries) CountCollectionTeamAccess(ctx context.Context, arg CountCollec
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countReportFailure = `-- name: CountReportFailure :one
+UPDATE reports
+SET consecutive_failures = CASE CAST(?1 AS TEXT)
+        WHEN 'failed' THEN consecutive_failures + 1
+        WHEN 'sent' THEN 0
+        WHEN 'partial' THEN 0
+        ELSE consecutive_failures
+    END
+WHERE id = ?2
+RETURNING consecutive_failures
+`
+
+type CountReportFailureParams struct {
+	Status string `json:"status"`
+	ID     int64  `json:"id"`
+}
+
+// A failed run adds one to the streak; a sent or partial run ends it.
+func (q *Queries) CountReportFailure(ctx context.Context, arg CountReportFailureParams) (int64, error) {
+	row := q.queryRow(ctx, q.countReportFailureStmt, countReportFailure, arg.Status, arg.ID)
+	var consecutive_failures int64
+	err := row.Scan(&consecutive_failures)
+	return consecutive_failures, err
 }
 
 const countSavedViewsInScope = `-- name: CountSavedViewsInScope :one
@@ -1039,6 +1088,62 @@ func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQuerySharePara
 	return err
 }
 
+const createReport = `-- name: CreateReport :one
+
+INSERT INTO reports (
+    name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id,
+    schedule_json, timezone, time_range, range_anchor, variables_json,
+    max_rows, skip_if_empty, attach_csv
+) VALUES (
+    ?1, ?2, ?3, ?4,
+    ?5, ?6, ?7, ?8,
+    ?9, ?10, ?11,
+    ?12, ?13, ?14
+)
+RETURNING id
+`
+
+type CreateReportParams struct {
+	Name          string         `json:"name"`
+	OwnerID       sql.NullInt64  `json:"owner_id"`
+	SourceKind    string         `json:"source_kind"`
+	DashboardID   sql.NullInt64  `json:"dashboard_id"`
+	TabID         sql.NullString `json:"tab_id"`
+	SavedQueryID  sql.NullInt64  `json:"saved_query_id"`
+	ScheduleJson  string         `json:"schedule_json"`
+	Timezone      string         `json:"timezone"`
+	TimeRange     sql.NullString `json:"time_range"`
+	RangeAnchor   string         `json:"range_anchor"`
+	VariablesJson string         `json:"variables_json"`
+	MaxRows       int64          `json:"max_rows"`
+	SkipIfEmpty   bool           `json:"skip_if_empty"`
+	AttachCsv     bool           `json:"attach_csv"`
+}
+
+// Scheduled reports (RFC 0008). Every timestamp this section writes is UTC
+// text in the '%Y-%m-%dT%H:%M:%fZ' form, so comparisons run as text.
+func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (int64, error) {
+	row := q.queryRow(ctx, q.createReportStmt, createReport,
+		arg.Name,
+		arg.OwnerID,
+		arg.SourceKind,
+		arg.DashboardID,
+		arg.TabID,
+		arg.SavedQueryID,
+		arg.ScheduleJson,
+		arg.Timezone,
+		arg.TimeRange,
+		arg.RangeAnchor,
+		arg.VariablesJson,
+		arg.MaxRows,
+		arg.SkipIfEmpty,
+		arg.AttachCsv,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSavedQuery = `-- name: CreateSavedQuery :one
 
 INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_language, editor_mode, query_content, created_by)
@@ -1413,6 +1518,45 @@ func (q *Queries) DeleteQueryShare(ctx context.Context, token string) (string, e
 	return token_2, err
 }
 
+const deleteReport = `-- name: DeleteReport :execrows
+DELETE FROM reports WHERE id = ?1
+`
+
+func (q *Queries) DeleteReport(ctx context.Context, id int64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteReportStmt, deleteReport, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteReportRecipients = `-- name: DeleteReportRecipients :exec
+DELETE FROM report_recipients WHERE report_id = ?1
+`
+
+func (q *Queries) DeleteReportRecipients(ctx context.Context, reportID int64) error {
+	_, err := q.exec(ctx, q.deleteReportRecipientsStmt, deleteReportRecipients, reportID)
+	return err
+}
+
+const deleteReportUserRecipient = `-- name: DeleteReportUserRecipient :execrows
+DELETE FROM report_recipients
+WHERE report_id = ?1 AND kind = 'user' AND user_id = ?2
+`
+
+type DeleteReportUserRecipientParams struct {
+	ReportID int64         `json:"report_id"`
+	UserID   sql.NullInt64 `json:"user_id"`
+}
+
+func (q *Queries) DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteReportUserRecipientStmt, deleteReportUserRecipient, arg.ReportID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSavedQuery = `-- name: DeleteSavedQuery :exec
 DELETE FROM saved_queries WHERE id = ?
 `
@@ -1574,6 +1718,45 @@ func (q *Queries) FinishJob(ctx context.Context, arg FinishJobParams) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const finishReportRun = `-- name: FinishReportRun :one
+UPDATE report_runs
+SET status = ?1,
+    reason = ?2,
+    window_start = CAST(?3 AS TEXT),
+    window_end = CAST(?4 AS TEXT),
+    panels_json = ?5,
+    deliveries_json = ?6,
+    deadline_at = NULL,
+    finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?7 AND status = 'running'
+RETURNING report_id
+`
+
+type FinishReportRunParams struct {
+	Status         string         `json:"status"`
+	Reason         string         `json:"reason"`
+	WindowStart    sql.NullString `json:"window_start"`
+	WindowEnd      sql.NullString `json:"window_end"`
+	PanelsJson     string         `json:"panels_json"`
+	DeliveriesJson string         `json:"deliveries_json"`
+	ID             int64          `json:"id"`
+}
+
+func (q *Queries) FinishReportRun(ctx context.Context, arg FinishReportRunParams) (int64, error) {
+	row := q.queryRow(ctx, q.finishReportRunStmt, finishReportRun,
+		arg.Status,
+		arg.Reason,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.PanelsJson,
+		arg.DeliveriesJson,
+		arg.ID,
+	)
+	var report_id int64
+	err := row.Scan(&report_id)
+	return report_id, err
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
@@ -2127,6 +2310,40 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 		&i.CreatedAt,
 		&i.Email,
 		&i.FullName,
+	)
+	return i, err
+}
+
+const getReport = `-- name: GetReport :one
+SELECT id, name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id, schedule_json, timezone, time_range, range_anchor, variables_json, max_rows, skip_if_empty, attach_csv, state, pause_reason, consecutive_failures, last_manual_run_at, last_preview_at, created_at, updated_at FROM reports WHERE id = ?1
+`
+
+func (q *Queries) GetReport(ctx context.Context, id int64) (Report, error) {
+	row := q.queryRow(ctx, q.getReportStmt, getReport, id)
+	var i Report
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.OwnerID,
+		&i.SourceKind,
+		&i.DashboardID,
+		&i.TabID,
+		&i.SavedQueryID,
+		&i.ScheduleJson,
+		&i.Timezone,
+		&i.TimeRange,
+		&i.RangeAnchor,
+		&i.VariablesJson,
+		&i.MaxRows,
+		&i.SkipIfEmpty,
+		&i.AttachCsv,
+		&i.State,
+		&i.PauseReason,
+		&i.ConsecutiveFailures,
+		&i.LastManualRunAt,
+		&i.LastPreviewAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2725,6 +2942,119 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 	return id, err
 }
 
+const insertReportRecipient = `-- name: InsertReportRecipient :exec
+INSERT INTO report_recipients (report_id, kind, user_id, team_id, email, added_by)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+`
+
+type InsertReportRecipientParams struct {
+	ReportID int64         `json:"report_id"`
+	Kind     string        `json:"kind"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+	Email    string        `json:"email"`
+	AddedBy  sql.NullInt64 `json:"added_by"`
+}
+
+func (q *Queries) InsertReportRecipient(ctx context.Context, arg InsertReportRecipientParams) error {
+	_, err := q.exec(ctx, q.insertReportRecipientStmt, insertReportRecipient,
+		arg.ReportID,
+		arg.Kind,
+		arg.UserID,
+		arg.TeamID,
+		arg.Email,
+		arg.AddedBy,
+	)
+	return err
+}
+
+const insertRunningReportRun = `-- name: InsertRunningReportRun :one
+INSERT INTO report_runs (report_id, trigger, scheduled_for, actor_id, status, started_at, deadline_at)
+VALUES (
+    ?1, ?2, CAST(?3 AS TEXT), ?4, 'running',
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?5 AS TEXT))
+)
+ON CONFLICT DO NOTHING
+RETURNING id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at
+`
+
+type InsertRunningReportRunParams struct {
+	ReportID         int64         `json:"report_id"`
+	Trigger          string        `json:"trigger"`
+	ScheduledFor     string        `json:"scheduled_for"`
+	ActorID          sql.NullInt64 `json:"actor_id"`
+	DeadlineModifier string        `json:"deadline_modifier"`
+}
+
+// A conflict on either partial unique index inserts nothing and returns no
+// row; the caller then tells the tick conflict from a run in flight.
+func (q *Queries) InsertRunningReportRun(ctx context.Context, arg InsertRunningReportRunParams) (ReportRun, error) {
+	row := q.queryRow(ctx, q.insertRunningReportRunStmt, insertRunningReportRun,
+		arg.ReportID,
+		arg.Trigger,
+		arg.ScheduledFor,
+		arg.ActorID,
+		arg.DeadlineModifier,
+	)
+	var i ReportRun
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.Trigger,
+		&i.ScheduledFor,
+		&i.ActorID,
+		&i.Status,
+		&i.Reason,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.PanelsJson,
+		&i.DeliveriesJson,
+		&i.StartedAt,
+		&i.DeadlineAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const insertSkippedReportTick = `-- name: InsertSkippedReportTick :one
+INSERT INTO report_runs (report_id, trigger, scheduled_for, status, reason, started_at, finished_at)
+VALUES (
+    ?1, 'schedule', CAST(?2 AS TEXT), 'skipped', ?3,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+)
+ON CONFLICT DO NOTHING
+RETURNING id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at
+`
+
+type InsertSkippedReportTickParams struct {
+	ReportID     int64  `json:"report_id"`
+	ScheduledFor string `json:"scheduled_for"`
+	Reason       string `json:"reason"`
+}
+
+func (q *Queries) InsertSkippedReportTick(ctx context.Context, arg InsertSkippedReportTickParams) (ReportRun, error) {
+	row := q.queryRow(ctx, q.insertSkippedReportTickStmt, insertSkippedReportTick, arg.ReportID, arg.ScheduledFor, arg.Reason)
+	var i ReportRun
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.Trigger,
+		&i.ScheduledFor,
+		&i.ActorID,
+		&i.Status,
+		&i.Reason,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.PanelsJson,
+		&i.DeliveriesJson,
+		&i.StartedAt,
+		&i.DeadlineAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
 UPDATE alert_history
 SET payload_json = json_set(json_remove(payload_json, '$.delivery_deadline_at'),
@@ -2746,6 +3076,24 @@ type InterruptAlertDeliveriesParams struct {
 func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
 	_, err := q.exec(ctx, q.interruptAlertDeliveriesStmt, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
 	return err
+}
+
+const interruptStaleReportRuns = `-- name: InterruptStaleReportRuns :execrows
+UPDATE report_runs
+SET status = 'interrupted',
+    reason = 'process_stopped',
+    deadline_at = NULL,
+    finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE status = 'running'
+  AND deadline_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?1 AS TEXT))
+`
+
+func (q *Queries) InterruptStaleReportRuns(ctx context.Context, graceModifier string) (int64, error) {
+	result, err := q.exec(ctx, q.interruptStaleReportRunsStmt, interruptStaleReportRuns, graceModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const isSourceManaged = `-- name: IsSourceManaged :one
@@ -4157,6 +4505,259 @@ func (q *Queries) ListQueryHistory(ctx context.Context, arg ListQueryHistoryPara
 	return items, nil
 }
 
+const listReportRecipients = `-- name: ListReportRecipients :many
+SELECT id, report_id, kind, user_id, team_id, email, added_by, created_at FROM report_recipients WHERE report_id = ?1 ORDER BY id
+`
+
+func (q *Queries) ListReportRecipients(ctx context.Context, reportID int64) ([]ReportRecipient, error) {
+	rows, err := q.query(ctx, q.listReportRecipientsStmt, listReportRecipients, reportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRecipient{}
+	for rows.Next() {
+		var i ReportRecipient
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Kind,
+			&i.UserID,
+			&i.TeamID,
+			&i.Email,
+			&i.AddedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportRuns = `-- name: ListReportRuns :many
+SELECT id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at FROM report_runs
+WHERE report_id = ?1
+  AND (CAST(?2 AS INTEGER) = 0 OR id < CAST(?2 AS INTEGER))
+ORDER BY id DESC
+LIMIT ?3
+`
+
+type ListReportRunsParams struct {
+	ReportID int64 `json:"report_id"`
+	Before   int64 `json:"before"`
+	MaxRuns  int64 `json:"max_runs"`
+}
+
+// before = 0 starts at the newest run.
+func (q *Queries) ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error) {
+	rows, err := q.query(ctx, q.listReportRunsStmt, listReportRuns, arg.ReportID, arg.Before, arg.MaxRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRun{}
+	for rows.Next() {
+		var i ReportRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Trigger,
+			&i.ScheduledFor,
+			&i.ActorID,
+			&i.Status,
+			&i.Reason,
+			&i.WindowStart,
+			&i.WindowEnd,
+			&i.PanelsJson,
+			&i.DeliveriesJson,
+			&i.StartedAt,
+			&i.DeadlineAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReports = `-- name: ListReports :many
+SELECT id, name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id, schedule_json, timezone, time_range, range_anchor, variables_json, max_rows, skip_if_empty, attach_csv, state, pause_reason, consecutive_failures, last_manual_run_at, last_preview_at, created_at, updated_at FROM reports ORDER BY name, id
+`
+
+func (q *Queries) ListReports(ctx context.Context) ([]Report, error) {
+	rows, err := q.query(ctx, q.listReportsStmt, listReports)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Report{}
+	for rows.Next() {
+		var i Report
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OwnerID,
+			&i.SourceKind,
+			&i.DashboardID,
+			&i.TabID,
+			&i.SavedQueryID,
+			&i.ScheduleJson,
+			&i.Timezone,
+			&i.TimeRange,
+			&i.RangeAnchor,
+			&i.VariablesJson,
+			&i.MaxRows,
+			&i.SkipIfEmpty,
+			&i.AttachCsv,
+			&i.State,
+			&i.PauseReason,
+			&i.ConsecutiveFailures,
+			&i.LastManualRunAt,
+			&i.LastPreviewAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportsByOwner = `-- name: ListReportsByOwner :many
+SELECT id, name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id, schedule_json, timezone, time_range, range_anchor, variables_json, max_rows, skip_if_empty, attach_csv, state, pause_reason, consecutive_failures, last_manual_run_at, last_preview_at, created_at, updated_at FROM reports WHERE owner_id = ?1 ORDER BY name, id
+`
+
+func (q *Queries) ListReportsByOwner(ctx context.Context, ownerID sql.NullInt64) ([]Report, error) {
+	rows, err := q.query(ctx, q.listReportsByOwnerStmt, listReportsByOwner, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Report{}
+	for rows.Next() {
+		var i Report
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OwnerID,
+			&i.SourceKind,
+			&i.DashboardID,
+			&i.TabID,
+			&i.SavedQueryID,
+			&i.ScheduleJson,
+			&i.Timezone,
+			&i.TimeRange,
+			&i.RangeAnchor,
+			&i.VariablesJson,
+			&i.MaxRows,
+			&i.SkipIfEmpty,
+			&i.AttachCsv,
+			&i.State,
+			&i.PauseReason,
+			&i.ConsecutiveFailures,
+			&i.LastManualRunAt,
+			&i.LastPreviewAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportsForRecipient = `-- name: ListReportsForRecipient :many
+SELECT r.id, r.name, r.owner_id, r.source_kind, r.dashboard_id, r.tab_id, r.saved_query_id, r.schedule_json, r.timezone, r.time_range, r.range_anchor, r.variables_json, r.max_rows, r.skip_if_empty, r.attach_csv, r.state, r.pause_reason, r.consecutive_failures, r.last_manual_run_at, r.last_preview_at, r.created_at, r.updated_at FROM reports r
+WHERE EXISTS (
+    SELECT 1 FROM report_recipients rr
+    WHERE rr.report_id = r.id
+      AND (
+        (rr.kind = 'user' AND rr.user_id = ?1)
+        OR (rr.kind = 'team' AND rr.team_id IN (
+            SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?1))
+        OR (rr.kind = 'email' AND lower(rr.email) = (
+            SELECT lower(u.email) FROM users u WHERE u.id = ?1))
+      )
+)
+ORDER BY r.name, r.id
+`
+
+// A user receives a report through a user row, a team row of a team the
+// user belongs to, or an email row that matches the user's address.
+func (q *Queries) ListReportsForRecipient(ctx context.Context, userID sql.NullInt64) ([]Report, error) {
+	rows, err := q.query(ctx, q.listReportsForRecipientStmt, listReportsForRecipient, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Report{}
+	for rows.Next() {
+		var i Report
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OwnerID,
+			&i.SourceKind,
+			&i.DashboardID,
+			&i.TabID,
+			&i.SavedQueryID,
+			&i.ScheduleJson,
+			&i.Timezone,
+			&i.TimeRange,
+			&i.RangeAnchor,
+			&i.VariablesJson,
+			&i.MaxRows,
+			&i.SkipIfEmpty,
+			&i.AttachCsv,
+			&i.State,
+			&i.PauseReason,
+			&i.ConsecutiveFailures,
+			&i.LastManualRunAt,
+			&i.LastPreviewAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSavedQueriesForUser = `-- name: ListSavedQueriesForUser :many
 SELECT
     sq.id,
@@ -5080,6 +5681,19 @@ func (q *Queries) LockCollection(ctx context.Context, id int64) (int64, error) {
 	return id_2, err
 }
 
+const lockReport = `-- name: LockReport :one
+SELECT id FROM reports WHERE id = ?1
+`
+
+// SQLite has one writer, so inside a write transaction this read already
+// excludes other writers; it checks that the report exists.
+func (q *Queries) LockReport(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.lockReportStmt, lockReport, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
@@ -5134,6 +5748,27 @@ WHERE id = ?
 func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.markAlertTriggeredStmt, markAlertTriggered, id)
 	return err
+}
+
+const pauseReport = `-- name: PauseReport :execrows
+UPDATE reports
+SET state = 'paused',
+    pause_reason = ?1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2
+`
+
+type PauseReportParams struct {
+	PauseReason string `json:"pause_reason"`
+	ID          int64  `json:"id"`
+}
+
+func (q *Queries) PauseReport(ctx context.Context, arg PauseReportParams) (int64, error) {
+	result, err := q.exec(ctx, q.pauseReportStmt, pauseReport, arg.PauseReason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const pruneAlertHistory = `-- name: PruneAlertHistory :exec
@@ -5226,6 +5861,28 @@ type PruneQueryHistoryForUserParams struct {
 // keeping history bounded on every insert.
 func (q *Queries) PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error {
 	_, err := q.exec(ctx, q.pruneQueryHistoryForUserStmt, pruneQueryHistoryForUser, arg.UserID, arg.Offset)
+	return err
+}
+
+const pruneReportRuns = `-- name: PruneReportRuns :exec
+DELETE FROM report_runs
+WHERE report_runs.report_id = ?1
+  AND report_runs.status <> 'running'
+  AND report_runs.id NOT IN (
+    SELECT keep.id FROM report_runs keep
+    WHERE keep.report_id = ?1
+    ORDER BY keep.id DESC
+    LIMIT ?2
+  )
+`
+
+type PruneReportRunsParams struct {
+	ReportID int64 `json:"report_id"`
+	Keep     int64 `json:"keep"`
+}
+
+func (q *Queries) PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error {
+	_, err := q.exec(ctx, q.pruneReportRunsStmt, pruneReportRuns, arg.ReportID, arg.Keep)
 	return err
 }
 
@@ -5464,6 +6121,26 @@ func (q *Queries) RepairDashboardSummary(ctx context.Context, arg RepairDashboar
 	return result.RowsAffected()
 }
 
+const reportTickExists = `-- name: ReportTickExists :one
+SELECT EXISTS(
+    SELECT 1 FROM report_runs
+    WHERE report_id = ?1 AND trigger = 'schedule'
+      AND scheduled_for = CAST(?2 AS TEXT)
+)
+`
+
+type ReportTickExistsParams struct {
+	ReportID     int64  `json:"report_id"`
+	ScheduledFor string `json:"scheduled_for"`
+}
+
+func (q *Queries) ReportTickExists(ctx context.Context, arg ReportTickExistsParams) (bool, error) {
+	row := q.queryRow(ctx, q.reportTickExistsStmt, reportTickExists, arg.ReportID, arg.ScheduledFor)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
 SET status = 'resolved',
@@ -5480,6 +6157,23 @@ type ResolveAlertHistoryForAlertParams struct {
 func (q *Queries) ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error {
 	_, err := q.exec(ctx, q.resolveAlertHistoryForAlertStmt, resolveAlertHistoryForAlert, arg.Message, arg.AlertID)
 	return err
+}
+
+const resumeReport = `-- name: ResumeReport :execrows
+UPDATE reports
+SET state = 'active',
+    pause_reason = '',
+    consecutive_failures = 0,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+`
+
+func (q *Queries) ResumeReport(ctx context.Context, id int64) (int64, error) {
+	result, err := q.exec(ctx, q.resumeReportStmt, resumeReport, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows
@@ -5694,6 +6388,48 @@ type SetUserPasswordHashParams struct {
 func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
 	_, err := q.exec(ctx, q.setUserPasswordHashStmt, setUserPasswordHash, arg.PasswordHash, arg.ID)
 	return err
+}
+
+const takeReportManualRunCooldown = `-- name: TakeReportManualRunCooldown :execrows
+UPDATE reports
+SET last_manual_run_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+  AND (last_manual_run_at IS NULL
+       OR last_manual_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)))
+`
+
+type TakeReportManualRunCooldownParams struct {
+	ID             int64  `json:"id"`
+	WindowModifier string `json:"window_modifier"`
+}
+
+func (q *Queries) TakeReportManualRunCooldown(ctx context.Context, arg TakeReportManualRunCooldownParams) (int64, error) {
+	result, err := q.exec(ctx, q.takeReportManualRunCooldownStmt, takeReportManualRunCooldown, arg.ID, arg.WindowModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const takeReportPreviewCooldown = `-- name: TakeReportPreviewCooldown :execrows
+UPDATE reports
+SET last_preview_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+  AND (last_preview_at IS NULL
+       OR last_preview_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)))
+`
+
+type TakeReportPreviewCooldownParams struct {
+	ID             int64  `json:"id"`
+	WindowModifier string `json:"window_modifier"`
+}
+
+func (q *Queries) TakeReportPreviewCooldown(ctx context.Context, arg TakeReportPreviewCooldownParams) (int64, error) {
+	result, err := q.exec(ctx, q.takeReportPreviewCooldownStmt, takeReportPreviewCooldown, arg.ID, arg.WindowModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const teamHasSource = `-- name: TeamHasSource :one
@@ -6069,6 +6805,65 @@ func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJo
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateReport = `-- name: UpdateReport :execrows
+UPDATE reports
+SET name = ?1,
+    source_kind = ?2,
+    dashboard_id = ?3,
+    tab_id = ?4,
+    saved_query_id = ?5,
+    schedule_json = ?6,
+    timezone = ?7,
+    time_range = ?8,
+    range_anchor = ?9,
+    variables_json = ?10,
+    max_rows = ?11,
+    skip_if_empty = ?12,
+    attach_csv = ?13,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?14
+`
+
+type UpdateReportParams struct {
+	Name          string         `json:"name"`
+	SourceKind    string         `json:"source_kind"`
+	DashboardID   sql.NullInt64  `json:"dashboard_id"`
+	TabID         sql.NullString `json:"tab_id"`
+	SavedQueryID  sql.NullInt64  `json:"saved_query_id"`
+	ScheduleJson  string         `json:"schedule_json"`
+	Timezone      string         `json:"timezone"`
+	TimeRange     sql.NullString `json:"time_range"`
+	RangeAnchor   string         `json:"range_anchor"`
+	VariablesJson string         `json:"variables_json"`
+	MaxRows       int64          `json:"max_rows"`
+	SkipIfEmpty   bool           `json:"skip_if_empty"`
+	AttachCsv     bool           `json:"attach_csv"`
+	ID            int64          `json:"id"`
+}
+
+func (q *Queries) UpdateReport(ctx context.Context, arg UpdateReportParams) (int64, error) {
+	result, err := q.exec(ctx, q.updateReportStmt, updateReport,
+		arg.Name,
+		arg.SourceKind,
+		arg.DashboardID,
+		arg.TabID,
+		arg.SavedQueryID,
+		arg.ScheduleJson,
+		arg.Timezone,
+		arg.TimeRange,
+		arg.RangeAnchor,
+		arg.VariablesJson,
+		arg.MaxRows,
+		arg.SkipIfEmpty,
+		arg.AttachCsv,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateSavedQuery = `-- name: UpdateSavedQuery :exec

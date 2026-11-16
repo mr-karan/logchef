@@ -1,6 +1,6 @@
 // Package store defines the backend-agnostic contract for logchef's application
 // metadata — users, teams, sources, sessions, saved queries, collections,
-// saved views, alerts, background jobs, API tokens, system settings, export jobs, user preferences, query
+// saved views, alerts, background jobs, scheduled reports, API tokens, system settings, export jobs, user preferences, query
 // shares, OAuth authorization state and audit events. (Log data lives in ClickHouse and is not part of this contract.)
 //
 // Concrete implementations live in sub-packages — store/sqlite (the default,
@@ -317,6 +317,69 @@ type QueryHistoryStore interface {
 	QueryVolumeByDay(ctx context.Context, since string) ([]models.DailyQueryVolume, error)
 }
 
+// ReportStore persists scheduled reports (RFC 0008), their recipients and
+// their runs. Every time it compares or writes for a claim or a cooldown is
+// the database clock, so replicas agree.
+type ReportStore interface {
+	// CreateReport inserts an active report and fills r from the stored row.
+	CreateReport(ctx context.Context, r *models.Report) error
+	// GetReport returns models.ErrNotFound when the report does not exist.
+	GetReport(ctx context.Context, id models.ReportID) (*models.Report, error)
+	// ListReports returns every report, by name.
+	ListReports(ctx context.Context) ([]*models.Report, error)
+	ListReportsByOwner(ctx context.Context, owner models.UserID) ([]*models.Report, error)
+	// ListReportsForRecipient returns the reports that name the user directly,
+	// a team the user belongs to, or the user's address ignoring case.
+	ListReportsForRecipient(ctx context.Context, userID models.UserID) ([]*models.Report, error)
+	// UpdateReport writes the fields a user edits: name, source, schedule,
+	// timezone, range, variables and options. It leaves the owner, the state
+	// and the counters alone, and fills r from the stored row. A missing
+	// report returns models.ErrNotFound.
+	UpdateReport(ctx context.Context, r *models.Report) error
+	// DeleteReport returns models.ErrNotFound when the report does not exist.
+	DeleteReport(ctx context.Context, id models.ReportID) error
+	// PauseReport sets the report paused with a non-empty reason.
+	PauseReport(ctx context.Context, id models.ReportID, reason models.ReportPauseReason) error
+	// ResumeReport makes the report active and resets its failure streak.
+	ResumeReport(ctx context.Context, id models.ReportID) error
+	// ClaimReport makes owner the owner and lifts a pause for an inactive
+	// owner. Who may claim is decided by the caller.
+	ClaimReport(ctx context.Context, id models.ReportID, owner models.UserID) error
+	// TakeReportCooldown takes the manual-run or preview cooldown with one
+	// conditional update and reports whether it did. False means the last
+	// one was less than models.ReportCooldown ago, or the report is gone.
+	TakeReportCooldown(ctx context.Context, id models.ReportID, kind models.ReportCooldownKind) (bool, error)
+
+	ListReportRecipients(ctx context.Context, id models.ReportID) ([]models.ReportRecipient, error)
+	// ReplaceReportRecipients replaces every recipient row of the report in
+	// one transaction that holds the report, so concurrent replaces never
+	// merge. A duplicate target returns models.ErrConflict and a missing
+	// report models.ErrNotFound.
+	ReplaceReportRecipients(ctx context.Context, id models.ReportID, recipients []models.ReportRecipient) error
+	// RemoveReportUserRecipient deletes the direct user row of userID and
+	// returns models.ErrNotFound when there is none.
+	RemoveReportUserRecipient(ctx context.Context, id models.ReportID, userID models.UserID) error
+
+	// CreateReportRun inserts a running run as the claim. A scheduled run
+	// whose tick already has a row returns models.ErrReportTickTaken; any
+	// other run while one is running returns models.ErrReportRunInFlight.
+	CreateReportRun(ctx context.Context, claim models.ReportRunClaim) (*models.ReportRun, error)
+	// SkipReportTick records a scheduled tick as skipped without running it.
+	// A tick that already has a row returns models.ErrReportTickTaken.
+	SkipReportTick(ctx context.Context, id models.ReportID, scheduledFor time.Time, reason models.ReportRunReason) (*models.ReportRun, error)
+	// FinishReportRun writes a running run's result, updates the report's
+	// failure streak, keeps the newest models.ReportRunHistoryLimit runs and
+	// returns the streak. A run that is not running returns
+	// models.ErrNotFound.
+	FinishReportRun(ctx context.Context, runID models.ReportRunID, res models.ReportRunResult) (int, error)
+	// ListReportRuns returns up to limit runs, newest first, with ids below
+	// before; before 0 starts at the newest.
+	ListReportRuns(ctx context.Context, id models.ReportID, before models.ReportRunID, limit int) ([]*models.ReportRun, error)
+	// InterruptStaleReportRuns marks running runs whose deadline passed more
+	// than grace ago interrupted, and returns how many.
+	InterruptStaleReportRuns(ctx context.Context, grace time.Duration) (int64, error)
+}
+
 // ExportJobStore persists asynchronous CSV/export job records.
 type ExportJobStore interface {
 	ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]models.ReapedExportJob, error)
@@ -489,8 +552,8 @@ type AuditStore interface {
 // callback receives, and what consumers should accept when they don't manage
 // the connection lifecycle themselves.
 //
-// It composes one interface per domain; together they cover all 16 metadata
-// domains. Every method speaks pkg/models types — no sqlc or driver types leak
+// It composes one interface per domain; together they cover every metadata
+// domain. Every method speaks pkg/models types — no sqlc or driver types leak
 // through.
 type StoreOps interface {
 	SessionStore
@@ -503,6 +566,7 @@ type StoreOps interface {
 	DashboardStore
 	AlertStore
 	JobStore
+	ReportStore
 	QueryHistoryStore
 	ExportJobStore
 	QueryShareStore

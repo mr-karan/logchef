@@ -71,6 +71,8 @@ const (
 	TokenScopeQuerySharesWrite  TokenScope = "query_shares:write"
 	TokenScopeSettingsRead      TokenScope = "settings:read"
 	TokenScopeSettingsWrite     TokenScope = "settings:write"
+	TokenScopeReportsRead       TokenScope = "reports:read"
+	TokenScopeReportsWrite      TokenScope = "reports:write"
 )
 
 // TeamRole represents the possible team member roles

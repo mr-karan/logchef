@@ -65,6 +65,12 @@ func TestJobs(t *testing.T) {
 	storetest.RunJobs(t, opener(sqlitetest.Path(t)), false)
 }
 
+// TestReports runs the report store tests with two store instances on one
+// file, so the cooldown race waits on SQLite's write lock, not on Go.
+func TestReports(t *testing.T) {
+	storetest.RunReports(t, opener(sqlitetest.Path(t)))
+}
+
 func opener(path string) storetest.Opener {
 	return func(t *testing.T) store.Store {
 		t.Helper()

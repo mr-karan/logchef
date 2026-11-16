@@ -51,6 +51,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.claimOAuthAuthRequestDecisionStmt, err = db.PrepareContext(ctx, claimOAuthAuthRequestDecision); err != nil {
 		return nil, fmt.Errorf("error preparing query ClaimOAuthAuthRequestDecision: %w", err)
 	}
+	if q.claimReportStmt, err = db.PrepareContext(ctx, claimReport); err != nil {
+		return nil, fmt.Errorf("error preparing query ClaimReport: %w", err)
+	}
 	if q.clearSavedViewScopeDefaultStmt, err = db.PrepareContext(ctx, clearSavedViewScopeDefault); err != nil {
 		return nil, fmt.Errorf("error preparing query ClearSavedViewScopeDefault: %w", err)
 	}
@@ -71,6 +74,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.countCollectionTeamAccessStmt, err = db.PrepareContext(ctx, countCollectionTeamAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountCollectionTeamAccess: %w", err)
+	}
+	if q.countReportFailureStmt, err = db.PrepareContext(ctx, countReportFailure); err != nil {
+		return nil, fmt.Errorf("error preparing query CountReportFailure: %w", err)
 	}
 	if q.countSavedViewsInScopeStmt, err = db.PrepareContext(ctx, countSavedViewsInScope); err != nil {
 		return nil, fmt.Errorf("error preparing query CountSavedViewsInScope: %w", err)
@@ -104,6 +110,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createQueryShareStmt, err = db.PrepareContext(ctx, createQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateQueryShare: %w", err)
+	}
+	if q.createReportStmt, err = db.PrepareContext(ctx, createReport); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateReport: %w", err)
 	}
 	if q.createSavedQueryStmt, err = db.PrepareContext(ctx, createSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSavedQuery: %w", err)
@@ -162,6 +171,15 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteQueryShareStmt, err = db.PrepareContext(ctx, deleteQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteQueryShare: %w", err)
 	}
+	if q.deleteReportStmt, err = db.PrepareContext(ctx, deleteReport); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteReport: %w", err)
+	}
+	if q.deleteReportRecipientsStmt, err = db.PrepareContext(ctx, deleteReportRecipients); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteReportRecipients: %w", err)
+	}
+	if q.deleteReportUserRecipientStmt, err = db.PrepareContext(ctx, deleteReportUserRecipient); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteReportUserRecipient: %w", err)
+	}
 	if q.deleteSavedQueryStmt, err = db.PrepareContext(ctx, deleteSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSavedQuery: %w", err)
 	}
@@ -191,6 +209,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.finishJobStmt, err = db.PrepareContext(ctx, finishJob); err != nil {
 		return nil, fmt.Errorf("error preparing query FinishJob: %w", err)
+	}
+	if q.finishReportRunStmt, err = db.PrepareContext(ctx, finishReportRun); err != nil {
+		return nil, fmt.Errorf("error preparing query FinishReportRun: %w", err)
 	}
 	if q.getAPITokenStmt, err = db.PrepareContext(ctx, getAPIToken); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAPIToken: %w", err)
@@ -245,6 +266,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getQueryShareStmt, err = db.PrepareContext(ctx, getQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query GetQueryShare: %w", err)
+	}
+	if q.getReportStmt, err = db.PrepareContext(ctx, getReport); err != nil {
+		return nil, fmt.Errorf("error preparing query GetReport: %w", err)
 	}
 	if q.getSavedQueryStmt, err = db.PrepareContext(ctx, getSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSavedQuery: %w", err)
@@ -312,8 +336,20 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertQueryHistoryStmt, err = db.PrepareContext(ctx, insertQueryHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertQueryHistory: %w", err)
 	}
+	if q.insertReportRecipientStmt, err = db.PrepareContext(ctx, insertReportRecipient); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertReportRecipient: %w", err)
+	}
+	if q.insertRunningReportRunStmt, err = db.PrepareContext(ctx, insertRunningReportRun); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertRunningReportRun: %w", err)
+	}
+	if q.insertSkippedReportTickStmt, err = db.PrepareContext(ctx, insertSkippedReportTick); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertSkippedReportTick: %w", err)
+	}
 	if q.interruptAlertDeliveriesStmt, err = db.PrepareContext(ctx, interruptAlertDeliveries); err != nil {
 		return nil, fmt.Errorf("error preparing query InterruptAlertDeliveries: %w", err)
+	}
+	if q.interruptStaleReportRunsStmt, err = db.PrepareContext(ctx, interruptStaleReportRuns); err != nil {
+		return nil, fmt.Errorf("error preparing query InterruptStaleReportRuns: %w", err)
 	}
 	if q.isSourceManagedStmt, err = db.PrepareContext(ctx, isSourceManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query IsSourceManaged: %w", err)
@@ -393,6 +429,21 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listQueryHistoryStmt, err = db.PrepareContext(ctx, listQueryHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueryHistory: %w", err)
 	}
+	if q.listReportRecipientsStmt, err = db.PrepareContext(ctx, listReportRecipients); err != nil {
+		return nil, fmt.Errorf("error preparing query ListReportRecipients: %w", err)
+	}
+	if q.listReportRunsStmt, err = db.PrepareContext(ctx, listReportRuns); err != nil {
+		return nil, fmt.Errorf("error preparing query ListReportRuns: %w", err)
+	}
+	if q.listReportsStmt, err = db.PrepareContext(ctx, listReports); err != nil {
+		return nil, fmt.Errorf("error preparing query ListReports: %w", err)
+	}
+	if q.listReportsByOwnerStmt, err = db.PrepareContext(ctx, listReportsByOwner); err != nil {
+		return nil, fmt.Errorf("error preparing query ListReportsByOwner: %w", err)
+	}
+	if q.listReportsForRecipientStmt, err = db.PrepareContext(ctx, listReportsForRecipient); err != nil {
+		return nil, fmt.Errorf("error preparing query ListReportsForRecipient: %w", err)
+	}
 	if q.listSavedQueriesForUserStmt, err = db.PrepareContext(ctx, listSavedQueriesForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSavedQueriesForUser: %w", err)
 	}
@@ -450,6 +501,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.lockCollectionStmt, err = db.PrepareContext(ctx, lockCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query LockCollection: %w", err)
 	}
+	if q.lockReportStmt, err = db.PrepareContext(ctx, lockReport); err != nil {
+		return nil, fmt.Errorf("error preparing query LockReport: %w", err)
+	}
 	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
 	}
@@ -462,6 +516,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.markAlertTriggeredStmt, err = db.PrepareContext(ctx, markAlertTriggered); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertTriggered: %w", err)
 	}
+	if q.pauseReportStmt, err = db.PrepareContext(ctx, pauseReport); err != nil {
+		return nil, fmt.Errorf("error preparing query PauseReport: %w", err)
+	}
 	if q.pruneAlertHistoryStmt, err = db.PrepareContext(ctx, pruneAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneAlertHistory: %w", err)
 	}
@@ -473,6 +530,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.pruneQueryHistoryForUserStmt, err = db.PrepareContext(ctx, pruneQueryHistoryForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneQueryHistoryForUser: %w", err)
+	}
+	if q.pruneReportRunsStmt, err = db.PrepareContext(ctx, pruneReportRuns); err != nil {
+		return nil, fmt.Errorf("error preparing query PruneReportRuns: %w", err)
 	}
 	if q.queryVolumeByDayStmt, err = db.PrepareContext(ctx, queryVolumeByDay); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryVolumeByDay: %w", err)
@@ -504,8 +564,14 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.repairDashboardSummaryStmt, err = db.PrepareContext(ctx, repairDashboardSummary); err != nil {
 		return nil, fmt.Errorf("error preparing query RepairDashboardSummary: %w", err)
 	}
+	if q.reportTickExistsStmt, err = db.PrepareContext(ctx, reportTickExists); err != nil {
+		return nil, fmt.Errorf("error preparing query ReportTickExists: %w", err)
+	}
 	if q.resolveAlertHistoryForAlertStmt, err = db.PrepareContext(ctx, resolveAlertHistoryForAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query ResolveAlertHistoryForAlert: %w", err)
+	}
+	if q.resumeReportStmt, err = db.PrepareContext(ctx, resumeReport); err != nil {
+		return nil, fmt.Errorf("error preparing query ResumeReport: %w", err)
 	}
 	if q.revokeOAuthGrantStmt, err = db.PrepareContext(ctx, revokeOAuthGrant); err != nil {
 		return nil, fmt.Errorf("error preparing query RevokeOAuthGrant: %w", err)
@@ -539,6 +605,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.setUserPasswordHashStmt, err = db.PrepareContext(ctx, setUserPasswordHash); err != nil {
 		return nil, fmt.Errorf("error preparing query SetUserPasswordHash: %w", err)
+	}
+	if q.takeReportManualRunCooldownStmt, err = db.PrepareContext(ctx, takeReportManualRunCooldown); err != nil {
+		return nil, fmt.Errorf("error preparing query TakeReportManualRunCooldown: %w", err)
+	}
+	if q.takeReportPreviewCooldownStmt, err = db.PrepareContext(ctx, takeReportPreviewCooldown); err != nil {
+		return nil, fmt.Errorf("error preparing query TakeReportPreviewCooldown: %w", err)
 	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
@@ -575,6 +647,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateExportJobRunningStmt, err = db.PrepareContext(ctx, updateExportJobRunning); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateExportJobRunning: %w", err)
+	}
+	if q.updateReportStmt, err = db.PrepareContext(ctx, updateReport); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateReport: %w", err)
 	}
 	if q.updateSavedQueryStmt, err = db.PrepareContext(ctx, updateSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSavedQuery: %w", err)
@@ -662,6 +737,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing claimOAuthAuthRequestDecisionStmt: %w", cerr)
 		}
 	}
+	if q.claimReportStmt != nil {
+		if cerr := q.claimReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing claimReportStmt: %w", cerr)
+		}
+	}
 	if q.clearSavedViewScopeDefaultStmt != nil {
 		if cerr := q.clearSavedViewScopeDefaultStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing clearSavedViewScopeDefaultStmt: %w", cerr)
@@ -695,6 +775,11 @@ func (q *Queries) Close() error {
 	if q.countCollectionTeamAccessStmt != nil {
 		if cerr := q.countCollectionTeamAccessStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countCollectionTeamAccessStmt: %w", cerr)
+		}
+	}
+	if q.countReportFailureStmt != nil {
+		if cerr := q.countReportFailureStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countReportFailureStmt: %w", cerr)
 		}
 	}
 	if q.countSavedViewsInScopeStmt != nil {
@@ -750,6 +835,11 @@ func (q *Queries) Close() error {
 	if q.createQueryShareStmt != nil {
 		if cerr := q.createQueryShareStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createQueryShareStmt: %w", cerr)
+		}
+	}
+	if q.createReportStmt != nil {
+		if cerr := q.createReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createReportStmt: %w", cerr)
 		}
 	}
 	if q.createSavedQueryStmt != nil {
@@ -847,6 +937,21 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteQueryShareStmt: %w", cerr)
 		}
 	}
+	if q.deleteReportStmt != nil {
+		if cerr := q.deleteReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteReportStmt: %w", cerr)
+		}
+	}
+	if q.deleteReportRecipientsStmt != nil {
+		if cerr := q.deleteReportRecipientsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteReportRecipientsStmt: %w", cerr)
+		}
+	}
+	if q.deleteReportUserRecipientStmt != nil {
+		if cerr := q.deleteReportUserRecipientStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteReportUserRecipientStmt: %w", cerr)
+		}
+	}
 	if q.deleteSavedQueryStmt != nil {
 		if cerr := q.deleteSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSavedQueryStmt: %w", cerr)
@@ -895,6 +1000,11 @@ func (q *Queries) Close() error {
 	if q.finishJobStmt != nil {
 		if cerr := q.finishJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing finishJobStmt: %w", cerr)
+		}
+	}
+	if q.finishReportRunStmt != nil {
+		if cerr := q.finishReportRunStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing finishReportRunStmt: %w", cerr)
 		}
 	}
 	if q.getAPITokenStmt != nil {
@@ -985,6 +1095,11 @@ func (q *Queries) Close() error {
 	if q.getQueryShareStmt != nil {
 		if cerr := q.getQueryShareStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getQueryShareStmt: %w", cerr)
+		}
+	}
+	if q.getReportStmt != nil {
+		if cerr := q.getReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getReportStmt: %w", cerr)
 		}
 	}
 	if q.getSavedQueryStmt != nil {
@@ -1097,9 +1212,29 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertQueryHistoryStmt: %w", cerr)
 		}
 	}
+	if q.insertReportRecipientStmt != nil {
+		if cerr := q.insertReportRecipientStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertReportRecipientStmt: %w", cerr)
+		}
+	}
+	if q.insertRunningReportRunStmt != nil {
+		if cerr := q.insertRunningReportRunStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertRunningReportRunStmt: %w", cerr)
+		}
+	}
+	if q.insertSkippedReportTickStmt != nil {
+		if cerr := q.insertSkippedReportTickStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertSkippedReportTickStmt: %w", cerr)
+		}
+	}
 	if q.interruptAlertDeliveriesStmt != nil {
 		if cerr := q.interruptAlertDeliveriesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing interruptAlertDeliveriesStmt: %w", cerr)
+		}
+	}
+	if q.interruptStaleReportRunsStmt != nil {
+		if cerr := q.interruptStaleReportRunsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing interruptStaleReportRunsStmt: %w", cerr)
 		}
 	}
 	if q.isSourceManagedStmt != nil {
@@ -1232,6 +1367,31 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listQueryHistoryStmt: %w", cerr)
 		}
 	}
+	if q.listReportRecipientsStmt != nil {
+		if cerr := q.listReportRecipientsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listReportRecipientsStmt: %w", cerr)
+		}
+	}
+	if q.listReportRunsStmt != nil {
+		if cerr := q.listReportRunsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listReportRunsStmt: %w", cerr)
+		}
+	}
+	if q.listReportsStmt != nil {
+		if cerr := q.listReportsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listReportsStmt: %w", cerr)
+		}
+	}
+	if q.listReportsByOwnerStmt != nil {
+		if cerr := q.listReportsByOwnerStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listReportsByOwnerStmt: %w", cerr)
+		}
+	}
+	if q.listReportsForRecipientStmt != nil {
+		if cerr := q.listReportsForRecipientStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listReportsForRecipientStmt: %w", cerr)
+		}
+	}
 	if q.listSavedQueriesForUserStmt != nil {
 		if cerr := q.listSavedQueriesForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSavedQueriesForUserStmt: %w", cerr)
@@ -1327,6 +1487,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing lockCollectionStmt: %w", cerr)
 		}
 	}
+	if q.lockReportStmt != nil {
+		if cerr := q.lockReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing lockReportStmt: %w", cerr)
+		}
+	}
 	if q.markAlertEvaluatedStmt != nil {
 		if cerr := q.markAlertEvaluatedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing markAlertEvaluatedStmt: %w", cerr)
@@ -1347,6 +1512,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing markAlertTriggeredStmt: %w", cerr)
 		}
 	}
+	if q.pauseReportStmt != nil {
+		if cerr := q.pauseReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing pauseReportStmt: %w", cerr)
+		}
+	}
 	if q.pruneAlertHistoryStmt != nil {
 		if cerr := q.pruneAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing pruneAlertHistoryStmt: %w", cerr)
@@ -1365,6 +1535,11 @@ func (q *Queries) Close() error {
 	if q.pruneQueryHistoryForUserStmt != nil {
 		if cerr := q.pruneQueryHistoryForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing pruneQueryHistoryForUserStmt: %w", cerr)
+		}
+	}
+	if q.pruneReportRunsStmt != nil {
+		if cerr := q.pruneReportRunsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing pruneReportRunsStmt: %w", cerr)
 		}
 	}
 	if q.queryVolumeByDayStmt != nil {
@@ -1417,9 +1592,19 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing repairDashboardSummaryStmt: %w", cerr)
 		}
 	}
+	if q.reportTickExistsStmt != nil {
+		if cerr := q.reportTickExistsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing reportTickExistsStmt: %w", cerr)
+		}
+	}
 	if q.resolveAlertHistoryForAlertStmt != nil {
 		if cerr := q.resolveAlertHistoryForAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing resolveAlertHistoryForAlertStmt: %w", cerr)
+		}
+	}
+	if q.resumeReportStmt != nil {
+		if cerr := q.resumeReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing resumeReportStmt: %w", cerr)
 		}
 	}
 	if q.revokeOAuthGrantStmt != nil {
@@ -1475,6 +1660,16 @@ func (q *Queries) Close() error {
 	if q.setUserPasswordHashStmt != nil {
 		if cerr := q.setUserPasswordHashStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setUserPasswordHashStmt: %w", cerr)
+		}
+	}
+	if q.takeReportManualRunCooldownStmt != nil {
+		if cerr := q.takeReportManualRunCooldownStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing takeReportManualRunCooldownStmt: %w", cerr)
+		}
+	}
+	if q.takeReportPreviewCooldownStmt != nil {
+		if cerr := q.takeReportPreviewCooldownStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing takeReportPreviewCooldownStmt: %w", cerr)
 		}
 	}
 	if q.teamHasSourceStmt != nil {
@@ -1535,6 +1730,11 @@ func (q *Queries) Close() error {
 	if q.updateExportJobRunningStmt != nil {
 		if cerr := q.updateExportJobRunningStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateExportJobRunningStmt: %w", cerr)
+		}
+	}
+	if q.updateReportStmt != nil {
+		if cerr := q.updateReportStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateReportStmt: %w", cerr)
 		}
 	}
 	if q.updateSavedQueryStmt != nil {
@@ -1645,6 +1845,7 @@ type Queries struct {
 	authenticateOAuthAccessTokenStmt      *sql.Stmt
 	claimJobsStmt                         *sql.Stmt
 	claimOAuthAuthRequestDecisionStmt     *sql.Stmt
+	claimReportStmt                       *sql.Stmt
 	clearSavedViewScopeDefaultStmt        *sql.Stmt
 	completeExportJobStmt                 *sql.Stmt
 	consumeOAuthAuthCodeStmt              *sql.Stmt
@@ -1652,6 +1853,7 @@ type Queries struct {
 	countAdminUsersStmt                   *sql.Stmt
 	countAuditEventsStmt                  *sql.Stmt
 	countCollectionTeamAccessStmt         *sql.Stmt
+	countReportFailureStmt                *sql.Stmt
 	countSavedViewsInScopeStmt            *sql.Stmt
 	countSharedCollectionEditAccessStmt   *sql.Stmt
 	countUserSessionsStmt                 *sql.Stmt
@@ -1663,6 +1865,7 @@ type Queries struct {
 	createOAuthAuthRequestStmt            *sql.Stmt
 	createOAuthGrantStmt                  *sql.Stmt
 	createQueryShareStmt                  *sql.Stmt
+	createReportStmt                      *sql.Stmt
 	createSavedQueryStmt                  *sql.Stmt
 	createSavedViewStmt                   *sql.Stmt
 	createSessionStmt                     *sql.Stmt
@@ -1682,6 +1885,9 @@ type Queries struct {
 	deleteExpiredSessionsStmt             *sql.Stmt
 	deleteJobStmt                         *sql.Stmt
 	deleteQueryShareStmt                  *sql.Stmt
+	deleteReportStmt                      *sql.Stmt
+	deleteReportRecipientsStmt            *sql.Stmt
+	deleteReportUserRecipientStmt         *sql.Stmt
 	deleteSavedQueryStmt                  *sql.Stmt
 	deleteSavedViewStmt                   *sql.Stmt
 	deleteSessionStmt                     *sql.Stmt
@@ -1692,6 +1898,7 @@ type Queries struct {
 	deleteUserSessionsStmt                *sql.Stmt
 	failExportJobStmt                     *sql.Stmt
 	finishJobStmt                         *sql.Stmt
+	finishReportRunStmt                   *sql.Stmt
 	getAPITokenStmt                       *sql.Stmt
 	getAPITokenByHashStmt                 *sql.Stmt
 	getAlertStmt                          *sql.Stmt
@@ -1710,6 +1917,7 @@ type Queries struct {
 	getOAuthRefreshTokenStateStmt         *sql.Stmt
 	getPersonalCollectionStmt             *sql.Stmt
 	getQueryShareStmt                     *sql.Stmt
+	getReportStmt                         *sql.Stmt
 	getSavedQueryStmt                     *sql.Stmt
 	getSavedViewStmt                      *sql.Stmt
 	getSessionStmt                        *sql.Stmt
@@ -1732,7 +1940,11 @@ type Queries struct {
 	insertOAuthAccessTokenStmt            *sql.Stmt
 	insertOAuthRefreshTokenStmt           *sql.Stmt
 	insertQueryHistoryStmt                *sql.Stmt
+	insertReportRecipientStmt             *sql.Stmt
+	insertRunningReportRunStmt            *sql.Stmt
+	insertSkippedReportTickStmt           *sql.Stmt
 	interruptAlertDeliveriesStmt          *sql.Stmt
+	interruptStaleReportRunsStmt          *sql.Stmt
 	isSourceManagedStmt                   *sql.Stmt
 	isTeamManagedStmt                     *sql.Stmt
 	kickJobStmt                           *sql.Stmt
@@ -1759,6 +1971,11 @@ type Queries struct {
 	listOAuthGrantsForUserStmt            *sql.Stmt
 	listQueryActivityStmt                 *sql.Stmt
 	listQueryHistoryStmt                  *sql.Stmt
+	listReportRecipientsStmt              *sql.Stmt
+	listReportRunsStmt                    *sql.Stmt
+	listReportsStmt                       *sql.Stmt
+	listReportsByOwnerStmt                *sql.Stmt
+	listReportsForRecipientStmt           *sql.Stmt
 	listSavedQueriesForUserStmt           *sql.Stmt
 	listSavedQueriesForUserBySourceStmt   *sql.Stmt
 	listSavedViewsStmt                    *sql.Stmt
@@ -1778,14 +1995,17 @@ type Queries struct {
 	listUsersStmt                         *sql.Stmt
 	listUsersForProvisioningStmt          *sql.Stmt
 	lockCollectionStmt                    *sql.Stmt
+	lockReportStmt                        *sql.Stmt
 	markAlertEvaluatedStmt                *sql.Stmt
 	markAlertInstanceNotifiedStmt         *sql.Stmt
 	markAlertResolvedStmt                 *sql.Stmt
 	markAlertTriggeredStmt                *sql.Stmt
+	pauseReportStmt                       *sql.Stmt
 	pruneAlertHistoryStmt                 *sql.Stmt
 	pruneAuditEventsStmt                  *sql.Stmt
 	pruneExpiredQuerySharesStmt           *sql.Stmt
 	pruneQueryHistoryForUserStmt          *sql.Stmt
+	pruneReportRunsStmt                   *sql.Stmt
 	queryVolumeByDayStmt                  *sql.Stmt
 	reapInterruptedExportJobsStmt         *sql.Stmt
 	releaseJobStmt                        *sql.Stmt
@@ -1796,7 +2016,9 @@ type Queries struct {
 	removeTeamMemberStmt                  *sql.Stmt
 	removeTeamSourceStmt                  *sql.Stmt
 	repairDashboardSummaryStmt            *sql.Stmt
+	reportTickExistsStmt                  *sql.Stmt
 	resolveAlertHistoryForAlertStmt       *sql.Stmt
+	resumeReportStmt                      *sql.Stmt
 	revokeOAuthGrantStmt                  *sql.Stmt
 	revokeOAuthGrantByTokenStmt           *sql.Stmt
 	revokeOAuthGrantForUserStmt           *sql.Stmt
@@ -1808,6 +2030,8 @@ type Queries struct {
 	setTeamManagedStmt                    *sql.Stmt
 	setUserManagedStmt                    *sql.Stmt
 	setUserPasswordHashStmt               *sql.Stmt
+	takeReportManualRunCooldownStmt       *sql.Stmt
+	takeReportPreviewCooldownStmt         *sql.Stmt
 	teamHasSourceStmt                     *sql.Stmt
 	topSourcesByQueriesStmt               *sql.Stmt
 	topUsersByQueriesStmt                 *sql.Stmt
@@ -1820,6 +2044,7 @@ type Queries struct {
 	updateCollectionStmt                  *sql.Stmt
 	updateDashboardStmt                   *sql.Stmt
 	updateExportJobRunningStmt            *sql.Stmt
+	updateReportStmt                      *sql.Stmt
 	updateSavedQueryStmt                  *sql.Stmt
 	updateSavedViewStmt                   *sql.Stmt
 	updateSourceStmt                      *sql.Stmt
@@ -1847,6 +2072,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		authenticateOAuthAccessTokenStmt:      q.authenticateOAuthAccessTokenStmt,
 		claimJobsStmt:                         q.claimJobsStmt,
 		claimOAuthAuthRequestDecisionStmt:     q.claimOAuthAuthRequestDecisionStmt,
+		claimReportStmt:                       q.claimReportStmt,
 		clearSavedViewScopeDefaultStmt:        q.clearSavedViewScopeDefaultStmt,
 		completeExportJobStmt:                 q.completeExportJobStmt,
 		consumeOAuthAuthCodeStmt:              q.consumeOAuthAuthCodeStmt,
@@ -1854,6 +2080,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		countAdminUsersStmt:                   q.countAdminUsersStmt,
 		countAuditEventsStmt:                  q.countAuditEventsStmt,
 		countCollectionTeamAccessStmt:         q.countCollectionTeamAccessStmt,
+		countReportFailureStmt:                q.countReportFailureStmt,
 		countSavedViewsInScopeStmt:            q.countSavedViewsInScopeStmt,
 		countSharedCollectionEditAccessStmt:   q.countSharedCollectionEditAccessStmt,
 		countUserSessionsStmt:                 q.countUserSessionsStmt,
@@ -1865,6 +2092,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createOAuthAuthRequestStmt:            q.createOAuthAuthRequestStmt,
 		createOAuthGrantStmt:                  q.createOAuthGrantStmt,
 		createQueryShareStmt:                  q.createQueryShareStmt,
+		createReportStmt:                      q.createReportStmt,
 		createSavedQueryStmt:                  q.createSavedQueryStmt,
 		createSavedViewStmt:                   q.createSavedViewStmt,
 		createSessionStmt:                     q.createSessionStmt,
@@ -1884,6 +2112,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteExpiredSessionsStmt:             q.deleteExpiredSessionsStmt,
 		deleteJobStmt:                         q.deleteJobStmt,
 		deleteQueryShareStmt:                  q.deleteQueryShareStmt,
+		deleteReportStmt:                      q.deleteReportStmt,
+		deleteReportRecipientsStmt:            q.deleteReportRecipientsStmt,
+		deleteReportUserRecipientStmt:         q.deleteReportUserRecipientStmt,
 		deleteSavedQueryStmt:                  q.deleteSavedQueryStmt,
 		deleteSavedViewStmt:                   q.deleteSavedViewStmt,
 		deleteSessionStmt:                     q.deleteSessionStmt,
@@ -1894,6 +2125,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteUserSessionsStmt:                q.deleteUserSessionsStmt,
 		failExportJobStmt:                     q.failExportJobStmt,
 		finishJobStmt:                         q.finishJobStmt,
+		finishReportRunStmt:                   q.finishReportRunStmt,
 		getAPITokenStmt:                       q.getAPITokenStmt,
 		getAPITokenByHashStmt:                 q.getAPITokenByHashStmt,
 		getAlertStmt:                          q.getAlertStmt,
@@ -1912,6 +2144,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getOAuthRefreshTokenStateStmt:         q.getOAuthRefreshTokenStateStmt,
 		getPersonalCollectionStmt:             q.getPersonalCollectionStmt,
 		getQueryShareStmt:                     q.getQueryShareStmt,
+		getReportStmt:                         q.getReportStmt,
 		getSavedQueryStmt:                     q.getSavedQueryStmt,
 		getSavedViewStmt:                      q.getSavedViewStmt,
 		getSessionStmt:                        q.getSessionStmt,
@@ -1934,7 +2167,11 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		insertOAuthAccessTokenStmt:            q.insertOAuthAccessTokenStmt,
 		insertOAuthRefreshTokenStmt:           q.insertOAuthRefreshTokenStmt,
 		insertQueryHistoryStmt:                q.insertQueryHistoryStmt,
+		insertReportRecipientStmt:             q.insertReportRecipientStmt,
+		insertRunningReportRunStmt:            q.insertRunningReportRunStmt,
+		insertSkippedReportTickStmt:           q.insertSkippedReportTickStmt,
 		interruptAlertDeliveriesStmt:          q.interruptAlertDeliveriesStmt,
+		interruptStaleReportRunsStmt:          q.interruptStaleReportRunsStmt,
 		isSourceManagedStmt:                   q.isSourceManagedStmt,
 		isTeamManagedStmt:                     q.isTeamManagedStmt,
 		kickJobStmt:                           q.kickJobStmt,
@@ -1961,6 +2198,11 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listOAuthGrantsForUserStmt:            q.listOAuthGrantsForUserStmt,
 		listQueryActivityStmt:                 q.listQueryActivityStmt,
 		listQueryHistoryStmt:                  q.listQueryHistoryStmt,
+		listReportRecipientsStmt:              q.listReportRecipientsStmt,
+		listReportRunsStmt:                    q.listReportRunsStmt,
+		listReportsStmt:                       q.listReportsStmt,
+		listReportsByOwnerStmt:                q.listReportsByOwnerStmt,
+		listReportsForRecipientStmt:           q.listReportsForRecipientStmt,
 		listSavedQueriesForUserStmt:           q.listSavedQueriesForUserStmt,
 		listSavedQueriesForUserBySourceStmt:   q.listSavedQueriesForUserBySourceStmt,
 		listSavedViewsStmt:                    q.listSavedViewsStmt,
@@ -1980,14 +2222,17 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUsersStmt:                         q.listUsersStmt,
 		listUsersForProvisioningStmt:          q.listUsersForProvisioningStmt,
 		lockCollectionStmt:                    q.lockCollectionStmt,
+		lockReportStmt:                        q.lockReportStmt,
 		markAlertEvaluatedStmt:                q.markAlertEvaluatedStmt,
 		markAlertInstanceNotifiedStmt:         q.markAlertInstanceNotifiedStmt,
 		markAlertResolvedStmt:                 q.markAlertResolvedStmt,
 		markAlertTriggeredStmt:                q.markAlertTriggeredStmt,
+		pauseReportStmt:                       q.pauseReportStmt,
 		pruneAlertHistoryStmt:                 q.pruneAlertHistoryStmt,
 		pruneAuditEventsStmt:                  q.pruneAuditEventsStmt,
 		pruneExpiredQuerySharesStmt:           q.pruneExpiredQuerySharesStmt,
 		pruneQueryHistoryForUserStmt:          q.pruneQueryHistoryForUserStmt,
+		pruneReportRunsStmt:                   q.pruneReportRunsStmt,
 		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,
 		reapInterruptedExportJobsStmt:         q.reapInterruptedExportJobsStmt,
 		releaseJobStmt:                        q.releaseJobStmt,
@@ -1998,7 +2243,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeTeamMemberStmt:                  q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                  q.removeTeamSourceStmt,
 		repairDashboardSummaryStmt:            q.repairDashboardSummaryStmt,
+		reportTickExistsStmt:                  q.reportTickExistsStmt,
 		resolveAlertHistoryForAlertStmt:       q.resolveAlertHistoryForAlertStmt,
+		resumeReportStmt:                      q.resumeReportStmt,
 		revokeOAuthGrantStmt:                  q.revokeOAuthGrantStmt,
 		revokeOAuthGrantByTokenStmt:           q.revokeOAuthGrantByTokenStmt,
 		revokeOAuthGrantForUserStmt:           q.revokeOAuthGrantForUserStmt,
@@ -2010,6 +2257,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		setTeamManagedStmt:                    q.setTeamManagedStmt,
 		setUserManagedStmt:                    q.setUserManagedStmt,
 		setUserPasswordHashStmt:               q.setUserPasswordHashStmt,
+		takeReportManualRunCooldownStmt:       q.takeReportManualRunCooldownStmt,
+		takeReportPreviewCooldownStmt:         q.takeReportPreviewCooldownStmt,
 		teamHasSourceStmt:                     q.teamHasSourceStmt,
 		topSourcesByQueriesStmt:               q.topSourcesByQueriesStmt,
 		topUsersByQueriesStmt:                 q.topUsersByQueriesStmt,
@@ -2022,6 +2271,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateCollectionStmt:                  q.updateCollectionStmt,
 		updateDashboardStmt:                   q.updateDashboardStmt,
 		updateExportJobRunningStmt:            q.updateExportJobRunningStmt,
+		updateReportStmt:                      q.updateReportStmt,
 		updateSavedQueryStmt:                  q.updateSavedQueryStmt,
 		updateSavedViewStmt:                   q.updateSavedViewStmt,
 		updateSourceStmt:                      q.updateSourceStmt,
