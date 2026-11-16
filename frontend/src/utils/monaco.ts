@@ -381,9 +381,15 @@ function registerLogchefQL() {
     // Keywords (boolean operators)
     keywords: ['and', 'or'],
 
+    // Keywords of the aggregation pipe
+    pipeKeywords: ['as', 'by', 'sort', 'limit', 'asc', 'desc', 'time'],
+
     // The main tokenizer
     tokenizer: {
       root: [
+        // Everything after the first pipe selects fields or aggregates
+        [/\|/, { token: 'delimiter', next: '@pipe' }],
+
         // Identifiers - field names
         [/[a-zA-Z][\w._-]*/, {
           cases: {
@@ -411,6 +417,24 @@ function registerLogchefQL() {
         [/\b\d+\b/, 'number'],
 
         // Whitespace
+        [/\s+/, '']
+      ],
+
+      pipe: [
+        [/time(?=\s*\()/, 'keyword'],
+        [/[a-zA-Z_][\w]*(?=\s*\()/, 'function'],
+        [/@?[a-zA-Z_][\w.:@-]*/, {
+          cases: {
+            '@pipeKeywords': 'keyword',
+            '@default': 'logchefqlKey',
+          }
+        }],
+        [/"/, { token: 'string.quote', bracket: '@open', next: '@string_double' }],
+        [/'/, { token: 'string.quote', bracket: '@open', next: '@string_single' }],
+        [/\(/, { token: 'delimiter.parenthesis', bracket: '@open' }],
+        [/\)/, { token: 'delimiter.parenthesis', bracket: '@close' }],
+        [/[,|]/, 'delimiter'],
+        [/\d+[a-z]*/, 'number'],
         [/\s+/, '']
       ],
 

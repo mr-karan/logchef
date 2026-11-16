@@ -1,3 +1,5 @@
+import { isAggregation } from './aggregation'
+
 export type FilterOperator = '=' | '!=' | '~' | '!~' | '>' | '>=' | '<' | '<='
 
 export const TEXT_OPERATORS: readonly FilterOperator[] = ['=', '!=', '~', '!~']
@@ -154,7 +156,9 @@ export function hasSelect(query: string): boolean {
 
 // Adds a projected field. A query without a projection gets one listing the
 // columns currently shown, so the new field joins them instead of replacing them.
+// An aggregation has no projection to extend.
 export function addSelectField(query: string, field: string, shownColumns: readonly string[]): string {
+  if (isAggregation(query)) return query
   const { where, select } = splitPipe(query)
   const fields = select ? select.split(/\s+/) : [...shownColumns]
   if (!fields.includes(field)) fields.push(field)

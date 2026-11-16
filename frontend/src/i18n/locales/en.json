@@ -14,6 +14,7 @@
   "dashboards.conflict.back": "Back",
   "dashboards.conflict.confirmOverwrite": "Overwrite",
   "queryEditor.unknownField": "Unknown field \"{field}\"",
+  "queryEditor.numberFieldNeeded": "{func} needs a number field. \"{field}\" is {type}",
   "queryEditor.syntaxError": "Invalid LogchefQL syntax: {message}",
   "queryEditor.invalidSyntax": "Invalid LogchefQL syntax",
   "queryEditor.distinctCount": "{count} distinct values",

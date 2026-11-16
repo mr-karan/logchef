@@ -51,6 +51,13 @@ describe('appendCondition', () => {
   it('ignores pipes inside quoted values', () => {
     expect(appendCondition('msg~"a|b"', 'c=3')).toBe('msg~"a|b" and c=3')
   })
+
+  it('keeps every stage of an aggregation', () => {
+    expect(appendCondition('level="error" | count() by service | sort count desc | limit 5', 'job="api"'))
+      .toBe('level="error" and job="api" | count() by service | sort count desc | limit 5')
+    expect(removeColumnConditions('level="error" and job="api" | count() by job | limit 5', 'job'))
+      .toBe('level="error" | count() by job | limit 5')
+  })
 })
 
 describe('addSelectField', () => {
@@ -62,6 +69,11 @@ describe('addSelectField', () => {
   it('extends an existing projection once', () => {
     expect(addSelectField('| timestamp msg', 'msg.http.status', [])).toBe('| timestamp msg msg.http.status')
     expect(addSelectField('| timestamp msg', 'msg', [])).toBe('| timestamp msg')
+  })
+
+  it('leaves an aggregation unchanged', () => {
+    expect(addSelectField('level="error" | count() by service', 'msg', ['timestamp', 'msg']))
+      .toBe('level="error" | count() by service')
   })
 })
 

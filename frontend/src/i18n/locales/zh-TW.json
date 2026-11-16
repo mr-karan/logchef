@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "返回",
   "dashboards.conflict.confirmOverwrite": "覆寫",
   "queryEditor.unknownField": "未知欄位「{field}」",
+  "queryEditor.numberFieldNeeded": "{func} 需要數值欄位。「{field}」的類型是 {type}",
   "queryEditor.syntaxError": "LogchefQL 語法無效：{message}",
   "queryEditor.invalidSyntax": "LogchefQL 語法無效",
   "queryEditor.distinctCount": "{count} 個相異值",

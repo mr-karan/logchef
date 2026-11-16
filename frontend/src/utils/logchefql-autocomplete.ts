@@ -1,19 +1,29 @@
 /**
  * LogchefQL autocomplete context parsing and helpers.
  *
- * Grammar: field operator value [boolean field operator value]*
+ * Grammar: field operator value [boolean field operator value]* [| pipe]
  * Operators: = != ~ !~ > < >= <=
  * Boolean: and or (case-insensitive)
  * Values: "quoted strings", 'single quoted', unquoted words, numbers
+ * Pipe: fields to select, or an aggregation such as `count() by service`
  */
 
+import { aggregationOutline, pipeTail } from "@/utils/logchefql/aggregation"
+
 // --- Types ---
+
+export type AggregationKeyword = "as" | "by" | ","
 
 type LogchefQLContext =
   | { suggest: "fields"; partial: string }
   | { suggest: "operators"; key: string }
   | { suggest: "values"; key: string; operator: string; partial: string; quote: '"' | "'" | null; contextQuery: string }
   | { suggest: "boolean"; partial: string }
+  // After a pipe: functions, and fields too where a select can start.
+  | { suggest: "functions"; partial: string; fields: boolean }
+  | { suggest: "functionArgument"; func: string; partial: string }
+  | { suggest: "aggregationKeywords"; keywords: AggregationKeyword[]; partial: string }
+  | { suggest: "groupKeys"; partial: string }
   | { suggest: "none" }
 
 // --- Field type helpers ---
@@ -101,12 +111,23 @@ function valueRestLength(textAfterCursor: string, quote: '"' | "'" | null): numb
 }
 
 export function buildBooleanInsertText(
-  keyword: 'and' | 'or',
+  keyword: 'and' | 'or' | 'as' | 'by',
   textBeforeCursor: string,
   partial: string,
 ): string {
   const beforeKeyword = textBeforeCursor.slice(0, textBeforeCursor.length - partial.length)
   return `${/\s$/.test(beforeKeyword) ? '' : ' '}${keyword} `
+}
+
+// A comma joins the item before it, so the spaces between them go.
+export function buildCommaEdit(textBeforeCursor: string, partial: string): { insertText: string; deleteBefore: number } {
+  const beforeComma = textBeforeCursor.slice(0, textBeforeCursor.length - partial.length)
+  return { insertText: ', ', deleteBefore: /[ \t]*$/.exec(beforeComma)?.[0].length ?? 0 }
+}
+
+// A bare `time` after `by` is the time bucket, so a field named time is quoted.
+export function groupKeyInsertText(field: string): string {
+  return /^time$/i.test(field) ? `"${field}"` : field
 }
 
 type LogchefQLOperator = '=' | '!=' | '~' | '!~' | '>' | '<' | '>=' | '<='
@@ -165,6 +186,9 @@ const TRAILING_WORD_RE = new RegExp(`(${FIELD_CHARS})$`)
  */
 export function parseLogchefQLContext(text: string, fields: string[]): LogchefQLContext {
   if (!text.trim()) return { suggest: "fields", partial: "" }
+
+  const pipeContext = parsePipeContext(text)
+  if (pipeContext) return pipeContext
 
   // Step 1: Detect open quote at cursor position
   const quoteState = getQuoteState(text)
@@ -238,6 +262,33 @@ export function parseLogchefQLContext(text: string, fields: string[]): LogchefQL
 }
 
 // --- Internal helpers ---
+
+// The context after the first pipe, or null for text without one.
+function parsePipeContext(text: string): LogchefQLContext | null {
+  const partial = /\s$/.test(text) ? "" : TRAILING_WORD_RE.exec(text)?.[1] ?? ""
+  const prefix = text.slice(0, text.length - partial.length)
+  const tail = pipeTail(prefix)
+  if (tail === null) return null
+  if (!tail.trim()) return { suggest: "functions", partial, fields: true }
+
+  const outline = aggregationOutline(prefix)
+  if (!outline) return getQuoteState(text).inQuote ? { suggest: "none" } : { suggest: "fields", partial }
+  const next = outline.next
+  switch (next.expect) {
+    case "item":
+      return { suggest: "functions", partial, fields: false }
+    case "argument":
+      return { suggest: "functionArgument", func: next.func, partial }
+    case "afterItem":
+      return { suggest: "aggregationKeywords", keywords: next.aliased ? ["by", ","] : ["as", "by", ","], partial }
+    case "key":
+      return { suggest: "groupKeys", partial }
+    case "afterKey":
+      return { suggest: "aggregationKeywords", keywords: next.aliased ? [","] : ["as", ","], partial }
+    default:
+      return { suggest: "none" }
+  }
+}
 
 interface QuoteState {
   inQuote: boolean

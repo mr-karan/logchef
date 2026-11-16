@@ -1,4 +1,5 @@
 import type { ParseError } from '@/api/logchefql';
+import { aggregationOutline, functionArgument, numberColumnKind } from './aggregation';
 
 export interface FieldReference {
   name: string;
@@ -19,7 +20,36 @@ export function getUnknownLogchefQLFields(query: string, schema: Record<string, 
   return getLogchefQLFields(query).filter(field => field.complete && getSchemaFieldType(schema, field) === undefined);
 }
 
+// Function names, keywords, aliases, windows and sort names of an aggregation
+// are not fields; the fields are the function arguments and the `by` keys.
 export function getLogchefQLFields(query: string): FieldReference[] {
+  const outline = aggregationOutline(query);
+  if (!outline) return getFilterFields(query);
+  const aggregationFields = [...outline.items, ...outline.keys]
+    .flatMap(({ field }) => field ? [{ ...field, complete: true }] : []);
+  return [...getFilterFields(query, true), ...aggregationFields];
+}
+
+export interface NumberFunctionWarning {
+  func: string;
+  field: string;
+  type: string;
+  start: number;
+  end: number;
+}
+
+// A number function on a column of a type that holds no number. A nested path
+// is skipped: a map value or a JSON path can hold one.
+export function getNumberFunctionWarnings(query: string, schema: Record<string, { type: string }>): NumberFunctionWarning[] {
+  return (aggregationOutline(query)?.items ?? []).flatMap(({ func, field }) => {
+    if (!field || field.name !== field.baseName || functionArgument(func) !== 'number') return [];
+    const type = getSchemaFieldType(schema, field);
+    if (type === undefined || numberColumnKind(type) !== 'rejected') return [];
+    return [{ func, field: field.name, type, start: field.start, end: field.end }];
+  });
+}
+
+function getFilterFields(query: string, stopAtPipe = false): FieldReference[] {
   const tokens = Array.from(query.matchAll(/\{\{\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\}\}|\[\[|\]\]|"(?:[^"\\]|\\.)*(?:"|$)|'(?:[^'\\]|\\.)*(?:'|$)|@?[a-zA-Z_][a-zA-Z0-9_:@-]*|[-+]?[0-9]*\.?[0-9]+|!=|!~|>=|<=|[^\s]/g));
   const fields: FieldReference[] = [];
   let state: 'field' | 'operator' | 'value' | 'boolean' | 'projection' = 'field';
@@ -30,6 +60,7 @@ export function getLogchefQLFields(query: string): FieldReference[] {
     const text = token[0];
     if (text === '[[' || text === ']]') continue;
     if (text === '|') {
+      if (stopAtPipe) break;
       state = 'projection';
       continue;
     }
