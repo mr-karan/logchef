@@ -21,8 +21,14 @@ func TestDescribeListsOnlyWorkingCapabilities(t *testing.T) {
 	if !slices.Equal(d.Capabilities, want) {
 		t.Fatalf("capabilities %v", d.Capabilities)
 	}
-	if !slices.Equal(d.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogQL}) {
+	if !slices.Equal(d.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogQL}) {
 		t.Fatalf("languages %v", d.QueryLanguages)
+	}
+	if !slices.Equal(d.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}) {
+		t.Fatalf("editor modes %v", d.SavedQueryEditorModes)
+	}
+	if !d.LogchefQLNeedsColumns {
+		t.Fatal("LogchefQL compilation must receive the columns, to know the stream labels")
 	}
 	if d.AlertEditorModes == nil || len(d.AlertEditorModes) != 0 {
 		t.Fatalf("alert modes %v, want an empty list", d.AlertEditorModes)
