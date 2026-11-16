@@ -79,6 +79,9 @@ const (
 	// email destinations when alerting is off.
 	TokenScopeDestinationsRead  TokenScope = "destinations:read"
 	TokenScopeDestinationsWrite TokenScope = "destinations:write"
+	// Audit events hold emails and IP addresses, so audit:read stays out of
+	// the read-only preset.
+	TokenScopeAuditRead TokenScope = "audit:read"
 )
 
 // TeamRole represents the possible team member roles

@@ -414,6 +414,10 @@ func (s *Server) setupRoutes() {
 	// Authoritative all-time usage analytics over the non-pruned query_stats_daily rollup.
 	admin.Get("/query-stats", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryStats)
 
+	// Audit log (RFC 0009). The export records audit_event.export.
+	admin.Get("/audit-events", s.requireTokenScope(models.TokenScopeAuditRead), s.handleListAuditEvents)
+	admin.Get("/audit-events/export", s.requireTokenScope(models.TokenScopeAuditRead), s.handleExportAuditEvents).Name(string(audit.AuditEventExport))
+
 	// Provisioning Export
 	admin.Get("/provisioning/export", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleExportProvisioning)
 
