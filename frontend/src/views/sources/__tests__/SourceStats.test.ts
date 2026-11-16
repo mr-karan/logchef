@@ -24,6 +24,7 @@ const source: Source = {
   connection: {}, ttl_days: 7, created_at: "", updated_at: "", is_connected: true,
 };
 const otherSource: Source = { ...source, id: 8, name: "audit logs" };
+const victoriaSource: Source = { ...source, id: 9, name: "vl logs", source_type: "victorialogs" };
 const inspection: SourceInspection = {
   details: [{ key: "host", label: "Host", value: "localhost:9000" }],
   storage: [
@@ -47,7 +48,8 @@ const fail = (message: string) => Promise.reject({ status: "error", message, err
 vi.mock("@/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/sources")>()),
   sourcesApi: {
-    listAllSourcesForAdmin: () => ok([source, otherSource]),
+    listAllSourcesForAdmin: () => ok([source, otherSource, victoriaSource]),
+    getSchemaAdvice: (sourceId: number) => ok({ source_id: sourceId, generated_at: null, generated_by: null, window_days: null, stale: false, report: null }),
     getAdminSourceInspection: (sourceId: number) => {
       const pending = server.pendingInspections;
       if (pending) {
@@ -181,6 +183,20 @@ describe("SourceStats", () => {
     expect(disclosure?.open).toBe(true);
     expect(disclosure?.textContent).toContain("CREATE TABLE logs");
     expect(root.querySelector(".sparkline-stub")).not.toBeNull();
+  });
+
+  it("shows the schema advisor for a ClickHouse source only", async () => {
+    server.inspectionFails = false;
+    server.activityFails = false;
+    const root = await render();
+    expect(root.textContent).toContain(i18n.global.t("advisor.title"));
+
+    unmount?.();
+    host?.remove();
+    route.query = { sourceId: "9" };
+    const other = await render();
+    expect(other.querySelector("h1")?.textContent).toBe(victoriaSource.name);
+    expect(other.textContent).not.toContain(i18n.global.t("advisor.title"));
   });
 
   it("keeps the inspection failure visible after a successful activity retry", async () => {

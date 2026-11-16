@@ -12,6 +12,7 @@ import { getSourceTypeLabel } from '@/lib/queryMetadata'
 import SourceInspectionOverview from './components/SourceInspectionOverview.vue'
 import SourceInspectionActivity from './components/SourceInspectionActivity.vue'
 import SourceInspectionSchema from './components/SourceInspectionSchema.vue'
+import SourceInspectionAdvisor from './components/SourceInspectionAdvisor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -167,5 +168,6 @@ watch(
       <SourceInspectionActivity :source="selectedSource" :engine="sourceEngine" :activity="activity" :loading="isLoadingActivity" :error="activityError" @retry="fetchSourceActivity" />
     </SourceInspectionOverview>
     <SourceInspectionSchema v-if="inspection" :source="selectedSource" :schema="inspection.schema" />
+    <SourceInspectionAdvisor v-if="selectedSource?.source_type === 'clickhouse'" :key="selectedSource.id" :source-id="selectedSource.id" />
   </div>
 </template>
