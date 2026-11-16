@@ -25,6 +25,7 @@ import (
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/oauth"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -129,15 +130,60 @@ type auditRouteEnv struct {
 	cookie *http.Cookie
 }
 
-func newAuditRouteEnv(t *testing.T) *auditRouteEnv {
+// auditEnvSetup is what an auditEnvOption may change before the server
+// starts. opts.SQLite is the store the server and its recorder use; db is
+// the database under it.
+type auditEnvSetup struct {
+	db   *sqlite.DB
+	logs *syncLogBuffer
+	opts ServerOptions
+	// logAudit makes the recorder write each event's log line to logs.
+	logAudit bool
+}
+
+// auditEnvOption changes the server before New starts its goroutines.
+type auditEnvOption func(*auditEnvSetup)
+
+// withAuditStore makes the server and its recorder use wrap(db).
+func withAuditStore(wrap func(*sqlite.DB) store.Store) auditEnvOption {
+	return func(s *auditEnvSetup) { s.opts.SQLite = wrap(s.db) }
+}
+
+// withAuditLogLines makes the recorder write each event's log line to the
+// env's log buffer.
+func withAuditLogLines() auditEnvOption {
+	return func(s *auditEnvSetup) { s.logAudit = true }
+}
+
+// withConfig changes the server configuration.
+func withConfig(change func(*config.Config)) auditEnvOption {
+	return func(s *auditEnvSetup) { change(s.opts.Config) }
+}
+
+func newAuditRouteEnv(t *testing.T, options ...auditEnvOption) *auditRouteEnv {
 	t.Helper()
 	db := newServerTestDB(t)
 	logs := &syncLogBuffer{}
-	cfg := &config.Config{Auth: config.AuthConfig{
-		SessionDuration: time.Hour, MaxConcurrentSessions: 5,
-		Local: config.LocalAuthConfig{Enabled: true},
+	setup := &auditEnvSetup{db: db, logs: logs, opts: ServerOptions{
+		Config: &config.Config{Auth: config.AuthConfig{
+			SessionDuration: time.Hour, MaxConcurrentSessions: 5,
+			Local: config.LocalAuthConfig{Enabled: true},
+		}},
+		SQLite: db,
+		Logger: slog.New(slog.NewJSONHandler(logs, nil)),
 	}}
-	s := newServerForTest(t, cfg, db, nil, slog.New(slog.NewJSONHandler(logs, nil)))
+	for _, option := range options {
+		option(setup)
+	}
+	setup.opts.Audit = testAuditRecorder(t, setup.opts.SQLite)
+	if setup.logAudit {
+		setup.opts.Audit = audit.New(audit.Options{
+			Store:     strictAuditStore{AuditStore: setup.opts.SQLite, t: t},
+			Logger:    slog.New(slog.NewJSONHandler(logs, nil)),
+			LogEvents: true,
+		})
+	}
+	s := startTestServer(t, setup.opts)
 	admin := mkTestUser(t, db, "admin@example.com", models.UserRoleAdmin)
 	return &auditRouteEnv{t: t, s: s, db: db, logs: logs, admin: admin, cookie: sessionCookie(t, db, admin)}
 }
