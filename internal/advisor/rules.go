@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/queryescape"
@@ -22,6 +23,9 @@ var rules = []func(a *analysis) []finding{
 	materializedColumnFindings,
 	lowCardinalityFindings,
 	codecFindings,
+	sortKeyFindings,
+	partitioningFindings,
+	retentionReviewFindings,
 }
 
 // finding is a SchemaFinding with the share that ranks it.
@@ -50,6 +54,8 @@ type analysis struct {
 	// whose cardinality they need.
 	sampled    bool
 	candidates map[string]float64
+	// now is when the analysis runs.
+	now time.Time
 }
 
 // Analyze runs the rule set on f. It is pure: the same facts give the same
@@ -146,6 +152,7 @@ func newAnalysis(f Facts) *analysis {
 		columns:    map[string]clickhouse.AdvisorColumn{},
 		sampled:    f.Sample != nil,
 		candidates: map[string]float64{},
+		now:        f.Now,
 	}
 	for _, column := range f.Metadata.Columns {
 		a.columns[column.Name] = column

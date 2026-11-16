@@ -92,8 +92,10 @@ func RefreshSchemaAdvice(ctx context.Context, db store.Store, ds *datasource.Ser
 		return nil, err
 	}
 	stored, err := ds.RunSchemaAdvice(ctx, source, func(ctx context.Context, provider datasource.SchemaAdvisorProvider) (*models.StoredSchemaAdvisorReport, error) {
-		since := time.Now().UTC().AddDate(0, 0, -(windowDays - 1)).Format(time.DateOnly)
-		usage, err := schemaAdviceUsage(ctx, db, sourceID, since)
+		today := time.Now().UTC()
+		since := today.AddDate(0, 0, -(windowDays - 1)).Format(time.DateOnly)
+		retentionSince := today.AddDate(0, 0, -(maxSchemaAdviceWindowDays - 1)).Format(time.DateOnly)
+		usage, err := schemaAdviceUsage(ctx, db, sourceID, since, retentionSince)
 		if err != nil {
 			return nil, err
 		}
@@ -254,13 +256,18 @@ func schemaAdviceSource(ctx context.Context, ds *datasource.Service, sourceID mo
 
 // schemaAdviceUsage reads the shape rollup of a source since a date. The
 // totals cover every row, while the shapes stop at the most used
-// schemaAdviceShapeLimit; usage is truncated when the list reaches it.
-func schemaAdviceUsage(ctx context.Context, db store.QueryHistoryStore, sourceID models.SourceID, since string) (advisor.Usage, error) {
+// schemaAdviceShapeLimit; usage is truncated when the list reaches it. The
+// retention coverage covers every row since retentionSince.
+func schemaAdviceUsage(ctx context.Context, db store.QueryHistoryStore, sourceID models.SourceID, since, retentionSince string) (advisor.Usage, error) {
 	shapes, err := db.ListQueryShapeStats(ctx, sourceID, since, schemaAdviceShapeLimit)
 	if err != nil {
 		return advisor.Usage{}, err
 	}
 	coverage, err := db.QueryShapeCoverage(ctx, sourceID, since)
+	if err != nil {
+		return advisor.Usage{}, err
+	}
+	retention, err := db.QueryShapeCoverage(ctx, sourceID, retentionSince)
 	if err != nil {
 		return advisor.Usage{}, err
 	}
@@ -270,6 +277,8 @@ func schemaAdviceUsage(ctx context.Context, db store.QueryHistoryStore, sourceID
 		Queries:    coverage.QueryCount,
 		Unanalyzed: coverage.UnanalyzedCount,
 		Overflow:   coverage.OverflowCount,
+		Days:       coverage.FilteredDays,
+		Retention:  retention,
 	}
 	for _, shape := range shapes {
 		usage.Shapes = append(usage.Shapes, advisor.ShapeUsage{Shape: shape.Shape, Queries: shape.QueryCount, DurationMs: shape.TotalDurationMs})

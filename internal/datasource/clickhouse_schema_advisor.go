@@ -29,9 +29,9 @@ func (p *ClickHouseProvider) AdviseSchema(ctx context.Context, source *models.So
 			return nil, fmt.Errorf("read %s: %s", name, input.Detail)
 		}
 	}
-	facts := advisor.Facts{Metadata: meta, TimestampColumn: source.MetaTSField, Usage: usage}
+	facts := advisor.Facts{Metadata: meta, TimestampColumn: source.MetaTSField, Usage: usage, Now: time.Now()}
 	if columns := advisor.SampleColumns(facts); len(columns) > 0 {
-		if facts.Sample, err = client.AdvisorSample(ctx, meta, source.MetaTSField, columns, time.Now()); err != nil {
+		if facts.Sample, err = client.AdvisorSample(ctx, meta, source.MetaTSField, columns, facts.Now); err != nil {
 			return nil, err
 		}
 	}

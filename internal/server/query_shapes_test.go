@@ -127,7 +127,7 @@ func TestQueryShapeOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := models.QueryShapeCoverage{Days: 1, QueryCount: 503, UnanalyzedCount: 1, OverflowCount: 1, NullLookbackCount: 503}
+	want := models.QueryShapeCoverage{Days: 1, FilteredDays: 1, QueryCount: 503, UnanalyzedCount: 1, OverflowCount: 1, NullLookbackCount: 503}
 	if !reflect.DeepEqual(coverage, want) {
 		t.Fatalf("coverage = %+v, want %+v", coverage, want)
 	}

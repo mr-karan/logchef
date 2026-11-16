@@ -1360,10 +1360,13 @@ LIMIT sqlc.arg(row_limit)::bigint;
 
 -- name: QueryShapeCoverage :one
 -- Totals over every rollup row of a source on/after `since`, not only the rows
--- that ListQueryShapeStats returns. lookback_rows is 0 when no row has a
--- lookback, and then max_lookback_s means nothing.
+-- that ListQueryShapeStats returns. filtered_days counts the days with a
+-- query that has a filter: the empty shape, also kept by the 'unanalyzed' and
+-- 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
+-- and then max_lookback_s means nothing.
 SELECT
     COUNT(DISTINCT bucket_date)::bigint AS days,
+    (COUNT(DISTINCT bucket_date) FILTER (WHERE shape <> '[]'))::bigint AS filtered_days,
     COALESCE(SUM(query_count), 0)::bigint AS query_count,
     COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'unanalyzed'), 0)::bigint AS unanalyzed_count,
     COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'overflow'), 0)::bigint AS overflow_count,

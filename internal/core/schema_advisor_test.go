@@ -35,7 +35,7 @@ func TestSchemaAdviceUsageTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	usage, err := schemaAdviceUsage(ctx, db, source, day)
+	usage, err := schemaAdviceUsage(ctx, db, source, day, day)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,9 +44,45 @@ func TestSchemaAdviceUsageTruncated(t *testing.T) {
 			usage.Truncated, len(usage.Shapes), usage.Queries, usage.Overflow, schemaAdviceShapeLimit, schemaAdviceShapeLimit+10)
 	}
 
-	usage, err = schemaAdviceUsage(ctx, db, source+1, day)
+	usage, err = schemaAdviceUsage(ctx, db, source+1, day, day)
 	if err != nil || usage.Truncated || len(usage.Shapes) != 0 || usage.Queries != 0 {
 		t.Fatalf("usage of a source with no rollup = %+v / %v, want empty", usage, err)
+	}
+}
+
+// The window's coverage counts its own days with a filtered query, while the
+// retention coverage also counts the rows before the window.
+func TestSchemaAdviceUsageRetention(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	const source = models.SourceID(7)
+	lookback := int64(3600)
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		for i, day := range []string{"2026-08-20", "2026-11-09", "2026-11-10"} {
+			if err := tx.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: day, SourceID: source, Usage: models.QueryShapeUsage{
+				QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: "0000000000000001", Shape: models.FilterShape{{Column: "c", Kind: models.MatchEq}},
+				QueryCount: int64(i + 1), MaxLookbackSeconds: &lookback,
+			}}); err != nil {
+				return err
+			}
+		}
+		// A day with only unfiltered queries is no day of filtered usage.
+		return tx.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: "2026-11-11", SourceID: source, Usage: models.QueryShapeUsage{
+			QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: "0000000000000002", Shape: models.FilterShape{}, QueryCount: 4, MaxLookbackSeconds: &lookback,
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := schemaAdviceUsage(ctx, db, source, "2026-11-09", "2026-08-13")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Days != 2 || usage.Queries != 9 {
+		t.Errorf("window: %d filtered days, %d queries; want 2 and 9", usage.Days, usage.Queries)
+	}
+	if r := usage.Retention; r.Days != 4 || r.QueryCount != 10 || r.MaxLookbackSeconds == nil || *r.MaxLookbackSeconds != lookback {
+		t.Errorf("retention = %+v, want 4 days, 10 queries, lookback %d", r, lookback)
 	}
 }
 
