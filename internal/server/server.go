@@ -98,6 +98,7 @@ type Server struct {
 	historyQueue    chan *models.QueryHistory
 	historyDropped  atomic.Uint64
 	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
+	shapes          shapeRecorder
 	tokenQueue      chan int
 	tokenLastQueued map[int]time.Time
 	tokenDropped    atomic.Uint64

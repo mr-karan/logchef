@@ -100,7 +100,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		started := time.Now()
 		record = func(rows int64) {
 			duration := time.Since(started).Milliseconds()
-			s.recordQueryHistory(user, src.TeamID(), src.SourceID(), req.QueryText, req.QueryLanguage, duration, rows)
+			s.recordQueryHistory(user, src.TeamID(), source, params.StartTime, req.QueryText, req.QueryLanguage, duration, rows)
 			s.log.Info("query.execute", "user", user.Email, "team_id", src.TeamID(), "source_id", src.SourceID(), "mode", "windowed", "query_id", queryID, "rows", rows, "duration_ms", duration)
 		}
 	}

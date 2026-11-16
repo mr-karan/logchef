@@ -111,6 +111,13 @@ func RecordJobRun(kind, result string) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
+// RecordQueryShape counts one query offered to the schema advisor's shape
+// rollup. result is "analyzed", "unanalyzed", "overflow" or "error".
+func RecordQueryShape(result string) {
+	labels := fmt.Sprintf(`logchef_query_shape_records_total{result=%q}`, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
 // ObserveJobRunDuration records how long a job handler ran.
 func ObserveJobRunDuration(kind string, d time.Duration) {
 	labels := fmt.Sprintf(`logchef_jobs_run_duration_seconds{kind=%q}`, kind)

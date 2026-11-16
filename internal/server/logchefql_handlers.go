@@ -195,6 +195,12 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 	}
 	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
+	// ClickHouse bakes the time range into the SQL, so the start time for
+	// query history comes from the request.
+	historyStart, _, err := core.ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
+	if err != nil {
+		return s.sendQueryError(c, sourceID, &core.QueryRequestError{Message: err.Error()}, logchefQLQueryFailure, logchefQLQueryOperation)
+	}
 	executableQuery := compiled.Query
 	executableQueryLanguage := compiled.Language
 
@@ -253,6 +259,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		requestedLimit:       queryParams.Limit,
 		historyQuery:         req.Query,
 		historyLanguage:      models.QueryLanguageLogchefQL,
+		historyStart:         historyStart,
 		cacheable:            cacheable,
 		cacheKey:             cacheKey,
 		cacheTTL:             effTTL,

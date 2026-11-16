@@ -259,6 +259,18 @@ type QueryHistory struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type QueryShapeStatsDaily struct {
+	BucketDate      string      `json:"bucket_date"`
+	SourceID        int64       `json:"source_id"`
+	QueryLanguage   string      `json:"query_language"`
+	ShapeHash       string      `json:"shape_hash"`
+	Shape           string      `json:"shape"`
+	QueryCount      int64       `json:"query_count"`
+	TotalDurationMs int64       `json:"total_duration_ms"`
+	TotalRows       int64       `json:"total_rows"`
+	MaxLookbackS    pgtype.Int8 `json:"max_lookback_s"`
+}
+
 type QueryShare struct {
 	Token          string             `json:"token"`
 	SourceID       int64              `json:"source_id"`

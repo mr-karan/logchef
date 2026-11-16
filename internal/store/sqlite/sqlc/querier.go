@@ -213,6 +213,10 @@ type Querier interface {
 	// Get a team ID that the user belongs to and that has access to the source
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
 	HoldJob(ctx context.Context, arg HoldJobParams) (int64, error)
+	// Query shape stats daily rollup (RFC 0010) ------------------------------------
+	// Add one increment to a shape's daily row: sum the three counters and keep
+	// the larger max_lookback_s (a NULL lookback never replaces a known one).
+	IncrementQueryShapeStats(ctx context.Context, arg IncrementQueryShapeStatsParams) error
 	// Query stats daily rollup -----------------------------------------------------
 	// Upsert one executed query into the non-pruned daily rollup: add 1 to
 	// query_count and the given duration to total_duration_ms for the composite key.
@@ -296,6 +300,11 @@ type Querier interface {
 	ListQueryActivity(ctx context.Context, limit int64) ([]ListQueryActivityRow, error)
 	// List one user's recent history, newest first.
 	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
+	// A source's analyzed shapes on/after `since`, summed over days, most used
+	// first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
+	// counts them. lookback_rows is 0 when no row has a lookback, and then
+	// max_lookback_s means nothing.
+	ListQueryShapeStats(ctx context.Context, arg ListQueryShapeStatsParams) ([]ListQueryShapeStatsRow, error)
 	ListReportRecipients(ctx context.Context, reportID int64) ([]ReportRecipient, error)
 	// before = 0 starts at the newest run.
 	ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error)
@@ -360,7 +369,12 @@ type Querier interface {
 	// Delete a user's history rows beyond the newest `offset` (the per-user cap),
 	// keeping history bounded on every insert.
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
+	PruneQueryShapeStats(ctx context.Context, bucketDate string) error
 	PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error
+	// Totals over every rollup row of a source on/after `since`, not only the rows
+	// that ListQueryShapeStats returns. lookback_rows is 0 when no row has a
+	// lookback, and then max_lookback_s means nothing.
+	QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error)
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error)

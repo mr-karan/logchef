@@ -1279,6 +1279,63 @@ WHERE qsd.bucket_date >= $1
 GROUP BY qsd.bucket_date
 ORDER BY qsd.bucket_date ASC;
 
+-- Query shape stats daily rollup (RFC 0010) ------------------------------------
+
+-- name: IncrementQueryShapeStats :exec
+-- Add one increment to a shape's daily row: sum the three counters and keep
+-- the larger max_lookback_s (GREATEST ignores NULL, so a NULL lookback never
+-- replaces a known one).
+INSERT INTO query_shape_stats_daily (
+    bucket_date, source_id, query_language, shape_hash, shape,
+    query_count, total_duration_ms, total_rows, max_lookback_s
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
+DO UPDATE SET
+    query_count = query_shape_stats_daily.query_count + EXCLUDED.query_count,
+    total_duration_ms = query_shape_stats_daily.total_duration_ms + EXCLUDED.total_duration_ms,
+    total_rows = query_shape_stats_daily.total_rows + EXCLUDED.total_rows,
+    max_lookback_s = GREATEST(query_shape_stats_daily.max_lookback_s, EXCLUDED.max_lookback_s);
+
+-- name: ListQueryShapeStats :many
+-- A source's analyzed shapes on/after `since`, summed over days, most used
+-- first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
+-- counts them. lookback_rows is 0 when no row has a lookback, and then
+-- max_lookback_s means nothing.
+SELECT
+    query_language,
+    shape_hash,
+    shape,
+    SUM(query_count)::bigint AS query_count,
+    SUM(total_duration_ms)::bigint AS total_duration_ms,
+    SUM(total_rows)::bigint AS total_rows,
+    COUNT(max_lookback_s)::bigint AS lookback_rows,
+    COALESCE(MAX(max_lookback_s), 0)::bigint AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = sqlc.arg(source_id)
+  AND bucket_date >= sqlc.arg(since)
+  AND shape_hash NOT IN ('unanalyzed', 'overflow')
+GROUP BY query_language, shape_hash, shape
+ORDER BY query_count DESC, query_language ASC, shape_hash ASC
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: QueryShapeCoverage :one
+-- Totals over every rollup row of a source on/after `since`, not only the rows
+-- that ListQueryShapeStats returns. lookback_rows is 0 when no row has a
+-- lookback, and then max_lookback_s means nothing.
+SELECT
+    COUNT(DISTINCT bucket_date)::bigint AS days,
+    COALESCE(SUM(query_count), 0)::bigint AS query_count,
+    COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'unanalyzed'), 0)::bigint AS unanalyzed_count,
+    COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'overflow'), 0)::bigint AS overflow_count,
+    COALESCE(SUM(query_count) FILTER (WHERE max_lookback_s IS NULL), 0)::bigint AS null_lookback_count,
+    COUNT(max_lookback_s)::bigint AS lookback_rows,
+    COALESCE(MAX(max_lookback_s), 0)::bigint AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since);
+
+-- name: PruneQueryShapeStats :exec
+DELETE FROM query_shape_stats_daily WHERE bucket_date < $1;
+
 -- OAuth authorization server ------------------------------------------------
 -- Every *_hash argument is an HMAC hex digest, never a plaintext code or
 -- token. Postgres runs at READ COMMITTED: a conditional UPDATE waits on the
