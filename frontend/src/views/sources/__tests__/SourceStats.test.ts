@@ -49,7 +49,7 @@ vi.mock("@/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/sources")>()),
   sourcesApi: {
     listAllSourcesForAdmin: () => ok([source, otherSource, victoriaSource]),
-    getSchemaAdvice: (sourceId: number) => ok({ source_id: sourceId, generated_at: null, generated_by: null, window_days: null, stale: false, report: null }),
+    getSchemaAdvice: (sourceId: number) => ok({ source_id: sourceId, generated_at: null, generated_by: null, window_days: null, stale: false, report: null, dismissals: [] }),
     getAdminSourceInspection: (sourceId: number) => {
       const pending = server.pendingInspections;
       if (pending) {

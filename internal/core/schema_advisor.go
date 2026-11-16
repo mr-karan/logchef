@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/advisor"
@@ -24,14 +26,21 @@ const (
 	schemaAdviceShapeLimit     = 5000
 	schemaAdviceStaleAfter     = 7 * 24 * time.Hour
 	maxSchemaAdviceReportBytes = 256 << 10
+	maxDismissalReasonBytes    = 500
 )
 
 // ErrSchemaAdviceRunFailed means ClickHouse could not be analyzed: it did not
 // answer, or the run passed its deadline. The stored report is kept.
 var ErrSchemaAdviceRunFailed = errors.New("schema analysis failed")
 
-// SchemaAdvice is a source's stored schema advisor report. Before the first
-// analysis every field but SourceID is null.
+// ErrSchemaFindingNotFound means the stored report holds no finding with the
+// id, or the finding is not dismissed.
+var ErrSchemaFindingNotFound = errors.New("schema finding not found")
+
+var findingIDPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// SchemaAdvice is a source's stored schema advisor report and its dismissed
+// findings. Before the first analysis every report field is null.
 type SchemaAdvice struct {
 	SourceID    models.SourceID             `json:"source_id"`
 	GeneratedAt *time.Time                  `json:"generated_at"`
@@ -39,6 +48,8 @@ type SchemaAdvice struct {
 	WindowDays  *int                        `json:"window_days"`
 	Stale       bool                        `json:"stale"`
 	Report      *models.SchemaAdvisorReport `json:"report"`
+	// Dismissals can name findings that the current report no longer holds.
+	Dismissals []models.SchemaAdvisorDismissal `json:"dismissals"`
 }
 
 // GetSchemaAdvice returns the stored schema advisor report of a ClickHouse
@@ -50,14 +61,18 @@ func GetSchemaAdvice(ctx context.Context, db store.SchemaAdvisorStore, ds *datas
 	if _, err := schemaAdviceSource(ctx, ds, sourceID); err != nil {
 		return nil, err
 	}
+	dismissals, err := db.ListSchemaAdvisorDismissals(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
 	stored, err := db.GetSchemaAdvisorReport(ctx, sourceID)
 	if errors.Is(err, models.ErrNotFound) {
-		return &SchemaAdvice{SourceID: sourceID}, nil
+		return &SchemaAdvice{SourceID: sourceID, Dismissals: dismissals}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return schemaAdviceOf(stored, time.Now()), nil
+	return schemaAdviceOf(stored, dismissals, time.Now()), nil
 }
 
 // RefreshSchemaAdvice analyzes a ClickHouse source over the last windowDays
@@ -108,7 +123,112 @@ func RefreshSchemaAdvice(ctx context.Context, db store.Store, ds *datasource.Ser
 		}
 		return nil, err
 	}
-	return schemaAdviceOf(stored, time.Now()), nil
+	dismissals, err := db.ListSchemaAdvisorDismissals(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return schemaAdviceOf(stored, dismissals, time.Now()), nil
+}
+
+// DismissSchemaFinding dismisses a finding of the source's stored report, or
+// replaces the reason of its dismissal. It returns the dismissal it
+// replaced (nil for a new one), the new dismissal and the finding's rule.
+// The principal must be a global admin and hold sources:write.
+func DismissSchemaFinding(ctx context.Context, db store.Store, ds *datasource.Service, p access.Principal, sourceID models.SourceID, findingID, reason string) (before, after *models.SchemaAdvisorDismissal, rule string, err error) {
+	if err := requireSchemaDismissalAccess(p, findingID); err != nil {
+		return nil, nil, "", err
+	}
+	if len(reason) > maxDismissalReasonBytes {
+		return nil, nil, "", &ValidationError{Field: "reason", Message: fmt.Sprintf("reason must be at most %d bytes", maxDismissalReasonBytes)}
+	}
+	if _, err := schemaAdviceSource(ctx, ds, sourceID); err != nil {
+		return nil, nil, "", err
+	}
+	err = withSchemaDismissalLock(ctx, db, sourceID, func(tx store.StoreOps) error {
+		stored, err := tx.GetSchemaAdvisorReport(ctx, sourceID)
+		if errors.Is(err, models.ErrNotFound) {
+			return ErrSchemaFindingNotFound
+		}
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(stored.Report.Findings, func(f models.SchemaFinding) bool { return f.ID == findingID })
+		if i < 0 {
+			return ErrSchemaFindingNotFound
+		}
+		rule = stored.Report.Findings[i].Rule
+		if before, err = tx.GetSchemaAdvisorDismissal(ctx, sourceID, findingID); errors.Is(err, models.ErrNotFound) {
+			before = nil
+		} else if err != nil {
+			return err
+		}
+		after = &models.SchemaAdvisorDismissal{
+			SourceID:    sourceID,
+			FindingID:   findingID,
+			Reason:      reason,
+			DismissedBy: &p.User.ID,
+			DismissedAt: time.Now().UTC(),
+		}
+		return tx.UpsertSchemaAdvisorDismissal(ctx, after)
+	})
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return before, after, rule, nil
+}
+
+// RestoreSchemaFinding deletes the dismissal of a finding and returns it. A
+// finding that is not dismissed is ErrSchemaFindingNotFound. The principal
+// must be a global admin and hold sources:write.
+func RestoreSchemaFinding(ctx context.Context, db store.Store, ds *datasource.Service, p access.Principal, sourceID models.SourceID, findingID string) (*models.SchemaAdvisorDismissal, error) {
+	if err := requireSchemaDismissalAccess(p, findingID); err != nil {
+		return nil, err
+	}
+	if _, err := schemaAdviceSource(ctx, ds, sourceID); err != nil {
+		return nil, err
+	}
+	var dismissal *models.SchemaAdvisorDismissal
+	err := withSchemaDismissalLock(ctx, db, sourceID, func(tx store.StoreOps) error {
+		var err error
+		if dismissal, err = tx.GetSchemaAdvisorDismissal(ctx, sourceID, findingID); err != nil {
+			return err
+		}
+		return tx.DeleteSchemaAdvisorDismissal(ctx, sourceID, findingID)
+	})
+	if errors.Is(err, models.ErrNotFound) {
+		return nil, ErrSchemaFindingNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return dismissal, nil
+}
+
+// withSchemaDismissalLock runs fn in a transaction that holds the source
+// row, so the dismissal it reads is the one its write replaces (RFC 0009,
+// snapshots come from the mutation).
+func withSchemaDismissalLock(ctx context.Context, db store.Store, sourceID models.SourceID, fn func(tx store.StoreOps) error) error {
+	return db.WithTx(ctx, func(tx store.StoreOps) error {
+		if _, err := tx.GetSourceForUpdate(ctx, sourceID); errors.Is(err, models.ErrNotFound) {
+			return ErrSourceNotFound
+		} else if err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+func requireSchemaDismissalAccess(p access.Principal, findingID string) error {
+	if err := p.RequireGlobalAdmin(); err != nil {
+		return err
+	}
+	if err := p.Require(models.TokenScopeSourcesWrite); err != nil {
+		return err
+	}
+	if !findingIDPattern.MatchString(findingID) {
+		return &ValidationError{Field: "finding_id", Message: "finding_id must be 16 hexadecimal characters"}
+	}
+	return nil
 }
 
 func requireSchemaAdvisorAccess(p access.Principal) error {
@@ -184,7 +304,7 @@ func fitSchemaReport(report *models.SchemaAdvisorReport) error {
 	return nil
 }
 
-func schemaAdviceOf(stored *models.StoredSchemaAdvisorReport, now time.Time) *SchemaAdvice {
+func schemaAdviceOf(stored *models.StoredSchemaAdvisorReport, dismissals []models.SchemaAdvisorDismissal, now time.Time) *SchemaAdvice {
 	generatedAt, windowDays, report := stored.GeneratedAt, stored.WindowDays, stored.Report
 	return &SchemaAdvice{
 		SourceID:    stored.SourceID,
@@ -193,5 +313,6 @@ func schemaAdviceOf(stored *models.StoredSchemaAdvisorReport, now time.Time) *Sc
 		WindowDays:  &windowDays,
 		Stale:       now.Sub(generatedAt) > schemaAdviceStaleAfter,
 		Report:      &report,
+		Dismissals:  dismissals,
 	}
 }

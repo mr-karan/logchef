@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "सीमित",
   "advisor.inputMissing": "अनुपलब्ध",
   "advisor.inputError": "त्रुटि",
-  "advisor.inputSkipped": "छोड़ा गया"
+  "advisor.inputSkipped": "छोड़ा गया",
+  "advisor.dismiss": "खारिज करें",
+  "advisor.dismissTitle": "सुझाव खारिज करें",
+  "advisor.dismissReason": "कारण (वैकल्पिक)",
+  "advisor.reasonTooLong": "कारण अधिकतम {max} बाइट का हो सकता है",
+  "advisor.showDismissed": "खारिज किए गए दिखाएँ ({count})",
+  "advisor.dismissed": "खारिज किए गए",
+  "advisor.dismissedAt": "{time} को खारिज किया",
+  "advisor.findingGone": "सुझाव {id} मौजूदा रिपोर्ट में नहीं है",
+  "advisor.restore": "बहाल करें"
 }

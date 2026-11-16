@@ -1369,6 +1369,27 @@ ON CONFLICT (source_id) DO UPDATE SET
     window_days = excluded.window_days,
     report = excluded.report;
 
+-- name: ListSchemaAdvisorDismissals :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = ?
+ORDER BY dismissed_at, finding_id;
+
+-- name: GetSchemaAdvisorDismissal :one
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = ? AND finding_id = ?;
+
+-- name: UpsertSchemaAdvisorDismissal :exec
+-- Dismissing a dismissed finding again replaces its reason and author.
+INSERT INTO schema_advisor_dismissals (source_id, finding_id, reason, dismissed_by, dismissed_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (source_id, finding_id) DO UPDATE SET
+    reason = excluded.reason,
+    dismissed_by = excluded.dismissed_by,
+    dismissed_at = excluded.dismissed_at;
+
+-- name: DeleteSchemaAdvisorDismissal :execrows
+DELETE FROM schema_advisor_dismissals WHERE source_id = ? AND finding_id = ?;
+
 -- OAuth authorization server ------------------------------------------------
 -- Times are Unix milliseconds (see 000033_oauth.up.sql). Every *_hash
 -- argument is an HMAC hex digest, never a plaintext code or token.

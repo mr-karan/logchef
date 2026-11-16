@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "受限",
   "advisor.inputMissing": "不存在",
   "advisor.inputError": "錯誤",
-  "advisor.inputSkipped": "已略過"
+  "advisor.inputSkipped": "已略過",
+  "advisor.dismiss": "忽略",
+  "advisor.dismissTitle": "忽略建議",
+  "advisor.dismissReason": "原因（選填）",
+  "advisor.reasonTooLong": "原因最多 {max} 位元組",
+  "advisor.showDismissed": "顯示已忽略 ({count})",
+  "advisor.dismissed": "已忽略",
+  "advisor.dismissedAt": "忽略於 {time}",
+  "advisor.findingGone": "目前報告中沒有建議 {id}",
+  "advisor.restore": "還原"
 }

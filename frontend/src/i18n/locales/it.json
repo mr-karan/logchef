@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "limitato",
   "advisor.inputMissing": "mancante",
   "advisor.inputError": "errore",
-  "advisor.inputSkipped": "saltato"
+  "advisor.inputSkipped": "saltato",
+  "advisor.dismiss": "Ignora",
+  "advisor.dismissTitle": "Ignora il risultato",
+  "advisor.dismissReason": "Motivo (facoltativo)",
+  "advisor.reasonTooLong": "Il motivo può essere al massimo di {max} byte",
+  "advisor.showDismissed": "Mostra ignorati ({count})",
+  "advisor.dismissed": "Ignorati",
+  "advisor.dismissedAt": "Ignorato {time}",
+  "advisor.findingGone": "Il risultato {id} non è nel report attuale",
+  "advisor.restore": "Ripristina"
 }

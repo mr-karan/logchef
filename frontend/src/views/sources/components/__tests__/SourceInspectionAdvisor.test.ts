@@ -7,6 +7,8 @@ import type { SchemaAdvice, SchemaAdvisorReport } from "@/api/sources";
 const api = vi.hoisted(() => ({
   getSchemaAdvice: vi.fn(),
   refreshSchemaAdvice: vi.fn(),
+  dismissSchemaFinding: vi.fn(),
+  restoreSchemaFinding: vi.fn(),
 }));
 vi.mock("@/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/sources")>()),
@@ -45,8 +47,9 @@ const report: SchemaAdvisorReport = {
   }],
   notes: ["usage record is incomplete"],
 };
-const empty: SchemaAdvice = { source_id: 7, generated_at: null, generated_by: null, window_days: null, stale: false, report: null };
-const stored: SchemaAdvice = { source_id: 7, generated_at: "2026-11-16T10:00:00Z", generated_by: 1, window_days: 30, stale: true, report };
+const empty: SchemaAdvice = { source_id: 7, generated_at: null, generated_by: null, window_days: null, stale: false, report: null, dismissals: [] };
+const stored: SchemaAdvice = { source_id: 7, generated_at: "2026-11-16T10:00:00Z", generated_by: 1, window_days: 30, stale: true, report, dismissals: [] };
+const findingId = "0123456789abcdef";
 
 const ok = <T>(data: T) => Promise.resolve({ status: "success" as const, data });
 const fail = (message: string, error_type: string) => Promise.reject({ status: "error", message, error_type });
@@ -81,9 +84,34 @@ function button(root: HTMLElement, text: string): HTMLButtonElement {
 }
 
 beforeEach(() => {
-  api.getSchemaAdvice.mockReset();
-  api.refreshSchemaAdvice.mockReset();
+  for (const fn of Object.values(api)) fn.mockReset();
 });
+
+async function chooseDismiss(root: HTMLElement) {
+  const trigger = root.querySelector<HTMLButtonElement>(`[data-finding="${findingId}"] button[aria-label="${i18n.global.t("ui.actions")}"]`);
+  if (!trigger) throw new Error("no actions menu on the finding");
+  trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await vi.waitFor(() => expect(document.querySelector("[role=menu]")).not.toBeNull());
+  const item = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((el) => el.textContent?.trim() === i18n.global.t("advisor.dismiss"));
+  if (!item) throw new Error("no Dismiss item");
+  item.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+  item.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse" }));
+  item.click();
+  await vi.waitFor(() => expect(document.querySelector("#advisor-dismiss-reason")).not.toBeNull());
+}
+
+function typeReason(text: string) {
+  const textarea = document.querySelector<HTMLTextAreaElement>("#advisor-dismiss-reason");
+  if (!textarea) throw new Error("no reason field");
+  textarea.value = text;
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function dialogSubmit(): HTMLButtonElement {
+  const found = [...document.querySelectorAll<HTMLButtonElement>("[role=dialog] button[type=submit]")][0];
+  if (!found) throw new Error("no submit button");
+  return found;
+}
 
 afterEach(() => {
   unmount?.();
@@ -167,5 +195,64 @@ describe("SourceInspectionAdvisor", () => {
     expect(root.textContent).toContain("Schema advice is available for ClickHouse sources only");
     expect([...root.querySelectorAll("button")].some((b) => b.textContent?.trim() === i18n.global.t("ui.retry"))).toBe(false);
     expect(button(root, i18n.global.t("advisor.runAnalysis")).disabled).toBe(true);
+  });
+
+  it("dismisses a finding with a reason and restores it", async () => {
+    api.getSchemaAdvice.mockReturnValue(ok(stored));
+    api.dismissSchemaFinding.mockReturnValue(ok({ finding_id: findingId, reason: "covered by the replica", dismissed_by: 1, dismissed_at: "2026-11-16T11:00:00Z" }));
+    api.restoreSchemaFinding.mockReturnValue(ok(null));
+    const root = await render();
+    expect(root.textContent).not.toContain(i18n.global.t("advisor.showDismissed", { count: 1 }));
+
+    await chooseDismiss(root);
+    typeReason("  covered by the replica  ");
+    await flush();
+    dialogSubmit().click();
+    await flush();
+
+    expect(api.dismissSchemaFinding).toHaveBeenCalledWith(7, findingId, "covered by the replica");
+    expect(root.querySelector(`[data-finding="${findingId}"]`)).toBeNull();
+    expect(root.textContent).toContain(i18n.global.t("advisor.noFindings"));
+    expect(root.querySelector(`[data-dismissed="${findingId}"]`)).toBeNull();
+
+    root.querySelector<HTMLButtonElement>("#advisor-show-dismissed")?.click();
+    await flush();
+    const row = root.querySelector(`[data-dismissed="${findingId}"]`);
+    expect(row?.textContent).toContain("Add a bloom filter index on request_id");
+    expect(row?.textContent).toContain("covered by the replica");
+
+    button(root, i18n.global.t("advisor.restore")).click();
+    await flush();
+
+    expect(api.restoreSchemaFinding).toHaveBeenCalledWith(7, findingId);
+    expect(root.querySelector(`[data-finding="${findingId}"]`)).not.toBeNull();
+    expect(root.querySelector(`[data-dismissed="${findingId}"]`)).toBeNull();
+  });
+
+  it("lists a dismissal whose finding left the report", async () => {
+    const gone = "fedcba9876543210";
+    api.getSchemaAdvice.mockReturnValue(ok({ ...stored, dismissals: [{ finding_id: gone, reason: "", dismissed_by: null, dismissed_at: "2026-11-01T10:00:00Z" }] }));
+    const root = await render();
+
+    expect(root.querySelector(`[data-finding="${findingId}"]`)).not.toBeNull();
+    root.querySelector<HTMLButtonElement>("#advisor-show-dismissed")?.click();
+    await flush();
+    expect(root.querySelector(`[data-dismissed="${gone}"]`)?.textContent).toContain(i18n.global.t("advisor.findingGone", { id: gone }));
+  });
+
+  it("keeps the dialog open and blocks a reason over 500 bytes", async () => {
+    api.getSchemaAdvice.mockReturnValue(ok(stored));
+    const root = await render();
+
+    await chooseDismiss(root);
+    typeReason("é".repeat(251));
+    await flush();
+
+    expect(document.body.textContent).toContain(i18n.global.t("advisor.reasonTooLong", { max: 500 }));
+    expect(dialogSubmit().disabled).toBe(true);
+    typeReason("é".repeat(250));
+    await flush();
+    expect(dialogSubmit().disabled).toBe(false);
+    expect(api.dismissSchemaFinding).not.toHaveBeenCalled();
   });
 });

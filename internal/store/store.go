@@ -378,14 +378,25 @@ type QueryHistoryStore interface {
 	PruneQueryShapeStats(ctx context.Context, before string) error
 }
 
-// SchemaAdvisorStore persists the schema advisor report of each source
-// (RFC 0010).
+// SchemaAdvisorStore persists the schema advisor report of each source and
+// the findings admins dismissed (RFC 0010).
 type SchemaAdvisorStore interface {
 	// GetSchemaAdvisorReport returns models.ErrNotFound before the source's
 	// first analysis.
 	GetSchemaAdvisorReport(ctx context.Context, sourceID models.SourceID) (*models.StoredSchemaAdvisorReport, error)
 	// UpsertSchemaAdvisorReport replaces the source's report.
 	UpsertSchemaAdvisorReport(ctx context.Context, report *models.StoredSchemaAdvisorReport) error
+	// ListSchemaAdvisorDismissals returns the source's dismissals, oldest first.
+	ListSchemaAdvisorDismissals(ctx context.Context, sourceID models.SourceID) ([]models.SchemaAdvisorDismissal, error)
+	// GetSchemaAdvisorDismissal returns models.ErrNotFound when the finding
+	// is not dismissed.
+	GetSchemaAdvisorDismissal(ctx context.Context, sourceID models.SourceID, findingID string) (*models.SchemaAdvisorDismissal, error)
+	// UpsertSchemaAdvisorDismissal dismisses a finding, or replaces the
+	// reason and author of its dismissal.
+	UpsertSchemaAdvisorDismissal(ctx context.Context, d *models.SchemaAdvisorDismissal) error
+	// DeleteSchemaAdvisorDismissal returns models.ErrNotFound when the
+	// finding is not dismissed.
+	DeleteSchemaAdvisorDismissal(ctx context.Context, sourceID models.SourceID, findingID string) error
 }
 
 // ReportStore persists scheduled reports (RFC 0008), their recipients and

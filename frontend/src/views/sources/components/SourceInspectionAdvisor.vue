@@ -2,11 +2,16 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { refAutoReset } from '@vueuse/core'
-import { Check, Copy, Info, Play } from 'lucide-vue-next'
+import { Check, Copy, EyeOff, Info, Play } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
-import { EmptyState, LoadingState, PageSection } from '@/components/layout'
+import { EmptyState, LoadingState, PageSection, RowActionsMenu } from '@/components/layout'
 import type { AdvisorImpact, AdvisorInputState, SchemaFinding } from '@/api/sources'
 import { isRetryableSourceError, useSourcesStore } from '@/stores/sources'
 import { useToast } from '@/composables/useToast'
@@ -44,6 +49,17 @@ const report = computed(() => advice.value?.report ?? null)
 const loading = computed(() => sourcesStore.isLoadingOperation(`getSchemaAdvice-${props.sourceId}`))
 const running = computed(() => sourcesStore.isLoadingOperation(`refreshSchemaAdvice-${props.sourceId}`))
 const failedInputs = computed(() => report.value?.inputs.filter(input => input.state !== 'ok') ?? [])
+const dismissals = computed(() => advice.value?.dismissals ?? [])
+const activeFindings = computed(() => {
+  const dismissed = new Set(dismissals.value.map(d => d.finding_id))
+  return report.value?.findings.filter(finding => !dismissed.has(finding.id)) ?? []
+})
+// A dismissal outlives a refresh, so its finding can be gone from the report.
+const dismissedRows = computed(() => dismissals.value.map(dismissal => ({
+  dismissal,
+  finding: report.value?.findings.find(finding => finding.id === dismissal.finding_id) ?? null,
+})))
+const showDismissed = ref(false)
 
 const loadError = ref<{ message: string; retryable: boolean } | null>(null)
 const runError = ref<{ message: string; retryable: boolean } | null>(null)
@@ -72,6 +88,32 @@ async function copyDDL(finding: SchemaFinding) {
   } catch {
     toast({ title: t('pages.copyFailed'), variant: 'destructive' })
   }
+}
+
+const maxReasonBytes = 500
+const dismissing = ref<SchemaFinding | null>(null)
+const reason = ref('')
+const reasonTooLong = computed(() => new TextEncoder().encode(reason.value.trim()).length > maxReasonBytes)
+const dismissBusy = computed(() => !!dismissing.value && sourcesStore.isLoadingOperation(`dismissSchemaFinding-${props.sourceId}-${dismissing.value.id}`))
+const dismissOpen = computed({
+  get: () => dismissing.value !== null,
+  set: (open: boolean) => { if (!open) dismissing.value = null },
+})
+
+function openDismiss(finding: SchemaFinding) {
+  reason.value = ''
+  dismissing.value = finding
+}
+
+async function confirmDismiss() {
+  const finding = dismissing.value
+  if (!finding || reasonTooLong.value) return
+  const result = await sourcesStore.dismissSchemaFinding(props.sourceId, finding.id, reason.value.trim())
+  if (result.success) dismissing.value = null
+}
+
+function restore(findingId: string) {
+  return sourcesStore.restoreSchemaFinding(props.sourceId, findingId)
 }
 
 onMounted(load)
@@ -106,13 +148,25 @@ onMounted(load)
             <Info class="mt-0.5 size-4 shrink-0" />{{ note }}
           </li>
         </ul>
-        <EmptyState v-if="!report.findings.length" :title="t('advisor.noFindings')" class="py-6" />
-        <article v-for="finding in report.findings" :key="finding.id" class="space-y-3 rounded-md border p-4" :data-finding="finding.id">
+        <div v-if="dismissals.length" class="flex items-center gap-2">
+          <Switch id="advisor-show-dismissed" v-model="showDismissed" />
+          <Label for="advisor-show-dismissed" class="text-sm font-normal">{{ t('advisor.showDismissed', { count: dismissals.length }) }}</Label>
+        </div>
+        <EmptyState v-if="!activeFindings.length" :title="t('advisor.noFindings')" class="py-6" />
+        <article v-for="finding in activeFindings" :key="finding.id" class="space-y-3 rounded-md border p-4" :data-finding="finding.id">
           <header class="flex flex-wrap items-center gap-2">
             <Badge :variant="impactVariants[finding.impact]">{{ t(impactLabels[finding.impact]) }}</Badge>
             <h3 class="text-sm font-medium">{{ finding.title }}</h3>
             <Badge v-if="finding.rebuild" variant="outline">{{ t('advisor.needsRebuild') }}</Badge>
             <Badge v-if="finding.candidate" variant="outline">{{ t('advisor.validateFirst') }}</Badge>
+            <div class="ml-auto">
+              <RowActionsMenu>
+                <DropdownMenuItem @click="openDismiss(finding)">
+                  <EyeOff class="mr-2 h-4 w-4" />
+                  {{ t('advisor.dismiss') }}
+                </DropdownMenuItem>
+              </RowActionsMenu>
+            </div>
           </header>
           <dl v-if="finding.evidence.length" class="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,14rem)_1fr]">
             <template v-for="(item, index) in finding.evidence" :key="index">
@@ -141,7 +195,40 @@ onMounted(load)
             </template>
           </dl>
         </article>
+        <section v-if="showDismissed && dismissedRows.length" class="space-y-2">
+          <h3 class="text-sm font-medium">{{ t('advisor.dismissed') }}</h3>
+          <div v-for="row in dismissedRows" :key="row.dismissal.finding_id" class="flex items-start justify-between gap-3 rounded-md border border-dashed p-3" :data-dismissed="row.dismissal.finding_id">
+            <div class="min-w-0 space-y-1">
+              <p class="text-sm font-medium">{{ row.finding?.title ?? t('advisor.findingGone', { id: row.dismissal.finding_id }) }}</p>
+              <p class="text-xs text-muted-foreground">{{ t('advisor.dismissedAt', { time: formatDate(row.dismissal.dismissed_at) }) }}</p>
+              <p v-if="row.dismissal.reason" class="whitespace-pre-wrap break-words text-sm">{{ row.dismissal.reason }}</p>
+            </div>
+            <Button variant="outline" size="sm" :disabled="sourcesStore.isLoadingOperation(`restoreSchemaFinding-${sourceId}-${row.dismissal.finding_id}`)" @click="restore(row.dismissal.finding_id)">
+              {{ t('advisor.restore') }}
+            </Button>
+          </div>
+        </section>
       </div>
     </template>
   </PageSection>
+
+  <Dialog v-model:open="dismissOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{{ t('advisor.dismissTitle') }}</DialogTitle>
+      </DialogHeader>
+      <form class="grid gap-4" @submit.prevent="confirmDismiss">
+        <p class="text-sm">{{ dismissing?.title }}</p>
+        <div class="grid gap-1.5">
+          <Label for="advisor-dismiss-reason">{{ t('advisor.dismissReason') }}</Label>
+          <Textarea id="advisor-dismiss-reason" v-model="reason" rows="3" :aria-invalid="reasonTooLong" />
+          <p v-if="reasonTooLong" class="text-xs text-destructive">{{ t('advisor.reasonTooLong', { max: maxReasonBytes }) }}</p>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="dismissing = null">{{ t('ui.cancel') }}</Button>
+          <Button type="submit" :disabled="reasonTooLong || dismissBusy">{{ t('advisor.dismiss') }}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
 </template>

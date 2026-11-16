@@ -1258,5 +1258,14 @@
   "advisor.inputLimited": "제한됨",
   "advisor.inputMissing": "없음",
   "advisor.inputError": "오류",
-  "advisor.inputSkipped": "건너뜀"
+  "advisor.inputSkipped": "건너뜀",
+  "advisor.dismiss": "숨기기",
+  "advisor.dismissTitle": "권장 사항 숨기기",
+  "advisor.dismissReason": "사유 (선택)",
+  "advisor.reasonTooLong": "사유는 최대 {max}바이트까지 입력할 수 있습니다",
+  "advisor.showDismissed": "숨긴 항목 표시 ({count})",
+  "advisor.dismissed": "숨긴 항목",
+  "advisor.dismissedAt": "{time} 숨김",
+  "advisor.findingGone": "권장 사항 {id}이(가) 현재 보고서에 없습니다",
+  "advisor.restore": "복원"
 }

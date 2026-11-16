@@ -150,3 +150,14 @@ type StoredSchemaAdvisorReport struct {
 	WindowDays  int
 	Report      SchemaAdvisorReport
 }
+
+// SchemaAdvisorDismissal records that an admin dismissed one finding of a
+// source. It outlives the refresh that produced the finding.
+type SchemaAdvisorDismissal struct {
+	SourceID  SourceID `json:"-"`
+	FindingID string   `json:"finding_id"`
+	Reason    string   `json:"reason"`
+	// DismissedBy is nil once the user is deleted.
+	DismissedBy *UserID   `json:"dismissed_by"`
+	DismissedAt time.Time `json:"dismissed_at"`
+}

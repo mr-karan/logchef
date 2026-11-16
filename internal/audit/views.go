@@ -288,3 +288,11 @@ func LogExportFields(language models.QueryLanguage, format string, rowLimit int,
 		Set("row_limit", rowLimit).
 		Digest("query", query)
 }
+
+// SchemaAdvisorDismissalFields records a dismissed schema advisor finding:
+// its id and the admin's reason. The target is the source.
+func SchemaAdvisorDismissalFields(d *models.SchemaAdvisorDismissal) *Fields {
+	return NewFields().
+		Set("finding_id", d.FindingID).
+		Set("reason", d.Reason)
+}

@@ -313,3 +313,215 @@ func TestSchemaAdviceJoinedRefreshKeepsRunLabels(t *testing.T) {
 		}
 	}
 }
+
+// TestSchemaFindingDismissals dismisses and restores a finding through the
+// routes: each change stores one audit event on the source with its fields
+// staged, GET lists the dismissal, and each row of the error table answers
+// with its status and records nothing.
+func TestSchemaFindingDismissals(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnvWithConfig(t, testOAuthConfig(), models.UserRoleAdmin)
+	ctx := context.Background()
+	_, src := mkTestTeam(t, e.db, "dismiss", e.user)
+	_, vlSource := e.vlSourceFor("http://127.0.0.1:1")
+	const finding = "0123456789abcdef"
+	stored := &models.StoredSchemaAdvisorReport{
+		SourceID: src.ID, GeneratedAt: time.Now().UTC().Truncate(time.Second), WindowDays: 30,
+		Report: models.SchemaAdvisorReport{
+			Status: models.AdvisorStatusOK, ClickHouseVersion: "26.8.1", Inputs: []models.AdvisorInput{},
+			Findings: []models.SchemaFinding{{ID: finding, Rule: "skip_index_bloom", Impact: models.ImpactHigh, Title: "Add a bloom filter index on request_id", Evidence: []models.AdvisorEvidence{}, DDL: []string{}}},
+		},
+	}
+	if err := e.db.UpsertSchemaAdvisorReport(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+
+	dismissalPath := func(id models.SourceID, findingID string) string {
+		return advisorPath(id, "/findings/"+findingID+"/dismissal")
+	}
+	dismiss := func(id models.SourceID, findingID, session, body string) *testResponse {
+		return e.consentRequest(http.MethodPut, dismissalPath(id, findingID), session, body, sameOriginJSON)
+	}
+	restore := func(id models.SourceID, findingID, session string) *testResponse {
+		return e.consentRequest(http.MethodDelete, dismissalPath(id, findingID), session, "", sameOriginJSON)
+	}
+	type dismissalBody struct {
+		Message   string `json:"message"`
+		ErrorType string `json:"error_type"`
+		Data      struct {
+			FindingID   string         `json:"finding_id"`
+			Reason      string         `json:"reason"`
+			DismissedBy *models.UserID `json:"dismissed_by"`
+			DismissedAt time.Time      `json:"dismissed_at"`
+		} `json:"data"`
+	}
+	expect := func(name string, resp *testResponse, status int) dismissalBody {
+		t.Helper()
+		var body dismissalBody
+		if status != http.StatusNoContent {
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("%s: decode: %v", name, err)
+			}
+		}
+		if resp.StatusCode != status {
+			t.Fatalf("%s: status %d (%s), want %d", name, resp.StatusCode, body.Message, status)
+		}
+		return body
+	}
+	dismissals := func() []models.SchemaAdvisorDismissal {
+		t.Helper()
+		var body struct {
+			Data struct {
+				Dismissals []models.SchemaAdvisorDismissal `json:"dismissals"`
+			} `json:"data"`
+		}
+		resp := e.consentRequest(http.MethodGet, advisorPath(src.ID, ""), e.session, "", nil)
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET: status %d, decode error %v", resp.StatusCode, err)
+		}
+		if body.Data.Dismissals == nil {
+			t.Fatal("GET has no dismissals list")
+		}
+		return body.Data.Dismissals
+	}
+
+	if got := dismissals(); len(got) != 0 {
+		t.Fatalf("dismissals before any = %+v, want an empty list", got)
+	}
+	body := expect("dismiss", dismiss(src.ID, finding, e.session, `{"reason":"covered by the replica's index"}`), http.StatusOK)
+	if body.Data.FindingID != finding || body.Data.Reason != "covered by the replica's index" || body.Data.DismissedBy == nil || *body.Data.DismissedBy != e.user.ID || body.Data.DismissedAt.IsZero() {
+		t.Fatalf("dismiss = %+v", body.Data)
+	}
+	if got := dismissals(); len(got) != 1 || got[0].FindingID != finding || got[0].Reason != "covered by the replica's index" {
+		t.Fatalf("dismissals after dismiss = %+v", got)
+	}
+	expect("dismiss again without a body", dismiss(src.ID, finding, e.session, ""), http.StatusOK)
+	expect("restore", restore(src.ID, finding, e.session), http.StatusNoContent)
+	if got := dismissals(); len(got) != 0 {
+		t.Fatalf("dismissals after restore = %+v, want none", got)
+	}
+
+	// Error rows: none of these may store an event.
+	expect("restore a finding that is not dismissed", restore(src.ID, finding, e.session), http.StatusNotFound)
+	expect("dismiss a finding the report lacks", dismiss(src.ID, "fedcba9876543210", e.session, ""), http.StatusNotFound)
+	expect("dismiss on an unknown source", dismiss(src.ID+1000, finding, e.session, ""), http.StatusNotFound)
+	for _, bad := range []string{"0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0", "0123456789abcdeg"} {
+		expect("dismiss id "+bad, dismiss(src.ID, bad, e.session, ""), http.StatusBadRequest)
+		expect("restore id "+bad, restore(src.ID, bad, e.session), http.StatusBadRequest)
+	}
+	expect("reason of 501 bytes", dismiss(src.ID, finding, e.session, `{"reason":"`+strings.Repeat("a", 501)+`"}`), http.StatusBadRequest)
+	expect("reason of 500 bytes", dismiss(src.ID, finding, e.session, `{"reason":"`+strings.Repeat("a", 500)+`"}`), http.StatusOK)
+	expect("restore the 500-byte dismissal", restore(src.ID, finding, e.session), http.StatusNoContent)
+	if body := expect("dismiss on VictoriaLogs", dismiss(vlSource.ID, finding, e.session, ""), http.StatusBadRequest); body.Message != "Schema advice is available for ClickHouse sources only" {
+		t.Errorf("VictoriaLogs message = %q", body.Message)
+	}
+	_, memberSession := e.newSessionUser("dismiss-member@example.com")
+	expect("member dismiss", dismiss(src.ID, finding, memberSession, ""), http.StatusForbidden)
+	expect("member restore", restore(src.ID, finding, memberSession), http.StatusForbidden)
+	pat, err := core.CreateAPIToken(ctx, e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), &e.cfg.Auth, e.user.ID, "sources-read", nil, []models.TokenScope{models.TokenScopeSourcesRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPut, testIssuer+dismissalPath(src.ID, finding), http.NoBody)
+	req.Header.Set("Authorization", "Bearer "+pat.Token)
+	expect("token dismiss without sources:write", e.do(req), http.StatusForbidden)
+
+	events, err := e.db.ListAuditEvents(ctx, models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []models.AuditEvent
+	for _, ev := range events {
+		if strings.HasPrefix(ev.Action, "schema_advisor_dismissal.") {
+			got = append(got, ev)
+		}
+	}
+	want := []string{"schema_advisor_dismissal.create", "schema_advisor_dismissal.create", "schema_advisor_dismissal.delete", "schema_advisor_dismissal.create", "schema_advisor_dismissal.delete"}
+	if len(got) != len(want) {
+		t.Fatalf("stored %d dismissal events, want %v: %+v", len(got), want, got)
+	}
+	for i, ev := range got {
+		detail := string(ev.Detail)
+		if ev.Action != want[i] || ev.TargetType != "source" || ev.TargetID != fmt.Sprint(src.ID) || ev.Outcome != models.AuditOutcomeSuccess ||
+			!strings.Contains(detail, `"finding_id":"`+finding+`"`) || strings.Contains(detail, "unstaged") {
+			t.Errorf("event %d = %s %s:%s %s detail %s, want %s on source %d with the finding id", i, ev.Action, ev.TargetType, ev.TargetID, ev.Outcome, detail, want[i], src.ID)
+		}
+		if strings.HasSuffix(ev.Action, ".create") != strings.Contains(detail, `"rule":"skip_index_bloom"`) {
+			t.Errorf("event %d %s detail %s: only a dismissal names the rule", i, ev.Action, detail)
+		}
+	}
+	if changes := string(got[0].Changes); !strings.Contains(changes, "covered by the replica's index") {
+		t.Errorf("first dismissal changes = %s, want the reason", changes)
+	}
+	if changes := string(got[2].Changes); !strings.Contains(changes, `"finding_id"`) {
+		t.Errorf("restore changes = %s, want the removed dismissal", changes)
+	}
+}
+
+// TestSchemaFindingDismissalSnapshots dismisses one finding from concurrent
+// requests. Each event's previous reason must be the reason that the write
+// replaced, so in a serial history every reason but the last is replaced
+// exactly once and only the first write replaces nothing.
+func TestSchemaFindingDismissalSnapshots(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnvWithConfig(t, testOAuthConfig(), models.UserRoleAdmin)
+	ctx := context.Background()
+	_, src := mkTestTeam(t, e.db, "snapshots", e.user)
+	const finding = "0123456789abcdef"
+	if err := e.db.UpsertSchemaAdvisorReport(ctx, &models.StoredSchemaAdvisorReport{
+		SourceID: src.ID, GeneratedAt: time.Now().UTC(), WindowDays: 30,
+		Report: models.SchemaAdvisorReport{Status: models.AdvisorStatusOK, Inputs: []models.AdvisorInput{}, Findings: []models.SchemaFinding{{ID: finding, Rule: "skip_index_bloom", Evidence: []models.AdvisorEvidence{}, DDL: []string{}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := advisorPath(src.ID, "/findings/"+finding+"/dismissal")
+
+	const writes = 24
+	var wg sync.WaitGroup
+	for i := range writes {
+		wg.Go(func() {
+			resp := e.consentRequest(http.MethodPut, path, e.session, fmt.Sprintf(`{"reason":"r%02d"}`, i), sameOriginJSON)
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("PUT %d: status %d", i, resp.StatusCode)
+			}
+		})
+	}
+	wg.Wait()
+
+	final, err := e.db.GetSchemaAdvisorDismissal(ctx, src.ID, finding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := e.db.ListAuditEvents(ctx, models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaced := map[string]int{}
+	for _, ev := range events {
+		if ev.Action != "schema_advisor_dismissal.create" {
+			continue
+		}
+		var changes struct {
+			Reason struct {
+				From *string `json:"from"`
+			} `json:"reason"`
+		}
+		if err := json.Unmarshal(ev.Changes, &changes); err != nil {
+			t.Fatal(err)
+		}
+		from := "<none>"
+		if changes.Reason.From != nil {
+			from = *changes.Reason.From
+		}
+		replaced[from]++
+	}
+	want := map[string]int{"<none>": 1}
+	for i := range writes {
+		if reason := fmt.Sprintf("r%02d", i); reason != final.Reason {
+			want[reason] = 1
+		}
+	}
+	if fmt.Sprint(replaced) != fmt.Sprint(want) {
+		t.Fatalf("previous reasons across events = %v\nwant each replaced reason once: %v", replaced, want)
+	}
+}

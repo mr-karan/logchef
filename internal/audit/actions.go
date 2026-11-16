@@ -100,6 +100,9 @@ const (
 	ReportPause  Action = "report.pause"
 	ReportResume Action = "report.resume"
 	ReportClaim  Action = "report.claim"
+
+	SchemaAdvisorDismissalCreate Action = "schema_advisor_dismissal.create"
+	SchemaAdvisorDismissalDelete Action = "schema_advisor_dismissal.delete"
 )
 
 // Spec is the registration of one action.
@@ -146,6 +149,7 @@ var registrations = []struct {
 	{SavedViewCreate, true}, {SavedViewUpdate, true}, {SavedViewDelete, true}, {SavedViewSetDefault, true}, {SavedViewClearDefault, true},
 	{ReportCreate, true}, {ReportUpdate, true}, {ReportDelete, false},
 	{ReportPause, false}, {ReportResume, false}, {ReportClaim, false},
+	{SchemaAdvisorDismissalCreate, true}, {SchemaAdvisorDismissalDelete, true},
 }
 
 // verbs is the closed list of verbs an action may use.
