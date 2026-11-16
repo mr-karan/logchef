@@ -29,6 +29,8 @@ import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
+import { useSavedViewsStore } from "@/stores/savedViews";
+import type { SavedViewLayout } from "@/lib/savedViewLayout";
 import { useQuery } from "@/composables/useQuery";
 import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 
@@ -92,6 +94,7 @@ const canExecuteQuery = computed(() => exploreStore.canExecuteQuery);
 const rows = computed(() => runs.results?.rows ?? []);
 
 const nav = useExplorerNavigator();
+const savedViews = useSavedViewsStore();
 const isInitializing = computed(() => nav.status.value === 'loading' || nav.status.value === 'error');
 const initializationError = nav.error;
 
@@ -169,10 +172,13 @@ const sortKeysInfoOpen = ref(false); // State for sort keys info expandable sect
 const isHistogramVisible = ref(true);
 
 // Display mode for table vs compact view (table is default)
+// A view that sets the display mode owns it; a change updates the view's
+// working copy, not the preference.
 const displayMode = computed({
-  get: () => preferences.value.display_mode,
+  get: () => savedViews.displayMode ?? preferences.value.display_mode,
   set: (value: 'table' | 'compact' | 'json') => {
-    preferencesStore.updatePreferences({ display_mode: value });
+    if (savedViews.displayMode !== null) savedViews.setDisplayMode(value);
+    else preferencesStore.updatePreferences({ display_mode: value });
   },
 });
 
@@ -1079,6 +1085,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 @add-fast-filter="addSortKeyFilter"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
+                @select-view="nav.selectView"
                 @export="handleExport"
               />
 
@@ -1155,7 +1162,13 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :regex-highlights="regexHighlights"
                     :active-mode="activeMode"
                     :display-mode="displayMode"
-                    v-bind="displayMode === 'table' ? { filteredColumns: columnFilters } : {}"
+                    v-bind="displayMode === 'table' ? {
+                      filteredColumns: columnFilters,
+                      viewSeed: savedViews.activeSeed,
+                      layoutResetToken: savedViews.layoutResetToken,
+                      onWorkingLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(savedViews.activeViewId, layout),
+                      onTableLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(null, layout),
+                    } : {}"
                     @drill-down="handleDrillDown"
                     @add-column="handleAddColumn"
                     @apply-column-filter="handleApplyColumnFilter"

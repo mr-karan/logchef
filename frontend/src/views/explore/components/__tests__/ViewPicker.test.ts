@@ -1,0 +1,83 @@
+import { createApp, h, nextTick } from "vue";
+import { createPinia, setActivePinia } from "pinia";
+import { afterEach, expect, it, vi } from "vitest";
+import { i18n } from "@/i18n";
+import type { SavedView } from "@/api/savedViews";
+import { useSavedViewsStore } from "@/stores/savedViews";
+import ViewPicker from "../ViewPicker.vue";
+
+vi.mock("@/api/savedViews", () => ({ savedViewsApi: { list: vi.fn(), create: vi.fn(), update: vi.fn() } }));
+
+let unmount: (() => void) | null = null;
+
+afterEach(() => {
+  unmount?.();
+  unmount = null;
+  document.body.innerHTML = "";
+  localStorage.clear();
+});
+
+function view(id: number, scope: SavedView["scope"], name: string, can_edit = true): SavedView {
+  return {
+    id, source_id: 5, scope, name, description: "", definition: { version: 1, columns: [{ name: "msg" }] },
+    is_default: false, managed: false, revision: 1, created_at: "", updated_at: "", can_edit, can_set_default: can_edit,
+  };
+}
+
+async function mount(views: SavedView[], active: number | null) {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  const store = useSavedViewsStore();
+  store.enter(2, 5, { views, default_view_id: null }, active);
+  const selected: (number | null)[] = [];
+  const host = document.createElement("div");
+  document.body.append(host);
+  const app = createApp({ render: () => h(ViewPicker, { displayMode: "table", onSelect: (id: number | null) => selected.push(id) }) }).use(pinia).use(i18n);
+  app.mount(host);
+  unmount = () => app.unmount();
+  await nextTick();
+  return { host, store, selected };
+}
+
+async function openMenu(host: HTMLElement) {
+  const trigger = host.querySelector<HTMLElement>("[data-testid=view-picker]")!;
+  trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }));
+  trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await nextTick();
+  await nextTick();
+  return [...document.body.querySelectorAll<HTMLElement>("[role=menuitem]")];
+}
+
+it("names the active view, or No view", async () => {
+  const none = await mount([view(1, "personal", "errors")], null);
+  expect(none.host.textContent).toContain("No view");
+  unmount?.();
+  const active = await mount([view(1, "personal", "errors")], 1);
+  expect(active.host.textContent).toContain("errors");
+  expect(active.host.querySelector("[data-testid=view-modified]")).toBeNull();
+});
+
+it("marks a modified view and offers Update view only when the caller can edit it", async () => {
+  const { host, store } = await mount([view(1, "team", "team view", false)], 1);
+  store.reportTableLayout(1, { columns: [{ name: "level" }] });
+  await nextTick();
+  expect(host.querySelector("[data-testid=view-modified]")).not.toBeNull();
+  const labels = (await openMenu(host)).map(item => item.textContent?.trim());
+  expect(labels).toContain("Reset to view");
+  expect(labels).not.toContain("Update view");
+});
+
+it("lists the views in scope groups and emits the pick", async () => {
+  const { host, selected } = await mount([view(1, "personal", "mine"), view(2, "team", "ours"), view(3, "source", "everyone")], 1);
+  const items = await openMenu(host);
+  const labels = items.map(item => item.textContent?.trim());
+  expect(labels.slice(0, 3)).toEqual(["mine", "ours", "everyone"]);
+  expect(labels).toEqual(expect.arrayContaining(["No view", "Save as new view", "Reset to view"]));
+  // An unmodified view has nothing to update.
+  expect(labels).not.toContain("Update view");
+  expect(document.body.textContent).toContain("Personal");
+  expect(document.body.textContent).toContain("Team");
+  items[1].click();
+  await nextTick();
+  expect(selected).toEqual([2]);
+});
