@@ -51,6 +51,7 @@ const (
 	QueryLanguageLogchefQL     QueryLanguage = "logchefql"
 	QueryLanguageClickHouseSQL QueryLanguage = "clickhouse-sql"
 	QueryLanguageLogsQL        QueryLanguage = "logsql"
+	QueryLanguageLogQL         QueryLanguage = "logql"
 )
 
 func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
@@ -63,6 +64,8 @@ func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
 		return QueryLanguageClickHouseSQL
 	case QueryLanguageLogsQL:
 		return QueryLanguageLogsQL
+	case QueryLanguageLogQL:
+		return QueryLanguageLogQL
 	default:
 		return language
 	}
@@ -70,7 +73,7 @@ func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
 
 func (l QueryLanguage) Valid() bool {
 	switch NormalizeQueryLanguage(l) {
-	case QueryLanguageLogchefQL, QueryLanguageClickHouseSQL, QueryLanguageLogsQL:
+	case QueryLanguageLogchefQL, QueryLanguageClickHouseSQL, QueryLanguageLogsQL, QueryLanguageLogQL:
 		return true
 	default:
 		return false
