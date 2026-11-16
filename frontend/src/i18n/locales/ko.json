@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "뒤로",
   "dashboards.conflict.confirmOverwrite": "덮어쓰기",
   "queryEditor.unknownField": "알 수 없는 필드 \"{field}\"",
+  "queryEditor.numberFieldNeeded": "{func}에는 숫자 필드가 필요합니다. \"{field}\"의 유형은 {type}입니다",
   "queryEditor.syntaxError": "잘못된 LogchefQL 구문: {message}",
   "queryEditor.invalidSyntax": "잘못된 LogchefQL 구문",
   "queryEditor.distinctCount": "고유 값 {count}개",

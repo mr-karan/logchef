@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "Retour",
   "dashboards.conflict.confirmOverwrite": "Écraser",
   "queryEditor.unknownField": "Champ inconnu « {field} »",
+  "queryEditor.numberFieldNeeded": "{func} nécessite un champ numérique. « {field} » est de type {type}",
   "queryEditor.syntaxError": "Syntaxe LogchefQL invalide : {message}",
   "queryEditor.invalidSyntax": "Syntaxe LogchefQL invalide",
   "queryEditor.distinctCount": "{count} valeurs distinctes",

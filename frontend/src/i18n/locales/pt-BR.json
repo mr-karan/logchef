@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "Voltar",
   "dashboards.conflict.confirmOverwrite": "Sobrescrever",
   "queryEditor.unknownField": "Campo desconhecido \"{field}\"",
+  "queryEditor.numberFieldNeeded": "{func} precisa de um campo numérico. \"{field}\" é {type}",
   "queryEditor.syntaxError": "Sintaxe LogchefQL inválida: {message}",
   "queryEditor.invalidSyntax": "Sintaxe LogchefQL inválida",
   "queryEditor.distinctCount": "{count} valores distintos",

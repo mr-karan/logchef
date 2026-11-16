@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "Zurück",
   "dashboards.conflict.confirmOverwrite": "Überschreiben",
   "queryEditor.unknownField": "Unbekanntes Feld „{field}“",
+  "queryEditor.numberFieldNeeded": "{func} braucht ein Zahlenfeld. „{field}“ ist {type}",
   "queryEditor.syntaxError": "Ungültige LogchefQL-Syntax: {message}",
   "queryEditor.invalidSyntax": "Ungültige LogchefQL-Syntax",
   "queryEditor.distinctCount": "{count} unterschiedliche Werte",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { escapeHoverText, getLogchefQLErrorRange, getLogchefQLFields, getSchemaFieldType, getUnknownLogchefQLFields } from './diagnostics';
+import { escapeHoverText, getLogchefQLErrorRange, getLogchefQLFields, getNumberFunctionWarnings, getSchemaFieldType, getUnknownLogchefQLFields } from './diagnostics';
 import { prepareLogchefQLTemplate } from './template';
 
 describe('LogchefQL field references', () => {
@@ -25,6 +25,53 @@ describe('LogchefQL field references', () => {
       { name: 'method', baseName: 'method', start: 0, end: 6, complete: false },
     ]);
     expect(getLogchefQLFields('method="unfinished unknown=1').map(field => field.name)).toEqual(['method']);
+  });
+
+  it('reads only arguments and group keys as fields in an aggregation', () => {
+    const query = 'level=error | count() as errors, sum(bytes) by time(5m) as t, log.host as h | sort errors desc | limit 10';
+    const fields = getLogchefQLFields(query);
+    expect(fields.map(({ name, complete }) => ({ name, complete }))).toEqual([
+      { name: 'level', complete: true },
+      { name: 'bytes', complete: true },
+      { name: 'log.host', complete: true },
+    ]);
+    expect(fields.every(field => query.slice(field.start, field.end) === field.name)).toBe(true);
+  });
+
+  it('does not mark aggregation words as unknown fields', () => {
+    expect(getUnknownLogchefQLFields('level=error | count() by service', { level: { type: 'String' }, service: { type: 'String' } })).toEqual([]);
+    expect(getUnknownLogchefQLFields('| count() by servise', { service: { type: 'String' } }).map(field => field.name)).toEqual(['servise']);
+  });
+});
+
+describe('number function warnings', () => {
+  const schema = {
+    tags: { type: 'Array(String)' },
+    msg: { type: 'String' },
+    bytes: { type: 'Nullable(UInt64)' },
+    ts: { type: 'DateTime64(3)' },
+    ok: { type: 'Nullable(Bool)' },
+    attrs: { type: 'Map(String, String)' },
+    pair: { type: 'Tuple(String, UInt8)' },
+    sizes: { type: 'Array(Nullable(UInt64))' },
+  };
+
+  it('warns on a number function over a column that holds no number', () => {
+    const query = '| sum(tags), avg(msg), p95(bytes), max(ts), min(ok), sum(attrs), sum(attrs.n), count_distinct(tags), sum(missing), p95(pair), avg(sizes)';
+    expect(getNumberFunctionWarnings(query, schema).map(({ func, field, type }) => ({ func, field, type }))).toEqual([
+      { func: 'sum', field: 'tags', type: 'Array(String)' },
+      { func: 'max', field: 'ts', type: 'DateTime64(3)' },
+      { func: 'min', field: 'ok', type: 'Nullable(Bool)' },
+      { func: 'sum', field: 'attrs', type: 'Map(String, String)' },
+      { func: 'p95', field: 'pair', type: 'Tuple(String, UInt8)' },
+      { func: 'avg', field: 'sizes', type: 'Array(Nullable(UInt64))' },
+    ]);
+  });
+
+  it('marks the field', () => {
+    const query = 'x=1 | sum(tags)';
+    const [warning] = getNumberFunctionWarnings(query, schema);
+    expect(query.slice(warning.start, warning.end)).toBe('tags');
   });
 });
 

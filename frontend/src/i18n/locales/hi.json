@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "वापस",
   "dashboards.conflict.confirmOverwrite": "ओवरराइट करें",
   "queryEditor.unknownField": "अज्ञात फ़ील्ड \"{field}\"",
+  "queryEditor.numberFieldNeeded": "{func} के लिए संख्या फ़ील्ड चाहिए। \"{field}\" {type} है",
   "queryEditor.syntaxError": "अमान्य LogchefQL सिंटैक्स: {message}",
   "queryEditor.invalidSyntax": "अमान्य LogchefQL सिंटैक्स",
   "queryEditor.distinctCount": "{count} अलग-अलग मान",

@@ -16,6 +16,7 @@
   "dashboards.conflict.back": "戻る",
   "dashboards.conflict.confirmOverwrite": "上書き",
   "queryEditor.unknownField": "不明なフィールド「{field}」",
+  "queryEditor.numberFieldNeeded": "{func} には数値フィールドが必要です。「{field}」は {type} です",
   "queryEditor.syntaxError": "LogchefQL の構文が無効です: {message}",
   "queryEditor.invalidSyntax": "LogchefQL の構文が無効です",
   "queryEditor.distinctCount": "{count} 個の異なる値",
