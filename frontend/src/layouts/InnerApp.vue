@@ -51,6 +51,7 @@ import {
   LayoutDashboard,
   CalendarClock,
   Activity,
+  ScrollText,
   ExternalLink,
   LockKeyhole,
 } from "lucide-vue-next";
@@ -214,6 +215,12 @@ const adminNavItems: NavItem[] = [
     get title() { return t('ui.queryActivity'); },
     icon: Activity,
     url: "/admin/query-activity",
+    adminOnly: true,
+  },
+  {
+    get title() { return t('ui.auditLog'); },
+    icon: ScrollText,
+    url: "/admin/audit-log",
     adminOnly: true,
   },
 ];

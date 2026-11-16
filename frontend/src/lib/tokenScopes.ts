@@ -26,7 +26,8 @@ export type TokenScope =
   | "settings:read"
   | "settings:write"
   | "destinations:read"
-  | "destinations:write";
+  | "destinations:write"
+  | "audit:read";
 
 interface TokenScopeOption {
   value: TokenScope;
@@ -80,6 +81,7 @@ export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
   { value: "query_shares:write", labelKey: "tokens.scopes.querySharesWrite", descriptionKey: "tokens.scopeDescriptions.querySharesWrite", groupKey: "tokens.groups.sharing" },
   { value: "settings:read", labelKey: "tokens.scopes.settingsRead", descriptionKey: "tokens.scopeDescriptions.settingsRead", groupKey: "tokens.groups.administration" },
   { value: "settings:write", labelKey: "tokens.scopes.settingsWrite", descriptionKey: "tokens.scopeDescriptions.settingsWrite", groupKey: "tokens.groups.administration" },
+  { value: "audit:read", labelKey: "tokens.scopes.auditRead", descriptionKey: "tokens.scopeDescriptions.auditRead", groupKey: "tokens.groups.administration" },
 ];
 
 export interface TokenScopePreset {

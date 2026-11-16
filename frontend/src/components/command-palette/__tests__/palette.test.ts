@@ -340,7 +340,7 @@ describe('buildPaletteView', () => {
 
     it('shows admins every page', () => {
       expect(pages(VIEWERS.admin)).toEqual([
-        ...everyone, 'ManageUsers', 'ServiceTokens', 'Teams', 'Sources', 'NewSource', 'SourceInspection', 'AdminSettings', 'AdminQueryActivity', ...settings,
+        ...everyone, 'ManageUsers', 'ServiceTokens', 'Teams', 'Sources', 'NewSource', 'SourceInspection', 'AdminSettings', 'AdminQueryActivity', 'AdminAuditLog', ...settings,
       ])
     })
 
