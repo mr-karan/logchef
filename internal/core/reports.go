@@ -125,6 +125,33 @@ func validateReport(ctx context.Context, db store.StoreOps, owner *models.User, 
 	if len(in.Recipients) > 0 {
 		return nil, invalidReport("recipients: a report is sent to its owner for now; user, team and email recipients are not supported yet")
 	}
+	maxRows := defaultReportMaxRows
+	if in.MaxRows != nil {
+		maxRows = *in.MaxRows
+	}
+	if maxRows < minReportMaxRows || maxRows > maxReportMaxRows {
+		return nil, invalidReport("max_rows must be %d to %d", minReportMaxRows, maxReportMaxRows)
+	}
+	var (
+		r   *models.Report
+		err error
+	)
+	switch in.Source.Kind {
+	case models.ReportSourceSavedQuery:
+		r, err = validateSavedQueryReport(ctx, db, owner, in, now)
+	case models.ReportSourceDashboard:
+		r, err = validateDashboardReport(ctx, db, owner, in, now)
+	default:
+		return nil, invalidReport("source.kind must be dashboard or saved_query")
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.Name, r.MaxRows, r.SkipIfEmpty = in.Name, maxRows, in.SkipIfEmpty
+	return r, nil
+}
+
+func validateSavedQueryReport(ctx context.Context, db store.StoreOps, owner *models.User, in *ReportInput, now time.Time) (*models.Report, error) {
 	if in.AttachCSV {
 		return nil, invalidReport("attach_csv is not supported yet")
 	}
@@ -132,7 +159,10 @@ func validateReport(ctx context.Context, db store.StoreOps, owner *models.User, 
 	if err != nil {
 		return nil, err
 	}
-	timing, err := validateReportTiming(in, now)
+	if in.TimeRange == nil || *in.TimeRange == "" {
+		return nil, invalidReport("time_range is required for a saved query")
+	}
+	timing, err := validateReportTiming(in, *in.TimeRange, now)
 	if err != nil {
 		return nil, err
 	}
@@ -147,15 +177,7 @@ func validateReport(ctx context.Context, db store.StoreOps, owner *models.User, 
 	if _, err := resolveReportVariables(content.Variables, variables, timing.loc, now); err != nil {
 		return nil, invalidReport("%v", err)
 	}
-	maxRows := defaultReportMaxRows
-	if in.MaxRows != nil {
-		maxRows = *in.MaxRows
-	}
-	if maxRows < minReportMaxRows || maxRows > maxReportMaxRows {
-		return nil, invalidReport("max_rows must be %d to %d", minReportMaxRows, maxReportMaxRows)
-	}
 	return &models.Report{
-		Name:         in.Name,
 		SourceKind:   models.ReportSourceSavedQuery,
 		SavedQueryID: &sq.ID,
 		Schedule:     timing.schedule,
@@ -163,8 +185,65 @@ func validateReport(ctx context.Context, db store.StoreOps, owner *models.User, 
 		TimeRange:    *in.TimeRange,
 		RangeAnchor:  timing.anchor,
 		Variables:    variables,
-		MaxRows:      maxRows,
-		SkipIfEmpty:  in.SkipIfEmpty,
+	}, nil
+}
+
+// validateDashboardReport checks a dashboard source: the dashboard runs,
+// the tab exists and the owner can view the dashboard. RFC 0008 bounds a
+// report at 30 query panels; a dashboard holds at most
+// models.MaxDashboardPanels, fewer, so no selection reaches the bound. A dashboard has no
+// variables, and its range defaults to the dashboard's.
+func validateDashboardReport(ctx context.Context, db store.StoreOps, owner *models.User, in *ReportInput, now time.Time) (*models.Report, error) {
+	src := in.Source
+	if in.AttachCSV {
+		return nil, invalidReport("attach_csv needs a saved_query source")
+	}
+	if len(in.Variables) > 0 {
+		return nil, invalidReport("variables: a dashboard report takes no variables")
+	}
+	if src.SavedQueryID != nil {
+		return nil, invalidReport("source: a dashboard source takes no saved_query_id")
+	}
+	if src.DashboardID == nil || *src.DashboardID <= 0 {
+		return nil, invalidReport("source.dashboard_id is required")
+	}
+	d, err := db.GetDashboard(ctx, *src.DashboardID)
+	if err != nil {
+		if models.IsNotFound(err) {
+			return nil, invalidReport("source.dashboard_id: dashboard %d does not exist", *src.DashboardID)
+		}
+		return nil, fmt.Errorf("loading dashboard %d: %w", *src.DashboardID, err)
+	}
+	view, _, err := reportDashboardPanels(d, src.TabID)
+	if err != nil {
+		return nil, invalidReport("source: %v", err)
+	}
+	var timeRange string
+	if in.TimeRange != nil {
+		timeRange = *in.TimeRange
+	}
+	timing, err := validateReportTiming(in, dashboardReportRange(timeRange, view), now)
+	if err != nil {
+		return nil, err
+	}
+	if owner != nil {
+		canView, err := UserCanViewDashboard(ctx, db, owner, d)
+		if err != nil {
+			return nil, fmt.Errorf("checking the owner's view of dashboard %d: %w", d.ID, err)
+		}
+		if !canView {
+			return nil, fmt.Errorf("%w: the report owner cannot view this dashboard", ErrReportForbidden)
+		}
+	}
+	return &models.Report{
+		SourceKind:  models.ReportSourceDashboard,
+		DashboardID: &d.ID,
+		TabID:       src.TabID,
+		Schedule:    timing.schedule,
+		Timezone:    in.Timezone,
+		TimeRange:   timeRange,
+		RangeAnchor: timing.anchor,
+		Variables:   map[string]any{},
 	}, nil
 }
 
@@ -175,7 +254,9 @@ type reportTiming struct {
 	anchor   models.ReportRangeAnchor
 }
 
-func validateReportTiming(in *ReportInput, now time.Time) (reportTiming, error) {
+// validateReportTiming checks the schedule, the timezone and the anchor,
+// and that timeRange, the range a run resolves, resolves with them.
+func validateReportTiming(in *ReportInput, timeRange string, now time.Time) (reportTiming, error) {
 	if len(bytes.TrimSpace(in.Schedule)) == 0 {
 		return reportTiming{}, invalidReport("schedule is required")
 	}
@@ -197,23 +278,13 @@ func validateReportTiming(in *ReportInput, now time.Time) (reportTiming, error) 
 	if anchor != models.ReportAnchorSendTime && anchor != models.ReportAnchorDayStart {
 		return reportTiming{}, invalidReport("range_anchor must be send_time or day_start")
 	}
-	if in.TimeRange == nil || *in.TimeRange == "" {
-		return reportTiming{}, invalidReport("time_range is required for a saved query")
-	}
-	if _, err := reports.ResolveWindow(*in.TimeRange, anchor == models.ReportAnchorDayStart, loc, now); err != nil {
+	if _, err := reports.ResolveWindow(timeRange, anchor == models.ReportAnchorDayStart, loc, now); err != nil {
 		return reportTiming{}, invalidReport("time_range: %v", err)
 	}
 	return reportTiming{schedule: schedule, loc: loc, anchor: anchor}, nil
 }
 
 func validateReportSource(ctx context.Context, db store.StoreOps, owner *models.User, src ReportSourceRef) (*models.SavedQuery, error) {
-	switch src.Kind {
-	case models.ReportSourceSavedQuery:
-	case models.ReportSourceDashboard:
-		return nil, invalidReport("source.kind: dashboard reports are not supported yet")
-	default:
-		return nil, invalidReport("source.kind must be saved_query")
-	}
 	if src.DashboardID != nil || src.TabID != "" {
 		return nil, invalidReport("source: a saved_query source takes no dashboard_id or tab_id")
 	}
@@ -400,15 +471,10 @@ func ClaimReport(ctx context.Context, db store.StoreOps, p access.Principal, id 
 		}
 		return nil, nil, fmt.Errorf("loading report %d: %w", id, err)
 	}
-	admin := p.RequireGlobalAdmin() == nil
-	if !admin {
-		sq, err := db.GetSavedQuery(ctx, *r.SavedQueryID)
+	if p.RequireGlobalAdmin() != nil {
+		reach, err := userCanViewReportSource(ctx, db, p.User, r)
 		if err != nil {
-			return nil, nil, fmt.Errorf("loading saved query of report %d: %w", id, err)
-		}
-		reach, err := db.UserHasSourceAccess(ctx, p.User.ID, sq.SourceID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("checking source access: %w", err)
+			return nil, nil, err
 		}
 		if !reach {
 			return nil, nil, ErrReportNotFound
@@ -426,6 +492,31 @@ func ClaimReport(ctx context.Context, db store.StoreOps, p access.Principal, id 
 	}
 	after, err = reloadReport(ctx, db, id)
 	return r, after, err
+}
+
+// userCanViewReportSource reports whether u can view the report's source:
+// a team of u's own has the saved query's source, or u can view the
+// dashboard.
+func userCanViewReportSource(ctx context.Context, db store.StoreOps, u *models.User, r *models.Report) (bool, error) {
+	switch {
+	case r.SavedQueryID != nil:
+		sq, err := db.GetSavedQuery(ctx, *r.SavedQueryID)
+		if err != nil {
+			return false, fmt.Errorf("loading saved query of report %d: %w", r.ID, err)
+		}
+		reach, err := db.UserHasSourceAccess(ctx, u.ID, sq.SourceID)
+		if err != nil {
+			return false, fmt.Errorf("checking source access: %w", err)
+		}
+		return reach, nil
+	case r.DashboardID != nil:
+		d, err := db.GetDashboard(ctx, *r.DashboardID)
+		if err != nil {
+			return false, fmt.Errorf("loading dashboard of report %d: %w", r.ID, err)
+		}
+		return UserCanViewDashboard(ctx, db, u, d)
+	}
+	return false, nil
 }
 
 func reloadReport(ctx context.Context, db store.StoreOps, id models.ReportID) (*models.Report, error) {
@@ -546,6 +637,14 @@ func buildReportResponses(ctx context.Context, d ReportDeps, p access.Principal,
 	for _, q := range queries {
 		queryNames[q.ID] = q.Name
 	}
+	dashboards, err := d.DB.ListDashboardSummaries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing dashboards: %w", err)
+	}
+	dashboardNames := make(map[int]string, len(dashboards))
+	for _, dash := range dashboards {
+		dashboardNames[dash.ID] = dash.Name
+	}
 	runs, err := d.DB.ListLatestReportRuns(ctx)
 	if err != nil {
 		return nil, err
@@ -556,8 +655,11 @@ func buildReportResponses(ctx context.Context, d ReportDeps, p access.Principal,
 	}
 	for _, r := range list {
 		resp := reportResponse(p, r, lastRuns[r.ID])
-		if r.SavedQueryID != nil {
+		switch {
+		case r.SavedQueryID != nil:
 			resp.Source.Name = queryNames[*r.SavedQueryID]
+		case r.DashboardID != nil:
+			resp.Source.Name = dashboardNames[*r.DashboardID]
 		}
 		if r.OwnerID != nil {
 			if u := owners[*r.OwnerID]; u != nil {
@@ -613,20 +715,63 @@ func BuildReportResponse(ctx context.Context, d ReportDeps, p access.Principal, 
 	if store.GetSettingWithDefault(ctx, d.DB, "alerts.smtp_host", "") == "" || store.GetSettingWithDefault(ctx, d.DB, "alerts.smtp_from", "") == "" {
 		resp.Warnings = append(resp.Warnings, ReportWarning{Code: "smtp_not_configured"})
 	}
-	if r.OwnerID != nil && r.SavedQueryID != nil {
-		sq, err := d.DB.GetSavedQuery(ctx, *r.SavedQueryID)
+	if r.OwnerID != nil {
+		locked, err := panelsLockedForOwner(ctx, d.DB, *r.OwnerID, r)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range locked {
+			resp.Warnings = append(resp.Warnings, ReportWarning{Code: "panel_locked_for_owner", PanelID: id})
+		}
+	}
+	return resp, nil
+}
+
+// panelsLockedForOwner lists the panels of the report's source that the
+// owner no longer reaches. A dashboard that no longer runs locks nothing:
+// its run fails with source_invalid instead.
+func panelsLockedForOwner(ctx context.Context, db store.StoreOps, ownerID models.UserID, r *models.Report) ([]string, error) {
+	switch {
+	case r.SavedQueryID != nil:
+		sq, err := db.GetSavedQuery(ctx, *r.SavedQueryID)
 		if err != nil {
 			return nil, fmt.Errorf("loading saved query %d: %w", *r.SavedQueryID, err)
 		}
-		reach, err := d.DB.UserHasSourceAccess(ctx, *r.OwnerID, sq.SourceID)
+		reach, err := db.UserHasSourceAccess(ctx, ownerID, sq.SourceID)
 		if err != nil {
 			return nil, fmt.Errorf("checking source access: %w", err)
 		}
 		if !reach {
-			resp.Warnings = append(resp.Warnings, ReportWarning{Code: "panel_locked_for_owner", PanelID: reportPanelID})
+			return []string{reportPanelID}, nil
 		}
+	case r.DashboardID != nil:
+		dash, err := db.GetDashboard(ctx, *r.DashboardID)
+		if err != nil {
+			return nil, fmt.Errorf("loading dashboard %d: %w", *r.DashboardID, err)
+		}
+		_, panels, err := reportDashboardPanels(dash, r.TabID)
+		if err != nil {
+			return nil, nil //nolint:nilerr // a dashboard that no longer runs fails its run, it locks no panel
+		}
+		var locked []string
+		for i := range panels {
+			member, err := IsTeamMember(ctx, db, panels[i].TeamID, ownerID)
+			if err != nil {
+				return nil, fmt.Errorf("checking team membership: %w", err)
+			}
+			linked := false
+			if member {
+				if linked, err = db.TeamHasSource(ctx, panels[i].TeamID, panels[i].SourceID); err != nil {
+					return nil, fmt.Errorf("checking team source link: %w", err)
+				}
+			}
+			if !linked {
+				locked = append(locked, panels[i].ID)
+			}
+		}
+		return locked, nil
 	}
-	return resp, nil
+	return nil, nil
 }
 
 // ListReportRuns returns runs of a report the caller may edit, newest

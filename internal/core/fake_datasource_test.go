@@ -22,6 +22,7 @@ type fakeProvider struct {
 	evaluateAlertFn func(ctx context.Context, source *models.Source, req datasource.AlertQueryRequest) (*models.QueryResult, error)
 	queryLogsFn     func(ctx context.Context, source *models.Source, req datasource.QueryRequest) (*models.QueryResult, error)
 	compileFn       func(ctx context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error)
+	histogramFn     func(ctx context.Context, source *models.Source, req datasource.HistogramRequest) (*datasource.HistogramResult, error)
 	// requests counts the query, histogram, field value and compile requests
 	// that reached the provider.
 	requests int
@@ -71,9 +72,12 @@ func (f *fakeProvider) GetSourceSchema(context.Context, *models.Source) ([]model
 	return nil, nil
 }
 
-func (f *fakeProvider) Histogram(context.Context, *models.Source, datasource.HistogramRequest) (*datasource.HistogramResult, error) {
+func (f *fakeProvider) Histogram(ctx context.Context, source *models.Source, req datasource.HistogramRequest) (*datasource.HistogramResult, error) {
 	f.requests++
-	return nil, nil
+	if f.histogramFn == nil {
+		return nil, nil
+	}
+	return f.histogramFn(ctx, source, req)
 }
 
 func (f *fakeProvider) GetFieldValues(context.Context, *models.Source, datasource.FieldValuesRequest) (*datasource.FieldValuesResult, error) {

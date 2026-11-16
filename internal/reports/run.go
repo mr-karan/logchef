@@ -56,17 +56,28 @@ func DeadlinesFrom(handler time.Time) Deadlines {
 // at the query deadline.
 var ErrQueryBudget = errors.New("timeout: the run's query budget ran out")
 
-// PanelJob runs one panel's query as the report owner.
+// PanelJob runs one panel's query as the report owner and renders it.
 type PanelJob struct {
 	ID    string
 	Title string
-	Run   func(ctx context.Context) (*models.QueryResult, error)
+	Run   func(ctx context.Context) (PanelOutput, error)
 }
 
-// PanelResult is one panel's query result or error, in job order.
+// PanelOutput is a panel that ran: the email form and what the run history
+// records about its query.
+type PanelOutput struct {
+	Panel      Panel
+	Rows       int
+	Truncation models.Truncation
+	// Empty means the query matched no rows: no table rows, no stat rows,
+	// or a count of zero.
+	Empty bool
+}
+
+// PanelResult is one panel's output or error, in job order.
 type PanelResult struct {
 	Job    PanelJob
-	Result *models.QueryResult
+	Output PanelOutput
 	Err    error
 }
 
@@ -102,7 +113,7 @@ func RunPanels(ctx context.Context, queryDeadline time.Time, jobs []PanelJob) []
 			case err != nil:
 				out[i].Err = err
 			default:
-				out[i].Result = res
+				out[i].Output = res
 			}
 		})
 	}
@@ -228,6 +239,11 @@ func DeliveryOutcome(panels []models.ReportPanelOutcome, deliveries []models.Rep
 	for i := range panels {
 		if panels[i].Status == models.ReportPanelFailed {
 			return models.ReportRunPartial, models.ReportReasonPanelFailed
+		}
+	}
+	for i := range panels {
+		if panels[i].Status == models.ReportPanelLocked {
+			return models.ReportRunPartial, models.ReportReasonPanelLocked
 		}
 	}
 	switch {

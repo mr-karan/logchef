@@ -2,6 +2,7 @@ package reports
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"html/template"
@@ -41,13 +42,21 @@ type Document struct {
 	ReportURL string
 }
 
-// Panel is one rendered panel. A failed panel has no Table; an empty one
-// has a Table with no rows.
+// Panel is one rendered panel. A failed, locked or unsupported panel has
+// no Table and no Stat; an empty table has a Table with no rows.
 type Panel struct {
 	ID     string
 	Title  string
 	Table  *Table
+	Stat   *Tile
 	Failed bool
+	// Locked marks a panel whose source the report owner no longer reaches.
+	Locked bool
+	// Unsupported marks a visualization that email does not show.
+	Unsupported bool
+	// Note qualifies the panel's data in its header: its own range, or a
+	// fixed window.
+	Note string
 }
 
 // Rendered is a body that fits MaxBodyBytes.
@@ -106,10 +115,10 @@ func cutIDs(panels []Panel, cut []bool) []string {
 
 // truncationLabel is the RFC 0003 label of a cut result. A sum over a cut
 // result is wrong without it.
-func truncationLabel(t *Table) string {
-	switch t.Truncation {
+func truncationLabel(t models.Truncation, rows int) string {
+	switch t {
 	case models.TruncationRows:
-		return fmt.Sprintf("First %d rows", t.TotalRows)
+		return fmt.Sprintf("First %d rows", rows)
 	case models.TruncationBytes:
 		return "Cut by size"
 	case models.TruncationUnknown:
@@ -121,26 +130,34 @@ func truncationLabel(t *Table) string {
 
 // panelView is a panel as the templates print it.
 type panelView struct {
-	Title      string
-	Cut        bool
-	Failed     bool
-	Empty      bool
-	Columns    []string
-	Rows       [][]Cell
-	MoreRows   int
-	Truncation string
+	Title       string
+	Note        string
+	Cut         bool
+	Failed      bool
+	Locked      bool
+	Unsupported bool
+	Stat        *Tile
+	Empty       bool
+	Columns     []string
+	Rows        [][]Cell
+	MoreRows    int
+	Truncation  string
 }
 
 func panelViews(doc Document, rows int, cut []bool) []panelView {
 	views := make([]panelView, len(doc.Panels))
 	for i, p := range doc.Panels {
-		v := panelView{Title: p.Title, Cut: cut[i], Failed: p.Failed}
+		v := panelView{Title: p.Title, Note: p.Note, Cut: cut[i], Failed: p.Failed, Locked: p.Locked, Unsupported: p.Unsupported}
+		if p.Stat != nil && !cut[i] {
+			v.Stat = p.Stat
+			v.Truncation = truncationLabel(p.Stat.Truncation, p.Stat.Rows)
+		}
 		if p.Table != nil && !cut[i] {
 			shown := p.Table.Rows[:min(rows, len(p.Table.Rows))]
 			v.Columns, v.Rows = p.Table.Columns, shown
 			v.Empty = p.Table.TotalRows == 0
 			v.MoreRows = p.Table.TotalRows - len(shown)
-			v.Truncation = truncationLabel(p.Table)
+			v.Truncation = truncationLabel(p.Table.Truncation, p.Table.TotalRows)
 		}
 		views[i] = v
 	}
@@ -162,9 +179,15 @@ var htmlBody = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 </td></tr>
 {{range .Panels}}<tr><td style="padding:16px 24px;border-bottom:1px solid #e4e4e7;">
 <div style="font-size:15px;font-weight:bold;margin-bottom:8px;">{{.Title}}</div>
-{{if .Cut}}<div style="font-size:13px;color:#52525b;">This panel was left out to keep the email small.{{if $.SourceURL}} <a href="{{$.SourceURL}}" style="color:#2563eb;">Open it in Logchef</a>.{{end}}</div>
+{{if .Note}}<div style="font-size:12px;color:#71717a;margin:-4px 0 8px;">{{.Note}}</div>
+{{end}}{{if .Cut}}<div style="font-size:13px;color:#52525b;">This panel was left out to keep the email small.{{if $.SourceURL}} <a href="{{$.SourceURL}}" style="color:#2563eb;">Open it in Logchef</a>.{{end}}</div>
+{{else if .Locked}}<div style="font-size:13px;color:#52525b;">The report owner no longer has access to this panel.</div>
+{{else if .Unsupported}}<div style="font-size:13px;color:#52525b;">This panel is not shown in email.{{if $.SourceURL}} <a href="{{$.SourceURL}}" style="color:#2563eb;">Open it in Logchef</a>.{{end}}</div>
 {{else if .Failed}}<div style="font-size:13px;color:#b91c1c;">This panel failed to load.</div>
-{{else if .Empty}}<div style="font-size:13px;color:#52525b;">No rows</div>
+{{else if .Stat}}{{if .Truncation}}<div style="font-size:12px;color:#a16207;margin-bottom:6px;">{{.Truncation}}</div>
+{{end}}<div style="font-size:28px;font-weight:bold;">{{if .Stat.Value}}{{.Stat.Value}}{{else}}No data{{end}}</div>
+{{if .Stat.RowLabel}}<div style="font-size:12px;color:#52525b;margin-top:4px;">{{.Stat.RowLabel}}</div>
+{{end}}{{else if .Empty}}<div style="font-size:13px;color:#52525b;">No rows</div>
 {{else}}{{if .Truncation}}<div style="font-size:12px;color:#a16207;margin-bottom:6px;">{{.Truncation}}</div>
 {{end}}<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:12px;">
 <tr>{{range .Columns}}<th align="left" style="padding:4px 6px;border-bottom:1px solid #d4d4d8;background:#fafafa;">{{.}}</th>{{end}}</tr>
@@ -206,13 +229,30 @@ func renderText(doc Document, rows int, cut []bool) string {
 	var b strings.Builder
 	from, to := formatWindowEdge(doc.Window.Start, doc.Location), formatWindowEdge(doc.Window.End, doc.Location)
 	fmt.Fprintf(&b, "%s\n%s to %s (%s)\n", doc.ReportName, from, to, doc.Location)
-	for _, p := range panelViews(doc, rows, cut) {
+	views := panelViews(doc, rows, cut)
+	for i := range views {
+		p := &views[i]
 		fmt.Fprintf(&b, "\n== %s ==\n", p.Title)
+		if p.Note != "" {
+			b.WriteString(p.Note + "\n")
+		}
 		switch {
 		case p.Cut:
 			b.WriteString("This panel was left out to keep the email small.\n")
+		case p.Locked:
+			b.WriteString("The report owner no longer has access to this panel.\n")
+		case p.Unsupported:
+			b.WriteString("This panel is not shown in email.\n")
 		case p.Failed:
 			b.WriteString("This panel failed to load.\n")
+		case p.Stat != nil:
+			if p.Truncation != "" {
+				b.WriteString(p.Truncation + "\n")
+			}
+			b.WriteString(cmp.Or(p.Stat.Value, "No data") + "\n")
+			if p.Stat.RowLabel != "" {
+				b.WriteString(p.Stat.RowLabel + "\n")
+			}
 		case p.Empty:
 			b.WriteString("No rows\n")
 		default:

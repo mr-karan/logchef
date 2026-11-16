@@ -1,0 +1,28 @@
+{
+  "comment": "Stat number formats of RFC 0003 in the en-US locale. internal/reports and frontend/src/utils/numberFormat.ts both run these cases, so a change on one side fails the other side's test. value is an exact decimal literal; float is a number from a Float column.",
+  "cases": [
+    { "name": "default rounds to two decimals and groups", "value": "1234.5678", "format": {}, "text": "1,234.57" },
+    { "name": "decimals pads", "value": "5", "format": { "decimals": 2 }, "text": "5.00" },
+    { "name": "half rounds away from zero", "value": "2.5", "format": { "decimals": 0 }, "text": "3" },
+    { "name": "negative half rounds away from zero", "value": "-2.345", "format": {}, "text": "-2.35" },
+    { "name": "negative below one keeps its sign", "value": "-0.4", "format": {}, "text": "-0.4" },
+    { "name": "rounds to zero without a sign", "value": "-0.0004", "format": { "decimals": 3 }, "text": "0.000" },
+    { "name": "grouping off", "value": "1234567", "format": { "grouping": false }, "text": "1234567" },
+    { "name": "30-digit integer keeps every digit", "value": "123456789012345678901234567890", "format": {}, "text": "123,456,789,012,345,678,901,234,567,890" },
+    { "name": "exponent literal", "value": "1.5e3", "format": {}, "text": "1,500" },
+    { "name": "percent", "value": "12.34", "format": { "unit": "percent", "decimals": 1 }, "text": "12.3%" },
+    { "name": "percent without decimals", "value": "50", "format": { "unit": "percent" }, "text": "50%" },
+    { "name": "bytes below a KiB", "value": "512", "format": { "unit": "bytes" }, "text": "512 B" },
+    { "name": "bytes in KiB", "value": "1536", "format": { "unit": "bytes" }, "text": "1.5 KiB" },
+    { "name": "bytes in GiB padded", "value": "1073741824", "format": { "unit": "bytes", "decimals": 2 }, "text": "1.00 GiB" },
+    { "name": "milliseconds to minutes", "value": "90000", "format": { "unit": "duration_ms" }, "text": "1.5 min" },
+    { "name": "seconds to hours", "value": "7200", "format": { "unit": "duration_s" }, "text": "2 h" },
+    { "name": "compact millions", "value": "1234567", "format": { "notation": "compact" }, "text": "1.23M" },
+    { "name": "compact rounds up into the next suffix", "value": "999.999", "format": { "notation": "compact" }, "text": "1K" },
+    { "name": "standard notation is not compact", "value": "1234567", "format": { "notation": "standard" }, "text": "1,234,567" },
+    { "name": "scale", "value": "12345", "format": { "scale": 0.001, "decimals": 3 }, "text": "12.345" },
+    { "name": "prefix and suffix", "value": "1000", "format": { "prefix": "$", "suffix": " USD" }, "text": "$1,000 USD" },
+    { "name": "float scaled in binary", "float": 0.1, "format": { "scale": 3 }, "text": "0.3" },
+    { "name": "float average", "float": 2.6666666666666665, "format": { "decimals": 4 }, "text": "2.6667" }
+  ]
+}

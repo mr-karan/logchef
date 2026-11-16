@@ -213,3 +213,19 @@ func TestRenderCutsPanelsFromTheEnd(t *testing.T) {
 		t.Errorf("a body that cannot fit = %v, want ErrBodyTooLarge", err)
 	}
 }
+
+func TestRenderLabelsATruncatedStat(t *testing.T) {
+	doc := Document{
+		ReportName: "Stats", Location: time.UTC, Window: Window{Start: time.Unix(0, 0), End: time.Unix(3600, 0)},
+		Panels: []Panel{{ID: "s", Title: "Total", Stat: &Tile{Value: "1,000", Rows: 1000, Truncation: models.TruncationRows}}},
+	}
+	r, err := Render(doc, 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"html": r.HTML, "text": r.Text} {
+		if !strings.Contains(body, "First 1000 rows") {
+			t.Errorf("%s body lacks the truncation label", name)
+		}
+	}
+}

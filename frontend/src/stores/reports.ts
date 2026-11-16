@@ -3,23 +3,28 @@ import { computed } from "vue";
 import { useBaseStore } from "./base";
 import { reportsApi, type Report, type ReportInput, type ReportPreview, type ReportRun, type ReportScope } from "@/api/reports";
 import { savedQueriesApi, type SavedQuery } from "@/api/savedQueries";
+import { dashboardsApi, type Dashboard, type DashboardSummary } from "@/api/dashboards";
 import { i18n } from "@/i18n";
 
 interface ReportsState {
   reports: Report[];
   scope: ReportScope;
   savedQueries: SavedQuery[];
+  dashboards: DashboardSummary[];
+  /** The tabs of each dashboard the editor picked, by dashboard id. */
+  dashboardTabs: Record<number, { id: string; title: string }[]>;
   runs: Record<number, ReportRun[]>;
 }
 
 export const RUNS_PAGE = 20;
 
 export const useReportsStore = defineStore("reports", () => {
-  const state = useBaseStore<ReportsState>({ reports: [], scope: "mine", savedQueries: [], runs: {} });
+  const state = useBaseStore<ReportsState>({ reports: [], scope: "mine", savedQueries: [], dashboards: [], dashboardTabs: {}, runs: {} });
 
   const reports = computed(() => state.data.value.reports);
   const scope = computed(() => state.data.value.scope);
   const savedQueries = computed(() => state.data.value.savedQueries);
+  const dashboards = computed(() => state.data.value.dashboards);
 
   async function fetchReports(next: ReportScope = state.data.value.scope) {
     state.data.value.scope = next;
@@ -50,6 +55,33 @@ export const useReportsStore = defineStore("reports", () => {
         state.data.value.savedQueries = data ?? [];
       },
     });
+  }
+
+  // The source picker lists the dashboards the caller can see.
+  async function fetchDashboards() {
+    return await state.callApi<DashboardSummary[]>({
+      apiCall: () => dashboardsApi.list(),
+      operationKey: "fetchReportDashboards",
+      showToast: false,
+      onSuccess: (data) => {
+        state.data.value.dashboards = data ?? [];
+      },
+    });
+  }
+
+  async function fetchDashboardTabs(id: number) {
+    return await state.callApi<Dashboard>({
+      apiCall: () => dashboardsApi.get(id),
+      operationKey: `fetchReportDashboardTabs-${id}`,
+      showToast: false,
+      onSuccess: (data) => {
+        if (data && !data.corrupt) state.data.value.dashboardTabs[id] = data.panels.tabs.map((tab) => ({ id: tab.id, title: tab.title }));
+      },
+    });
+  }
+
+  function tabsOf(id: number | null): { id: string; title: string }[] {
+    return id === null ? [] : state.data.value.dashboardTabs[id] ?? [];
   }
 
   function replace(report: Report | null) {
@@ -151,9 +183,13 @@ export const useReportsStore = defineStore("reports", () => {
     reports,
     scope,
     savedQueries,
+    dashboards,
     isLoadingOperation: state.isLoadingOperation,
     fetchReports,
     fetchSavedQueries,
+    fetchDashboards,
+    fetchDashboardTabs,
+    tabsOf,
     getReport,
     createReport,
     updateReport,

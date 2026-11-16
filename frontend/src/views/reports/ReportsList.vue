@@ -60,16 +60,18 @@ function when(value: string): string {
 
 // --- Editor -----------------------------------------------------------------
 // /reports/:id opens a report (the link in every report email), and
-// ?saved_query=<id> starts a new report on that saved query.
+// ?saved_query=<id> or ?dashboard=<id> starts a new report on that source.
 const editorOpen = ref(false);
 const editing = ref<Report | null>(null);
 const copyOf = ref<Report | null>(null);
 const presetQuery = ref<number | null>(null);
+const presetDashboard = ref<number | null>(null);
 
-function openNew(savedQueryId: number | null = null) {
+function openNew(savedQueryId: number | null = null, dashboardId: number | null = null) {
   editing.value = null;
   copyOf.value = null;
   presetQuery.value = savedQueryId;
+  presetDashboard.value = dashboardId;
   editorOpen.value = true;
 }
 
@@ -95,12 +97,14 @@ async function openFromRoute() {
     return;
   }
   const savedQuery = Number(route.query.saved_query);
-  if (Number.isInteger(savedQuery) && savedQuery > 0) openNew(savedQuery);
+  if (Number.isInteger(savedQuery) && savedQuery > 0) return openNew(savedQuery);
+  const dashboard = Number(route.query.dashboard);
+  if (Number.isInteger(dashboard) && dashboard > 0) openNew(null, dashboard);
 }
 
 // Closing the editor leaves the deep link, so a reload does not reopen it.
 watch(editorOpen, (isOpen) => {
-  if (!isOpen && (route.params.id || route.query.saved_query)) void router.replace({ name: "Reports" });
+  if (!isOpen && (route.params.id || route.query.saved_query || route.query.dashboard)) void router.replace({ name: "Reports" });
 });
 
 // --- History ----------------------------------------------------------------
@@ -235,6 +239,7 @@ onMounted(async () => {
       :report="editing"
       :copy-of="copyOf"
       :saved-query-id="presetQuery"
+      :dashboard-id="presetDashboard"
       @history="openHistory"
     />
     <ReportHistoryDrawer v-model:open="historyOpen" :report="historyReport" />

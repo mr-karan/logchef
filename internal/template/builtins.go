@@ -227,3 +227,26 @@ func logQLTimeMacroError(name string) error {
 func reservedNameError(name string) error {
 	return fmt.Errorf("variable name %s is reserved for a built-in macro", name)
 }
+
+// UsesTimeRange reports whether a ClickHouse SQL query takes the dashboard
+// range: through {{__time_filter}}, or {{__from}} with {{__to}}, outside
+// comments, strings, quoted identifiers and heredocs. It is the rule of the
+// dashboard's "fixed window" chip (panelTimeBound in the frontend).
+func UsesTimeRange(query string) bool {
+	used := map[string]bool{}
+	for i := 0; i < len(query); {
+		if end := quotedOrCommentEnd(query, i, ClickHouseSQL); end > i {
+			i = end
+			continue
+		}
+		if strings.HasPrefix(query[i:], "{{") {
+			if loc := variablePattern.FindStringSubmatchIndex(query[i:]); len(loc) >= 4 && loc[0] == 0 {
+				used[query[i+loc[2]:i+loc[3]]] = true
+				i += loc[1]
+				continue
+			}
+		}
+		i++
+	}
+	return used["__time_filter"] || used["__from"] && used["__to"]
+}
