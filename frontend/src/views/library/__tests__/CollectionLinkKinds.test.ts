@@ -207,18 +207,18 @@ describe("CollectionDetailPane link kinds", () => {
 
   it("offers move, conversion and removal on the caller's own pin", async () => {
     const root = await render();
-    expect(await openRowMenu(root, "My query")).toEqual(["Move", "Let collection editors edit", "Remove"]);
+    expect(await openRowMenu(root, "My query")).toEqual(["Schedule report", "Move", "Let collection editors edit", "Remove"]);
   });
 
-  it("offers nothing on someone else's managed link", async () => {
+  it("offers only a report on someone else's managed link", async () => {
     const root = await render();
-    expect(rowFor(root, "Their query").querySelector("button[aria-label='Actions']")).toBeNull();
+    expect(await openRowMenu(root, "Their query")).toEqual(["Schedule report"]);
   });
 
   it("lets a global admin convert and remove any link", async () => {
     mockUser.value = user("admin");
     const root = await render();
-    expect(await openRowMenu(root, "Their query")).toEqual(["Move", "Stop delegating edit", "Remove"]);
+    expect(await openRowMenu(root, "Their query")).toEqual(["Schedule report", "Move", "Stop delegating edit", "Remove"]);
     await clickMenuItem("Stop delegating edit");
     expect(server.updateRequests).toEqual([{ collection: 1, query: 2, kind: "pin" }]);
   });

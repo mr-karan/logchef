@@ -49,6 +49,7 @@ import {
   FolderOpen,
   KeyRound,
   LayoutDashboard,
+  CalendarClock,
   Activity,
   ExternalLink,
   LockKeyhole,
@@ -166,6 +167,11 @@ const allMainNavItems: NavItem[] = [
     get title() { return t('ui.dashboards'); },
     icon: LayoutDashboard,
     url: "/dashboards",
+  },
+  {
+    get title() { return t('reports.title'); },
+    icon: CalendarClock,
+    url: "/reports",
   },
 ];
 

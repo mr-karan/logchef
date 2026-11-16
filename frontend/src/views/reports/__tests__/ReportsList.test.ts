@@ -1,0 +1,209 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createApp, nextTick, type App } from "vue";
+import { createPinia } from "pinia";
+import { createMemoryHistory, createRouter } from "vue-router";
+import { i18n } from "@/i18n";
+
+const mocks = vi.hoisted(() => ({
+  reports: {
+    list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn(),
+    pause: vi.fn(), resume: vi.fn(), claim: vi.fn(), run: vi.fn(), preview: vi.fn(), runs: vi.fn(),
+  },
+  savedQueries: { list: vi.fn() },
+}));
+
+vi.mock("@/api/reports", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/reports")>();
+  return { ...actual, reportsApi: mocks.reports };
+});
+vi.mock("@/api/savedQueries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/savedQueries")>();
+  return { ...actual, savedQueriesApi: mocks.savedQueries };
+});
+vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ user: { id: 1, role: "member" } }) }));
+
+import ReportsList from "../ReportsList.vue";
+import type { Report, ReportInput, ReportRun } from "@/api/reports";
+import type { SavedQuery } from "@/api/savedQueries";
+
+const savedQuery: SavedQuery = {
+  id: 5, source_id: 2, name: "5xx by status", description: "", query_language: "clickhouse-sql", editor_mode: "native",
+  query_content: JSON.stringify({ content: "SELECT 1 WHERE host = {{host}}", variables: [{ name: "host", label: "Host", type: "text", value: "", defaultValue: "api-1" }] }),
+  created_at: "", updated_at: "", source_name: "app_logs",
+};
+
+function report(input: ReportInput, id = 9): Report {
+  return {
+    id, name: input.name, source: { ...input.source, name: savedQuery.name }, schedule: input.schedule, timezone: input.timezone,
+    time_range: input.time_range, range_anchor: input.range_anchor, variables: input.variables, max_rows: input.max_rows,
+    skip_if_empty: input.skip_if_empty, owner: { id: 1, name: "Owner", email: "owner@example.com" }, state: "active",
+    pause_reason: "", last_run: null, can_edit: true, warnings: [], created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-16T00:00:00Z",
+  };
+}
+
+const sentRun: ReportRun = {
+  id: 3, report_id: 9, trigger: "manual", scheduled_for: "2026-11-16T03:30:00Z", status: "sent", reason: "",
+  panels: [{ panel_id: "query", title: "5xx by status", status: "ok", rows: 4 }],
+  deliveries: [{ class: "user", target: "1", via: "direct", status: "sent", attempts: 1 }],
+  started_at: "2026-11-16T03:30:00Z", finished_at: "2026-11-16T03:30:02Z",
+};
+
+async function settle() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await nextTick();
+}
+
+function setValue(el: HTMLInputElement | HTMLSelectElement, value: string) {
+  el.value = value;
+  el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+}
+
+function button(label: string): HTMLButtonElement {
+  const found = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label);
+  if (!found) throw new Error(`button ${label} not rendered`);
+  return found;
+}
+
+describe("ReportsList", () => {
+  let app: App;
+  let host: HTMLDivElement;
+
+  async function mount(path: string, rows: Report[] = []) {
+    mocks.reports.list.mockResolvedValue({ status: "success", data: rows });
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/reports/:id?", name: "Reports", component: ReportsList }] });
+    await router.push(path);
+    app = createApp(ReportsList);
+    app.use(createPinia()).use(i18n).use(router).mount(host);
+    await settle();
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+    mocks.savedQueries.list.mockResolvedValue({ status: "success", data: [savedQuery] });
+    mocks.reports.create.mockImplementation(async (input: ReportInput) => ({ status: "success", data: report(input) }));
+    mocks.reports.run.mockResolvedValue({ status: "success", data: { ...sentRun, status: "running" } });
+    mocks.reports.runs.mockResolvedValue({ status: "success", data: [sentRun] });
+    mocks.reports.remove.mockResolvedValue({ status: "success", data: null });
+  });
+
+  afterEach(() => {
+    app?.unmount();
+    host?.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("creates a report on a saved query, sends a test and shows the run", async () => {
+    await mount("/reports?saved_query=5");
+    await vi.waitFor(() => expect(document.querySelector("#report-source")).not.toBeNull());
+    const source = document.querySelector<HTMLSelectElement>("#report-source")!;
+    await vi.waitFor(() => expect(source.value).toBe("5"));
+    expect(document.querySelector<HTMLInputElement>("#report-var-host")!.placeholder).toBe("api-1");
+
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "Daily 5xx");
+    setValue(document.querySelector<HTMLSelectElement>("#report-frequency")!, "weekly");
+    await settle();
+    setValue(document.querySelector<HTMLSelectElement>("#report-frequency")!, "hourly");
+    setValue(document.querySelector<HTMLSelectElement>("#report-range")!, "today");
+    await settle();
+    button(i18n.global.t("reports.create")).click();
+    await settle();
+
+    expect(mocks.reports.create).toHaveBeenCalledTimes(1);
+    const input = mocks.reports.create.mock.calls[0][0] as ReportInput;
+    expect(input.source).toEqual({ kind: "saved_query", saved_query_id: 5 });
+    expect(input.schedule).toEqual({ frequency: "hourly", minute: 0 });
+    expect(input.time_range).toBe("today");
+    expect(input.range_anchor).toBe("send_time");
+    expect(input.variables).toEqual({});
+
+    button(i18n.global.t("reports.sendTest")).click();
+    await settle();
+    expect(mocks.reports.run).toHaveBeenCalledWith(9, "me");
+    expect(mocks.reports.create).toHaveBeenCalledTimes(1);
+
+    button(i18n.global.t("reports.history")).click();
+    await settle();
+    await vi.waitFor(() => expect(document.querySelector('[data-run-status="sent"]')).not.toBeNull());
+    expect(mocks.reports.runs).toHaveBeenCalledWith(9, 0, 20);
+    expect(document.querySelector('[data-run-status="sent"]')!.textContent).toContain(i18n.global.t("reports.status_sent"));
+    // The list's last run follows the history the drawer loaded.
+    expect(host.querySelector('[data-report-id="9"]')!.textContent).toContain(i18n.global.t("reports.status_sent"));
+  });
+
+  it("takes a list default and keeps a stored list as a list", async () => {
+    const listQuery: SavedQuery = {
+      ...savedQuery, id: 6, name: "by hosts",
+      query_content: JSON.stringify({ content: "SELECT 1 WHERE host IN ({{hosts}})", variables: [{ name: "hosts", label: "Hosts", type: "text", inputType: "multiselect", value: [], defaultValue: ["api-1", "api-2"] }] }),
+    };
+    mocks.savedQueries.list.mockResolvedValue({ status: "success", data: [listQuery] });
+    const existing = report({ name: "Hosts", source: { kind: "saved_query", saved_query_id: 6 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: { hosts: ["web-1", "web-2"] }, max_rows: 25, skip_if_empty: false }, 7);
+    mocks.reports.update.mockImplementation(async (_id: number, input: ReportInput) => ({ status: "success", data: report(input, 7) }));
+    await mount("/reports/7", [existing]);
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>("#report-var-hosts")?.value).toBe("web-1, web-2"));
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "Hosts daily");
+    await settle();
+    button(i18n.global.t("ui.save")).click();
+    await settle();
+    expect((mocks.reports.update.mock.calls[0][1] as ReportInput).variables).toEqual({ hosts: ["web-1", "web-2"] });
+
+    setValue(document.querySelector<HTMLInputElement>("#report-var-hosts")!, "");
+    await settle();
+    expect(button(i18n.global.t("ui.save")).disabled).toBe(false);
+    button(i18n.global.t("ui.save")).click();
+    await settle();
+    expect((mocks.reports.update.mock.calls[1][1] as ReportInput).variables).toEqual({});
+  });
+
+  it("does not let a save that finishes late take over another report", async () => {
+    const base = { source: { kind: "saved_query" as const, saved_query_id: 5 }, schedule: { frequency: "daily" as const, hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time" as const, variables: {}, max_rows: 25, skip_if_empty: false };
+    const a = report({ ...base, name: "A" }, 1);
+    const b = report({ ...base, name: "B" }, 2);
+    let finishA: (value: unknown) => void = () => {};
+    mocks.reports.update.mockImplementationOnce(() => new Promise((resolve) => { finishA = resolve; }));
+    mocks.reports.update.mockImplementation(async (id: number, input: ReportInput) => ({ status: "success", data: report(input, id) }));
+    await mount("/reports", [a, b]);
+    const edit = (id: number) => host.querySelector<HTMLButtonElement>(`[data-report-id="${id}"] button[aria-label="${i18n.global.t("ui.edit")}"]`)!;
+
+    edit(1).click();
+    await settle();
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "A changed");
+    await settle();
+    button(i18n.global.t("ui.save")).click();
+    await settle();
+    button(i18n.global.t("ui.close")).click();
+    await settle();
+    edit(2).click();
+    await settle();
+    finishA({ status: "success", data: report({ ...base, name: "A changed" }, 1) });
+    await settle();
+
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "B edited");
+    await settle();
+    button(i18n.global.t("ui.save")).click();
+    await settle();
+    expect(mocks.reports.update.mock.calls.map((c) => [c[0], (c[1] as ReportInput).name])).toEqual([[1, "A changed"], [2, "B edited"]]);
+  });
+
+  it("deletes a report only after the confirm dialog", async () => {
+    const existing = report({ name: "Nightly", source: { kind: "saved_query", saved_query_id: 5 }, schedule: { frequency: "daily", hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time", variables: {}, max_rows: 25, skip_if_empty: false }, 4);
+    await mount("/reports", [existing]);
+    expect(host.textContent).toContain("Nightly");
+    const trigger = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.global.t("ui.actions")}"]`)!;
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[role=menu]")).not.toBeNull());
+    const item = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((el) => el.textContent?.trim() === i18n.global.t("ui.delete"))!;
+    item.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+    item.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse" }));
+    item.click();
+    await settle();
+    expect(mocks.reports.remove).not.toHaveBeenCalled();
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>("[role=alertdialog] button")].find((b) => b.textContent?.trim() === i18n.global.t("ui.delete"))!;
+    confirm.click();
+    await settle();
+    expect(mocks.reports.remove).toHaveBeenCalledWith(4);
+    await vi.waitFor(() => expect(host.textContent).not.toContain("Nightly"));
+  });
+});

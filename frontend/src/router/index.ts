@@ -141,6 +141,23 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // Scheduled reports (RFC 0008). /reports/:id opens a report from the link
+  // in its email.
+  {
+    path: "/reports",
+    meta: {
+      requiresAuth: true,
+    },
+    children: [
+      {
+        path: ":id?",
+        name: "Reports",
+        component: lazy("ReportsList", () => import("@/views/reports/ReportsList.vue")),
+        meta: { title: "routes.reports" },
+      },
+    ],
+  },
+
   // Admin Section. Per-route gates: `requiresAdmin` blocks non-global admins;
   // `requiresAnyTeamAdmin` lets team admins through for their team's pages.
   // The parent has no role meta — children declare their own access.
