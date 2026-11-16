@@ -25,7 +25,7 @@ func TestTransitionTwoGroups(t *testing.T) {
 		ok     = models.AlertInstanceStateOK
 		firing = models.AlertInstanceStateFiring
 	)
-	rule := Rule{Operator: models.AlertThresholdGreaterThan, Threshold: 10}
+	rule := Rule{Operator: models.AlertThresholdGreaterThan, Threshold: 10, NoData: models.AlertNoDataZero, Grouped: true}
 	a := map[string]string{"service": "a"}
 	b := map[string]string{"service": "b"}
 	sample := func(key string, group map[string]string, value float64) Sample {
@@ -34,7 +34,10 @@ func TestTransitionTwoGroups(t *testing.T) {
 
 	var tracked []Instance
 	tick := func(samples ...Sample) []Change {
-		changes := Transition(rule, tracked, samples)
+		changes, err := Transition(rule, tracked, samples, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
 		tracked = tracked[:0]
 		for _, change := range changes {
 			if change.To == firing {
@@ -54,7 +57,7 @@ func TestTransitionTwoGroups(t *testing.T) {
 			samples: []Sample{sample(`["a"]`, a, 12), sample(`["b"]`, b, 3)},
 			want: []Change{
 				{GroupKey: `["a"]`, Group: a, From: ok, To: firing, Value: 12, Sampled: true},
-				{GroupKey: `["b"]`, Group: b, From: ok, To: ok, Value: 3, Sampled: true},
+				{GroupKey: `["b"]`, Group: b, From: ok, To: ok, Value: 3, Sampled: true, Untracked: true},
 			},
 		},
 		{
@@ -69,7 +72,7 @@ func TestTransitionTwoGroups(t *testing.T) {
 			name:    "a resolves, b keeps firing",
 			samples: []Sample{sample(`["a"]`, a, 4), sample(`["b"]`, b, 30)},
 			want: []Change{
-				{GroupKey: `["a"]`, Group: a, From: firing, To: ok, Value: 4, Sampled: true},
+				{GroupKey: `["a"]`, Group: a, From: firing, To: ok, Value: 4, Sampled: true, Untracked: true},
 				{GroupKey: `["b"]`, Group: b, From: firing, To: firing, Value: 30, Sampled: true},
 			},
 		},
@@ -77,8 +80,8 @@ func TestTransitionTwoGroups(t *testing.T) {
 			name:    "b stops reporting and compares 0",
 			samples: []Sample{sample(`["a"]`, a, 1)},
 			want: []Change{
-				{GroupKey: `["a"]`, Group: a, From: ok, To: ok, Value: 1, Sampled: true},
-				{GroupKey: `["b"]`, Group: b, From: firing, To: ok},
+				{GroupKey: `["a"]`, Group: a, From: ok, To: ok, Value: 1, Sampled: true, Untracked: true},
+				{GroupKey: `["b"]`, Group: b, From: firing, To: ok, Untracked: true},
 			},
 		},
 	} {

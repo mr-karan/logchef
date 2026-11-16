@@ -105,11 +105,8 @@ func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.S
 	alert.Description = strings.TrimSpace(alert.Description)
 	alert.Query = strings.TrimSpace(alert.Query)
 	alert.ConditionJSON = strings.TrimSpace(alert.ConditionJSON)
-	if alert.GroupBy, err = normalizeGroupBy(alert.GroupBy); err != nil {
+	if err := normalizeGroupingAndPolicy(alert); err != nil {
 		return err
-	}
-	if len(alert.GroupBy) > 0 && alert.EditorMode != models.AlertEditorModeNative {
-		return fmt.Errorf("group_by needs a native query; a LogchefQL condition is evaluated ungrouped")
 	}
 
 	switch alert.EditorMode {
@@ -147,6 +144,23 @@ func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.S
 	return nil
 }
 
+// normalizeGroupingAndPolicy checks group_by against the editor mode and
+// defaults an absent no_data_policy to zero.
+func normalizeGroupingAndPolicy(alert *models.Alert) error {
+	var err error
+	if alert.GroupBy, err = normalizeGroupBy(alert.GroupBy); err != nil {
+		return err
+	}
+	if len(alert.GroupBy) > 0 && alert.EditorMode != models.AlertEditorModeNative {
+		return fmt.Errorf("group_by needs a native query; a LogchefQL condition is evaluated ungrouped")
+	}
+	alert.NoDataPolicy = alert.NoDataPolicy.OrZero()
+	if !alert.NoDataPolicy.Valid() {
+		return fmt.Errorf("invalid no_data_policy %q: use zero, no_data or keep", alert.NoDataPolicy)
+	}
+	return nil
+}
+
 // CreateAlert creates a new alert rule for the specified source, owned by the
 // user, with the destinations the user may use, together with the job that
 // evaluates it.
@@ -172,6 +186,8 @@ func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 		Annotations:       sanitizeStringMap(req.Annotations),
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		GroupBy:           req.GroupBy,
+		NoDataPolicy:      req.NoDataPolicy,
+		NotifyOnResolve:   req.NotifyOnResolve == nil || *req.NotifyOnResolve,
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
 	}
@@ -352,6 +368,12 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	if req.GroupBy != nil {
 		alert.GroupBy = *req.GroupBy
 	}
+	if req.NoDataPolicy != nil {
+		alert.NoDataPolicy = *req.NoDataPolicy
+	}
+	if req.NotifyOnResolve != nil {
+		alert.NotifyOnResolve = *req.NotifyOnResolve
+	}
 	if req.IsActive != nil {
 		alert.IsActive = *req.IsActive
 	}
@@ -361,7 +383,7 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 // row is written before the alert row, the order in which an evaluation's
 // commit locks them, so an edit cannot deadlock with it. Requested
 // destinations replace the rule's; a group_by change closes the open
-// episodes.
+// episodes and drops every instance.
 func writeAlertUpdate(ctx context.Context, tx store.StoreOps, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) error {
 	if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert)); err != nil {
 		return err
@@ -382,10 +404,17 @@ func writeAlertUpdate(ctx context.Context, tx store.StoreOps, user *models.User,
 		return nil
 	}
 	open, err := tx.ListOpenAlertHistory(ctx, alert.ID)
-	if err != nil || len(open) == 0 {
+	if err != nil {
 		return err
 	}
-	return tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed")
+	if len(open) > 0 {
+		if err := tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed"); err != nil {
+			return err
+		}
+	}
+	// The no_data and keep policies also track ok groups, which have no
+	// episode to close.
+	return tx.DeleteAlertInstances(ctx, alert.ID)
 }
 
 // validateFrequency applies the floor of the rule's job schedule. A stored rule
@@ -473,10 +502,14 @@ func ListAlertInstances(ctx context.Context, db store.StoreOps, alertID models.A
 }
 
 func instanceStateRank(state models.AlertInstanceState) int {
-	if state == models.AlertInstanceStateFiring {
+	switch state {
+	case models.AlertInstanceStateFiring:
 		return 0
+	case models.AlertInstanceStateNoData:
+		return 1
+	default:
+		return 2
 	}
-	return 1
 }
 
 // UserCanEditAlert returns true if the user is the creator or a global admin.
@@ -565,6 +598,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		FrequencySeconds:  60,
 		Severity:          models.AlertSeverityWarning,
 		GroupBy:           req.GroupBy,
+		NoDataPolicy:      req.NoDataPolicy,
 	}
 	if err := validateAlertModel(ctx, db, ds, sourceID, tempAlert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
@@ -597,15 +631,18 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	// non-empty result is still a genuine error.
 	value, err := util.ExtractFirstNumeric(result)
 	var warnings []string
-	if len(result.Logs) == 0 {
-		warnings = append(warnings, noRowsWarning)
+	var thresholdMet bool
+	noData := len(result.Logs) == 0
+	switch {
+	case noData:
 		value = 0
-	} else if err != nil {
+		thresholdMet = noRowsThresholdMet(tempAlert)
+		warnings = append(warnings, noRowsWarning(tempAlert.NoDataPolicy))
+	case err != nil:
 		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
+	default:
+		thresholdMet = util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 	}
-
-	// Check if threshold would be met
-	thresholdMet := util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 
 	// Generate additional warnings
 	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result, false)...)
@@ -616,6 +653,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		ExecutionTimeMs: executionTime.Milliseconds(),
 		RowsReturned:    len(result.Logs),
 		Warnings:        warnings,
+		NoData:          noData,
 	}, nil
 }
 
@@ -643,15 +681,30 @@ func groupedTestResponse(alert *models.Alert, result *models.QueryResult, execut
 		}
 	}
 	if len(samples) == 0 {
-		// The scheduler compares 0 for a rule with no rows and no firing group.
-		resp.ThresholdMet = util.CompareAlertThreshold(0, alert.ThresholdValue, alert.ThresholdOperator)
-		resp.Warnings = append(resp.Warnings, noRowsWarning)
+		resp.NoData = true
+		resp.ThresholdMet = noRowsThresholdMet(alert)
+		resp.Warnings = append(resp.Warnings, noRowsWarning(alert.NoDataPolicy))
 	}
 	resp.Warnings = append(resp.Warnings, generateQueryWarnings(alert.Query, executionTime, result, true)...)
 	return resp, nil
 }
 
-const noRowsWarning = "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison."
+// noRowsThresholdMet reports whether a result without rows meets the
+// threshold: only the zero policy compares 0, the others never fire on it.
+func noRowsThresholdMet(alert *models.Alert) bool {
+	return alert.NoDataPolicy == models.AlertNoDataZero && util.CompareAlertThreshold(0, alert.ThresholdValue, alert.ThresholdOperator)
+}
+
+func noRowsWarning(policy models.AlertNoDataPolicy) string {
+	switch policy {
+	case models.AlertNoDataNoData:
+		return "Query returned no rows. The alert will report no data."
+	case models.AlertNoDataKeep:
+		return "Query returned no rows. The alert will keep its current state."
+	default:
+		return "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison."
+	}
+}
 
 // generateQueryWarnings flags slow or unbounded queries. A grouped rule reads
 // every row, so only an ungrouped one is warned about returning several.

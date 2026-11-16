@@ -109,7 +109,7 @@ func testResolveAlertGroup(t *testing.T, ctx context.Context, s store.Store, ale
 	}
 	checkout := fire(`["checkout"]`, "checkout")
 	search := fire(`["search"]`, "search")
-	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+	if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateFiring); err != nil {
 		t.Fatal(err)
 	}
 

@@ -353,7 +353,7 @@ func createManagerTestAlert(t *testing.T, db store.Store) *models.Alert {
 	alert := &models.Alert{
 		SourceID: source.ID, Name: "errors", Query: "SELECT count() FROM logs",
 		QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
-		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true,
+		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true, NotifyOnResolve: true,
 		ThresholdOperator: models.AlertThresholdGreaterThan, ThresholdValue: 10,
 		Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
 	}

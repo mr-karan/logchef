@@ -35,6 +35,7 @@ type Alert struct {
 	GroupByJson       pgtype.Text        `json:"group_by_json"`
 	NoDataPolicy      string             `json:"no_data_policy"`
 	EvalSeq           int64              `json:"eval_seq"`
+	NotifyOnResolve   bool               `json:"notify_on_resolve"`
 }
 
 type AlertDestination struct {

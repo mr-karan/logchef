@@ -586,10 +586,12 @@ INSERT INTO alerts (
     annotations_json,
     generator_url,
     group_by_json,
+    no_data_policy,
+    notify_on_resolve,
     is_active,
     created_by
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 RETURNING *;
 
 -- name: GetAlert :one
@@ -629,10 +631,12 @@ SET name = $1,
     annotations_json = $13,
     generator_url = $14,
     group_by_json = $15,
-    is_active = $16,
+    no_data_policy = $16,
+    notify_on_resolve = $17,
+    is_active = $18,
     eval_seq = eval_seq + 1,
     updated_at = now()
-WHERE id = $17
+WHERE id = $19
 RETURNING id;
 
 -- name: DeleteAlert :one
@@ -640,23 +644,18 @@ DELETE FROM alerts WHERE id = $1
 RETURNING id;
 
 -- name: MarkAlertEvaluated :exec
+-- Records an evaluation and the rule's summary state. last_triggered_at moves
+-- when the rule starts firing.
 UPDATE alerts
-SET last_state = 'resolved',
+SET last_triggered_at = CASE WHEN sqlc.arg(last_state)::text = 'firing' AND last_state <> 'firing' THEN now() ELSE last_triggered_at END,
+    last_state = sqlc.arg(last_state),
     last_evaluated_at = now(),
     updated_at = now()
-WHERE id = $1;
+WHERE id = sqlc.arg(id);
 
 -- name: TouchAlertEvaluated :exec
 UPDATE alerts
 SET last_evaluated_at = now(),
-    updated_at = now()
-WHERE id = $1;
-
--- name: MarkAlertTriggered :exec
-UPDATE alerts
-SET last_state = 'firing',
-    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE now() END,
-    last_evaluated_at = now(),
     updated_at = now()
 WHERE id = $1;
 
@@ -705,11 +704,14 @@ WHERE alert_id = ANY(sqlc.arg(alert_ids)::bigint[])
 GROUP BY alert_id, state;
 
 -- name: RefreshAlertState :exec
--- After a manual resolve of one group: the rule is firing while any group fires.
+-- After a manual resolve of one group: the rule is firing while any group
+-- fires, else no_data while any group has no data.
 UPDATE alerts
 SET last_state = CASE WHEN EXISTS (
         SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'firing'
-    ) THEN 'firing' ELSE 'resolved' END,
+    ) THEN 'firing' WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'no_data'
+    ) THEN 'no_data' ELSE 'resolved' END,
     eval_seq = eval_seq + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id);
@@ -736,14 +738,14 @@ SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_buil
     'delivery_failed', true,
     'delivery_error', 'delivery interrupted',
     'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
-WHERE status = 'triggered'
+WHERE status IN ('triggered', 'no_data')
   AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
   AND (sqlc.arg(history_id)::bigint = 0 OR id = sqlc.arg(history_id))
   AND (sqlc.arg(alert_id)::bigint = 0 OR alert_id = sqlc.arg(alert_id));
 
 -- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
-WHERE id = $1 AND status = 'triggered'
+WHERE id = $1 AND status IN ('triggered', 'no_data')
 FOR UPDATE;
 
 -- name: ResolveAlertHistoryForAlert :exec
@@ -751,29 +753,36 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
     message = sqlc.arg(message)
-WHERE alert_id = sqlc.arg(alert_id) AND status = 'triggered';
+WHERE alert_id = sqlc.arg(alert_id) AND status IN ('triggered', 'no_data');
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
-WHERE id = $2 AND status = 'triggered'
+WHERE id = $2 AND status IN ('triggered', 'no_data')
+RETURNING id;
+
+-- name: SetOpenAlertHistoryStatus :one
+-- An open episode that moves between firing and no_data.
+UPDATE alert_history
+SET status = $1, message = $2
+WHERE id = $3 AND status IN ('triggered', 'no_data')
 RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one
 SELECT * FROM alert_history
-WHERE alert_id = $1 AND status = 'triggered'
+WHERE alert_id = $1 AND status IN ('triggered', 'no_data')
 ORDER BY triggered_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListOpenAlertHistory :many
 -- Every open episode of the alert, newest first.
 SELECT * FROM alert_history
-WHERE alert_id = sqlc.arg(alert_id) AND status = 'triggered'
+WHERE alert_id = sqlc.arg(alert_id) AND status IN ('triggered', 'no_data')
 ORDER BY triggered_at DESC, id DESC;
 
 -- name: ListOpenAlertGroupHistoryIDs :many
 SELECT id FROM alert_history
-WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status = 'triggered'
+WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status IN ('triggered', 'no_data')
 FOR UPDATE;
 
 -- name: ResolveAlertGroupHistory :exec
@@ -781,7 +790,7 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
     message = sqlc.arg(message)
-WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status = 'triggered';
+WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status IN ('triggered', 'no_data');
 
 -- name: GetAlertHistoryEntry :one
 SELECT * FROM alert_history
@@ -797,11 +806,11 @@ LIMIT $2;
 -- Keeps every open episode and the newest N closed rows.
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
-  AND target.status <> 'triggered'
+  AND target.status NOT IN ('triggered', 'no_data')
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
-    WHERE keep.alert_id = $2 AND keep.status <> 'triggered'
+    WHERE keep.alert_id = $2 AND keep.status NOT IN ('triggered', 'no_data')
     ORDER BY keep.triggered_at DESC, keep.id DESC
     LIMIT $3
  );

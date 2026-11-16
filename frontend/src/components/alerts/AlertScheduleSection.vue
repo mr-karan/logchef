@@ -10,6 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import type { AlertNoDataPolicy } from "@/api/alerts";
 import type { AlertFormState } from "@/composables/useAlertForm";
 
 const { t } = useI18n();
@@ -64,6 +66,23 @@ defineProps<{
           <p class="text-xs text-muted-foreground">
             {{ t('ui.howOftenThisAlertRunsEG300sEvery5Minutes') }}
           </p>
+        </div>
+        <div class="space-y-2">
+          <Label for="alert-no-data-policy">{{ t('alerts.noDataPolicy') }}</Label>
+          <Select :model-value="form.no_data_policy" :disabled="disabled" @update:model-value="(value) => (form.no_data_policy = value as AlertNoDataPolicy)">
+            <SelectTrigger id="alert-no-data-policy">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="zero">{{ t('alerts.noDataPolicyZero') }}</SelectItem>
+              <SelectItem value="no_data">{{ t('alerts.noDataPolicyNoData') }}</SelectItem>
+              <SelectItem value="keep">{{ t('alerts.noDataPolicyKeep') }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div class="flex items-center justify-between gap-4 self-end rounded-md border px-3 py-2">
+          <Label for="alert-notify-on-resolve">{{ t('alerts.notifyOnResolve') }}</Label>
+          <Switch id="alert-notify-on-resolve" :model-value="form.notify_on_resolve" :disabled="disabled" @update:model-value="(checked) => (form.notify_on_resolve = Boolean(checked))" />
         </div>
       </div>
     </div>

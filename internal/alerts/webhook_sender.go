@@ -19,6 +19,7 @@ import (
 	"log/slog"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 type WebhookSenderOptions struct {
@@ -56,6 +57,15 @@ type webhookPayload struct {
 	ResolvedAt        *time.Time        `json:"resolved_at,omitempty"`
 	GeneratorURL      string            `json:"generator_url,omitempty"`
 	Message           string            `json:"message,omitempty"`
+}
+
+// v1Status keeps the version 1 payload's two statuses: a no_data episode is
+// sent as triggered, and annotations.reason says why.
+func v1Status(status models.AlertStatus) models.AlertStatus {
+	if status == models.AlertStatusNoData {
+		return models.AlertStatusTriggered
+	}
+	return status
 }
 
 func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
@@ -115,7 +125,7 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 		AlertID:           int64(notification.AlertID),
 		AlertName:         notification.AlertName,
 		Description:       notification.Description,
-		Status:            string(notification.Status),
+		Status:            string(v1Status(notification.Status)),
 		Severity:          string(notification.Severity),
 		SourceID:          int(notification.SourceID),
 		SourceName:        notification.SourceName,

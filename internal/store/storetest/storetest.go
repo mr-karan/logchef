@@ -48,6 +48,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
 	t.Run("AlertInstances", func(t *testing.T) { testAlertInstances(t, ctx, s) })
 	t.Run("AlertGroups", func(t *testing.T) { testAlertGroups(t, ctx, s) })
+	t.Run("AlertNoData", func(t *testing.T) { testAlertNoData(t, ctx, s) })
 	t.Run("Destinations", func(t *testing.T) { testDestinations(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
@@ -946,7 +947,7 @@ func testAlertEvaluationState(t *testing.T, ctx context.Context, s store.Store, 
 	for _, state := range []models.AlertState{models.AlertStateResolved, models.AlertStateFiring} {
 		t.Run("TouchAlertEvaluated/"+string(state), func(t *testing.T) {
 			if state == models.AlertStateFiring {
-				if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+				if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateFiring); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -979,7 +980,7 @@ func testAlertEvaluationState(t *testing.T, ctx context.Context, s store.Store, 
 			}
 		})
 	}
-	if err := s.MarkAlertEvaluated(ctx, alertID); err != nil {
+	if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateResolved); err != nil {
 		t.Fatal(err)
 	}
 	if resolved, err := s.GetAlert(ctx, alertID); err != nil || resolved.LastState != models.AlertStateResolved {
@@ -1188,7 +1189,7 @@ func testOpenEpisodePruning(t *testing.T, ctx context.Context, s store.Store, al
 
 func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
 	t.Helper()
-	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+	if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateFiring); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})

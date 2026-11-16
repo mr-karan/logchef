@@ -13,7 +13,7 @@ function alert(id: number): Alert {
     id, source_id: 1, name: `Alert ${id}`, query_language: 'clickhouse-sql', editor_mode: 'native',
     query: 'SELECT count(*) FROM logs', lookback_seconds: 60, threshold_operator: 'gt',
     threshold_value: 0, frequency_seconds: 60, severity: 'warning',
-    destination_ids: [], is_active: true, last_state: 'firing',
+    destination_ids: [], no_data_policy: 'zero', notify_on_resolve: true, is_active: true, last_state: 'firing',
     created_at: '2026-01-01', updated_at: '2026-01-01',
   }
 }
@@ -133,6 +133,21 @@ describe('AlertDetail route changes', () => {
     resolve.click()
     await vi.waitFor(() => expect(network.requests.some(r => r.config.url === '/alerts/1/resolve')).toBe(true))
     expect(JSON.parse(String(request('/alerts/1/resolve').config.data))).toEqual({ message: 'Manually resolved', group_key: '["checkout"]' })
+  })
+
+  it('shows a no-data group and lets it be resolved, but not an ok group', async () => {
+    await loadFirstHistory()
+    request('/alerts/1/instances').succeed([
+      { alert_id: 1, group_key: '["checkout"]', group: { service: 'checkout' }, state: 'no_data', state_since: '2026-01-01T00:00:00Z' },
+      { alert_id: 1, group_key: '["search"]', group: { service: 'search' }, state: 'ok', value: 3, state_since: '2026-01-01T00:00:00Z' },
+    ])
+    await vi.waitFor(() => expect(host.textContent).toContain('service=search'))
+    const rowOf = (service: string) => [...host.querySelectorAll('tr')].find(tr => tr.textContent?.includes(`service=${service}`))
+    const resolveIn = (row?: Element) => [...(row?.querySelectorAll('button') ?? [])].find(button => button.textContent?.trim() === 'Resolve')
+    expect(rowOf('checkout')?.textContent).toContain('No data')
+    expect(resolveIn(rowOf('checkout'))).toBeDefined()
+    expect(rowOf('search')?.textContent).toContain('OK')
+    expect(resolveIn(rowOf('search'))).toBeUndefined()
   })
 
   it('leaves the tab out of the overview query', async () => {

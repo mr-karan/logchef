@@ -75,7 +75,7 @@ const { search, rows: sortedAlerts, sortKey, sortDir, toggleSort } = useTableSea
   sortAccessors: {
     active: (a) => (a.is_active ? 1 : 0),
     name: (a) => a.name.toLowerCase(),
-    status: (a) => (a.last_state === "firing" ? 1 : 0),
+    status: (a) => ({ firing: 2, no_data: 1, resolved: 0 })[a.last_state],
     lastTriggered: (a) => (a.last_triggered_at ? new Date(a.last_triggered_at).getTime() || 0 : 0),
   },
   initialSort: { key: "name", dir: "asc" },
@@ -395,11 +395,13 @@ onMounted(async () => {
                   <div class="flex items-center gap-2">
                     <span 
                       class="h-2 w-2 rounded-full shrink-0"
-                      :class="alert.last_state === 'firing' ? 'bg-red-500 animate-pulse' : 'bg-green-500'"
+                      :class="alert.last_state === 'firing' ? 'bg-red-500 animate-pulse' : alert.last_state === 'no_data' ? 'bg-amber-500' : 'bg-green-500'"
                     />
                     <span class="text-sm">
                       {{ (alert.group_by?.length && alert.instance_counts?.firing)
                         ? t('alerts.groupsFiring', { count: alert.instance_counts.firing })
+                        : (alert.group_by?.length && alert.instance_counts?.no_data)
+                        ? t('alerts.groupsNoData', { count: alert.instance_counts.no_data })
                         : t(alertStateLabels[alert.last_state]) }}
                     </span>
                   </div>
