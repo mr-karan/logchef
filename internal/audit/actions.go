@@ -189,3 +189,13 @@ func Lookup(name string) (Spec, bool) {
 	spec, ok := registry[Action(name)]
 	return spec, ok
 }
+
+// HasResource says whether any registered action names resource.
+func HasResource(resource string) bool {
+	for _, spec := range registry {
+		if spec.TargetType == resource {
+			return true
+		}
+	}
+	return false
+}
