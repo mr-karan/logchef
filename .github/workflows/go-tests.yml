@@ -177,7 +177,7 @@ jobs:
           docker exec "$c" clickhouse-client --query 'SYSTEM RELOAD CONFIG'
           test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.clusters WHERE cluster = 'logchef_two_shards'")" = 2
       - name: Query, schema, and lifecycle compatibility
-        run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql -count=1
+        run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql ./internal/advisor -count=1
 
   lint:
     runs-on: ubuntu-latest
