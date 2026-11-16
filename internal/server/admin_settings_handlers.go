@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -161,14 +163,21 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
 	}
 
-	// Upsert the setting
-	if err := s.store.UpsertSetting(c.Context(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
+	before, after, err := core.UpdateSetting(c.Context(), s.store, &models.SystemSetting{
+		Key: key, Value: req.Value, ValueType: req.ValueType, Category: req.Category,
+		Description: req.Description, IsSensitive: req.IsSensitive,
+	})
+	if err != nil {
 		s.log.Error("failed to update setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to update setting")
 	}
 
 	s.log.Info("setting updated", "key", key, "user", user.Email)
-	auditTarget(c, audit.SettingTarget(key))
+	var beforeFields *audit.Fields
+	if before != nil {
+		beforeFields = audit.SettingFields(before)
+	}
+	auditSet(c, audit.SettingTarget(key), beforeFields, audit.SettingFields(after))
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "setting updated successfully", "key": key})
 }
 
@@ -191,13 +200,17 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 		return nil
 	}
 
-	if err := s.store.DeleteSetting(c.Context(), key); err != nil {
+	deleted, err := core.DeleteSetting(c.Context(), s.store, key)
+	if err != nil {
+		if errors.Is(err, core.ErrSettingNotFound) {
+			return SendError(c, fiber.StatusNotFound, "setting not found")
+		}
 		s.log.Error("failed to delete setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to delete setting")
 	}
 
 	s.log.Info("setting deleted", "key", key, "user", user.Email)
-	auditTarget(c, audit.SettingTarget(key))
+	auditSet(c, audit.SettingTarget(key), audit.SettingFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "setting deleted successfully"})
 }
 

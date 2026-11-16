@@ -11,6 +11,10 @@ RETURNING id;
 -- Get a single source by ID
 SELECT * FROM sources WHERE id = $1;
 
+-- name: GetSourceForUpdate :one
+-- Get a source by ID and lock the row until the transaction ends
+SELECT * FROM sources WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: GetSourceByIdentityKey :one
 -- Get a single source by provider-computed identity key
 SELECT * FROM sources WHERE identity_key = $1;
@@ -796,6 +800,10 @@ WHERE target.alert_id = $1
 -- name: GetSystemSetting :one
 SELECT * FROM system_settings
 WHERE key = $1;
+
+-- name: LockSettingWrites :exec
+-- Hold a transaction-scoped advisory lock, which also covers a key with no row
+SELECT pg_advisory_xact_lock($1);
 
 -- name: ListSystemSettings :many
 SELECT * FROM system_settings

@@ -73,6 +73,19 @@ func (s *Store) GetSource(ctx context.Context, id models.SourceID) (*models.Sour
 	return sourceToModel(row), nil
 }
 
+// GetSourceForUpdate retrieves a source by ID and locks the row until the
+// transaction ends. Returns models.ErrNotFound if absent.
+func (s *Store) GetSourceForUpdate(ctx context.Context, id models.SourceID) (*models.Source, error) {
+	row, err := s.q.GetSourceForUpdate(ctx, int64(id))
+	if err != nil {
+		if notFound(err) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("getting source id %d for update: %w", id, err)
+	}
+	return sourceToModel(row), nil
+}
+
 // GetSourceByIdentityKey retrieves a source by its provider-computed identity
 // key. Returns models.ErrNotFound if absent.
 func (s *Store) GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error) {

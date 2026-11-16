@@ -196,6 +196,8 @@ type Querier interface {
 	GetSourceByIdentityKey(ctx context.Context, identityKey string) (Source, error)
 	// Get source by name for provisioning lookup
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (Source, error)
+	// Get a source by ID and lock the row until the transaction ends
+	GetSourceForUpdate(ctx context.Context, id int64) (Source, error)
 	// System Settings Queries
 	GetSystemSetting(ctx context.Context, key string) (SystemSetting, error)
 	// Get a team by ID
@@ -360,6 +362,8 @@ type Querier interface {
 	// Holds the report row until the transaction ends, so two replacements of
 	// its recipients run one after the other instead of merging.
 	LockReport(ctx context.Context, id int64) (int64, error)
+	// Hold a transaction-scoped advisory lock, which also covers a key with no row
+	LockSettingWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error)
 	MarkAlertResolved(ctx context.Context, id int64) error

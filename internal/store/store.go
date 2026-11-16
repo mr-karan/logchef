@@ -82,6 +82,9 @@ type UserStore interface {
 type SourceStore interface {
 	CreateSource(ctx context.Context, source *models.Source) error
 	GetSource(ctx context.Context, id models.SourceID) (*models.Source, error)
+	// GetSourceForUpdate reads a source and, inside WithTx, blocks other
+	// writers of that source until the transaction ends.
+	GetSourceForUpdate(ctx context.Context, id models.SourceID) (*models.Source, error)
 	GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error)
 	ListSources(ctx context.Context) ([]*models.Source, error)
 	UpdateSource(ctx context.Context, source *models.Source) error
@@ -480,6 +483,11 @@ type TeamStore interface {
 // SettingsStore persists system settings.
 type SettingsStore interface {
 	GetSetting(ctx context.Context, key string) (string, error)
+	// GetSettingForUpdate reads a setting and, inside WithTx, blocks every
+	// other caller of GetSettingForUpdate until the transaction ends, so a
+	// key that does not exist yet is covered too. It returns
+	// models.ErrNotFound when the key does not exist.
+	GetSettingForUpdate(ctx context.Context, key string) (*models.SystemSetting, error)
 	ListSettings(ctx context.Context) ([]*models.SystemSetting, error)
 	ListSettingsByCategory(ctx context.Context, category string) ([]*models.SystemSetting, error)
 	UpsertSetting(ctx context.Context, key, value, valueType, category, description string, isSensitive bool) error
