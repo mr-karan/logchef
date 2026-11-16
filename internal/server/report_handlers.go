@@ -22,7 +22,7 @@ func (s *Server) newReportRunner(opts ServerOptions) *core.ReportRunner {
 		DB:          s.store,
 		DS:          opts.Datasources,
 		Query:       s.config.Query,
-		Mailer:      reports.NewSMTPMailer(s.store, s.log),
+		Mailer:      reports.NewSMTPMailer(s.store),
 		Audit:       s.audit,
 		Log:         s.log.With("component", "reports"),
 		UIURL:       uiURL(&s.config.Server),

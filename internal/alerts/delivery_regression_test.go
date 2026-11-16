@@ -34,7 +34,7 @@ func TestManagerChangedWebhookTargets(t *testing.T) {
 			defer broken.Close()
 			fixed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { added.Add(1); w.WriteHeader(http.StatusNoContent) }))
 			defer fixed.Close()
-			alert.WebhookURLs = []string{broken.URL}
+			brokenID := linkWebhooks(t, db, alert, broken.URL)[0]
 			sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 			m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
 			if err := m.handleTriggered(t.Context(), alert, 12); err != nil {
@@ -42,11 +42,11 @@ func TestManagerChangedWebhookTargets(t *testing.T) {
 			}
 			switch change {
 			case "fixed":
-				alert.WebhookURLs = []string{fixed.URL}
+				linkWebhooks(t, db, alert, fixed.URL)
 			case "added":
-				alert.WebhookURLs = append(alert.WebhookURLs, fixed.URL)
+				linkDestinations(t, db, alert, brokenID, webhookDestination(t, db, fixed.URL))
 			case "removed":
-				alert.WebhookURLs = nil
+				linkDestinations(t, db, alert)
 			}
 			// A fresh manager must recover the selection from the persisted history.
 			m = NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
@@ -377,7 +377,7 @@ func TestDeliveryRecovery(t *testing.T) {
 					w.WriteHeader(http.StatusNoContent)
 				}))
 				defer second.Close()
-				alert.WebhookURLs = []string{first.URL, second.URL}
+				ids := linkWebhooks(t, db, alert, first.URL, second.URL)
 				raw, err := os.ReadFile("testdata/legacy_delivery_pending.json")
 				if err != nil {
 					t.Fatal(err)
@@ -386,7 +386,7 @@ func TestDeliveryRecovery(t *testing.T) {
 				if err := json.Unmarshal(raw, &payload); err != nil {
 					t.Fatal(err)
 				}
-				payload["delivery_pending"] = []string{string(deliveryTargetID("webhook", second.URL))}
+				payload["delivery_pending"] = []string{string(webhookTarget(ids[1]))}
 				if _, err := db.InsertAlertHistory(t.Context(), alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", payload); err != nil {
 					t.Fatal(err)
 				}

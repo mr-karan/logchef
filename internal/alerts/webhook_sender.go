@@ -108,7 +108,7 @@ func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
 }
 
 func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
-	if len(notification.WebhookURLs) == 0 {
+	if len(notification.Webhooks) == 0 {
 		return nil
 	}
 	payload := webhookPayload{
@@ -135,19 +135,18 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 	}
 	body, marshalErr := json.Marshal(payload)
 	var results DeliveryResults
-	for index, destination := range notification.WebhookURLs {
-		target := deliveryTargetID("webhook", destination)
-		if !notification.selects(target) {
+	for index, webhook := range notification.Webhooks {
+		if !notification.selects(webhook.Target) {
 			continue
 		}
 		err := marshalErr
 		if err == nil {
-			err = s.sendWebhook(ctx, notification.AlertName, index, destination, body)
+			err = s.sendWebhook(ctx, notification.AlertName, index, webhook.URL, body)
 		}
 		if err != nil {
 			err = fmt.Errorf("webhook delivery failed: %w", err)
 		}
-		results = append(results, DeliveryResult{Target: target, Err: err})
+		results = append(results, DeliveryResult{Target: webhook.Target, Err: err})
 	}
 	return results
 }

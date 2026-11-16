@@ -43,6 +43,11 @@ const (
 	LogExportCreate   Action = "log_export.create"
 	LogExportDownload Action = "log_export.download"
 
+	NotificationDestinationCreate Action = "notification_destination.create"
+	NotificationDestinationUpdate Action = "notification_destination.update"
+	NotificationDestinationDelete Action = "notification_destination.delete"
+	NotificationDestinationTest   Action = "notification_destination.test"
+
 	OAuthConsentApprove Action = "oauth_consent.approve"
 	OAuthConsentDeny    Action = "oauth_consent.deny"
 
@@ -123,6 +128,7 @@ var registrations = []struct {
 	{CollectionTeamAdd, false}, {CollectionTeamRemove, false},
 	{DashboardCreate, false}, {DashboardUpdate, false}, {DashboardDelete, false},
 	{LogExportCreate, false}, {LogExportDownload, false},
+	{NotificationDestinationCreate, true}, {NotificationDestinationUpdate, true}, {NotificationDestinationDelete, true}, {NotificationDestinationTest, false},
 	{OAuthConsentApprove, false}, {OAuthConsentDeny, false},
 	{OAuthGrantRevoke, false},
 	{QueryShareCreate, false}, {QueryShareDelete, false},

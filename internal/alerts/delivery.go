@@ -55,17 +55,14 @@ func (n AlertNotification) selects(target DeliveryTargetID) bool {
 
 func (n AlertNotification) targetIDs() []string {
 	targets := make(map[DeliveryTargetID]struct{})
-	for _, address := range uniqueEmails(n.RecipientEmails) {
-		targets[n.emailTarget(address)] = struct{}{}
+	for _, webhook := range n.Webhooks {
+		targets[webhook.Target] = struct{}{}
 	}
-	for _, address := range n.WebhookURLs {
-		targets[deliveryTargetID("webhook", address)] = struct{}{}
+	for _, email := range n.Emails {
+		targets[email.Target] = struct{}{}
 	}
-	if n.RecipientResolutionErr != "" || (len(n.RecipientUserIDs) > 0 && len(n.RecipientEmails) == 0 && len(n.MissingRecipientUserIDs) == 0) {
-		targets[deliveryTargetID("email", "recipient-resolution")] = struct{}{}
-	}
-	for _, id := range n.MissingRecipientUserIDs {
-		targets[emailUserTarget(id)] = struct{}{}
+	for _, unusable := range n.Unusable {
+		targets[unusable.Target] = struct{}{}
 	}
 	ids := make([]string, 0, len(targets))
 	for target := range targets {
@@ -75,6 +72,17 @@ func (n AlertNotification) targetIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// unusableResults reports the selected unusable targets as failed.
+func (n AlertNotification) unusableResults() DeliveryResults {
+	var results DeliveryResults
+	for _, unusable := range n.Unusable {
+		if n.selects(unusable.Target) {
+			results = append(results, DeliveryResult{Target: unusable.Target, Err: errors.New(unusable.Err)})
+		}
+	}
+	return results
 }
 
 func pendingDeliveryTargets(payload map[string]any) map[DeliveryTargetID]struct{} {
@@ -97,15 +105,23 @@ func storedDeliveryTargets(payload map[string]any, field string) map[DeliveryTar
 	return targets
 }
 
-func emailUserTarget(id models.UserID) DeliveryTargetID {
-	return deliveryTargetID("email-user", strconv.FormatInt(int64(id), 10))
+// Delivery targets are keyed by destination, so a retry reaches the same
+// destination, and by recipient within an email destination. A user
+// recipient is keyed by user id, so a changed address does not lose a retry.
+func webhookTarget(destination models.DestinationID) DeliveryTargetID {
+	return deliveryTargetID("webhook", strconv.FormatInt(int64(destination), 10))
 }
 
-func (n AlertNotification) emailTarget(address string) DeliveryTargetID {
-	if target, ok := n.recipientTargets[address]; ok {
-		return target
-	}
-	return deliveryTargetID("email", address)
+func emailAddressTarget(destination models.DestinationID, address string) DeliveryTargetID {
+	return deliveryTargetID("email", strconv.FormatInt(int64(destination), 10)+":"+address)
+}
+
+func emailUserTarget(destination models.DestinationID, user models.UserID) DeliveryTargetID {
+	return deliveryTargetID("email-user", strconv.FormatInt(int64(destination), 10)+":"+strconv.FormatInt(int64(user), 10))
+}
+
+func destinationTarget(destination models.DestinationID) DeliveryTargetID {
+	return deliveryTargetID("destination", strconv.FormatInt(int64(destination), 10))
 }
 
 func (results DeliveryResults) failedTargets() []string {

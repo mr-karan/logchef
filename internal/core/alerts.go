@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -56,78 +55,6 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	return out
-}
-
-func sanitizeUserIDs(in []models.UserID) []models.UserID {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[models.UserID]struct{}, len(in))
-	out := make([]models.UserID, 0, len(in))
-	for _, id := range in {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func sanitizeWebhookURLs(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, raw := range in {
-		urlValue := strings.TrimSpace(raw)
-		if urlValue == "" {
-			continue
-		}
-		if _, ok := seen[urlValue]; ok {
-			continue
-		}
-		seen[urlValue] = struct{}{}
-		out = append(out, urlValue)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func validateRecipientUserIDs(ctx context.Context, db store.StoreOps, recipientIDs []models.UserID) error {
-	if len(recipientIDs) == 0 {
-		return nil
-	}
-	// Recipients are users, not team members. Make sure each id resolves.
-	for _, id := range recipientIDs {
-		user, err := db.GetUser(ctx, id)
-		if err != nil || user == nil {
-			return fmt.Errorf("user %d not found", id)
-		}
-	}
-	return nil
-}
-
-func validateWebhookURLs(urls []string) error {
-	for _, raw := range urls {
-		parsed, err := url.Parse(raw)
-		if err != nil || parsed.Host == "" {
-			return fmt.Errorf("invalid webhook URL %q", raw)
-		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return fmt.Errorf("webhook URL %q must use http or https", raw)
-		}
-	}
-	return nil
 }
 
 // normalizeGroupBy trims the group column names and rejects a blank, a
@@ -220,21 +147,14 @@ func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.S
 	return nil
 }
 
-// CreateAlert creates a new alert rule for the specified source, owned by
-// createdBy, together with the job that evaluates it.
-func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
+// CreateAlert creates a new alert rule for the specified source, owned by the
+// user, with the destinations the user may use, together with the job that
+// evaluates it.
+func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, user *models.User, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
-	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
-	if err := validateRecipientUserIDs(ctx, db, recipientUserIDs); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-	}
-	webhookURLs := sanitizeWebhookURLs(req.WebhookURLs)
-	if err := validateWebhookURLs(webhookURLs); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-	}
-	owner := createdBy
+	owner := user.ID
 	alert := &models.Alert{
 		SourceID:          sourceID,
 		Name:              req.Name,
@@ -250,8 +170,6 @@ func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 		Severity:          req.Severity,
 		Labels:            sanitizeStringMap(req.Labels),
 		Annotations:       sanitizeStringMap(req.Annotations),
-		RecipientUserIDs:  recipientUserIDs,
-		WebhookURLs:       webhookURLs,
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		GroupBy:           req.GroupBy,
 		IsActive:          req.IsActive,
@@ -265,16 +183,27 @@ func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 	}
 
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		ids, err := resolveAlertDestinations(ctx, tx, user, req.DestinationIDs, nil)
+		if err != nil {
+			return err
+		}
 		if err := tx.CreateAlert(ctx, alert); err != nil {
 			return err
 		}
+		if err := tx.SetAlertDestinations(ctx, alert.ID, ids); err != nil {
+			return err
+		}
+		alert.DestinationIDs = ids
 		return jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert))
 	})
 	if err != nil {
+		if errors.Is(err, ErrInvalidAlertConfiguration) || errors.Is(err, ErrDestinationForbidden) {
+			return nil, err
+		}
 		log.Error("failed to create alert", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("failed to create alert: %w", err)
 	}
-	log.Info("alert created", "alert_id", alert.ID, "source_id", sourceID, "created_by", createdBy)
+	log.Info("alert created", "alert_id", alert.ID, "source_id", sourceID, "created_by", user.ID)
 	return alert, nil
 }
 
@@ -293,8 +222,9 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 
 // UpdateAlert updates an existing alert rule and its job. A change of group_by closes every
 // open episode with "rule changed", because the old group keys no longer
-// name any group of the new result.
-func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+// name any group of the new result. Destinations the editor adds must be
+// usable by the editor; the ones the rule has stay.
+func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, user *models.User, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -316,40 +246,18 @@ func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 	// or delete an alert whose stored query the parser rejects. Evaluation
 	// still refuses to run it.
 	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode
-	if req.RecipientUserIDs != nil {
-		if err := validateRecipientUserIDs(ctx, db, existing.RecipientUserIDs); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-		}
-	}
-	if req.WebhookURLs != nil {
-		if err := validateWebhookURLs(existing.WebhookURLs); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-		}
-	}
 	if err := validateAlertModel(ctx, db, ds, existing.SourceID, existing, queryChanged); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
 	groupByChanged := !slices.Equal(existing.GroupBy, previous.GroupBy)
-	// The job row is written before the alert row, the order in which an
-	// evaluation's commit locks them, so an edit cannot deadlock with it.
 	err = db.WithTx(ctx, func(tx store.StoreOps) error {
-		if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(existing)); err != nil {
-			return err
-		}
-		if err := tx.UpdateAlert(ctx, existing); err != nil {
-			return err
-		}
-		if !groupByChanged {
-			return nil
-		}
-		open, err := tx.ListOpenAlertHistory(ctx, alertID)
-		if err != nil || len(open) == 0 {
-			return err
-		}
-		return tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed")
+		return writeAlertUpdate(ctx, tx, user, existing, previous.DestinationIDs, req.DestinationIDs, groupByChanged)
 	})
 	if err != nil {
+		if errors.Is(err, ErrInvalidAlertConfiguration) || errors.Is(err, ErrDestinationForbidden) {
+			return nil, err
+		}
 		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
@@ -438,12 +346,6 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	if req.Annotations != nil {
 		alert.Annotations = sanitizeStringMap(*req.Annotations)
 	}
-	if req.RecipientUserIDs != nil {
-		alert.RecipientUserIDs = sanitizeUserIDs(*req.RecipientUserIDs)
-	}
-	if req.WebhookURLs != nil {
-		alert.WebhookURLs = sanitizeWebhookURLs(*req.WebhookURLs)
-	}
 	if req.GeneratorURL != nil {
 		alert.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)
 	}
@@ -453,6 +355,37 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	if req.IsActive != nil {
 		alert.IsActive = *req.IsActive
 	}
+}
+
+// writeAlertUpdate writes an edited rule in the caller's transaction. The job
+// row is written before the alert row, the order in which an evaluation's
+// commit locks them, so an edit cannot deadlock with it. Requested
+// destinations replace the rule's; a group_by change closes the open
+// episodes.
+func writeAlertUpdate(ctx context.Context, tx store.StoreOps, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) error {
+	if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert)); err != nil {
+		return err
+	}
+	if err := tx.UpdateAlert(ctx, alert); err != nil {
+		return err
+	}
+	if requested != nil {
+		ids, err := resolveAlertDestinations(ctx, tx, user, *requested, current)
+		if err != nil {
+			return err
+		}
+		if err := tx.SetAlertDestinations(ctx, alert.ID, ids); err != nil {
+			return err
+		}
+	}
+	if !groupByChanged {
+		return nil
+	}
+	open, err := tx.ListOpenAlertHistory(ctx, alert.ID)
+	if err != nil || len(open) == 0 {
+		return err
+	}
+	return tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed")
 }
 
 // validateFrequency applies the floor of the rule's job schedule. A stored rule

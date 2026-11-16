@@ -36,7 +36,7 @@ func TestVisibilityForPrincipal(t *testing.T) {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 	query := seedSavedQueryOnSource(t, db, src, owner)
-	alert, err := CreateAlert(ctx, db, newFakeDatasourceService(db, log, nil), log, src.ID, owner.ID, newTestCreateAlertRequest())
+	alert, err := CreateAlert(ctx, db, newFakeDatasourceService(db, log, nil), log, src.ID, owner, newTestCreateAlertRequest())
 	if err != nil {
 		t.Fatalf("CreateAlert: %v", err)
 	}

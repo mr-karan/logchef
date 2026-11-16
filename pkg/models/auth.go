@@ -75,6 +75,10 @@ const (
 	TokenScopeReportsWrite      TokenScope = "reports:write"
 	TokenScopeSavedViewsRead    TokenScope = "saved_views:read"
 	TokenScopeSavedViewsWrite   TokenScope = "saved_views:write"
+	// Notification destinations stay outside the alert scopes: reports use
+	// email destinations when alerting is off.
+	TokenScopeDestinationsRead  TokenScope = "destinations:read"
+	TokenScopeDestinationsWrite TokenScope = "destinations:write"
 )
 
 // TeamRole represents the possible team member roles

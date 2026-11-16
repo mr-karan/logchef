@@ -56,7 +56,6 @@ const {
   queryTemplates,
   applyConditionTemplate,
   applyTemplate,
-  newWebhookUrl,
   teamMembers,
   testQueryResult,
   isTestingQuery,
@@ -69,10 +68,6 @@ const {
   removeLabel,
   addAnnotation,
   removeAnnotation,
-  addRecipient,
-  removeRecipient,
-  addWebhook,
-  removeWebhook,
   handleSubmit,
 } = useAlertForm(props, emit);
 
@@ -124,11 +119,7 @@ function handleClose() {
           :form="form"
           :disabled="isDisabled"
           :team-members="teamMembers"
-          v-model:new-webhook-url="newWebhookUrl"
-          :on-add-recipient="addRecipient"
-          :on-remove-recipient="removeRecipient"
-          :on-add-webhook="addWebhook"
-          :on-remove-webhook="removeWebhook"
+          :team-id="teamId"
           :on-add-label="addLabel"
           :on-remove-label="removeLabel"
           :on-add-annotation="addAnnotation"
@@ -192,11 +183,7 @@ function handleClose() {
       :form="form"
       :disabled="isDisabled"
       :team-members="teamMembers"
-      v-model:new-webhook-url="newWebhookUrl"
-      :on-add-recipient="addRecipient"
-      :on-remove-recipient="removeRecipient"
-      :on-add-webhook="addWebhook"
-      :on-remove-webhook="removeWebhook"
+      :team-id="teamId"
       :on-add-label="addLabel"
       :on-remove-label="removeLabel"
       :on-add-annotation="addAnnotation"

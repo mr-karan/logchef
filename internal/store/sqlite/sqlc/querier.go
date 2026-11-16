@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AddAlertDestination(ctx context.Context, arg AddAlertDestinationParams) error
 	// Link a saved query to a collection. An existing link of any kind is left as
 	// it is; the row count tells the caller whether the insert happened.
 	AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) (int64, error)
@@ -49,6 +50,7 @@ type Querier interface {
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
 	// Instance counts of the given alerts, one row per (alert, state).
 	CountAlertInstancesByState(ctx context.Context, alertIds []int64) ([]CountAlertInstancesByStateRow, error)
+	CountAlertsUsingDestination(ctx context.Context, destinationID int64) (int64, error)
 	// Counts the events that match the filters, stopping at max_rows.
 	CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error)
 	// Count the teams shared with a collection that the user currently belongs to.
@@ -62,6 +64,7 @@ type Querier interface {
 	// and in which the user is an owner or editor. A non-zero count means the
 	// user has delegated edit rights on that query. A pin grants nothing.
 	CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error)
+	CountTeamNotificationDestinations(ctx context.Context, teamID sql.NullInt64) (int64, error)
 	// Count active sessions for a user
 	CountUserSessions(ctx context.Context, arg CountUserSessionsParams) (int64, error)
 	// API Tokens
@@ -78,6 +81,8 @@ type Querier interface {
 	// Export Jobs
 	// Persist an async export job
 	CreateExportJob(ctx context.Context, arg CreateExportJobParams) error
+	// Notification destinations --------------------------------------------------
+	CreateNotificationDestination(ctx context.Context, arg CreateNotificationDestinationParams) (NotificationDestination, error)
 	// OAuth authorization server ------------------------------------------------
 	// Times are Unix milliseconds (see 000033_oauth.up.sql). Every *_hash
 	// argument is an HMAC hex digest, never a plaintext code or token.
@@ -110,6 +115,7 @@ type Querier interface {
 	// Delete an API token by ID and user ID (ensure user owns the token)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
+	DeleteAlertDestinations(ctx context.Context, alertID int64) error
 	DeleteAlertInstance(ctx context.Context, arg DeleteAlertInstanceParams) error
 	DeleteAlertInstances(ctx context.Context, alertID int64) error
 	DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error)
@@ -128,6 +134,7 @@ type Querier interface {
 	// Delete all sessions whose expiry is at or before the given time
 	DeleteExpiredSessions(ctx context.Context, expiresAt time.Time) error
 	DeleteJob(ctx context.Context, arg DeleteJobParams) error
+	DeleteNotificationDestination(ctx context.Context, id int64) (int64, error)
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	DeleteReport(ctx context.Context, id int64) (int64, error)
@@ -173,6 +180,7 @@ type Querier interface {
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetJob(ctx context.Context, arg GetJobParams) (Job, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
+	GetNotificationDestination(ctx context.Context, id int64) (NotificationDestination, error)
 	GetOAuthAuthCodeState(ctx context.Context, codeHash sql.NullString) (GetOAuthAuthCodeStateRow, error)
 	GetOAuthAuthRequest(ctx context.Context, id string) (OauthAuthRequest, error)
 	GetOAuthGrant(ctx context.Context, id int64) (OauthGrant, error)
@@ -249,6 +257,8 @@ type Querier interface {
 	KickJob(ctx context.Context, arg KickJobParams) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
+	ListAlertDestinationLinks(ctx context.Context, alertIds []int64) ([]AlertDestination, error)
+	ListAlertDestinations(ctx context.Context, alertID int64) ([]NotificationDestination, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	// Alert instance queries
 	ListAlertInstances(ctx context.Context, alertID int64) ([]AlertInstance, error)
@@ -291,6 +301,7 @@ type Querier interface {
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
 	ListManagedTeams(ctx context.Context) ([]Team, error)
+	ListNotificationDestinations(ctx context.Context) ([]NotificationDestination, error)
 	ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]OauthGrant, error)
 	ListOpenAlertGroupHistoryIDs(ctx context.Context, arg ListOpenAlertGroupHistoryIDsParams) ([]int64, error)
 	// Every open episode of the alert, newest first.
@@ -346,6 +357,9 @@ type Querier interface {
 	ListTeams(ctx context.Context) ([]ListTeamsRow, error)
 	// List all teams a user is a member of
 	ListTeamsForUser(ctx context.Context, userID int64) ([]ListTeamsForUserRow, error)
+	// Private destinations of the user, team destinations of the user's teams,
+	// and global ones.
+	ListUsableNotificationDestinations(ctx context.Context, userID sql.NullInt64) ([]NotificationDestination, error)
 	// List all teams a user is a member of
 	ListUserTeams(ctx context.Context, userID int64) ([]Team, error)
 	// List all users
@@ -450,6 +464,7 @@ type Querier interface {
 	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
+	UpdateNotificationDestination(ctx context.Context, arg UpdateNotificationDestinationParams) (NotificationDestination, error)
 	UpdateReport(ctx context.Context, arg UpdateReportParams) (int64, error)
 	// Update a saved query's mutable fields
 	UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryParams) error

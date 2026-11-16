@@ -9,34 +9,37 @@ import (
 )
 
 type Alert struct {
-	ID                   int64              `json:"id"`
-	SourceID             int64              `json:"source_id"`
-	Name                 string             `json:"name"`
-	Description          pgtype.Text        `json:"description"`
-	Query                pgtype.Text        `json:"query"`
-	ConditionJson        pgtype.Text        `json:"condition_json"`
-	LookbackSeconds      int64              `json:"lookback_seconds"`
-	ThresholdOperator    string             `json:"threshold_operator"`
-	ThresholdValue       float64            `json:"threshold_value"`
-	FrequencySeconds     int64              `json:"frequency_seconds"`
-	Severity             string             `json:"severity"`
-	LabelsJson           pgtype.Text        `json:"labels_json"`
-	AnnotationsJson      pgtype.Text        `json:"annotations_json"`
-	GeneratorUrl         pgtype.Text        `json:"generator_url"`
-	IsActive             bool               `json:"is_active"`
-	LastState            string             `json:"last_state"`
-	LastEvaluatedAt      pgtype.Timestamptz `json:"last_evaluated_at"`
-	LastTriggeredAt      pgtype.Timestamptz `json:"last_triggered_at"`
-	RecipientUserIdsJson pgtype.Text        `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      pgtype.Text        `json:"webhook_urls_json"`
-	CreatedBy            pgtype.Int8        `json:"created_by"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	QueryLanguage        string             `json:"query_language"`
-	EditorMode           string             `json:"editor_mode"`
-	GroupByJson          pgtype.Text        `json:"group_by_json"`
-	NoDataPolicy         string             `json:"no_data_policy"`
-	EvalSeq              int64              `json:"eval_seq"`
+	ID                int64              `json:"id"`
+	SourceID          int64              `json:"source_id"`
+	Name              string             `json:"name"`
+	Description       pgtype.Text        `json:"description"`
+	Query             pgtype.Text        `json:"query"`
+	ConditionJson     pgtype.Text        `json:"condition_json"`
+	LookbackSeconds   int64              `json:"lookback_seconds"`
+	ThresholdOperator string             `json:"threshold_operator"`
+	ThresholdValue    float64            `json:"threshold_value"`
+	FrequencySeconds  int64              `json:"frequency_seconds"`
+	Severity          string             `json:"severity"`
+	LabelsJson        pgtype.Text        `json:"labels_json"`
+	AnnotationsJson   pgtype.Text        `json:"annotations_json"`
+	GeneratorUrl      pgtype.Text        `json:"generator_url"`
+	IsActive          bool               `json:"is_active"`
+	LastState         string             `json:"last_state"`
+	LastEvaluatedAt   pgtype.Timestamptz `json:"last_evaluated_at"`
+	LastTriggeredAt   pgtype.Timestamptz `json:"last_triggered_at"`
+	CreatedBy         pgtype.Int8        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	QueryLanguage     string             `json:"query_language"`
+	EditorMode        string             `json:"editor_mode"`
+	GroupByJson       pgtype.Text        `json:"group_by_json"`
+	NoDataPolicy      string             `json:"no_data_policy"`
+	EvalSeq           int64              `json:"eval_seq"`
+}
+
+type AlertDestination struct {
+	AlertID       int64 `json:"alert_id"`
+	DestinationID int64 `json:"destination_id"`
 }
 
 type AlertHistory struct {
@@ -196,6 +199,23 @@ type Job struct {
 	LastError      pgtype.Text        `json:"last_error"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationDestination struct {
+	ID                 int64              `json:"id"`
+	Name               string             `json:"name"`
+	Type               string             `json:"type"`
+	Scope              string             `json:"scope"`
+	TeamID             pgtype.Int8        `json:"team_id"`
+	ConfigJson         string             `json:"config_json"`
+	Secret             string             `json:"secret"`
+	IsActive           bool               `json:"is_active"`
+	CreatedBy          pgtype.Int8        `json:"created_by"`
+	LastDeliveryAt     pgtype.Timestamptz `json:"last_delivery_at"`
+	LastDeliveryStatus pgtype.Text        `json:"last_delivery_status"`
+	LastDeliveryError  pgtype.Text        `json:"last_delivery_error"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OauthAccessToken struct {

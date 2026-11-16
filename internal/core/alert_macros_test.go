@@ -35,12 +35,12 @@ func TestAlertTimeMacros(t *testing.T) {
 	macroQuery := "SELECT count() AS value FROM logs WHERE {{__time_filter}} AND level = 'error'"
 	req := newTestCreateAlertRequest()
 	req.Query = macroQuery
-	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, req)
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner, req)
 	if err != nil {
 		t.Fatalf("CreateAlert(macro query) = %v", err)
 	}
 	updated := "SELECT count() AS value FROM logs WHERE {{__time_filter}}"
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &updated}); err != nil {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Query: &updated}); err != nil {
 		t.Fatalf("UpdateAlert(macro query) = %v", err)
 	}
 	test := &models.TestAlertQueryRequest{
@@ -53,7 +53,7 @@ func TestAlertTimeMacros(t *testing.T) {
 
 	variable := newTestCreateAlertRequest()
 	variable.Query = "SELECT count() AS value FROM logs WHERE {{__time_filter}} AND service = {{service}}"
-	if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, variable); !isInvalidAlertQuery(err) {
+	if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner, variable); !isInvalidAlertQuery(err) {
 		t.Errorf("CreateAlert(user variable) err = %v, want invalid alert query", err)
 	}
 
@@ -64,7 +64,7 @@ func TestAlertTimeMacros(t *testing.T) {
 	}
 	bad := newTestCreateAlertRequest()
 	bad.Query = cut
-	_, saveErr := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, bad)
+	_, saveErr := CreateAlert(ctx, db, ds, log, source.ID, owner, bad)
 	if !errors.Is(saveErr, ErrInvalidAlertConfiguration) || !strings.HasSuffix(saveErr.Error(), runErr.Error()) {
 		t.Errorf("save error = %v, want the run-time error %q", saveErr, runErr)
 	}

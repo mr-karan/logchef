@@ -200,7 +200,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.Loki.StartBackgroundHealthChecks(0)
 
 	// Initialize alerts manager with dynamic senders that read config from DB
-	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
+	emailSender := alerts.NewDynamicEmailSender(a.SQLite)
 	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, alerts.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
@@ -219,7 +219,6 @@ func (a *App) Initialize(ctx context.Context) error {
 		ClickHouse:    a.ClickHouse,
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
-		WebhookSender: webhookSender,
 		OIDCProvider:  oidcProvider,
 		OAuth:         oauthServer,
 		FS:            a.WebFS,

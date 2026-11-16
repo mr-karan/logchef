@@ -24,6 +24,9 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.addAlertDestinationStmt, err = db.PrepareContext(ctx, addAlertDestination); err != nil {
+		return nil, fmt.Errorf("error preparing query AddAlertDestination: %w", err)
+	}
 	if q.addCollectionItemStmt, err = db.PrepareContext(ctx, addCollectionItem); err != nil {
 		return nil, fmt.Errorf("error preparing query AddCollectionItem: %w", err)
 	}
@@ -72,6 +75,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countAlertInstancesByStateStmt, err = db.PrepareContext(ctx, countAlertInstancesByState); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAlertInstancesByState: %w", err)
 	}
+	if q.countAlertsUsingDestinationStmt, err = db.PrepareContext(ctx, countAlertsUsingDestination); err != nil {
+		return nil, fmt.Errorf("error preparing query CountAlertsUsingDestination: %w", err)
+	}
 	if q.countAuditEventsStmt, err = db.PrepareContext(ctx, countAuditEvents); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAuditEvents: %w", err)
 	}
@@ -86,6 +92,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.countSharedCollectionEditAccessStmt, err = db.PrepareContext(ctx, countSharedCollectionEditAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountSharedCollectionEditAccess: %w", err)
+	}
+	if q.countTeamNotificationDestinationsStmt, err = db.PrepareContext(ctx, countTeamNotificationDestinations); err != nil {
+		return nil, fmt.Errorf("error preparing query CountTeamNotificationDestinations: %w", err)
 	}
 	if q.countUserSessionsStmt, err = db.PrepareContext(ctx, countUserSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query CountUserSessions: %w", err)
@@ -104,6 +113,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.createExportJobStmt, err = db.PrepareContext(ctx, createExportJob); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateExportJob: %w", err)
+	}
+	if q.createNotificationDestinationStmt, err = db.PrepareContext(ctx, createNotificationDestination); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateNotificationDestination: %w", err)
 	}
 	if q.createOAuthAuthRequestStmt, err = db.PrepareContext(ctx, createOAuthAuthRequest); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateOAuthAuthRequest: %w", err)
@@ -141,6 +153,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteAlertStmt, err = db.PrepareContext(ctx, deleteAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlert: %w", err)
 	}
+	if q.deleteAlertDestinationsStmt, err = db.PrepareContext(ctx, deleteAlertDestinations); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAlertDestinations: %w", err)
+	}
 	if q.deleteAlertInstanceStmt, err = db.PrepareContext(ctx, deleteAlertInstance); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlertInstance: %w", err)
 	}
@@ -173,6 +188,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteJobStmt, err = db.PrepareContext(ctx, deleteJob); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteJob: %w", err)
+	}
+	if q.deleteNotificationDestinationStmt, err = db.PrepareContext(ctx, deleteNotificationDestination); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteNotificationDestination: %w", err)
 	}
 	if q.deleteQueryShareStmt, err = db.PrepareContext(ctx, deleteQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteQueryShare: %w", err)
@@ -254,6 +272,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getLatestUnresolvedAlertHistoryStmt, err = db.PrepareContext(ctx, getLatestUnresolvedAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query GetLatestUnresolvedAlertHistory: %w", err)
+	}
+	if q.getNotificationDestinationStmt, err = db.PrepareContext(ctx, getNotificationDestination); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNotificationDestination: %w", err)
 	}
 	if q.getOAuthAuthCodeStateStmt, err = db.PrepareContext(ctx, getOAuthAuthCodeState); err != nil {
 		return nil, fmt.Errorf("error preparing query GetOAuthAuthCodeState: %w", err)
@@ -375,6 +396,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
 	}
+	if q.listAlertDestinationLinksStmt, err = db.PrepareContext(ctx, listAlertDestinationLinks); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertDestinationLinks: %w", err)
+	}
+	if q.listAlertDestinationsStmt, err = db.PrepareContext(ctx, listAlertDestinations); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAlertDestinations: %w", err)
+	}
 	if q.listAlertHistoryStmt, err = db.PrepareContext(ctx, listAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertHistory: %w", err)
 	}
@@ -431,6 +458,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listManagedTeamsStmt, err = db.PrepareContext(ctx, listManagedTeams); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedTeams: %w", err)
+	}
+	if q.listNotificationDestinationsStmt, err = db.PrepareContext(ctx, listNotificationDestinations); err != nil {
+		return nil, fmt.Errorf("error preparing query ListNotificationDestinations: %w", err)
 	}
 	if q.listOAuthGrantsForUserStmt, err = db.PrepareContext(ctx, listOAuthGrantsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListOAuthGrantsForUser: %w", err)
@@ -509,6 +539,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listTeamsForUserStmt, err = db.PrepareContext(ctx, listTeamsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListTeamsForUser: %w", err)
+	}
+	if q.listUsableNotificationDestinationsStmt, err = db.PrepareContext(ctx, listUsableNotificationDestinations); err != nil {
+		return nil, fmt.Errorf("error preparing query ListUsableNotificationDestinations: %w", err)
 	}
 	if q.listUserTeamsStmt, err = db.PrepareContext(ctx, listUserTeams); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserTeams: %w", err)
@@ -681,6 +714,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateExportJobRunningStmt, err = db.PrepareContext(ctx, updateExportJobRunning); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateExportJobRunning: %w", err)
 	}
+	if q.updateNotificationDestinationStmt, err = db.PrepareContext(ctx, updateNotificationDestination); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateNotificationDestination: %w", err)
+	}
 	if q.updateReportStmt, err = db.PrepareContext(ctx, updateReport); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateReport: %w", err)
 	}
@@ -725,6 +761,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.addAlertDestinationStmt != nil {
+		if cerr := q.addAlertDestinationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing addAlertDestinationStmt: %w", cerr)
+		}
+	}
 	if q.addCollectionItemStmt != nil {
 		if cerr := q.addCollectionItemStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing addCollectionItemStmt: %w", cerr)
@@ -805,6 +846,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing countAlertInstancesByStateStmt: %w", cerr)
 		}
 	}
+	if q.countAlertsUsingDestinationStmt != nil {
+		if cerr := q.countAlertsUsingDestinationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countAlertsUsingDestinationStmt: %w", cerr)
+		}
+	}
 	if q.countAuditEventsStmt != nil {
 		if cerr := q.countAuditEventsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countAuditEventsStmt: %w", cerr)
@@ -828,6 +874,11 @@ func (q *Queries) Close() error {
 	if q.countSharedCollectionEditAccessStmt != nil {
 		if cerr := q.countSharedCollectionEditAccessStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countSharedCollectionEditAccessStmt: %w", cerr)
+		}
+	}
+	if q.countTeamNotificationDestinationsStmt != nil {
+		if cerr := q.countTeamNotificationDestinationsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countTeamNotificationDestinationsStmt: %w", cerr)
 		}
 	}
 	if q.countUserSessionsStmt != nil {
@@ -858,6 +909,11 @@ func (q *Queries) Close() error {
 	if q.createExportJobStmt != nil {
 		if cerr := q.createExportJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createExportJobStmt: %w", cerr)
+		}
+	}
+	if q.createNotificationDestinationStmt != nil {
+		if cerr := q.createNotificationDestinationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createNotificationDestinationStmt: %w", cerr)
 		}
 	}
 	if q.createOAuthAuthRequestStmt != nil {
@@ -920,6 +976,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteAlertStmt: %w", cerr)
 		}
 	}
+	if q.deleteAlertDestinationsStmt != nil {
+		if cerr := q.deleteAlertDestinationsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAlertDestinationsStmt: %w", cerr)
+		}
+	}
 	if q.deleteAlertInstanceStmt != nil {
 		if cerr := q.deleteAlertInstanceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAlertInstanceStmt: %w", cerr)
@@ -973,6 +1034,11 @@ func (q *Queries) Close() error {
 	if q.deleteJobStmt != nil {
 		if cerr := q.deleteJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteJobStmt: %w", cerr)
+		}
+	}
+	if q.deleteNotificationDestinationStmt != nil {
+		if cerr := q.deleteNotificationDestinationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteNotificationDestinationStmt: %w", cerr)
 		}
 	}
 	if q.deleteQueryShareStmt != nil {
@@ -1108,6 +1174,11 @@ func (q *Queries) Close() error {
 	if q.getLatestUnresolvedAlertHistoryStmt != nil {
 		if cerr := q.getLatestUnresolvedAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getLatestUnresolvedAlertHistoryStmt: %w", cerr)
+		}
+	}
+	if q.getNotificationDestinationStmt != nil {
+		if cerr := q.getNotificationDestinationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNotificationDestinationStmt: %w", cerr)
 		}
 	}
 	if q.getOAuthAuthCodeStateStmt != nil {
@@ -1310,6 +1381,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAPITokensForUserStmt: %w", cerr)
 		}
 	}
+	if q.listAlertDestinationLinksStmt != nil {
+		if cerr := q.listAlertDestinationLinksStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertDestinationLinksStmt: %w", cerr)
+		}
+	}
+	if q.listAlertDestinationsStmt != nil {
+		if cerr := q.listAlertDestinationsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAlertDestinationsStmt: %w", cerr)
+		}
+	}
 	if q.listAlertHistoryStmt != nil {
 		if cerr := q.listAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAlertHistoryStmt: %w", cerr)
@@ -1403,6 +1484,11 @@ func (q *Queries) Close() error {
 	if q.listManagedTeamsStmt != nil {
 		if cerr := q.listManagedTeamsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedTeamsStmt: %w", cerr)
+		}
+	}
+	if q.listNotificationDestinationsStmt != nil {
+		if cerr := q.listNotificationDestinationsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listNotificationDestinationsStmt: %w", cerr)
 		}
 	}
 	if q.listOAuthGrantsForUserStmt != nil {
@@ -1533,6 +1619,11 @@ func (q *Queries) Close() error {
 	if q.listTeamsForUserStmt != nil {
 		if cerr := q.listTeamsForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listTeamsForUserStmt: %w", cerr)
+		}
+	}
+	if q.listUsableNotificationDestinationsStmt != nil {
+		if cerr := q.listUsableNotificationDestinationsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listUsableNotificationDestinationsStmt: %w", cerr)
 		}
 	}
 	if q.listUserTeamsStmt != nil {
@@ -1820,6 +1911,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateExportJobRunningStmt: %w", cerr)
 		}
 	}
+	if q.updateNotificationDestinationStmt != nil {
+		if cerr := q.updateNotificationDestinationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateNotificationDestinationStmt: %w", cerr)
+		}
+	}
 	if q.updateReportStmt != nil {
 		if cerr := q.updateReportStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateReportStmt: %w", cerr)
@@ -1922,477 +2018,501 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                                    DBTX
-	tx                                    *sql.Tx
-	addCollectionItemStmt                 *sql.Stmt
-	addCollectionMemberStmt               *sql.Stmt
-	addCollectionTeamStmt                 *sql.Stmt
-	addTeamMemberStmt                     *sql.Stmt
-	addTeamSourceStmt                     *sql.Stmt
-	advanceAlertEvalSeqStmt               *sql.Stmt
-	authenticateOAuthAccessTokenStmt      *sql.Stmt
-	claimJobsStmt                         *sql.Stmt
-	claimOAuthAuthRequestDecisionStmt     *sql.Stmt
-	claimReportStmt                       *sql.Stmt
-	clearSavedViewScopeDefaultStmt        *sql.Stmt
-	completeExportJobStmt                 *sql.Stmt
-	consumeOAuthAuthCodeStmt              *sql.Stmt
-	consumeOAuthRefreshTokenStmt          *sql.Stmt
-	countAdminUsersStmt                   *sql.Stmt
-	countAlertInstancesByStateStmt        *sql.Stmt
-	countAuditEventsStmt                  *sql.Stmt
-	countCollectionTeamAccessStmt         *sql.Stmt
-	countReportFailureStmt                *sql.Stmt
-	countSavedViewsInScopeStmt            *sql.Stmt
-	countSharedCollectionEditAccessStmt   *sql.Stmt
-	countUserSessionsStmt                 *sql.Stmt
-	createAPITokenStmt                    *sql.Stmt
-	createAlertStmt                       *sql.Stmt
-	createCollectionStmt                  *sql.Stmt
-	createDashboardStmt                   *sql.Stmt
-	createExportJobStmt                   *sql.Stmt
-	createOAuthAuthRequestStmt            *sql.Stmt
-	createOAuthGrantStmt                  *sql.Stmt
-	createQueryShareStmt                  *sql.Stmt
-	createReportStmt                      *sql.Stmt
-	createSavedQueryStmt                  *sql.Stmt
-	createSavedViewStmt                   *sql.Stmt
-	createSessionStmt                     *sql.Stmt
-	createSourceStmt                      *sql.Stmt
-	createTeamStmt                        *sql.Stmt
-	createUserStmt                        *sql.Stmt
-	deleteAPITokenStmt                    *sql.Stmt
-	deleteAlertStmt                       *sql.Stmt
-	deleteAlertInstanceStmt               *sql.Stmt
-	deleteAlertInstancesStmt              *sql.Stmt
-	deleteClaimedJobStmt                  *sql.Stmt
-	deleteCollectionStmt                  *sql.Stmt
-	deleteDashboardStmt                   *sql.Stmt
-	deleteExpiredExportJobsStmt           *sql.Stmt
-	deleteExpiredOAuthAccessTokensStmt    *sql.Stmt
-	deleteExpiredOAuthAuthRequestsStmt    *sql.Stmt
-	deleteExpiredOAuthRefreshFamiliesStmt *sql.Stmt
-	deleteExpiredSessionsStmt             *sql.Stmt
-	deleteJobStmt                         *sql.Stmt
-	deleteQueryShareStmt                  *sql.Stmt
-	deleteReportStmt                      *sql.Stmt
-	deleteReportRecipientsStmt            *sql.Stmt
-	deleteReportUserRecipientStmt         *sql.Stmt
-	deleteSavedQueryStmt                  *sql.Stmt
-	deleteSavedViewStmt                   *sql.Stmt
-	deleteSessionStmt                     *sql.Stmt
-	deleteSourceStmt                      *sql.Stmt
-	deleteSystemSettingStmt               *sql.Stmt
-	deleteTeamStmt                        *sql.Stmt
-	deleteUserStmt                        *sql.Stmt
-	deleteUserSessionsStmt                *sql.Stmt
-	failExportJobStmt                     *sql.Stmt
-	finishJobStmt                         *sql.Stmt
-	finishReportRunStmt                   *sql.Stmt
-	getAPITokenStmt                       *sql.Stmt
-	getAPITokenByHashStmt                 *sql.Stmt
-	getAlertStmt                          *sql.Stmt
-	getAlertHistoryEntryStmt              *sql.Stmt
-	getAuditPruneBoundaryStmt             *sql.Stmt
-	getCollectionStmt                     *sql.Stmt
-	getCollectionItemLinkStmt             *sql.Stmt
-	getCollectionMemberStmt               *sql.Stmt
-	getDashboardStmt                      *sql.Stmt
-	getExportJobStmt                      *sql.Stmt
-	getJobStmt                            *sql.Stmt
-	getLatestUnresolvedAlertHistoryStmt   *sql.Stmt
-	getOAuthAuthCodeStateStmt             *sql.Stmt
-	getOAuthAuthRequestStmt               *sql.Stmt
-	getOAuthGrantStmt                     *sql.Stmt
-	getOAuthRefreshTokenStateStmt         *sql.Stmt
-	getPersonalCollectionStmt             *sql.Stmt
-	getQueryShareStmt                     *sql.Stmt
-	getReportStmt                         *sql.Stmt
-	getSavedQueryStmt                     *sql.Stmt
-	getSavedViewStmt                      *sql.Stmt
-	getSessionStmt                        *sql.Stmt
-	getSourceStmt                         *sql.Stmt
-	getSourceByIdentityKeyStmt            *sql.Stmt
-	getSourceByNameForProvisioningStmt    *sql.Stmt
-	getSystemSettingStmt                  *sql.Stmt
-	getTeamStmt                           *sql.Stmt
-	getTeamByNameStmt                     *sql.Stmt
-	getTeamMemberStmt                     *sql.Stmt
-	getTriggeredAlertHistoryAlertIDStmt   *sql.Stmt
-	getUserStmt                           *sql.Stmt
-	getUserByEmailStmt                    *sql.Stmt
-	getUserPreferencesStmt                *sql.Stmt
-	getUserTeamForSourceStmt              *sql.Stmt
-	holdJobStmt                           *sql.Stmt
-	incrementQueryShapeStatsStmt          *sql.Stmt
-	incrementQueryStatsStmt               *sql.Stmt
-	insertAlertHistoryStmt                *sql.Stmt
-	insertAuditEventStmt                  *sql.Stmt
-	insertOAuthAccessTokenStmt            *sql.Stmt
-	insertOAuthRefreshTokenStmt           *sql.Stmt
-	insertQueryHistoryStmt                *sql.Stmt
-	insertReportRecipientStmt             *sql.Stmt
-	insertRunningReportRunStmt            *sql.Stmt
-	insertSkippedReportTickStmt           *sql.Stmt
-	insertTeamMemberStmt                  *sql.Stmt
-	interruptAlertDeliveriesStmt          *sql.Stmt
-	interruptStaleReportRunsStmt          *sql.Stmt
-	isSourceManagedStmt                   *sql.Stmt
-	isTeamManagedStmt                     *sql.Stmt
-	kickJobStmt                           *sql.Stmt
-	listAPITokensForUserStmt              *sql.Stmt
-	listAlertHistoryStmt                  *sql.Stmt
-	listAlertInstancesStmt                *sql.Stmt
-	listAlertsBySourceStmt                *sql.Stmt
-	listAlertsForUserStmt                 *sql.Stmt
-	listAllSavedQueriesStmt               *sql.Stmt
-	listAuditEventsAscStmt                *sql.Stmt
-	listAuditEventsDescStmt               *sql.Stmt
-	listCollectionEditorsStmt             *sql.Stmt
-	listCollectionItemsStmt               *sql.Stmt
-	listCollectionMembersStmt             *sql.Stmt
-	listCollectionTeamsStmt               *sql.Stmt
-	listCollectionsForUserStmt            *sql.Stmt
-	listDashboardSummariesStmt            *sql.Stmt
-	listExpiredExportJobPathsStmt         *sql.Stmt
-	listInterruptedExportJobsStmt         *sql.Stmt
-	listLatestReportRunsStmt              *sql.Stmt
-	listManagedSavedViewsStmt             *sql.Stmt
-	listManagedSourcesStmt                *sql.Stmt
-	listManagedTeamsStmt                  *sql.Stmt
-	listOAuthGrantsForUserStmt            *sql.Stmt
-	listOpenAlertGroupHistoryIDsStmt      *sql.Stmt
-	listOpenAlertHistoryStmt              *sql.Stmt
-	listQueryActivityStmt                 *sql.Stmt
-	listQueryHistoryStmt                  *sql.Stmt
-	listQueryShapeStatsStmt               *sql.Stmt
-	listReportRecipientsStmt              *sql.Stmt
-	listReportRunsStmt                    *sql.Stmt
-	listReportsStmt                       *sql.Stmt
-	listReportsByOwnerStmt                *sql.Stmt
-	listReportsForRecipientStmt           *sql.Stmt
-	listSavedQueriesForUserStmt           *sql.Stmt
-	listSavedQueriesForUserBySourceStmt   *sql.Stmt
-	listSavedViewsStmt                    *sql.Stmt
-	listServiceAccountsStmt               *sql.Stmt
-	listSharedCollectionPinsStmt          *sql.Stmt
-	listSourceTeamsStmt                   *sql.Stmt
-	listSourcesStmt                       *sql.Stmt
-	listSourcesForUserStmt                *sql.Stmt
-	listStaleDashboardSummaryInputsStmt   *sql.Stmt
-	listSystemSettingsStmt                *sql.Stmt
-	listSystemSettingsByCategoryStmt      *sql.Stmt
-	listTeamMembersWithDetailsStmt        *sql.Stmt
-	listTeamSourcesStmt                   *sql.Stmt
-	listTeamsStmt                         *sql.Stmt
-	listTeamsForUserStmt                  *sql.Stmt
-	listUserTeamsStmt                     *sql.Stmt
-	listUsersStmt                         *sql.Stmt
-	listUsersForProvisioningStmt          *sql.Stmt
-	lockCollectionStmt                    *sql.Stmt
-	lockReportStmt                        *sql.Stmt
-	markAlertEvaluatedStmt                *sql.Stmt
-	markAlertInstanceNotifiedStmt         *sql.Stmt
-	markAlertResolvedStmt                 *sql.Stmt
-	markAlertTriggeredStmt                *sql.Stmt
-	pauseReportStmt                       *sql.Stmt
-	pruneAlertHistoryStmt                 *sql.Stmt
-	pruneAuditEventsStmt                  *sql.Stmt
-	pruneExpiredQuerySharesStmt           *sql.Stmt
-	pruneQueryHistoryForUserStmt          *sql.Stmt
-	pruneQueryShapeStatsStmt              *sql.Stmt
-	pruneReportRunsStmt                   *sql.Stmt
-	queryShapeCoverageStmt                *sql.Stmt
-	queryVolumeByDayStmt                  *sql.Stmt
-	reapInterruptedExportJobsStmt         *sql.Stmt
-	refreshAlertStateStmt                 *sql.Stmt
-	releaseJobStmt                        *sql.Stmt
-	removeCollectionItemStmt              *sql.Stmt
-	removeCollectionMemberStmt            *sql.Stmt
-	removeCollectionPinStmt               *sql.Stmt
-	removeCollectionTeamStmt              *sql.Stmt
-	removeTeamMemberStmt                  *sql.Stmt
-	removeTeamSourceStmt                  *sql.Stmt
-	repairDashboardSummaryStmt            *sql.Stmt
-	reportTickExistsStmt                  *sql.Stmt
-	resolveAlertGroupHistoryStmt          *sql.Stmt
-	resolveAlertHistoryForAlertStmt       *sql.Stmt
-	resumeReportStmt                      *sql.Stmt
-	revokeOAuthGrantStmt                  *sql.Stmt
-	revokeOAuthGrantByTokenStmt           *sql.Stmt
-	revokeOAuthGrantForUserStmt           *sql.Stmt
-	saveOAuthAuthCodeStmt                 *sql.Stmt
-	setCollectionItemKindStmt             *sql.Stmt
-	setOAuthAuthRequestGrantStmt          *sql.Stmt
-	setSavedViewDefaultFlagStmt           *sql.Stmt
-	setSourceManagedStmt                  *sql.Stmt
-	setTeamManagedStmt                    *sql.Stmt
-	setUserManagedStmt                    *sql.Stmt
-	setUserPasswordHashStmt               *sql.Stmt
-	takeReportManualRunCooldownStmt       *sql.Stmt
-	takeReportPreviewCooldownStmt         *sql.Stmt
-	teamHasSourceStmt                     *sql.Stmt
-	topSourcesByQueriesStmt               *sql.Stmt
-	topUsersByQueriesStmt                 *sql.Stmt
-	touchAlertEvaluatedStmt               *sql.Stmt
-	touchOAuthGrantStmt                   *sql.Stmt
-	touchQueryShareStmt                   *sql.Stmt
-	updateAPITokenLastUsedStmt            *sql.Stmt
-	updateAlertStmt                       *sql.Stmt
-	updateAlertHistoryPayloadStmt         *sql.Stmt
-	updateCollectionStmt                  *sql.Stmt
-	updateDashboardStmt                   *sql.Stmt
-	updateExportJobRunningStmt            *sql.Stmt
-	updateReportStmt                      *sql.Stmt
-	updateSavedQueryStmt                  *sql.Stmt
-	updateSavedViewStmt                   *sql.Stmt
-	updateSourceStmt                      *sql.Stmt
-	updateTeamStmt                        *sql.Stmt
-	updateTeamMemberRoleStmt              *sql.Stmt
-	updateUserStmt                        *sql.Stmt
-	updateUserLastLoginStmt               *sql.Stmt
-	upsertAlertInstanceStmt               *sql.Stmt
-	upsertJobStmt                         *sql.Stmt
-	upsertSystemSettingStmt               *sql.Stmt
-	upsertUserPreferencesStmt             *sql.Stmt
-	userHasSourceAccessStmt               *sql.Stmt
+	db                                     DBTX
+	tx                                     *sql.Tx
+	addAlertDestinationStmt                *sql.Stmt
+	addCollectionItemStmt                  *sql.Stmt
+	addCollectionMemberStmt                *sql.Stmt
+	addCollectionTeamStmt                  *sql.Stmt
+	addTeamMemberStmt                      *sql.Stmt
+	addTeamSourceStmt                      *sql.Stmt
+	advanceAlertEvalSeqStmt                *sql.Stmt
+	authenticateOAuthAccessTokenStmt       *sql.Stmt
+	claimJobsStmt                          *sql.Stmt
+	claimOAuthAuthRequestDecisionStmt      *sql.Stmt
+	claimReportStmt                        *sql.Stmt
+	clearSavedViewScopeDefaultStmt         *sql.Stmt
+	completeExportJobStmt                  *sql.Stmt
+	consumeOAuthAuthCodeStmt               *sql.Stmt
+	consumeOAuthRefreshTokenStmt           *sql.Stmt
+	countAdminUsersStmt                    *sql.Stmt
+	countAlertInstancesByStateStmt         *sql.Stmt
+	countAlertsUsingDestinationStmt        *sql.Stmt
+	countAuditEventsStmt                   *sql.Stmt
+	countCollectionTeamAccessStmt          *sql.Stmt
+	countReportFailureStmt                 *sql.Stmt
+	countSavedViewsInScopeStmt             *sql.Stmt
+	countSharedCollectionEditAccessStmt    *sql.Stmt
+	countTeamNotificationDestinationsStmt  *sql.Stmt
+	countUserSessionsStmt                  *sql.Stmt
+	createAPITokenStmt                     *sql.Stmt
+	createAlertStmt                        *sql.Stmt
+	createCollectionStmt                   *sql.Stmt
+	createDashboardStmt                    *sql.Stmt
+	createExportJobStmt                    *sql.Stmt
+	createNotificationDestinationStmt      *sql.Stmt
+	createOAuthAuthRequestStmt             *sql.Stmt
+	createOAuthGrantStmt                   *sql.Stmt
+	createQueryShareStmt                   *sql.Stmt
+	createReportStmt                       *sql.Stmt
+	createSavedQueryStmt                   *sql.Stmt
+	createSavedViewStmt                    *sql.Stmt
+	createSessionStmt                      *sql.Stmt
+	createSourceStmt                       *sql.Stmt
+	createTeamStmt                         *sql.Stmt
+	createUserStmt                         *sql.Stmt
+	deleteAPITokenStmt                     *sql.Stmt
+	deleteAlertStmt                        *sql.Stmt
+	deleteAlertDestinationsStmt            *sql.Stmt
+	deleteAlertInstanceStmt                *sql.Stmt
+	deleteAlertInstancesStmt               *sql.Stmt
+	deleteClaimedJobStmt                   *sql.Stmt
+	deleteCollectionStmt                   *sql.Stmt
+	deleteDashboardStmt                    *sql.Stmt
+	deleteExpiredExportJobsStmt            *sql.Stmt
+	deleteExpiredOAuthAccessTokensStmt     *sql.Stmt
+	deleteExpiredOAuthAuthRequestsStmt     *sql.Stmt
+	deleteExpiredOAuthRefreshFamiliesStmt  *sql.Stmt
+	deleteExpiredSessionsStmt              *sql.Stmt
+	deleteJobStmt                          *sql.Stmt
+	deleteNotificationDestinationStmt      *sql.Stmt
+	deleteQueryShareStmt                   *sql.Stmt
+	deleteReportStmt                       *sql.Stmt
+	deleteReportRecipientsStmt             *sql.Stmt
+	deleteReportUserRecipientStmt          *sql.Stmt
+	deleteSavedQueryStmt                   *sql.Stmt
+	deleteSavedViewStmt                    *sql.Stmt
+	deleteSessionStmt                      *sql.Stmt
+	deleteSourceStmt                       *sql.Stmt
+	deleteSystemSettingStmt                *sql.Stmt
+	deleteTeamStmt                         *sql.Stmt
+	deleteUserStmt                         *sql.Stmt
+	deleteUserSessionsStmt                 *sql.Stmt
+	failExportJobStmt                      *sql.Stmt
+	finishJobStmt                          *sql.Stmt
+	finishReportRunStmt                    *sql.Stmt
+	getAPITokenStmt                        *sql.Stmt
+	getAPITokenByHashStmt                  *sql.Stmt
+	getAlertStmt                           *sql.Stmt
+	getAlertHistoryEntryStmt               *sql.Stmt
+	getAuditPruneBoundaryStmt              *sql.Stmt
+	getCollectionStmt                      *sql.Stmt
+	getCollectionItemLinkStmt              *sql.Stmt
+	getCollectionMemberStmt                *sql.Stmt
+	getDashboardStmt                       *sql.Stmt
+	getExportJobStmt                       *sql.Stmt
+	getJobStmt                             *sql.Stmt
+	getLatestUnresolvedAlertHistoryStmt    *sql.Stmt
+	getNotificationDestinationStmt         *sql.Stmt
+	getOAuthAuthCodeStateStmt              *sql.Stmt
+	getOAuthAuthRequestStmt                *sql.Stmt
+	getOAuthGrantStmt                      *sql.Stmt
+	getOAuthRefreshTokenStateStmt          *sql.Stmt
+	getPersonalCollectionStmt              *sql.Stmt
+	getQueryShareStmt                      *sql.Stmt
+	getReportStmt                          *sql.Stmt
+	getSavedQueryStmt                      *sql.Stmt
+	getSavedViewStmt                       *sql.Stmt
+	getSessionStmt                         *sql.Stmt
+	getSourceStmt                          *sql.Stmt
+	getSourceByIdentityKeyStmt             *sql.Stmt
+	getSourceByNameForProvisioningStmt     *sql.Stmt
+	getSystemSettingStmt                   *sql.Stmt
+	getTeamStmt                            *sql.Stmt
+	getTeamByNameStmt                      *sql.Stmt
+	getTeamMemberStmt                      *sql.Stmt
+	getTriggeredAlertHistoryAlertIDStmt    *sql.Stmt
+	getUserStmt                            *sql.Stmt
+	getUserByEmailStmt                     *sql.Stmt
+	getUserPreferencesStmt                 *sql.Stmt
+	getUserTeamForSourceStmt               *sql.Stmt
+	holdJobStmt                            *sql.Stmt
+	incrementQueryShapeStatsStmt           *sql.Stmt
+	incrementQueryStatsStmt                *sql.Stmt
+	insertAlertHistoryStmt                 *sql.Stmt
+	insertAuditEventStmt                   *sql.Stmt
+	insertOAuthAccessTokenStmt             *sql.Stmt
+	insertOAuthRefreshTokenStmt            *sql.Stmt
+	insertQueryHistoryStmt                 *sql.Stmt
+	insertReportRecipientStmt              *sql.Stmt
+	insertRunningReportRunStmt             *sql.Stmt
+	insertSkippedReportTickStmt            *sql.Stmt
+	insertTeamMemberStmt                   *sql.Stmt
+	interruptAlertDeliveriesStmt           *sql.Stmt
+	interruptStaleReportRunsStmt           *sql.Stmt
+	isSourceManagedStmt                    *sql.Stmt
+	isTeamManagedStmt                      *sql.Stmt
+	kickJobStmt                            *sql.Stmt
+	listAPITokensForUserStmt               *sql.Stmt
+	listAlertDestinationLinksStmt          *sql.Stmt
+	listAlertDestinationsStmt              *sql.Stmt
+	listAlertHistoryStmt                   *sql.Stmt
+	listAlertInstancesStmt                 *sql.Stmt
+	listAlertsBySourceStmt                 *sql.Stmt
+	listAlertsForUserStmt                  *sql.Stmt
+	listAllSavedQueriesStmt                *sql.Stmt
+	listAuditEventsAscStmt                 *sql.Stmt
+	listAuditEventsDescStmt                *sql.Stmt
+	listCollectionEditorsStmt              *sql.Stmt
+	listCollectionItemsStmt                *sql.Stmt
+	listCollectionMembersStmt              *sql.Stmt
+	listCollectionTeamsStmt                *sql.Stmt
+	listCollectionsForUserStmt             *sql.Stmt
+	listDashboardSummariesStmt             *sql.Stmt
+	listExpiredExportJobPathsStmt          *sql.Stmt
+	listInterruptedExportJobsStmt          *sql.Stmt
+	listLatestReportRunsStmt               *sql.Stmt
+	listManagedSavedViewsStmt              *sql.Stmt
+	listManagedSourcesStmt                 *sql.Stmt
+	listManagedTeamsStmt                   *sql.Stmt
+	listNotificationDestinationsStmt       *sql.Stmt
+	listOAuthGrantsForUserStmt             *sql.Stmt
+	listOpenAlertGroupHistoryIDsStmt       *sql.Stmt
+	listOpenAlertHistoryStmt               *sql.Stmt
+	listQueryActivityStmt                  *sql.Stmt
+	listQueryHistoryStmt                   *sql.Stmt
+	listQueryShapeStatsStmt                *sql.Stmt
+	listReportRecipientsStmt               *sql.Stmt
+	listReportRunsStmt                     *sql.Stmt
+	listReportsStmt                        *sql.Stmt
+	listReportsByOwnerStmt                 *sql.Stmt
+	listReportsForRecipientStmt            *sql.Stmt
+	listSavedQueriesForUserStmt            *sql.Stmt
+	listSavedQueriesForUserBySourceStmt    *sql.Stmt
+	listSavedViewsStmt                     *sql.Stmt
+	listServiceAccountsStmt                *sql.Stmt
+	listSharedCollectionPinsStmt           *sql.Stmt
+	listSourceTeamsStmt                    *sql.Stmt
+	listSourcesStmt                        *sql.Stmt
+	listSourcesForUserStmt                 *sql.Stmt
+	listStaleDashboardSummaryInputsStmt    *sql.Stmt
+	listSystemSettingsStmt                 *sql.Stmt
+	listSystemSettingsByCategoryStmt       *sql.Stmt
+	listTeamMembersWithDetailsStmt         *sql.Stmt
+	listTeamSourcesStmt                    *sql.Stmt
+	listTeamsStmt                          *sql.Stmt
+	listTeamsForUserStmt                   *sql.Stmt
+	listUsableNotificationDestinationsStmt *sql.Stmt
+	listUserTeamsStmt                      *sql.Stmt
+	listUsersStmt                          *sql.Stmt
+	listUsersForProvisioningStmt           *sql.Stmt
+	lockCollectionStmt                     *sql.Stmt
+	lockReportStmt                         *sql.Stmt
+	markAlertEvaluatedStmt                 *sql.Stmt
+	markAlertInstanceNotifiedStmt          *sql.Stmt
+	markAlertResolvedStmt                  *sql.Stmt
+	markAlertTriggeredStmt                 *sql.Stmt
+	pauseReportStmt                        *sql.Stmt
+	pruneAlertHistoryStmt                  *sql.Stmt
+	pruneAuditEventsStmt                   *sql.Stmt
+	pruneExpiredQuerySharesStmt            *sql.Stmt
+	pruneQueryHistoryForUserStmt           *sql.Stmt
+	pruneQueryShapeStatsStmt               *sql.Stmt
+	pruneReportRunsStmt                    *sql.Stmt
+	queryShapeCoverageStmt                 *sql.Stmt
+	queryVolumeByDayStmt                   *sql.Stmt
+	reapInterruptedExportJobsStmt          *sql.Stmt
+	refreshAlertStateStmt                  *sql.Stmt
+	releaseJobStmt                         *sql.Stmt
+	removeCollectionItemStmt               *sql.Stmt
+	removeCollectionMemberStmt             *sql.Stmt
+	removeCollectionPinStmt                *sql.Stmt
+	removeCollectionTeamStmt               *sql.Stmt
+	removeTeamMemberStmt                   *sql.Stmt
+	removeTeamSourceStmt                   *sql.Stmt
+	repairDashboardSummaryStmt             *sql.Stmt
+	reportTickExistsStmt                   *sql.Stmt
+	resolveAlertGroupHistoryStmt           *sql.Stmt
+	resolveAlertHistoryForAlertStmt        *sql.Stmt
+	resumeReportStmt                       *sql.Stmt
+	revokeOAuthGrantStmt                   *sql.Stmt
+	revokeOAuthGrantByTokenStmt            *sql.Stmt
+	revokeOAuthGrantForUserStmt            *sql.Stmt
+	saveOAuthAuthCodeStmt                  *sql.Stmt
+	setCollectionItemKindStmt              *sql.Stmt
+	setOAuthAuthRequestGrantStmt           *sql.Stmt
+	setSavedViewDefaultFlagStmt            *sql.Stmt
+	setSourceManagedStmt                   *sql.Stmt
+	setTeamManagedStmt                     *sql.Stmt
+	setUserManagedStmt                     *sql.Stmt
+	setUserPasswordHashStmt                *sql.Stmt
+	takeReportManualRunCooldownStmt        *sql.Stmt
+	takeReportPreviewCooldownStmt          *sql.Stmt
+	teamHasSourceStmt                      *sql.Stmt
+	topSourcesByQueriesStmt                *sql.Stmt
+	topUsersByQueriesStmt                  *sql.Stmt
+	touchAlertEvaluatedStmt                *sql.Stmt
+	touchOAuthGrantStmt                    *sql.Stmt
+	touchQueryShareStmt                    *sql.Stmt
+	updateAPITokenLastUsedStmt             *sql.Stmt
+	updateAlertStmt                        *sql.Stmt
+	updateAlertHistoryPayloadStmt          *sql.Stmt
+	updateCollectionStmt                   *sql.Stmt
+	updateDashboardStmt                    *sql.Stmt
+	updateExportJobRunningStmt             *sql.Stmt
+	updateNotificationDestinationStmt      *sql.Stmt
+	updateReportStmt                       *sql.Stmt
+	updateSavedQueryStmt                   *sql.Stmt
+	updateSavedViewStmt                    *sql.Stmt
+	updateSourceStmt                       *sql.Stmt
+	updateTeamStmt                         *sql.Stmt
+	updateTeamMemberRoleStmt               *sql.Stmt
+	updateUserStmt                         *sql.Stmt
+	updateUserLastLoginStmt                *sql.Stmt
+	upsertAlertInstanceStmt                *sql.Stmt
+	upsertJobStmt                          *sql.Stmt
+	upsertSystemSettingStmt                *sql.Stmt
+	upsertUserPreferencesStmt              *sql.Stmt
+	userHasSourceAccessStmt                *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                                    tx,
-		tx:                                    tx,
-		addCollectionItemStmt:                 q.addCollectionItemStmt,
-		addCollectionMemberStmt:               q.addCollectionMemberStmt,
-		addCollectionTeamStmt:                 q.addCollectionTeamStmt,
-		addTeamMemberStmt:                     q.addTeamMemberStmt,
-		addTeamSourceStmt:                     q.addTeamSourceStmt,
-		advanceAlertEvalSeqStmt:               q.advanceAlertEvalSeqStmt,
-		authenticateOAuthAccessTokenStmt:      q.authenticateOAuthAccessTokenStmt,
-		claimJobsStmt:                         q.claimJobsStmt,
-		claimOAuthAuthRequestDecisionStmt:     q.claimOAuthAuthRequestDecisionStmt,
-		claimReportStmt:                       q.claimReportStmt,
-		clearSavedViewScopeDefaultStmt:        q.clearSavedViewScopeDefaultStmt,
-		completeExportJobStmt:                 q.completeExportJobStmt,
-		consumeOAuthAuthCodeStmt:              q.consumeOAuthAuthCodeStmt,
-		consumeOAuthRefreshTokenStmt:          q.consumeOAuthRefreshTokenStmt,
-		countAdminUsersStmt:                   q.countAdminUsersStmt,
-		countAlertInstancesByStateStmt:        q.countAlertInstancesByStateStmt,
-		countAuditEventsStmt:                  q.countAuditEventsStmt,
-		countCollectionTeamAccessStmt:         q.countCollectionTeamAccessStmt,
-		countReportFailureStmt:                q.countReportFailureStmt,
-		countSavedViewsInScopeStmt:            q.countSavedViewsInScopeStmt,
-		countSharedCollectionEditAccessStmt:   q.countSharedCollectionEditAccessStmt,
-		countUserSessionsStmt:                 q.countUserSessionsStmt,
-		createAPITokenStmt:                    q.createAPITokenStmt,
-		createAlertStmt:                       q.createAlertStmt,
-		createCollectionStmt:                  q.createCollectionStmt,
-		createDashboardStmt:                   q.createDashboardStmt,
-		createExportJobStmt:                   q.createExportJobStmt,
-		createOAuthAuthRequestStmt:            q.createOAuthAuthRequestStmt,
-		createOAuthGrantStmt:                  q.createOAuthGrantStmt,
-		createQueryShareStmt:                  q.createQueryShareStmt,
-		createReportStmt:                      q.createReportStmt,
-		createSavedQueryStmt:                  q.createSavedQueryStmt,
-		createSavedViewStmt:                   q.createSavedViewStmt,
-		createSessionStmt:                     q.createSessionStmt,
-		createSourceStmt:                      q.createSourceStmt,
-		createTeamStmt:                        q.createTeamStmt,
-		createUserStmt:                        q.createUserStmt,
-		deleteAPITokenStmt:                    q.deleteAPITokenStmt,
-		deleteAlertStmt:                       q.deleteAlertStmt,
-		deleteAlertInstanceStmt:               q.deleteAlertInstanceStmt,
-		deleteAlertInstancesStmt:              q.deleteAlertInstancesStmt,
-		deleteClaimedJobStmt:                  q.deleteClaimedJobStmt,
-		deleteCollectionStmt:                  q.deleteCollectionStmt,
-		deleteDashboardStmt:                   q.deleteDashboardStmt,
-		deleteExpiredExportJobsStmt:           q.deleteExpiredExportJobsStmt,
-		deleteExpiredOAuthAccessTokensStmt:    q.deleteExpiredOAuthAccessTokensStmt,
-		deleteExpiredOAuthAuthRequestsStmt:    q.deleteExpiredOAuthAuthRequestsStmt,
-		deleteExpiredOAuthRefreshFamiliesStmt: q.deleteExpiredOAuthRefreshFamiliesStmt,
-		deleteExpiredSessionsStmt:             q.deleteExpiredSessionsStmt,
-		deleteJobStmt:                         q.deleteJobStmt,
-		deleteQueryShareStmt:                  q.deleteQueryShareStmt,
-		deleteReportStmt:                      q.deleteReportStmt,
-		deleteReportRecipientsStmt:            q.deleteReportRecipientsStmt,
-		deleteReportUserRecipientStmt:         q.deleteReportUserRecipientStmt,
-		deleteSavedQueryStmt:                  q.deleteSavedQueryStmt,
-		deleteSavedViewStmt:                   q.deleteSavedViewStmt,
-		deleteSessionStmt:                     q.deleteSessionStmt,
-		deleteSourceStmt:                      q.deleteSourceStmt,
-		deleteSystemSettingStmt:               q.deleteSystemSettingStmt,
-		deleteTeamStmt:                        q.deleteTeamStmt,
-		deleteUserStmt:                        q.deleteUserStmt,
-		deleteUserSessionsStmt:                q.deleteUserSessionsStmt,
-		failExportJobStmt:                     q.failExportJobStmt,
-		finishJobStmt:                         q.finishJobStmt,
-		finishReportRunStmt:                   q.finishReportRunStmt,
-		getAPITokenStmt:                       q.getAPITokenStmt,
-		getAPITokenByHashStmt:                 q.getAPITokenByHashStmt,
-		getAlertStmt:                          q.getAlertStmt,
-		getAlertHistoryEntryStmt:              q.getAlertHistoryEntryStmt,
-		getAuditPruneBoundaryStmt:             q.getAuditPruneBoundaryStmt,
-		getCollectionStmt:                     q.getCollectionStmt,
-		getCollectionItemLinkStmt:             q.getCollectionItemLinkStmt,
-		getCollectionMemberStmt:               q.getCollectionMemberStmt,
-		getDashboardStmt:                      q.getDashboardStmt,
-		getExportJobStmt:                      q.getExportJobStmt,
-		getJobStmt:                            q.getJobStmt,
-		getLatestUnresolvedAlertHistoryStmt:   q.getLatestUnresolvedAlertHistoryStmt,
-		getOAuthAuthCodeStateStmt:             q.getOAuthAuthCodeStateStmt,
-		getOAuthAuthRequestStmt:               q.getOAuthAuthRequestStmt,
-		getOAuthGrantStmt:                     q.getOAuthGrantStmt,
-		getOAuthRefreshTokenStateStmt:         q.getOAuthRefreshTokenStateStmt,
-		getPersonalCollectionStmt:             q.getPersonalCollectionStmt,
-		getQueryShareStmt:                     q.getQueryShareStmt,
-		getReportStmt:                         q.getReportStmt,
-		getSavedQueryStmt:                     q.getSavedQueryStmt,
-		getSavedViewStmt:                      q.getSavedViewStmt,
-		getSessionStmt:                        q.getSessionStmt,
-		getSourceStmt:                         q.getSourceStmt,
-		getSourceByIdentityKeyStmt:            q.getSourceByIdentityKeyStmt,
-		getSourceByNameForProvisioningStmt:    q.getSourceByNameForProvisioningStmt,
-		getSystemSettingStmt:                  q.getSystemSettingStmt,
-		getTeamStmt:                           q.getTeamStmt,
-		getTeamByNameStmt:                     q.getTeamByNameStmt,
-		getTeamMemberStmt:                     q.getTeamMemberStmt,
-		getTriggeredAlertHistoryAlertIDStmt:   q.getTriggeredAlertHistoryAlertIDStmt,
-		getUserStmt:                           q.getUserStmt,
-		getUserByEmailStmt:                    q.getUserByEmailStmt,
-		getUserPreferencesStmt:                q.getUserPreferencesStmt,
-		getUserTeamForSourceStmt:              q.getUserTeamForSourceStmt,
-		holdJobStmt:                           q.holdJobStmt,
-		incrementQueryShapeStatsStmt:          q.incrementQueryShapeStatsStmt,
-		incrementQueryStatsStmt:               q.incrementQueryStatsStmt,
-		insertAlertHistoryStmt:                q.insertAlertHistoryStmt,
-		insertAuditEventStmt:                  q.insertAuditEventStmt,
-		insertOAuthAccessTokenStmt:            q.insertOAuthAccessTokenStmt,
-		insertOAuthRefreshTokenStmt:           q.insertOAuthRefreshTokenStmt,
-		insertQueryHistoryStmt:                q.insertQueryHistoryStmt,
-		insertReportRecipientStmt:             q.insertReportRecipientStmt,
-		insertRunningReportRunStmt:            q.insertRunningReportRunStmt,
-		insertSkippedReportTickStmt:           q.insertSkippedReportTickStmt,
-		insertTeamMemberStmt:                  q.insertTeamMemberStmt,
-		interruptAlertDeliveriesStmt:          q.interruptAlertDeliveriesStmt,
-		interruptStaleReportRunsStmt:          q.interruptStaleReportRunsStmt,
-		isSourceManagedStmt:                   q.isSourceManagedStmt,
-		isTeamManagedStmt:                     q.isTeamManagedStmt,
-		kickJobStmt:                           q.kickJobStmt,
-		listAPITokensForUserStmt:              q.listAPITokensForUserStmt,
-		listAlertHistoryStmt:                  q.listAlertHistoryStmt,
-		listAlertInstancesStmt:                q.listAlertInstancesStmt,
-		listAlertsBySourceStmt:                q.listAlertsBySourceStmt,
-		listAlertsForUserStmt:                 q.listAlertsForUserStmt,
-		listAllSavedQueriesStmt:               q.listAllSavedQueriesStmt,
-		listAuditEventsAscStmt:                q.listAuditEventsAscStmt,
-		listAuditEventsDescStmt:               q.listAuditEventsDescStmt,
-		listCollectionEditorsStmt:             q.listCollectionEditorsStmt,
-		listCollectionItemsStmt:               q.listCollectionItemsStmt,
-		listCollectionMembersStmt:             q.listCollectionMembersStmt,
-		listCollectionTeamsStmt:               q.listCollectionTeamsStmt,
-		listCollectionsForUserStmt:            q.listCollectionsForUserStmt,
-		listDashboardSummariesStmt:            q.listDashboardSummariesStmt,
-		listExpiredExportJobPathsStmt:         q.listExpiredExportJobPathsStmt,
-		listInterruptedExportJobsStmt:         q.listInterruptedExportJobsStmt,
-		listLatestReportRunsStmt:              q.listLatestReportRunsStmt,
-		listManagedSavedViewsStmt:             q.listManagedSavedViewsStmt,
-		listManagedSourcesStmt:                q.listManagedSourcesStmt,
-		listManagedTeamsStmt:                  q.listManagedTeamsStmt,
-		listOAuthGrantsForUserStmt:            q.listOAuthGrantsForUserStmt,
-		listOpenAlertGroupHistoryIDsStmt:      q.listOpenAlertGroupHistoryIDsStmt,
-		listOpenAlertHistoryStmt:              q.listOpenAlertHistoryStmt,
-		listQueryActivityStmt:                 q.listQueryActivityStmt,
-		listQueryHistoryStmt:                  q.listQueryHistoryStmt,
-		listQueryShapeStatsStmt:               q.listQueryShapeStatsStmt,
-		listReportRecipientsStmt:              q.listReportRecipientsStmt,
-		listReportRunsStmt:                    q.listReportRunsStmt,
-		listReportsStmt:                       q.listReportsStmt,
-		listReportsByOwnerStmt:                q.listReportsByOwnerStmt,
-		listReportsForRecipientStmt:           q.listReportsForRecipientStmt,
-		listSavedQueriesForUserStmt:           q.listSavedQueriesForUserStmt,
-		listSavedQueriesForUserBySourceStmt:   q.listSavedQueriesForUserBySourceStmt,
-		listSavedViewsStmt:                    q.listSavedViewsStmt,
-		listServiceAccountsStmt:               q.listServiceAccountsStmt,
-		listSharedCollectionPinsStmt:          q.listSharedCollectionPinsStmt,
-		listSourceTeamsStmt:                   q.listSourceTeamsStmt,
-		listSourcesStmt:                       q.listSourcesStmt,
-		listSourcesForUserStmt:                q.listSourcesForUserStmt,
-		listStaleDashboardSummaryInputsStmt:   q.listStaleDashboardSummaryInputsStmt,
-		listSystemSettingsStmt:                q.listSystemSettingsStmt,
-		listSystemSettingsByCategoryStmt:      q.listSystemSettingsByCategoryStmt,
-		listTeamMembersWithDetailsStmt:        q.listTeamMembersWithDetailsStmt,
-		listTeamSourcesStmt:                   q.listTeamSourcesStmt,
-		listTeamsStmt:                         q.listTeamsStmt,
-		listTeamsForUserStmt:                  q.listTeamsForUserStmt,
-		listUserTeamsStmt:                     q.listUserTeamsStmt,
-		listUsersStmt:                         q.listUsersStmt,
-		listUsersForProvisioningStmt:          q.listUsersForProvisioningStmt,
-		lockCollectionStmt:                    q.lockCollectionStmt,
-		lockReportStmt:                        q.lockReportStmt,
-		markAlertEvaluatedStmt:                q.markAlertEvaluatedStmt,
-		markAlertInstanceNotifiedStmt:         q.markAlertInstanceNotifiedStmt,
-		markAlertResolvedStmt:                 q.markAlertResolvedStmt,
-		markAlertTriggeredStmt:                q.markAlertTriggeredStmt,
-		pauseReportStmt:                       q.pauseReportStmt,
-		pruneAlertHistoryStmt:                 q.pruneAlertHistoryStmt,
-		pruneAuditEventsStmt:                  q.pruneAuditEventsStmt,
-		pruneExpiredQuerySharesStmt:           q.pruneExpiredQuerySharesStmt,
-		pruneQueryHistoryForUserStmt:          q.pruneQueryHistoryForUserStmt,
-		pruneQueryShapeStatsStmt:              q.pruneQueryShapeStatsStmt,
-		pruneReportRunsStmt:                   q.pruneReportRunsStmt,
-		queryShapeCoverageStmt:                q.queryShapeCoverageStmt,
-		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,
-		reapInterruptedExportJobsStmt:         q.reapInterruptedExportJobsStmt,
-		refreshAlertStateStmt:                 q.refreshAlertStateStmt,
-		releaseJobStmt:                        q.releaseJobStmt,
-		removeCollectionItemStmt:              q.removeCollectionItemStmt,
-		removeCollectionMemberStmt:            q.removeCollectionMemberStmt,
-		removeCollectionPinStmt:               q.removeCollectionPinStmt,
-		removeCollectionTeamStmt:              q.removeCollectionTeamStmt,
-		removeTeamMemberStmt:                  q.removeTeamMemberStmt,
-		removeTeamSourceStmt:                  q.removeTeamSourceStmt,
-		repairDashboardSummaryStmt:            q.repairDashboardSummaryStmt,
-		reportTickExistsStmt:                  q.reportTickExistsStmt,
-		resolveAlertGroupHistoryStmt:          q.resolveAlertGroupHistoryStmt,
-		resolveAlertHistoryForAlertStmt:       q.resolveAlertHistoryForAlertStmt,
-		resumeReportStmt:                      q.resumeReportStmt,
-		revokeOAuthGrantStmt:                  q.revokeOAuthGrantStmt,
-		revokeOAuthGrantByTokenStmt:           q.revokeOAuthGrantByTokenStmt,
-		revokeOAuthGrantForUserStmt:           q.revokeOAuthGrantForUserStmt,
-		saveOAuthAuthCodeStmt:                 q.saveOAuthAuthCodeStmt,
-		setCollectionItemKindStmt:             q.setCollectionItemKindStmt,
-		setOAuthAuthRequestGrantStmt:          q.setOAuthAuthRequestGrantStmt,
-		setSavedViewDefaultFlagStmt:           q.setSavedViewDefaultFlagStmt,
-		setSourceManagedStmt:                  q.setSourceManagedStmt,
-		setTeamManagedStmt:                    q.setTeamManagedStmt,
-		setUserManagedStmt:                    q.setUserManagedStmt,
-		setUserPasswordHashStmt:               q.setUserPasswordHashStmt,
-		takeReportManualRunCooldownStmt:       q.takeReportManualRunCooldownStmt,
-		takeReportPreviewCooldownStmt:         q.takeReportPreviewCooldownStmt,
-		teamHasSourceStmt:                     q.teamHasSourceStmt,
-		topSourcesByQueriesStmt:               q.topSourcesByQueriesStmt,
-		topUsersByQueriesStmt:                 q.topUsersByQueriesStmt,
-		touchAlertEvaluatedStmt:               q.touchAlertEvaluatedStmt,
-		touchOAuthGrantStmt:                   q.touchOAuthGrantStmt,
-		touchQueryShareStmt:                   q.touchQueryShareStmt,
-		updateAPITokenLastUsedStmt:            q.updateAPITokenLastUsedStmt,
-		updateAlertStmt:                       q.updateAlertStmt,
-		updateAlertHistoryPayloadStmt:         q.updateAlertHistoryPayloadStmt,
-		updateCollectionStmt:                  q.updateCollectionStmt,
-		updateDashboardStmt:                   q.updateDashboardStmt,
-		updateExportJobRunningStmt:            q.updateExportJobRunningStmt,
-		updateReportStmt:                      q.updateReportStmt,
-		updateSavedQueryStmt:                  q.updateSavedQueryStmt,
-		updateSavedViewStmt:                   q.updateSavedViewStmt,
-		updateSourceStmt:                      q.updateSourceStmt,
-		updateTeamStmt:                        q.updateTeamStmt,
-		updateTeamMemberRoleStmt:              q.updateTeamMemberRoleStmt,
-		updateUserStmt:                        q.updateUserStmt,
-		updateUserLastLoginStmt:               q.updateUserLastLoginStmt,
-		upsertAlertInstanceStmt:               q.upsertAlertInstanceStmt,
-		upsertJobStmt:                         q.upsertJobStmt,
-		upsertSystemSettingStmt:               q.upsertSystemSettingStmt,
-		upsertUserPreferencesStmt:             q.upsertUserPreferencesStmt,
-		userHasSourceAccessStmt:               q.userHasSourceAccessStmt,
+		db:                                     tx,
+		tx:                                     tx,
+		addAlertDestinationStmt:                q.addAlertDestinationStmt,
+		addCollectionItemStmt:                  q.addCollectionItemStmt,
+		addCollectionMemberStmt:                q.addCollectionMemberStmt,
+		addCollectionTeamStmt:                  q.addCollectionTeamStmt,
+		addTeamMemberStmt:                      q.addTeamMemberStmt,
+		addTeamSourceStmt:                      q.addTeamSourceStmt,
+		advanceAlertEvalSeqStmt:                q.advanceAlertEvalSeqStmt,
+		authenticateOAuthAccessTokenStmt:       q.authenticateOAuthAccessTokenStmt,
+		claimJobsStmt:                          q.claimJobsStmt,
+		claimOAuthAuthRequestDecisionStmt:      q.claimOAuthAuthRequestDecisionStmt,
+		claimReportStmt:                        q.claimReportStmt,
+		clearSavedViewScopeDefaultStmt:         q.clearSavedViewScopeDefaultStmt,
+		completeExportJobStmt:                  q.completeExportJobStmt,
+		consumeOAuthAuthCodeStmt:               q.consumeOAuthAuthCodeStmt,
+		consumeOAuthRefreshTokenStmt:           q.consumeOAuthRefreshTokenStmt,
+		countAdminUsersStmt:                    q.countAdminUsersStmt,
+		countAlertInstancesByStateStmt:         q.countAlertInstancesByStateStmt,
+		countAlertsUsingDestinationStmt:        q.countAlertsUsingDestinationStmt,
+		countAuditEventsStmt:                   q.countAuditEventsStmt,
+		countCollectionTeamAccessStmt:          q.countCollectionTeamAccessStmt,
+		countReportFailureStmt:                 q.countReportFailureStmt,
+		countSavedViewsInScopeStmt:             q.countSavedViewsInScopeStmt,
+		countSharedCollectionEditAccessStmt:    q.countSharedCollectionEditAccessStmt,
+		countTeamNotificationDestinationsStmt:  q.countTeamNotificationDestinationsStmt,
+		countUserSessionsStmt:                  q.countUserSessionsStmt,
+		createAPITokenStmt:                     q.createAPITokenStmt,
+		createAlertStmt:                        q.createAlertStmt,
+		createCollectionStmt:                   q.createCollectionStmt,
+		createDashboardStmt:                    q.createDashboardStmt,
+		createExportJobStmt:                    q.createExportJobStmt,
+		createNotificationDestinationStmt:      q.createNotificationDestinationStmt,
+		createOAuthAuthRequestStmt:             q.createOAuthAuthRequestStmt,
+		createOAuthGrantStmt:                   q.createOAuthGrantStmt,
+		createQueryShareStmt:                   q.createQueryShareStmt,
+		createReportStmt:                       q.createReportStmt,
+		createSavedQueryStmt:                   q.createSavedQueryStmt,
+		createSavedViewStmt:                    q.createSavedViewStmt,
+		createSessionStmt:                      q.createSessionStmt,
+		createSourceStmt:                       q.createSourceStmt,
+		createTeamStmt:                         q.createTeamStmt,
+		createUserStmt:                         q.createUserStmt,
+		deleteAPITokenStmt:                     q.deleteAPITokenStmt,
+		deleteAlertStmt:                        q.deleteAlertStmt,
+		deleteAlertDestinationsStmt:            q.deleteAlertDestinationsStmt,
+		deleteAlertInstanceStmt:                q.deleteAlertInstanceStmt,
+		deleteAlertInstancesStmt:               q.deleteAlertInstancesStmt,
+		deleteClaimedJobStmt:                   q.deleteClaimedJobStmt,
+		deleteCollectionStmt:                   q.deleteCollectionStmt,
+		deleteDashboardStmt:                    q.deleteDashboardStmt,
+		deleteExpiredExportJobsStmt:            q.deleteExpiredExportJobsStmt,
+		deleteExpiredOAuthAccessTokensStmt:     q.deleteExpiredOAuthAccessTokensStmt,
+		deleteExpiredOAuthAuthRequestsStmt:     q.deleteExpiredOAuthAuthRequestsStmt,
+		deleteExpiredOAuthRefreshFamiliesStmt:  q.deleteExpiredOAuthRefreshFamiliesStmt,
+		deleteExpiredSessionsStmt:              q.deleteExpiredSessionsStmt,
+		deleteJobStmt:                          q.deleteJobStmt,
+		deleteNotificationDestinationStmt:      q.deleteNotificationDestinationStmt,
+		deleteQueryShareStmt:                   q.deleteQueryShareStmt,
+		deleteReportStmt:                       q.deleteReportStmt,
+		deleteReportRecipientsStmt:             q.deleteReportRecipientsStmt,
+		deleteReportUserRecipientStmt:          q.deleteReportUserRecipientStmt,
+		deleteSavedQueryStmt:                   q.deleteSavedQueryStmt,
+		deleteSavedViewStmt:                    q.deleteSavedViewStmt,
+		deleteSessionStmt:                      q.deleteSessionStmt,
+		deleteSourceStmt:                       q.deleteSourceStmt,
+		deleteSystemSettingStmt:                q.deleteSystemSettingStmt,
+		deleteTeamStmt:                         q.deleteTeamStmt,
+		deleteUserStmt:                         q.deleteUserStmt,
+		deleteUserSessionsStmt:                 q.deleteUserSessionsStmt,
+		failExportJobStmt:                      q.failExportJobStmt,
+		finishJobStmt:                          q.finishJobStmt,
+		finishReportRunStmt:                    q.finishReportRunStmt,
+		getAPITokenStmt:                        q.getAPITokenStmt,
+		getAPITokenByHashStmt:                  q.getAPITokenByHashStmt,
+		getAlertStmt:                           q.getAlertStmt,
+		getAlertHistoryEntryStmt:               q.getAlertHistoryEntryStmt,
+		getAuditPruneBoundaryStmt:              q.getAuditPruneBoundaryStmt,
+		getCollectionStmt:                      q.getCollectionStmt,
+		getCollectionItemLinkStmt:              q.getCollectionItemLinkStmt,
+		getCollectionMemberStmt:                q.getCollectionMemberStmt,
+		getDashboardStmt:                       q.getDashboardStmt,
+		getExportJobStmt:                       q.getExportJobStmt,
+		getJobStmt:                             q.getJobStmt,
+		getLatestUnresolvedAlertHistoryStmt:    q.getLatestUnresolvedAlertHistoryStmt,
+		getNotificationDestinationStmt:         q.getNotificationDestinationStmt,
+		getOAuthAuthCodeStateStmt:              q.getOAuthAuthCodeStateStmt,
+		getOAuthAuthRequestStmt:                q.getOAuthAuthRequestStmt,
+		getOAuthGrantStmt:                      q.getOAuthGrantStmt,
+		getOAuthRefreshTokenStateStmt:          q.getOAuthRefreshTokenStateStmt,
+		getPersonalCollectionStmt:              q.getPersonalCollectionStmt,
+		getQueryShareStmt:                      q.getQueryShareStmt,
+		getReportStmt:                          q.getReportStmt,
+		getSavedQueryStmt:                      q.getSavedQueryStmt,
+		getSavedViewStmt:                       q.getSavedViewStmt,
+		getSessionStmt:                         q.getSessionStmt,
+		getSourceStmt:                          q.getSourceStmt,
+		getSourceByIdentityKeyStmt:             q.getSourceByIdentityKeyStmt,
+		getSourceByNameForProvisioningStmt:     q.getSourceByNameForProvisioningStmt,
+		getSystemSettingStmt:                   q.getSystemSettingStmt,
+		getTeamStmt:                            q.getTeamStmt,
+		getTeamByNameStmt:                      q.getTeamByNameStmt,
+		getTeamMemberStmt:                      q.getTeamMemberStmt,
+		getTriggeredAlertHistoryAlertIDStmt:    q.getTriggeredAlertHistoryAlertIDStmt,
+		getUserStmt:                            q.getUserStmt,
+		getUserByEmailStmt:                     q.getUserByEmailStmt,
+		getUserPreferencesStmt:                 q.getUserPreferencesStmt,
+		getUserTeamForSourceStmt:               q.getUserTeamForSourceStmt,
+		holdJobStmt:                            q.holdJobStmt,
+		incrementQueryShapeStatsStmt:           q.incrementQueryShapeStatsStmt,
+		incrementQueryStatsStmt:                q.incrementQueryStatsStmt,
+		insertAlertHistoryStmt:                 q.insertAlertHistoryStmt,
+		insertAuditEventStmt:                   q.insertAuditEventStmt,
+		insertOAuthAccessTokenStmt:             q.insertOAuthAccessTokenStmt,
+		insertOAuthRefreshTokenStmt:            q.insertOAuthRefreshTokenStmt,
+		insertQueryHistoryStmt:                 q.insertQueryHistoryStmt,
+		insertReportRecipientStmt:              q.insertReportRecipientStmt,
+		insertRunningReportRunStmt:             q.insertRunningReportRunStmt,
+		insertSkippedReportTickStmt:            q.insertSkippedReportTickStmt,
+		insertTeamMemberStmt:                   q.insertTeamMemberStmt,
+		interruptAlertDeliveriesStmt:           q.interruptAlertDeliveriesStmt,
+		interruptStaleReportRunsStmt:           q.interruptStaleReportRunsStmt,
+		isSourceManagedStmt:                    q.isSourceManagedStmt,
+		isTeamManagedStmt:                      q.isTeamManagedStmt,
+		kickJobStmt:                            q.kickJobStmt,
+		listAPITokensForUserStmt:               q.listAPITokensForUserStmt,
+		listAlertDestinationLinksStmt:          q.listAlertDestinationLinksStmt,
+		listAlertDestinationsStmt:              q.listAlertDestinationsStmt,
+		listAlertHistoryStmt:                   q.listAlertHistoryStmt,
+		listAlertInstancesStmt:                 q.listAlertInstancesStmt,
+		listAlertsBySourceStmt:                 q.listAlertsBySourceStmt,
+		listAlertsForUserStmt:                  q.listAlertsForUserStmt,
+		listAllSavedQueriesStmt:                q.listAllSavedQueriesStmt,
+		listAuditEventsAscStmt:                 q.listAuditEventsAscStmt,
+		listAuditEventsDescStmt:                q.listAuditEventsDescStmt,
+		listCollectionEditorsStmt:              q.listCollectionEditorsStmt,
+		listCollectionItemsStmt:                q.listCollectionItemsStmt,
+		listCollectionMembersStmt:              q.listCollectionMembersStmt,
+		listCollectionTeamsStmt:                q.listCollectionTeamsStmt,
+		listCollectionsForUserStmt:             q.listCollectionsForUserStmt,
+		listDashboardSummariesStmt:             q.listDashboardSummariesStmt,
+		listExpiredExportJobPathsStmt:          q.listExpiredExportJobPathsStmt,
+		listInterruptedExportJobsStmt:          q.listInterruptedExportJobsStmt,
+		listLatestReportRunsStmt:               q.listLatestReportRunsStmt,
+		listManagedSavedViewsStmt:              q.listManagedSavedViewsStmt,
+		listManagedSourcesStmt:                 q.listManagedSourcesStmt,
+		listManagedTeamsStmt:                   q.listManagedTeamsStmt,
+		listNotificationDestinationsStmt:       q.listNotificationDestinationsStmt,
+		listOAuthGrantsForUserStmt:             q.listOAuthGrantsForUserStmt,
+		listOpenAlertGroupHistoryIDsStmt:       q.listOpenAlertGroupHistoryIDsStmt,
+		listOpenAlertHistoryStmt:               q.listOpenAlertHistoryStmt,
+		listQueryActivityStmt:                  q.listQueryActivityStmt,
+		listQueryHistoryStmt:                   q.listQueryHistoryStmt,
+		listQueryShapeStatsStmt:                q.listQueryShapeStatsStmt,
+		listReportRecipientsStmt:               q.listReportRecipientsStmt,
+		listReportRunsStmt:                     q.listReportRunsStmt,
+		listReportsStmt:                        q.listReportsStmt,
+		listReportsByOwnerStmt:                 q.listReportsByOwnerStmt,
+		listReportsForRecipientStmt:            q.listReportsForRecipientStmt,
+		listSavedQueriesForUserStmt:            q.listSavedQueriesForUserStmt,
+		listSavedQueriesForUserBySourceStmt:    q.listSavedQueriesForUserBySourceStmt,
+		listSavedViewsStmt:                     q.listSavedViewsStmt,
+		listServiceAccountsStmt:                q.listServiceAccountsStmt,
+		listSharedCollectionPinsStmt:           q.listSharedCollectionPinsStmt,
+		listSourceTeamsStmt:                    q.listSourceTeamsStmt,
+		listSourcesStmt:                        q.listSourcesStmt,
+		listSourcesForUserStmt:                 q.listSourcesForUserStmt,
+		listStaleDashboardSummaryInputsStmt:    q.listStaleDashboardSummaryInputsStmt,
+		listSystemSettingsStmt:                 q.listSystemSettingsStmt,
+		listSystemSettingsByCategoryStmt:       q.listSystemSettingsByCategoryStmt,
+		listTeamMembersWithDetailsStmt:         q.listTeamMembersWithDetailsStmt,
+		listTeamSourcesStmt:                    q.listTeamSourcesStmt,
+		listTeamsStmt:                          q.listTeamsStmt,
+		listTeamsForUserStmt:                   q.listTeamsForUserStmt,
+		listUsableNotificationDestinationsStmt: q.listUsableNotificationDestinationsStmt,
+		listUserTeamsStmt:                      q.listUserTeamsStmt,
+		listUsersStmt:                          q.listUsersStmt,
+		listUsersForProvisioningStmt:           q.listUsersForProvisioningStmt,
+		lockCollectionStmt:                     q.lockCollectionStmt,
+		lockReportStmt:                         q.lockReportStmt,
+		markAlertEvaluatedStmt:                 q.markAlertEvaluatedStmt,
+		markAlertInstanceNotifiedStmt:          q.markAlertInstanceNotifiedStmt,
+		markAlertResolvedStmt:                  q.markAlertResolvedStmt,
+		markAlertTriggeredStmt:                 q.markAlertTriggeredStmt,
+		pauseReportStmt:                        q.pauseReportStmt,
+		pruneAlertHistoryStmt:                  q.pruneAlertHistoryStmt,
+		pruneAuditEventsStmt:                   q.pruneAuditEventsStmt,
+		pruneExpiredQuerySharesStmt:            q.pruneExpiredQuerySharesStmt,
+		pruneQueryHistoryForUserStmt:           q.pruneQueryHistoryForUserStmt,
+		pruneQueryShapeStatsStmt:               q.pruneQueryShapeStatsStmt,
+		pruneReportRunsStmt:                    q.pruneReportRunsStmt,
+		queryShapeCoverageStmt:                 q.queryShapeCoverageStmt,
+		queryVolumeByDayStmt:                   q.queryVolumeByDayStmt,
+		reapInterruptedExportJobsStmt:          q.reapInterruptedExportJobsStmt,
+		refreshAlertStateStmt:                  q.refreshAlertStateStmt,
+		releaseJobStmt:                         q.releaseJobStmt,
+		removeCollectionItemStmt:               q.removeCollectionItemStmt,
+		removeCollectionMemberStmt:             q.removeCollectionMemberStmt,
+		removeCollectionPinStmt:                q.removeCollectionPinStmt,
+		removeCollectionTeamStmt:               q.removeCollectionTeamStmt,
+		removeTeamMemberStmt:                   q.removeTeamMemberStmt,
+		removeTeamSourceStmt:                   q.removeTeamSourceStmt,
+		repairDashboardSummaryStmt:             q.repairDashboardSummaryStmt,
+		reportTickExistsStmt:                   q.reportTickExistsStmt,
+		resolveAlertGroupHistoryStmt:           q.resolveAlertGroupHistoryStmt,
+		resolveAlertHistoryForAlertStmt:        q.resolveAlertHistoryForAlertStmt,
+		resumeReportStmt:                       q.resumeReportStmt,
+		revokeOAuthGrantStmt:                   q.revokeOAuthGrantStmt,
+		revokeOAuthGrantByTokenStmt:            q.revokeOAuthGrantByTokenStmt,
+		revokeOAuthGrantForUserStmt:            q.revokeOAuthGrantForUserStmt,
+		saveOAuthAuthCodeStmt:                  q.saveOAuthAuthCodeStmt,
+		setCollectionItemKindStmt:              q.setCollectionItemKindStmt,
+		setOAuthAuthRequestGrantStmt:           q.setOAuthAuthRequestGrantStmt,
+		setSavedViewDefaultFlagStmt:            q.setSavedViewDefaultFlagStmt,
+		setSourceManagedStmt:                   q.setSourceManagedStmt,
+		setTeamManagedStmt:                     q.setTeamManagedStmt,
+		setUserManagedStmt:                     q.setUserManagedStmt,
+		setUserPasswordHashStmt:                q.setUserPasswordHashStmt,
+		takeReportManualRunCooldownStmt:        q.takeReportManualRunCooldownStmt,
+		takeReportPreviewCooldownStmt:          q.takeReportPreviewCooldownStmt,
+		teamHasSourceStmt:                      q.teamHasSourceStmt,
+		topSourcesByQueriesStmt:                q.topSourcesByQueriesStmt,
+		topUsersByQueriesStmt:                  q.topUsersByQueriesStmt,
+		touchAlertEvaluatedStmt:                q.touchAlertEvaluatedStmt,
+		touchOAuthGrantStmt:                    q.touchOAuthGrantStmt,
+		touchQueryShareStmt:                    q.touchQueryShareStmt,
+		updateAPITokenLastUsedStmt:             q.updateAPITokenLastUsedStmt,
+		updateAlertStmt:                        q.updateAlertStmt,
+		updateAlertHistoryPayloadStmt:          q.updateAlertHistoryPayloadStmt,
+		updateCollectionStmt:                   q.updateCollectionStmt,
+		updateDashboardStmt:                    q.updateDashboardStmt,
+		updateExportJobRunningStmt:             q.updateExportJobRunningStmt,
+		updateNotificationDestinationStmt:      q.updateNotificationDestinationStmt,
+		updateReportStmt:                       q.updateReportStmt,
+		updateSavedQueryStmt:                   q.updateSavedQueryStmt,
+		updateSavedViewStmt:                    q.updateSavedViewStmt,
+		updateSourceStmt:                       q.updateSourceStmt,
+		updateTeamStmt:                         q.updateTeamStmt,
+		updateTeamMemberRoleStmt:               q.updateTeamMemberRoleStmt,
+		updateUserStmt:                         q.updateUserStmt,
+		updateUserLastLoginStmt:                q.updateUserLastLoginStmt,
+		upsertAlertInstanceStmt:                q.upsertAlertInstanceStmt,
+		upsertJobStmt:                          q.upsertJobStmt,
+		upsertSystemSettingStmt:                q.upsertSystemSettingStmt,
+		upsertUserPreferencesStmt:              q.upsertUserPreferencesStmt,
+		userHasSourceAccessStmt:                q.userHasSourceAccessStmt,
 	}
 }

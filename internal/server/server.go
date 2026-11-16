@@ -47,7 +47,6 @@ type ServerOptions struct {
 	SQLite        store.Store
 	ClickHouse    *clickhouse.Manager
 	Datasources   *datasource.Service
-	WebhookSender *alerts.DynamicWebhookSender
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	OAuth         *oauth.Server      // OAuth authorization server; nil when auth.oauth is disabled.
@@ -71,7 +70,6 @@ type Server struct {
 	store         store.Store
 	clickhouse    *clickhouse.Manager
 	datasources   *datasource.Service
-	webhookSender *alerts.DynamicWebhookSender
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	oauth         *oauth.Server      // nil when auth.oauth is disabled
@@ -202,7 +200,6 @@ func New(opts ServerOptions) *Server {
 		clickhouse:    opts.ClickHouse,
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
-		webhookSender: opts.WebhookSender,
 		oidcProvider:  opts.OIDCProvider,
 		oauth:         opts.OAuth,
 		fs:            opts.FS,
@@ -419,7 +416,6 @@ func (s *Server) setupRoutes() {
 	admin.Put("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleUpdateSetting).Name(string(audit.SettingUpdate))
 	admin.Delete("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleDeleteSetting).Name(string(audit.SettingDelete))
 	admin.Post("/settings/test-email", s.requireSession, s.requireAlertsEnabled, s.handleTestEmail).Name(string(audit.SettingTest))
-	admin.Post("/settings/test-webhook", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestWebhook).Name(string(audit.SettingTest))
 
 	// --- Team Routes (Access controlled by team membership) ---
 	// Regular users can view teams they belong to, team admins can manage membership and linked sources
@@ -544,6 +540,15 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Get("/:alertID/history", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertHistory)
 	alertRoutes.Get("/:alertID/instances", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertInstances)
 	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert).Name(string(audit.AlertResolve))
+
+	// Notification destinations. Not behind requireAlertsEnabled: scheduled
+	// reports send to email destinations when alerting is off.
+	destinationRoutes := api.Group("/notification-destinations", s.requireAuth)
+	destinationRoutes.Get("/", s.requireTokenScope(models.TokenScopeDestinationsRead), s.handleListDestinations)
+	destinationRoutes.Post("/", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleCreateDestination).Name(string(audit.NotificationDestinationCreate))
+	destinationRoutes.Post("/test", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleTestDestination).Name(string(audit.NotificationDestinationTest))
+	destinationRoutes.Put("/:destinationID", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleUpdateDestination).Name(string(audit.NotificationDestinationUpdate))
+	destinationRoutes.Delete("/:destinationID", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleDeleteDestination).Name(string(audit.NotificationDestinationDelete))
 
 	// Dashboards (saved grids of visualization panels). Visibility: any
 	// authenticated user can list/view. Edit/delete: creator + global admin

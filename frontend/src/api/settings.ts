@@ -29,10 +29,6 @@ export interface TestEmailRequest {
   recipient_email?: string;
 }
 
-export interface TestWebhookRequest {
-  webhook_url: string;
-}
-
 export interface TestNotificationResponse {
   message: string;
   recipient?: string;
@@ -53,7 +49,4 @@ export const settingsApi = {
 
   testEmail: (data?: TestEmailRequest) =>
     apiClient.post<TestNotificationResponse>('/admin/settings/test-email', data || {}),
-
-  testWebhook: (data: TestWebhookRequest) =>
-    apiClient.post<TestNotificationResponse>('/admin/settings/test-webhook', data),
 };

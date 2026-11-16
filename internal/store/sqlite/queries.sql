@@ -577,14 +577,12 @@ INSERT INTO alerts (
     severity,
     labels_json,
     annotations_json,
-    recipient_user_ids_json,
-    webhook_urls_json,
     generator_url,
     group_by_json,
     is_active,
     created_by
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetAlert :one
@@ -622,8 +620,6 @@ SET name = ?,
     severity = ?,
     labels_json = ?,
     annotations_json = ?,
-    recipient_user_ids_json = ?,
-    webhook_urls_json = ?,
     generator_url = ?,
     group_by_json = ?,
     is_active = ?,
@@ -1983,3 +1979,66 @@ SET status = 'interrupted',
     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE status = 'running'
   AND deadline_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(sqlc.arg(grace_modifier) AS TEXT));
+-- Notification destinations --------------------------------------------------
+
+-- name: CreateNotificationDestination :one
+INSERT INTO notification_destinations (name, type, scope, team_id, config_json, secret, is_active, created_by, created_at, updated_at)
+VALUES (
+    sqlc.arg(name), sqlc.arg(type), sqlc.arg(scope), sqlc.narg(team_id), sqlc.arg(config_json), sqlc.arg(secret),
+    sqlc.arg(is_active), sqlc.narg(created_by),
+    strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+)
+RETURNING *;
+
+-- name: UpdateNotificationDestination :one
+UPDATE notification_destinations
+SET name = sqlc.arg(name),
+    scope = sqlc.arg(scope),
+    team_id = sqlc.narg(team_id),
+    config_json = sqlc.arg(config_json),
+    secret = sqlc.arg(secret),
+    is_active = sqlc.arg(is_active),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: DeleteNotificationDestination :execrows
+DELETE FROM notification_destinations WHERE id = ?;
+
+-- name: GetNotificationDestination :one
+SELECT * FROM notification_destinations WHERE id = ?;
+
+-- name: ListNotificationDestinations :many
+SELECT * FROM notification_destinations ORDER BY name, id;
+
+-- name: ListUsableNotificationDestinations :many
+-- Private destinations of the user, team destinations of the user's teams,
+-- and global ones.
+SELECT d.* FROM notification_destinations d
+WHERE d.scope = 'global'
+   OR (d.scope = 'private' AND d.created_by = sqlc.arg(user_id))
+   OR (d.scope = 'team' AND d.team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = sqlc.arg(user_id)))
+ORDER BY d.name, d.id;
+
+-- name: CountTeamNotificationDestinations :one
+SELECT COUNT(*) FROM notification_destinations WHERE team_id = ?;
+
+-- name: CountAlertsUsingDestination :one
+SELECT COUNT(*) FROM alert_destinations WHERE destination_id = ?;
+
+-- name: DeleteAlertDestinations :exec
+DELETE FROM alert_destinations WHERE alert_id = ?;
+
+-- name: AddAlertDestination :exec
+INSERT INTO alert_destinations (alert_id, destination_id) VALUES (?, ?);
+
+-- name: ListAlertDestinationLinks :many
+SELECT alert_id, destination_id FROM alert_destinations
+WHERE alert_id IN (sqlc.slice(alert_ids))
+ORDER BY alert_id, destination_id;
+
+-- name: ListAlertDestinations :many
+SELECT d.* FROM notification_destinations d
+JOIN alert_destinations ad ON ad.destination_id = d.id
+WHERE ad.alert_id = ?
+ORDER BY d.id;

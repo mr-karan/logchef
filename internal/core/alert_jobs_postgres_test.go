@@ -35,7 +35,7 @@ func TestAlertEditWaitsForEvaluationCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds := newFakeDatasourceService(db, log, nil)
-	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, newTestCreateAlertRequest())
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner, newTestCreateAlertRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestAlertEditWaitsForEvaluationCommit(t *testing.T) {
 	edit := make(chan error, 1)
 	name := "renamed"
 	go func() {
-		_, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Name: &name})
+		_, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &name})
 		edit <- err
 	}()
 	// Let the edit reach its first lock before the evaluation goes on.

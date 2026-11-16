@@ -37,7 +37,7 @@ func TestAlertGroupByValidation(t *testing.T) {
 				req.EditorMode = tc.mode
 				req.ConditionJSON = `level="error"`
 			}
-			_, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, req)
+			_, err := CreateAlert(ctx, db, ds, log, source.ID, owner, req)
 			if !errors.Is(err, ErrInvalidAlertConfiguration) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("CreateAlert(group_by %q) err = %v, want invalid configuration with %q", tc.groupBy, err, tc.want)
 			}
@@ -46,7 +46,7 @@ func TestAlertGroupByValidation(t *testing.T) {
 
 	req := newTestCreateAlertRequest()
 	req.GroupBy = []string{" service ", "region"}
-	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, req)
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestUpdateGroupByClosesEpisodes(t *testing.T) {
 	owner := newTestUser(t, db, "regroup-owner@example.com", "Owner")
 	source := newTestSource(t, db, "regroup-alerts")
 	ds := newFakeDatasourceService(db, log, nil)
-	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, newTestCreateAlertRequest())
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner, newTestCreateAlertRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestUpdateGroupByClosesEpisodes(t *testing.T) {
 	}
 
 	renamed := "renamed"
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Name: &renamed}); err != nil {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &renamed}); err != nil {
 		t.Fatal(err)
 	}
 	if open, err := db.ListOpenAlertHistory(ctx, alert.ID); err != nil || len(open) != 1 {
@@ -85,7 +85,7 @@ func TestUpdateGroupByClosesEpisodes(t *testing.T) {
 	}
 
 	groupBy := []string{"service"}
-	updated, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{GroupBy: &groupBy})
+	updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{GroupBy: &groupBy})
 	if err != nil {
 		t.Fatal(err)
 	}

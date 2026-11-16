@@ -14,19 +14,14 @@ import {
   resolveAlertMetadata,
   supportsAlertEditorMode,
 } from "@/lib/queryMetadata";
-import type { AcceptableValue } from "reka-ui";
 
 // Extended types for local usage until API types are updated.
 // The form doesn't include source_id — the caller adds it from context.
 export type FormCreatePayload = Omit<CreateAlertRequest, "source_id"> & {
-  recipient_user_ids: number[];
-  webhook_urls: string[];
+  destination_ids: number[];
 };
 
-export interface ExtendedUpdateAlertRequest extends UpdateAlertRequest {
-  recipient_user_ids?: number[];
-  webhook_urls?: string[];
-}
+export type ExtendedUpdateAlertRequest = UpdateAlertRequest;
 
 export interface AlertFormState {
   name: string;
@@ -46,8 +41,7 @@ export interface AlertFormState {
   is_active: boolean;
   labels: Array<{ id: number; key: string; value: string }>;
   annotations: Array<{ id: number; key: string; value: string }>;
-  recipient_user_ids: number[];
-  webhook_urls: string[];
+  destination_ids: number[];
 }
 
 /** Splits the Group by field into column names. */
@@ -159,12 +153,10 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     is_active: true,
     labels: [],
     annotations: [],
-    recipient_user_ids: [],
-    webhook_urls: [],
+    destination_ids: [],
   });
 
   // UI state for adding webhook
-  const newWebhookUrl = ref("");
 
   // LogChefQL validation state
   const conditionError = ref<string | null>(null);
@@ -202,7 +194,7 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   const generatedQuery = ref("");
   const isTranslating = ref(false);
 
-  // Team members for recipient selection
+  // Team members, offered as recipients of a new email destination
   const teamMembers = computed(() => {
     if (!props.teamId) return [];
     return teamsStore.getTeamMembersByTeamId(props.teamId);
@@ -502,38 +494,12 @@ WHERE ${timeFilter}`,
     }
   }
 
-  // Recipient management
-  function addRecipient(value: AcceptableValue) {
-    const userId = parseInt(String(value ?? ""));
-    if (userId && !form.recipient_user_ids.includes(userId)) {
-      form.recipient_user_ids.push(userId);
-    }
-  }
-
-  function removeRecipient(userId: number) {
-    form.recipient_user_ids = form.recipient_user_ids.filter(id => id !== userId);
-  }
-
-  // Webhook management
-  function addWebhook() {
-    const url = newWebhookUrl.value.trim();
-    if (url && !form.webhook_urls.includes(url)) {
-      form.webhook_urls.push(url);
-      newWebhookUrl.value = "";
-    }
-  }
-
-  function removeWebhook(url: string) {
-    form.webhook_urls = form.webhook_urls.filter(u => u !== url);
-  }
-
   function resetForm(alert: Alert | null) {
     invalidateTranslation();
     testQueryResult.value = null;
     testQueryError.value = null;
     conditionError.value = null;
     generatedQuery.value = "";
-    newWebhookUrl.value = "";
 
     if (!alert) {
       form.name = "";
@@ -552,15 +518,11 @@ WHERE ${timeFilter}`,
       form.is_active = true;
       form.labels = [];
       form.annotations = [];
-      form.recipient_user_ids = [];
-      form.webhook_urls = [];
+      form.destination_ids = [];
       labelCounter.value = 0;
       annotationCounter.value = 0;
       return;
     }
-
-    // Type assertion to access extra fields that might exist on the alert object
-    const extendedAlert = alert as unknown as { recipient_user_ids?: number[]; webhook_urls?: string[] };
 
     form.name = alert.name;
     form.description = alert.description ?? "";
@@ -592,8 +554,7 @@ WHERE ${timeFilter}`,
       ? Object.entries(alert.annotations).map(([key, value]) => ({ id: annotationCounter.value++, key, value }))
       : [];
 
-    form.recipient_user_ids = extendedAlert.recipient_user_ids ? [...extendedAlert.recipient_user_ids] : [];
-    form.webhook_urls = extendedAlert.webhook_urls ? [...extendedAlert.webhook_urls] : [];
+    form.destination_ids = alert.destination_ids ? [...alert.destination_ids] : [];
   }
 
   // A LogchefQL condition is evaluated ungrouped until the server compiles it.
@@ -705,8 +666,7 @@ WHERE ${timeFilter}`,
       is_active: form.is_active,
       labels: labelsRecord,
       annotations: annotationsRecord,
-      recipient_user_ids: form.recipient_user_ids,
-      webhook_urls: form.webhook_urls,
+      destination_ids: form.destination_ids,
       group_by: groupBy.value,
     };
 
@@ -732,7 +692,6 @@ WHERE ${timeFilter}`,
     queryTemplates,
     applyConditionTemplate,
     applyTemplate,
-    newWebhookUrl,
     teamMembers,
     testQueryResult,
     isTestingQuery,
@@ -745,10 +704,6 @@ WHERE ${timeFilter}`,
     removeLabel,
     addAnnotation,
     removeAnnotation,
-    addRecipient,
-    removeRecipient,
-    addWebhook,
-    removeWebhook,
     handleSubmit,
   };
 }

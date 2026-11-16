@@ -111,6 +111,9 @@ func (s *Server) handleListAlerts(c fiber.Ctx) error {
 func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 	user := currentUser(c)
 
+	if key := legacyAlertTargetKey(c.Body()); key != "" {
+		return sendLegacyAlertTargetError(c, key)
+	}
 	var req models.CreateAlertRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -131,10 +134,13 @@ func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
-	alert, err := core.CreateAlert(c.Context(), s.store, s.datasources, s.log, req.SourceID, user.ID, &req)
+	alert, err := core.CreateAlert(c.Context(), s.store, s.datasources, s.log, req.SourceID, user, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+		if errors.Is(err, core.ErrDestinationForbidden) {
+			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 		}
 		s.log.Error("failed to create alert", "source_id", req.SourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create alert", models.GeneralErrorType)
@@ -180,16 +186,21 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can edit this alert", models.AuthorizationErrorType)
 	}
 
+	if key := legacyAlertTargetKey(c.Body()); key != "" {
+		return sendLegacyAlertTargetError(c, key)
+	}
 	var req models.UpdateAlertRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, updateErr := core.UpdateAlert(c.Context(), s.store, s.datasources, s.log, alert.ID, &req)
+	updated, updateErr := core.UpdateAlert(c.Context(), s.store, s.datasources, s.log, user, alert.ID, &req)
 	if updateErr != nil {
 		switch {
 		case errors.Is(updateErr, core.ErrInvalidAlertConfiguration):
 			return SendErrorWithType(c, fiber.StatusBadRequest, updateErr.Error(), models.ValidationErrorType)
+		case errors.Is(updateErr, core.ErrDestinationForbidden):
+			return SendErrorWithType(c, fiber.StatusForbidden, updateErr.Error(), models.AuthorizationErrorType)
 		case errors.Is(updateErr, core.ErrAlertNotFound):
 			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		default:

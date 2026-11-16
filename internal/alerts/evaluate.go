@@ -351,7 +351,7 @@ func (m *Manager) planFire(alert *models.Alert, current *models.AlertInstance, p
 // committed, then records the outcome.
 func (m *Manager) deliverFiring(ctx context.Context, alert *models.Alert, step *fireStep) {
 	step.notification.TriggeredAt = step.history.TriggeredAt
-	results := m.sender.Send(ctx, step.notification)
+	results := m.deliver(ctx, step.notification)
 	deliveryErr := results.Err()
 	// Removing every pending target leaves delivery failed until a current target succeeds.
 	if step.retry && len(step.selected) == 0 && len(results) == 0 {

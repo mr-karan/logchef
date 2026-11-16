@@ -81,3 +81,39 @@ func TestAlertJobsUpgrade(t *testing.T) {
 
 	storetest.CheckAlertJobsUpgrade(t, opener(dsn)(t))
 }
+
+// TestAlertDestinationsUpgrade applies every migration before
+// add_notification_destinations and records them as applied, seeds rule
+// targets, then lets postgres.New run the remaining migrations.
+func TestAlertDestinationsUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const alertDestinationsVersion = 24
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, alertDestinationsVersion) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, alertDestinationsVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.AlertDestinationsUpgradeSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+
+	storetest.CheckAlertDestinationsUpgrade(t, opener(dsn)(t))
+}

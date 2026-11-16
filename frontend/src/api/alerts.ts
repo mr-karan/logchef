@@ -26,8 +26,7 @@ export interface Alert {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
-  recipient_user_ids: number[];
-  webhook_urls: string[];
+  destination_ids: number[];
   group_by?: string[] | null;
   instance_counts?: AlertInstanceCounts;
   is_active: boolean;
@@ -80,8 +79,7 @@ export interface CreateAlertRequest {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
-  recipient_user_ids?: number[];
-  webhook_urls?: string[];
+  destination_ids?: number[];
   group_by?: string[];
   is_active: boolean;
 }
@@ -101,8 +99,7 @@ export interface UpdateAlertRequest {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
-  recipient_user_ids?: number[];
-  webhook_urls?: string[];
+  destination_ids?: number[];
   group_by?: string[];
   is_active?: boolean;
 }

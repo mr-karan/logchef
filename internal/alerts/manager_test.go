@@ -381,7 +381,7 @@ func TestManagerReservesDeliveryDeadline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bound := alertEvaluationTimeout + smtpDialTimeout + deliveryBookkeepingTimeout
+			bound := deliveryAttemptTimeout
 			if deadline.Before(started.Add(bound)) || deadline.After(time.Now().UTC().Add(bound)) || !strings.HasSuffix(raw, "Z") {
 				t.Errorf("reservation deadline = %s, want current attempt plus %s in UTC", raw, bound)
 			}

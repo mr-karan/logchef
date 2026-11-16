@@ -60,6 +60,16 @@ func ExportSourceTarget(teamID models.TeamID, sourceID models.SourceID) Target {
 	return Target{Type: "source", ID: id(sourceID), TeamID: &teamID, SourceID: &sourceID}
 }
 
+func NotificationDestinationTarget(d *models.NotificationDestination) Target {
+	return Target{Type: "notification_destination", ID: id(d.ID), Label: d.Name, TeamID: d.TeamID}
+}
+
+// NotificationDestinationTypeTarget is the target of a test send to an
+// unsaved destination, which has no ID.
+func NotificationDestinationTypeTarget(t models.DestinationType) Target {
+	return Target{Type: "notification_destination", Label: string(t)}
+}
+
 func OAuthConsentTarget(requestID models.OAuthAuthRequestID) Target {
 	return Target{Type: "oauth_consent", ID: string(requestID)}
 }

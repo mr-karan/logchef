@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
 	"net"
 	"net/mail"
 	"slices"
@@ -142,7 +141,7 @@ func smtpMailer(host string, port int) Mailer {
 		"alerts.smtp_port":     strconv.Itoa(port),
 		"alerts.smtp_from":     "Logchef <reports@example.com>",
 		"alerts.smtp_security": "none",
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	})
 }
 
 func fakeAddr(t *testing.T, f *fakeSMTP) (host string, port int) {

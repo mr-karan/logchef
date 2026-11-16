@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/mail"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store"
 )
 
@@ -52,19 +51,18 @@ func (e *MailError) Unwrap() error { return e.Err }
 // ErrMailNotConfigured means the SMTP host, port or from address is not set.
 var ErrMailNotConfigured = errors.New("smtp is not configured")
 
-// SMTPMailer sends through alerts.EmailSender with the SMTP settings read at
-// each send.
+// SMTPMailer sends through notify.Mailer with the SMTP settings read at each
+// send.
 type SMTPMailer struct {
 	settings store.SettingGetter
-	log      *slog.Logger
 }
 
-func NewSMTPMailer(settings store.SettingGetter, log *slog.Logger) *SMTPMailer {
-	return &SMTPMailer{settings: settings, log: log}
+func NewSMTPMailer(settings store.SettingGetter) *SMTPMailer {
+	return &SMTPMailer{settings: settings}
 }
 
 func (m *SMTPMailer) Send(ctx context.Context, to mail.Address, msg MailMessage) error {
-	opts := alerts.EmailSenderOptionsFromSettings(ctx, m.settings, m.log)
+	opts := notify.MailerOptionsFromSettings(ctx, m.settings)
 	if opts.Host == "" || opts.Port == 0 || opts.From == "" {
 		return &MailError{Class: MailPermanent, Err: ErrMailNotConfigured}
 	}
@@ -76,18 +74,18 @@ func (m *SMTPMailer) Send(ctx context.Context, to mail.Address, msg MailMessage)
 	if err != nil {
 		return &MailError{Class: MailPermanent, Err: err}
 	}
-	err = alerts.NewEmailSender(opts).SendMessage(ctx, to.Address, raw)
+	err = notify.NewMailer(opts).SendMessage(ctx, to.Address, raw)
 	if err == nil {
 		return nil
 	}
-	sendErr, ok := errors.AsType[*alerts.SendError](err)
+	sendErr, ok := errors.AsType[*notify.SendError](err)
 	if !ok {
 		return &MailError{Class: MailTransient, Err: err}
 	}
-	class := map[alerts.SendClass]MailClass{
-		alerts.SendTransient: MailTransient,
-		alerts.SendPermanent: MailPermanent,
-		alerts.SendUnknown:   MailUnknown,
+	class := map[notify.SendClass]MailClass{
+		notify.SendTransient: MailTransient,
+		notify.SendPermanent: MailPermanent,
+		notify.SendUnknown:   MailUnknown,
 	}[sendErr.Class]
 	return &MailError{Class: class, Err: sendErr.Err}
 }

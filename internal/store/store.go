@@ -264,6 +264,31 @@ type AlertStore interface {
 	MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error
 }
 
+// DestinationStore persists notification destinations and their links to
+// alert rules. Reads return the secret in NotificationDestination.Secret, with
+// HasSecret and SecretHint filled for the API.
+type DestinationStore interface {
+	// CreateNotificationDestination fills the ID and timestamps.
+	CreateNotificationDestination(ctx context.Context, d *models.NotificationDestination) error
+	// UpdateNotificationDestination writes name, scope, team, config, secret
+	// and is_active. It returns models.ErrNotFound for a missing destination.
+	UpdateNotificationDestination(ctx context.Context, d *models.NotificationDestination) error
+	// DeleteNotificationDestination returns models.ErrNotFound for a missing
+	// destination and models.ErrConflict while a rule uses it.
+	DeleteNotificationDestination(ctx context.Context, id models.DestinationID) error
+	GetNotificationDestination(ctx context.Context, id models.DestinationID) (*models.NotificationDestination, error)
+	ListNotificationDestinations(ctx context.Context) ([]*models.NotificationDestination, error)
+	// ListUsableNotificationDestinations returns the user's private
+	// destinations, those of the user's teams, and the global ones.
+	ListUsableNotificationDestinations(ctx context.Context, userID models.UserID) ([]*models.NotificationDestination, error)
+	CountTeamNotificationDestinations(ctx context.Context, teamID models.TeamID) (int, error)
+	CountAlertsUsingDestination(ctx context.Context, id models.DestinationID) (int, error)
+	// SetAlertDestinations replaces the rule's destinations.
+	SetAlertDestinations(ctx context.Context, alertID models.AlertID, ids []models.DestinationID) error
+	// ListAlertDestinations returns the rule's destinations, ordered by id.
+	ListAlertDestinations(ctx context.Context, alertID models.AlertID) ([]*models.NotificationDestination, error)
+}
+
 // JobStore persists the background jobs that internal/jobs schedules and
 // leases. Every time comparison uses the database clock, so clock skew
 // between replicas does not matter. The methods that take a lease token
@@ -612,6 +637,7 @@ type StoreOps interface {
 	CollectionStore
 	DashboardStore
 	AlertStore
+	DestinationStore
 	JobStore
 	ReportStore
 	QueryHistoryStore

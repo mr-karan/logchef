@@ -108,7 +108,7 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 	ds.Register(datasource.NewClickHouseProvider(nil, log))
 
 	req := newTestCreateAlertRequest()
-	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, req)
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,10 +124,10 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 		t.Run(query, func(t *testing.T) {
 			badRequest := newTestCreateAlertRequest()
 			badRequest.Query = query
-			if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, badRequest); !isInvalidAlertQuery(err) {
+			if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner, badRequest); !isInvalidAlertQuery(err) {
 				t.Errorf("CreateAlert() error = %v, want invalid alert query", err)
 			}
-			if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &query}); !isInvalidAlertQuery(err) {
+			if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Query: &query}); !isInvalidAlertQuery(err) {
 				t.Errorf("UpdateAlert() error = %v, want invalid alert query", err)
 			}
 			stored, err := db.GetAlert(ctx, alert.ID)
@@ -142,7 +142,7 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 
 	blank := newTestCreateAlertRequest()
 	blank.Query = "   "
-	if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, blank); err == nil || !strings.Contains(err.Error(), "query is required for native alerts") {
+	if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner, blank); err == nil || !strings.Contains(err.Error(), "query is required for native alerts") {
 		t.Errorf("CreateAlert(blank query) error = %v, want query is required", err)
 	}
 
@@ -152,7 +152,7 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 			conditionRequest.EditorMode = models.AlertEditorModeCondition
 			conditionRequest.ConditionJSON = `severity = "ERROR"`
 			conditionRequest.Query = "SELECT " + aggregate + " as value\nFROM default.logs\nWHERE (severity = 'ERROR') AND `timestamp` >= now() - toIntervalSecond(300)"
-			created, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, conditionRequest)
+			created, err := CreateAlert(ctx, db, ds, log, source.ID, owner, conditionRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +193,7 @@ func TestUpdateAlertWithUnparseableStoredQuery(t *testing.T) {
 
 	inactive := false
 	renamed := "legacy (paused)"
-	updated, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Name: &renamed, IsActive: &inactive, Query: &legacyQuery})
+	updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &renamed, IsActive: &inactive, Query: &legacyQuery})
 	if err != nil {
 		t.Fatalf("UpdateAlert(pause, unchanged query) error = %v", err)
 	}
@@ -202,7 +202,7 @@ func TestUpdateAlertWithUnparseableStoredQuery(t *testing.T) {
 	}
 
 	edited := "SELECT count() FROM logs # edited"
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &edited}); !isInvalidAlertQuery(err) {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Query: &edited}); !isInvalidAlertQuery(err) {
 		t.Errorf("UpdateAlert(changed query) error = %v, want invalid alert query", err)
 	}
 }
@@ -270,7 +270,7 @@ func TestCreateAlertFullLifecycle(t *testing.T) {
 	ds := newFakeDatasourceService(db, log, nil)
 
 	req := newTestCreateAlertRequest()
-	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, req)
+	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner, req)
 	if err != nil {
 		t.Fatalf("CreateAlert: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestCreateAlertFullLifecycle(t *testing.T) {
 
 	newName := "5xx spike (updated)"
 	newThreshold := 20.0
-	updated, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{
+	updated, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{
 		Name:           &newName,
 		ThresholdValue: &newThreshold,
 	})
@@ -351,14 +351,13 @@ func TestCreateAlertValidation(t *testing.T) {
 			r.ConditionJSON = ""
 			r.Query = "SELECT 1"
 		}, wantErr: true},
-		{name: "unknown recipient user", mutate: func(r *models.CreateAlertRequest) {
-			r.RecipientUserIDs = []models.UserID{999999}
+		{name: "unknown destination", mutate: func(r *models.CreateAlertRequest) {
+			r.DestinationIDs = []models.DestinationID{999999}
 		}, wantErr: true},
-		{name: "invalid webhook URL", mutate: func(r *models.CreateAlertRequest) {
-			r.WebhookURLs = []string{"not-a-url"}
-		}, wantErr: true},
-		{name: "webhook URL with unsupported scheme", mutate: func(r *models.CreateAlertRequest) {
-			r.WebhookURLs = []string{"ftp://example.com/hook"}
+		{name: "more than ten destinations", mutate: func(r *models.CreateAlertRequest) {
+			for id := range 11 {
+				r.DestinationIDs = append(r.DestinationIDs, models.DestinationID(id+1))
+			}
 		}, wantErr: true},
 	}
 
@@ -366,7 +365,7 @@ func TestCreateAlertValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := newTestCreateAlertRequest()
 			tc.mutate(req)
-			_, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, req)
+			_, err := CreateAlert(ctx, db, ds, log, src.ID, owner, req)
 			if tc.wantErr {
 				if !errors.Is(err, ErrInvalidAlertConfiguration) {
 					t.Errorf("CreateAlert(%s) err = %v, want ErrInvalidAlertConfiguration", tc.name, err)
@@ -397,7 +396,7 @@ func TestCreateAlertUnsupportedByProvider(t *testing.T) {
 	})
 
 	req := newTestCreateAlertRequest()
-	if _, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, req); err == nil {
+	if _, err := CreateAlert(ctx, db, ds, log, src.ID, owner, req); err == nil {
 		t.Error("expected CreateAlert to fail for a query language the provider does not support")
 	}
 }
@@ -409,7 +408,8 @@ func TestUpdateAlertNotFound(t *testing.T) {
 	ds := newFakeDatasourceService(db, log, nil)
 
 	name := "new name"
-	_, err := UpdateAlert(context.Background(), db, ds, log, models.AlertID(999999), &models.UpdateAlertRequest{Name: &name})
+	admin := &models.User{ID: 1, Role: models.UserRoleAdmin}
+	_, err := UpdateAlert(context.Background(), db, ds, log, admin, models.AlertID(999999), &models.UpdateAlertRequest{Name: &name})
 	if !errors.Is(err, ErrAlertNotFound) {
 		t.Errorf("UpdateAlert(missing) err = %v, want ErrAlertNotFound", err)
 	}
@@ -428,18 +428,18 @@ func TestUpdateAlertRejectsInvalidPartialFields(t *testing.T) {
 	src := newTestSource(t, db, "update-src")
 	ds := newFakeDatasourceService(db, log, nil)
 
-	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, newTestCreateAlertRequest())
+	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner, newTestCreateAlertRequest())
 	if err != nil {
 		t.Fatalf("CreateAlert: %v", err)
 	}
 
 	zero := 0
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{FrequencySeconds: &zero}); !errors.Is(err, ErrInvalidAlertConfiguration) {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{FrequencySeconds: &zero}); !errors.Is(err, ErrInvalidAlertConfiguration) {
 		t.Errorf("UpdateAlert(zero frequency) err = %v, want ErrInvalidAlertConfiguration", err)
 	}
 
 	badOp := models.AlertThresholdOperator("nonsense")
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{ThresholdOperator: &badOp}); !errors.Is(err, ErrInvalidAlertConfiguration) {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{ThresholdOperator: &badOp}); !errors.Is(err, ErrInvalidAlertConfiguration) {
 		t.Errorf("UpdateAlert(bad operator) err = %v, want ErrInvalidAlertConfiguration", err)
 	}
 
@@ -471,11 +471,11 @@ func TestAlertJobFollowsTheRule(t *testing.T) {
 
 	tooFast := newTestCreateAlertRequest()
 	tooFast.FrequencySeconds = 9
-	if _, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, tooFast); !errors.Is(err, ErrInvalidAlertConfiguration) {
+	if _, err := CreateAlert(ctx, db, ds, log, src.ID, owner, tooFast); !errors.Is(err, ErrInvalidAlertConfiguration) {
 		t.Errorf("CreateAlert(9s) err = %v, want ErrInvalidAlertConfiguration", err)
 	}
 
-	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, newTestCreateAlertRequest())
+	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner, newTestCreateAlertRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,14 +485,14 @@ func TestAlertJobFollowsTheRule(t *testing.T) {
 	}
 
 	paused, ten := false, 10
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{IsActive: &paused, FrequencySeconds: &ten}); err != nil {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{IsActive: &paused, FrequencySeconds: &ten}); err != nil {
 		t.Fatal(err)
 	}
 	if updated, err := job(alert.ID); err != nil || updated.ScheduleExpr != "10" || updated.Enabled {
 		t.Fatalf("job after pause = %+v, %v; want a disabled 10s interval", updated, err)
 	}
 	nine := 9
-	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{FrequencySeconds: &nine}); !errors.Is(err, ErrInvalidAlertConfiguration) {
+	if _, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{FrequencySeconds: &nine}); !errors.Is(err, ErrInvalidAlertConfiguration) {
 		t.Errorf("UpdateAlert(9s) err = %v, want ErrInvalidAlertConfiguration", err)
 	}
 
@@ -522,7 +522,7 @@ func TestResolveAlertNoUnresolvedHistory(t *testing.T) {
 	owner := newTestUser(t, db, "resolve-owner@example.com", "Owner")
 	src := newTestSource(t, db, "resolve-src")
 	ds := newFakeDatasourceService(db, log, nil)
-	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner.ID, newTestCreateAlertRequest())
+	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner, newTestCreateAlertRequest())
 	if err != nil {
 		t.Fatalf("CreateAlert: %v", err)
 	}
@@ -671,5 +671,60 @@ func TestGenerateQueryWarningsNamesTruncationCause(t *testing.T) {
 				t.Fatalf("warnings = %q, want one starting with %q", warnings, tc.prefix)
 			}
 		})
+	}
+}
+
+// TestAlertDestinationUse: a rule takes the destinations its editor can use;
+// a destination already on the rule stays when someone else edits it, and
+// adding one the editor cannot use is refused.
+func TestAlertDestinationUse(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	owner := newTestUser(t, db, "use-owner@example.com", "Owner")
+	other := newTestUser(t, db, "use-other@example.com", "Other")
+	admin := newTestUser(t, db, "use-admin@example.com", "Admin")
+	admin.Role = models.UserRoleAdmin
+	src := newTestSource(t, db, "use-src")
+	ds := newFakeDatasourceService(db, log, nil)
+	private := func(user *models.User) models.DestinationID {
+		d, err := CreateDestination(ctx, db, user, &models.DestinationRequest{Name: "hook", Type: models.DestinationTypeWebhook,
+			Scope: models.DestinationScopePrivate, Secret: "https://hooks.example.com/" + user.Email})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ID
+	}
+	ownerDest, otherDest, adminDest := private(owner), private(other), private(admin)
+
+	req := newTestCreateAlertRequest()
+	req.DestinationIDs = []models.DestinationID{otherDest}
+	if _, err := CreateAlert(ctx, db, ds, log, src.ID, owner, req); !errors.Is(err, ErrDestinationForbidden) {
+		t.Fatalf("create with another user's private destination: %v, want ErrDestinationForbidden", err)
+	}
+	req.DestinationIDs = []models.DestinationID{ownerDest, ownerDest}
+	alert, err := CreateAlert(ctx, db, ds, log, src.ID, owner, req)
+	if err != nil || !slices.Equal(alert.DestinationIDs, []models.DestinationID{ownerDest}) {
+		t.Fatalf("create with own destination = %+v, %v", alert, err)
+	}
+
+	// An admin edits the rule: the owner's destination stays, the admin's own
+	// is added, another user's private one is refused.
+	keep := []models.DestinationID{ownerDest, adminDest}
+	updated, err := UpdateAlert(ctx, db, ds, log, admin, alert.ID, &models.UpdateAlertRequest{DestinationIDs: &keep})
+	if err != nil || !slices.Equal(updated.DestinationIDs, []models.DestinationID{ownerDest, adminDest}) {
+		t.Fatalf("admin edit = %+v, %v", updated, err)
+	}
+	add := []models.DestinationID{ownerDest, adminDest, otherDest}
+	if _, err := UpdateAlert(ctx, db, ds, log, admin, alert.ID, &models.UpdateAlertRequest{DestinationIDs: &add}); !errors.Is(err, ErrDestinationForbidden) {
+		t.Errorf("admin adding another user's private destination: %v, want ErrDestinationForbidden", err)
+	}
+	name := "renamed"
+	if renamed, err := UpdateAlert(ctx, db, ds, log, owner, alert.ID, &models.UpdateAlertRequest{Name: &name}); err != nil || len(renamed.DestinationIDs) != 2 {
+		t.Errorf("an edit without destination_ids = %+v, %v; want the destinations kept", renamed, err)
+	}
+	if _, err := DeleteDestination(ctx, db, owner, ownerDest); !errors.Is(err, ErrDestinationInUse) {
+		t.Errorf("delete a destination in use: %v, want ErrDestinationInUse", err)
 	}
 }

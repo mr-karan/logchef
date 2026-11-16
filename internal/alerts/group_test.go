@@ -447,17 +447,11 @@ func TestGroupedWebhookPerGroup(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer receiver.Close()
-	alert, err := f.db.GetAlert(t.Context(), f.alert.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	alert.WebhookURLs = []string{receiver.URL}
-	if err := f.db.UpdateAlert(t.Context(), alert); err != nil {
-		t.Fatal(err)
-	}
+	linkWebhooks(t, f.db, f.alert, receiver.URL)
 	f.manager.sender = NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	f.provider.results = append(f.provider.results, groupedResult(row("checkout", 12), row("search", 30)))
-	if alert, err = f.db.GetAlert(t.Context(), alert.ID); err != nil {
+	alert, err := f.db.GetAlert(t.Context(), f.alert.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {

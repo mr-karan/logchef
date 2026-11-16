@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { PageHeader, LoadingState } from '@/components/layout'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { Pencil, Eye, EyeOff, Save, X, Mail, Webhook, Loader2 } from 'lucide-vue-next'
+import { Pencil, Eye, EyeOff, Save, X, Mail, Loader2 } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -36,9 +36,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
-import { useToast } from '@/composables/useToast'
 
-const { toast } = useToast()
 const { t } = useI18n()
 
 const authStore = useAuthStore()
@@ -50,7 +48,6 @@ const { isLoading } = storeToRefs(settingsStore)
 const showEditDialog = ref(false)
 const showDeleteDialog = ref(false)
 const showTestEmailDialog = ref(false)
-const showTestWebhookDialog = ref(false)
 const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
@@ -58,9 +55,7 @@ const showSensitiveValues = ref<Record<string, boolean>>({})
 // fall back to AI so an admin isn't landed on a hidden tab.
 const currentTab = ref(metaStore.alertsEnabled ? 'alerts' : 'ai')
 const testEmailRecipient = ref('')
-const testWebhookUrl = ref('')
 const isTestingEmail = ref(false)
-const isTestingWebhook = ref(false)
 
 const editForm = ref<UpdateSettingRequest>({
   value: '',
@@ -158,11 +153,6 @@ const openTestEmailDialog = () => {
   showTestEmailDialog.value = true
 }
 
-const openTestWebhookDialog = () => {
-  testWebhookUrl.value = ''
-  showTestWebhookDialog.value = true
-}
-
 const handleTestEmail = async () => {
   isTestingEmail.value = true
   try {
@@ -172,22 +162,6 @@ const handleTestEmail = async () => {
     }
   } finally {
     isTestingEmail.value = false
-  }
-}
-
-const handleTestWebhook = async () => {
-  if (!testWebhookUrl.value.trim()) {
-    toast({ title: t('admin.webhookURLRequired'), variant: 'destructive' })
-    return
-  }
-  isTestingWebhook.value = true
-  try {
-    const result = await settingsStore.testWebhook(testWebhookUrl.value)
-    if (result?.success) {
-      showTestWebhookDialog.value = false
-    }
-  } finally {
-    isTestingWebhook.value = false
   }
 }
 
@@ -219,10 +193,6 @@ onMounted(() => {
                 <Button variant="outline" size="sm" @click="openTestEmailDialog">
                   <Mail class="mr-2 h-4 w-4" />
                   {{ t('admin.testEmail') }}
-                </Button>
-                <Button variant="outline" size="sm" @click="openTestWebhookDialog">
-                  <Webhook class="mr-2 h-4 w-4" />
-                  {{ t('admin.testWebhook') }}
                 </Button>
               </div>
             </div>
@@ -544,40 +514,5 @@ onMounted(() => {
       </DialogContent>
     </Dialog>
 
-    <!-- Test Webhook Dialog -->
-    <Dialog :open="showTestWebhookDialog" @update:open="showTestWebhookDialog = false">
-      <DialogContent class="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>{{ t('admin.testWebhookConfiguration') }}</DialogTitle>
-          <DialogDescription>
-            {{ t('admin.testWebhookDescription') }}
-          </DialogDescription>
-        </DialogHeader>
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label for="test-webhook">{{ t('admin.webhookURL') }}</Label>
-            <Input
-              id="test-webhook"
-              v-model="testWebhookUrl"
-              type="url"
-              placeholder="https://example.com/webhook"
-            />
-            <p class="text-xs text-muted-foreground">
-              {{ t('admin.webhookURLHint') }}
-            </p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showTestWebhookDialog = false" :disabled="isTestingWebhook">
-            {{ t('ui.cancel') }}
-          </Button>
-          <Button @click="handleTestWebhook" :disabled="isTestingWebhook || !testWebhookUrl.trim()">
-            <Loader2 v-if="isTestingWebhook" class="mr-2 h-4 w-4 animate-spin" />
-            <Webhook v-else class="mr-2 h-4 w-4" />
-            {{ t('admin.sendTestWebhook') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>

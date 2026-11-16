@@ -46,25 +46,23 @@ func (s *Store) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		return err
 	}
 	_, err = s.q.UpdateAlert(ctx, sqlc.UpdateAlertParams{
-		Name:                 createParams.Name,
-		Description:          createParams.Description,
-		QueryLanguage:        createParams.QueryLanguage,
-		EditorMode:           createParams.EditorMode,
-		Query:                createParams.Query,
-		ConditionJson:        createParams.ConditionJson,
-		LookbackSeconds:      createParams.LookbackSeconds,
-		ThresholdOperator:    createParams.ThresholdOperator,
-		ThresholdValue:       createParams.ThresholdValue,
-		FrequencySeconds:     createParams.FrequencySeconds,
-		Severity:             createParams.Severity,
-		LabelsJson:           createParams.LabelsJson,
-		AnnotationsJson:      createParams.AnnotationsJson,
-		RecipientUserIdsJson: createParams.RecipientUserIdsJson,
-		WebhookUrlsJson:      createParams.WebhookUrlsJson,
-		GeneratorUrl:         createParams.GeneratorUrl,
-		GroupByJson:          createParams.GroupByJson,
-		IsActive:             createParams.IsActive,
-		ID:                   int64(alert.ID),
+		Name:              createParams.Name,
+		Description:       createParams.Description,
+		QueryLanguage:     createParams.QueryLanguage,
+		EditorMode:        createParams.EditorMode,
+		Query:             createParams.Query,
+		ConditionJson:     createParams.ConditionJson,
+		LookbackSeconds:   createParams.LookbackSeconds,
+		ThresholdOperator: createParams.ThresholdOperator,
+		ThresholdValue:    createParams.ThresholdValue,
+		FrequencySeconds:  createParams.FrequencySeconds,
+		Severity:          createParams.Severity,
+		LabelsJson:        createParams.LabelsJson,
+		AnnotationsJson:   createParams.AnnotationsJson,
+		GeneratorUrl:      createParams.GeneratorUrl,
+		GroupByJson:       createParams.GroupByJson,
+		IsActive:          createParams.IsActive,
+		ID:                int64(alert.ID),
 	})
 	if err != nil {
 		if notFound(err) {
@@ -100,7 +98,11 @@ func (s *Store) GetAlert(ctx context.Context, alertID models.AlertID) (*models.A
 		}
 		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
-	return alertFromSQLC(row)
+	alert, err := alertFromSQLC(row)
+	if err != nil {
+		return nil, err
+	}
+	return alert, s.attachDestinationIDs(ctx, alert)
 }
 
 // ListAlertsBySource returns alerts for one source.
@@ -109,7 +111,7 @@ func (s *Store) ListAlertsBySource(ctx context.Context, sourceID models.SourceID
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	return alertsFromSQLC(rows)
+	return s.alertsWithDestinations(ctx, rows)
 }
 
 // ListAlertsForUser returns alerts the user can see via team membership.
@@ -118,7 +120,15 @@ func (s *Store) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts for user: %w", err)
 	}
-	return alertsFromSQLC(rows)
+	return s.alertsWithDestinations(ctx, rows)
+}
+
+func (s *Store) alertsWithDestinations(ctx context.Context, rows []sqlc.Alert) ([]*models.Alert, error) {
+	alerts, err := alertsFromSQLC(rows)
+	if err != nil {
+		return nil, err
+	}
+	return alerts, s.attachDestinationIDs(ctx, alerts...)
 }
 
 // MarkAlertEvaluated updates state after evaluation finishes without triggering.
@@ -327,39 +337,29 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 	if err != nil {
 		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal annotations: %w", err)
 	}
-	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
-	if err != nil {
-		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal recipient user IDs: %w", err)
-	}
-	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
-	if err != nil {
-		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal webhook URLs: %w", err)
-	}
 	groupByJSON, err := marshalStringSlice(alert.GroupBy)
 	if err != nil {
 		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal group_by: %w", err)
 	}
 
 	params := sqlc.CreateAlertParams{
-		SourceID:             int64(alert.SourceID),
-		Name:                 alert.Name,
-		Description:          text(alert.Description),
-		QueryLanguage:        string(alert.QueryLanguage),
-		EditorMode:           string(alert.EditorMode),
-		Query:                text(alert.Query),
-		ConditionJson:        text(alert.ConditionJSON),
-		LookbackSeconds:      int64(alert.LookbackSeconds),
-		ThresholdOperator:    string(alert.ThresholdOperator),
-		ThresholdValue:       alert.ThresholdValue,
-		FrequencySeconds:     int64(alert.FrequencySeconds),
-		Severity:             string(alert.Severity),
-		LabelsJson:           text(labelsJSON),
-		AnnotationsJson:      text(annotationsJSON),
-		RecipientUserIdsJson: text(recipientUserIDsJSON),
-		WebhookUrlsJson:      text(webhookURLsJSON),
-		GeneratorUrl:         text(alert.GeneratorURL),
-		GroupByJson:          text(groupByJSON),
-		IsActive:             alert.IsActive,
+		SourceID:          int64(alert.SourceID),
+		Name:              alert.Name,
+		Description:       text(alert.Description),
+		QueryLanguage:     string(alert.QueryLanguage),
+		EditorMode:        string(alert.EditorMode),
+		Query:             text(alert.Query),
+		ConditionJson:     text(alert.ConditionJSON),
+		LookbackSeconds:   int64(alert.LookbackSeconds),
+		ThresholdOperator: string(alert.ThresholdOperator),
+		ThresholdValue:    alert.ThresholdValue,
+		FrequencySeconds:  int64(alert.FrequencySeconds),
+		Severity:          string(alert.Severity),
+		LabelsJson:        text(labelsJSON),
+		AnnotationsJson:   text(annotationsJSON),
+		GeneratorUrl:      text(alert.GeneratorURL),
+		GroupByJson:       text(groupByJSON),
+		IsActive:          alert.IsActive,
 	}
 	if alert.CreatedBy != nil {
 		params.CreatedBy = int8Val(int64(*alert.CreatedBy))
@@ -389,14 +389,6 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode annotations: %w", err)
 	}
-	recipientUserIDs, err := unmarshalUserIDs(row.RecipientUserIdsJson)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode recipient user IDs: %w", err)
-	}
-	webhookURLs, err := unmarshalStringSlice(row.WebhookUrlsJson)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
-	}
 	groupBy, err := unmarshalStringSlice(row.GroupByJson)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode group_by: %w", err)
@@ -418,8 +410,6 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 		Severity:          models.AlertSeverity(row.Severity),
 		Labels:            labels,
 		Annotations:       annotations,
-		RecipientUserIDs:  recipientUserIDs,
-		WebhookURLs:       webhookURLs,
 		GeneratorURL:      textStr(row.GeneratorUrl),
 		GroupBy:           groupBy,
 		IsActive:          row.IsActive,
@@ -472,12 +462,8 @@ func unmarshalStringMap(raw pgtype.Text) (map[string]string, error) {
 	return alertjson.Decode[map[string]string](textStr(raw))
 }
 
-func marshalUserIDs(ids []models.UserID) (string, error) {
-	return alertjson.Encode(ids, len(ids) == 0)
-}
-
-func unmarshalUserIDs(raw pgtype.Text) ([]models.UserID, error) {
-	return alertjson.Decode[[]models.UserID](textStr(raw))
+func marshalPayload(payload map[string]any) (string, error) {
+	return alertjson.Encode(payload, len(payload) == 0)
 }
 
 func marshalStringSlice(values []string) (string, error) {
@@ -486,10 +472,6 @@ func marshalStringSlice(values []string) (string, error) {
 
 func unmarshalStringSlice(raw pgtype.Text) ([]string, error) {
 	return alertjson.Decode[[]string](textStr(raw))
-}
-
-func marshalPayload(payload map[string]any) (string, error) {
-	return alertjson.Encode(payload, len(payload) == 0)
 }
 
 func unmarshalPayload(raw pgtype.Text) (map[string]any, error) {

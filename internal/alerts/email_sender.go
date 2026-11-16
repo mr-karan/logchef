@@ -2,174 +2,48 @@ package alerts
 
 import (
 	"context"
-	"crypto/tls"
-	"errors"
 	"fmt"
-	"net"
-	"net/smtp"
-	"net/textproto"
 	"strings"
-	"syscall"
 	"time"
 
-	"log/slog"
+	"github.com/mr-karan/logchef/internal/notify"
 )
 
-const smtpDialTimeout = 5 * time.Second
+// smtpDialTimeout is the SMTP budget inside an alert delivery attempt.
+const smtpDialTimeout = notify.DefaultSMTPTimeout
 
-const (
-	smtpSecurityNone     = "none"
-	smtpSecurityStartTLS = "starttls"
-	smtpSecurityTLS      = "tls"
-)
-
-var (
-	// ErrSMTPNotConfigured means the SMTP host, port or from address is not set.
-	ErrSMTPNotConfigured = errors.New("smtp is not configured")
-	errSMTPTLS           = errors.New("smtp TLS failed")
-	errSMTPAuth          = errors.New("smtp authentication failed")
-)
-
-// SendClass says what a failed send means for a retry.
-type SendClass string
-
-const (
-	// SendTransient failed before the end of DATA, or got a 4xx reply. A
-	// retry cannot deliver a second copy.
-	SendTransient SendClass = "transient"
-	// SendPermanent got a 5xx reply or an authentication failure, or SMTP is
-	// not configured. A retry fails the same way.
-	SendPermanent SendClass = "permanent"
-	// SendUnknown lost the connection after the end of DATA was written and
-	// before the reply: the server may have accepted the message.
-	SendUnknown SendClass = "unknown"
-)
-
-// SendError is a failed SendMessage. Err is sanitized and safe to store.
-type SendError struct {
-	Class SendClass
-	Err   error
-}
-
-func (e *SendError) Error() string { return string(e.Class) + ": " + e.Err.Error() }
-func (e *SendError) Unwrap() error { return e.Err }
-
-type EmailSenderOptions struct {
-	Host          string
-	Port          int
-	Username      string
-	Password      string
-	From          string
-	ReplyTo       string
-	Security      string
-	Timeout       time.Duration
-	SkipTLSVerify bool
-	Logger        *slog.Logger
-}
-
+// EmailSender mails a notification to the email targets, one message per
+// recipient, through a notify.Mailer.
 type EmailSender struct {
-	host          string
-	port          int
-	username      string
-	password      string
-	from          string
-	replyTo       string
-	security      string
-	timeout       time.Duration
-	skipTLSVerify bool
-	logger        *slog.Logger
+	mailer *notify.Mailer
 }
 
-func NewEmailSender(opts EmailSenderOptions) *EmailSender {
-	security := strings.ToLower(strings.TrimSpace(opts.Security))
-	switch security {
-	case smtpSecurityNone, smtpSecurityStartTLS, smtpSecurityTLS:
-	case "":
-		security = smtpSecurityStartTLS
-	default:
-		security = smtpSecurityStartTLS
-	}
-	timeout := opts.Timeout
-	if timeout <= 0 {
-		timeout = smtpDialTimeout
-	}
-	logger := opts.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &EmailSender{
-		host:          strings.TrimSpace(opts.Host),
-		port:          opts.Port,
-		username:      strings.TrimSpace(opts.Username),
-		password:      opts.Password,
-		from:          strings.TrimSpace(opts.From),
-		replyTo:       strings.TrimSpace(opts.ReplyTo),
-		security:      security,
-		timeout:       timeout,
-		skipTLSVerify: opts.SkipTLSVerify,
-		logger:        logger.With("component", "alert_email_sender"),
-	}
+func NewEmailSender(mailer *notify.Mailer) *EmailSender {
+	return &EmailSender{mailer: mailer}
 }
 
 func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
 	var results DeliveryResults
-	resolutionTarget := deliveryTargetID("email", "recipient-resolution")
-	if notification.selects(resolutionTarget) {
-		var err error
-		switch {
-		case notification.RecipientResolutionErr != "":
-			err = fmt.Errorf("recipient resolution failed: %s", notification.RecipientResolutionErr)
-		case len(notification.RecipientUserIDs) > 0 && len(notification.RecipientEmails) == 0 && len(notification.MissingRecipientUserIDs) == 0:
-			err = fmt.Errorf("no valid email recipients resolved")
-		}
-		if err != nil {
-			results = append(results, DeliveryResult{Target: resolutionTarget, Err: err})
-		}
-	}
-	for _, id := range notification.MissingRecipientUserIDs {
-		target := emailUserTarget(id)
-		if notification.selects(target) {
-			results = append(results, DeliveryResult{Target: target, Err: fmt.Errorf("missing recipient user ID: %d", id)})
-		}
-	}
-	for index, recipient := range uniqueEmails(notification.RecipientEmails) {
-		target := notification.emailTarget(recipient)
-		if !notification.selects(target) {
+	for index, target := range notification.Emails {
+		if !notification.selects(target.Target) {
 			continue
 		}
-		var err error
-		if s.host == "" || s.port == 0 || s.from == "" {
-			err = ErrSMTPNotConfigured
-		} else {
-			err = s.sendEmail(ctx, recipient, s.buildMessage(notification, recipient))
-		}
+		err := s.mailer.Send(ctx, target.Address, notify.MailMessage{Subject: emailSubject(notification), Text: s.buildBody(notification)})
 		if err != nil {
-			err = fmt.Errorf("email delivery failed: email recipient %d: %w", index+1, sanitizeSMTPError(err))
+			err = fmt.Errorf("email delivery failed: email recipient %d: %w", index+1, err)
 		}
-		results = append(results, DeliveryResult{Target: target, Err: err})
+		results = append(results, DeliveryResult{Target: target.Target, Err: err})
 	}
 	return results
 }
 
-func (s *EmailSender) buildMessage(notification AlertNotification, recipient string) []byte {
+func emailSubject(notification AlertNotification) string {
 	name := notification.AlertName
 	if len(notification.Group) > 0 {
 		// Group values come from log data; keep them on one header line.
 		name += " [" + strings.Map(dropLineBreaks, formatGroup(notification.Group)) + "]"
 	}
-	subject := fmt.Sprintf("[Logchef] %s (%s) %s", name, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
-	body := s.buildBody(notification)
-	headers := []string{
-		fmt.Sprintf("From: %s", s.from),
-		fmt.Sprintf("To: %s", recipient),
-		fmt.Sprintf("Subject: %s", subject),
-		"MIME-Version: 1.0",
-		"Content-Type: text/plain; charset=\"UTF-8\"",
-	}
-	if s.replyTo != "" {
-		headers = append(headers, fmt.Sprintf("Reply-To: %s", s.replyTo))
-	}
-	return []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + body)
+	return fmt.Sprintf("[Logchef] %s (%s) %s", name, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
 }
 
 func (s *EmailSender) buildBody(notification AlertNotification) string {
@@ -217,193 +91,9 @@ func (s *EmailSender) buildBody(notification AlertNotification) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// SendMessage sends a prepared MIME message to one address and classifies a
-// failure. A 250 reply to the end of DATA is a delivery, whatever QUIT then
-// returns, so a caller that retries on SendTransient never sends a second
-// copy.
-func (s *EmailSender) SendMessage(ctx context.Context, to string, message []byte) error {
-	if s.host == "" || s.port == 0 || s.from == "" {
-		return &SendError{Class: SendPermanent, Err: ErrSMTPNotConfigured}
-	}
-	client, err := s.connect(ctx)
-	if err != nil {
-		return classifyBeforeDataEnd(err)
-	}
-	defer client.Close()
-	if err := client.Mail(s.from); err != nil {
-		return classifyBeforeDataEnd(err)
-	}
-	if err := client.Rcpt(to); err != nil {
-		return classifyBeforeDataEnd(err)
-	}
-	writer, err := client.Data()
-	if err != nil {
-		return classifyBeforeDataEnd(err)
-	}
-	// On a failed write the end of DATA is never sent, so the server drops
-	// the partial message when the connection closes.
-	if _, err := writer.Write(message); err != nil {
-		return classifyBeforeDataEnd(err)
-	}
-	if err := writer.Close(); err != nil {
-		if _, ok := errors.AsType[*textproto.Error](err); ok {
-			return classifyBeforeDataEnd(err)
-		}
-		return &SendError{Class: SendUnknown, Err: sanitizeSMTPError(err)}
-	}
-	_ = client.Quit()
-	return nil
-}
-
-func classifyBeforeDataEnd(err error) error {
-	class := SendTransient
-	if reply, ok := errors.AsType[*textproto.Error](err); ok && reply.Code >= 500 {
-		class = SendPermanent
-	}
-	if errors.Is(err, errSMTPAuth) {
-		class = SendPermanent
-	}
-	return &SendError{Class: class, Err: sanitizeSMTPError(err)}
-}
-
-func (s *EmailSender) sendEmail(ctx context.Context, recipient string, message []byte) error {
-	client, err := s.connect(ctx)
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-
-	if err := client.Mail(s.from); err != nil {
-		return err
-	}
-	if err := client.Rcpt(recipient); err != nil {
-		return err
-	}
-	writer, err := client.Data()
-	if err != nil {
-		return err
-	}
-	if _, err := writer.Write(message); err != nil {
-		_ = writer.Close()
-		return err
-	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
-	return client.Quit()
-}
-
-func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
-	address := fmt.Sprintf("%s:%d", s.host, s.port)
-	dialer := &net.Dialer{Timeout: s.timeout}
-	var (
-		conn net.Conn
-		err  error
-	)
-	if s.security == smtpSecurityTLS {
-		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
-		tlsDialer := &tls.Dialer{NetDialer: dialer, Config: tlsConfig}
-		conn, err = tlsDialer.DialContext(ctx, "tcp", address)
-		if err != nil {
-			err = fmt.Errorf("%w: %w", errSMTPTLS, err)
-		}
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", address)
-	}
-	if err != nil {
-		return nil, err
-	}
-	deadline := time.Now().Add(s.timeout)
-	if evaluationDeadline, ok := ctx.Deadline(); ok && evaluationDeadline.Before(deadline) {
-		deadline = evaluationDeadline
-	}
-	_ = conn.SetDeadline(deadline)
-	client, err := smtp.NewClient(conn, s.host)
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-	if s.security == smtpSecurityStartTLS {
-		if ok, _ := client.Extension("STARTTLS"); !ok {
-			_ = client.Close()
-			return nil, errSMTPTLS
-		}
-		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
-		if err := client.StartTLS(tlsConfig); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("%w: %w", errSMTPTLS, err)
-		}
-	}
-	if s.username != "" {
-		auth := smtp.PlainAuth("", s.username, s.password, s.host)
-		if err := client.Auth(auth); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("%w: %w", errSMTPAuth, err)
-		}
-	}
-	return client, nil
-}
-
 func dropLineBreaks(r rune) rune {
 	if r == '\r' || r == '\n' {
 		return ' '
 	}
 	return r
-}
-
-func uniqueEmails(emails []string) []string {
-	seen := make(map[string]struct{}, len(emails))
-	out := make([]string, 0, len(emails))
-	for _, email := range emails {
-		normalized := strings.TrimSpace(email)
-		if normalized == "" {
-			continue
-		}
-		if _, ok := seen[normalized]; ok {
-			continue
-		}
-		seen[normalized] = struct{}{}
-		out = append(out, normalized)
-	}
-	return out
-}
-
-func sanitizeSMTPError(err error) error {
-	if errors.Is(err, ErrSMTPNotConfigured) {
-		return ErrSMTPNotConfigured
-	}
-	if errors.Is(err, context.Canceled) {
-		return errors.New("smtp request canceled")
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return errors.New("smtp request timed out")
-	}
-	if networkErr, ok := errors.AsType[net.Error](err); ok && networkErr.Timeout() {
-		return errors.New("smtp request timed out")
-	}
-	if _, ok := errors.AsType[*net.DNSError](err); ok {
-		return errors.New("smtp DNS lookup failed")
-	}
-	if errors.Is(err, syscall.ECONNREFUSED) {
-		return errors.New("smtp connection refused")
-	}
-	if errors.Is(err, errSMTPTLS) {
-		return errSMTPTLS
-	}
-	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
-		return errSMTPTLS
-	}
-	if _, ok := errors.AsType[tls.RecordHeaderError](err); ok {
-		return errSMTPTLS
-	}
-	if errors.Is(err, errSMTPAuth) {
-		return errSMTPAuth
-	}
-	if reply, ok := errors.AsType[*textproto.Error](err); ok && (reply.Code == 530 || reply.Code == 534 || reply.Code == 535 || reply.Code == 538) {
-		return errSMTPAuth
-	}
-	if reply, ok := errors.AsType[*textproto.Error](err); ok && reply.Code >= 400 && reply.Code < 600 {
-		return errors.New("smtp message rejected by server")
-	}
-	return errors.New("smtp connection failed")
 }

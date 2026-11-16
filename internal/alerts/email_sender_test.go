@@ -3,24 +3,22 @@ package alerts
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/textproto"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/notify"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestEmailSenderRetriesOnlyFailedRecipients(t *testing.T) {
-	sender := NewEmailSender(EmailSenderOptions{})
-	notification := AlertNotification{RecipientEmails: []string{"first@example.com", "second@example.com"}}
+	sender := NewEmailSender(notify.NewMailer(notify.MailerOptions{}))
+	notification := AlertNotification{Emails: testEmails("first@example.com", "second@example.com")}
 	results := sender.Send(t.Context(), notification)
 	if len(results) != 2 {
 		t.Fatalf("results = %d, want 2", len(results))
@@ -84,37 +82,11 @@ func TestEmailSenderSanitizesRecipientErrors(t *testing.T) {
 	if _, err := fmt.Sscan(port, &portNumber); err != nil {
 		t.Fatal(err)
 	}
-	sender := NewEmailSender(EmailSenderOptions{Host: host, Port: portNumber, From: "sender@example.com", Security: "none"})
-	result := sender.Send(t.Context(), AlertNotification{RecipientEmails: []string{"recipient@example.com"}})
+	sender := NewEmailSender(notify.NewMailer(notify.MailerOptions{Host: host, Port: portNumber, From: "sender@example.com", Security: "none"}))
+	result := sender.Send(t.Context(), AlertNotification{Emails: testEmails("recipient@example.com")})
 	<-done
 	if err := result.Err(); err == nil || err.Error() != "email delivery failed: email recipient 1: smtp message rejected by server" {
 		t.Fatalf("delivery error = %v, want a non-identifying rejection", err)
-	}
-}
-
-func TestSMTPErrorCategories(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-		want string
-	}{
-		{"not configured", ErrSMTPNotConfigured, "smtp is not configured"},
-		{"refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "smtp connection refused"},
-		{"DNS", &net.DNSError{Name: "private.invalid", Err: "private lookup details"}, "smtp DNS lookup failed"},
-		{"TLS", &tls.CertificateVerificationError{Err: errors.New("private certificate details")}, "smtp TLS failed"},
-		{"auth", &textproto.Error{Code: 535, Msg: "private authentication details"}, "smtp authentication failed"},
-		{"timeout", fmt.Errorf("private server: %w", context.DeadlineExceeded), "smtp request timed out"},
-		{"reset", &net.OpError{Op: "read", Err: syscall.ECONNRESET}, "smtp connection failed"},
-		{"host unreachable", &net.OpError{Op: "dial", Err: syscall.EHOSTUNREACH}, "smtp connection failed"},
-		{"network unreachable", &net.OpError{Op: "dial", Err: syscall.ENETUNREACH}, "smtp connection failed"},
-		{"greeting EOF", fmt.Errorf("private server: %w", io.EOF), "smtp connection failed"},
-		{"rejected", &textproto.Error{Code: 550, Msg: "private recipient details"}, "smtp message rejected by server"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := sanitizeSMTPError(tc.err).Error(); got != tc.want {
-				t.Errorf("sanitized error = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -142,11 +114,11 @@ func TestSMTPGreetingHonorsEvaluationDeadline(t *testing.T) {
 	if _, err := fmt.Sscan(port, &portNumber); err != nil {
 		t.Fatal(err)
 	}
-	sender := NewEmailSender(EmailSenderOptions{Host: host, Port: portNumber, From: "sender@example.com", Security: "none", Timeout: 2 * time.Second})
+	sender := NewEmailSender(notify.NewMailer(notify.MailerOptions{Host: host, Port: portNumber, From: "sender@example.com", Security: "none", Timeout: 2 * time.Second}))
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	if err := sender.Send(ctx, AlertNotification{RecipientEmails: []string{"recipient@example.com"}}).Err(); err == nil {
+	if err := sender.Send(ctx, AlertNotification{Emails: testEmails("recipient@example.com")}).Err(); err == nil {
 		t.Error("stalled SMTP greeting succeeded")
 	}
 	<-done
@@ -159,19 +131,15 @@ func TestSMTPGreetingHonorsEvaluationDeadline(t *testing.T) {
 // subject and the body, and a line break in a group value from log data
 // cannot start a new header.
 func TestEmailNamesTheGroup(t *testing.T) {
-	sender := &EmailSender{from: "logchef@example.com"}
-	message := string(sender.buildMessage(AlertNotification{
+	notification := AlertNotification{
 		AlertName: "errors", Severity: models.AlertSeverityCritical, Status: models.AlertStatusTriggered,
 		Group: map[string]string{"service": "checkout\r\nBcc: victim@example.com"},
-	}, "oncall@example.com"))
-	headers, body, _ := strings.Cut(message, "\r\n\r\n")
-	if want := "Subject: [Logchef] errors [service=checkout  Bcc: victim@example.com] (CRITICAL) TRIGGERED"; !strings.Contains(headers, want) {
-		t.Errorf("headers = %q, want %q", headers, want)
 	}
-	if strings.Contains(headers, "\r\nBcc:") {
-		t.Errorf("a group value added a header: %q", headers)
+	subject := emailSubject(notification)
+	if want := "[Logchef] errors [service=checkout  Bcc: victim@example.com] (CRITICAL) TRIGGERED"; subject != want {
+		t.Errorf("subject = %q, want %q", subject, want)
 	}
-	if !strings.Contains(body, "Group: service=checkout") {
+	if body := (&EmailSender{}).buildBody(notification); !strings.Contains(body, "Group: service=checkout") {
 		t.Errorf("body = %q, want a Group line", body)
 	}
 }
