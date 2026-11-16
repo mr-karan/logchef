@@ -1799,5 +1799,13 @@
   "alerts.wholeResult": "Whole result",
   "alerts.groupsFiring": "{count} firing",
   "alerts.testGroupsTotal": "Groups: {count}",
-  "alerts.testGroupsShown": "showing the first {shown} of {total}"
+  "alerts.testGroupsShown": "showing the first {shown} of {total}",
+  "explore.chartView": "Chart",
+  "explore.chartNeedsOneGroupField": "A chart needs one group field",
+  "explore.chartNeedsOneValue": "A chart needs one value",
+  "explore.addToDashboard": "Add to dashboard",
+  "explore.addToDashboardDescription": "Choose a dashboard you can edit.",
+  "explore.chooseDashboard": "Choose a dashboard",
+  "explore.noEditableDashboards": "No dashboard you can edit. Create one on the Dashboards page.",
+  "ui.liveTailNeedsLogRows": "Live tail needs log rows. Remove the aggregation after the filter."
 }

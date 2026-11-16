@@ -112,7 +112,9 @@
                   ? t('ui.stopLiveTail')
                   : (canGoLive
                     ? t('ui.streamNewLogsAsTheyArrive')
-                    : t('ui.liveTailNeedsLogchefQLOrLogsQLForVictoriaLogs')) }}
+                    : exploreStore.liveTailNeedsLogRows
+                      ? t('ui.liveTailNeedsLogRows')
+                      : t('ui.liveTailNeedsLogchefQLOrLogsQLForVictoriaLogs')) }}
               </p>
             </TooltipContent>
           </Tooltip>

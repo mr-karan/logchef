@@ -54,6 +54,7 @@ import {
   layoutRowCount,
   columnTrackWidth,
   MAX_DASHBOARD_PANELS,
+  takePanelSeed,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
@@ -610,7 +611,23 @@ async function load() {
   const result = await store.loadDashboard(dashboardId.value);
   if (!result.success || !store.current) {
     notFound.value = true;
+    return;
   }
+  await addSeededPanel();
+}
+
+// A panel that the Explorer's "Add to dashboard" sent opens in the builder as a new panel.
+async function addSeededPanel() {
+  const seed = takePanelSeed();
+  if (!seed || !canEdit.value) return;
+  await store.enterEdit();
+  const id = store.isEditing ? store.createDraftShell() : null;
+  if (!id) return;
+  // An undefined key clears the field, so the shell's count-mode interval does not carry over.
+  store.updateDraftPanel(id, { ...seed, query: { interval: undefined, ...seed.query } });
+  pendingNewPanelId.value = id;
+  editingPanelId.value = id;
+  editorOpen.value = true;
 }
 
 watch(dashboardId, () => {

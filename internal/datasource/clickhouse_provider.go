@@ -372,7 +372,7 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 
 	opts := buildResult.QueryOptions(*req.QueryTimeout)
 	opts.MaxResponseBytes = req.MaxResponseBytes
-	opts.Warnings = queryWarningsForBuildResult(buildResult)
+	opts.Warnings = queryWarningsForBuildResult(buildResult, req.Aggregation != nil)
 	if req.Aggregation != nil {
 		opts.AggregationMaxMemoryBytes = req.AggregationMaxMemoryBytes
 		if opts.AggregationMaxMemoryBytes <= 0 {
@@ -382,9 +382,11 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 	return client, buildResult.SQL, opts, nil
 }
 
-func queryWarningsForBuildResult(result clickhouse.QueryBuildResult) []models.QueryWarning {
+// An aggregated result gets no LIMIT_APPLIED: the row probe proves a cut, and
+// stats.truncation reports it (RFC 0005, "Limits and failure modes").
+func queryWarningsForBuildResult(result clickhouse.QueryBuildResult, aggregated bool) []models.QueryWarning {
 	warnings := make([]models.QueryWarning, 0, 2)
-	if result.LimitAdded {
+	if result.LimitAdded && !aggregated {
 		warnings = append(warnings, models.QueryWarning{
 			Code:    "LIMIT_APPLIED",
 			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", result.AppliedLimit),

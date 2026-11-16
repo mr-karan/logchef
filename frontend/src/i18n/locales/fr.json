@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "Résultat entier",
   "alerts.groupsFiring": "{count} déclenchés",
   "alerts.testGroupsTotal": "Groupes : {count}",
-  "alerts.testGroupsShown": "affichage des {shown} premiers sur {total}"
+  "alerts.testGroupsShown": "affichage des {shown} premiers sur {total}",
+  "explore.chartView": "Graphique",
+  "explore.chartNeedsOneGroupField": "Un graphique nécessite un seul champ de groupe",
+  "explore.chartNeedsOneValue": "Un graphique nécessite une seule valeur",
+  "explore.addToDashboard": "Ajouter au tableau de bord",
+  "explore.addToDashboardDescription": "Choisissez un tableau de bord que vous pouvez modifier.",
+  "explore.chooseDashboard": "Choisir un tableau de bord",
+  "explore.noEditableDashboards": "Aucun tableau de bord modifiable. Créez-en un sur la page Tableaux de bord.",
+  "ui.liveTailNeedsLogRows": "Le suivi en direct nécessite des lignes de log. Supprimez l'agrégation après le filtre."
 }

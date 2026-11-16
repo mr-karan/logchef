@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "Risultato intero",
   "alerts.groupsFiring": "{count} in allerta",
   "alerts.testGroupsTotal": "Gruppi: {count}",
-  "alerts.testGroupsShown": "mostrati i primi {shown} di {total}"
+  "alerts.testGroupsShown": "mostrati i primi {shown} di {total}",
+  "explore.chartView": "Grafico",
+  "explore.chartNeedsOneGroupField": "Un grafico richiede un solo campo di gruppo",
+  "explore.chartNeedsOneValue": "Un grafico richiede un solo valore",
+  "explore.addToDashboard": "Aggiungi alla dashboard",
+  "explore.addToDashboardDescription": "Scegli una dashboard che puoi modificare.",
+  "explore.chooseDashboard": "Scegli una dashboard",
+  "explore.noEditableDashboards": "Nessuna dashboard modificabile. Creane una nella pagina Dashboard.",
+  "ui.liveTailNeedsLogRows": "Il live tail richiede righe di log. Rimuovi l'aggregazione dopo il filtro."
 }

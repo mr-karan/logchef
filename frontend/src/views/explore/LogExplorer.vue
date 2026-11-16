@@ -30,7 +30,7 @@ import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
 import { useQuery } from "@/composables/useQuery";
-import { supportsQueryLanguage, hasSourceCapability } from "@/lib/queryMetadata";
+import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
@@ -56,6 +56,7 @@ import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
 import WindowedSearchPanel from "./components/WindowedSearchPanel.vue";
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
+import AggregationResult from "./components/AggregationResult.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
 import AskChefDrawer from "@/components/ask-chef/AskChefDrawer.vue";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -290,6 +291,11 @@ const handleDrillDown = (data: { column: string; value: unknown; operator: Filte
     queryEditorRef.value?.focus(true);
   });
 };
+
+// An aggregated result shows its own view in place of the log rows.
+const aggregation = computed(() => runs.results?.aggregation ?? null);
+
+const handleAddGroupCondition = (field: string, value: unknown) => handleDrillDown({ column: field, value, operator: "=" });
 
 // Header filters edit the query like the cell menu, then rerun it.
 const columnFilters = computed(() => activeMode.value === "logchefql" ? filteredColumns(logchefQuery.value ?? "") : []);
@@ -1066,7 +1072,8 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 :logsCount="rows.length"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
                 :isExporting="isExporting"
-                :canExport="supportsExports"
+                :canExport="supportsExports && !aggregation"
+                :aggregated="!!aggregation"
                 :fastFilterFields="missingSortKeyFilters"
                 :canAddFastFilter="activeMode === 'logchefql'"
                 @add-fast-filter="addSortKeyFilter"
@@ -1104,6 +1111,24 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                   @stop="exploreStore.stopLiveTail()"
                   @resume="exploreStore.startLiveTail()"
                 />
+
+                <template v-else-if="aggregation && runs.shown?.results">
+                  <AggregationResult
+                    :aggregation="aggregation"
+                    :columns="runs.shown.results.columns"
+                    :rows="runs.shown.results.rows"
+                    :stats="runs.shown.results.stats"
+                    :query="runs.shown.query.text"
+                    :team-id="runs.shown.teamId"
+                    :source-id="runs.shown.source.id"
+                    :range="runs.shown.resolved"
+                    :alignment="getNativeQueryLanguageForSource(runs.shown.source) === 'logsql' ? 'fixed-offset' : 'calendar'"
+                    @add-condition="handleAddGroupCondition"
+                  />
+                  <div v-if="runs.showsLoading" class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
+                    <p class="text-muted-foreground animate-pulse">{{ t('ui.loadingResults') }}</p>
+                  </div>
+                </template>
 
                 <!-- Results Table -->
                 <template v-else-if="rows.length > 0 || isExecutingQuery || isInitialQueryPending">

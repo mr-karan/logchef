@@ -1053,5 +1053,13 @@
   "alerts.wholeResult": "전체 결과",
   "alerts.groupsFiring": "{count}개 발생 중",
   "alerts.testGroupsTotal": "그룹: {count}",
-  "alerts.testGroupsShown": "{total}개 중 처음 {shown}개 표시"
+  "alerts.testGroupsShown": "{total}개 중 처음 {shown}개 표시",
+  "explore.chartView": "차트",
+  "explore.chartNeedsOneGroupField": "차트에는 그룹 필드가 하나만 필요합니다",
+  "explore.chartNeedsOneValue": "차트에는 값이 하나만 필요합니다",
+  "explore.addToDashboard": "대시보드에 추가",
+  "explore.addToDashboardDescription": "편집할 수 있는 대시보드를 선택하세요.",
+  "explore.chooseDashboard": "대시보드 선택",
+  "explore.noEditableDashboards": "편집할 수 있는 대시보드가 없습니다. 대시보드 페이지에서 만드세요.",
+  "ui.liveTailNeedsLogRows": "라이브 테일에는 로그 행이 필요합니다. 필터 뒤의 집계를 제거하세요."
 }
