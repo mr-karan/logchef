@@ -397,7 +397,11 @@ onMounted(async () => {
                       class="h-2 w-2 rounded-full shrink-0"
                       :class="alert.last_state === 'firing' ? 'bg-red-500 animate-pulse' : 'bg-green-500'"
                     />
-                    <span class="text-sm">{{ t(alertStateLabels[alert.last_state]) }}</span>
+                    <span class="text-sm">
+                      {{ (alert.group_by?.length && alert.instance_counts?.firing)
+                        ? t('alerts.groupsFiring', { count: alert.instance_counts.firing })
+                        : t(alertStateLabels[alert.last_state]) }}
+                    </span>
                   </div>
                 </TableCell>
                 <!-- Last Triggered -->

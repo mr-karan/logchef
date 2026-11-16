@@ -544,7 +544,7 @@ func TestAskChefTurnFromAnAlertEntry(t *testing.T) {
 	env := newAskChefEnv(t, cfg, &echoChat{})
 	insert := func(alert models.AlertID) int64 {
 		value := 23.0
-		entry, err := env.db.InsertAlertHistory(context.Background(), alert, models.AlertStatusTriggered, &value, "fired", nil)
+		entry, err := env.db.InsertAlertHistory(context.Background(), alert, "", nil, models.AlertStatusTriggered, &value, "fired", nil)
 		if err != nil {
 			t.Fatalf("InsertAlertHistory: %v", err)
 		}

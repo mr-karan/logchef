@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestEmailSenderRetriesOnlyFailedRecipients(t *testing.T) {
@@ -150,5 +152,26 @@ func TestSMTPGreetingHonorsEvaluationDeadline(t *testing.T) {
 	<-done
 	if time.Since(started) > time.Second {
 		t.Error("SMTP greeting exceeded the evaluation deadline by more than one second")
+	}
+}
+
+// TestEmailNamesTheGroup: a grouped rule's email names its group in the
+// subject and the body, and a line break in a group value from log data
+// cannot start a new header.
+func TestEmailNamesTheGroup(t *testing.T) {
+	sender := &EmailSender{from: "logchef@example.com"}
+	message := string(sender.buildMessage(AlertNotification{
+		AlertName: "errors", Severity: models.AlertSeverityCritical, Status: models.AlertStatusTriggered,
+		Group: map[string]string{"service": "checkout\r\nBcc: victim@example.com"},
+	}, "oncall@example.com"))
+	headers, body, _ := strings.Cut(message, "\r\n\r\n")
+	if want := "Subject: [Logchef] errors [service=checkout  Bcc: victim@example.com] (CRITICAL) TRIGGERED"; !strings.Contains(headers, want) {
+		t.Errorf("headers = %q, want %q", headers, want)
+	}
+	if strings.Contains(headers, "\r\nBcc:") {
+		t.Errorf("a group value added a header: %q", headers)
+	}
+	if !strings.Contains(body, "Group: service=checkout") {
+		t.Errorf("body = %q, want a Group line", body)
 	}
 }

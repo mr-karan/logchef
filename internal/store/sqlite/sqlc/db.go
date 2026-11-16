@@ -69,6 +69,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countAdminUsersStmt, err = db.PrepareContext(ctx, countAdminUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAdminUsers: %w", err)
 	}
+	if q.countAlertInstancesByStateStmt, err = db.PrepareContext(ctx, countAlertInstancesByState); err != nil {
+		return nil, fmt.Errorf("error preparing query CountAlertInstancesByState: %w", err)
+	}
 	if q.countAuditEventsStmt, err = db.PrepareContext(ctx, countAuditEvents); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAuditEvents: %w", err)
 	}
@@ -137,6 +140,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteAlertStmt, err = db.PrepareContext(ctx, deleteAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlert: %w", err)
+	}
+	if q.deleteAlertInstanceStmt, err = db.PrepareContext(ctx, deleteAlertInstance); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAlertInstance: %w", err)
 	}
 	if q.deleteAlertInstancesStmt, err = db.PrepareContext(ctx, deleteAlertInstances); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAlertInstances: %w", err)
@@ -423,6 +429,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listOAuthGrantsForUserStmt, err = db.PrepareContext(ctx, listOAuthGrantsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListOAuthGrantsForUser: %w", err)
 	}
+	if q.listOpenAlertGroupHistoryIDsStmt, err = db.PrepareContext(ctx, listOpenAlertGroupHistoryIDs); err != nil {
+		return nil, fmt.Errorf("error preparing query ListOpenAlertGroupHistoryIDs: %w", err)
+	}
+	if q.listOpenAlertHistoryStmt, err = db.PrepareContext(ctx, listOpenAlertHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query ListOpenAlertHistory: %w", err)
+	}
 	if q.listQueryActivityStmt, err = db.PrepareContext(ctx, listQueryActivity); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueryActivity: %w", err)
 	}
@@ -540,6 +552,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.reapInterruptedExportJobsStmt, err = db.PrepareContext(ctx, reapInterruptedExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query ReapInterruptedExportJobs: %w", err)
 	}
+	if q.refreshAlertStateStmt, err = db.PrepareContext(ctx, refreshAlertState); err != nil {
+		return nil, fmt.Errorf("error preparing query RefreshAlertState: %w", err)
+	}
 	if q.releaseJobStmt, err = db.PrepareContext(ctx, releaseJob); err != nil {
 		return nil, fmt.Errorf("error preparing query ReleaseJob: %w", err)
 	}
@@ -566,6 +581,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.reportTickExistsStmt, err = db.PrepareContext(ctx, reportTickExists); err != nil {
 		return nil, fmt.Errorf("error preparing query ReportTickExists: %w", err)
+	}
+	if q.resolveAlertGroupHistoryStmt, err = db.PrepareContext(ctx, resolveAlertGroupHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query ResolveAlertGroupHistory: %w", err)
 	}
 	if q.resolveAlertHistoryForAlertStmt, err = db.PrepareContext(ctx, resolveAlertHistoryForAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query ResolveAlertHistoryForAlert: %w", err)
@@ -767,6 +785,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing countAdminUsersStmt: %w", cerr)
 		}
 	}
+	if q.countAlertInstancesByStateStmt != nil {
+		if cerr := q.countAlertInstancesByStateStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countAlertInstancesByStateStmt: %w", cerr)
+		}
+	}
 	if q.countAuditEventsStmt != nil {
 		if cerr := q.countAuditEventsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countAuditEventsStmt: %w", cerr)
@@ -880,6 +903,11 @@ func (q *Queries) Close() error {
 	if q.deleteAlertStmt != nil {
 		if cerr := q.deleteAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAlertStmt: %w", cerr)
+		}
+	}
+	if q.deleteAlertInstanceStmt != nil {
+		if cerr := q.deleteAlertInstanceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAlertInstanceStmt: %w", cerr)
 		}
 	}
 	if q.deleteAlertInstancesStmt != nil {
@@ -1357,6 +1385,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listOAuthGrantsForUserStmt: %w", cerr)
 		}
 	}
+	if q.listOpenAlertGroupHistoryIDsStmt != nil {
+		if cerr := q.listOpenAlertGroupHistoryIDsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listOpenAlertGroupHistoryIDsStmt: %w", cerr)
+		}
+	}
+	if q.listOpenAlertHistoryStmt != nil {
+		if cerr := q.listOpenAlertHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listOpenAlertHistoryStmt: %w", cerr)
+		}
+	}
 	if q.listQueryActivityStmt != nil {
 		if cerr := q.listQueryActivityStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listQueryActivityStmt: %w", cerr)
@@ -1552,6 +1590,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing reapInterruptedExportJobsStmt: %w", cerr)
 		}
 	}
+	if q.refreshAlertStateStmt != nil {
+		if cerr := q.refreshAlertStateStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing refreshAlertStateStmt: %w", cerr)
+		}
+	}
 	if q.releaseJobStmt != nil {
 		if cerr := q.releaseJobStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing releaseJobStmt: %w", cerr)
@@ -1595,6 +1638,11 @@ func (q *Queries) Close() error {
 	if q.reportTickExistsStmt != nil {
 		if cerr := q.reportTickExistsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing reportTickExistsStmt: %w", cerr)
+		}
+	}
+	if q.resolveAlertGroupHistoryStmt != nil {
+		if cerr := q.resolveAlertGroupHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing resolveAlertGroupHistoryStmt: %w", cerr)
 		}
 	}
 	if q.resolveAlertHistoryForAlertStmt != nil {
@@ -1851,6 +1899,7 @@ type Queries struct {
 	consumeOAuthAuthCodeStmt              *sql.Stmt
 	consumeOAuthRefreshTokenStmt          *sql.Stmt
 	countAdminUsersStmt                   *sql.Stmt
+	countAlertInstancesByStateStmt        *sql.Stmt
 	countAuditEventsStmt                  *sql.Stmt
 	countCollectionTeamAccessStmt         *sql.Stmt
 	countReportFailureStmt                *sql.Stmt
@@ -1874,6 +1923,7 @@ type Queries struct {
 	createUserStmt                        *sql.Stmt
 	deleteAPITokenStmt                    *sql.Stmt
 	deleteAlertStmt                       *sql.Stmt
+	deleteAlertInstanceStmt               *sql.Stmt
 	deleteAlertInstancesStmt              *sql.Stmt
 	deleteClaimedJobStmt                  *sql.Stmt
 	deleteCollectionStmt                  *sql.Stmt
@@ -1969,6 +2019,8 @@ type Queries struct {
 	listManagedSourcesStmt                *sql.Stmt
 	listManagedTeamsStmt                  *sql.Stmt
 	listOAuthGrantsForUserStmt            *sql.Stmt
+	listOpenAlertGroupHistoryIDsStmt      *sql.Stmt
+	listOpenAlertHistoryStmt              *sql.Stmt
 	listQueryActivityStmt                 *sql.Stmt
 	listQueryHistoryStmt                  *sql.Stmt
 	listReportRecipientsStmt              *sql.Stmt
@@ -2008,6 +2060,7 @@ type Queries struct {
 	pruneReportRunsStmt                   *sql.Stmt
 	queryVolumeByDayStmt                  *sql.Stmt
 	reapInterruptedExportJobsStmt         *sql.Stmt
+	refreshAlertStateStmt                 *sql.Stmt
 	releaseJobStmt                        *sql.Stmt
 	removeCollectionItemStmt              *sql.Stmt
 	removeCollectionMemberStmt            *sql.Stmt
@@ -2017,6 +2070,7 @@ type Queries struct {
 	removeTeamSourceStmt                  *sql.Stmt
 	repairDashboardSummaryStmt            *sql.Stmt
 	reportTickExistsStmt                  *sql.Stmt
+	resolveAlertGroupHistoryStmt          *sql.Stmt
 	resolveAlertHistoryForAlertStmt       *sql.Stmt
 	resumeReportStmt                      *sql.Stmt
 	revokeOAuthGrantStmt                  *sql.Stmt
@@ -2078,6 +2132,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		consumeOAuthAuthCodeStmt:              q.consumeOAuthAuthCodeStmt,
 		consumeOAuthRefreshTokenStmt:          q.consumeOAuthRefreshTokenStmt,
 		countAdminUsersStmt:                   q.countAdminUsersStmt,
+		countAlertInstancesByStateStmt:        q.countAlertInstancesByStateStmt,
 		countAuditEventsStmt:                  q.countAuditEventsStmt,
 		countCollectionTeamAccessStmt:         q.countCollectionTeamAccessStmt,
 		countReportFailureStmt:                q.countReportFailureStmt,
@@ -2101,6 +2156,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createUserStmt:                        q.createUserStmt,
 		deleteAPITokenStmt:                    q.deleteAPITokenStmt,
 		deleteAlertStmt:                       q.deleteAlertStmt,
+		deleteAlertInstanceStmt:               q.deleteAlertInstanceStmt,
 		deleteAlertInstancesStmt:              q.deleteAlertInstancesStmt,
 		deleteClaimedJobStmt:                  q.deleteClaimedJobStmt,
 		deleteCollectionStmt:                  q.deleteCollectionStmt,
@@ -2196,6 +2252,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listManagedSourcesStmt:                q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                  q.listManagedTeamsStmt,
 		listOAuthGrantsForUserStmt:            q.listOAuthGrantsForUserStmt,
+		listOpenAlertGroupHistoryIDsStmt:      q.listOpenAlertGroupHistoryIDsStmt,
+		listOpenAlertHistoryStmt:              q.listOpenAlertHistoryStmt,
 		listQueryActivityStmt:                 q.listQueryActivityStmt,
 		listQueryHistoryStmt:                  q.listQueryHistoryStmt,
 		listReportRecipientsStmt:              q.listReportRecipientsStmt,
@@ -2235,6 +2293,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneReportRunsStmt:                   q.pruneReportRunsStmt,
 		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,
 		reapInterruptedExportJobsStmt:         q.reapInterruptedExportJobsStmt,
+		refreshAlertStateStmt:                 q.refreshAlertStateStmt,
 		releaseJobStmt:                        q.releaseJobStmt,
 		removeCollectionItemStmt:              q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:            q.removeCollectionMemberStmt,
@@ -2244,6 +2303,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeTeamSourceStmt:                  q.removeTeamSourceStmt,
 		repairDashboardSummaryStmt:            q.repairDashboardSummaryStmt,
 		reportTickExistsStmt:                  q.reportTickExistsStmt,
+		resolveAlertGroupHistoryStmt:          q.resolveAlertGroupHistoryStmt,
 		resolveAlertHistoryForAlertStmt:       q.resolveAlertHistoryForAlertStmt,
 		resumeReportStmt:                      q.resumeReportStmt,
 		revokeOAuthGrantStmt:                  q.revokeOAuthGrantStmt,

@@ -3,6 +3,12 @@ import type { AlertEditorMode, QueryLanguage } from "@/lib/queryMetadata";
 
 export type AlertThresholdOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
 export type AlertSeverity = "info" | "warning" | "critical";
+
+export interface AlertInstanceCounts {
+  firing: number;
+  ok: number;
+}
+
 export interface Alert {
   id: number;
   source_id: number;
@@ -22,6 +28,8 @@ export interface Alert {
   generator_url?: string;
   recipient_user_ids: number[];
   webhook_urls: string[];
+  group_by?: string[] | null;
+  instance_counts?: AlertInstanceCounts;
   is_active: boolean;
   last_state: "firing" | "resolved";
   last_evaluated_at?: string | null;
@@ -31,9 +39,22 @@ export interface Alert {
   updated_at: string;
 }
 
+export interface AlertInstance {
+  alert_id: number;
+  group_key: string;
+  group: Record<string, string>;
+  state: "ok" | "firing";
+  value?: number | null;
+  state_since: string;
+  last_seen_at?: string | null;
+  history_id?: number | null;
+}
+
 export interface AlertHistoryEntry {
   id: number;
   alert_id: number;
+  group_key: string;
+  group?: Record<string, string>;
   status: "triggered" | "resolved" | "error";
   triggered_at: string;
   resolved_at?: string | null;
@@ -61,6 +82,7 @@ export interface CreateAlertRequest {
   generator_url?: string;
   recipient_user_ids?: number[];
   webhook_urls?: string[];
+  group_by?: string[];
   is_active: boolean;
 }
 
@@ -81,11 +103,14 @@ export interface UpdateAlertRequest {
   generator_url?: string;
   recipient_user_ids?: number[];
   webhook_urls?: string[];
+  group_by?: string[];
   is_active?: boolean;
 }
 
 export interface ResolveAlertRequest {
   message?: string;
+  /** Resolves one group; omitted resolves every group. */
+  group_key?: string;
 }
 
 export interface TestAlertQueryRequest {
@@ -97,6 +122,13 @@ export interface TestAlertQueryRequest {
   lookback_seconds?: number;
   threshold_operator: AlertThresholdOperator;
   threshold_value: number;
+  group_by?: string[];
+}
+
+export interface AlertSample {
+  group: Record<string, string>;
+  value: number;
+  threshold_met: boolean;
 }
 
 export interface TestAlertQueryResponse {
@@ -105,6 +137,9 @@ export interface TestAlertQueryResponse {
   execution_time_ms: number;
   rows_returned: number;
   warnings: string[];
+  /** Grouped rules only: at most 20 samples, out of groups_total. */
+  samples: AlertSample[];
+  groups_total: number;
 }
 
 export const alertsApi = {
@@ -129,6 +164,8 @@ export const alertsApi = {
     const search = limit ? `?limit=${encodeURIComponent(limit)}` : "";
     return apiClient.get<AlertHistoryEntry[]>(`/alerts/${alertId}/history${search}`, options);
   },
+  instances: (alertId: number, options?: RequestOptions) =>
+    apiClient.get<AlertInstance[]>(`/alerts/${alertId}/instances`, options),
   testQuery: (payload: TestAlertQueryRequest) =>
     apiClient.post<TestAlertQueryResponse>("/alerts/test", payload),
 };

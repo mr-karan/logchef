@@ -6,28 +6,51 @@ import (
 	"maps"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func (m *Manager) buildAlertMetadata(ctx context.Context, alert *models.Alert, status models.AlertStatus, value float64) (labels, annotations map[string]string) {
+// messageContext holds what every message of one evaluation shares, so a
+// grouped rule reads the source, the recipients and the settings once.
+type messageContext struct {
+	alert             *models.Alert
+	sourceName        string
+	recipientEmails   []string
+	missingRecipients []models.UserID
+	recipientTargets  map[string]DeliveryTargetID
+	generatorURL      string
+}
+
+func (m *Manager) newMessageContext(ctx context.Context, alert *models.Alert) *messageContext {
+	mc := &messageContext{alert: alert}
+	if source, err := m.db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
+		mc.sourceName = source.Name
+	} else {
+		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
+	}
+	mc.recipientEmails, mc.missingRecipients, mc.recipientTargets = m.resolveRecipientEmails(ctx, alert)
+	mc.generatorURL = m.generatorURL(ctx, alert)
+	return mc
+}
+
+// metadata returns the labels and annotations of one group's message. The
+// group values join the rule's labels; the built-in labels win a name clash.
+func (mc *messageContext) metadata(status models.AlertStatus, value float64, group map[string]string) (labels, annotations map[string]string) {
+	alert := mc.alert
 	labels = copyStringMap(alert.Labels)
 	if labels == nil {
-		labels = make(map[string]string, 8)
+		labels = make(map[string]string, 8+len(group))
 	}
+	maps.Copy(labels, group)
 	labels["alertname"] = alert.Name
 	labels["alert_id"] = strconv.FormatInt(int64(alert.ID), 10)
 	labels["severity"] = string(alert.Severity)
-
-	if source, err := m.db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
-		labels["source"] = source.Name
-		labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
-	} else {
-		// Fallback to just ID if fetch fails
-		labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
-		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
+	if mc.sourceName != "" {
+		labels["source"] = mc.sourceName
 	}
+	labels["source_id"] = strconv.FormatInt(int64(alert.SourceID), 10)
 
 	annotations = copyStringMap(alert.Annotations)
 	if annotations == nil {
@@ -49,22 +72,16 @@ func (m *Manager) buildAlertMetadata(ctx context.Context, alert *models.Alert, s
 	if alert.LookbackSeconds > 0 {
 		annotations["lookback_seconds"] = strconv.Itoa(alert.LookbackSeconds)
 	}
+	// A group column may share a name with a built-in label, so the group
+	// also travels whole in its own annotation.
+	if len(group) > 0 {
+		annotations["group"] = formatGroup(group)
+	}
 	return labels, annotations
 }
 
-func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) error {
-	if m.sender == nil || history == nil {
-		return nil
-	}
-
-	notification := m.buildNotification(ctx, alert, history, labels, annotations, status, value)
-	return m.sender.Send(ctx, notification).Err()
-}
-
-func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
-	recipientEmails, missingRecipients, recipientTargets := m.resolveRecipientEmails(ctx, alert)
-	sourceName := labels["source"]
-
+func (mc *messageContext) notification(history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
+	alert := mc.alert
 	return AlertNotification{
 		AlertID:                 alert.ID,
 		AlertName:               alert.Name,
@@ -72,7 +89,7 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Status:                  status,
 		Severity:                alert.Severity,
 		SourceID:                alert.SourceID,
-		SourceName:              sourceName,
+		SourceName:              mc.sourceName,
 		Value:                   value,
 		ThresholdOp:             alert.ThresholdOperator,
 		ThresholdValue:          alert.ThresholdValue,
@@ -80,18 +97,29 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		LookbackSecs:            alert.LookbackSeconds,
 		Query:                   strings.TrimSpace(alert.Query),
 		ConditionJSON:           strings.TrimSpace(alert.ConditionJSON),
+		Group:                   copyStringMap(history.Group),
 		Labels:                  copyStringMap(labels),
 		Annotations:             copyStringMap(annotations),
 		TriggeredAt:             history.TriggeredAt,
 		ResolvedAt:              history.ResolvedAt,
-		GeneratorURL:            m.generatorURL(ctx, alert),
+		GeneratorURL:            mc.generatorURL,
 		Message:                 history.Message,
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
-		RecipientEmails:         recipientEmails,
-		recipientTargets:        recipientTargets,
-		MissingRecipientUserIDs: missingRecipients,
+		RecipientEmails:         append([]string(nil), mc.recipientEmails...),
+		recipientTargets:        mc.recipientTargets,
+		MissingRecipientUserIDs: append([]models.UserID(nil), mc.missingRecipients...),
 		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
+}
+
+// sendResolved sends the resolved message of one closed episode.
+func (m *Manager) sendResolved(ctx context.Context, mc *messageContext, entry *models.AlertHistoryEntry, value float64, extra map[string]string) error {
+	labels, annotations := mc.metadata(models.AlertStatusResolved, value, entry.Group)
+	if entry.ResolvedAt != nil {
+		annotations["resolved_at"] = entry.ResolvedAt.Format(time.RFC3339Nano)
+	}
+	maps.Copy(annotations, extra)
+	return m.sender.Send(ctx, mc.notification(entry, labels, annotations, models.AlertStatusResolved, value)).Err()
 }
 
 func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, targets map[string]DeliveryTargetID) {

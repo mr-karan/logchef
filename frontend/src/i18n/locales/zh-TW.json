@@ -1042,5 +1042,16 @@
   "panelStyle.none": "無",
   "panelStyle.minutes": "分鐘",
   "panelStyle.seconds": "秒",
-  "panelStyle.millis": "毫秒"
+  "panelStyle.millis": "毫秒",
+  "alerts.groupBy": "分組依據",
+  "alerts.groupByNeedsNativeQuery": "分組需要原生查詢。",
+  "alerts.groups": "分組",
+  "alerts.group": "分組",
+  "alerts.since": "起始",
+  "alerts.stateOk": "正常",
+  "alerts.noGroupFiring": "沒有正在觸發的分組。",
+  "alerts.wholeResult": "整個結果",
+  "alerts.groupsFiring": "{count} 個觸發中",
+  "alerts.testGroupsTotal": "分組：{count}",
+  "alerts.testGroupsShown": "顯示 {total} 個中的前 {shown} 個"
 }

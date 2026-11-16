@@ -5,7 +5,7 @@ import AlertDeliveryStatus from "../AlertDeliveryStatus.vue";
 import type { AlertHistoryEntry } from "@/api/alerts";
 
 function historyEntry(payload: Record<string, unknown>): AlertHistoryEntry {
-  return { id: 1, alert_id: 1, status: "triggered", triggered_at: new Date().toISOString(), created_at: new Date().toISOString(), payload };
+  return { id: 1, alert_id: 1, group_key: "", status: "triggered", triggered_at: new Date().toISOString(), created_at: new Date().toISOString(), payload };
 }
 
 function render(entry: AlertHistoryEntry, inspect?: (element: HTMLDivElement) => void): string {

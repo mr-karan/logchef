@@ -23,12 +23,14 @@ type AlertNotification struct {
 	LookbackSecs   int
 	Query          string
 	ConditionJSON  string
-	Labels         map[string]string
-	Annotations    map[string]string
-	TriggeredAt    time.Time
-	ResolvedAt     *time.Time
-	GeneratorURL   string
-	Message        string
+	// Group holds the group values of a grouped rule's message, nil otherwise.
+	Group        map[string]string
+	Labels       map[string]string
+	Annotations  map[string]string
+	TriggeredAt  time.Time
+	ResolvedAt   *time.Time
+	GeneratorURL string
+	Message      string
 
 	RecipientUserIDs        []models.UserID
 	RecipientEmails         []string

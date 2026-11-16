@@ -129,16 +129,40 @@ type Alert struct {
 	RecipientUserIDs  []UserID               `json:"recipient_user_ids,omitempty"`
 	WebhookURLs       []string               `json:"webhook_urls,omitempty"`
 	GeneratorURL      string                 `json:"generator_url,omitempty"`
-	IsActive          bool                   `json:"is_active"`
-	LastState         AlertState             `json:"last_state"`
-	LastEvaluatedAt   *time.Time             `json:"last_evaluated_at,omitempty"`
-	LastTriggeredAt   *time.Time             `json:"last_triggered_at,omitempty"`
-	CreatedBy         *UserID                `json:"created_by,omitempty"`
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
+	// GroupBy names the result columns that split the rule into one state per
+	// group. Empty means ungrouped.
+	GroupBy         []string   `json:"group_by"`
+	IsActive        bool       `json:"is_active"`
+	LastState       AlertState `json:"last_state"`
+	LastEvaluatedAt *time.Time `json:"last_evaluated_at,omitempty"`
+	LastTriggeredAt *time.Time `json:"last_triggered_at,omitempty"`
+	CreatedBy       *UserID    `json:"created_by,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	// InstanceCounts is filled by the list and get routes.
+	InstanceCounts *AlertInstanceCounts `json:"instance_counts,omitempty"`
 	// EvalSeq is read with the rest of the rule. An evaluation commits only
 	// while the stored value still equals it.
 	EvalSeq int64 `json:"-"`
+}
+
+// MaxAlertGroupBy bounds the group columns of one rule.
+const MaxAlertGroupBy = 4
+
+// AlertInstanceCounts summarises a rule's instances by state.
+type AlertInstanceCounts struct {
+	Firing int `json:"firing"`
+	OK     int `json:"ok"`
+}
+
+// Add counts n instances in state.
+func (c *AlertInstanceCounts) Add(state AlertInstanceState, n int) {
+	switch state {
+	case AlertInstanceStateFiring:
+		c.Firing += n
+	case AlertInstanceStateOK:
+		c.OK += n
+	}
 }
 
 // AlertInstanceState is the state of one group of a rule.
@@ -167,15 +191,19 @@ type AlertInstance struct {
 
 // AlertHistoryEntry captures individual trigger or resolution events for an alert.
 type AlertHistoryEntry struct {
-	ID          int64          `json:"id"`
-	AlertID     AlertID        `json:"alert_id"`
-	Status      AlertStatus    `json:"status"`
-	TriggeredAt time.Time      `json:"triggered_at"`
-	ResolvedAt  *time.Time     `json:"resolved_at,omitempty"`
-	Value       *float64       `json:"value,omitempty"`
-	Message     string         `json:"message,omitempty"`
-	Payload     map[string]any `json:"payload,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID      int64   `json:"id"`
+	AlertID AlertID `json:"alert_id"`
+	// GroupKey and Group name the group of the episode. Both are empty for an
+	// ungrouped rule and for evaluation errors.
+	GroupKey    string            `json:"group_key"`
+	Group       map[string]string `json:"group,omitempty"`
+	Status      AlertStatus       `json:"status"`
+	TriggeredAt time.Time         `json:"triggered_at"`
+	ResolvedAt  *time.Time        `json:"resolved_at,omitempty"`
+	Value       *float64          `json:"value,omitempty"`
+	Message     string            `json:"message,omitempty"`
+	Payload     map[string]any    `json:"payload,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
 }
 
 // CreateAlertRequest defines the payload required to create a new alert rule.
@@ -197,6 +225,7 @@ type CreateAlertRequest struct {
 	RecipientUserIDs  []UserID               `json:"recipient_user_ids"`
 	WebhookURLs       []string               `json:"webhook_urls"`
 	GeneratorURL      string                 `json:"generator_url"`
+	GroupBy           []string               `json:"group_by"`
 	IsActive          bool                   `json:"is_active"`
 }
 
@@ -218,12 +247,15 @@ type UpdateAlertRequest struct {
 	RecipientUserIDs  *[]UserID               `json:"recipient_user_ids"`
 	WebhookURLs       *[]string               `json:"webhook_urls"`
 	GeneratorURL      *string                 `json:"generator_url"`
+	GroupBy           *[]string               `json:"group_by"`
 	IsActive          *bool                   `json:"is_active"`
 }
 
 // ResolveAlertRequest allows callers to provide context when manually resolving an alert.
 type ResolveAlertRequest struct {
 	Message string `json:"message"`
+	// GroupKey resolves one group. Nil resolves every group of the rule.
+	GroupKey *string `json:"group_key"`
 }
 
 // TestAlertQueryRequest allows testing an alert query before saving.
@@ -235,15 +267,30 @@ type TestAlertQueryRequest struct {
 	LookbackSeconds   int                    `json:"lookback_seconds"`
 	ThresholdOperator AlertThresholdOperator `json:"threshold_operator"`
 	ThresholdValue    float64                `json:"threshold_value"`
+	GroupBy           []string               `json:"group_by"`
+}
+
+// MaxTestAlertSamples bounds the samples a test response lists.
+const MaxTestAlertSamples = 20
+
+// AlertSample is the value one group read in a test evaluation.
+type AlertSample struct {
+	Group        map[string]string `json:"group"`
+	Value        float64           `json:"value"`
+	ThresholdMet bool              `json:"threshold_met"`
 }
 
 // TestAlertQueryResponse returns the result of a test query execution with performance metrics.
+// For a grouped rule, Value is the first sample's and ThresholdMet reports
+// that at least one group meets the threshold.
 type TestAlertQueryResponse struct {
-	Value           float64  `json:"value"`
-	ThresholdMet    bool     `json:"threshold_met"`
-	ExecutionTimeMs int64    `json:"execution_time_ms"`
-	RowsReturned    int      `json:"rows_returned"`
-	Warnings        []string `json:"warnings"`
+	Value           float64       `json:"value"`
+	ThresholdMet    bool          `json:"threshold_met"`
+	ExecutionTimeMs int64         `json:"execution_time_ms"`
+	RowsReturned    int           `json:"rows_returned"`
+	Warnings        []string      `json:"warnings"`
+	Samples         []AlertSample `json:"samples"`
+	GroupsTotal     int           `json:"groups_total"`
 }
 
 // DefaultAlertHistoryLimit controls the number of history entries returned when unspecified.

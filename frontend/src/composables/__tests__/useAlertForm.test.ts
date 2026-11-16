@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from '@/i18n'
-import { useAlertForm, type UseAlertFormProps } from '../useAlertForm'
+import { parseGroupBy, useAlertForm, type UseAlertFormProps } from '../useAlertForm'
 import { controlledApi } from '@/test/controlledApi'
 
 function translation(sql: string) {
@@ -90,5 +90,29 @@ describe('alert condition translation ownership', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(mounted.form.generatedQuery.value).toBe('')
     if (change === 'native') expect(mounted.form.form.query).toBe('SELECT 42')
+  })
+})
+
+describe('group by field', () => {
+  it('splits column names and drops blanks', () => {
+    expect(parseGroupBy(' service, ,region ,')).toEqual(['service', 'region'])
+    expect(parseGroupBy('')).toEqual([])
+  })
+
+  it('sends the parsed group_by with a native test query', async () => {
+    const network = controlledApi(config => config.url === '/alerts/test')
+    const mounted = mountForm()
+    try {
+      mounted.form.form.editor_mode = 'native'
+      mounted.form.form.query = 'SELECT service, count() AS value FROM logs GROUP BY service'
+      mounted.form.form.group_by = 'service'
+      void mounted.form.handleTestQuery()
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+      expect(JSON.parse(String(network.requests[0].config.data)).group_by).toEqual(['service'])
+      network.requests[0].succeed({ value: 0, threshold_met: false, execution_time_ms: 1, rows_returned: 0, warnings: [], samples: [], groups_total: 0 })
+    } finally {
+      mounted.unmount()
+      network.restore()
+    }
   })
 })

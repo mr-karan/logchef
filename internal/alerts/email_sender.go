@@ -127,7 +127,12 @@ func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) 
 }
 
 func (s *EmailSender) buildMessage(notification AlertNotification, recipient string) []byte {
-	subject := fmt.Sprintf("[Logchef] %s (%s) %s", notification.AlertName, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
+	name := notification.AlertName
+	if len(notification.Group) > 0 {
+		// Group values come from log data; keep them on one header line.
+		name += " [" + strings.Map(dropLineBreaks, formatGroup(notification.Group)) + "]"
+	}
+	subject := fmt.Sprintf("[Logchef] %s (%s) %s", name, strings.ToUpper(string(notification.Severity)), strings.ToUpper(string(notification.Status)))
 	body := s.buildBody(notification)
 	headers := []string{
 		fmt.Sprintf("From: %s", s.from),
@@ -149,6 +154,9 @@ func (s *EmailSender) buildBody(notification AlertNotification) string {
 		fmt.Sprintf("Alert: %s", notification.AlertName),
 		fmt.Sprintf("Status: %s", status),
 		fmt.Sprintf("Severity: %s", severity),
+	}
+	if len(notification.Group) > 0 {
+		lines = append(lines, fmt.Sprintf("Group: %s", formatGroup(notification.Group)))
 	}
 	if notification.SourceName != "" {
 		lines = append(lines, fmt.Sprintf("Source: %s", notification.SourceName))
@@ -260,6 +268,13 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 		}
 	}
 	return client, nil
+}
+
+func dropLineBreaks(r rune) rune {
+	if r == '\r' || r == '\n' {
+		return ' '
+	}
+	return r
 }
 
 func uniqueEmails(emails []string) []string {

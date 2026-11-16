@@ -225,8 +225,12 @@ type AlertStore interface {
 	MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error
 	TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error
 	MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error
-	InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error)
+	// InsertAlertHistory records an entry for one group; groupKey is "" and
+	// group nil for an ungrouped rule and for evaluation errors.
+	InsertAlertHistory(ctx context.Context, alertID models.AlertID, groupKey string, group map[string]string, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error)
+	// ListOpenAlertHistory returns every open episode of the alert, newest first.
+	ListOpenAlertHistory(ctx context.Context, alertID models.AlertID) ([]*models.AlertHistoryEntry, error)
 	// GetAlertHistoryEntry returns models.ErrNotFound when the alert has no
 	// entry with that ID.
 	GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error)
@@ -235,6 +239,11 @@ type AlertStore interface {
 	// that owns historyID, deletes the alert's instances and advances its
 	// eval_seq, so an evaluation that read the old state commits nothing.
 	ResolveAlertHistory(ctx context.Context, historyID int64, message string) error
+	// ResolveAlertGroup resolves the open episode of one group, deletes the
+	// group's instance, advances eval_seq and sets last_state from the
+	// instances that remain. It returns models.ErrNotFound when the group has
+	// no open episode.
+	ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string) error
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)
 	// PruneAlertHistory keeps every open episode and the newest keep closed entries.
@@ -244,6 +253,9 @@ type AlertStore interface {
 	// advanced it first. UpdateAlert and ResolveAlertHistory advance it too.
 	AdvanceAlertEvalSeq(ctx context.Context, alertID models.AlertID, seq int64) error
 	ListAlertInstances(ctx context.Context, alertID models.AlertID) ([]*models.AlertInstance, error)
+	// CountAlertInstances returns the instance counts of each given alert
+	// that has instances.
+	CountAlertInstances(ctx context.Context, alertIDs []models.AlertID) (map[models.AlertID]models.AlertInstanceCounts, error)
 	UpsertAlertInstance(ctx context.Context, instance *models.AlertInstance) error
 	// MarkAlertInstanceNotified sets notified on the instance whose open
 	// episode is historyID, and returns models.ErrNotFound when there is none.

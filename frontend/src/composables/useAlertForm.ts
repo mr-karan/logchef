@@ -36,6 +36,8 @@ export interface AlertFormState {
   condition_json: string; // LogChefQL condition string
   aggregate_function: "count" | "sum" | "avg" | "min" | "max";
   aggregate_field: string;
+  /** Comma-separated result column names; native mode only. */
+  group_by: string;
   lookback_seconds: number;
   threshold_operator: Alert["threshold_operator"];
   threshold_value: number;
@@ -46,6 +48,11 @@ export interface AlertFormState {
   annotations: Array<{ id: number; key: string; value: string }>;
   recipient_user_ids: number[];
   webhook_urls: string[];
+}
+
+/** Splits the Group by field into column names. */
+export function parseGroupBy(text: string): string[] {
+  return text.split(",").map((name) => name.trim()).filter(Boolean);
 }
 
 export type QueryTemplate = {
@@ -143,6 +150,7 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     condition_json: "",
     aggregate_function: "count",
     aggregate_field: "",
+    group_by: "",
     lookback_seconds: 300,
     threshold_operator: "gt",
     threshold_value: 1,
@@ -543,6 +551,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
       form.condition_json = "";
       form.aggregate_function = "count";
       form.aggregate_field = "";
+      form.group_by = "";
       form.lookback_seconds = 300;
       form.threshold_operator = "gt";
       form.threshold_value = 1;
@@ -575,6 +584,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
         form.aggregate_field = aggMatch[2].trim();
       }
     }
+    form.group_by = (alert.group_by ?? []).join(", ");
     form.lookback_seconds = alert.lookback_seconds;
     form.threshold_operator = alert.threshold_operator;
     form.threshold_value = alert.threshold_value;
@@ -593,6 +603,9 @@ WHERE \`${tsField}\` >= ${lookback}`,
     form.recipient_user_ids = extendedAlert.recipient_user_ids ? [...extendedAlert.recipient_user_ids] : [];
     form.webhook_urls = extendedAlert.webhook_urls ? [...extendedAlert.webhook_urls] : [];
   }
+
+  // A LogchefQL condition is evaluated ungrouped until the server compiles it.
+  const groupBy = computed(() => (form.editor_mode === "native" ? parseGroupBy(form.group_by) : []));
 
   async function handleTestQuery() {
     if (!props.teamId || !props.sourceId || !form.query.trim()) {
@@ -613,6 +626,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
         lookback_seconds: form.lookback_seconds,
         threshold_operator: form.threshold_operator,
         threshold_value: form.threshold_value,
+        group_by: groupBy.value,
       });
       testQueryResult.value = result.data;
     } catch (error: any) {
@@ -660,7 +674,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
   });
 
   watch(
-    () => [form.query, form.threshold_operator, form.threshold_value],
+    () => [form.query, form.threshold_operator, form.threshold_value, form.group_by],
     () => {
       testQueryResult.value = null;
       testQueryError.value = null;
@@ -701,6 +715,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
       annotations: annotationsRecord,
       recipient_user_ids: form.recipient_user_ids,
       webhook_urls: form.webhook_urls,
+      group_by: groupBy.value,
     };
 
     if (props.mode === "create") {

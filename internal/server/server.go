@@ -529,6 +529,7 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Put("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateAlert).Name(string(audit.AlertUpdate))
 	alertRoutes.Delete("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteAlert).Name(string(audit.AlertDelete))
 	alertRoutes.Get("/:alertID/history", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertHistory)
+	alertRoutes.Get("/:alertID/instances", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertInstances)
 	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert).Name(string(audit.AlertResolve))
 
 	// Dashboards (saved grids of visualization panels). Visibility: any

@@ -192,45 +192,71 @@ func (noopSender) Send(_ context.Context, _ AlertNotification) DeliveryResults {
 	return nil
 }
 
-func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, message string) error {
+// ManualResolve closes the open episode of one group, or of every group when
+// groupKey is nil, and sends one resolved notification per closed group. It
+// returns models.ErrNotFound when nothing is open.
+func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, groupKey *string, message string) error {
 	alert, err := m.db.GetAlert(ctx, alertID)
 	if err != nil {
 		return fmt.Errorf("failed to get alert: %w", err)
 	}
-
-	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alertID)
+	// Close exactly the groups that were read, in one transaction, so every
+	// closed group gets its resolved notification. A group that opens after
+	// the read stays open.
+	var entries []*models.AlertHistoryEntry
+	err = m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		open, err := tx.ListOpenAlertHistory(ctx, alertID)
+		if err != nil {
+			return err
+		}
+		entries = newestPerGroup(open, groupKey)
+		if len(entries) == 0 {
+			return models.ErrNotFound
+		}
+		for _, entry := range entries {
+			if err := tx.ResolveAlertGroup(ctx, alertID, entry.GroupKey, message); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to find unresolved alert history: %w", err)
-	}
-
-	// Update the history entry in the database
-	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
 
+	mc := m.newMessageContext(ctx, alert)
 	now := time.Now().UTC()
-	entry.Message = message
-	entry.ResolvedAt = &now
-	entry.Status = models.AlertStatusResolved
-
-	// Get the current value if available, otherwise use 0
-	value := float64(0)
-	if entry.Value != nil {
-		value = *entry.Value
+	for _, entry := range entries {
+		entry.Message = message
+		entry.ResolvedAt = &now
+		entry.Status = models.AlertStatusResolved
+		value := float64(0)
+		if entry.Value != nil {
+			value = *entry.Value
+		}
+		if sendErr := m.sendResolved(ctx, mc, entry, value, map[string]string{"resolved_by": "manual"}); sendErr != nil {
+			m.log.Warn("failed to send manual resolution notifications", "alert_id", alertID, "group_key", entry.GroupKey, "error", sendErr)
+		} else {
+			m.log.Debug("manual resolution notifications sent", "alert_id", alertID, "group_key", entry.GroupKey)
+		}
 	}
-
-	labels, annotations := m.buildAlertMetadata(ctx, alert, models.AlertStatusResolved, value)
-	if annotations == nil {
-		annotations = make(map[string]string, 2)
-	}
-	annotations["resolved_at"] = now.Format(time.RFC3339Nano)
-	annotations["resolved_by"] = "manual"
-
-	if sendErr := m.sendNotification(ctx, alert, entry, labels, annotations, models.AlertStatusResolved, value); sendErr != nil {
-		m.log.Warn("failed to send manual resolution notifications", "alert_id", alertID, "error", sendErr)
-	} else {
-		m.log.Debug("manual resolution notifications sent", "alert_id", alertID)
-	}
-
 	return nil
+}
+
+// newestPerGroup keeps the newest open row of each group, in the order of
+// open (newest first), and only the given group when groupKey is set.
+func newestPerGroup(open []*models.AlertHistoryEntry, groupKey *string) []*models.AlertHistoryEntry {
+	seen := make(map[string]struct{}, len(open))
+	entries := make([]*models.AlertHistoryEntry, 0, len(open))
+	for _, entry := range open {
+		if groupKey != nil && entry.GroupKey != *groupKey {
+			continue
+		}
+		if _, ok := seen[entry.GroupKey]; ok {
+			continue
+		}
+		seen[entry.GroupKey] = struct{}{}
+		entries = append(entries, entry)
+	}
+	return entries
 }

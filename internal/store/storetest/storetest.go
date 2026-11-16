@@ -45,6 +45,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
 	t.Run("AlertInstances", func(t *testing.T) { testAlertInstances(t, ctx, s) })
+	t.Run("AlertGroups", func(t *testing.T) { testAlertGroups(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
 	t.Run("Provisioning", func(t *testing.T) { testProvisioning(t, ctx, s) })
@@ -924,7 +925,7 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 
 	// History round-trip.
 	val := 12.0
-	if _, err := s.InsertAlertHistory(ctx, a.ID, models.AlertStatusTriggered, &val, "fired", map[string]any{"k": "v"}); err != nil {
+	if _, err := s.InsertAlertHistory(ctx, a.ID, "", nil, models.AlertStatusTriggered, &val, "fired", map[string]any{"k": "v"}); err != nil {
 		t.Fatalf("InsertAlertHistory: %v", err)
 	}
 	hist, err := s.ListAlertHistory(ctx, a.ID, 10)
@@ -1123,13 +1124,13 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	alertID := alert.ID
 	var legacyIDs []int64
 	for range 3 {
-		legacy, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		legacy, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "legacy firing", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		legacyIDs = append(legacyIDs, legacy.ID)
 	}
-	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+	entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{
 		"delivery_attempts": 3, "delivery_failed": true,
 	})
 	if err != nil {
@@ -1137,7 +1138,7 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	}
 	const keep = 2
 	for range keep + 1 {
-		if _, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusError, nil, "evaluation failed", nil); err != nil {
+		if _, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusError, nil, "evaluation failed", nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
@@ -1177,7 +1178,7 @@ func testOpenEpisodePruning(t *testing.T, ctx context.Context, s store.Store, al
 	t.Helper()
 	var ids []int64
 	for range 3 {
-		entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "legacy firing", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1200,7 +1201,7 @@ func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, al
 	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
 		t.Fatal(err)
 	}
-	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+	entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
 	if err != nil {
 		t.Fatal(err)
 	}

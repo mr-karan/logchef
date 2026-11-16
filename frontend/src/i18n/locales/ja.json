@@ -1042,5 +1042,16 @@
   "panelStyle.none": "なし",
   "panelStyle.minutes": "分",
   "panelStyle.seconds": "秒",
-  "panelStyle.millis": "ミリ秒"
+  "panelStyle.millis": "ミリ秒",
+  "alerts.groupBy": "グループ化",
+  "alerts.groupByNeedsNativeQuery": "グループ化にはネイティブクエリが必要です。",
+  "alerts.groups": "グループ",
+  "alerts.group": "グループ",
+  "alerts.since": "開始",
+  "alerts.stateOk": "OK",
+  "alerts.noGroupFiring": "発火中のグループはありません。",
+  "alerts.wholeResult": "結果全体",
+  "alerts.groupsFiring": "{count} 件発火中",
+  "alerts.testGroupsTotal": "グループ: {count}",
+  "alerts.testGroupsShown": "{total} 件中最初の {shown} 件を表示"
 }
