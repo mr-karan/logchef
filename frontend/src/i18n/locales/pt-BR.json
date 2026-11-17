@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "Consulta {language}",
   "alerts.generatedQuery": "{language} gerado",
   "alerts.logsQLTemplateHint": "Escolha um modelo LogsQL. A janela de análise é aplicada automaticamente.",
+  "alerts.logQLTemplateHint": "Escreva uma consulta de métrica LogQL. O intervalo dela, como [5m], decide quais logs são contados.",
+  "alerts.logQLLookbackMismatch": "A consulta não tem um intervalo de {range}. O próprio intervalo dela decide a janela, não o período de retrospectiva.",
   "alerts.sqlTemplateHint": "Escolha um modelo para preencher a tabela, o campo de data e a janela de análise.",
   "alerts.missingContext": "Equipe ou fonte indisponível",
   "alerts.invalidCondition": "Condição inválida",

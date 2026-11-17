@@ -5,9 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -113,14 +117,13 @@ func TestInspectSource(t *testing.T) {
 	}
 }
 
-// Methods that later units of RFC 0011 own fail with a validation error.
-func TestLaterUnitsAreValidationErrors(t *testing.T) {
+// Field value requests without a field or a limit fail with a validation error.
+func TestEmptyFieldValueRequestsAreValidationErrors(t *testing.T) {
 	p := testProvider()
 	source := testSource(t, models.LokiConnectionInfo{BaseURL: "http://loki.test"})
 	_, valuesErr := p.GetFieldValues(t.Context(), source, datasource.FieldValuesRequest{})
 	_, allValuesErr := p.GetAllFieldValues(t.Context(), source, datasource.AllFieldValuesRequest{})
-	_, alertErr := p.EvaluateAlert(t.Context(), source, datasource.AlertQueryRequest{})
-	for _, err := range []error{valuesErr, allValuesErr, alertErr} {
+	for _, err := range []error{valuesErr, allValuesErr} {
 		if _, ok := errors.AsType[*datasource.ValidationError](err); !ok {
 			t.Fatalf("error %v, want a validation error", err)
 		}
@@ -171,6 +174,110 @@ func TestCompileLogchefQL(t *testing.T) {
 		}
 		if compiled.Error.Code != logchefql.ErrUnsupportedFeature {
 			t.Fatalf("code %s", compiled.Error.Code)
+		}
+	})
+}
+
+func alertLoki(t *testing.T, status int, contentType, body string, seen *url.Values) *models.Source {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/loki/api/v1/query" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		*seen = r.URL.Query()
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(server.Close)
+	return testSource(t, models.LokiConnectionInfo{BaseURL: server.URL})
+}
+
+func TestEvaluateAlert(t *testing.T) {
+	at := time.Date(2026, 11, 16, 10, 0, 0, 123, time.UTC)
+	req := datasource.AlertQueryRequest{Language: models.QueryLanguageLogQL, Query: ` sum by (pod, app) (count_over_time({app="api"}[5m])) `, At: at, LookbackSeconds: 300}
+
+	t.Run("an instant query at At returns value first and sorted series", func(t *testing.T) {
+		var seen url.Values
+		source := alertLoki(t, http.StatusOK, "application/json", `{"status":"success","data":{"resultType":"vector","result":[
+			{"metric":{"app":"api","pod":"b"},"value":[1794823200,"7"]},
+			{"metric":{"app":"api","pod":"a","value":"label"},"value":[1794823200,"3"]}
+		],"stats":{"summary":{"execTime":0.25,"totalLinesProcessed":10}}}}`, &seen)
+		result, err := testProvider().EvaluateAlert(t.Context(), source, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seen.Get("time") != "1794823200000000123" || seen.Get("query") != `sum by (pod, app) (count_over_time({app="api"}[5m]))` {
+			t.Fatalf("params %v", seen)
+		}
+		names := make([]string, len(result.Columns))
+		for i, column := range result.Columns {
+			names[i] = column.Name
+		}
+		if !slices.Equal(names, []string{"value", "app", "pod"}) {
+			t.Fatalf("columns %v", names)
+		}
+		if len(result.Logs) != 2 || result.Logs[0]["value"] != "3" || result.Logs[0]["pod"] != "a" || result.Logs[1]["value"] != "7" {
+			t.Fatalf("rows %v", result.Logs)
+		}
+		if result.Stats.ExecutionTimeMs != 250 || result.Stats.RowsRead != 10 || result.Stats.RowsReturned != 2 {
+			t.Fatalf("stats %+v", result.Stats)
+		}
+
+		samples, err := alerts.SamplesFromResult(result, []string{"pod"})
+		if err != nil || len(samples) != 2 || samples[0].Value != 3 || samples[1].Value != 7 {
+			t.Fatalf("grouped samples %+v, %v", samples, err)
+		}
+		samples, err = alerts.SamplesFromResult(result, nil)
+		if err != nil || len(samples) != 1 || samples[0].Value != 3 {
+			t.Fatalf("ungrouped samples %+v, %v", samples, err)
+		}
+	})
+
+	t.Run("an empty vector is zero rows", func(t *testing.T) {
+		var seen url.Values
+		source := alertLoki(t, http.StatusOK, "application/json", `{"status":"success","data":{"resultType":"vector","result":[]}}`, &seen)
+		result, err := testProvider().EvaluateAlert(t.Context(), source, req)
+		if err != nil || len(result.Logs) != 0 || result.Logs == nil {
+			t.Fatalf("result %+v, %v", result, err)
+		}
+	})
+
+	t.Run("a log query gets the named error", func(t *testing.T) {
+		var seen url.Values
+		source := alertLoki(t, http.StatusBadRequest, "text/plain; charset=utf-8", "log queries are not supported as an instant query type, please change your query to a range query type", &seen)
+		_, err := testProvider().EvaluateAlert(t.Context(), source, req)
+		assertValidation(t, err, logQueryAlertMessage)
+	})
+
+	t.Run("a scalar result gets the named error", func(t *testing.T) {
+		var seen url.Values
+		source := alertLoki(t, http.StatusOK, "application/json", `{"status":"success","data":{"resultType":"scalar","result":[1794823200,"2"]}}`, &seen)
+		_, err := testProvider().EvaluateAlert(t.Context(), source, req)
+		assertValidation(t, err, logQueryAlertMessage)
+	})
+
+	t.Run("a parse error keeps Loki's message", func(t *testing.T) {
+		var seen url.Values
+		source := alertLoki(t, http.StatusBadRequest, "text/plain", "parse error at line 1, col 29: syntax error", &seen)
+		_, err := testProvider().EvaluateAlert(t.Context(), source, req)
+		assertValidation(t, err, "parse error at line 1, col 29: syntax error")
+	})
+
+	t.Run("a request without At or with another language is refused before Loki", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("the request reached Loki") }))
+		t.Cleanup(server.Close)
+		source := testSource(t, models.LokiConnectionInfo{BaseURL: server.URL})
+		noAt := req
+		noAt.At = time.Time{}
+		logsQL := req
+		logsQL.Language = models.QueryLanguageLogsQL
+		empty := req
+		empty.Query = "  "
+		for _, r := range []datasource.AlertQueryRequest{noAt, logsQL, empty} {
+			if _, err := testProvider().EvaluateAlert(t.Context(), source, r); err == nil {
+				t.Fatalf("request %+v was accepted", r)
+			}
 		}
 	})
 }

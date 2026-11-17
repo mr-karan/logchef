@@ -721,6 +721,8 @@
   "alerts.nativeQueryLabel": "{language} query",
   "alerts.generatedQuery": "Generated {language}",
   "alerts.logsQLTemplateHint": "Choose a LogsQL template. The lookback window is applied automatically.",
+  "alerts.logQLTemplateHint": "Write a LogQL metric query. Its range, such as [5m], decides which logs are counted.",
+  "alerts.logQLLookbackMismatch": "The query has no range of {range}. Its own range decides the window, not the lookback.",
   "alerts.sqlTemplateHint": "Choose a template to fill in the table, timestamp field, and lookback window.",
   "alerts.missingContext": "Team or source not available",
   "alerts.invalidCondition": "Invalid condition",

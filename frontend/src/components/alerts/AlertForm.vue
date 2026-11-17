@@ -54,6 +54,7 @@ const {
   conditionError,
   conditionTemplates,
   queryTemplates,
+  lookbackWarning,
   applyConditionTemplate,
   applyTemplate,
   teamMembers,
@@ -103,6 +104,7 @@ function handleClose() {
           :aggregate-field-suggestions="aggregateFieldSuggestions"
           :condition-templates="conditionTemplates"
           :query-templates="queryTemplates"
+          :lookback-warning="lookbackWarning"
           :condition-error="conditionError"
           :generated-query="generatedQuery"
           :is-testing-query="isTestingQuery"
@@ -167,6 +169,7 @@ function handleClose() {
       :aggregate-field-suggestions="aggregateFieldSuggestions"
       :condition-templates="conditionTemplates"
       :query-templates="queryTemplates"
+      :lookback-warning="lookbackWarning"
       :condition-error="conditionError"
       :generated-query="generatedQuery"
       :is-testing-query="isTestingQuery"

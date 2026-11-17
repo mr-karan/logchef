@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "{language} क्वेरी",
   "alerts.generatedQuery": "बनी हुई {language}",
   "alerts.logsQLTemplateHint": "LogsQL टेम्पलेट चुनें। पिछली अवधि अपने आप लागू होगी।",
+  "alerts.logQLTemplateHint": "LogQL मेट्रिक क्वेरी लिखें। उसकी रेंज, जैसे [5m], तय करती है कि कौन से लॉग गिने जाएँ।",
+  "alerts.logQLLookbackMismatch": "क्वेरी में {range} की रेंज नहीं है। विंडो उसकी अपनी रेंज तय करती है, लुकबैक नहीं।",
   "alerts.sqlTemplateHint": "टेबल, टाइमस्टैम्प फ़ील्ड और पिछली अवधि भरने के लिए टेम्पलेट चुनें।",
   "alerts.missingContext": "टीम या स्रोत उपलब्ध नहीं",
   "alerts.invalidCondition": "अमान्य शर्त",

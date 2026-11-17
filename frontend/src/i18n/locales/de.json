@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "{language}-Abfrage",
   "alerts.generatedQuery": "Generiertes {language}",
   "alerts.logsQLTemplateHint": "LogsQL-Vorlage wählen. Das Rückblickfenster wird automatisch angewendet.",
+  "alerts.logQLTemplateHint": "Schreiben Sie eine LogQL-Metrikabfrage. Ihr Bereich, etwa [5m], bestimmt, welche Logs gezählt werden.",
+  "alerts.logQLLookbackMismatch": "Die Abfrage enthält keinen Bereich {range}. Ihr eigener Bereich bestimmt das Fenster, nicht der Rückblick.",
   "alerts.sqlTemplateHint": "Vorlage wählen, um Tabelle, Zeitstempelfeld und Rückblickfenster auszufüllen.",
   "alerts.missingContext": "Team oder Quelle nicht verfügbar",
   "alerts.invalidCondition": "Ungültige Bedingung",

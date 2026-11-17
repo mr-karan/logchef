@@ -33,6 +33,7 @@ defineProps<{
   aggregateFieldSuggestions: string[];
   conditionTemplates: ConditionTemplate[];
   queryTemplates: QueryTemplate[];
+  lookbackWarning: string | null;
   conditionError: string | null;
   generatedQuery: string;
   isTestingQuery: boolean;
@@ -199,6 +200,9 @@ defineProps<{
         />
         <p class="text-xs text-muted-foreground">
           {{ nativeQueryHelpText }}
+        </p>
+        <p v-if="lookbackWarning" class="text-xs text-yellow-700 dark:text-yellow-400">
+          {{ lookbackWarning }}
         </p>
       </div>
     </template>

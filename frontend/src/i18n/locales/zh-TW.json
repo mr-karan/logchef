@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "{language} 查詢",
   "alerts.generatedQuery": "產生的 {language}",
   "alerts.logsQLTemplateHint": "選擇 LogsQL 範本。回溯時間範圍會自動套用。",
+  "alerts.logQLTemplateHint": "撰寫 LogQL 指標查詢。其範圍（例如 [5m]）決定計算哪些日誌。",
+  "alerts.logQLLookbackMismatch": "查詢中沒有 {range} 範圍。時間窗由查詢本身的範圍決定，而不是回溯時間。",
   "alerts.sqlTemplateHint": "選擇範本以填入資料表、時間戳記欄位與回溯時間範圍。",
   "alerts.missingContext": "團隊或資料來源無法使用",
   "alerts.invalidCondition": "條件無效",

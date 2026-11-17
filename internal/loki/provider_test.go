@@ -30,8 +30,8 @@ func TestDescribeListsOnlyWorkingCapabilities(t *testing.T) {
 	if !d.LogchefQLNeedsColumns {
 		t.Fatal("LogchefQL compilation must receive the columns, to know the stream labels")
 	}
-	if d.AlertEditorModes == nil || len(d.AlertEditorModes) != 0 {
-		t.Fatalf("alert modes %v, want an empty list", d.AlertEditorModes)
+	if !slices.Equal(d.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}) {
+		t.Fatalf("alert modes %v", d.AlertEditorModes)
 	}
 }
 

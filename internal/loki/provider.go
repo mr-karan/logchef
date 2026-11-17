@@ -115,7 +115,7 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeLoki
 }
 
-// Describe lists only what works. A later unit of RFC 0011 adds alerts.
+// Describe lists only what works.
 func (p *Provider) Describe() datasource.Descriptor {
 	return datasource.Descriptor{
 		Capabilities: []datasource.Capability{
@@ -129,7 +129,7 @@ func (p *Provider) Describe() datasource.Descriptor {
 		},
 		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogQL},
 		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
-		AlertEditorModes:      []models.AlertEditorMode{},
+		AlertEditorModes:      []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative},
 		// The generator must know which fields are stream labels.
 		LogchefQLNeedsColumns: true,
 	}

@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "{language} 쿼리",
   "alerts.generatedQuery": "생성된 {language}",
   "alerts.logsQLTemplateHint": "LogsQL 템플릿을 선택하세요. 조회 기간은 자동 적용됩니다.",
+  "alerts.logQLTemplateHint": "LogQL 메트릭 쿼리를 작성하세요. [5m] 같은 범위가 집계할 로그를 정합니다.",
+  "alerts.logQLLookbackMismatch": "쿼리에 {range} 범위가 없습니다. 창은 조회 기간이 아니라 쿼리 자체의 범위로 정해집니다.",
   "alerts.sqlTemplateHint": "템플릿을 선택해 테이블, 타임스탬프 필드, 조회 기간을 채우세요.",
   "alerts.missingContext": "팀 또는 소스를 사용할 수 없습니다",
   "alerts.invalidCondition": "잘못된 조건",
