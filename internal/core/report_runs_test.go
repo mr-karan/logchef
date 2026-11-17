@@ -52,6 +52,7 @@ func (m *fakeMailer) messages() []sentMail {
 type reportEnv struct {
 	t      *testing.T
 	db     *sqlite.DB
+	dbPath string
 	owner  *models.User
 	team   *models.Team
 	source *models.Source
@@ -69,8 +70,8 @@ const reportQueryContent = `{"version":1,"sourceId":%d,"limit":100,"content":"SE
 func newReportEnv(t *testing.T) *reportEnv {
 	t.Helper()
 	ctx := context.Background()
-	db := newTestDB(t)
-	e := &reportEnv{t: t, db: db, mailer: &fakeMailer{}}
+	db, dbPath := newTestDBWithPath(t)
+	e := &reportEnv{t: t, db: db, dbPath: dbPath, mailer: &fakeMailer{}}
 	e.owner = newTestUser(t, db, "owner@example.com", "Owner")
 	e.source = newTestSource(t, db, "app_logs")
 	e.team = newTestTeam(t, db, "payments", models.TeamRoleMember, e.owner)

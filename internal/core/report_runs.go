@@ -20,6 +20,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/reports"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -89,10 +90,101 @@ func (rr *ReportRunner) StartManualRun(ctx context.Context, p access.Principal, 
 	return run, nil
 }
 
-// Execute runs a claimed run and writes its result. ctx ends at the run's
-// handler deadline; the final update runs on a context that deadline does
-// not cancel.
+// JobKind is the report job registration for a job runner. A run's handler
+// deadline is its query budget plus reports.HandlerSlack.
+func (rr *ReportRunner) JobKind(concurrency int) jobs.KindSpec {
+	return jobs.KindSpec{
+		Kind:        reports.JobKind,
+		Handler:     rr.runScheduled,
+		Timeout:     reports.HandlerBudget(rr.QueryBudget),
+		Concurrency: concurrency,
+	}
+}
+
+// runScheduled sends the report that the job names for the tick job.At. The
+// run row is the claim: a tick that already has a row ends without work, so
+// a tick that two replicas start sends once.
+func (rr *ReportRunner) runScheduled(ctx context.Context, job jobs.Job) error {
+	id, err := reports.ParseJobKey(job.Key)
+	if err != nil {
+		return err
+	}
+	// The state is read behind the claim: a pause takes the job row before
+	// it writes the report, so a pause that committed before this point is
+	// seen here, and one that commits later finds the tick already started.
+	var run *models.ReportRun
+	paused := false
+	err = rr.write(ctx, &job, func(tx store.StoreOps) error {
+		r, err := tx.GetReport(ctx, id)
+		if err != nil {
+			return err
+		}
+		if r.State != models.ReportStateActive {
+			paused = true
+			_, err = tx.SkipReportTick(ctx, id, job.At, models.ReportReasonPaused)
+			return err
+		}
+		run, err = tx.CreateReportRun(ctx, models.ReportRunClaim{
+			ReportID:      id,
+			Trigger:       models.ReportTriggerSchedule,
+			ScheduledFor:  job.At,
+			HandlerBudget: reports.HandlerBudget(rr.QueryBudget),
+		})
+		return err
+	})
+	switch {
+	case models.IsNotFound(err):
+		return jobs.ErrGone
+	case errors.Is(err, models.ErrReportTickTaken), err == nil && paused:
+		return nil
+	case errors.Is(err, models.ErrReportRunInFlight):
+		return rr.skipTick(ctx, job, id, models.ReportReasonBusy)
+	case errors.Is(err, jobs.ErrLeaseLost):
+		rr.Log.Warn("a later claim owns this report's job; the tick was not started", "report_id", id)
+		return nil
+	case err != nil:
+		return fmt.Errorf("claiming report %d tick %s: %w", id, job.At.UTC().Format(time.RFC3339), err)
+	}
+	runCtx, cancel := context.WithDeadline(ctx, *run.DeadlineAt)
+	defer cancel()
+	err = rr.complete(runCtx, run, ReportRunToAll, &job)
+	if errors.Is(err, jobs.ErrLeaseLost) {
+		rr.Log.Warn("a later claim owns this report's job; the run's result was not stored", "report_id", id, "run_id", run.ID)
+		return nil
+	}
+	return err
+}
+
+// skipTick records the tick as skipped, unless it already has a row.
+func (rr *ReportRunner) skipTick(ctx context.Context, job jobs.Job, id models.ReportID, reason models.ReportRunReason) error {
+	err := rr.write(ctx, &job, func(tx store.StoreOps) error {
+		_, err := tx.SkipReportTick(ctx, id, job.At, reason)
+		return err
+	})
+	switch {
+	case err == nil, errors.Is(err, models.ErrReportTickTaken):
+		return nil
+	case errors.Is(err, jobs.ErrLeaseLost):
+		rr.Log.Warn("a later claim owns this report's job; the skipped tick was not recorded", "report_id", id)
+		return nil
+	}
+	return fmt.Errorf("skipping report %d tick %s: %w", id, job.At.UTC().Format(time.RFC3339), err)
+}
+
+// Execute runs a claimed manual run and writes its result. ctx ends at the
+// run's handler deadline; the final update runs on a context that deadline
+// does not cancel.
 func (rr *ReportRunner) Execute(ctx context.Context, run *models.ReportRun, to ReportRunRecipients) {
+	if err := rr.complete(ctx, run, to, nil); err != nil {
+		rr.Log.Error("report run not completed", "report_id", run.ReportID, "run_id", run.ID, "error", err)
+	}
+}
+
+// complete runs a claimed run and writes its result. claim is the job claim
+// of a scheduled run and nil for a manual one. Every write of a scheduled
+// run first proves its claim, so a run whose claim another replica took
+// over writes nothing and returns jobs.ErrLeaseLost.
+func (rr *ReportRunner) complete(ctx context.Context, run *models.ReportRun, to ReportRunRecipients, claim *jobs.Job) error {
 	var (
 		r   *models.Report
 		res models.ReportRunResult
@@ -114,21 +206,42 @@ func (rr *ReportRunner) Execute(ctx context.Context, run *models.ReportRun, to R
 	}
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reports.FinishTimeout)
 	defer cancel()
-	failures, err := rr.DB.FinishReportRun(finishCtx, run.ID, res)
+	var failures int
+	err = rr.write(finishCtx, claim, func(tx store.StoreOps) error {
+		var err error
+		failures, err = tx.FinishReportRun(finishCtx, run.ID, res)
+		return err
+	})
 	if err != nil {
-		rr.Log.Error("report run result not stored", "report_id", run.ReportID, "run_id", run.ID, "error", err)
-		return
+		return err
 	}
 	if r == nil {
-		return
+		return nil
 	}
 	switch {
 	case res.Reason == models.ReportReasonOwnerInactive && r.PauseReason != models.ReportPauseOwnerInactive:
-		rr.pause(finishCtx, run, r, models.ReportPauseOwnerInactive)
+		return rr.pause(finishCtx, run, r, models.ReportPauseOwnerInactive, claim)
 	case res.Status == models.ReportRunFailed && failures >= reportFailurePause && r.State == models.ReportStateActive:
-		rr.pause(finishCtx, run, r, models.ReportPauseFailures)
+		if err := rr.pause(finishCtx, run, r, models.ReportPauseFailures, claim); err != nil {
+			return err
+		}
 		rr.noticeOwnerOfPause(finishCtx, r, res.Reason)
 	}
+	return nil
+}
+
+// write runs fn in one transaction that first proves claim, when the run
+// has one.
+func (rr *ReportRunner) write(ctx context.Context, claim *jobs.Job, fn func(tx store.StoreOps) error) error {
+	if claim == nil {
+		return fn(rr.DB)
+	}
+	return rr.DB.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := jobs.Hold(ctx, tx, *claim); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 // acquire waits for a run slot until ctx ends.
@@ -145,11 +258,10 @@ func (rr *ReportRunner) acquire(ctx context.Context) (release func(), err error)
 }
 
 // pause is a pause by the system, outside HTTP, so it records its audit
-// event itself.
-func (rr *ReportRunner) pause(ctx context.Context, run *models.ReportRun, r *models.Report, reason models.ReportPauseReason) {
-	if err := rr.DB.PauseReport(ctx, r.ID, reason); err != nil {
-		rr.Log.Error("report not paused", "report_id", r.ID, "reason", reason, "error", err)
-		return
+// event itself. It disables the report's job in the same write.
+func (rr *ReportRunner) pause(ctx context.Context, run *models.ReportRun, r *models.Report, reason models.ReportPauseReason, claim *jobs.Job) error {
+	if _, err := writeReport(ctx, rr.DB, r, claim, func(tx store.StoreOps) error { return tx.PauseReport(ctx, r.ID, reason) }); err != nil {
+		return fmt.Errorf("pausing report %d with reason %s: %w", r.ID, reason, err)
 	}
 	rr.Audit.Record(ctx, audit.Event{
 		Action:  audit.ReportPause,
@@ -162,6 +274,7 @@ func (rr *ReportRunner) pause(ctx context.Context, run *models.ReportRun, r *mod
 		Target: audit.ReportTarget(r),
 		Detail: audit.NewFields().Set("reason", reason),
 	})
+	return nil
 }
 
 // noticeOwnerOfPause sends the owner one plain email that names the report
@@ -409,13 +522,13 @@ type renderedRun struct {
 // runAndRender runs the panels until queryDeadline, decides the outcomes
 // that end a run before delivery, and renders the email.
 func (rr *ReportRunner) runAndRender(ctx context.Context, plan *reportPlan, queryDeadline time.Time) (*renderedRun, error) {
-	var jobs []reports.PanelJob
+	var panelJobs []reports.PanelJob
 	for _, p := range plan.panels {
 		if p.job != nil {
-			jobs = append(jobs, *p.job)
+			panelJobs = append(panelJobs, *p.job)
 		}
 	}
-	results := reports.RunPanels(ctx, queryDeadline, jobs)
+	results := reports.RunPanels(ctx, queryDeadline, panelJobs)
 	out := &renderedRun{panels: make([]models.ReportPanelOutcome, len(plan.panels))}
 	doc := reports.Document{
 		ReportName: plan.report.Name,
