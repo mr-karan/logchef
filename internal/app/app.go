@@ -19,6 +19,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/loki"
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
@@ -279,7 +280,9 @@ func (a *App) startJobs(ctx context.Context) error {
 			return fmt.Errorf("failed to store the delivery drain job: %w", err)
 		}
 		a.Jobs.Register(a.Alerts.EvaluationKind())
-		a.Jobs.Register(notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Hold: a.Alerts.HoldDelivery, Logger: a.Logger}).Kind())
+		drainer := notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Hold: a.Alerts.HoldDelivery, Logger: a.Logger})
+		metrics.RegisterNotificationDeliveriesPending(drainer.Pending)
+		a.Jobs.Register(drainer.Kind())
 	}
 	if a.Config.Reports.Enabled && !a.Config.Demo.ReadOnly {
 		if err := core.SyncReportJobs(ctx, a.SQLite); err != nil {

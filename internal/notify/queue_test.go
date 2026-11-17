@@ -480,3 +480,34 @@ func TestDrainChecksEachRowWhenItsTurnComes(t *testing.T) {
 		t.Errorf("cancelled row status = %s, want failed", row.Status)
 	}
 }
+
+// TestOverLimitMessageIsNotSent: a message over 256 KiB fails at enqueue and
+// never reaches the receiver, the other row is sent, and the pending gauge
+// counts only the row that waits.
+func TestOverLimitMessageIsNotSent(t *testing.T) {
+	receiver, calls, _ := statusReceiver(t)
+	e := webhookEnv(t, receiver.URL)
+	big := testMessage
+	big.Title = strings.Repeat("x", 256<<10)
+	rows := []Delivery{
+		{DestinationID: e.dest.ID, Producer: "test", ProducerRef: "ref", SequenceKey: "seq", DedupKey: "small", Message: testMessage},
+		{DestinationID: e.dest.ID, Producer: "test", ProducerRef: "ref", SequenceKey: "seq", DedupKey: "big", Message: big},
+	}
+	if err := e.db.WithTx(t.Context(), func(tx store.StoreOps) error { return Enqueue(t.Context(), tx, rows) }); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.drainer.Pending(); got != 1 {
+		t.Fatalf("pending before the drain = %v, want 1", got)
+	}
+	e.drain(t)
+	if calls.Load() != 1 || e.row(t, 1).Status != models.DeliverySent {
+		t.Fatalf("%d requests, small row %+v; want the small row sent once", calls.Load(), e.row(t, 1))
+	}
+	if row := e.row(t, 2); row.Status != models.DeliveryFailed || row.Attempts != 0 || !strings.Contains(row.LastError, "over the 262144-byte limit") ||
+		row.MessageJSON != `{"event":"firing","title":"","text":""}` {
+		t.Fatalf("big row = %+v, want failed without an attempt, with the event only", row)
+	}
+	if got := e.drainer.Pending(); got != 0 {
+		t.Fatalf("pending after the drain = %v, want 0", got)
+	}
+}

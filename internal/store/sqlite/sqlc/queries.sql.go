@@ -712,6 +712,17 @@ func (q *Queries) CountCollectionTeamAccess(ctx context.Context, arg CountCollec
 	return count, err
 }
 
+const countPendingDeliveries = `-- name: CountPendingDeliveries :one
+SELECT COUNT(*) FROM notification_deliveries WHERE status = 'pending'
+`
+
+func (q *Queries) CountPendingDeliveries(ctx context.Context) (int64, error) {
+	row := q.queryRow(ctx, q.countPendingDeliveriesStmt, countPendingDeliveries)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countReportFailure = `-- name: CountReportFailure :one
 UPDATE reports
 SET consecutive_failures = CASE CAST(?1 AS TEXT)
@@ -1966,29 +1977,33 @@ const enqueueDelivery = `-- name: EnqueueDelivery :execrows
 
 INSERT INTO notification_deliveries (
     destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json,
-    next_attempt_at, created_at
+    status, last_error, next_attempt_at, created_at
 ) VALUES (
     ?1, ?2, ?3, ?4,
     ?5, ?6, ?7, ?8,
+    ?9, ?10,
     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 )
 ON CONFLICT (dedup_key) DO NOTHING
 `
 
 type EnqueueDeliveryParams struct {
-	DestinationID int64  `json:"destination_id"`
-	Producer      string `json:"producer"`
-	ProducerRef   string `json:"producer_ref"`
-	Recipient     string `json:"recipient"`
-	SequenceKey   string `json:"sequence_key"`
-	Event         string `json:"event"`
-	DedupKey      string `json:"dedup_key"`
-	MessageJson   string `json:"message_json"`
+	DestinationID int64          `json:"destination_id"`
+	Producer      string         `json:"producer"`
+	ProducerRef   string         `json:"producer_ref"`
+	Recipient     string         `json:"recipient"`
+	SequenceKey   string         `json:"sequence_key"`
+	Event         string         `json:"event"`
+	DedupKey      string         `json:"dedup_key"`
+	MessageJson   string         `json:"message_json"`
+	Status        string         `json:"status"`
+	LastError     sql.NullString `json:"last_error"`
 }
 
 // Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
 // the database clock, in the jobs table's text form.
-// A row whose dedup_key exists is left as it is.
+// A row whose dedup_key exists is left as it is. A row may start failed, such
+// as one whose message is over the size limit.
 func (q *Queries) EnqueueDelivery(ctx context.Context, arg EnqueueDeliveryParams) (int64, error) {
 	result, err := q.exec(ctx, q.enqueueDeliveryStmt, enqueueDelivery,
 		arg.DestinationID,
@@ -1999,6 +2014,8 @@ func (q *Queries) EnqueueDelivery(ctx context.Context, arg EnqueueDeliveryParams
 		arg.Event,
 		arg.DedupKey,
 		arg.MessageJson,
+		arg.Status,
+		arg.LastError,
 	)
 	if err != nil {
 		return 0, err

@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,6 +29,7 @@ func RunDeliveries(t *testing.T, open Opener) {
 	t.Run("Cancel", func(t *testing.T) { testCancelDeliveries(t, open(t), open(t)) })
 	t.Run("Summaries", func(t *testing.T) { testDeliverySummaries(t, open(t)) })
 	t.Run("Prune", func(t *testing.T) { testPruneDeliveries(t, open(t)) })
+	t.Run("OverLimitMessageStartsFailed", func(t *testing.T) { testOverLimitMessage(t, open(t)) })
 	t.Run("TwoDrainsSendEachRowOnce", func(t *testing.T) { testTwoDrains(t, open(t), open(t)) })
 }
 
@@ -428,4 +430,60 @@ func testCancelDeliveries(t *testing.T, a, b store.Store) {
 	if row := mustGetDelivery(t, a, reserved.ID); row.LastError != "cancelled" {
 		t.Errorf("cancelled row last_error = %q, want %q", row.LastError, "cancelled")
 	}
+}
+
+// testOverLimitMessage: a message over 256 KiB is stored failed, without an
+// attempt, and a message of exactly 256 KiB waits as usual. Only pending rows
+// count as pending. Other subtests share the table, so counts are relative.
+func testOverLimitMessage(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	dest := deliveryDestination(t, s)
+	const limit = 256 << 10 // RFC 0006, "Limits": delivery message
+	at, over := delivery(dest, "at", notify.EventFiring), delivery(dest, "over", notify.EventFiring)
+	at.Message.Title = titleForSize(t, at.Message, limit)
+	over.Message.Title = titleForSize(t, over.Message, limit+1)
+	before := countPending(t, s)
+	enqueue(t, s, at, over)
+
+	if n := countPending(t, s); n != before+1 {
+		t.Fatalf("pending = %d, want %d", n, before+1)
+	}
+	summaries, err := s.ListDeliverySummaries(ctx, "test", []string{"at", "over"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting := summaries["at"]; len(waiting) != 1 || waiting[0].Status != models.DeliveryPending {
+		t.Errorf("summary at the limit = %+v, want one pending row", waiting)
+	}
+	failed := summaries["over"]
+	if len(failed) != 1 || failed[0].Status != models.DeliveryFailed || failed[0].Attempts != 0 ||
+		failed[0].LastError != "not sent: the message is 262145 bytes, over the 262144-byte limit" {
+		t.Errorf("summary over the limit = %+v, want one failed row naming the limit", failed)
+	}
+	if _, err := s.CancelDeliveries(ctx, "test", "at", "test done"); err != nil {
+		t.Fatal(err)
+	}
+	if n := countPending(t, s); n != before {
+		t.Fatalf("pending after the cancel = %d, want %d", n, before)
+	}
+}
+
+func countPending(t *testing.T, s store.DeliveryStore) int64 {
+	t.Helper()
+	n, err := s.CountPendingDeliveries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// titleForSize returns a title that makes msg encode to exactly size bytes.
+func titleForSize(t *testing.T, msg notify.Message, size int) string {
+	t.Helper()
+	msg.Title = ""
+	body, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Repeat("x", size-len(body))
 }

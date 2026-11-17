@@ -90,6 +90,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countCollectionTeamAccessStmt, err = db.PrepareContext(ctx, countCollectionTeamAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountCollectionTeamAccess: %w", err)
 	}
+	if q.countPendingDeliveriesStmt, err = db.PrepareContext(ctx, countPendingDeliveries); err != nil {
+		return nil, fmt.Errorf("error preparing query CountPendingDeliveries: %w", err)
+	}
 	if q.countReportFailureStmt, err = db.PrepareContext(ctx, countReportFailure); err != nil {
 		return nil, fmt.Errorf("error preparing query CountReportFailure: %w", err)
 	}
@@ -944,6 +947,11 @@ func (q *Queries) Close() error {
 	if q.countCollectionTeamAccessStmt != nil {
 		if cerr := q.countCollectionTeamAccessStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countCollectionTeamAccessStmt: %w", cerr)
+		}
+	}
+	if q.countPendingDeliveriesStmt != nil {
+		if cerr := q.countPendingDeliveriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countPendingDeliveriesStmt: %w", cerr)
 		}
 	}
 	if q.countReportFailureStmt != nil {
@@ -2242,6 +2250,7 @@ type Queries struct {
 	countAlertsUsingDestinationStmt        *sql.Stmt
 	countAuditEventsStmt                   *sql.Stmt
 	countCollectionTeamAccessStmt          *sql.Stmt
+	countPendingDeliveriesStmt             *sql.Stmt
 	countReportFailureStmt                 *sql.Stmt
 	countSavedViewsInScopeStmt             *sql.Stmt
 	countSharedCollectionEditAccessStmt    *sql.Stmt
@@ -2517,6 +2526,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		countAlertsUsingDestinationStmt:        q.countAlertsUsingDestinationStmt,
 		countAuditEventsStmt:                   q.countAuditEventsStmt,
 		countCollectionTeamAccessStmt:          q.countCollectionTeamAccessStmt,
+		countPendingDeliveriesStmt:             q.countPendingDeliveriesStmt,
 		countReportFailureStmt:                 q.countReportFailureStmt,
 		countSavedViewsInScopeStmt:             q.countSavedViewsInScopeStmt,
 		countSharedCollectionEditAccessStmt:    q.countSharedCollectionEditAccessStmt,
