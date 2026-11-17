@@ -13,6 +13,7 @@ import (
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/jobs"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/internal/util"
@@ -262,7 +263,8 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 
 // UpdateAlert updates an existing alert rule and its job. A change of group_by closes every
 // open episode with "rule changed", because the old group keys no longer
-// name any group of the new result. Destinations the editor adds must be
+// name any group of the new result, and sends their resolved notifications
+// (alerts.CloseForRuleChange). Destinations the editor adds must be
 // usable by the editor; the ones the rule has stay. It returns the rule before
 // and after the write, both read in the write's transaction under the row
 // lock.
@@ -296,9 +298,10 @@ func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 	}
 
 	groupByChanged := !slices.Equal(existing.GroupBy, previous.GroupBy)
+	enqueued := 0
 	err = db.WithTx(ctx, func(tx store.StoreOps) error {
 		var err error
-		if before, err = writeAlertUpdate(ctx, tx, user, existing, previous.DestinationIDs, req.DestinationIDs, groupByChanged); err != nil {
+		if before, enqueued, err = writeAlertUpdate(ctx, tx, log, user, existing, previous.DestinationIDs, req.DestinationIDs, groupByChanged); err != nil {
 			return err
 		}
 		after, err = tx.GetAlert(ctx, alertID)
@@ -313,6 +316,13 @@ func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 		}
 		log.Error("failed to update alert", "alert_id", alertID, "error", err)
 		return nil, nil, fmt.Errorf("failed to update alert: %w", err)
+	}
+	if enqueued > 0 {
+		// The runner polls the store, so the drain sends the resolves now
+		// instead of at its interval. A failure only delays them.
+		if err := db.KickJob(ctx, string(notify.DeliverKind), notify.DrainKey); err != nil {
+			log.Warn("failed to kick the delivery drain; it runs at its interval", "error", err)
+		}
 	}
 	return before, after, nil
 }
@@ -408,46 +418,40 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 }
 
 // writeAlertUpdate writes an edited rule in the caller's transaction and
-// returns the rule it replaced, read under the row lock. The job row is
-// written before the alert row, the order in which an evaluation's commit
-// locks them, so an edit cannot deadlock with it. Requested destinations
-// replace the rule's; a group_by change closes the open episodes and drops
-// every instance.
-func writeAlertUpdate(ctx context.Context, tx store.StoreOps, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) (*models.Alert, error) {
+// returns the rule it replaced, read under the row lock, and the number of
+// notifications it enqueued. The job row is written before the alert row, the
+// order in which an evaluation's commit locks them, so an edit cannot
+// deadlock with it. A group_by change closes the open episodes, enqueues
+// their resolved notifications and drops every instance; it runs before
+// requested destinations replace the rule's, so a resolve reaches the
+// destinations that its firing reached.
+func writeAlertUpdate(ctx context.Context, tx store.StoreOps, log *slog.Logger, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) (*models.Alert, int, error) {
 	if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert)); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	before, err := tx.GetAlertForUpdate(ctx, alert.ID)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := tx.UpdateAlert(ctx, alert); err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	enqueued := 0
+	if groupByChanged {
+		if enqueued, err = alerts.CloseForRuleChange(ctx, tx, log, alert); err != nil {
+			return nil, 0, err
+		}
 	}
 	if requested != nil {
 		ids, err := resolveAlertDestinations(ctx, tx, user, *requested, current)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if err := tx.SetAlertDestinations(ctx, alert.ID, ids); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
-	if !groupByChanged {
-		return before, nil
-	}
-	open, err := tx.ListOpenAlertHistory(ctx, alert.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(open) > 0 {
-		if err := tx.ResolveAlertHistory(ctx, open[0].ID, "rule changed"); err != nil {
-			return nil, err
-		}
-	}
-	// The no_data and keep policies also track ok groups, which have no
-	// episode to close.
-	return before, tx.DeleteAlertInstances(ctx, alert.ID)
+	return before, enqueued, nil
 }
 
 // validateFrequency applies the floor of the rule's job schedule. A stored rule

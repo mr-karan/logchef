@@ -145,8 +145,10 @@ when:
 The rule's page lists its groups with their state, value and how long they
 have been in it. The list of rules shows "3 firing" or "1 with no data".
 Changing **Group by** closes every open episode with the message "rule
-changed" and sends no resolved notification, so close any PagerDuty incident
-of the old groups by hand.
+changed". Each old group that sent its firing notification sends a resolved
+one, with its own PagerDuty dedup key, to the destinations the rule had
+before the edit, so the incidents of the old groups close. Nothing is sent
+when **Notify when resolved** is off or a silence mutes the group.
 
 ## When the query returns no rows
 
@@ -383,6 +385,10 @@ the commit loses nothing, and a crash before it changes nothing.
   delay, up to 10 minutes. After five attempts the delivery is `failed`.
 - Any other `4xx`, an inactive destination or a recipient who no longer
   exists fails at once.
+- Before it sends an alert delivery, the drain checks the rule's silences.
+  A silenced delivery waits, without spending an attempt, until the silence
+  ends, and is checked again at least every minute, so deleting the silence
+  releases it. See [Silences](#silences).
 - Email is sent at most once. A delivery is marked as attempting before the
   SMTP transaction. An error after the message data was sent, or a crash
   during the transaction, leaves it `unknown`, and it is never sent again.
@@ -414,8 +420,10 @@ While a silence matches a group:
 - the group still changes state and writes history, with `silenced_by` in the
   history payload, and queues no notification;
 - a notification queued before the silence started, including its retries,
-  still goes out. Silencing a rule that already fired does not stop a page
-  that is waiting in the queue;
+  waits in the queue until the silence ends, with the attempts it had left,
+  and the notifications queued behind it for the same group wait too. If the
+  group resolves inside the silence, the waiting notification is cancelled
+  and shows as `failed` with the reason;
 - when the silence ends and the group still fires or has no data, the next
   evaluation sends the notification it owes;
 - a resolved notification goes out only for an episode that was announced. A

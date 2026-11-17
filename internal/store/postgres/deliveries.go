@@ -65,12 +65,20 @@ func (s *Store) MarkDeliveryAttempting(ctx context.Context, id, token int64) (bo
 	return n == 1, nil
 }
 
-func (s *Store) ReleaseDelivery(ctx context.Context, id, token int64) (bool, error) {
-	n, err := s.q.ReleaseDelivery(ctx, sqlc.ReleaseDeliveryParams{ID: id, ReservedToken: token})
+func (s *Store) ReleaseDelivery(ctx context.Context, id, token int64, after time.Duration) (bool, error) {
+	n, err := s.q.ReleaseDelivery(ctx, sqlc.ReleaseDeliveryParams{DelaySeconds: after.Seconds(), ID: id, ReservedToken: token})
 	if err != nil {
 		return false, fmt.Errorf("error releasing delivery %d: %w", id, err)
 	}
 	return n == 1, nil
+}
+
+func (s *Store) CancelDeliveries(ctx context.Context, producer, producerRef, errText string) (int64, error) {
+	n, err := s.q.CancelDeliveries(ctx, sqlc.CancelDeliveriesParams{LastError: text(errText), Producer: producer, ProducerRef: producerRef})
+	if err != nil {
+		return 0, fmt.Errorf("error cancelling deliveries of %s %s: %w", producer, producerRef, err)
+	}
+	return n, nil
 }
 
 func (s *Store) FinishDelivery(ctx context.Context, id, token int64, out models.DeliveryOutcome) (bool, error) {

@@ -279,7 +279,7 @@ func (a *App) startJobs(ctx context.Context) error {
 			return fmt.Errorf("failed to store the delivery drain job: %w", err)
 		}
 		a.Jobs.Register(a.Alerts.EvaluationKind())
-		a.Jobs.Register(notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Logger: a.Logger}).Kind())
+		a.Jobs.Register(notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Hold: a.Alerts.HoldDelivery, Logger: a.Logger}).Kind())
 	}
 	if a.Config.Reports.Enabled && !a.Config.Demo.ReadOnly {
 		if err := core.SyncReportJobs(ctx, a.SQLite); err != nil {

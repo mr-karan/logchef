@@ -18,30 +18,46 @@ import (
 // started the day before is checked too. An error means the stored window
 // cannot be read.
 func ActiveAt(s *models.AlertSilence, t time.Time) (bool, error) {
+	_, active, err := activeUntil(s, t)
+	return active, err
+}
+
+// activeUntil reports whether s applies at t and, when it does, the end of
+// the window that holds t.
+func activeUntil(s *models.AlertSilence, t time.Time) (time.Time, bool, error) {
 	if s.EndsAt != nil && !t.Before(*s.EndsAt) {
-		return false, nil
+		return time.Time{}, false, nil
 	}
 	switch s.ScheduleKind {
 	case models.SilenceOnce:
-		return s.StartsAt != nil && s.EndsAt != nil && !t.Before(*s.StartsAt), nil
+		if s.StartsAt == nil || s.EndsAt == nil || t.Before(*s.StartsAt) {
+			return time.Time{}, false, nil
+		}
+		return *s.EndsAt, true, nil
 	case models.SilenceWeekly:
-		return weeklyActiveAt(s.Weekly, t)
+		end, active, err := weeklyWindowEnd(s.Weekly, t)
+		if active && s.EndsAt != nil && s.EndsAt.Before(end) {
+			end = *s.EndsAt
+		}
+		return end, active, err
 	default:
-		return false, fmt.Errorf("silence %d has schedule kind %q", s.ID, s.ScheduleKind)
+		return time.Time{}, false, fmt.Errorf("silence %d has schedule kind %q", s.ID, s.ScheduleKind)
 	}
 }
 
-func weeklyActiveAt(w *models.SilenceWeeklyWindow, t time.Time) (bool, error) {
+// weeklyWindowEnd reports whether t falls in a window of w and, when it
+// does, when that window ends.
+func weeklyWindowEnd(w *models.SilenceWeeklyWindow, t time.Time) (time.Time, bool, error) {
 	if w == nil {
-		return false, fmt.Errorf("weekly silence has no window")
+		return time.Time{}, false, fmt.Errorf("weekly silence has no window")
 	}
 	loc, err := time.LoadLocation(w.Timezone)
 	if err != nil {
-		return false, fmt.Errorf("weekly silence timezone: %w", err)
+		return time.Time{}, false, fmt.Errorf("weekly silence timezone: %w", err)
 	}
 	hour, minute, err := ParseClock(w.Start)
 	if err != nil {
-		return false, err
+		return time.Time{}, false, err
 	}
 	local := t.In(loc)
 	duration := time.Duration(w.DurationMinutes) * time.Minute
@@ -55,11 +71,11 @@ func weeklyActiveAt(w *models.SilenceWeeklyWindow, t time.Time) (bool, error) {
 		// time.Date resolves a start inside a daylight-saving gap to a real
 		// instant, so the window still opens on that day.
 		start := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, loc)
-		if !t.Before(start) && t.Before(start.Add(duration)) {
-			return true, nil
+		if end := start.Add(duration); !t.Before(start) && t.Before(end) {
+			return end, true, nil
 		}
 	}
-	return false, nil
+	return time.Time{}, false, nil
 }
 
 // ParseClock reads an "HH:MM" local time of day.

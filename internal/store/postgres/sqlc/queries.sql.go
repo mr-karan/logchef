@@ -207,6 +207,32 @@ func (q *Queries) AuthenticateOAuthAccessToken(ctx context.Context, arg Authenti
 	return i, err
 }
 
+const cancelDeliveries = `-- name: CancelDeliveries :execrows
+UPDATE notification_deliveries
+SET status = 'failed',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = $1
+WHERE producer = $2 AND producer_ref = $3 AND status = 'pending'
+`
+
+type CancelDeliveriesParams struct {
+	LastError   pgtype.Text `json:"last_error"`
+	Producer    string      `json:"producer"`
+	ProducerRef string      `json:"producer_ref"`
+}
+
+// Ends the pending rows of one producer ref unsent. The raised token keeps a
+// drain that reserved one from sending an email or writing an outcome.
+func (q *Queries) CancelDeliveries(ctx context.Context, arg CancelDeliveriesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelDeliveries, arg.LastError, arg.Producer, arg.ProducerRef)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimJobs = `-- name: ClaimJobs :many
 UPDATE jobs
 SET lease_owner = $1,
@@ -7018,19 +7044,21 @@ const releaseDelivery = `-- name: ReleaseDelivery :execrows
 UPDATE notification_deliveries
 SET reserved_by = NULL,
     reserved_until = NULL,
-    attempts = attempts - 1
-WHERE id = $1 AND reserved_token = $2 AND status = 'pending'
+    attempts = attempts - 1,
+    next_attempt_at = now() + make_interval(secs => $1::double precision)
+WHERE id = $2 AND reserved_token = $3 AND status = 'pending'
 `
 
 type ReleaseDeliveryParams struct {
-	ID            int64 `json:"id"`
-	ReservedToken int64 `json:"reserved_token"`
+	DelaySeconds  float64 `json:"delay_seconds"`
+	ID            int64   `json:"id"`
+	ReservedToken int64   `json:"reserved_token"`
 }
 
 // Hands back a reserved row that was not sent, with the attempt that its
-// reservation counted.
+// reservation counted, due again after delay_seconds.
 func (q *Queries) ReleaseDelivery(ctx context.Context, arg ReleaseDeliveryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseDelivery, arg.ID, arg.ReservedToken)
+	result, err := q.db.Exec(ctx, releaseDelivery, arg.DelaySeconds, arg.ID, arg.ReservedToken)
 	if err != nil {
 		return 0, err
 	}

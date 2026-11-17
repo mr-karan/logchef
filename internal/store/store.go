@@ -301,8 +301,13 @@ type DeliveryStore interface {
 	// MarkDeliveryAttempting moves a reserved pending row to attempting.
 	MarkDeliveryAttempting(ctx context.Context, id, token int64) (bool, error)
 	// ReleaseDelivery hands back a reserved pending row that was not sent:
-	// it clears the reservation and takes back the attempt it counted.
-	ReleaseDelivery(ctx context.Context, id, token int64) (bool, error)
+	// it clears the reservation, takes back the attempt it counted and makes
+	// the row due after the given delay.
+	ReleaseDelivery(ctx context.Context, id, token int64, after time.Duration) (bool, error)
+	// CancelDeliveries ends every pending row of the producer ref unsent, as
+	// failed with errText, and returns how many it ended. A drain that
+	// reserved one of them can no longer write its outcome.
+	CancelDeliveries(ctx context.Context, producer, producerRef, errText string) (int64, error)
 	// FinishDelivery records an attempt's outcome and clears the
 	// reservation. It reports false when a later reservation or
 	// ExpireEmailAttempts took the row over.

@@ -26,6 +26,9 @@ type Querier interface {
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
 	AdvanceAlertEvalSeq(ctx context.Context, arg AdvanceAlertEvalSeqParams) (int64, error)
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
+	// Ends the pending rows of one producer ref unsent. The raised token keeps a
+	// drain that reserved one from sending an email or writing an outcome.
+	CancelDeliveries(ctx context.Context, arg CancelDeliveriesParams) (int64, error)
 	// SQLite has one writer, so this statement needs no row locks.
 	// last_started_at is the database clock at the claim.
 	ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, error)
@@ -433,7 +436,7 @@ type Querier interface {
 	// fires, else no_data while any group has no data.
 	RefreshAlertState(ctx context.Context, id int64) error
 	// Hands back a reserved row that was not sent, with the attempt that its
-	// reservation counted.
+	// reservation counted, due again after delay_modifier.
 	ReleaseDelivery(ctx context.Context, arg ReleaseDeliveryParams) (int64, error)
 	ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error)
 	// Remove a link of either kind

@@ -24,6 +24,8 @@ func RunDeliveries(t *testing.T, open Opener) {
 	t.Run("StaleReservationChangesNothing", func(t *testing.T) { testStaleReservation(t, open(t), open(t)) })
 	t.Run("ExpireEmailAttempts", func(t *testing.T) { testExpireEmailAttempts(t, open(t)) })
 	t.Run("ReleaseUnsent", func(t *testing.T) { testReleaseUnsent(t, open(t)) })
+	t.Run("ReleaseWithDelay", func(t *testing.T) { testReleaseWithDelay(t, open(t)) })
+	t.Run("Cancel", func(t *testing.T) { testCancelDeliveries(t, open(t), open(t)) })
 	t.Run("Summaries", func(t *testing.T) { testDeliverySummaries(t, open(t)) })
 	t.Run("Prune", func(t *testing.T) { testPruneDeliveries(t, open(t)) })
 	t.Run("TwoDrainsSendEachRowOnce", func(t *testing.T) { testTwoDrains(t, open(t), open(t)) })
@@ -333,14 +335,97 @@ func testReleaseUnsent(t *testing.T, s store.Store) {
 	if len(rows) != 1 || rows[0].Attempts != 1 {
 		t.Fatalf("reserved %+v, want one row with one attempt", rows)
 	}
-	if ok, err := s.ReleaseDelivery(ctx, rows[0].ID, rows[0].ReservedToken); err != nil || !ok {
+	if ok, err := s.ReleaseDelivery(ctx, rows[0].ID, rows[0].ReservedToken, 0); err != nil || !ok {
 		t.Fatalf("ReleaseDelivery = %v, %v", ok, err)
 	}
 	again := reserve(t, s, "b", time.Minute)
 	if len(again) != 1 || again[0].Attempts != 1 {
 		t.Fatalf("after the release, reserved %+v, want the row at once with one attempt", again)
 	}
-	if ok, err := s.ReleaseDelivery(ctx, rows[0].ID, rows[0].ReservedToken); err != nil || ok {
+	if ok, err := s.ReleaseDelivery(ctx, rows[0].ID, rows[0].ReservedToken, 0); err != nil || ok {
 		t.Errorf("a stale ReleaseDelivery = %v, %v; want no row written", ok, err)
+	}
+}
+
+// testReleaseWithDelay: a row released with a delay keeps its attempts, is
+// not due before the delay ends, and holds back the later rows of its
+// sequence meanwhile.
+func testReleaseWithDelay(t *testing.T, s store.Store) {
+	ctx := context.Background()
+	dest := deliveryDestination(t, s)
+	enqueue(t, s, delivery(dest, "held", notify.EventFiring), delivery(dest, "held", notify.EventResolved))
+	var firing *models.NotificationDelivery
+	for _, row := range reserve(t, s, "a", time.Minute) {
+		if row.SequenceKey != "held" {
+			continue
+		}
+		if firing != nil || row.Event != string(notify.EventFiring) {
+			t.Fatalf("reserved %s of sequence held, want the firing alone", row.Event)
+		}
+		firing = row
+	}
+	if firing == nil {
+		t.Fatal("the firing was not reserved")
+	}
+	if ok, err := s.ReleaseDelivery(ctx, firing.ID, firing.ReservedToken, time.Hour); err != nil || !ok {
+		t.Fatalf("ReleaseDelivery = %v, %v", ok, err)
+	}
+	for _, row := range reserve(t, s, "b", time.Minute) {
+		if row.SequenceKey == "held" {
+			t.Fatalf("during the delay, reserved the %s, want nothing of sequence held: the firing waits and its resolved behind it", row.Event)
+		}
+	}
+	row := mustGetDelivery(t, s, firing.ID)
+	if row.Status != models.DeliveryPending || row.Attempts != 0 || row.NextAttemptAt.Before(time.Now().Add(50*time.Minute)) {
+		t.Errorf("held row = status %s, attempts %d, next attempt %s; want pending, 0, about an hour from now", row.Status, row.Attempts, row.NextAttemptAt)
+	}
+}
+
+// testCancelDeliveries: cancelling a producer ref ends its pending rows as
+// failed, even a reserved one whose drain then cannot write its outcome,
+// and leaves sent rows and other refs alone.
+func testCancelDeliveries(t *testing.T, a, b store.Store) {
+	ctx := context.Background()
+	dest := deliveryDestination(t, a)
+	// The database is shared with the other tests, so rows are picked by
+	// sequence key.
+	pick := func(rows []*models.NotificationDelivery, seq string) *models.NotificationDelivery {
+		t.Helper()
+		for _, row := range rows {
+			if row.SequenceKey == seq {
+				return row
+			}
+		}
+		t.Fatalf("reserved %d rows, none of sequence %q", len(rows), seq)
+		return nil
+	}
+	sent := delivery(dest, "cancel-sent", notify.EventFiring)
+	sent.ProducerRef = "cancel-episode"
+	enqueue(t, a, sent)
+	first := pick(reserve(t, a, "a", time.Minute), "cancel-sent")
+	if ok, err := a.FinishDelivery(ctx, first.ID, first.ReservedToken, models.DeliveryOutcome{Status: models.DeliverySent}); err != nil || !ok {
+		t.Fatalf("FinishDelivery = %v, %v", ok, err)
+	}
+	enqueue(t, a, delivery(dest, "cancel-episode", notify.EventFiring), delivery(dest, "cancel-other", notify.EventFiring))
+	rows := reserve(t, a, "a", time.Minute)
+	reserved, other := pick(rows, "cancel-episode"), pick(rows, "cancel-other")
+	n, err := b.CancelDeliveries(ctx, "test", "cancel-episode", "cancelled")
+	if err != nil || n != 1 {
+		t.Fatalf("CancelDeliveries = %d, %v; want the one pending row of the ref", n, err)
+	}
+	if ok, err := a.FinishDelivery(ctx, reserved.ID, reserved.ReservedToken, models.DeliveryOutcome{Status: models.DeliverySent}); err != nil || ok {
+		t.Errorf("FinishDelivery after the cancel = %v, %v; want no row written", ok, err)
+	}
+	for _, want := range []struct {
+		id     int64
+		status models.DeliveryStatus
+	}{{first.ID, models.DeliverySent}, {reserved.ID, models.DeliveryFailed}, {other.ID, models.DeliveryPending}} {
+		row := mustGetDelivery(t, a, want.id)
+		if row.Status != want.status {
+			t.Errorf("row %d (%s) status = %s, want %s", row.ID, row.SequenceKey, row.Status, want.status)
+		}
+	}
+	if row := mustGetDelivery(t, a, reserved.ID); row.LastError != "cancelled" {
+		t.Errorf("cancelled row last_error = %q, want %q", row.LastError, "cancelled")
 	}
 }

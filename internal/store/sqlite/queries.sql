@@ -2193,12 +2193,24 @@ WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status
 
 -- name: ReleaseDelivery :execrows
 -- Hands back a reserved row that was not sent, with the attempt that its
--- reservation counted.
+-- reservation counted, due again after delay_modifier.
 UPDATE notification_deliveries
 SET reserved_by = NULL,
     reserved_until = NULL,
-    attempts = attempts - 1
+    attempts = attempts - 1,
+    next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(sqlc.arg(delay_modifier) AS TEXT))
 WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status = 'pending';
+
+-- name: CancelDeliveries :execrows
+-- Ends the pending rows of one producer ref unsent. The raised token keeps a
+-- drain that reserved one from sending an email or writing an outcome.
+UPDATE notification_deliveries
+SET status = 'failed',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = sqlc.arg(last_error)
+WHERE producer = sqlc.arg(producer) AND producer_ref = sqlc.arg(producer_ref) AND status = 'pending';
 
 -- name: FinishDelivery :execrows
 -- Writes one attempt's outcome while the reservation is current. A pending

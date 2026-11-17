@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `GROUP BY service` or a LogsQL `stats by (service)` and **Group by**
   `service` fire and resolve each service on its own, with one notification
   per group and the group values in the labels. The alert page lists the
-  groups and resolves one at a time; the alert list shows "N firing". A
+  groups and resolves one at a time; the alert list shows "N firing".
+  Changing **Group by** closes the open episodes and sends each announced
+  group's resolved notification, so its PagerDuty incident closes. A
   grouped result with a repeated group, a missing group column or more than
   100 rows is an evaluation error, never a partial update.
 - ClickHouse alert queries accept the dashboard time macros `{{__from}}`,
@@ -78,10 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source, one rule or all of the source's rules, and up to five label
   matchers. It runs once for up to 30 days, or every week on chosen days for
   up to 24 hours in an IANA time zone, for maintenance windows. A silenced
-  group still changes state and writes history, and queues no notification
-  (one already queued still goes out); the notification it owes goes
-  out when the silence ends, and a group that fired and resolved inside a
-  silence sends nothing. Anyone who sees the source and holds `alerts:write`
+  group still changes state and writes history, and sends nothing: a
+  notification queued before the silence, or its retry, waits until the
+  silence ends. The notification it owes goes out when the silence ends, and
+  a group that fired and resolved inside a silence sends nothing. Anyone who sees the source and holds `alerts:write`
   can create one; the creator and global admins edit and delete it. The
   **Silences** tab lists them, and **Silence** on a group of a rule starts one
   for an hour. Routes: `/api/v1/alert-silences`.

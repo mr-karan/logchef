@@ -407,3 +407,76 @@ func TestCancelledDrainSpendsNoUnsentAttempt(t *testing.T) {
 		}
 	}
 }
+
+// TestDrainHoldFailureSendsNothing: when the hold check fails, the row goes
+// back unsent, with its attempt back, and is tried again after a wait.
+func TestDrainHoldFailureSendsNothing(t *testing.T) {
+	receiver, calls, _ := statusReceiver(t)
+	e := webhookEnv(t, receiver.URL)
+	e.drainer.hold = func(context.Context, *models.NotificationDelivery) (time.Duration, error) {
+		return 0, fmt.Errorf("silences unreadable")
+	}
+	e.enqueue(t, "")
+	e.drain(t)
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("receiver got %d requests, want none", n)
+	}
+	if row := e.row(t, 1); row.Status != models.DeliveryPending || row.Attempts != 0 || !row.NextAttemptAt.After(time.Now()) {
+		t.Errorf("row = status %s, attempts %d, next attempt %s; want pending, 0, later", row.Status, row.Attempts, row.NextAttemptAt)
+	}
+}
+
+// TestDrainChecksEachRowWhenItsTurnComes: the hold check and the reservation
+// check run when a worker is ready to send a row, not when the batch is
+// reserved. A row that a slow send kept waiting goes out held if a silence
+// started meanwhile, and not at all if it was cancelled meanwhile.
+func TestDrainChecksEachRowWhenItsTurnComes(t *testing.T) {
+	release := make(chan struct{})
+	var calls atomic.Int32
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) <= sendWorkers {
+			<-release
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	e := webhookEnv(t, receiver.URL)
+	// sendWorkers rows that stall, then one row to hold and one to cancel.
+	recipients := make([]string, sendWorkers+2)
+	e.enqueue(t, recipients...)
+	heldID, cancelledID := int64(sendWorkers+1), int64(sendWorkers+2)
+	var silenced atomic.Bool
+	e.drainer.hold = func(_ context.Context, row *models.NotificationDelivery) (time.Duration, error) {
+		if row.ID == heldID && silenced.Load() {
+			return time.Hour, nil
+		}
+		return 0, nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.drain(t)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for calls.Load() < sendWorkers && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := calls.Load(); got != sendWorkers {
+		t.Fatalf("receiver got %d requests, want the %d stalled ones", got, sendWorkers)
+	}
+	silenced.Store(true)
+	if _, err := e.raw.Exec(`UPDATE notification_deliveries SET status = 'failed', reserved_token = reserved_token + 1 WHERE id = ?`, cancelledID); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	if got := calls.Load(); got != sendWorkers {
+		t.Errorf("receiver got %d requests, want only the %d stalled ones", got, sendWorkers)
+	}
+	if row := e.row(t, heldID); row.Status != models.DeliveryPending || row.Attempts != 0 {
+		t.Errorf("held row = status %s, attempts %d; want pending with no attempt spent", row.Status, row.Attempts)
+	}
+	if row := e.row(t, cancelledID); row.Status != models.DeliveryFailed {
+		t.Errorf("cancelled row status = %s, want failed", row.Status)
+	}
+}
