@@ -96,6 +96,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--output json`. The new Schema Advisor docs page covers the rules,
   thresholds, budgets and metrics.
 
+### Fixed
+
+- Provisioning on Postgres no longer rewrites every managed source on each
+  startup. Postgres stores the connection as JSONB, whose text never matched
+  the declared connection, so each run updated every source and recorded a
+  source update audit event even when nothing changed.
+
+### Security
+
+- Provisioning export no longer writes custom header values of VictoriaLogs
+  and Loki sources. A header often carries a credential, such as an API key
+  for a fronting proxy, and the export ends up in files people commit or
+  share. Each header is now exported as a `header_secret_refs` entry naming
+  the environment variable `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`, the
+  same way `secret_ref` replaces the password or token. Provisioning reads
+  `header_secret_refs` on VictoriaLogs and Loki sources, and refuses to start
+  when a referenced variable is empty or not set, naming the source and the
+  header, instead of saving an empty header. Plain header values in
+  `connection.headers` keep working. To apply an export, set each named
+  variable to the header's value.
+
 ### Upgrade notes
 
 - The `sources` table accepts the new source type `loki` (SQLite migration

@@ -3,6 +3,8 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -11,7 +13,8 @@ import (
 )
 
 // ExportConfig reads the current database state and produces a ProvisioningConfig.
-// Passwords are replaced with secret_ref placeholders (never exported).
+// Passwords and custom header values are replaced with secret_ref and
+// header_secret_refs placeholders (never exported).
 func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningConfig, error) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
@@ -26,10 +29,30 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 		return nil, fmt.Errorf("failed to list sources: %w", err)
 	}
 
+	// Generated variable names come from sanitized names, so two sources or
+	// headers can map to one variable that cannot hold both secrets.
+	claimed := make(map[string]string)
+	claim := func(envVar, owner string) error {
+		if other, taken := claimed[envVar]; taken {
+			return fmt.Errorf("%s and %s both export as %s; rename one so each has its own variable", other, owner, envVar)
+		}
+		claimed[envVar] = owner
+		return nil
+	}
 	for _, src := range sources {
 		provisioned, err := exportSource(src)
 		if err != nil {
 			return nil, err
+		}
+		if src.SecretRef == "" && provisioned.SecretRef != "" {
+			if err := claim(provisioned.SecretRef, fmt.Sprintf("the secret of source %q", src.Name)); err != nil {
+				return nil, err
+			}
+		}
+		for _, header := range slices.Sorted(maps.Keys(provisioned.HeaderSecretRefs)) {
+			if err := claim(provisioned.HeaderSecretRefs[header], fmt.Sprintf("header %q of source %q", header, src.Name)); err != nil {
+				return nil, err
+			}
 		}
 		if provisioned.Views, err = exportSourceViews(ctx, db, src); err != nil {
 			return nil, err
@@ -77,7 +100,8 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 }
 
 // exportSource converts a stored source into its provisioning entry. A secret
-// is never exported: its place is taken by a secret_ref.
+// is never exported: its place is taken by a secret_ref, and each custom
+// header value by a header_secret_refs entry.
 func exportSource(src *models.Source) (config.ProvisionSource, error) {
 	provisioned := config.ProvisionSource{
 		Name:              src.Name,
@@ -90,51 +114,12 @@ func exportSource(src *models.Source) (config.ProvisionSource, error) {
 
 	switch models.NormalizeSourceType(src.SourceType) {
 	case models.SourceTypeVictoriaLogs:
-		conn, err := src.VictoriaLogsConnection()
-		if err != nil {
-			return config.ProvisionSource{}, fmt.Errorf("failed to decode victorialogs source %q: %w", src.Name, err)
-		}
-
-		if src.SecretRef != "" {
-			provisioned.SecretRef = src.SecretRef
-		} else {
-			switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
-			case "bearer":
-				if conn.Auth.Token != "" {
-					provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_TOKEN", sanitizeEnvName(src.Name))
-				}
-			case "basic":
-				if conn.Auth.Password != "" {
-					provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
-				}
-			}
-		}
-
-		conn.Auth.Password = ""
-		conn.Auth.Token = ""
-		if err := provisioned.SetConnectionConfig(conn); err != nil {
-			return config.ProvisionSource{}, fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
+		if err := exportVictoriaLogsSource(src, &provisioned); err != nil {
+			return config.ProvisionSource{}, err
 		}
 	case models.SourceTypeLoki:
-		conn, err := src.LokiConnection()
-		if err != nil {
-			return config.ProvisionSource{}, fmt.Errorf("failed to decode loki source %q: %w", src.Name, err)
-		}
-
-		if secret := lokiSecretField(&conn); src.SecretRef != "" {
-			provisioned.SecretRef = src.SecretRef
-		} else if secret != nil && *secret != "" {
-			suffix := "PASSWORD"
-			if normalizedAuthMode(conn.Auth.Mode) == "bearer" {
-				suffix = "TOKEN"
-			}
-			provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_%s", sanitizeEnvName(src.Name), suffix)
-		}
-
-		conn.Auth.Password = ""
-		conn.Auth.Token = ""
-		if err := provisioned.SetConnectionConfig(conn); err != nil {
-			return config.ProvisionSource{}, fmt.Errorf("failed to encode loki source %q: %w", src.Name, err)
+		if err := exportLokiSource(src, &provisioned); err != nil {
+			return config.ProvisionSource{}, err
 		}
 	default:
 		conn := src.Connection
@@ -151,6 +136,86 @@ func exportSource(src *models.Source) (config.ProvisionSource, error) {
 	}
 
 	return provisioned, nil
+}
+
+// exportVictoriaLogsSource fills p with the connection of a VictoriaLogs
+// source, its secret and header values replaced by references.
+func exportVictoriaLogsSource(src *models.Source, p *config.ProvisionSource) error {
+	conn, err := src.VictoriaLogsConnection()
+	if err != nil {
+		return fmt.Errorf("failed to decode victorialogs source %q: %w", src.Name, err)
+	}
+
+	if src.SecretRef != "" {
+		p.SecretRef = src.SecretRef
+	} else {
+		switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
+		case "bearer":
+			if conn.Auth.Token != "" {
+				p.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_TOKEN", sanitizeEnvName(src.Name))
+			}
+		case "basic":
+			if conn.Auth.Password != "" {
+				p.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
+			}
+		}
+	}
+
+	conn.Auth.Password = ""
+	conn.Auth.Token = ""
+	p.HeaderSecretRefs, conn.Headers = exportHeaders(src.Name, conn.Headers)
+	if err := p.SetConnectionConfig(conn); err != nil {
+		return fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
+	}
+	return nil
+}
+
+// exportLokiSource fills p with the connection of a Loki source, its secret
+// and header values replaced by references.
+func exportLokiSource(src *models.Source, p *config.ProvisionSource) error {
+	conn, err := src.LokiConnection()
+	if err != nil {
+		return fmt.Errorf("failed to decode loki source %q: %w", src.Name, err)
+	}
+
+	if secret := lokiSecretField(&conn); src.SecretRef != "" {
+		p.SecretRef = src.SecretRef
+	} else if secret != nil && *secret != "" {
+		suffix := "PASSWORD"
+		if normalizedAuthMode(conn.Auth.Mode) == "bearer" {
+			suffix = "TOKEN"
+		}
+		p.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_%s", sanitizeEnvName(src.Name), suffix)
+	}
+
+	conn.Auth.Password = ""
+	conn.Auth.Token = ""
+	p.HeaderSecretRefs, conn.Headers = exportHeaders(src.Name, conn.Headers)
+	if err := p.SetConnectionConfig(conn); err != nil {
+		return fmt.Errorf("failed to encode loki source %q: %w", src.Name, err)
+	}
+	return nil
+}
+
+// exportHeaders replaces each custom header value with a reference to the
+// environment variable LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>. A header with
+// an empty value holds no secret and stays in the connection, so importing the
+// export does not demand a variable for it.
+func exportHeaders(sourceName string, headers map[string]string) (refs, kept map[string]string) {
+	for _, name := range slices.Sorted(maps.Keys(headers)) {
+		if headers[name] == "" {
+			if kept == nil {
+				kept = make(map[string]string)
+			}
+			kept[name] = ""
+			continue
+		}
+		if refs == nil {
+			refs = make(map[string]string)
+		}
+		refs[name] = fmt.Sprintf("LOGCHEF_SOURCE_%s_HEADER_%s", sanitizeEnvName(sourceName), sanitizeEnvName(name))
+	}
+	return refs, kept
 }
 
 func sanitizeEnvName(name string) string {

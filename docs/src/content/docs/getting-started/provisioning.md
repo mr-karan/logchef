@@ -96,6 +96,7 @@ Once satisfied with the dry-run output, set `dry_run = false` and restart.
 | `source_type` | No | `clickhouse` | Datasource backend: `clickhouse`, `victorialogs` or `loki` |
 | `connection` | Yes for new configs | — | Provider-specific connection block |
 | `secret_ref` | No | — | Environment variable name for the provider secret |
+| `header_secret_refs` | No | — | VictoriaLogs and Loki: map of custom header name to the environment variable that holds its value |
 | `meta_ts_field` | No | `timestamp` for ClickHouse, `_time` for VictoriaLogs and Loki | Timestamp field name |
 | `meta_severity_field` | No | — (`detected_level` for Loki) | Severity/level column name |
 | `description` | No | — | Human-readable description |
@@ -289,6 +290,23 @@ export LOGCHEF_CH_PROD_PASSWORD="actual-password"
 
 For VictoriaLogs and Loki bearer auth, `secret_ref` fills `connection.auth.token`. For basic auth, it fills `connection.auth.password`.
 
+Custom headers on VictoriaLogs and Loki sources often carry a credential too, such as an API key for a proxy in front of the backend. Use `header_secret_refs` to read a header's value from an environment variable:
+
+```toml
+[[sources]]
+name = "Payments Logs"
+source_type = "victorialogs"
+
+[sources.connection]
+base_url = "https://logs.example.com"
+headers = { X-Team = "payments" }
+
+[sources.header_secret_refs]
+X-Api-Key = "LOGCHEF_SOURCE_PAYMENTS_LOGS_HEADER_X_API_KEY"
+```
+
+Each entry sets the header to the variable's value. As with `secret_ref`, a non-empty value for the same header in `connection.headers` wins. Header names match without regard to case, so naming one header twice in `header_secret_refs` in different case is an error. Logchef refuses to start when a referenced variable is empty or not set, and the error names the source, the header and the variable, so a missing secret never saves an empty header. A plain value in `connection.headers` still works for a header that holds no secret.
+
 For **Nomad** deployments, use Nomad variables with template blocks:
 ```toml
 password = "{{ "{{.ch_prod_password}}" }}"
@@ -343,6 +361,8 @@ curl -s https://logchef.example.com/api/v1/admin/provisioning/export \
 ```
 
 This returns a JSON representation of all sources with their source views, teams, and memberships, useful as a starting point for writing your `provisioning.toml`. Exported views import unchanged: no revision moves and no default changes.
+
+The export never holds a secret. A source's password or token becomes a `secret_ref`: the stored one, or `LOGCHEF_SOURCE_<SOURCE>_PASSWORD` (or `_TOKEN` for bearer auth). Each custom header with a value becomes a `header_secret_refs` entry naming `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`, where `<SOURCE>` and `<HEADER>` are the names in upper case with every character other than a letter, digit or underscore replaced by `_`. Logchef does not store header references, so the export uses this name even for a header you declared with another variable. When two generated names come out the same, for example for sources named `prod-eu` and `prod_eu`, the export fails and names both, because one variable cannot hold two secrets; rename one of them. Before you apply an export, set each of these variables to the secret or header value; with them set, importing the export changes nothing.
 
 ## Inline vs Separate File
 
