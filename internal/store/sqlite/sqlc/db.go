@@ -48,6 +48,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.authenticateOAuthAccessTokenStmt, err = db.PrepareContext(ctx, authenticateOAuthAccessToken); err != nil {
 		return nil, fmt.Errorf("error preparing query AuthenticateOAuthAccessToken: %w", err)
 	}
+	if q.cancelDeliveriesStmt, err = db.PrepareContext(ctx, cancelDeliveries); err != nil {
+		return nil, fmt.Errorf("error preparing query CancelDeliveries: %w", err)
+	}
 	if q.claimJobsStmt, err = db.PrepareContext(ctx, claimJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query ClaimJobs: %w", err)
 	}
@@ -871,6 +874,11 @@ func (q *Queries) Close() error {
 	if q.authenticateOAuthAccessTokenStmt != nil {
 		if cerr := q.authenticateOAuthAccessTokenStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing authenticateOAuthAccessTokenStmt: %w", cerr)
+		}
+	}
+	if q.cancelDeliveriesStmt != nil {
+		if cerr := q.cancelDeliveriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing cancelDeliveriesStmt: %w", cerr)
 		}
 	}
 	if q.claimJobsStmt != nil {
@@ -2220,6 +2228,7 @@ type Queries struct {
 	addTeamSourceStmt                      *sql.Stmt
 	advanceAlertEvalSeqStmt                *sql.Stmt
 	authenticateOAuthAccessTokenStmt       *sql.Stmt
+	cancelDeliveriesStmt                   *sql.Stmt
 	claimJobsStmt                          *sql.Stmt
 	claimOAuthAuthRequestDecisionStmt      *sql.Stmt
 	claimReportStmt                        *sql.Stmt
@@ -2494,6 +2503,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		addTeamSourceStmt:                      q.addTeamSourceStmt,
 		advanceAlertEvalSeqStmt:                q.advanceAlertEvalSeqStmt,
 		authenticateOAuthAccessTokenStmt:       q.authenticateOAuthAccessTokenStmt,
+		cancelDeliveriesStmt:                   q.cancelDeliveriesStmt,
 		claimJobsStmt:                          q.claimJobsStmt,
 		claimOAuthAuthRequestDecisionStmt:      q.claimOAuthAuthRequestDecisionStmt,
 		claimReportStmt:                        q.claimReportStmt,

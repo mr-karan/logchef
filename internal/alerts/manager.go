@@ -87,8 +87,8 @@ func (m *Manager) kickDrain(ctx context.Context) {
 // ManualResolve closes the open episode of one group, or of every group when
 // groupKey is nil. When the rule notifies on resolve, it enqueues one resolved
 // notification per closed group that was announced and that no silence mutes
-// now, in the same transaction. It returns models.ErrNotFound when nothing is
-// open.
+// now, in the same transaction; see episodeCloser. It returns
+// models.ErrNotFound when nothing is open.
 func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, groupKey *string, message string) error {
 	alert, err := m.db.GetAlert(ctx, alertID)
 	if err != nil {
@@ -98,12 +98,11 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, gro
 	if err != nil {
 		return fmt.Errorf("failed to list alert silences: %w", err)
 	}
-	var mc *messageContext
+	c := &episodeCloser{alert: alert, silences: silences, out: &outbox{alert: alert}, log: m.log, now: time.Now().UTC(),
+		message: message, extra: map[string]string{"resolved_by": "manual"}, tag: "manual"}
 	if alert.NotifyOnResolve {
-		mc = m.newMessageContext(ctx, alert)
+		c.mc = m.newMessageContext(ctx, alert)
 	}
-	now := time.Now().UTC()
-	out := &outbox{alert: alert}
 	// Close exactly the groups that were read, in one transaction, so every
 	// closed group gets its resolved notification. A group that opens after
 	// the read stays open.
@@ -125,23 +124,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, gro
 			if err := tx.ResolveAlertGroup(ctx, alertID, entry.GroupKey, message); err != nil {
 				return err
 			}
-			if !alert.NotifyOnResolve || !announced {
-				continue
-			}
-			if silenced := m.silencedBy(alert, silences, entry.Group, now); len(silenced) > 0 {
-				m.log.Debug("silenced manual resolve", "alert_id", alertID, "group_key", entry.GroupKey, "silences", silenced)
-				continue
-			}
-			resolved := *entry
-			resolved.Message = message
-			resolved.ResolvedAt = &now
-			resolved.Status = models.AlertStatusResolved
-			value := float64(0)
-			if entry.Value != nil {
-				value = *entry.Value
-			}
-			n := mc.resolvedNotification(&resolved, value, map[string]string{"resolved_by": "manual"})
-			if err := out.add(ctx, tx, n, entry, "manual"); err != nil {
+			if err := c.closed(ctx, tx, entry, announced); err != nil {
 				return err
 			}
 		}
@@ -150,7 +133,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, gro
 	if err != nil {
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
-	if out.enqueued > 0 {
+	if c.out.enqueued > 0 {
 		m.kickDrain(ctx)
 	}
 	return nil

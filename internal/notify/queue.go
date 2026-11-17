@@ -42,6 +42,11 @@ const (
 	keepFinished = 30 * 24 * time.Hour
 	// writeTimeout bounds each outcome write, which outlives a cancelled run.
 	writeTimeout = 10 * time.Second
+	// minHold is the shortest wait of a held row, so a hold that ends
+	// within the run cannot spin the reservation loop.
+	minHold = time.Second
+	// holdCheckRetry is the wait of a row whose hold check failed.
+	holdCheckRetry = drainInterval
 )
 
 // retryDelays are the waits after the first four failed attempts.
@@ -93,11 +98,19 @@ func Enqueue(ctx context.Context, tx store.DeliveryStore, deliveries []Delivery)
 	return nil
 }
 
+// HoldFunc decides, just before a reserved row is sent, whether it must not
+// go out yet, such as an alert row whose group a silence mutes now. A
+// positive wait holds the row back for that long. A held row keeps the
+// attempts it has left and blocks the later rows of its sequence, as any
+// pending row does.
+type HoldFunc func(ctx context.Context, row *models.NotificationDelivery) (wait time.Duration, err error)
+
 // DrainerOptions configures a Drainer. Senders maps each destination type to
-// its sender; a type without one fails its rows.
+// its sender; a type without one fails its rows. Hold is optional.
 type DrainerOptions struct {
 	Store   store.Store
 	Senders map[models.DestinationType]Sender
+	Hold    HoldFunc
 	Logger  *slog.Logger
 }
 
@@ -107,6 +120,7 @@ type DrainerOptions struct {
 type Drainer struct {
 	db      store.Store
 	senders map[models.DestinationType]Sender
+	hold    HoldFunc
 	log     *slog.Logger
 	owner   string
 	// lease and sendTimeout are the reservation and per-send deadline; tests
@@ -120,6 +134,7 @@ func NewDrainer(opts DrainerOptions) *Drainer {
 	return &Drainer{
 		db:          opts.Store,
 		senders:     opts.Senders,
+		hold:        opts.Hold,
 		log:         opts.Logger.With("component", "notify_drain", "owner", owner),
 		owner:       owner,
 		lease:       reservationLease,
@@ -187,13 +202,13 @@ func (d *Drainer) sendBatch(ctx context.Context, destinations *destinationCache,
 func (d *Drainer) send(ctx context.Context, destinations *destinationCache, row *models.NotificationDelivery) {
 	log := d.log.With("delivery_id", row.ID, "destination_id", row.DestinationID)
 	if ctx.Err() != nil {
-		d.release(ctx, log, row)
+		d.release(ctx, log, row, 0)
 		return
 	}
 	dest, err := destinations.get(ctx, row.DestinationID)
 	if err != nil {
 		log.Error("failed to load the delivery's destination", "error", err)
-		d.release(ctx, log, row)
+		d.release(ctx, log, row, 0)
 		return
 	}
 	var msg Message
@@ -210,9 +225,13 @@ func (d *Drainer) send(ctx context.Context, destinations *destinationCache, row 
 	}
 	if err == nil {
 		err = d.attempt(ctx, log, dest, sender, row, msg)
+		if held, ok := errors.AsType[*heldError](err); ok {
+			d.release(ctx, log, row, held.wait)
+			return
+		}
 		switch {
 		case errors.Is(err, errNotStarted):
-			d.release(ctx, log, row)
+			d.release(ctx, log, row, 0)
 			return
 		case errors.Is(err, errReservationLost):
 			metrics.RecordNotificationDelivery(string(dest.Type), "reservation_lost")
@@ -222,17 +241,47 @@ func (d *Drainer) send(ctx context.Context, destinations *destinationCache, row 
 	d.finish(ctx, log, dest, row, outcome(row.Attempts, err))
 }
 
+// heldError is a send that the hold function kept back for wait.
+type heldError struct{ wait time.Duration }
+
+func (e *heldError) Error() string { return fmt.Sprintf("notify: delivery held back for %s", e.wait) }
+
 var (
 	errReservationLost = errors.New("notify: a later reservation owns this delivery")
 	// errNotStarted is a send that the run's end reached before it began.
 	errNotStarted = errors.New("notify: the run ended before the send began")
 )
 
-// attempt sends the row. An email row is first marked attempting, durably,
-// so that a crash during SMTP leaves it unknown instead of sending it again.
+// attempt sends the row. Right before the send it asks the hold function,
+// and checks that the reservation is still current, so a row cancelled or
+// taken over while it waited for a worker is not sent. An email row is
+// instead marked attempting, durably and under the same token check, so that
+// a crash during SMTP leaves it unknown instead of sending it again.
 func (d *Drainer) attempt(ctx context.Context, log *slog.Logger, dest *models.NotificationDestination, sender Sender, row *models.NotificationDelivery, msg Message) error {
 	if ctx.Err() != nil {
 		return errNotStarted
+	}
+	if d.hold != nil {
+		wait, err := d.hold(ctx, row)
+		if err != nil {
+			log.Error("failed to check whether the delivery is held back; it is tried again later", "error", err)
+			return &heldError{wait: holdCheckRetry}
+		}
+		if wait > 0 {
+			log.Debug("holding back a delivery", "wait", max(wait, minHold))
+			return &heldError{wait: max(wait, minHold)}
+		}
+	}
+	if dest.Type != models.DestinationTypeEmail {
+		current, err := d.db.GetDelivery(ctx, row.ID)
+		if err != nil {
+			log.Error("failed to check the delivery's reservation; it is tried again later", "error", err)
+			return &heldError{wait: holdCheckRetry}
+		}
+		if current.Status != models.DeliveryPending || current.ReservedToken != row.ReservedToken {
+			log.Warn("the delivery was cancelled or taken over while it waited; sending nothing", "status", current.Status)
+			return errReservationLost
+		}
 	}
 	if dest.Type == models.DestinationTypeEmail {
 		var marked bool
@@ -253,11 +302,12 @@ func (d *Drainer) attempt(ctx context.Context, log *slog.Logger, dest *models.No
 	return sender.Send(sendCtx, dest, row.Recipient, row.ID, msg)
 }
 
-// release hands an unsent row back, with the attempt its reservation
-// counted, so a cancelled run spends none of its retries.
-func (d *Drainer) release(ctx context.Context, log *slog.Logger, row *models.NotificationDelivery) {
+// release hands an unsent row back, due again after the given wait, with the
+// attempt its reservation counted, so a cancelled run or a hold spends none
+// of its retries.
+func (d *Drainer) release(ctx context.Context, log *slog.Logger, row *models.NotificationDelivery, after time.Duration) {
 	var err error
-	d.write(ctx, func(ctx context.Context) { _, err = d.db.ReleaseDelivery(ctx, row.ID, row.ReservedToken) })
+	d.write(ctx, func(ctx context.Context) { _, err = d.db.ReleaseDelivery(ctx, row.ID, row.ReservedToken, after) })
 	if err != nil {
 		log.Error("failed to release an unsent delivery; it is tried again when its reservation ends", "error", err)
 	}

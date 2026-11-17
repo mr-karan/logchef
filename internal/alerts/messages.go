@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strconv"
 	"strings"
@@ -24,13 +25,19 @@ type messageContext struct {
 }
 
 func (m *Manager) newMessageContext(ctx context.Context, alert *models.Alert) *messageContext {
+	return newMessageContext(ctx, m.db, m.log, alert)
+}
+
+// newMessageContext reads what the messages of alert share through db, which
+// may be a transaction.
+func newMessageContext(ctx context.Context, db store.StoreOps, log *slog.Logger, alert *models.Alert) *messageContext {
 	mc := &messageContext{alert: alert}
-	if source, err := m.db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
+	if source, err := db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
 		mc.sourceName = source.Name
 	} else {
-		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
+		log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
 	}
-	mc.generatorURL = m.generatorURL(ctx, alert)
+	mc.generatorURL = generatorURL(ctx, db, alert)
 	return mc
 }
 
@@ -284,14 +291,14 @@ func (m *Manager) TestDestination(ctx context.Context, d *models.NotificationDes
 	return out
 }
 
-func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {
+func generatorURL(ctx context.Context, db store.SettingGetter, alert *models.Alert) string {
 	if trimmed := strings.TrimSpace(alert.GeneratorURL); trimmed != "" {
 		return trimmed
 	}
 
-	base := strings.TrimSpace(store.GetSettingWithDefault(ctx, m.db, "alerts.frontend_url", ""))
+	base := strings.TrimSpace(store.GetSettingWithDefault(ctx, db, "alerts.frontend_url", ""))
 	if base == "" {
-		base = strings.TrimSpace(store.GetSettingWithDefault(ctx, m.db, "alerts.external_url", ""))
+		base = strings.TrimSpace(store.GetSettingWithDefault(ctx, db, "alerts.external_url", ""))
 	}
 	if base == "" {
 		return ""

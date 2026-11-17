@@ -62,12 +62,24 @@ func (db *DB) MarkDeliveryAttempting(ctx context.Context, id, token int64) (bool
 	return n == 1, nil
 }
 
-func (db *DB) ReleaseDelivery(ctx context.Context, id, token int64) (bool, error) {
-	n, err := db.writeQueries.ReleaseDelivery(ctx, sqlc.ReleaseDeliveryParams{ID: id, ReservedToken: token})
+func (db *DB) ReleaseDelivery(ctx context.Context, id, token int64, after time.Duration) (bool, error) {
+	n, err := db.writeQueries.ReleaseDelivery(ctx, sqlc.ReleaseDeliveryParams{
+		DelayModifier: fmt.Sprintf("+%.3f seconds", after.Seconds()),
+		ID:            id,
+		ReservedToken: token,
+	})
 	if err != nil {
 		return false, fmt.Errorf("error releasing delivery %d: %w", id, translateBusy(err))
 	}
 	return n == 1, nil
+}
+
+func (db *DB) CancelDeliveries(ctx context.Context, producer, producerRef, errText string) (int64, error) {
+	n, err := db.writeQueries.CancelDeliveries(ctx, sqlc.CancelDeliveriesParams{LastError: nullString(errText), Producer: producer, ProducerRef: producerRef})
+	if err != nil {
+		return 0, fmt.Errorf("error cancelling deliveries of %s %s: %w", producer, producerRef, translateBusy(err))
+	}
+	return n, nil
 }
 
 func (db *DB) FinishDelivery(ctx context.Context, id, token int64, out models.DeliveryOutcome) (bool, error) {

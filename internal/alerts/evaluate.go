@@ -125,10 +125,12 @@ type openStep struct {
 
 // resolveStep is one group's closing change.
 type resolveStep struct {
-	change       Change
-	history      *models.AlertHistoryEntry
-	message      string
-	notify       bool
+	change  Change
+	history *models.AlertHistoryEntry
+	message string
+	notify  bool
+	// discard cancels the episode's queued notifications; see discardsQueued.
+	discard      bool
 	notification AlertNotification
 }
 
@@ -203,7 +205,10 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alert silences: %w", err)
 	}
-	silencedBy := func(group map[string]string) []int64 { return m.silencedBy(alert, silences, group, at) }
+	silenced := func(group map[string]string) []int64 {
+		ids, _ := silencedBy(m.log, alert, silences, group, at)
+		return ids
+	}
 	episodes := openEpisodes(instances, open)
 	stored, tracked := trackedGroups(instances, open, episodes)
 
@@ -237,12 +242,12 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 				// A tracked ok group keeps its last value and sighting.
 				current = stored[change.GroupKey]
 			}
-			plan.opens = append(plan.opens, m.planOpen(alert, rule, current, ep.history, change, at, silencedBy(change.Group), messages))
+			plan.opens = append(plan.opens, m.planOpen(alert, rule, current, ep.history, change, at, silenced(change.Group), messages))
 			plan.state = summaryState(plan.state, change.To)
 		case change.Closes():
-			silenced := silencedBy(change.Group)
-			if len(silenced) > 0 {
-				m.log.Debug("silenced alert resolve", "alert_id", alert.ID, "group_key", change.GroupKey, "silences", silenced)
+			muted := silenced(change.Group)
+			if len(muted) > 0 {
+				m.log.Debug("silenced alert resolve", "alert_id", alert.ID, "group_key", change.GroupKey, "silences", muted)
 			}
 			step := &resolveStep{
 				change:  change,
@@ -250,7 +255,8 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 				message: resolveMessage(alert, change),
 				// Only an announced episode resolves aloud, so a group that
 				// fired and resolved inside a silence sends nothing.
-				notify: alert.NotifyOnResolve && ep.instance.Notified && len(silenced) == 0,
+				notify:  alert.NotifyOnResolve && ep.instance.Notified && len(muted) == 0,
+				discard: discardsQueued(ep.instance.Notified, muted),
 			}
 			if step.notify {
 				m.log.Info("alert resolved", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", change.GroupKey, "value", change.Value, "threshold", alert.ThresholdValue)
@@ -336,6 +342,11 @@ func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertI
 	for _, step := range plan.resolves {
 		if err := tx.ResolveAlertGroup(ctx, alertID, step.change.GroupKey, step.message); err != nil {
 			return err
+		}
+		if step.discard {
+			if err := discardQueued(ctx, tx, alertID, step.history.ID); err != nil {
+				return err
+			}
 		}
 		if step.notify {
 			if err := plan.outbox.add(ctx, tx, step.notification, step.history, plan.tag); err != nil {
@@ -510,28 +521,31 @@ func (m *Manager) planSilencedOpen(alert *models.Alert, step *openStep, silenced
 }
 
 // silencedBy returns the ids of the silences that mute a group of alert at
-// at. A silence whose stored schedule cannot be read is logged and mutes
-// nothing, so a broken silence never hides a notification.
-func (m *Manager) silencedBy(alert *models.Alert, silences []*models.AlertSilence, group map[string]string, at time.Time) []int64 {
+// at, and the earliest end of their current windows. A silence whose stored
+// schedule cannot be read is logged and mutes nothing, so a broken silence
+// never hides a notification.
+func silencedBy(log *slog.Logger, alert *models.Alert, silences []*models.AlertSilence, group map[string]string, at time.Time) (ids []int64, until time.Time) {
 	if len(silences) == 0 {
-		return nil
+		return nil, time.Time{}
 	}
 	labels := SilenceLabels(alert, group)
-	var ids []int64
 	for _, silence := range silences {
 		if !Matches(silence, alert, labels) {
 			continue
 		}
-		active, err := ActiveAt(silence, at)
+		end, active, err := activeUntil(silence, at)
 		if err != nil {
-			m.log.Error("alert silence cannot be evaluated; it mutes nothing", "silence_id", silence.ID, "alert_id", alert.ID, "error", err)
+			log.Error("alert silence cannot be evaluated; it mutes nothing", "silence_id", silence.ID, "alert_id", alert.ID, "error", err)
 			continue
 		}
 		if active {
 			ids = append(ids, int64(silence.ID))
+			if until.IsZero() || end.Before(until) {
+				until = end
+			}
 		}
 	}
-	return ids
+	return ids, until
 }
 
 // openInstance is the instance after an evaluation that left the group in
