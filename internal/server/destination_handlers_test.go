@@ -543,3 +543,133 @@ func TestPagerDutyDestinationSecretNeverLeaks(t *testing.T) {
 	wantSecretChanged(t, changesOf(t, events[1]), "secret")
 	e.wantNoText("LEAKKEY")
 }
+
+// TestWebhookDestinationPayloadVersion: a new webhook destination gets
+// version 2 unless it asks for 1, an update that omits the version keeps the
+// stored one, and no other version or type takes one.
+func TestWebhookDestinationPayloadVersion(t *testing.T) {
+	e := newDestinationEnv(t, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	user := mkTestUser(t, e.s.store, "version-member@example.com", models.UserRoleMember)
+	token := e.token(user, models.TokenScopeDestinationsRead, models.TokenScopeDestinationsWrite)
+	hook := func(name, config string) string {
+		return fmt.Sprintf(`{"name":%q,"type":"webhook","scope":"private","secret":"https://hooks.example.com/x","config":%s}`, name, config)
+	}
+	version := func(id models.DestinationID) int {
+		t.Helper()
+		d, err := e.s.store.GetNotificationDestination(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.Config.PayloadVersion
+	}
+
+	fresh := destinationID(t, e.expect(token, http.MethodPost, destinationsPath, hook("fresh", "{}"), http.StatusCreated))
+	legacy := destinationID(t, e.expect(token, http.MethodPost, destinationsPath, hook("legacy", `{"payload_version":1}`), http.StatusCreated))
+	if version(fresh) != 2 || version(legacy) != 1 {
+		t.Fatalf("versions = %d, %d; want a new destination at 2 and an explicit 1 kept", version(fresh), version(legacy))
+	}
+	for _, config := range []string{`{"payload_version":3}`, `{"payload_version":-1}`} {
+		e.expect(token, http.MethodPost, destinationsPath, hook("bad", config), http.StatusBadRequest)
+	}
+
+	at := fmt.Sprintf("%s/%d", destinationsPath, legacy)
+	e.expect(token, http.MethodPut, at, `{"name":"legacy 2","type":"webhook","scope":"private","secret":""}`, http.StatusOK)
+	if version(legacy) != 1 {
+		t.Fatalf("an update without a version moved the destination to %d", version(legacy))
+	}
+	e.expect(token, http.MethodPut, at, `{"name":"legacy","type":"webhook","scope":"private","secret":"","config":{"payload_version":2}}`, http.StatusOK)
+	e.expect(token, http.MethodPut, at, `{"name":"legacy","type":"webhook","scope":"private","secret":"","config":{"payload_version":3}}`, http.StatusBadRequest)
+	if version(legacy) != 2 {
+		t.Fatalf("version = %d after moving to 2 and a refused 3", version(legacy))
+	}
+
+	slack := destinationID(t, e.expect(token, http.MethodPost, destinationsPath,
+		`{"name":"ops","type":"slack","scope":"private","secret":"https://hooks.slack.com/services/T000/B000/XXXX","config":{}}`, http.StatusCreated))
+	e.expect(token, http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"id":%d,"config":{"payload_version":3}}`, fresh), http.StatusBadRequest)
+	e.expect(token, http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"id":%d,"config":{"payload_version":2}}`, slack), http.StatusBadRequest)
+}
+
+// TestWebhookDestinationSecretNeverLeaks: a webhook URL reaches the receiver
+// and nothing else. Create, update, list, test by id with an unsaved version,
+// an unsaved test against a receiver that echoes the URL, and delete: no
+// response, stored audit event or log line holds the URL's path or query.
+func TestWebhookDestinationSecretNeverLeaks(t *testing.T) {
+	type request struct {
+		path    string
+		version float64
+	}
+	requests := make(chan request, 8)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		version, _ := body["version"].(float64)
+		requests <- request{path: r.URL.String(), version: version}
+		if strings.HasPrefix(r.URL.Path, "/fail/") {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, "no receiver at "+r.URL.String())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(receiver.Close)
+	allowlist, err := config.ParseWebhookAllowlist([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := receiver.URL + "/hooks/leak-token-first?key=leak-query"
+	second := receiver.URL + "/hooks/leak-token-second?key=leak-query"
+	failing := receiver.URL + "/fail/leak-token-third?key=leak-query"
+	e := newAuditRouteEnv(t, withAuditLogLines(), withConfig(func(c *config.Config) { c.Alerts.Enabled = true }), func(s *auditEnvSetup) {
+		sender := notify.NewWebhookSender(notify.WebhookSenderOptions{Logger: s.opts.Logger, AllowedHosts: allowlist})
+		s.opts.AlertsManager = alerts.NewManager(alerts.Options{DB: s.opts.SQLite, Logger: s.opts.Logger, Senders: map[models.DestinationType]notify.Sender{models.DestinationTypeWebhook: sender}})
+	})
+
+	created := e.do(http.MethodPost, destinationsPath, fmt.Sprintf(`{"name":"ops","type":"webhook","scope":"global","secret":%q}`, first), e.cookie)
+	wantStatus(t, created, http.StatusCreated)
+	var envelope struct {
+		Data models.NotificationDestination `json:"data"`
+	}
+	err = json.Unmarshal(created.body, &envelope)
+	if d := envelope.Data; err != nil || !d.HasSecret || d.SecretHint != "127.0.0.1" || d.Config.PayloadVersion != 2 {
+		t.Fatalf("create response %s: %v; want has_secret, the host as hint and version 2", created.body, err)
+	}
+	at := fmt.Sprintf("%s/%d", destinationsPath, envelope.Data.ID)
+	responses := []auditResp{
+		created,
+		e.do(http.MethodPut, at, fmt.Sprintf(`{"name":"ops","type":"webhook","scope":"global","secret":%q,"config":{"payload_version":1}}`, second), e.cookie),
+		e.do(http.MethodGet, destinationsPath, "", e.cookie),
+		e.do(http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"id":%d,"config":{"payload_version":2}}`, envelope.Data.ID), e.cookie),
+		e.do(http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"name":"failing","type":"webhook","scope":"global","secret":%q}`, failing), e.cookie),
+		e.do(http.MethodDelete, at, "", e.cookie),
+	}
+	leaks := []string{"leak-token", "leak-query", "/hooks/", "/fail/"}
+	for i, r := range responses {
+		if r.status >= 300 {
+			t.Errorf("request %d = %d %s", i, r.status, r.body)
+		}
+		for _, leak := range leaks {
+			if bytes.Contains(r.body, []byte(leak)) {
+				t.Errorf("response %d leaks %q: %s", i, leak, r.body)
+			}
+		}
+	}
+	got := []request{<-requests, <-requests}
+	want := []request{{"/hooks/leak-token-second?key=leak-query", 2}, {"/fail/leak-token-third?key=leak-query", 2}}
+	if got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("receiver got %+v, want the stored URL at the tested version 2, then the unsaved one", got)
+	}
+	if !bytes.Contains(responses[4].body, []byte("status 500")) {
+		t.Errorf("failed test response = %s, want the status", responses[4].body)
+	}
+
+	events := e.events()
+	if len(events) != 5 {
+		t.Fatalf("stored %d audit events, want create, update, two tests and delete", len(events))
+	}
+	changes := changesOf(t, events[1])
+	wantSecretChanged(t, changes, "secret")
+	if c := changes["config.payload_version"]; c["from"] != float64(2) || c["to"] != float64(1) {
+		t.Errorf("update changes = %v, want config.payload_version from 2 to 1", changes)
+	}
+	e.wantNoText(leaks...)
+}

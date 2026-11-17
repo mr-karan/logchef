@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import {
   notificationDestinationsApi,
   type DestinationRequest,
+  type DestinationTestRequest,
   type DestinationTestResponse,
   type NotificationDestination,
 } from "@/api/notificationDestinations";
@@ -68,7 +69,7 @@ export const useNotificationDestinationsStore = defineStore("notificationDestina
     });
   }
 
-  async function testDestination(payload: { id: number } | DestinationRequest) {
+  async function testDestination(payload: DestinationTestRequest) {
     return await state.callApi<DestinationTestResponse>({
       apiCall: () => notificationDestinationsApi.test(payload),
       operationKey: "testDestination",

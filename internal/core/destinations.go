@@ -166,12 +166,16 @@ func applyDestinationConfig(ctx context.Context, db store.StoreOps, user *models
 		if len(req.Config.UserIDs) > 0 || len(req.Config.Addresses) > 0 {
 			return invalidDestination("config: a webhook destination has no recipients")
 		}
+		// An omitted version keeps the stored one; a new destination gets
+		// version 2.
 		version := req.Config.PayloadVersion
-		if version == 0 {
-			version = notify.WebhookPayloadV1
-		}
-		if version != notify.WebhookPayloadV1 {
-			return invalidDestination("config.payload_version: only version 1 is available")
+		switch {
+		case version == 0 && existing != nil:
+			version = existing.Config.PayloadVersion
+		case version == 0:
+			version = notify.WebhookPayloadV2
+		case version != notify.WebhookPayloadV1 && version != notify.WebhookPayloadV2:
+			return invalidDestination("config.payload_version must be 1 or 2")
 		}
 		d.Config = models.DestinationConfig{PayloadVersion: version}
 		return applyDestinationSecret(d, req, "webhook URL", notify.ValidateWebhookURL)
@@ -375,6 +379,13 @@ func DestinationForTest(ctx context.Context, db store.StoreOps, user *models.Use
 		}
 		if !ok && user.Role != models.UserRoleAdmin {
 			return nil, fmt.Errorf("%w: you cannot use this destination", ErrDestinationForbidden)
+		}
+		// The form tests a version change before it is saved.
+		if version := req.Config.PayloadVersion; version != 0 {
+			if d.Type != models.DestinationTypeWebhook || (version != notify.WebhookPayloadV1 && version != notify.WebhookPayloadV2) {
+				return nil, invalidDestination("config.payload_version must be 1 or 2, for a webhook destination")
+			}
+			d.Config.PayloadVersion = version
 		}
 		return d, nil
 	}

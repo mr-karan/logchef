@@ -20,6 +20,7 @@ import type { TeamMember } from "@/api/teams";
 import type {
   DestinationRequest,
   DestinationScope,
+  DestinationTestRequest,
   DestinationTestResult,
   DestinationType,
   NotificationDestination,
@@ -55,6 +56,8 @@ const form = reactive({
   // The API never returns the URL or routing key; on edit a blank one keeps the stored one.
   url: "",
   routingKey: "",
+  // A new webhook gets version 2; a saved one keeps its version until changed here.
+  payloadVersion: String(base?.config.payload_version ?? 2),
   isActive: base?.is_active ?? true,
 });
 const error = ref<string | null>(null);
@@ -88,7 +91,7 @@ function request(): DestinationRequest {
   }
   if (form.type === "slack") return { ...base, config: {}, secret: form.url.trim() };
   if (form.type === "pagerduty") return { ...base, config: {}, secret: form.routingKey.trim() };
-  return { ...base, config: { payload_version: 1 }, secret: form.url.trim() };
+  return { ...base, config: { payload_version: Number(form.payloadVersion) }, secret: form.url.trim() };
 }
 
 // Webhook and Slack destinations send to a URL; email ones to recipients.
@@ -114,10 +117,14 @@ function toggleUser(userId: number, checked: boolean) {
   form.userIds = checked ? [...form.userIds, userId] : form.userIds.filter(id => id !== userId);
 }
 
-// A saved destination with no new URL or key is tested by id, so the stored one is used.
-function testPayload(): { id: number } | DestinationRequest {
-  if (editing.value && form.type !== "email" && !typedSecret.value) return { id: editing.value.id };
-  return request();
+// A saved destination with no new URL or key is tested by id, so the stored one is used,
+// at the payload version the form shows.
+function testPayload(): DestinationTestRequest {
+  const saved = editing.value;
+  if (!saved || form.type === "email" || typedSecret.value) return request();
+  const version = Number(form.payloadVersion);
+  if (form.type === "webhook" && version !== saved.config.payload_version) return { id: saved.id, config: { payload_version: version } };
+  return { id: saved.id };
 }
 
 async function sendTest() {
@@ -214,6 +221,17 @@ async function save() {
         <Textarea id="destination-addresses" v-model="form.addresses" rows="2" placeholder="oncall@example.com" />
       </div>
     </template>
+
+    <div v-if="form.type === 'webhook'" class="space-y-2">
+      <Label>{{ t("destinations.payloadVersion") }}</Label>
+      <Select v-model="form.payloadVersion">
+        <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="2">{{ t("destinations.payloadVersion2") }}</SelectItem>
+          <SelectItem value="1">{{ t("destinations.payloadVersion1") }}</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
 
     <label v-if="editing" class="flex items-center gap-2 text-sm">
       <Switch v-model="form.isActive" />

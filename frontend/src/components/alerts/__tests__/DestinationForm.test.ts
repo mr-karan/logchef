@@ -45,7 +45,7 @@ describe("DestinationForm", () => {
     await vi.waitFor(() => expect(network.requests).toHaveLength(1));
     expect(network.requests[0].config.method).toBe("put");
     expect(network.requests[0].config.url).toBe("/notification-destinations/5");
-    expect(body()).toMatchObject({ name: "On-call hook", type: "webhook", scope: "team", team_id: 3, secret: "", is_active: true });
+    expect(body()).toMatchObject({ name: "On-call hook", type: "webhook", scope: "team", team_id: 3, config: { payload_version: 1 }, secret: "", is_active: true });
   });
 
   it("tests a saved webhook by id when no new URL is typed", async () => {
@@ -70,6 +70,51 @@ describe("DestinationForm", () => {
     await vi.waitFor(() => expect(network.requests).toHaveLength(1));
     expect(network.requests[0].config.method).toBe("post");
     expect(body()).toMatchObject({ name: "On-call hook (copy)", scope: "team", team_id: 3, secret: "https://hooks.example.com/new" });
+  });
+
+  function versionSelect(): HTMLButtonElement {
+    const selects = [...host.querySelectorAll<HTMLButtonElement>("[role=combobox]")];
+    const found = selects.find((b) => b.textContent?.includes("Version"));
+    if (!found) throw new Error("no payload version select");
+    return found;
+  }
+
+  async function chooseVersion(label: string) {
+    versionSelect().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[role=option]")).not.toBeNull());
+    const option = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((el) => el.textContent?.trim() === label);
+    if (!option) throw new Error(`no option ${label}`);
+    option.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await nextTick(); await nextTick();
+  }
+
+  it("creates a new webhook at payload version 2", async () => {
+    mount({});
+    await nextTick();
+    expect(versionSelect().textContent?.trim()).toBe("Version 2");
+    const name = host.querySelector("#destination-name") as HTMLInputElement;
+    name.value = "Receiver";
+    name.dispatchEvent(new Event("input"));
+    const url = host.querySelector("#destination-url") as HTMLInputElement;
+    url.value = "https://hooks.example.com/new";
+    url.dispatchEvent(new Event("input"));
+    await nextTick();
+    host.querySelector("form")!.dispatchEvent(new Event("submit"));
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+    expect(body()).toMatchObject({ type: "webhook", config: { payload_version: 2 }, secret: "https://hooks.example.com/new" });
+  });
+
+  it("tests a version 1 webhook at version 2 by id before saving the change", async () => {
+    mount({ destination: webhook });
+    await nextTick();
+    expect(versionSelect().textContent?.trim()).toBe("Version 1 (legacy)");
+    await chooseVersion("Version 2");
+    button("Send test").click();
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+    expect(body()).toEqual({ id: 5, config: { payload_version: 2 } });
+    host.querySelector("form")!.dispatchEvent(new Event("submit"));
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+    expect(body(1)).toMatchObject({ type: "webhook", config: { payload_version: 2 }, secret: "" });
   });
 
   it("edits a Slack destination: its URL field, a test by id, and a save with no config", async () => {
