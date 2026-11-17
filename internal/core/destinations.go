@@ -161,26 +161,7 @@ func applyDestinationScope(ctx context.Context, db store.StoreOps, d *models.Not
 func applyDestinationConfig(ctx context.Context, db store.StoreOps, user *models.User, d *models.NotificationDestination, req *models.DestinationRequest, existing *models.NotificationDestination) error {
 	switch d.Type {
 	case models.DestinationTypeEmail:
-		config, err := notify.NormalizeEmailConfig(req.Config)
-		if err != nil {
-			return invalidDestination("config: %v", err)
-		}
-		for _, id := range config.UserIDs {
-			if _, err := db.GetUser(ctx, id); err != nil {
-				if models.IsNotFound(err) {
-					return invalidDestination("config.user_ids: user %d not found", id)
-				}
-				return fmt.Errorf("failed to load user: %w", err)
-			}
-		}
-		addressesChanged := existing == nil || !slices.Equal(existing.Config.Addresses, config.Addresses)
-		if len(config.Addresses) > 0 && addressesChanged && user.Role != models.UserRoleAdmin {
-			return fmt.Errorf("%w: only a global admin can add an email address that is not a Logchef user", ErrDestinationForbidden)
-		}
-		if req.Secret != "" {
-			return invalidDestination("secret is not used by an email destination")
-		}
-		d.Config, d.Secret = config, ""
+		return applyEmailConfig(ctx, db, user, d, req, existing)
 	case models.DestinationTypeWebhook:
 		if len(req.Config.UserIDs) > 0 || len(req.Config.Addresses) > 0 {
 			return invalidDestination("config: a webhook destination has no recipients")
@@ -193,19 +174,55 @@ func applyDestinationConfig(ctx context.Context, db store.StoreOps, user *models
 			return invalidDestination("config.payload_version: only version 1 is available")
 		}
 		d.Config = models.DestinationConfig{PayloadVersion: version}
-		if secret := strings.TrimSpace(req.Secret); secret != "" {
-			if err := notify.ValidateWebhookURL(secret); err != nil {
-				return invalidDestination("secret: %v", err)
-			}
-			d.Secret = secret
+		return applyDestinationSecret(d, req, "webhook URL", notify.ValidateWebhookURL)
+	case models.DestinationTypeSlack:
+		if len(req.Config.UserIDs) > 0 || len(req.Config.Addresses) > 0 || req.Config.PayloadVersion != 0 {
+			return invalidDestination("config: a Slack destination has no settings besides its URL")
 		}
-		if d.Secret == "" {
-			return invalidDestination("secret: the webhook URL is required")
-		}
-	case models.DestinationTypeSlack, models.DestinationTypePagerDuty:
+		d.Config = models.DestinationConfig{}
+		return applyDestinationSecret(d, req, "Slack webhook URL", notify.ValidateSlackWebhookURL)
+	case models.DestinationTypePagerDuty:
 		return invalidDestination("type %s is not available yet", d.Type)
 	default:
-		return invalidDestination("type must be email or webhook")
+		return invalidDestination("type must be email, webhook or slack")
+	}
+}
+
+func applyEmailConfig(ctx context.Context, db store.StoreOps, user *models.User, d *models.NotificationDestination, req *models.DestinationRequest, existing *models.NotificationDestination) error {
+	config, err := notify.NormalizeEmailConfig(req.Config)
+	if err != nil {
+		return invalidDestination("config: %v", err)
+	}
+	for _, id := range config.UserIDs {
+		if _, err := db.GetUser(ctx, id); err != nil {
+			if models.IsNotFound(err) {
+				return invalidDestination("config.user_ids: user %d not found", id)
+			}
+			return fmt.Errorf("failed to load user: %w", err)
+		}
+	}
+	addressesChanged := existing == nil || !slices.Equal(existing.Config.Addresses, config.Addresses)
+	if len(config.Addresses) > 0 && addressesChanged && user.Role != models.UserRoleAdmin {
+		return fmt.Errorf("%w: only a global admin can add an email address that is not a Logchef user", ErrDestinationForbidden)
+	}
+	if req.Secret != "" {
+		return invalidDestination("secret is not used by an email destination")
+	}
+	d.Config, d.Secret = config, ""
+	return nil
+}
+
+// applyDestinationSecret checks and sets a new secret; a blank one keeps the
+// stored secret, and a destination needs one.
+func applyDestinationSecret(d *models.NotificationDestination, req *models.DestinationRequest, what string, validate func(string) error) error {
+	if secret := strings.TrimSpace(req.Secret); secret != "" {
+		if err := validate(secret); err != nil {
+			return invalidDestination("secret: %v", err)
+		}
+		d.Secret = secret
+	}
+	if d.Secret == "" {
+		return invalidDestination("secret: the %s is required", what)
 	}
 	return nil
 }

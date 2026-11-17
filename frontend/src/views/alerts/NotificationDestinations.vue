@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Bell, Mail, Pencil, Plus, RefreshCcw, Search, Send, Webhook } from "lucide-vue-next";
+import { Bell, Mail, Pencil, Plus, RefreshCcw, Search, Send, Slack, Webhook } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +43,11 @@ function teamName(id: number | undefined): string {
 function scopeLabel(d: NotificationDestination): string {
   if (d.scope === "team") return teamName(d.team_id);
   return d.scope === "global" ? t("destinations.scopeGlobal") : t("destinations.scopePrivate");
+}
+
+function typeLabel(d: NotificationDestination): string {
+  if (d.type === "email") return t("destinations.typeEmail");
+  return d.type === "slack" ? t("destinations.typeSlack") : t("destinations.typeWebhook");
 }
 
 function target(d: NotificationDestination): string {
@@ -208,8 +213,9 @@ onMounted(initializeContext);
                 <TableCell class="py-3 text-sm">
                   <span class="inline-flex items-center gap-1.5">
                     <Mail v-if="d.type === 'email'" class="h-3.5 w-3.5 text-muted-foreground" />
+                    <Slack v-else-if="d.type === 'slack'" class="h-3.5 w-3.5 text-muted-foreground" />
                     <Webhook v-else class="h-3.5 w-3.5 text-muted-foreground" />
-                    {{ d.type === 'email' ? t('destinations.typeEmail') : t('destinations.typeWebhook') }}
+                    {{ typeLabel(d) }}
                   </span>
                 </TableCell>
                 <TableCell class="py-3 text-sm">{{ scopeLabel(d) }}</TableCell>

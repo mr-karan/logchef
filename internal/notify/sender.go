@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -101,4 +104,40 @@ func BoundedError(err error) string {
 		limit--
 	}
 	return message[:limit] + marker
+}
+
+// formatGroupValues joins a group's values as key=value, sorted by key.
+func formatGroupValues(group map[string]string) string {
+	keys := slices.Sorted(maps.Keys(group))
+	parts := make([]string, len(keys))
+	for i, key := range keys {
+		parts[i] = key + "=" + group[key]
+	}
+	return strings.Join(parts, ", ")
+}
+
+// formatNumber shows at most four decimals, without trailing zeros.
+func formatNumber(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 4, 64)
+	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
+}
+
+var thresholdSymbols = map[string]string{"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "eq": "=", "neq": "!="}
+
+// thresholdText is a rule's threshold as an operator symbol and a number.
+func thresholdText(op string, value float64) string {
+	symbol := thresholdSymbols[op]
+	if symbol == "" {
+		symbol = op
+	}
+	return symbol + " " + formatNumber(value)
+}
+
+// cut keeps s within limit characters, ending a cut with an ellipsis.
+func cut(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:limit-1]) + "…"
 }

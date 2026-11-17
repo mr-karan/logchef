@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { Mail, Plus, Webhook, X } from "lucide-vue-next";
+import { Mail, Plus, Slack, Webhook, X } from "lucide-vue-next";
 import type { AcceptableValue } from "reka-ui";
 
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +79,7 @@ onMounted(load);
           <SelectItem v-for="destination in available" :key="destination.id" :value="String(destination.id)">
             <div class="flex items-center gap-2">
               <Mail v-if="destination.type === 'email'" class="h-3 w-3" />
+              <Slack v-else-if="destination.type === 'slack'" class="h-3 w-3" />
               <Webhook v-else class="h-3 w-3" />
               <span>{{ destination.name }}</span>
               <span v-if="destination.secret_hint" class="text-xs text-muted-foreground">{{ destination.secret_hint }}</span>
@@ -97,6 +98,7 @@ onMounted(load);
     <div v-if="selected.length > 0" class="flex flex-wrap gap-2">
       <Badge v-for="id in selected" :key="id" variant="secondary" class="flex items-center gap-1 font-normal">
         <Mail v-if="byId.get(id)?.type === 'email'" class="h-3 w-3 opacity-50" />
+        <Slack v-else-if="byId.get(id)?.type === 'slack'" class="h-3 w-3 opacity-50" />
         <Webhook v-else class="h-3 w-3 opacity-50" />
         <span>{{ byId.get(id)?.name ?? t("alerts.destinationUnknown", { id }) }}</span>
         <span v-if="byId.get(id) && !byId.get(id)?.is_active" class="text-xs text-muted-foreground">{{ t("alerts.destinationInactive") }}</span>

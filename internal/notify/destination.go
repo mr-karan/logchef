@@ -36,6 +36,19 @@ func ValidateWebhookURL(raw string) error {
 	return nil
 }
 
+// slackWebhookHosts are the hosts of Slack incoming webhooks.
+var slackWebhookHosts = []string{"hooks.slack.com", "hooks.slack-gov.com"}
+
+// ValidateSlackWebhookURL accepts an https Slack incoming webhook URL, so a
+// Slack destination cannot post its message to another host.
+func ValidateSlackWebhookURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || !slices.Contains(slackWebhookHosts, strings.ToLower(parsed.Host)) {
+		return errors.New("the Slack webhook URL must start with https://hooks.slack.com/ or https://hooks.slack-gov.com/")
+	}
+	return nil
+}
+
 // NormalizeEmailConfig trims, deduplicates and checks the recipients of an
 // email destination. It does not check that the users exist.
 func NormalizeEmailConfig(config models.DestinationConfig) (models.DestinationConfig, error) {

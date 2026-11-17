@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -134,7 +135,7 @@ func TestDestinationAccess(t *testing.T) {
 	e.expect(tok[member], http.MethodPost, destinationsPath, email(fmt.Sprintf(`{"user_ids":[%d]}`, outsider.ID)), http.StatusCreated)
 	e.expect(tok[admin], http.MethodPost, destinationsPath, email(`{"addresses":["oncall@example.com"]}`), http.StatusCreated)
 	e.expect(tok[member], http.MethodPost, destinationsPath, email(`{"user_ids":[999999]}`), http.StatusBadRequest)
-	e.expect(tok[member], http.MethodPost, destinationsPath, `{"name":"slack","type":"slack","scope":"private","secret":"https://hooks.slack.com/x"}`, http.StatusBadRequest)
+	e.expect(tok[member], http.MethodPost, destinationsPath, `{"name":"pd","type":"pagerduty","scope":"private","secret":"0123456789abcdef0123456789abcdef"}`, http.StatusBadRequest)
 
 	// A destination in use is refused with the count; a free one deletes.
 	alert := &models.Alert{SourceID: src.ID, Name: "uses it", QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
@@ -349,4 +350,106 @@ func TestDestinationTestTransportErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// senderFunc is a sender that never leaves the process.
+type senderFunc func(dest *models.NotificationDestination) error
+
+func (f senderFunc) Send(_ context.Context, dest *models.NotificationDestination, _ string, _ int64, _ notify.Message) error {
+	return f(dest)
+}
+
+// TestSlackDestinationURLChecks: a Slack destination saves only with an https
+// Slack incoming webhook URL, and has no settings besides it.
+func TestSlackDestinationURLChecks(t *testing.T) {
+	e := newDestinationEnv(t, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	user := mkTestUser(t, e.s.store, "slack-member@example.com", models.UserRoleMember)
+	token := e.token(user, models.TokenScopeDestinationsRead, models.TokenScopeDestinationsWrite)
+	slack := func(secret, config string) string {
+		return fmt.Sprintf(`{"name":"ops","type":"slack","scope":"private","secret":%q,"config":%s}`, secret, config)
+	}
+	for _, url := range []string{
+		"https://hooks.example.com/services/T000/B000/XXXX",
+		"https://hooks.slack.com.example.com/services/T000/B000/XXXX",
+		"http://hooks.slack.com/services/T000/B000/XXXX",
+		"https://hooks.slack.com:8443/services/T000/B000/XXXX",
+		"",
+	} {
+		e.expect(token, http.MethodPost, destinationsPath, slack(url, "{}"), http.StatusBadRequest)
+	}
+	e.expect(token, http.MethodPost, destinationsPath, slack("https://hooks.slack.com/services/T000/B000/XXXX", `{"payload_version":1}`), http.StatusBadRequest)
+	e.expect(token, http.MethodPost, destinationsPath, slack("https://hooks.slack.com/services/T000/B000/XXXX", `{"user_ids":[1]}`), http.StatusBadRequest)
+
+	id := destinationID(t, e.expect(token, http.MethodPost, destinationsPath, slack("https://hooks.slack-gov.com/services/T000/B000/XXXX", "{}"), http.StatusCreated))
+	at := fmt.Sprintf("%s/%d", destinationsPath, id)
+	// A blank URL keeps the stored one; another host is refused on update too.
+	e.expect(token, http.MethodPut, at, `{"name":"ops 2","type":"slack","scope":"private","secret":""}`, http.StatusOK)
+	e.expect(token, http.MethodPut, at, `{"name":"ops 2","type":"slack","scope":"private","secret":"https://example.com/hook"}`, http.StatusBadRequest)
+	stored, err := e.s.store.GetNotificationDestination(context.Background(), id)
+	if err != nil || stored.Secret != "https://hooks.slack-gov.com/services/T000/B000/XXXX" || stored.Name != "ops 2" {
+		t.Fatalf("stored = %+v, %v; want the first URL kept", stored, err)
+	}
+}
+
+// TestSlackDestinationSecretNeverLeaks: the Slack webhook URL reaches the
+// sender and nothing else: no API response, no stored audit event and no
+// log line holds it.
+func TestSlackDestinationSecretNeverLeaks(t *testing.T) {
+	const (
+		first  = "https://hooks.slack.com/services/T0LEAKTEAM/B0LEAKHOOK/leak-token-first"
+		second = "https://hooks.slack.com/services/T0LEAKTEAM/B0LEAKHOOK/leak-token-second"
+	)
+	sent := make(chan string, 8)
+	sender := senderFunc(func(dest *models.NotificationDestination) error {
+		sent <- dest.Secret
+		if dest.Name == "failing" {
+			return notify.Permanent(errors.New("slack delivery failed: status 404: no_service"))
+		}
+		return nil
+	})
+	e := newAuditRouteEnv(t, withAuditLogLines(), withConfig(func(c *config.Config) { c.Alerts.Enabled = true }), func(s *auditEnvSetup) {
+		s.opts.AlertsManager = alerts.NewManager(alerts.Options{DB: s.opts.SQLite, Logger: s.opts.Logger, Senders: map[models.DestinationType]notify.Sender{models.DestinationTypeSlack: sender}})
+	})
+	created := e.do(http.MethodPost, destinationsPath, fmt.Sprintf(`{"name":"ops","type":"slack","scope":"global","secret":%q}`, first), e.cookie)
+	wantStatus(t, created, http.StatusCreated)
+	var envelope struct {
+		Data models.NotificationDestination `json:"data"`
+	}
+	err := json.Unmarshal(created.body, &envelope)
+	if d := envelope.Data; err != nil || !d.HasSecret || d.SecretHint != "hooks.slack.com" {
+		t.Fatalf("create response %s: %v; want has_secret and the host as hint", created.body, err)
+	}
+	d := envelope.Data
+	at := fmt.Sprintf("%s/%d", destinationsPath, d.ID)
+	responses := []auditResp{
+		created,
+		e.do(http.MethodPut, at, fmt.Sprintf(`{"name":"ops","type":"slack","scope":"global","secret":%q}`, second), e.cookie),
+		e.do(http.MethodGet, destinationsPath, "", e.cookie),
+		e.do(http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"id":%d}`, d.ID), e.cookie),
+		e.do(http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"name":"failing","type":"slack","scope":"global","secret":%q}`, first), e.cookie),
+		e.do(http.MethodDelete, at, "", e.cookie),
+	}
+	for i, r := range responses {
+		if r.status >= 300 {
+			t.Errorf("request %d = %d %s", i, r.status, r.body)
+		}
+		for _, leak := range []string{"leak-token", "T0LEAKTEAM", "/services/"} {
+			if bytes.Contains(r.body, []byte(leak)) {
+				t.Errorf("response %d leaks %q: %s", i, leak, r.body)
+			}
+		}
+	}
+	if got := []string{<-sent, <-sent}; got[0] != second || got[1] != first {
+		t.Errorf("sender received %q, want the stored URL, then the unsaved one", got)
+	}
+	if !bytes.Contains(responses[4].body, []byte("no_service")) {
+		t.Errorf("failed test response = %s, want the Slack error", responses[4].body)
+	}
+
+	events := e.events()
+	if len(events) != 5 {
+		t.Fatalf("stored %d audit events, want create, update, two tests and delete", len(events))
+	}
+	wantSecretChanged(t, changesOf(t, events[1]), "secret")
+	e.wantNoText("leak-token", "T0LEAKTEAM", "/services/")
 }
