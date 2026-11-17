@@ -84,6 +84,7 @@ onMounted(load);
               <Webhook v-else class="h-3 w-3" />
               <span>{{ destination.name }}</span>
               <span v-if="destination.secret_hint" class="text-xs text-muted-foreground">{{ destination.secret_hint }}</span>
+              <span v-if="destination.type === 'webhook' && destination.config.payload_version" class="text-xs text-muted-foreground">{{ t("destinations.webhookVersion", { version: destination.config.payload_version }) }}</span>
             </div>
           </SelectItem>
         </SelectContent>

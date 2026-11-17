@@ -37,6 +37,8 @@ type Message struct {
 	DedupKey string `json:"dedup_key,omitempty"`
 	// Alert is the body of a version 1 webhook.
 	Alert *AlertPayload `json:"alert,omitempty"`
+	// Webhook is the content of a version 2 webhook body.
+	Webhook *WebhookContent `json:"webhook,omitempty"`
 }
 
 // Sender delivers one message to one destination, or to one recipient of an

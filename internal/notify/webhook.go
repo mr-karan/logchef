@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,8 +35,8 @@ const maxWebhookResponseBytes = 256
 // maxRetryAfter caps a receiver's Retry-After.
 const maxRetryAfter = 10 * time.Minute
 
-// WebhookSender posts a message's version 1 payload to a webhook
-// destination's URL.
+// WebhookSender posts a message to a webhook destination's URL in the
+// destination's payload version.
 type WebhookSender struct {
 	client *http.Client
 	logger *slog.Logger
@@ -118,19 +117,19 @@ func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
 	}
 }
 
-// Send posts msg's version 1 payload to dest's URL. A deliveryID above zero
-// goes in the Logchef-Delivery-Id header, so a receiver can drop a repeat.
+// Send posts msg to dest's URL in dest's payload version. A deliveryID above
+// zero goes in the Logchef-Delivery-Id header, so a receiver can drop a
+// repeat.
 func (s *WebhookSender) Send(ctx context.Context, dest *models.NotificationDestination, _ string, deliveryID int64, msg Message) error {
-	if msg.Alert == nil {
-		return Permanent(errors.New("webhook delivery failed: the message has no webhook payload"))
-	}
-	body, err := json.Marshal(msg.Alert)
+	body, err := webhookBody(dest.Config.PayloadVersion, deliveryID, msg, time.Now())
 	if err != nil {
 		return Permanent(fmt.Errorf("webhook delivery failed: %w", err))
 	}
 	answer, err := s.post(ctx, dest.Name, dest.Secret, deliveryID, body)
 	if err == nil && !answer.ok() {
-		s.logger.Warn("webhook delivery failed", "destination", dest.Name, "status", answer.status, "response_excerpt", answer.body)
+		// The response body is not logged: a receiver may echo the URL,
+		// which carries the destination's token.
+		s.logger.Warn("webhook delivery failed", "destination", dest.Name, "status", answer.status)
 		err = answer.err("")
 	}
 	if err != nil {

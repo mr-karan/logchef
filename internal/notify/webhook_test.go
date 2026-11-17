@@ -28,7 +28,7 @@ var testMessage = Message{Event: EventFiring, Alert: &AlertPayload{AlertName: "e
 
 // hook is a webhook destination that posts to url.
 func hook(target string) *models.NotificationDestination {
-	return &models.NotificationDestination{ID: 1, Name: "hook", Type: models.DestinationTypeWebhook, Secret: target, IsActive: true}
+	return &models.NotificationDestination{ID: 1, Name: "hook", Type: models.DestinationTypeWebhook, Config: models.DestinationConfig{PayloadVersion: WebhookPayloadV1}, Secret: target, IsActive: true}
 }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -320,34 +320,32 @@ func (transport webhookErrorTransport) RoundTrip(*http.Request) (*http.Response,
 	return nil, transport.err
 }
 
-func TestWebhookCapsEachResponseExcerpt(t *testing.T) {
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+// TestWebhookNeverLogsTheResponseBody: a receiver that echoes the request
+// path, where a webhook URL carries its token, reaches neither the error
+// nor the log.
+func TestWebhookNeverLogsTheResponseBody(t *testing.T) {
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
-		_, _ = io.WriteString(w, strings.Repeat("x", 300))
+		_, _ = io.WriteString(w, "no route for "+r.URL.String())
 	}))
 	defer receiver.Close()
 	var logs bytes.Buffer
 	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	for range 2 {
-		err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage)
-		if err == nil || strings.Contains(err.Error(), "xxx") || !strings.Contains(err.Error(), "status 502") {
-			t.Fatalf("response error retained body or lost status: %v", err)
+	for _, version := range []int{WebhookPayloadV1, WebhookPayloadV2} {
+		dest := hook(receiver.URL + "/hooks/leak-token?key=leak-query")
+		dest.Config.PayloadVersion = version
+		err := sender.Send(t.Context(), dest, "", 1, v2TestMessage())
+		if err == nil || err.Error() != "webhook delivery failed: status 502" || IsPermanent(err) {
+			t.Fatalf("version %d: delivery error = %v, want transient status 502 alone", version, err)
 		}
 	}
-	entries := strings.Split(strings.TrimSpace(logs.String()), "\n")
-	if len(entries) != 2 {
-		t.Fatalf("logged %d responses, want two", len(entries))
+	if strings.Count(logs.String(), `"status":502`) != 2 {
+		t.Errorf("logs = %s, want one failure line per send", logs.String())
 	}
-	for _, entry := range entries {
-		var logged struct {
-			Excerpt string `json:"response_excerpt"`
-		}
-		if err := json.Unmarshal([]byte(entry), &logged); err != nil {
-			t.Fatal(err)
-		}
-		if len(logged.Excerpt) > 256 || !strings.HasSuffix(logged.Excerpt, " [truncated]") {
-			t.Fatalf("invalid excerpt length %d", len(logged.Excerpt))
+	for _, leak := range []string{"leak-token", "leak-query", "no route"} {
+		if strings.Contains(logs.String(), leak) {
+			t.Errorf("log leaks %q: %s", leak, logs.String())
 		}
 	}
 }

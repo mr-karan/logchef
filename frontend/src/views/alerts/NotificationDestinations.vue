@@ -48,7 +48,8 @@ function scopeLabel(d: NotificationDestination): string {
 function typeLabel(d: NotificationDestination): string {
   if (d.type === "email") return t("destinations.typeEmail");
   if (d.type === "slack") return t("destinations.typeSlack");
-  return d.type === "pagerduty" ? t("destinations.typePagerDuty") : t("destinations.typeWebhook");
+  if (d.type === "pagerduty") return t("destinations.typePagerDuty");
+  return d.config.payload_version ? t("destinations.webhookVersion", { version: d.config.payload_version }) : t("destinations.typeWebhook");
 }
 
 function target(d: NotificationDestination): string {

@@ -35,6 +35,9 @@ export interface DestinationRequest {
   is_active?: boolean;
 }
 
+// A saved destination is tested by id; a webhook may try another payload version before it is saved.
+export type DestinationTestRequest = { id: number; config?: Pick<DestinationConfig, "payload_version"> } | DestinationRequest;
+
 export interface DestinationTestResult {
   target: string;
   ok: boolean;
@@ -54,6 +57,6 @@ export const notificationDestinationsApi = {
     apiClient.put<NotificationDestination>(`/notification-destinations/${id}`, payload),
   delete: (id: number) =>
     apiClient.delete<{ message: string }>(`/notification-destinations/${id}`),
-  test: (payload: { id: number } | DestinationRequest) =>
+  test: (payload: DestinationTestRequest) =>
     apiClient.post<DestinationTestResponse>("/notification-destinations/test", payload),
 };

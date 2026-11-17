@@ -87,27 +87,30 @@ func (mc *messageContext) metadata(status models.AlertStatus, value float64, gro
 func (mc *messageContext) notification(history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
 	alert := mc.alert
 	return AlertNotification{
-		AlertID:        alert.ID,
-		AlertName:      alert.Name,
-		Description:    strings.TrimSpace(alert.Description),
-		Status:         status,
-		Severity:       alert.Severity,
-		SourceID:       alert.SourceID,
-		SourceName:     mc.sourceName,
-		Value:          value,
-		ThresholdOp:    alert.ThresholdOperator,
-		ThresholdValue: alert.ThresholdValue,
-		FrequencySecs:  alert.FrequencySeconds,
-		LookbackSecs:   alert.LookbackSeconds,
-		Query:          strings.TrimSpace(alert.Query),
-		ConditionJSON:  strings.TrimSpace(alert.ConditionJSON),
-		Group:          copyStringMap(history.Group),
-		Labels:         copyStringMap(labels),
-		Annotations:    copyStringMap(annotations),
-		TriggeredAt:    history.TriggeredAt,
-		ResolvedAt:     history.ResolvedAt,
-		GeneratorURL:   mc.generatorURL,
-		Message:        history.Message,
+		AlertID:         alert.ID,
+		AlertName:       alert.Name,
+		Description:     strings.TrimSpace(alert.Description),
+		Status:          status,
+		Severity:        alert.Severity,
+		SourceID:        alert.SourceID,
+		SourceName:      mc.sourceName,
+		Value:           value,
+		ThresholdOp:     alert.ThresholdOperator,
+		ThresholdValue:  alert.ThresholdValue,
+		FrequencySecs:   alert.FrequencySeconds,
+		LookbackSecs:    alert.LookbackSeconds,
+		QueryLanguage:   alert.QueryLanguage,
+		Query:           strings.TrimSpace(alert.Query),
+		ConditionJSON:   strings.TrimSpace(alert.ConditionJSON),
+		Group:           copyStringMap(history.Group),
+		Labels:          copyStringMap(labels),
+		Annotations:     copyStringMap(annotations),
+		RuleLabels:      copyStringMap(alert.Labels),
+		RuleAnnotations: copyStringMap(alert.Annotations),
+		TriggeredAt:     history.TriggeredAt,
+		ResolvedAt:      history.ResolvedAt,
+		GeneratorURL:    mc.generatorURL,
+		Message:         history.Message,
 	}
 }
 
@@ -173,6 +176,7 @@ func (o *outbox) add(ctx context.Context, tx store.StoreOps, n AlertNotification
 		o.loaded = true
 	}
 	ev := event(n.Status)
+	n.HistoryID = episode.ID
 	msg := n.message(ev)
 	msg.DedupKey = IncidentKey(o.alert.ID, episode.GroupKey)
 	ref := DeliveryRef(o.alert.ID, episode.ID)
@@ -228,6 +232,7 @@ func testNotification(description string) AlertNotification {
 		ThresholdValue: 0.0,
 		FrequencySecs:  60,
 		LookbackSecs:   300,
+		QueryLanguage:  models.QueryLanguageClickHouseSQL,
 		Query:          "SELECT 1",
 		TriggeredAt:    time.Now().UTC(),
 		Message:        "Test notification - please ignore",

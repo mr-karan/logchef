@@ -21,9 +21,13 @@ import (
 // MaxEmailRecipients bounds the users and addresses of one email destination.
 const MaxEmailRecipients = 20
 
-// WebhookPayloadV1 is the payload of a rule's webhook before destinations
-// existed. Version 2 arrives with RFC 0006 unit D6.
-const WebhookPayloadV1 = 1
+// Webhook payload versions. Version 1 is the payload of a rule's webhook
+// before destinations existed, kept for receivers that parse it; version 2
+// is the RFC 0006 body, the default for a new destination.
+const (
+	WebhookPayloadV1 = 1
+	WebhookPayloadV2 = 2
+)
 
 // ValidateWebhookURL accepts an absolute http or https URL with a host.
 func ValidateWebhookURL(raw string) error {
