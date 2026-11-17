@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "{time} 분석됨",
   "advisor.stale": "오래됨",
   "advisor.runAnalysis": "분석 실행",
+  "advisor.refreshWeekly": "매주 새로 고침",
   "advisor.running": "분석 중…",
   "advisor.loadFailed": "스키마 권장 사항을 불러오지 못했습니다",
   "advisor.runFailed": "분석 실패",

@@ -98,6 +98,7 @@ before the change records nothing, except a failed sign-in.
 | Saved query | `saved_query.create`, `saved_query.update`, `saved_query.delete` | A saved query changes. A delete also removes the query's scheduled reports, with no `report.delete` of their own: `detail.reports_removed` counts them |
 | Saved view | `saved_view.create`, `saved_view.update`, `saved_view.delete`, `saved_view.set_default`, `saved_view.clear_default` | An Explorer view changes or becomes or stops being a default |
 | Schema advisor dismissal | `schema_advisor_dismissal.create`, `schema_advisor_dismissal.delete` | An admin dismisses or restores a schema advisor finding |
+| Schema advisor schedule | `schema_advisor_schedule.update` | An admin turns a source's weekly schema analysis on or off |
 | Service account | `service_account.create`, `service_account.delete` | A service account is created or deleted |
 | Session | `session.login`, `session.logout` | A local or OIDC sign-in (`detail.method`), including a failed one, and a sign-out |
 | Setting | `setting.update`, `setting.delete`, `setting.test` | A system setting changes, or the test email or webhook is sent |

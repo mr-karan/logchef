@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "Analysé {time}",
   "advisor.stale": "Obsolète",
   "advisor.runAnalysis": "Lancer l’analyse",
+  "advisor.refreshWeekly": "Actualiser chaque semaine",
   "advisor.running": "Analyse en cours…",
   "advisor.loadFailed": "Impossible de charger les conseils de schéma",
   "advisor.runFailed": "Échec de l’analyse",

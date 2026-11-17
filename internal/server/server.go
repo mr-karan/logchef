@@ -407,6 +407,7 @@ func (s *Server) setupRoutes() {
 	// as the stats route does.
 	admin.Get("/sources/:sourceID/advisor", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSchemaAdvice)
 	admin.Post("/sources/:sourceID/advisor/refresh", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleRefreshSchemaAdvice)
+	admin.Put("/sources/:sourceID/advisor/schedule", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleSetSchemaAdviceSchedule).Name(string(audit.SchemaAdvisorScheduleUpdate))
 	admin.Put("/sources/:sourceID/advisor/findings/:findingID/dismissal", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleDismissSchemaFinding).Name(string(audit.SchemaAdvisorDismissalCreate))
 	admin.Delete("/sources/:sourceID/advisor/findings/:findingID/dismissal", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleRestoreSchemaFinding).Name(string(audit.SchemaAdvisorDismissalDelete))
 

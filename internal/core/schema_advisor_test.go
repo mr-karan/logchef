@@ -35,7 +35,7 @@ func TestSchemaAdviceUsageTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	usage, err := schemaAdviceUsage(ctx, db, source, day, day)
+	usage, err := schemaAdviceUsage(ctx, db, source, day, day, day)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,14 +48,15 @@ func TestSchemaAdviceUsageTruncated(t *testing.T) {
 			usage.Truncated, len(usage.Shapes), usage.Queries, usage.Overflow, schemaAdviceShapeLimit, schemaAdviceShapeLimit+10)
 	}
 
-	usage, err = schemaAdviceUsage(ctx, db, source+1, day, day)
+	usage, err = schemaAdviceUsage(ctx, db, source+1, day, day, day)
 	if err != nil || usage.Truncated || len(usage.Shapes) != 0 || usage.Queries != 0 {
 		t.Fatalf("usage of a source with no rollup = %+v / %v, want empty", usage, err)
 	}
 }
 
 // The window's coverage counts its own days with a filtered query, while the
-// retention coverage also counts the rows before the window.
+// retention coverage also counts the rows before the window. Neither counts
+// a row after the window's last day.
 func TestSchemaAdviceUsageRetention(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
@@ -78,7 +79,7 @@ func TestSchemaAdviceUsageRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := schemaAdviceUsage(ctx, db, source, "2026-11-09", "2026-08-13")
+	usage, err := schemaAdviceUsage(ctx, db, source, "2026-11-09", "2026-08-13", "2026-11-11")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +88,17 @@ func TestSchemaAdviceUsageRetention(t *testing.T) {
 	}
 	if r := usage.Retention; r.Days != 4 || r.QueryCount != 10 || r.MaxLookbackSeconds == nil || *r.MaxLookbackSeconds != lookback {
 		t.Errorf("retention = %+v, want 4 days, 10 queries, lookback %d", r, lookback)
+	}
+
+	usage, err = schemaAdviceUsage(ctx, db, source, "2026-11-09", "2026-08-13", "2026-11-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Days != 1 || usage.Queries != 2 || len(usage.Shapes) != 1 || usage.Shapes[0].Queries != 2 {
+		t.Errorf("window ending 2026-11-09: %d filtered days, %d queries, shapes %+v; want 1 day and 2 queries", usage.Days, usage.Queries, usage.Shapes)
+	}
+	if r := usage.Retention; r.Days != 2 || r.QueryCount != 3 {
+		t.Errorf("retention ending 2026-11-09 = %+v, want 2 days and 3 queries", r)
 	}
 }
 

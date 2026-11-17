@@ -12,6 +12,7 @@ import (
 	"github.com/mr-karan/logchef/internal/advisor"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -50,29 +51,26 @@ type SchemaAdvice struct {
 	Report      *models.SchemaAdvisorReport `json:"report"`
 	// Dismissals can name findings that the current report no longer holds.
 	Dismissals []models.SchemaAdvisorDismissal `json:"dismissals"`
+	// ScheduledRefresh is true when the source's report refreshes weekly.
+	ScheduledRefresh bool `json:"scheduled_refresh"`
 }
 
 // GetSchemaAdvice returns the stored schema advisor report of a ClickHouse
 // source. The principal must be a global admin and hold sources:read.
-func GetSchemaAdvice(ctx context.Context, db store.SchemaAdvisorStore, ds *datasource.Service, p access.Principal, sourceID models.SourceID) (*SchemaAdvice, error) {
+func GetSchemaAdvice(ctx context.Context, db store.Store, ds *datasource.Service, p access.Principal, sourceID models.SourceID) (*SchemaAdvice, error) {
 	if err := requireSchemaAdvisorAccess(p); err != nil {
 		return nil, err
 	}
 	if _, err := schemaAdviceSource(ctx, ds, sourceID); err != nil {
 		return nil, err
 	}
-	dismissals, err := db.ListSchemaAdvisorDismissals(ctx, sourceID)
-	if err != nil {
-		return nil, err
-	}
 	stored, err := db.GetSchemaAdvisorReport(ctx, sourceID)
 	if errors.Is(err, models.ErrNotFound) {
-		return &SchemaAdvice{SourceID: sourceID, Dismissals: dismissals}, nil
-	}
-	if err != nil {
+		stored = nil
+	} else if err != nil {
 		return nil, err
 	}
-	return schemaAdviceOf(stored, dismissals, time.Now()), nil
+	return schemaAdviceOf(ctx, db, sourceID, stored)
 }
 
 // RefreshSchemaAdvice analyzes a ClickHouse source over the last windowDays
@@ -91,15 +89,37 @@ func RefreshSchemaAdvice(ctx context.Context, db store.Store, ds *datasource.Ser
 	if err != nil {
 		return nil, err
 	}
+	stored, err := analyzeSchema(ctx, db, ds, source, schemaAnalysis{windowDays: windowDays, by: &p.User.ID, at: time.Now()})
+	if err != nil {
+		return nil, err
+	}
+	return schemaAdviceOf(ctx, db, sourceID, stored)
+}
+
+// schemaAnalysis is one run's parameters. at is the evaluation time: the
+// usage window ends on its day, the analysis measures ages from it, and the
+// report is stamped with it. by is nil for a scheduled run, and claim is
+// its job claim.
+type schemaAnalysis struct {
+	windowDays int
+	by         *models.UserID
+	at         time.Time
+	claim      *jobs.Job
+}
+
+// analyzeSchema runs one analysis of a source and stores its report. A run
+// that fails keeps the stored report.
+func analyzeSchema(ctx context.Context, db store.Store, ds *datasource.Service, source *models.Source, run schemaAnalysis) (*models.StoredSchemaAdvisorReport, error) {
+	at := run.at.UTC()
 	stored, err := ds.RunSchemaAdvice(ctx, source, func(ctx context.Context, provider datasource.SchemaAdvisorProvider) (*models.StoredSchemaAdvisorReport, error) {
-		today := time.Now().UTC()
-		since := today.AddDate(0, 0, -(windowDays - 1)).Format(time.DateOnly)
-		retentionSince := today.AddDate(0, 0, -(maxSchemaAdviceWindowDays - 1)).Format(time.DateOnly)
-		usage, err := schemaAdviceUsage(ctx, db, sourceID, since, retentionSince)
+		until := at.Format(time.DateOnly)
+		since := at.AddDate(0, 0, -(run.windowDays - 1)).Format(time.DateOnly)
+		retentionSince := at.AddDate(0, 0, -(maxSchemaAdviceWindowDays - 1)).Format(time.DateOnly)
+		usage, err := schemaAdviceUsage(ctx, db, source.ID, since, retentionSince, until)
 		if err != nil {
 			return nil, err
 		}
-		report, err := provider.AdviseSchema(ctx, source, usage)
+		report, err := provider.AdviseSchema(ctx, source, usage, at)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrSchemaAdviceRunFailed, err)
 		}
@@ -107,13 +127,13 @@ func RefreshSchemaAdvice(ctx context.Context, db store.Store, ds *datasource.Ser
 			return nil, err
 		}
 		stored := &models.StoredSchemaAdvisorReport{
-			SourceID:    sourceID,
-			GeneratedAt: time.Now().UTC(),
-			GeneratedBy: &p.User.ID,
-			WindowDays:  windowDays,
+			SourceID:    source.ID,
+			GeneratedAt: at,
+			GeneratedBy: run.by,
+			WindowDays:  run.windowDays,
 			Report:      *report,
 		}
-		if err := db.UpsertSchemaAdvisorReport(ctx, stored); err != nil {
+		if err := storeSchemaReport(ctx, db, stored, run.claim); err != nil {
 			return nil, err
 		}
 		return stored, nil
@@ -125,11 +145,21 @@ func RefreshSchemaAdvice(ctx context.Context, db store.Store, ds *datasource.Ser
 		}
 		return nil, err
 	}
-	dismissals, err := db.ListSchemaAdvisorDismissals(ctx, sourceID)
-	if err != nil {
-		return nil, err
+	return stored, nil
+}
+
+// storeSchemaReport replaces the source's report. A scheduled run first
+// proves its claim, so a run whose claim was taken over writes nothing.
+func storeSchemaReport(ctx context.Context, db store.Store, stored *models.StoredSchemaAdvisorReport, claim *jobs.Job) error {
+	if claim == nil {
+		return db.UpsertSchemaAdvisorReport(ctx, stored)
 	}
-	return schemaAdviceOf(stored, dismissals, time.Now()), nil
+	return db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := jobs.Hold(ctx, tx, *claim); err != nil {
+			return err
+		}
+		return tx.UpsertSchemaAdvisorReport(ctx, stored)
+	})
 }
 
 // DismissSchemaFinding dismisses a finding of the source's stored report, or
@@ -146,7 +176,7 @@ func DismissSchemaFinding(ctx context.Context, db store.Store, ds *datasource.Se
 	if _, err := schemaAdviceSource(ctx, ds, sourceID); err != nil {
 		return nil, nil, "", err
 	}
-	err = withSchemaDismissalLock(ctx, db, sourceID, func(tx store.StoreOps) error {
+	err = withSchemaSourceLock(ctx, db, sourceID, func(tx store.StoreOps) error {
 		stored, err := tx.GetSchemaAdvisorReport(ctx, sourceID)
 		if errors.Is(err, models.ErrNotFound) {
 			return ErrSchemaFindingNotFound
@@ -190,7 +220,7 @@ func RestoreSchemaFinding(ctx context.Context, db store.Store, ds *datasource.Se
 		return nil, err
 	}
 	var dismissal *models.SchemaAdvisorDismissal
-	err := withSchemaDismissalLock(ctx, db, sourceID, func(tx store.StoreOps) error {
+	err := withSchemaSourceLock(ctx, db, sourceID, func(tx store.StoreOps) error {
 		var err error
 		if dismissal, err = tx.GetSchemaAdvisorDismissal(ctx, sourceID, findingID); err != nil {
 			return err
@@ -206,10 +236,10 @@ func RestoreSchemaFinding(ctx context.Context, db store.Store, ds *datasource.Se
 	return dismissal, nil
 }
 
-// withSchemaDismissalLock runs fn in a transaction that holds the source
-// row, so the dismissal it reads is the one its write replaces (RFC 0009,
+// withSchemaSourceLock runs fn in a transaction that holds the source row,
+// so the state it reads is the state its write replaces (RFC 0009,
 // snapshots come from the mutation).
-func withSchemaDismissalLock(ctx context.Context, db store.Store, sourceID models.SourceID, fn func(tx store.StoreOps) error) error {
+func withSchemaSourceLock(ctx context.Context, db store.Store, sourceID models.SourceID, fn func(tx store.StoreOps) error) error {
 	return db.WithTx(ctx, func(tx store.StoreOps) error {
 		if _, err := tx.GetSourceForUpdate(ctx, sourceID); errors.Is(err, models.ErrNotFound) {
 			return ErrSourceNotFound
@@ -254,20 +284,20 @@ func schemaAdviceSource(ctx context.Context, ds *datasource.Service, sourceID mo
 	return source, nil
 }
 
-// schemaAdviceUsage reads the shape rollup of a source since a date. The
-// totals cover every row, while the shapes stop at the most used
-// schemaAdviceShapeLimit; usage is truncated when the list reaches it. The
-// retention coverage covers every row since retentionSince.
-func schemaAdviceUsage(ctx context.Context, db store.QueryHistoryStore, sourceID models.SourceID, since, retentionSince string) (advisor.Usage, error) {
-	shapes, err := db.ListQueryShapeStats(ctx, sourceID, since, schemaAdviceShapeLimit)
+// schemaAdviceUsage reads the shape rollup of a source from since to until,
+// both inclusive. The totals cover every row, while the shapes stop at the
+// most used schemaAdviceShapeLimit; usage is truncated when the list reaches
+// it. The retention coverage covers every row from retentionSince to until.
+func schemaAdviceUsage(ctx context.Context, db store.QueryHistoryStore, sourceID models.SourceID, since, retentionSince, until string) (advisor.Usage, error) {
+	shapes, err := db.ListQueryShapeStats(ctx, sourceID, since, until, schemaAdviceShapeLimit)
 	if err != nil {
 		return advisor.Usage{}, err
 	}
-	coverage, err := db.QueryShapeCoverage(ctx, sourceID, since)
+	coverage, err := db.QueryShapeCoverage(ctx, sourceID, since, until)
 	if err != nil {
 		return advisor.Usage{}, err
 	}
-	retention, err := db.QueryShapeCoverage(ctx, sourceID, retentionSince)
+	retention, err := db.QueryShapeCoverage(ctx, sourceID, retentionSince, until)
 	if err != nil {
 		return advisor.Usage{}, err
 	}
@@ -313,15 +343,23 @@ func fitSchemaReport(report *models.SchemaAdvisorReport) error {
 	return nil
 }
 
-func schemaAdviceOf(stored *models.StoredSchemaAdvisorReport, dismissals []models.SchemaAdvisorDismissal, now time.Time) *SchemaAdvice {
-	generatedAt, windowDays, report := stored.GeneratedAt, stored.WindowDays, stored.Report
-	return &SchemaAdvice{
-		SourceID:    stored.SourceID,
-		GeneratedAt: &generatedAt,
-		GeneratedBy: stored.GeneratedBy,
-		WindowDays:  &windowDays,
-		Stale:       now.Sub(generatedAt) > schemaAdviceStaleAfter,
-		Report:      &report,
-		Dismissals:  dismissals,
+// schemaAdviceOf returns a source's advice: stored, which is nil before the
+// first analysis, with the source's dismissals and schedule.
+func schemaAdviceOf(ctx context.Context, db store.Store, sourceID models.SourceID, stored *models.StoredSchemaAdvisorReport) (*SchemaAdvice, error) {
+	dismissals, err := db.ListSchemaAdvisorDismissals(ctx, sourceID)
+	if err != nil {
+		return nil, err
 	}
+	scheduled, err := schemaAdviceScheduled(ctx, db, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	advice := &SchemaAdvice{SourceID: sourceID, Dismissals: dismissals, ScheduledRefresh: scheduled}
+	if stored == nil {
+		return advice, nil
+	}
+	generatedAt, windowDays, report := stored.GeneratedAt, stored.WindowDays, stored.Report
+	advice.GeneratedAt, advice.GeneratedBy, advice.WindowDays, advice.Report = &generatedAt, stored.GeneratedBy, &windowDays, &report
+	advice.Stale = time.Since(generatedAt) > schemaAdviceStaleAfter
+	return advice, nil
 }

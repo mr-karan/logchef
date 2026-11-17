@@ -64,7 +64,7 @@ func TestQueryShapeRollup(t *testing.T) {
 		start.Format(time.DateTime), start.Add(time.Hour).Format(time.DateTime)))
 	run("sql", `{"query_text":"SELECT * FROM logs.app WHERE service = 'api' AND status >= 500"}`)
 
-	rows, err := s.store.ListQueryShapeStats(t.Context(), source.ID, time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly), 5000)
+	rows, err := s.store.ListQueryShapeStats(t.Context(), source.ID, time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly), time.Now().UTC().AddDate(0, 0, 1).Format(time.DateOnly), 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestQueryShapeOverflow(t *testing.T) {
 	record(`field_0="y"`, models.QueryLanguageLogchefQL, "app")
 
 	day := now.Format(time.DateOnly)
-	coverage, err := s.store.QueryShapeCoverage(ctx, sourceID, day)
+	coverage, err := s.store.QueryShapeCoverage(ctx, sourceID, day, day)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestQueryShapeOverflow(t *testing.T) {
 	if !reflect.DeepEqual(coverage, want) {
 		t.Fatalf("coverage = %+v, want %+v", coverage, want)
 	}
-	rows, err := s.store.ListQueryShapeStats(ctx, sourceID, day, 5000)
+	rows, err := s.store.ListQueryShapeStats(ctx, sourceID, day, day, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestQueryShapePrunesOncePerDay(t *testing.T) {
 		}
 	}
 	s.recordQueryShape(ctx, now, &models.QueryHistory{SourceID: sourceID, QueryText: `level="error"`, QueryLanguage: models.QueryLanguageLogchefQL, SourceDatabase: "logs", SourceTable: "app"})
-	coverage, err := s.store.QueryShapeCoverage(ctx, sourceID, "2026-01-01")
+	coverage, err := s.store.QueryShapeCoverage(ctx, sourceID, "2026-01-01", "9999-12-31")
 	if err != nil {
 		t.Fatal(err)
 	}

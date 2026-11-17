@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "Analizado {time}",
   "advisor.stale": "Desactualizado",
   "advisor.runAnalysis": "Ejecutar análisis",
+  "advisor.refreshWeekly": "Actualizar cada semana",
   "advisor.running": "Analizando…",
   "advisor.loadFailed": "No se pudieron cargar las recomendaciones de esquema",
   "advisor.runFailed": "El análisis falló",

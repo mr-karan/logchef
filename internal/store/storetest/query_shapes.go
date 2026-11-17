@@ -44,7 +44,7 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	// A day whose only queries have no filter is not a filtered day.
 	inc(day3, models.ShapeHashUnanalyzed, models.FilterShape{}, 2, 0, 0, new(int64(60)))
 
-	got, err := s.ListQueryShapeStats(ctx, source, day1, 2)
+	got, err := s.ListQueryShapeStats(ctx, source, day1, day3, 2)
 	if err != nil {
 		t.Fatalf("ListQueryShapeStats: %v", err)
 	}
@@ -55,13 +55,13 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ListQueryShapeStats = %+v\nwant %+v", got, want)
 	}
-	if day1Only, err := s.ListQueryShapeStats(ctx, source, day1, 10); err != nil || len(day1Only) != 3 {
+	if day1Only, err := s.ListQueryShapeStats(ctx, source, day1, day3, 10); err != nil || len(day1Only) != 3 {
 		t.Fatalf("ListQueryShapeStats(limit 10) = %d rows / %v, want the 3 analyzed shapes", len(day1Only), err)
 	}
 
 	// Coverage counts every row, including the one past the listing's limit
 	// and the two special hashes.
-	coverage, err := s.QueryShapeCoverage(ctx, source, day1)
+	coverage, err := s.QueryShapeCoverage(ctx, source, day1, day3)
 	if err != nil {
 		t.Fatalf("QueryShapeCoverage: %v", err)
 	}
@@ -69,15 +69,28 @@ func testQueryShapeStats(t *testing.T, ctx context.Context, s store.Store) {
 	if !reflect.DeepEqual(coverage, wantCoverage) {
 		t.Fatalf("QueryShapeCoverage = %+v, want %+v", coverage, wantCoverage)
 	}
-	if empty, err := s.QueryShapeCoverage(ctx, source+1, day1); err != nil || !reflect.DeepEqual(empty, models.QueryShapeCoverage{}) {
+	if empty, err := s.QueryShapeCoverage(ctx, source+1, day1, day3); err != nil || !reflect.DeepEqual(empty, models.QueryShapeCoverage{}) {
 		t.Fatalf("QueryShapeCoverage(unknown source) = %+v / %v, want zero", empty, err)
+	}
+
+	// The window ends on until: rows after it count neither in the listing
+	// nor in the coverage.
+	firstDay, err := s.ListQueryShapeStats(ctx, source, day1, day1, 10)
+	wantFirstDay := []models.QueryShapeUsage{{QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: "aaaaaaaaaaaaaaaa", Shape: eq, QueryCount: 4, TotalDurationMs: 100, TotalRows: 13, MaxLookbackSeconds: new(int64(3600))}}
+	if err != nil || !reflect.DeepEqual(firstDay, wantFirstDay) {
+		t.Fatalf("ListQueryShapeStats(day1 to day1) = %+v / %v\nwant %+v", firstDay, err, wantFirstDay)
+	}
+	coverage, err = s.QueryShapeCoverage(ctx, source, day1, day1)
+	wantCoverage = models.QueryShapeCoverage{Days: 1, FilteredDays: 1, QueryCount: 4, MaxLookbackSeconds: new(int64(3600))}
+	if err != nil || !reflect.DeepEqual(coverage, wantCoverage) {
+		t.Fatalf("QueryShapeCoverage(day1 to day1) = %+v / %v, want %+v", coverage, err, wantCoverage)
 	}
 
 	// Prune deletes only rows before the cutoff.
 	if err := s.PruneQueryShapeStats(ctx, day2); err != nil {
 		t.Fatalf("PruneQueryShapeStats: %v", err)
 	}
-	coverage, err = s.QueryShapeCoverage(ctx, source, day1)
+	coverage, err = s.QueryShapeCoverage(ctx, source, day1, day3)
 	if err != nil {
 		t.Fatalf("QueryShapeCoverage after prune: %v", err)
 	}

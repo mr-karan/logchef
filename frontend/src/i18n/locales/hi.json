@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "{time} को विश्लेषित",
   "advisor.stale": "पुराना",
   "advisor.runAnalysis": "विश्लेषण चलाएँ",
+  "advisor.refreshWeekly": "हर सप्ताह रीफ़्रेश करें",
   "advisor.running": "विश्लेषण हो रहा है…",
   "advisor.loadFailed": "स्कीमा सलाह लोड नहीं हो सकी",
   "advisor.runFailed": "विश्लेषण विफल रहा",

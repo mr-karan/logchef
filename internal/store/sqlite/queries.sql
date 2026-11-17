@@ -1306,7 +1306,8 @@ DO UPDATE SET
     max_lookback_s = COALESCE(MAX(max_lookback_s, excluded.max_lookback_s), max_lookback_s, excluded.max_lookback_s);
 
 -- name: ListQueryShapeStats :many
--- A source's analyzed shapes on/after `since`, summed over days, most used
+-- A source's analyzed shapes from `since` to `until`, both inclusive, summed
+-- over days, most used
 -- first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
 -- counts them. lookback_rows is 0 when no row has a lookback, and then
 -- max_lookback_s means nothing.
@@ -1322,13 +1323,15 @@ SELECT
 FROM query_shape_stats_daily
 WHERE source_id = sqlc.arg(source_id)
   AND bucket_date >= sqlc.arg(since)
+  AND bucket_date <= sqlc.arg(until)
   AND shape_hash NOT IN ('unanalyzed', 'overflow')
 GROUP BY query_language, shape_hash, shape
 ORDER BY query_count DESC, query_language ASC, shape_hash ASC
 LIMIT sqlc.arg(limit);
 
 -- name: QueryShapeCoverage :one
--- Totals over every rollup row of a source on/after `since`, not only the rows
+-- Totals over every rollup row of a source from `since` to `until`, both
+-- inclusive, not only the rows
 -- that ListQueryShapeStats returns. filtered_days counts the days with a
 -- query that has a filter: the empty shape, also kept by the 'unanalyzed' and
 -- 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
@@ -1343,7 +1346,7 @@ SELECT
     CAST(COUNT(max_lookback_s) AS INTEGER) AS lookback_rows,
     CAST(COALESCE(MAX(max_lookback_s), 0) AS INTEGER) AS max_lookback_s
 FROM query_shape_stats_daily
-WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since);
+WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since) AND bucket_date <= sqlc.arg(until);
 
 -- name: PruneQueryShapeStats :exec
 DELETE FROM query_shape_stats_daily WHERE bucket_date < ?;

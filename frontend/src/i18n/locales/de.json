@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "Analysiert {time}",
   "advisor.stale": "Veraltet",
   "advisor.runAnalysis": "Analyse starten",
+  "advisor.refreshWeekly": "Wöchentlich aktualisieren",
   "advisor.running": "Wird analysiert…",
   "advisor.loadFailed": "Schema-Empfehlungen konnten nicht geladen werden",
   "advisor.runFailed": "Analyse fehlgeschlagen",

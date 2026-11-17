@@ -406,6 +406,17 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
+  async function setSchemaAdviceSchedule(sourceId: number, enabled: boolean) {
+    return await state.callApi<{ enabled: boolean }>({
+      apiCall: () => sourcesApi.setSchemaAdviceSchedule(sourceId, enabled),
+      operationKey: `setSchemaAdviceSchedule-${sourceId}`,
+      onSuccess: (data) => {
+        const advice = state.data.value.schemaAdvice[sourceId.toString()];
+        if (advice && data) storeSchemaAdvice(sourceId, { ...advice, scheduled_refresh: data.enabled });
+      },
+    });
+  }
+
   function setSchemaDismissals(sourceId: number, update: (dismissals: SchemaAdvisorDismissal[]) => SchemaAdvisorDismissal[]) {
     const advice = state.data.value.schemaAdvice[sourceId.toString()];
     if (advice) storeSchemaAdvice(sourceId, { ...advice, dismissals: update(advice.dismissals) });
@@ -609,6 +620,7 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourceActivity,
     getSchemaAdvice,
     refreshSchemaAdvice,
+    setSchemaAdviceSchedule,
     dismissSchemaFinding,
     restoreSchemaFinding,
     getTeamSourceInspection,

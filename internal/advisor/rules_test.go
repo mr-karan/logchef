@@ -218,3 +218,54 @@ func TestFormatting(t *testing.T) {
 		}
 	}
 }
+
+// Every finding ends with one line on the reads that system.query_log saw,
+// and has no such line when the log was not read.
+func TestQueryLogEvidence(t *testing.T) {
+	queryLogLines := func(report models.SchemaAdvisorReport) []models.AdvisorEvidence {
+		t.Helper()
+		if len(report.Findings) == 0 {
+			t.Fatalf("no findings: %+v", report)
+		}
+		var lines []models.AdvisorEvidence
+		for _, f := range report.Findings {
+			for _, e := range f.Evidence {
+				if e.Source == clickhouse.AdvisorInputQueryLog {
+					lines = append(lines, e)
+				}
+			}
+		}
+		return lines
+	}
+	for _, tt := range []struct {
+		name string
+		log  *clickhouse.AdvisorQueryLog
+		want string
+	}{
+		{"reads", &clickhouse.AdvisorQueryLog{Queries: 1234, MedianDurationMs: 41.6, P95DurationMs: 1830, MedianReadRows: 2_500_000, MedianReadBytes: 3 << 20}, "1,234 on the server that answered: median 42 ms, p95 1,830 ms, median 2,500,000 rows and 3.0 MiB read"},
+		{"no reads", &clickhouse.AdvisorQueryLog{}, "none on the server that answered"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := testMeta()
+			meta.QueryLog = tt.log
+			report := Analyze(Facts{Metadata: meta, TimestampColumn: "ts"})
+			want := models.AdvisorEvidence{Label: "Reads of the source in 7 days, all clients", Value: tt.want, Source: clickhouse.AdvisorInputQueryLog}
+			lines := queryLogLines(report)
+			if len(lines) != len(report.Findings) {
+				t.Fatalf("%d query log lines for %d findings", len(lines), len(report.Findings))
+			}
+			for _, f := range report.Findings {
+				if got := f.Evidence[len(f.Evidence)-1]; got != want {
+					t.Errorf("finding %s ends with %+v, want %+v", f.Rule, got, want)
+				}
+			}
+		})
+	}
+	t.Run("log not read", func(t *testing.T) {
+		meta := testMeta()
+		meta.Inputs[4].State = models.AdvisorInputLimited
+		if lines := queryLogLines(Analyze(Facts{Metadata: meta, TimestampColumn: "ts"})); len(lines) != 0 {
+			t.Errorf("query log lines = %+v, want none", lines)
+		}
+	})
+}

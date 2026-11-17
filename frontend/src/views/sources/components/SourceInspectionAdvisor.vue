@@ -48,6 +48,7 @@ const advice = computed(() => sourcesStore.getSchemaAdviceById(props.sourceId))
 const report = computed(() => advice.value?.report ?? null)
 const loading = computed(() => sourcesStore.isLoadingOperation(`getSchemaAdvice-${props.sourceId}`))
 const running = computed(() => sourcesStore.isLoadingOperation(`refreshSchemaAdvice-${props.sourceId}`))
+const scheduleBusy = computed(() => sourcesStore.isLoadingOperation(`setSchemaAdviceSchedule-${props.sourceId}`))
 const failedInputs = computed(() => report.value?.inputs.filter(input => input.state !== 'ok') ?? [])
 const dismissals = computed(() => advice.value?.dismissals ?? [])
 const activeFindings = computed(() => {
@@ -112,6 +113,10 @@ async function confirmDismiss() {
   if (result.success) dismissing.value = null
 }
 
+function setSchedule(enabled: boolean) {
+  return sourcesStore.setSchemaAdviceSchedule(props.sourceId, enabled)
+}
+
 function restore(findingId: string) {
   return sourcesStore.restoreSchemaFinding(props.sourceId, findingId)
 }
@@ -126,6 +131,10 @@ onMounted(load)
       <Badge v-for="input in failedInputs" :key="input.name" variant="outline" class="font-mono" :title="input.detail">
         {{ input.name }}: {{ t(inputStateLabels[input.state]) }}
       </Badge>
+      <div v-if="advice" class="flex items-center gap-2">
+        <Switch id="advisor-refresh-weekly" :model-value="advice.scheduled_refresh" :disabled="scheduleBusy" @update:model-value="setSchedule" />
+        <Label for="advisor-refresh-weekly" class="text-sm font-normal">{{ t('advisor.refreshWeekly') }}</Label>
+      </div>
       <Button size="sm" :disabled="running || loading || !!loadError" @click="runAnalysis">
         <Play class="size-3.5" :class="{ 'animate-pulse': running }" />
         {{ running ? t('advisor.running') : t('advisor.runAnalysis') }}

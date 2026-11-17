@@ -31,12 +31,13 @@ func (s *Store) IncrementQueryShapeStats(ctx context.Context, inc models.QuerySh
 	return nil
 }
 
-// ListQueryShapeStats returns a source's analyzed shapes since a date, summed
-// over days, most used first.
-func (s *Store) ListQueryShapeStats(ctx context.Context, sourceID models.SourceID, since string, limit int) ([]models.QueryShapeUsage, error) {
+// ListQueryShapeStats returns a source's analyzed shapes from since to until,
+// both inclusive, summed over days, most used first.
+func (s *Store) ListQueryShapeStats(ctx context.Context, sourceID models.SourceID, since, until string, limit int) ([]models.QueryShapeUsage, error) {
 	rows, err := s.q.ListQueryShapeStats(ctx, sqlc.ListQueryShapeStatsParams{
 		SourceID: int64(sourceID),
 		Since:    since,
+		Until:    until,
 		RowLimit: int64(limit),
 	})
 	if err != nil {
@@ -61,9 +62,10 @@ func (s *Store) ListQueryShapeStats(ctx context.Context, sourceID models.SourceI
 	return out, nil
 }
 
-// QueryShapeCoverage summarizes every rollup row of a source since a date.
-func (s *Store) QueryShapeCoverage(ctx context.Context, sourceID models.SourceID, since string) (models.QueryShapeCoverage, error) {
-	r, err := s.q.QueryShapeCoverage(ctx, sqlc.QueryShapeCoverageParams{SourceID: int64(sourceID), Since: since})
+// QueryShapeCoverage summarizes every rollup row of a source from since to
+// until, both inclusive.
+func (s *Store) QueryShapeCoverage(ctx context.Context, sourceID models.SourceID, since, until string) (models.QueryShapeCoverage, error) {
+	r, err := s.q.QueryShapeCoverage(ctx, sqlc.QueryShapeCoverageParams{SourceID: int64(sourceID), Since: since, Until: until})
 	if err != nil {
 		return models.QueryShapeCoverage{}, fmt.Errorf("error reading query shape coverage: %w", err)
 	}

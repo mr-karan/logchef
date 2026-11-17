@@ -870,10 +870,22 @@ depends on U5 and RFC 0006 and is its own PR, with a per-source switch.
 - **G2 and R2 match U10 (#325).** ClickHouse 26.8 serves `LIKE '%token%'` and
   `ILIKE` from a `text` index by a dictionary scan. The R2 "False positives"
   cell and the G2 row say so, and R2 still does not count those items.
-- **U13 shipped its docs only.** The page is
+- **U13 shipped its docs first.** The page is
   `docs/src/content/docs/features/schema-advisor.mdx`. The weekly scheduled
-  refresh on the RFC 0006 job runner is a follow-up PR. Until it lands, a
-  report changes only when an admin runs an analysis.
+  refresh followed in its own PR. The per-source switch is the job row itself:
+  `PUT /api/v1/admin/sources/:sourceID/advisor/schedule` creates or deletes a
+  `schema_advisor.refresh` job keyed by the source id, on Monday 03:00 UTC with
+  a 30-day window, audited as `schema_advisor_schedule.update`. Contrary to
+  "Seams", the job does not ignore `At`. A run stands for its tick, as every
+  RFC 0006 job does: the usage window ends on the tick's day, the rules measure
+  ages from it, and `generated_at` is the tick. `ListQueryShapeStats` and
+  `QueryShapeCoverage` take an inclusive `until` date for that, so a run
+  claimed late after downtime does not count usage recorded after its tick.
+- **The `system.query_log` read became evidence.** Every finding ends with one
+  line from it, "Reads of the source in 7 days, all clients", with the query
+  count, median and p95 duration, and median rows and bytes read, on the
+  server that answered. A read that is not `ok` drops the line. No new read
+  was added.
 
 ## Open questions for Karan
 
