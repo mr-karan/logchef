@@ -260,7 +260,7 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 			}
 			if step.notify {
 				m.log.Info("alert resolved", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", change.GroupKey, "value", change.Value, "threshold", alert.ThresholdValue)
-				step.notification = resolvedNotification(step, messages())
+				step.notification = resolvedNotification(step, at, messages())
 			}
 			plan.resolves = append(plan.resolves, step)
 			if !change.Untracked {
@@ -340,7 +340,7 @@ func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertI
 		}
 	}
 	for _, step := range plan.resolves {
-		if err := tx.ResolveAlertGroup(ctx, alertID, step.change.GroupKey, step.message); err != nil {
+		if err := tx.ResolveAlertGroup(ctx, alertID, step.change.GroupKey, step.message, plan.at); err != nil {
 			return err
 		}
 		if step.discard {
@@ -406,12 +406,12 @@ func (plan *evaluationPlan) writeOpen(ctx context.Context, tx store.StoreOps, al
 }
 
 // resolvedNotification is the resolved message of a group whose episode the
-// evaluation closes.
-func resolvedNotification(step *resolveStep, mc *messageContext) AlertNotification {
-	now := time.Now().UTC()
+// evaluation at at closes.
+func resolvedNotification(step *resolveStep, at time.Time, mc *messageContext) AlertNotification {
+	resolvedAt := at.UTC()
 	entry := *step.history
 	entry.Message = step.message
-	entry.ResolvedAt = &now
+	entry.ResolvedAt = &resolvedAt
 	entry.Status = models.AlertStatusResolved
 	if entry.Value == nil && step.change.Sampled {
 		value := step.change.Value

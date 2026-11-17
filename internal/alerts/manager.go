@@ -121,7 +121,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, gro
 		}
 		for _, entry := range entries {
 			announced := announcedEpisode(instances, entry)
-			if err := tx.ResolveAlertGroup(ctx, alertID, entry.GroupKey, message); err != nil {
+			if err := tx.ResolveAlertGroup(ctx, alertID, entry.GroupKey, message, c.now); err != nil {
 				return err
 			}
 			if err := c.closed(ctx, tx, entry, announced); err != nil {

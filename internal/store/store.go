@@ -253,11 +253,11 @@ type AlertStore interface {
 	// that owns historyID, deletes the alert's instances and advances its
 	// eval_seq, so an evaluation that read the old state commits nothing.
 	ResolveAlertHistory(ctx context.Context, historyID int64, message string) error
-	// ResolveAlertGroup resolves the open episode of one group, deletes the
-	// group's instance, advances eval_seq and sets last_state from the
-	// instances that remain. It returns models.ErrNotFound when the group has
-	// no open episode.
-	ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string) error
+	// ResolveAlertGroup resolves the open episode of one group at resolvedAt,
+	// deletes the group's instance, advances eval_seq and sets last_state from
+	// the instances that remain. It returns models.ErrNotFound when the group
+	// has no open episode.
+	ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string, resolvedAt time.Time) error
 	// SetOpenAlertHistoryStatus moves an open episode between triggered and
 	// no_data, and returns models.ErrNotFound when the episode is closed.
 	SetOpenAlertHistoryStatus(ctx context.Context, historyID int64, status models.AlertStatus, message string) error

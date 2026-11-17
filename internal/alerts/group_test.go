@@ -529,3 +529,29 @@ func TestGroupedIncidentKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestResolvedAtIsEvaluationTime: a resolve that an evaluation sends carries
+// the evaluation's time, which is also the resolved_at of its history row.
+// The time is years from the wall clock, so a wall-clock time cannot pass.
+func TestResolvedAtIsEvaluationTime(t *testing.T) {
+	f := newGroupedFixture(t)
+	at := time.Date(2020, 3, 4, 5, 6, 7, 0, time.UTC)
+	wantSent(t, "fire", f.evalAt(t, at, groupedResult(row("checkout", 12))), "triggered checkout")
+	resolveAt := at.Add(time.Minute)
+	wantSent(t, "resolve", f.evalAt(t, resolveAt, groupedResult(row("checkout", 1))), "resolved checkout")
+
+	n := f.sent[0]
+	if n.ResolvedAt == nil || !n.ResolvedAt.Equal(resolveAt) {
+		t.Errorf("notification resolved_at = %v, want %s", n.ResolvedAt, resolveAt)
+	}
+	if got, want := n.Annotations["resolved_at"], resolveAt.Format(time.RFC3339Nano); got != want {
+		t.Errorf("resolved_at annotation = %q, want %q", got, want)
+	}
+	history, err := f.db.ListAlertHistory(t.Context(), f.alert.ID, 10)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("history = %d rows, %v; want the one episode", len(history), err)
+	}
+	if stored := history[0].ResolvedAt; stored == nil || !stored.Equal(resolveAt) {
+		t.Errorf("history resolved_at = %v, want %s", stored, resolveAt)
+	}
+}

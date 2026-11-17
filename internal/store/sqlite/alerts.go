@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
@@ -229,9 +230,11 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 }
 
 // ResolveAlertGroup resolves the open episode of one group of the alert.
-func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string) error {
+func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string, resolvedAt time.Time) error {
 	if !db.inTx {
-		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertGroup(ctx, alertID, groupKey, message) })
+		return db.WithTx(ctx, func(tx store.StoreOps) error {
+			return tx.ResolveAlertGroup(ctx, alertID, groupKey, message, resolvedAt)
+		})
 	}
 	ids, err := db.writeQueries.ListOpenAlertGroupHistoryIDs(ctx, sqlc.ListOpenAlertGroupHistoryIDsParams{AlertID: int64(alertID), GroupKey: groupKey})
 	if err != nil {
@@ -240,7 +243,12 @@ func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, gro
 	if len(ids) == 0 {
 		return models.ErrNotFound
 	}
-	if err := db.writeQueries.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{AlertID: int64(alertID), GroupKey: groupKey, Message: nullString(message)}); err != nil {
+	if err := db.writeQueries.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{
+		AlertID:    int64(alertID),
+		GroupKey:   groupKey,
+		Message:    nullString(message),
+		ResolvedAt: sql.NullTime{Time: resolvedAt.UTC(), Valid: true},
+	}); err != nil {
 		return fmt.Errorf("failed to resolve alert episode: %w", err)
 	}
 	if err := db.writeQueries.DeleteAlertInstance(ctx, sqlc.DeleteAlertInstanceParams{AlertID: int64(alertID), GroupKey: groupKey}); err != nil {

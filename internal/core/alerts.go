@@ -596,7 +596,7 @@ func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.Ale
 func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, groupKey *string, message string) error {
 	var err error
 	if groupKey != nil {
-		err = db.ResolveAlertGroup(ctx, alertID, *groupKey, message)
+		err = db.ResolveAlertGroup(ctx, alertID, *groupKey, message, time.Now().UTC())
 	} else {
 		var entry *models.AlertHistoryEntry
 		if entry, err = db.GetLatestUnresolvedAlertHistory(ctx, alertID); err == nil {

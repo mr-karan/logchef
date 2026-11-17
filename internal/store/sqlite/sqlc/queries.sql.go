@@ -7467,19 +7467,25 @@ func (q *Queries) ReserveDeliveries(ctx context.Context, arg ReserveDeliveriesPa
 const resolveAlertGroupHistory = `-- name: ResolveAlertGroupHistory :exec
 UPDATE alert_history
 SET status = 'resolved',
-    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    message = ?1
-WHERE alert_id = ?2 AND group_key = ?3 AND status IN ('triggered', 'no_data')
+    resolved_at = ?1,
+    message = ?2
+WHERE alert_id = ?3 AND group_key = ?4 AND status IN ('triggered', 'no_data')
 `
 
 type ResolveAlertGroupHistoryParams struct {
-	Message  sql.NullString `json:"message"`
-	AlertID  int64          `json:"alert_id"`
-	GroupKey string         `json:"group_key"`
+	ResolvedAt sql.NullTime   `json:"resolved_at"`
+	Message    sql.NullString `json:"message"`
+	AlertID    int64          `json:"alert_id"`
+	GroupKey   string         `json:"group_key"`
 }
 
 func (q *Queries) ResolveAlertGroupHistory(ctx context.Context, arg ResolveAlertGroupHistoryParams) error {
-	_, err := q.exec(ctx, q.resolveAlertGroupHistoryStmt, resolveAlertGroupHistory, arg.Message, arg.AlertID, arg.GroupKey)
+	_, err := q.exec(ctx, q.resolveAlertGroupHistoryStmt, resolveAlertGroupHistory,
+		arg.ResolvedAt,
+		arg.Message,
+		arg.AlertID,
+		arg.GroupKey,
+	)
 	return err
 }
 

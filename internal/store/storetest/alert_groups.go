@@ -114,15 +114,19 @@ func testResolveAlertGroup(t *testing.T, ctx context.Context, s store.Store, ale
 	}
 
 	seq := evalSeq(t, ctx, s, alertID)
-	if err := s.ResolveAlertGroup(ctx, alertID, `["checkout"]`, "resolved checkout"); err != nil {
+	resolvedAt := time.Date(2001, 2, 3, 4, 5, 6, 0, time.UTC)
+	if err := s.ResolveAlertGroup(ctx, alertID, `["checkout"]`, "resolved checkout", resolvedAt); err != nil {
 		t.Fatal(err)
 	}
 	assertOneGroupResolved(t, ctx, s, alertID, checkout.ID, search.ID, seq)
+	if got, err := s.GetAlertHistoryEntry(ctx, alertID, checkout.ID); err != nil || got.ResolvedAt == nil || !got.ResolvedAt.Equal(resolvedAt) {
+		t.Fatalf("checkout resolved_at = %+v, %v; want %s", got, err, resolvedAt)
+	}
 
-	if err := s.ResolveAlertGroup(ctx, alertID, `["checkout"]`, "again"); !errors.Is(err, models.ErrNotFound) {
+	if err := s.ResolveAlertGroup(ctx, alertID, `["checkout"]`, "again", resolvedAt); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("resolve of a closed group err = %v, want ErrNotFound", err)
 	}
-	if err := s.ResolveAlertGroup(ctx, alertID, `["search"]`, "resolved search"); err != nil {
+	if err := s.ResolveAlertGroup(ctx, alertID, `["search"]`, "resolved search", resolvedAt); err != nil {
 		t.Fatal(err)
 	}
 	if alert, err := s.GetAlert(ctx, alertID); err != nil || alert.LastState != models.AlertStateResolved {
