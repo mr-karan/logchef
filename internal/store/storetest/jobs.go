@@ -16,16 +16,34 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// LeaseHooks end a job lease or a delivery reservation on the database clock,
+// which the store interface cannot. A test holds a lease long enough to stay
+// current however slowly it runs, then ends it with a hook instead of
+// sleeping past a short lease. Each backend's conformance test implements
+// them with raw SQL.
+type LeaseHooks struct {
+	// ExpireJobLease moves the job's lease_expires_at into the past.
+	ExpireJobLease func(ctx context.Context, id int64) error
+	// ExpireDeliveryReservation moves the delivery's reserved_until into the
+	// past.
+	ExpireDeliveryReservation func(ctx context.Context, id int64) error
+}
+
+// heldLease is a lease that a test takes and does not end. It outlasts any
+// test binary's timeout, so it stays current however slowly the test runs,
+// until a LeaseHooks call ends it.
+const heldLease = time.Hour
+
 // RunJobs exercises the JobStore contract and the job runner's guarantees
 // against one database. open must return a new store on the same database
 // each time, like a separate replica. rowLocks says the backend locks rows
 // (Postgres), so a claim skips a held job instead of waiting for the writer.
-func RunJobs(t *testing.T, open Opener, rowLocks bool) {
+func RunJobs(t *testing.T, open Opener, rowLocks bool, hooks LeaseHooks) {
 	t.Run("Definitions", func(t *testing.T) { testJobDefinitions(t, open(t)) })
 	t.Run("KickAndDelete", func(t *testing.T) { testJobKickAndDelete(t, open(t)) })
 	t.Run("TwoRunnersClaimDisjoint", func(t *testing.T) { testTwoRunnersClaimDisjoint(t, open(t), open(t)) })
-	t.Run("TakeoverAfterNewerClaimCommits", func(t *testing.T) { testTakeoverClaimFirst(t, open(t), open(t)) })
-	t.Run("TakeoverWhileHoldIsOpen", func(t *testing.T) { testTakeoverHoldFirst(t, open(t), open(t), rowLocks) })
+	t.Run("TakeoverAfterNewerClaimCommits", func(t *testing.T) { testTakeoverClaimFirst(t, open(t), open(t), hooks) })
+	t.Run("TakeoverWhileHoldIsOpen", func(t *testing.T) { testTakeoverHoldFirst(t, open(t), open(t), rowLocks, hooks) })
 	t.Run("ScheduleChangeDuringRun", func(t *testing.T) { testScheduleChangeDuringRun(t, open(t)) })
 	t.Run("CronFirstRun", func(t *testing.T) { testCronFirstRun(t, open(t)) })
 }
@@ -208,11 +226,14 @@ func testTwoRunnersClaimDisjoint(t *testing.T, a, b store.Store) {
 
 // testTakeoverClaimFirst: run A holds a job past its lease, run B claims it
 // and commits its state, then A's write transaction fails at Hold.
-func testTakeoverClaimFirst(t *testing.T, a, b store.Store) {
+func testTakeoverClaimFirst(t *testing.T, a, b store.Store, hooks LeaseHooks) {
 	ctx := context.Background()
 	upsertJob(t, a, jobs.Spec{Kind: "takeover-1", Key: "k", Schedule: jobs.Every(time.Minute), Misfire: jobs.RunOnce, Enabled: true})
-	runA := claimOne(t, a, "takeover-1", "owner-a", 50*time.Millisecond)
-	waitLeaseExpiry()
+	runA := claimOne(t, a, "takeover-1", "owner-a", heldLease)
+	if got, err := b.ClaimJobs(ctx, "takeover-1", "owner-b", time.Minute, 10); err != nil || len(got) != 0 {
+		t.Fatalf("B claimed %v (error %v) inside A's lease", got, err)
+	}
+	expireJobLease(t, hooks, runA.ID)
 
 	runB := claimOne(t, b, "takeover-1", "owner-b", time.Minute)
 	if runB.ID != runA.ID || runB.LeaseToken != runA.LeaseToken+1 {
@@ -238,12 +259,12 @@ func testTakeoverClaimFirst(t *testing.T, a, b store.Store) {
 // until A commits; once B holds it, A's next transaction fails at Hold. With
 // row locks (Postgres) B's claim returns at once with the other due job; on
 // SQLite it waits for A's write lock.
-func testTakeoverHoldFirst(t *testing.T, a, b store.Store, rowLocks bool) {
+func testTakeoverHoldFirst(t *testing.T, a, b store.Store, rowLocks bool, hooks LeaseHooks) {
 	ctx := context.Background()
 	upsertJob(t, a, jobs.Spec{Kind: "takeover-2", Key: "held", Schedule: jobs.Every(time.Minute), Misfire: jobs.RunOnce, Enabled: true})
-	runA := claimOne(t, a, "takeover-2", "owner-a", 50*time.Millisecond)
+	runA := claimOne(t, a, "takeover-2", "owner-a", heldLease)
 	upsertJob(t, a, jobs.Spec{Kind: "takeover-2", Key: "free", Schedule: jobs.Every(time.Minute), Misfire: jobs.RunOnce, Enabled: true})
-	waitLeaseExpiry()
+	expireJobLease(t, hooks, runA.ID)
 
 	claimed := make(chan claimResult, 1)
 	var runB *models.ScheduledJob
@@ -379,11 +400,19 @@ func claimOne(t *testing.T, s store.JobStore, kind, owner string, lease time.Dur
 	if got[0].LeaseOwner != owner || got[0].LastStartedAt == nil {
 		t.Fatalf("claimed job = %+v", got[0])
 	}
+	// Both times come from one statement on the database clock.
+	if expires := got[0].LeaseExpiresAt; expires == nil || !expires.Equal(got[0].LastStartedAt.Add(lease)) {
+		t.Fatalf("lease of the claim at %v ends at %v, want %v later", got[0].LastStartedAt, expires, lease)
+	}
 	return got[0]
 }
 
-// waitLeaseExpiry outlasts a 50ms lease on the database clock.
-func waitLeaseExpiry() { time.Sleep(150 * time.Millisecond) }
+func expireJobLease(t *testing.T, hooks LeaseHooks, id int64) {
+	t.Helper()
+	if err := hooks.ExpireJobLease(context.Background(), id); err != nil {
+		t.Fatalf("expire the lease of job %d: %v", id, err)
+	}
+}
 
 // writeHeldState is a handler's write transaction: Hold, then state.
 func writeHeldState(ctx context.Context, s store.Store, run *models.ScheduledJob, value string) error {

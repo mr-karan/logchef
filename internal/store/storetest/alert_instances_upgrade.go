@@ -145,7 +145,9 @@ func firstTickAfterUpgrade(t *testing.T, s store.Store) {
 	defer stop()
 
 	seeded := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
-	deadline := time.Now().Add(10 * time.Second)
+	// The deadline only stops a hang: the wait ends when the evaluations
+	// land, and under -race with SQLite on a loaded machine they took 8s.
+	deadline := time.Now().Add(time.Minute)
 	for alertID := models.AlertID(1); alertID <= 5; alertID++ {
 		for {
 			alert, err := s.GetAlert(context.Background(), alertID)
