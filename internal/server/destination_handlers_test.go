@@ -135,7 +135,7 @@ func TestDestinationAccess(t *testing.T) {
 	e.expect(tok[member], http.MethodPost, destinationsPath, email(fmt.Sprintf(`{"user_ids":[%d]}`, outsider.ID)), http.StatusCreated)
 	e.expect(tok[admin], http.MethodPost, destinationsPath, email(`{"addresses":["oncall@example.com"]}`), http.StatusCreated)
 	e.expect(tok[member], http.MethodPost, destinationsPath, email(`{"user_ids":[999999]}`), http.StatusBadRequest)
-	e.expect(tok[member], http.MethodPost, destinationsPath, `{"name":"pd","type":"pagerduty","scope":"private","secret":"0123456789abcdef0123456789abcdef"}`, http.StatusBadRequest)
+	e.expect(tok[member], http.MethodPost, destinationsPath, `{"name":"sms","type":"sms","scope":"private","secret":"+10000000000"}`, http.StatusBadRequest)
 
 	// A destination in use is refused with the count; a free one deletes.
 	alert := &models.Alert{SourceID: src.ID, Name: "uses it", QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
@@ -452,4 +452,94 @@ func TestSlackDestinationSecretNeverLeaks(t *testing.T) {
 	}
 	wantSecretChanged(t, changesOf(t, events[1]), "secret")
 	e.wantNoText("leak-token", "T0LEAKTEAM", "/services/")
+}
+
+// TestPagerDutyDestinationKeyChecks: a PagerDuty destination saves only with
+// a 32-character routing key, and has no settings besides it.
+func TestPagerDutyDestinationKeyChecks(t *testing.T) {
+	e := newDestinationEnv(t, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	user := mkTestUser(t, e.s.store, "pd-member@example.com", models.UserRoleMember)
+	token := e.token(user, models.TokenScopeDestinationsRead, models.TokenScopeDestinationsWrite)
+	pd := func(secret, config string) string {
+		return fmt.Sprintf(`{"name":"on-call","type":"pagerduty","scope":"private","secret":%q,"config":%s}`, secret, config)
+	}
+	const key = "0123456789abcdef0123456789abcdef"
+	for _, bad := range []string{"0123456789abcdef", "https://events.pagerduty.com/v2/enqueue", key + "0", ""} {
+		e.expect(token, http.MethodPost, destinationsPath, pd(bad, "{}"), http.StatusBadRequest)
+	}
+	e.expect(token, http.MethodPost, destinationsPath, pd(key, `{"payload_version":1}`), http.StatusBadRequest)
+	e.expect(token, http.MethodPost, destinationsPath, pd(key, `{"addresses":["a@example.com"]}`), http.StatusBadRequest)
+
+	created := e.expect(token, http.MethodPost, destinationsPath, pd(key, "{}"), http.StatusCreated)
+	var d models.NotificationDestination
+	if err := json.Unmarshal(created, &d); err != nil || !d.HasSecret || d.SecretHint != "…cdef" {
+		t.Fatalf("create response %s, %v; want the last four characters as hint", created, err)
+	}
+	at := fmt.Sprintf("%s/%d", destinationsPath, d.ID)
+	// A blank key keeps the stored one; a bad key is refused on update too.
+	e.expect(token, http.MethodPut, at, `{"name":"on-call 2","type":"pagerduty","scope":"private","secret":""}`, http.StatusOK)
+	e.expect(token, http.MethodPut, at, `{"name":"on-call 2","type":"pagerduty","scope":"private","secret":"short"}`, http.StatusBadRequest)
+	stored, err := e.s.store.GetNotificationDestination(context.Background(), d.ID)
+	if err != nil || stored.Secret != key || stored.Name != "on-call 2" {
+		t.Fatalf("stored = %+v, %v; want the first key kept", stored, err)
+	}
+}
+
+// TestPagerDutyDestinationSecretNeverLeaks: the routing key reaches the
+// sender and nothing else: no API response, no stored audit event and no
+// log line holds it.
+func TestPagerDutyDestinationSecretNeverLeaks(t *testing.T) {
+	const (
+		first  = "LEAKKEYFIRST0123456789abcdefABCD"
+		second = "LEAKKEYSECOND0123456789abcdefABC"
+	)
+	sent := make(chan string, 8)
+	sender := senderFunc(func(dest *models.NotificationDestination) error {
+		sent <- dest.Secret
+		if dest.Name == "failing" {
+			return notify.Permanent(errors.New("pagerduty delivery failed: status 400: Event object is invalid"))
+		}
+		return nil
+	})
+	e := newAuditRouteEnv(t, withAuditLogLines(), withConfig(func(c *config.Config) { c.Alerts.Enabled = true }), func(s *auditEnvSetup) {
+		s.opts.AlertsManager = alerts.NewManager(alerts.Options{DB: s.opts.SQLite, Logger: s.opts.Logger, Senders: map[models.DestinationType]notify.Sender{models.DestinationTypePagerDuty: sender}})
+	})
+	created := e.do(http.MethodPost, destinationsPath, fmt.Sprintf(`{"name":"on-call","type":"pagerduty","scope":"global","secret":%q}`, first), e.cookie)
+	wantStatus(t, created, http.StatusCreated)
+	var envelope struct {
+		Data models.NotificationDestination `json:"data"`
+	}
+	err := json.Unmarshal(created.body, &envelope)
+	if d := envelope.Data; err != nil || !d.HasSecret || d.SecretHint != "…ABCD" {
+		t.Fatalf("create response %s: %v; want has_secret and the last four characters as hint", created.body, err)
+	}
+	at := fmt.Sprintf("%s/%d", destinationsPath, envelope.Data.ID)
+	responses := []auditResp{
+		created,
+		e.do(http.MethodPut, at, fmt.Sprintf(`{"name":"on-call","type":"pagerduty","scope":"global","secret":%q}`, second), e.cookie),
+		e.do(http.MethodGet, destinationsPath, "", e.cookie),
+		e.do(http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"id":%d}`, envelope.Data.ID), e.cookie),
+		e.do(http.MethodPost, destinationsPath+"/test", fmt.Sprintf(`{"name":"failing","type":"pagerduty","scope":"global","secret":%q}`, first), e.cookie),
+		e.do(http.MethodDelete, at, "", e.cookie),
+	}
+	for i, r := range responses {
+		if r.status >= 300 {
+			t.Errorf("request %d = %d %s", i, r.status, r.body)
+		}
+		if bytes.Contains(r.body, []byte("LEAKKEY")) {
+			t.Errorf("response %d leaks the routing key: %s", i, r.body)
+		}
+	}
+	if got := []string{<-sent, <-sent}; got[0] != second || got[1] != first {
+		t.Errorf("sender received %q, want the stored key, then the unsaved one", got)
+	}
+	if !bytes.Contains(responses[4].body, []byte("Event object is invalid")) {
+		t.Errorf("failed test response = %s, want the PagerDuty error", responses[4].body)
+	}
+	events := e.events()
+	if len(events) != 5 {
+		t.Fatalf("stored %d audit events, want create, update, two tests and delete", len(events))
+	}
+	wantSecretChanged(t, changesOf(t, events[1]), "secret")
+	e.wantNoText("LEAKKEY")
 }

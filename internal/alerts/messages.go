@@ -129,6 +129,14 @@ func DeliveryRef(alertID models.AlertID, historyID int64) string {
 	return fmt.Sprintf("%d:%d", alertID, historyID)
 }
 
+// IncidentKey names the incident of one group of a rule, across its
+// episodes: logchef:alert:<id>: and the first 16 hex characters of the
+// SHA-256 of the group key (RFC 0006, PagerDuty).
+func IncidentKey(alertID models.AlertID, groupKey string) string {
+	sum := sha256.Sum256([]byte(groupKey))
+	return fmt.Sprintf("logchef:alert:%d:%x", alertID, sum[:8])
+}
+
 // outbox enqueues the notifications of one transaction. It reads the rule's
 // destinations once, in that transaction, so the rows match the destinations
 // that the commit sees.
@@ -166,6 +174,7 @@ func (o *outbox) add(ctx context.Context, tx store.StoreOps, n AlertNotification
 	}
 	ev := event(n.Status)
 	msg := n.message(ev)
+	msg.DedupKey = IncidentKey(o.alert.ID, episode.GroupKey)
 	ref := DeliveryRef(o.alert.ID, episode.ID)
 	// A group's notifications go out in order: its resolved never overtakes
 	// its firing.
@@ -235,6 +244,8 @@ func TestEmail() notify.MailMessage {
 // not, now, and returns one result per target.
 func (m *Manager) TestDestination(ctx context.Context, d *models.NotificationDestination) []models.DestinationTestResult {
 	msg := testNotification("This is a test notification to verify a notification destination.").message(notify.EventTest)
+	// Each test opens its own PagerDuty incident, apart from any rule's.
+	msg.DedupKey = fmt.Sprintf("logchef:test:%d", time.Now().UnixNano())
 	result := func(target string, err error) models.DestinationTestResult {
 		r := models.DestinationTestResult{Target: target, OK: err == nil}
 		if err != nil {

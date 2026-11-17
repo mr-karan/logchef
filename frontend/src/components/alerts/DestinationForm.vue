@@ -52,8 +52,9 @@ const form = reactive({
   scope: (base?.scope ?? "private") as DestinationScope,
   userIds: [...(base?.config.user_ids ?? [])],
   addresses: (base?.config.addresses ?? []).join(", "),
-  // The API never returns the URL; on edit a blank one keeps the stored URL.
+  // The API never returns the URL or routing key; on edit a blank one keeps the stored one.
   url: "",
+  routingKey: "",
   isActive: base?.is_active ?? true,
 });
 const error = ref<string | null>(null);
@@ -86,18 +87,22 @@ function request(): DestinationRequest {
     return { ...base, config: { user_ids: [...form.userIds], addresses }, secret: "" };
   }
   if (form.type === "slack") return { ...base, config: {}, secret: form.url.trim() };
+  if (form.type === "pagerduty") return { ...base, config: {}, secret: form.routingKey.trim() };
   return { ...base, config: { payload_version: 1 }, secret: form.url.trim() };
 }
 
 // Webhook and Slack destinations send to a URL; email ones to recipients.
-const sendsToURL = computed(() => form.type !== "email");
+const sendsToURL = computed(() => form.type === "webhook" || form.type === "slack");
 const urlPlaceholder = computed(() =>
   form.type === "slack" ? "https://hooks.slack.com/services/..." : "https://api.example.com/hooks/...",
 );
 
+// The secret the form holds for its type; email destinations have none.
+const typedSecret = computed(() => (form.type === "pagerduty" ? form.routingKey : form.url).trim());
+
 const canSubmit = computed(() => {
   if (!form.name.trim()) return false;
-  if (sendsToURL.value) return !!editing.value || form.url.trim() !== "";
+  if (form.type !== "email") return !!editing.value || typedSecret.value !== "";
   return form.userIds.length > 0 || form.addresses.trim() !== "";
 });
 
@@ -109,9 +114,9 @@ function toggleUser(userId: number, checked: boolean) {
   form.userIds = checked ? [...form.userIds, userId] : form.userIds.filter(id => id !== userId);
 }
 
-// A saved destination with no new URL is tested by id, so the stored URL is used.
+// A saved destination with no new URL or key is tested by id, so the stored one is used.
 function testPayload(): { id: number } | DestinationRequest {
-  if (editing.value && sendsToURL.value && !form.url.trim()) return { id: editing.value.id };
+  if (editing.value && form.type !== "email" && !typedSecret.value) return { id: editing.value.id };
   return request();
 }
 
@@ -152,6 +157,7 @@ async function save() {
           <SelectContent>
             <SelectItem value="webhook">{{ t("destinations.typeWebhook") }}</SelectItem>
             <SelectItem value="slack">{{ t("destinations.typeSlack") }}</SelectItem>
+            <SelectItem value="pagerduty">{{ t("destinations.typePagerDuty") }}</SelectItem>
             <SelectItem value="email">{{ t("destinations.typeEmail") }}</SelectItem>
           </SelectContent>
         </Select>
@@ -174,6 +180,17 @@ async function save() {
         v-model="form.url"
         type="url"
         :placeholder="editing?.secret_hint ? t('destinations.keepURL', { host: editing.secret_hint }) : urlPlaceholder"
+        autocomplete="off"
+      />
+    </div>
+
+    <div v-else-if="form.type === 'pagerduty'" class="space-y-2">
+      <Label for="destination-routing-key">{{ t("destinations.routingKey") }}</Label>
+      <Input
+        id="destination-routing-key"
+        v-model="form.routingKey"
+        type="password"
+        :placeholder="editing?.secret_hint ? t('destinations.keepRoutingKey', { hint: editing.secret_hint }) : ''"
         autocomplete="off"
       />
     </div>

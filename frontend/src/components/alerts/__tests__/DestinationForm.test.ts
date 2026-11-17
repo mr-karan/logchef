@@ -89,6 +89,25 @@ describe("DestinationForm", () => {
     await vi.waitFor(() => expect(network.requests).toHaveLength(2));
     expect(body(1)).toMatchObject({ type: "slack", config: {}, secret: "https://hooks.slack.com/services/T000/B000/XXXX" });
   });
+
+  it("edits a PagerDuty destination: its key field, a test by id, and a save with no config", async () => {
+    const pagerduty: NotificationDestination = { ...webhook, id: 9, name: "On-call", type: "pagerduty", config: {}, secret_hint: "…cdef" };
+    mount({ destination: pagerduty });
+    await nextTick();
+    expect(host.textContent).toContain("Routing key");
+    const key = host.querySelector("#destination-routing-key") as HTMLInputElement;
+    expect(key.type).toBe("password");
+    expect(key.placeholder).toContain("…cdef");
+    button("Send test").click();
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+    expect(body()).toEqual({ id: 9 });
+    key.value = "0123456789abcdef0123456789abcdef";
+    key.dispatchEvent(new Event("input"));
+    await nextTick();
+    host.querySelector("form")!.dispatchEvent(new Event("submit"));
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+    expect(body(1)).toMatchObject({ type: "pagerduty", config: {}, secret: "0123456789abcdef0123456789abcdef" });
+  });
 });
 
 describe("DestinationForm email recipients", () => {
