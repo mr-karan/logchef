@@ -26,6 +26,7 @@
 | `{"error":{"type":"auth_required",…}}` (with `--output json`/`jsonl`) | The saved sign-in is gone or revoked. Run the command in `error.fix` (for example `logchef auth --context prod`). |
 | `logchef auth` hangs or no browser opens | Use `--no-browser`; the URL goes to stderr. On a remote host, forward the port in the URL's `redirect_uri` over SSH (`ssh -L <port>:127.0.0.1:<port> host`), or use an API token. |
 | `The server refused the audit log` | `logchef audit` needs a global admin's API token with `audit:read` (or `*`), passed with `--token` / `LOGCHEF_AUTH_TOKEN`. OAuth sign-ins from `logchef auth` never reach admin routes. |
+| `The server refused the schema advisor` | `logchef advisor` needs a global admin's API token with `sources:read` (or `*`), passed with `--token` / `LOGCHEF_AUTH_TOKEN`. OAuth sign-ins from `logchef auth` never reach admin routes. |
 | Query returns nothing unexpectedly | See "Empty results" below. |
 
 ## Empty results — debug order

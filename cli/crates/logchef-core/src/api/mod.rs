@@ -605,6 +605,43 @@ impl Client {
             .await?;
         Ok(response.data)
     }
+
+    /// Lists every source. Needs a global admin and, for an API token, the
+    /// `sources:read` scope.
+    pub async fn list_all_sources(&self) -> Result<Vec<Source>> {
+        let response: ApiResponse<Vec<Source>> = self.get("/api/v1/admin/sources").await?;
+        Ok(response.data)
+    }
+
+    /// The stored schema advisor report of a source, as the server sent it
+    /// (a `SchemaAdvice`). Needs a global admin and, for an API token, the
+    /// `sources:read` scope.
+    pub async fn get_schema_advice(&self, source_id: i64) -> Result<serde_json::Value> {
+        let response: ApiResponse<serde_json::Value> = self
+            .get(&format!("/api/v1/admin/sources/{source_id}/advisor"))
+            .await?;
+        Ok(response.data)
+    }
+
+    /// Analyzes a source and returns the new report, as `get_schema_advice`
+    /// does. Without `window_days` the server uses its default window.
+    pub async fn refresh_schema_advice(
+        &self,
+        source_id: i64,
+        window_days: Option<u32>,
+    ) -> Result<serde_json::Value> {
+        let body = match window_days {
+            Some(days) => serde_json::json!({ "window_days": days }),
+            None => serde_json::json!({}),
+        };
+        let response: ApiResponse<serde_json::Value> = self
+            .post(
+                &format!("/api/v1/admin/sources/{source_id}/advisor/refresh"),
+                &body,
+            )
+            .await?;
+        Ok(response.data)
+    }
 }
 
 /// The server clamps a larger page to this.

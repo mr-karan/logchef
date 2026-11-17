@@ -3,8 +3,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    agent, audit, auth, collections, completions, config, doctor, explain, fields, find, histogram,
-    history, open, query, saved_queries, schema, skills, sources, sql, tail, teams, views, whoami,
+    advisor, agent, audit, auth, collections, completions, config, doctor, explain, fields, find,
+    histogram, history, open, query, saved_queries, schema, skills, sources, sql, tail, teams,
+    views, whoami,
 };
 
 const LONG_ABOUT: &str = "\
@@ -135,6 +136,11 @@ enum Commands {
     #[command(about = "List sources for a team")]
     Sources(sources::SourcesArgs),
 
+    #[command(
+        about = "Show schema advice for a ClickHouse source (global admins, API token with sources:read)"
+    )]
+    Advisor(advisor::AdvisorArgs),
+
     #[command(about = "Show schema for a source")]
     Schema(schema::SchemaArgs),
 
@@ -208,6 +214,7 @@ impl Cli {
             Some(Commands::Teams(args)) => teams::run(args, global).await,
             Some(Commands::Whoami(args)) => whoami::run(args, global).await,
             Some(Commands::Sources(args)) => sources::run(args, global).await,
+            Some(Commands::Advisor(args)) => advisor::run(args, global).await,
             Some(Commands::Schema(args)) => schema::run(args, global).await,
             Some(Commands::Doctor(args)) => doctor::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,
