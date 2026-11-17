@@ -85,12 +85,19 @@ function request(): DestinationRequest {
     const addresses = form.addresses.split(/[\s,]+/).map(a => a.trim()).filter(Boolean);
     return { ...base, config: { user_ids: [...form.userIds], addresses }, secret: "" };
   }
+  if (form.type === "slack") return { ...base, config: {}, secret: form.url.trim() };
   return { ...base, config: { payload_version: 1 }, secret: form.url.trim() };
 }
 
+// Webhook and Slack destinations send to a URL; email ones to recipients.
+const sendsToURL = computed(() => form.type !== "email");
+const urlPlaceholder = computed(() =>
+  form.type === "slack" ? "https://hooks.slack.com/services/..." : "https://api.example.com/hooks/...",
+);
+
 const canSubmit = computed(() => {
   if (!form.name.trim()) return false;
-  if (form.type === "webhook") return !!editing.value || form.url.trim() !== "";
+  if (sendsToURL.value) return !!editing.value || form.url.trim() !== "";
   return form.userIds.length > 0 || form.addresses.trim() !== "";
 });
 
@@ -102,9 +109,9 @@ function toggleUser(userId: number, checked: boolean) {
   form.userIds = checked ? [...form.userIds, userId] : form.userIds.filter(id => id !== userId);
 }
 
-// A saved webhook with no new URL is tested by id, so the stored URL is used.
+// A saved destination with no new URL is tested by id, so the stored URL is used.
 function testPayload(): { id: number } | DestinationRequest {
-  if (editing.value && form.type === "webhook" && !form.url.trim()) return { id: editing.value.id };
+  if (editing.value && sendsToURL.value && !form.url.trim()) return { id: editing.value.id };
   return request();
 }
 
@@ -144,6 +151,7 @@ async function save() {
           <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="webhook">{{ t("destinations.typeWebhook") }}</SelectItem>
+            <SelectItem value="slack">{{ t("destinations.typeSlack") }}</SelectItem>
             <SelectItem value="email">{{ t("destinations.typeEmail") }}</SelectItem>
           </SelectContent>
         </Select>
@@ -159,13 +167,13 @@ async function save() {
       </div>
     </div>
 
-    <div v-if="form.type === 'webhook'" class="space-y-2">
-      <Label for="destination-url">{{ t("destinations.webhookURL") }}</Label>
+    <div v-if="sendsToURL" class="space-y-2">
+      <Label for="destination-url">{{ form.type === "slack" ? t("destinations.slackURL") : t("destinations.webhookURL") }}</Label>
       <Input
         id="destination-url"
         v-model="form.url"
         type="url"
-        :placeholder="editing?.secret_hint ? t('destinations.keepURL', { host: editing.secret_hint }) : 'https://api.example.com/hooks/...'"
+        :placeholder="editing?.secret_hint ? t('destinations.keepURL', { host: editing.secret_hint }) : urlPlaceholder"
         autocomplete="off"
       />
     </div>

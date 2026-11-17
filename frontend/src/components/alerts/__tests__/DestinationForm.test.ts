@@ -71,6 +71,24 @@ describe("DestinationForm", () => {
     expect(network.requests[0].config.method).toBe("post");
     expect(body()).toMatchObject({ name: "On-call hook (copy)", scope: "team", team_id: 3, secret: "https://hooks.example.com/new" });
   });
+
+  it("edits a Slack destination: its URL field, a test by id, and a save with no config", async () => {
+    const slack: NotificationDestination = { ...webhook, id: 8, name: "#ops", type: "slack", config: {}, secret_hint: "hooks.slack.com" };
+    mount({ destination: slack });
+    await nextTick();
+    expect(host.textContent).toContain("Slack webhook URL");
+    expect((host.querySelector("#destination-url") as HTMLInputElement).placeholder).toContain("hooks.slack.com");
+    button("Send test").click();
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+    expect(body()).toEqual({ id: 8 });
+    const url = host.querySelector("#destination-url") as HTMLInputElement;
+    url.value = "https://hooks.slack.com/services/T000/B000/XXXX";
+    url.dispatchEvent(new Event("input"));
+    await nextTick();
+    host.querySelector("form")!.dispatchEvent(new Event("submit"));
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+    expect(body(1)).toMatchObject({ type: "slack", config: {}, secret: "https://hooks.slack.com/services/T000/B000/XXXX" });
+  });
 });
 
 describe("DestinationForm email recipients", () => {

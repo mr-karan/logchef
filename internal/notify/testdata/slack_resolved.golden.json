@@ -1,0 +1,69 @@
+{
+  "text": "[Logchef] High error rate [region=eu, service=checkout] (CRITICAL) RESOLVED",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "text": ":large_green_circle: Resolved: High error rate",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Severity*\ncritical"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Source*\napp-logs"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Value*\n12"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Threshold*\n\u0026gt; 100"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Since*\n2026-11-15T10:00:00Z"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Resolved*\n2026-11-15T10:30:00Z"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Group*\nregion=eu, service=checkout"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Description*\n5xx above normal"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "text": "Open in Logchef"
+          },
+          "url": "https://logchef.example.com/logs/alerts/42?source=7"
+        }
+      ]
+    }
+  ]
+}

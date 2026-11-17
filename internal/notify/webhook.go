@@ -128,22 +128,71 @@ func (s *WebhookSender) Send(ctx context.Context, dest *models.NotificationDesti
 	if err != nil {
 		return Permanent(fmt.Errorf("webhook delivery failed: %w", err))
 	}
-	if err := s.post(ctx, dest.Name, dest.Secret, deliveryID, body); err != nil {
+	answer, err := s.post(ctx, dest.Name, dest.Secret, deliveryID, body)
+	if err == nil && !answer.ok() {
+		s.logger.Warn("webhook delivery failed", "destination", dest.Name, "status", answer.status, "response_excerpt", answer.body)
+		err = answer.err("")
+	}
+	if err != nil {
 		return wrapClassified("webhook delivery failed", err)
 	}
 	return nil
 }
 
-func (s *WebhookSender) post(ctx context.Context, name, destination string, deliveryID int64, body []byte) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
+// httpPoster is the outbound HTTP client that the webhook, Slack and
+// PagerDuty senders share, with its address policy, timeout and body cap.
+type httpPoster interface {
+	post(ctx context.Context, name, target string, deliveryID int64, body []byte) (*httpAnswer, error)
+}
+
+// httpAnswer is a receiver's answer: its status, its headers and an excerpt
+// of its body. bodyLost is set, and body empty, when the connection failed
+// while the body was read.
+type httpAnswer struct {
+	status   int
+	header   http.Header
+	body     string
+	bodyLost bool
+}
+
+func (a *httpAnswer) ok() bool {
+	return a.status >= http.StatusOK && a.status < http.StatusMultipleChoices
+}
+
+// err classifies an answer that is not a success: 408 and 5xx are
+// transient, 429 is transient after its Retry-After, any other status is
+// permanent. A detail follows the status in the error's text.
+func (a *httpAnswer) err(detail string) error {
+	statusErr := fmt.Errorf("status %d", a.status)
+	if detail != "" {
+		statusErr = fmt.Errorf("status %d: %s", a.status, detail)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, destination, bytes.NewReader(body))
+	switch code := a.status; {
+	case code == http.StatusRequestTimeout || code >= 500:
+		return statusErr
+	case code == http.StatusTooManyRequests:
+		if after, ok := retryAfter(a.header.Get("Retry-After"), time.Now()); ok {
+			return RetryAfter(statusErr, after)
+		}
+		return statusErr
+	default:
+		return Permanent(statusErr)
+	}
+}
+
+// post sends body to target through the shared client and returns the
+// receiver's answer. The error is a transport failure, classified and
+// stripped of the URL.
+func (s *WebhookSender) post(ctx context.Context, name, target string, deliveryID int64, body []byte) (*httpAnswer, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		return Permanent(errors.New("invalid URL"))
+		return nil, Permanent(errors.New("invalid URL"))
 	}
 	if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
-		return Permanent(errors.New("only http and https URLs are allowed"))
+		return nil, Permanent(errors.New("only http and https URLs are allowed"))
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if deliveryID > 0 {
@@ -152,43 +201,36 @@ func (s *WebhookSender) post(ctx context.Context, name, destination string, deli
 	response, err := s.client.Do(request)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			return context.Canceled
+			return nil, context.Canceled
 		}
 		if denied, ok := errors.AsType[*webhookDestinationDeniedError](err); ok {
 			s.logger.Warn("webhook destination blocked by policy", "destination", name, "resolved_ip", denied.ip.String())
-			return Permanent(errWebhookDestinationDenied)
+			return nil, Permanent(errWebhookDestinationDenied)
 		}
-		return sanitizeWebhookTransportError(err)
+		return nil, sanitizeWebhookTransportError(err)
 	}
 	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, maxWebhookResponseBytes+1))
 	_ = response.Body.Close()
-	if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
-		return nil
-	}
+	answer := &httpAnswer{status: response.StatusCode, header: response.Header, bodyLost: readErr != nil}
 	if readErr == nil {
-		excerpt := strings.TrimSpace(strings.ToValidUTF8(string(responseBody), "?"))
-		if len(responseBody) > maxWebhookResponseBytes {
-			const marker = " [truncated]"
-			limit := min(len(excerpt), maxWebhookResponseBytes-len(marker))
-			for !utf8.ValidString(excerpt[:limit]) {
-				limit--
-			}
-			excerpt = excerpt[:limit] + marker
-		}
-		s.logger.Warn("webhook delivery failed", "destination", name, "status", response.StatusCode, "response_excerpt", excerpt)
+		answer.body = responseExcerpt(responseBody)
 	}
-	statusErr := fmt.Errorf("status %d", response.StatusCode)
-	switch code := response.StatusCode; {
-	case code == http.StatusRequestTimeout || code >= 500:
-		return statusErr
-	case code == http.StatusTooManyRequests:
-		if after, ok := retryAfter(response.Header.Get("Retry-After"), time.Now()); ok {
-			return RetryAfter(statusErr, after)
+	return answer, nil
+}
+
+// responseExcerpt is a body read up to one byte past the cap, as trimmed
+// valid UTF-8 within the cap.
+func responseExcerpt(body []byte) string {
+	excerpt := strings.TrimSpace(strings.ToValidUTF8(string(body), "?"))
+	if len(body) > maxWebhookResponseBytes {
+		const marker = " [truncated]"
+		limit := min(len(excerpt), maxWebhookResponseBytes-len(marker))
+		for !utf8.ValidString(excerpt[:limit]) {
+			limit--
 		}
-		return statusErr
-	default:
-		return Permanent(statusErr)
+		excerpt = excerpt[:limit] + marker
 	}
+	return excerpt
 }
 
 // retryAfter reads a Retry-After header in seconds or as an HTTP date, capped
@@ -243,6 +285,10 @@ func NewDynamicWebhookSender(settings store.SettingGetter, opts WebhookSenderOpt
 
 func (d *DynamicWebhookSender) Send(ctx context.Context, dest *models.NotificationDestination, recipient string, deliveryID int64, msg Message) error {
 	return d.current(ctx).Send(ctx, dest, recipient, deliveryID, msg)
+}
+
+func (d *DynamicWebhookSender) post(ctx context.Context, name, target string, deliveryID int64, body []byte) (*httpAnswer, error) {
+	return d.current(ctx).post(ctx, name, target, deliveryID, body)
 }
 
 func (d *DynamicWebhookSender) current(ctx context.Context) *WebhookSender {
