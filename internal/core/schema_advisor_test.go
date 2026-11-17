@@ -39,6 +39,10 @@ func TestSchemaAdviceUsageTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// R2 notes LogchefQL ~ searches only, so the language must reach it.
+	if len(usage.Shapes) == 0 || usage.Shapes[0].Language != models.QueryLanguageLogchefQL {
+		t.Fatalf("shapes = %+v, want each with its query language", usage.Shapes[:min(1, len(usage.Shapes))])
+	}
 	if !usage.Truncated || len(usage.Shapes) != schemaAdviceShapeLimit || usage.Queries != schemaAdviceShapeLimit+1+9 || usage.Overflow != 9 {
 		t.Fatalf("usage: truncated %v, %d shapes, %d queries, %d overflow; want truncated, %d shapes, %d queries, 9 overflow",
 			usage.Truncated, len(usage.Shapes), usage.Queries, usage.Overflow, schemaAdviceShapeLimit, schemaAdviceShapeLimit+10)

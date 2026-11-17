@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -15,13 +16,14 @@ import (
 
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/proto"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/queryescape"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// The build gates of RFC 0010 for R1, R3, R4 and R5. Each executes the DDL that
+// The build gates of RFC 0010 for R1, R2, R3, R4 and R5. Each executes the DDL that
 // Analyze generates on a table with existing parts. A rule whose gate fails
 // is removed from the rule set.
 
@@ -480,4 +482,136 @@ func TestRebuildRulesOnClickHouse(t *testing.T) {
 		}
 		noDDL(t, append(sortKey, retention...))
 	})
+}
+
+// TestGateTextIndex is G1 for text and G2. On 26.8 and later, the index that
+// R2 adds serves hasToken, hasAllTokens, hasAnyTokens and a LIKE with a
+// complete token on parts written before it, serves no match and no
+// positionCaseInsensitive, and changes no result, mixed case included, while
+// no part, some parts or every part holds the index. On an older server R2
+// gives no finding and the report says why. The column name holds a
+// backtick.
+func TestGateTextIndex(t *testing.T) {
+	client, conn, ctx := gateClickHouse(t)
+	const column = "log`msg"
+	quoted := queryescape.ClickHouseIdentifier(column)
+	table := fmt.Sprintf("logchef_gate_text_%d", time.Now().UnixNano())
+	t.Cleanup(func() { _ = conn.Exec(context.Background(), "DROP TABLE IF EXISTS "+table) })
+	gateExec(ctx, t, conn,
+		// One partition per insert keeps three parts that no merge combines.
+		"CREATE TABLE "+table+" (ts DateTime, tenant String, "+quoted+" String) ENGINE = MergeTree PARTITION BY tenant ORDER BY (tenant, ts) SETTINGS index_granularity = 256",
+	)
+	for part, needle := range []string{"Timeout here", "timeout here", "TIMEOUT here"} {
+		gateExec(ctx, t, conn, fmt.Sprintf("INSERT INTO %s SELECT toDateTime('2026-11-01 00:00:00') + number, 't%d', "+
+			"concat('conn req-', toString(number), multiIf(number = 777, ' %s', number = 778, ' xtimeouty', ' ok done')) FROM numbers(20000)", table, part, needle))
+	}
+
+	usage := Usage{Queries: 200, Shapes: []ShapeUsage{
+		{Shape: models.FilterShape{{Column: column, Kind: models.MatchToken}}, Queries: 120, DurationMs: 120 * 900},
+		{Shape: models.FilterShape{{Column: column, Kind: models.MatchLikeToken}}, Queries: 80, DurationMs: 80 * 900},
+	}}
+	facts := gateFacts(ctx, t, client, table, usage, nil)
+	report := Analyze(facts)
+	found := findingsOf(report, ruleTextIndex)
+	if !proto.CheckMinVersion(textIndexMinVersion, proto.ParseVersion(facts.Metadata.ServerVersion)) {
+		if len(found) != 0 || !slices.Contains(report.Notes, "text index advice needs ClickHouse 26.8") {
+			t.Fatalf("on %s R2 findings = %+v and notes = %q, want none and the version note", facts.Metadata.ServerVersion, found, report.Notes)
+		}
+		return
+	}
+	if len(found) != 1 {
+		t.Fatalf("R2 findings = %+v, want 1", found)
+	}
+
+	served := map[string]bool{
+		"hasToken(%s, 'timeout')":                    true,
+		"hasToken(%s, 'TIMEOUT')":                    true,
+		"hasAllTokens(%s, ['timeout', 'here'])":      true,
+		"hasAnyTokens(%s, ['Timeout', 'TIMEOUT'])":   true,
+		"%s LIKE '%% timeout %%'":                    true,
+		"%s LIKE 'conn req-777 Timeout%%'":           true,
+		"match(%s, '[0-9]+')":                        false,
+		"positionCaseInsensitive(%s, 'timeout') > 0": false,
+	}
+	// The docs promise no index for these, and R2 does not count them. They
+	// may read it: 26.8 scans the index dictionary for them
+	// (use_text_index_like_evaluation_by_dictionary_scan). G2 requires only
+	// identical results.
+	unpromised := []string{"%s LIKE '%%timeout%%'", "%s ILIKE '%%timeout%%'"}
+	predicates := slices.Sorted(maps.Keys(served))
+	predicates = append(predicates, unpromised...)
+	result := func(predicate string) string {
+		return gateString(ctx, t, conn, fmt.Sprintf("SELECT toString(count()) || ':' || toString(sum(cityHash64(tenant, ts))) FROM %s WHERE %s", table, fmt.Sprintf(predicate, quoted)))
+	}
+	before := map[string]string{}
+	for _, predicate := range predicates {
+		before[predicate] = result(predicate)
+	}
+	if got := before["hasToken(%s, 'timeout')"]; !strings.HasPrefix(got, "1:") {
+		t.Fatalf("fixture: hasToken(timeout) = %s, want one row", got)
+	}
+	if got := before["%s LIKE '%%timeout%%'"]; !strings.HasPrefix(got, "4:") {
+		t.Fatalf("fixture: LIKE '%%timeout%%' = %s, want four rows", got)
+	}
+	if got := before["positionCaseInsensitive(%s, 'timeout') > 0"]; !strings.HasPrefix(got, "6:") {
+		t.Fatalf("fixture: positionCaseInsensitive = %s, want six rows", got)
+	}
+
+	index := generatedName("idx", column, "text")
+	check := func(stage string, materialized bool) {
+		t.Helper()
+		for _, predicate := range predicates {
+			if got := result(predicate); got != before[predicate] {
+				t.Errorf("%s: %s = %s, want %s", stage, fmt.Sprintf(predicate, quoted), got, before[predicate])
+			}
+		}
+		if !materialized {
+			return
+		}
+		for _, predicate := range predicates[:len(served)] {
+			explain := fmt.Sprintf("EXPLAIN indexes = 1 SELECT ts FROM %s WHERE %s", table, fmt.Sprintf(predicate, quoted))
+			if !served[predicate] {
+				if planNames(ctx, t, conn, explain, index) {
+					t.Errorf("%s: the plan of %s uses %s, want no index", stage, fmt.Sprintf(predicate, quoted), index)
+				}
+				continue
+			}
+			if read, total := skipIndexGranules(ctx, t, conn, explain, index); read >= total {
+				t.Errorf("%s: %s kept %d of %d granules for %s, want fewer", stage, index, read, total, fmt.Sprintf(predicate, quoted))
+			}
+		}
+	}
+
+	gateExec(ctx, t, conn, found[0].DDL[0])
+	check("after ADD INDEX, no part holds the index", false)
+	gateExec(ctx, t, conn, fmt.Sprintf("ALTER TABLE %s MATERIALIZE INDEX %s IN PARTITION 't0'", table, queryescape.ClickHouseIdentifier(index)))
+	check("t1 and t2 without the index", true)
+	gateExec(ctx, t, conn, found[0].DDL[1])
+	if got := gateString(ctx, t, conn, "SELECT toString(countIf(secondary_indices_compressed_bytes = 0)) FROM system.parts WHERE database = currentDatabase() AND table = '"+table+"' AND active"); got != "0" {
+		t.Fatalf("%s parts lack the index after MATERIALIZE INDEX", got)
+	}
+	check("every part holds the index", true)
+	if again := findingsOf(Analyze(gateFacts(ctx, t, client, table, usage, nil)), ruleTextIndex); len(again) != 0 {
+		t.Errorf("R2 fires again after its DDL: %+v", again)
+	}
+}
+
+// planNames reports whether an EXPLAIN indexes = 1 plan names the skip index.
+func planNames(ctx context.Context, t *testing.T, conn driver.Conn, explain, index string) bool {
+	t.Helper()
+	rows, err := conn.Query(ctx, explain)
+	if err != nil {
+		t.Fatalf("%s: %v", explain, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(line, "Name: "+index) {
+			return true
+		}
+	}
+	return false
 }
