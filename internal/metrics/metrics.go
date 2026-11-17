@@ -118,6 +118,12 @@ func RecordNotificationDelivery(destinationType, result string) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
+// RegisterNotificationDeliveriesPending reports the delivery rows waiting to
+// be sent, read through pending each time the metric is read.
+func RegisterNotificationDeliveriesPending(pending func() float64) {
+	metrics.GetOrCreateGauge("logchef_notification_deliveries_pending", pending)
+}
+
 // RecordQueryShape counts one query offered to the schema advisor's shape
 // rollup. result is "analyzed", "unanalyzed", "overflow" or "error".
 func RecordQueryShape(result string) {

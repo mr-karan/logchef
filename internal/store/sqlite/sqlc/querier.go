@@ -60,6 +60,7 @@ type Querier interface {
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.
 	CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error)
+	CountPendingDeliveries(ctx context.Context) (int64, error)
 	// A failed run adds one to the streak; a sent or partial run ends it.
 	CountReportFailure(ctx context.Context, arg CountReportFailureParams) (int64, error)
 	// A NULL owner column compares as 0.
@@ -168,7 +169,8 @@ type Querier interface {
 	DeleteUserSessions(ctx context.Context, userID int64) error
 	// Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
 	// the database clock, in the jobs table's text form.
-	// A row whose dedup_key exists is left as it is.
+	// A row whose dedup_key exists is left as it is. A row may start failed, such
+	// as one whose message is over the size limit.
 	EnqueueDelivery(ctx context.Context, arg EnqueueDeliveryParams) (int64, error)
 	// An email row still attempting after its reservation ended belongs to a
 	// process that crashed or stalled during SMTP. The raised token keeps that

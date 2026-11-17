@@ -2167,14 +2167,20 @@ RETURNING id;
 -- the database clock.
 
 -- name: EnqueueDelivery :execrows
--- A row whose dedup_key exists is left as it is.
+-- A row whose dedup_key exists is left as it is. A row may start failed, such
+-- as one whose message is over the size limit.
 INSERT INTO notification_deliveries (
-    destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, next_attempt_at
+    destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json,
+    status, last_error, next_attempt_at
 ) VALUES (
     sqlc.arg(destination_id), sqlc.arg(producer), sqlc.arg(producer_ref), sqlc.arg(recipient),
-    sqlc.arg(sequence_key), sqlc.arg(event), sqlc.arg(dedup_key), sqlc.arg(message_json), now()
+    sqlc.arg(sequence_key), sqlc.arg(event), sqlc.arg(dedup_key), sqlc.arg(message_json),
+    sqlc.arg(status), sqlc.narg(last_error), now()
 )
 ON CONFLICT (dedup_key) DO NOTHING;
+
+-- name: CountPendingDeliveries :one
+SELECT COUNT(*) FROM notification_deliveries WHERE status = 'pending';
 
 -- name: ExpireEmailAttempts :execrows
 -- An email row still attempting after its reservation ended belongs to a

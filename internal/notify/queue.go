@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
@@ -47,6 +48,10 @@ const (
 	minHold = time.Second
 	// holdCheckRetry is the wait of a row whose hold check failed.
 	holdCheckRetry = drainInterval
+	// MaxMessageBytes bounds a stored message (RFC 0006, "Limits").
+	MaxMessageBytes = 256 << 10
+	// pendingCountTimeout bounds the count behind the pending gauge.
+	pendingCountTimeout = 5 * time.Second
 )
 
 // retryDelays are the waits after the first four failed attempts.
@@ -74,7 +79,11 @@ type Delivery struct {
 }
 
 // Enqueue writes the delivery rows inside the caller's transaction, due now,
-// in order. A row whose dedup key exists is skipped.
+// in order. A row whose dedup key exists is skipped. A message over
+// MaxMessageBytes is not sent: its row is written failed, with only the
+// event kept, so the caller's transaction still commits and the history
+// shows why. Cutting the message would change the version 1 webhook payload,
+// which stays as it is.
 func Enqueue(ctx context.Context, tx store.DeliveryStore, deliveries []Delivery) error {
 	for i := range deliveries {
 		d := &deliveries[i]
@@ -82,7 +91,7 @@ func Enqueue(ctx context.Context, tx store.DeliveryStore, deliveries []Delivery)
 		if err != nil {
 			return fmt.Errorf("notify: encode delivery %s: %w", d.DedupKey, err)
 		}
-		if _, err := tx.EnqueueDelivery(ctx, &models.NotificationDelivery{
+		row := &models.NotificationDelivery{
 			DestinationID: d.DestinationID,
 			Producer:      d.Producer,
 			ProducerRef:   d.ProducerRef,
@@ -91,7 +100,17 @@ func Enqueue(ctx context.Context, tx store.DeliveryStore, deliveries []Delivery)
 			Event:         string(d.Message.Event),
 			DedupKey:      d.DedupKey,
 			MessageJSON:   string(body),
-		}); err != nil {
+			Status:        models.DeliveryPending,
+		}
+		if len(body) > MaxMessageBytes {
+			row.Status = models.DeliveryFailed
+			row.LastError = fmt.Sprintf("not sent: the message is %d bytes, over the %d-byte limit", len(body), MaxMessageBytes)
+			if body, err = json.Marshal(Message{Event: d.Message.Event}); err != nil {
+				return fmt.Errorf("notify: encode delivery %s: %w", d.DedupKey, err)
+			}
+			row.MessageJSON = string(body)
+		}
+		if _, err := tx.EnqueueDelivery(ctx, row); err != nil {
 			return err
 		}
 	}
@@ -150,6 +169,21 @@ func (d *Drainer) Kind() jobs.KindSpec {
 		Timeout:     drainTimeout,
 		Concurrency: 1,
 	}
+}
+
+// Pending counts the rows waiting to be sent, for the
+// logchef_notification_deliveries_pending gauge. It reads the store each time
+// the metric is read, so every replica reports the queue as it is, not as it
+// was at that replica's last drain. A failed count reads as NaN.
+func (d *Drainer) Pending() float64 {
+	ctx, cancel := context.WithTimeout(context.Background(), pendingCountTimeout)
+	defer cancel()
+	n, err := d.db.CountPendingDeliveries(ctx)
+	if err != nil {
+		d.log.Warn("failed to count pending deliveries", "error", err)
+		return math.NaN()
+	}
+	return float64(n)
 }
 
 // Drain runs once: it ends email attempts that a crash interrupted, deletes

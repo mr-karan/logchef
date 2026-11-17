@@ -21,11 +21,21 @@ func (db *DB) EnqueueDelivery(ctx context.Context, d *models.NotificationDeliver
 		Event:         d.Event,
 		DedupKey:      d.DedupKey,
 		MessageJson:   d.MessageJSON,
+		Status:        string(d.Status),
+		LastError:     nullString(d.LastError),
 	})
 	if err != nil {
 		return false, fmt.Errorf("error enqueueing delivery %s: %w", d.DedupKey, translateBusy(err))
 	}
 	return n == 1, nil
+}
+
+func (db *DB) CountPendingDeliveries(ctx context.Context) (int64, error) {
+	n, err := db.readQueries.CountPendingDeliveries(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error counting pending deliveries: %w", err)
+	}
+	return n, nil
 }
 
 func (db *DB) ExpireEmailAttempts(ctx context.Context, errText string) (int64, error) {

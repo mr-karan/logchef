@@ -118,3 +118,14 @@ func TestClickHouseMetricsUnregister(t *testing.T) {
 		t.Errorf("series for another source were removed")
 	}
 }
+
+// TestNotificationDeliveriesPendingGauge: the gauge carries the RFC 0006 name
+// and reads its value when the metrics are written.
+func TestNotificationDeliveriesPendingGauge(t *testing.T) {
+	pending := 3.0
+	RegisterNotificationDeliveriesPending(func() float64 { return pending })
+	pending = 7
+	if out := exposition(); !strings.Contains(out, "logchef_notification_deliveries_pending 7\n") {
+		t.Fatalf("exposition has no pending gauge of 7:\n%s", out)
+	}
+}

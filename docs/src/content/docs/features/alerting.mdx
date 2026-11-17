@@ -499,6 +499,7 @@ that evaluation writes nothing, and the next one uses the new rule.
 | Recipients per email destination | 20 | 400 on save |
 | Silences per source | 100, with 5 matchers each | 400 on save |
 | Delivery attempts | 5 over about 43 minutes | The delivery is `failed` |
+| Notification message | 256 KiB, mostly the query, description, labels and annotations | Not sent: the delivery is `failed` and its error gives the size |
 | Silent group | Forgotten after 24 hours | Its episode resolves |
 | Closed history | `alerts.history_limit` per rule | Older entries are deleted |
 

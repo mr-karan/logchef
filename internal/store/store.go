@@ -286,9 +286,12 @@ type AlertStore interface {
 // time comparison uses the database clock. A reservation token, raised by
 // every reservation, fences each write of a send's outcome.
 type DeliveryStore interface {
-	// EnqueueDelivery inserts the row, due now. A row whose DedupKey exists
-	// is left as it is, and the result is false.
+	// EnqueueDelivery inserts the row, due now, with its Status and
+	// LastError. A row whose DedupKey exists is left as it is, and the result
+	// is false.
 	EnqueueDelivery(ctx context.Context, d *models.NotificationDelivery) (bool, error)
+	// CountPendingDeliveries counts the rows waiting to be sent.
+	CountPendingDeliveries(ctx context.Context) (int64, error)
 	// ExpireEmailAttempts marks unknown every attempting row whose
 	// reservation ended, stores errText and raises its token.
 	ExpireEmailAttempts(ctx context.Context, errText string) (int64, error)

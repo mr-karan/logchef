@@ -199,6 +199,7 @@ a rule, a group or a destination.
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
 | `logchef_notification_deliveries_total` | Delivery attempts by destination `type` (`email`, `webhook`, `slack`, `pagerduty`) and `result`: `sent`, `retry` (a transient failure, tried again later), `failed` (permanent, or out of attempts), `unknown` (an email whose outcome is unknown, never retried) or `reservation_lost` (a newer drain owns the row, so this outcome was dropped) | Counter | `type`, `result` |
+| `logchef_notification_deliveries_pending` | Delivery rows waiting to be sent, including retries and rows held back by a silence. Each replica reads the count from the metadata database when scraped, so every replica reports the same queue | Gauge | |
 | `logchef_alert_backtests_total` | Backtests by `result`: `ok`, `partial` (stopped at the 60-second limit), `not_replayable` (a ClickHouse query without the time macros), `invalid`, `busy` (refused with 429) or `error` | Counter | `result` |
 
 Evaluations are counted in `logchef_jobs_runs_total{kind="alert.evaluate"}`. A
@@ -211,6 +212,9 @@ failed evaluation, such as a query error or a repeated group, counts as
   history names the error
 - A rising `retry` share for one `type` means that service is down or rate
   limiting
+- `logchef_notification_deliveries_pending` that keeps growing means the drain
+  is not keeping up or not running. Scrape-time counts are equal across
+  replicas, so aggregate with `max`, not `sum`
 - `logchef_notification_deliveries_total{type="email",result="unknown"}` rising
   points at a mail server that drops connections after accepting a message
 
