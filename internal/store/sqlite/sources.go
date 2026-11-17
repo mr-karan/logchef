@@ -18,6 +18,10 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	if err := source.SyncConnectionConfig(); err != nil {
 		return fmt.Errorf("prepare source connection config: %w", err)
 	}
+	headerSecretRefs, err := models.EncodeHeaderSecretRefs(source.HeaderSecretRefs)
+	if err != nil {
+		return err
+	}
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.CreateSourceParams{
@@ -32,6 +36,7 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 		TtlDays:           int64(source.TTLDays),
 		Managed:           boolToInt(source.Managed),
 		SecretRef:         sql.NullString{String: source.SecretRef, Valid: source.SecretRef != ""},
+		HeaderSecretRefs:  sql.NullString{String: string(headerSecretRefs), Valid: headerSecretRefs != nil},
 	}
 
 	// Execute the generated query.
@@ -124,6 +129,10 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	if err := source.SyncConnectionConfig(); err != nil {
 		return fmt.Errorf("prepare source connection config: %w", err)
 	}
+	headerSecretRefs, err := models.EncodeHeaderSecretRefs(source.HeaderSecretRefs)
+	if err != nil {
+		return err
+	}
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.UpdateSourceParams{
@@ -138,10 +147,11 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 		TtlDays:           int64(source.TTLDays),
 		Managed:           boolToInt(source.Managed),
 		SecretRef:         sql.NullString{String: source.SecretRef, Valid: source.SecretRef != ""},
+		HeaderSecretRefs:  sql.NullString{String: string(headerSecretRefs), Valid: headerSecretRefs != nil},
 		ID:                int64(source.ID),
 	}
 
-	err := db.writeQueries.UpdateSource(ctx, params)
+	err = db.writeQueries.UpdateSource(ctx, params)
 	if err != nil {
 		db.log.Error("failed to update source record in db", "error", err, "source_id", source.ID)
 		// TODO: Check for specific errors like not found? The sqlc exec doesn't return ErrNoRows usually.

@@ -28,6 +28,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("GetNotFound", func(t *testing.T) { testGetNotFound(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("LokiSource", func(t *testing.T) { testLokiSource(t, ctx, s) })
+	t.Run("SourceHeaderSecretRefs", func(t *testing.T) { testSourceHeaderSecretRefs(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
 	t.Run("SettingFallbackLogs", func(t *testing.T) { testSettingFallbackLogs(t, s) })

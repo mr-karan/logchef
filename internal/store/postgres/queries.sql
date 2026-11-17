@@ -3,8 +3,8 @@
 -- name: CreateSource :one
 -- Create a new source entry
 INSERT INTO sources (
-    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, header_secret_refs, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id;
 
 -- name: GetSource :one
@@ -37,8 +37,9 @@ SET name = $1,
     ttl_days = $9,
     managed = $10,
     secret_ref = $11,
+    header_secret_refs = $12,
     updated_at = now()
-WHERE id = $12;
+WHERE id = $13;
 
 -- name: DeleteSource :exec
 -- Delete a source by ID

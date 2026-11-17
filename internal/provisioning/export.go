@@ -12,6 +12,17 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// SecretRefConflictError reports two secrets that would export as one
+// environment variable, which cannot hold both.
+type SecretRefConflictError struct {
+	EnvVar, First, Second string
+}
+
+func (e *SecretRefConflictError) Error() string {
+	return fmt.Sprintf("%s and %s both export as %s; rename a source, or declare a variable of its own in secret_ref or header_secret_refs",
+		e.First, e.Second, e.EnvVar)
+}
+
 // ExportConfig reads the current database state and produces a ProvisioningConfig.
 // Passwords and custom header values are replaced with secret_ref and
 // header_secret_refs placeholders (never exported).
@@ -30,13 +41,18 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 	}
 
 	// Generated variable names come from sanitized names, so two sources or
-	// headers can map to one variable that cannot hold both secrets.
-	claimed := make(map[string]string)
-	claim := func(envVar, owner string) error {
-		if other, taken := claimed[envVar]; taken {
-			return fmt.Errorf("%s and %s both export as %s; rename one so each has its own variable", other, owner, envVar)
+	// headers can map to one variable that cannot hold both secrets. A name
+	// the config declared may repeat: one variable can feed several sources.
+	type claim struct {
+		owner     string
+		generated bool
+	}
+	claimed := make(map[string]claim)
+	claimVar := func(envVar, owner string, generated bool) error {
+		if other, taken := claimed[envVar]; taken && (generated || other.generated) {
+			return &SecretRefConflictError{EnvVar: envVar, First: other.owner, Second: owner}
 		}
-		claimed[envVar] = owner
+		claimed[envVar] = claim{owner: owner, generated: generated}
 		return nil
 	}
 	for _, src := range sources {
@@ -44,13 +60,14 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 		if err != nil {
 			return nil, err
 		}
-		if src.SecretRef == "" && provisioned.SecretRef != "" {
-			if err := claim(provisioned.SecretRef, fmt.Sprintf("the secret of source %q", src.Name)); err != nil {
+		if provisioned.SecretRef != "" {
+			if err := claimVar(provisioned.SecretRef, fmt.Sprintf("the secret of source %q", src.Name), src.SecretRef == ""); err != nil {
 				return nil, err
 			}
 		}
 		for _, header := range slices.Sorted(maps.Keys(provisioned.HeaderSecretRefs)) {
-			if err := claim(provisioned.HeaderSecretRefs[header], fmt.Sprintf("header %q of source %q", header, src.Name)); err != nil {
+			generated := declaredHeaderRef(src.HeaderSecretRefs, header) == ""
+			if err := claimVar(provisioned.HeaderSecretRefs[header], fmt.Sprintf("header %q of source %q", header, src.Name), generated); err != nil {
 				return nil, err
 			}
 		}
@@ -163,7 +180,7 @@ func exportVictoriaLogsSource(src *models.Source, p *config.ProvisionSource) err
 
 	conn.Auth.Password = ""
 	conn.Auth.Token = ""
-	p.HeaderSecretRefs, conn.Headers = exportHeaders(src.Name, conn.Headers)
+	p.HeaderSecretRefs, conn.Headers = exportHeaders(src, conn.Headers)
 	if err := p.SetConnectionConfig(conn); err != nil {
 		return fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
 	}
@@ -190,18 +207,19 @@ func exportLokiSource(src *models.Source, p *config.ProvisionSource) error {
 
 	conn.Auth.Password = ""
 	conn.Auth.Token = ""
-	p.HeaderSecretRefs, conn.Headers = exportHeaders(src.Name, conn.Headers)
+	p.HeaderSecretRefs, conn.Headers = exportHeaders(src, conn.Headers)
 	if err := p.SetConnectionConfig(conn); err != nil {
 		return fmt.Errorf("failed to encode loki source %q: %w", src.Name, err)
 	}
 	return nil
 }
 
-// exportHeaders replaces each custom header value with a reference to the
-// environment variable LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>. A header with
-// an empty value holds no secret and stays in the connection, so importing the
+// exportHeaders replaces each custom header value with a reference to an
+// environment variable: the one provisioning declared for the header, or else
+// the generated LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>. A header with an
+// empty value holds no secret and stays in the connection, so importing the
 // export does not demand a variable for it.
-func exportHeaders(sourceName string, headers map[string]string) (refs, kept map[string]string) {
+func exportHeaders(src *models.Source, headers map[string]string) (refs, kept map[string]string) {
 	for _, name := range slices.Sorted(maps.Keys(headers)) {
 		if headers[name] == "" {
 			if kept == nil {
@@ -213,9 +231,45 @@ func exportHeaders(sourceName string, headers map[string]string) (refs, kept map
 		if refs == nil {
 			refs = make(map[string]string)
 		}
-		refs[name] = fmt.Sprintf("LOGCHEF_SOURCE_%s_HEADER_%s", sanitizeEnvName(sourceName), sanitizeEnvName(name))
+		refs[name] = declaredHeaderRef(src.HeaderSecretRefs, name)
+		if refs[name] == "" {
+			refs[name] = generatedHeaderRef(src.Name, name)
+		}
 	}
 	return refs, kept
+}
+
+func generatedHeaderRef(sourceName, header string) string {
+	return fmt.Sprintf("LOGCHEF_SOURCE_%s_HEADER_%s", sanitizeEnvName(sourceName), sanitizeEnvName(header))
+}
+
+// customHeaderRefs returns the header references a source keeps for export,
+// keyed by headerRefKey: those that name a variable other than the one export
+// generates, so importing an export leaves the source unchanged.
+func customHeaderRefs(sourceName string, refs map[string]string) map[string]string {
+	var custom map[string]string
+	for header, envVar := range refs {
+		if envVar == generatedHeaderRef(sourceName, header) {
+			continue
+		}
+		if custom == nil {
+			custom = make(map[string]string)
+		}
+		custom[headerRefKey(header)] = envVar
+	}
+	return custom
+}
+
+// declaredHeaderRef returns the variable that provisioning declared for the
+// header, or "" if none.
+func declaredHeaderRef(declared map[string]string, header string) string {
+	return declared[headerRefKey(header)]
+}
+
+// headerRefKey is the key of a header in models.Source.HeaderSecretRefs.
+// Header names match without regard to case, so the key is lower case.
+func headerRefKey(header string) string {
+	return strings.ToLower(strings.TrimSpace(header))
 }
 
 func sanitizeEnvName(name string) string {

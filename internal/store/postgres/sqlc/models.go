@@ -471,6 +471,7 @@ type Source struct {
 	SourceType        string             `json:"source_type"`
 	ConnectionConfig  []byte             `json:"connection_config"`
 	IdentityKey       string             `json:"identity_key"`
+	HeaderSecretRefs  []byte             `json:"header_secret_refs"`
 }
 
 type SystemSetting struct {

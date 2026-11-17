@@ -25,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tenant: the selector does not restrict native LogQL. The CLI now reads a
   fractional `execution_time_ms` and prints it rounded to whole milliseconds.
   Known gaps: the field sidebar loads values one field at a time instead of
-  using the stream label preload, MCP `get_log_context` does not work on Loki
-  sources, and provisioning export writes custom header values in plain text.
+  using the stream label preload, and MCP `get_log_context` does not work on
+  Loki sources.
   The new Grafana Loki tutorial and LogQL Queries guide cover setup, the
   LogchefQL mapping and every difference.
 - LogchefQL aggregations. A pipe after the filter counts and summarizes the
@@ -207,6 +207,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Provisioning export keeps the variable a header was declared with in
+  `header_secret_refs`, instead of always writing the generated
+  `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`. A reference to the generated
+  name is not stored, so importing an export still changes nothing.
+- When two secrets would export as one environment variable, the export
+  answers 409 with a message that names both, instead of a bare 500.
 - Provisioning on Postgres no longer rewrites every managed source on each
   startup. Postgres stores the connection as JSONB, whose text never matched
   the declared connection, so each run updated every source and recorded a
@@ -236,6 +242,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- The `sources` table gains a nullable `header_secret_refs` column (SQLite
+  migration 000058, Postgres 000032). It adds a column and rebuilds no table.
 - The `sources` table accepts the new source type `loki` (SQLite migration
   000047, Postgres 000021). Back up the metadata database first: the SQLite
   migration rebuilds `sources` and keeps every row, link and ID. Rolling back

@@ -472,6 +472,7 @@ type Source struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
+	HeaderSecretRefs  sql.NullString `json:"header_secret_refs"`
 }
 
 type SystemSetting struct {

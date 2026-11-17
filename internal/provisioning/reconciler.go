@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"reflect"
 	"time"
 
@@ -610,7 +611,8 @@ func sourceNeedsUpdate(existing *models.Source, desired config.ProvisionSource) 
 		existing.TTLDays != desired.TTLDays ||
 		existing.MetaTSField != desired.MetaTSField ||
 		existing.MetaSeverityField != desired.MetaSeverityField ||
-		existing.SecretRef != desired.SecretRef, nil
+		existing.SecretRef != desired.SecretRef ||
+		!maps.Equal(existing.HeaderSecretRefs, source.HeaderSecretRefs), nil
 }
 
 // sameJSON compares two JSON documents by value. Postgres stores
@@ -645,6 +647,7 @@ func buildProvisionedSourceModel(src config.ProvisionSource) (models.Source, err
 		TTLDays:           src.TTLDays,
 		Managed:           true,
 		SecretRef:         src.SecretRef,
+		HeaderSecretRefs:  customHeaderRefs(src.Name, src.HeaderSecretRefs),
 	}
 	if source.IsClickHouse() {
 		conn, err := src.ClickHouseConnection()
