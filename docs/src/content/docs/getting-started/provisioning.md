@@ -1,6 +1,6 @@
 ---
 title: Declarative Provisioning
-description: Manage Logchef teams, ClickHouse and VictoriaLogs sources, and access control via version-controlled config files for GitOps workflows.
+description: Manage Logchef teams, ClickHouse, VictoriaLogs and Loki sources, and access control via version-controlled config files for GitOps workflows.
 ---
 
 Logchef supports declarative provisioning: define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.
@@ -93,11 +93,11 @@ Once satisfied with the dry-run output, set `dry_run = false` and restart.
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `name` | Yes | — | Unique display name (used as identity key) |
-| `source_type` | No | `clickhouse` | Datasource backend: `clickhouse` or `victorialogs` |
+| `source_type` | No | `clickhouse` | Datasource backend: `clickhouse`, `victorialogs` or `loki` |
 | `connection` | Yes for new configs | — | Provider-specific connection block |
 | `secret_ref` | No | — | Environment variable name for the provider secret |
-| `meta_ts_field` | No | `timestamp` for ClickHouse, `_time` for VictoriaLogs | Timestamp field name |
-| `meta_severity_field` | No | — | Severity/level column name |
+| `meta_ts_field` | No | `timestamp` for ClickHouse, `_time` for VictoriaLogs and Loki | Timestamp field name |
+| `meta_severity_field` | No | — (`detected_level` for Loki) | Severity/level column name |
 | `description` | No | — | Human-readable description |
 | `ttl_days` | No | `0` | Data retention in days |
 
@@ -167,6 +167,50 @@ query = "{app=\"payments\"} kubernetes.namespace:=prod"
 ```
 
 The provisioning format is now nested and datasource-native. ClickHouse sources must use `source_type` plus the nested `connection` block rather than top-level `host` / `database` / `table_name` fields.
+
+### Loki sources
+
+For **Grafana Loki**, the connection block takes the base URL, the tenant, the
+default stream selector and the parser:
+
+```toml
+[[sources]]
+name = "Loki Demo"
+source_type = "loki"
+secret_ref = "LOGCHEF_SOURCE_LOKI_DEMO_TOKEN"
+
+[sources.connection]
+base_url = "http://127.0.0.1:3100"
+tenant_id = "dev"
+selector = '{service_name=~".+"}'
+parser = "json"
+principal = "payments-readonly"
+auth = { mode = "bearer" }
+
+[sources.connection.limits]
+max_entries_per_query = 5000
+sidebar_lookback_seconds = 900
+schema_lookback_seconds = 3600
+```
+
+Logchef checks a Loki connection with the same rules as the API, and an error
+names the field, such as `loki connection.selector: selector is required`.
+`selector` is required. `auth.mode` is `none` (the default), `basic` or
+`bearer`. `parser` is empty, `json` or `logfmt`. `limits` and `headers` are
+optional, and `Authorization` and `X-Scope-OrgID` are reserved header names.
+See [Using Grafana Loki with Logchef](/tutorials/loki#add-the-source) for what
+each field means.
+
+`base_url`, `tenant_id`, `selector` and `principal` are the source's identity.
+Provisioning refuses to change them on an existing Loki source, including one
+it adopts by name, because that would repoint the source's team links and
+saved queries at other data. Create a new source instead.
+
+An export writes a Loki source with its token and password blanked and a
+`secret_ref` in their place, and keeps the principal. Custom header values are
+exported in plain text, as for VictoriaLogs, because provisioning has no
+`secret_ref` for headers.
+
 
 ### Source Views
 
@@ -243,7 +287,7 @@ Set the environment variable before starting Logchef:
 export LOGCHEF_CH_PROD_PASSWORD="actual-password"
 ```
 
-For VictoriaLogs bearer auth, `secret_ref` fills `connection.auth.token`. For VictoriaLogs basic auth, it fills `connection.auth.password`.
+For VictoriaLogs and Loki bearer auth, `secret_ref` fills `connection.auth.token`. For basic auth, it fills `connection.auth.password`.
 
 For **Nomad** deployments, use Nomad variables with template blocks:
 ```toml

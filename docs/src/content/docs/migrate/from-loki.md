@@ -1,12 +1,48 @@
 ---
 title: From Loki
-description: Migrate Loki and Grafana log analytics to ClickHouse with Logchef — pipeline re-point, label-to-column mapping, LogQL to LogchefQL/SQL examples.
+description: Query an existing Loki from Logchef, or move Loki log analytics to ClickHouse or VictoriaLogs, with the pipeline change, label-to-column mapping and LogQL to LogchefQL/SQL examples.
 ---
 
-This guide covers moving log analytics off Loki/Grafana Explore and onto
-ClickHouse (or VictoriaLogs) with Logchef as the query UI. It's scoped to
-Loki's role as a log store — it doesn't cover Grafana's role as a general
-dashboarding tool for Prometheus/metrics, which Logchef doesn't replace.
+You do not have to move off Loki to use Logchef. Logchef can query a Loki
+tenant directly, and that is the first section below. The rest of this guide
+covers moving log analytics off Loki/Grafana Explore and onto ClickHouse (or
+VictoriaLogs) with Logchef as the query UI. It's scoped to Loki's role as a
+log store — it doesn't cover Grafana's role as a general dashboarding tool for
+Prometheus/metrics, which Logchef doesn't replace.
+
+## Keep Loki and query it from Logchef
+
+Add Loki as a source and keep your shippers, retention and storage as they
+are. Logchef reads Loki's HTTP API with a fixed tenant and a default stream
+selector, and your team gets:
+
+- LogchefQL search, which compiles to LogQL, and a native **LogQL** editor
+- the histogram, field sidebar, live tail and per-stream log context
+- saved queries, dashboards, and alerts in condition or native LogQL mode
+- the CLI and the MCP server
+
+Your LogQL keeps working as written:
+
+```logql
+{service_name="payments-api"} | json | status >= 500 | __error__=""
+```
+
+And LogchefQL gives the same rows without the pipeline syntax:
+
+```text
+service_name="payments-api" and status>=500
+```
+
+What you give up compared with moving the data: exports, windowed search, the
+source activity chart and LogchefQL aggregations are not available on Loki,
+content search is still Loki's chunk scan, and a Loki source gives a team the
+whole tenant. See [Using Grafana Loki with Logchef](/tutorials/loki) for the
+setup and every difference, and [LogQL Queries](/guide/logql-queries) for the
+query mapping.
+
+Move the data when you need indexed content search, SQL analytics,
+high-cardinality fields as columns, or exports. The rest of this page covers
+that path.
 
 ## What actually moves
 
@@ -99,7 +135,8 @@ Grafana Explore's live-tail view for Loki has a direct analog: Logchef's
 explorer has its own [Live toggle](/tutorials/victorialogs#live-tail). On
 VictoriaLogs sources it proxies the backend's native tail stream; on
 ClickHouse it polls on an interval, since ClickHouse has no native log-tail
-API.
+API. On a Loki source it [polls `query_range`](/tutorials/loki#live-tail)
+every 2 seconds.
 
 ## What you gain
 
@@ -144,3 +181,4 @@ API.
 - [Search Syntax](/guide/search-syntax) and [Query Examples](/guide/examples) for the full LogchefQL reference
 - [Dashboards](/features/dashboards) for the time-series view that replaces Grafana Explore's metric queries
 - [Using VictoriaLogs with Logchef](/tutorials/victorialogs) if you'd rather keep a label-oriented backend
+- [Using Grafana Loki with Logchef](/tutorials/loki) if you keep Loki

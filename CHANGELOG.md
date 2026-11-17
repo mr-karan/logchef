@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Grafana Loki sources. A global admin adds one in the UI, the API or the
+  provisioning TOML with a base URL, an optional tenant (sent as
+  `X-Scope-OrgID`), a default stream selector, a parser (none, JSON or
+  logfmt) and an optional access principal. The URL, tenant, selector and
+  principal are fixed after creation. LogchefQL compiles to LogQL, and the
+  new LogQL tab runs native LogQL as written, paged past Loki's 5,000-entry
+  limit. The histogram, field sidebar, live tail (polling every 2 seconds),
+  per-stream log context on LogchefQL rows, saved queries, dashboards,
+  condition and native LogQL alerts, AI query generation, the CLI and the MCP
+  server work on Loki. Histogram buckets start on UTC boundaries, and an entry
+  exactly on a bucket edge can count differently from the search. Exports,
+  windowed search, the source activity chart and LogchefQL aggregations are
+  not available. A Loki source gives the teams it is linked to the whole
+  tenant: the selector does not restrict native LogQL. The CLI now reads a
+  fractional `execution_time_ms` and prints it rounded to whole milliseconds.
+  Known gaps: the field sidebar loads values one field at a time instead of
+  using the stream label preload, MCP `get_log_context` does not work on Loki
+  sources, and provisioning export writes custom header values in plain text.
+  The new Grafana Loki tutorial and LogQL Queries guide cover setup, the
+  LogchefQL mapping and every difference.
 - LogchefQL aggregations. A pipe after the filter counts and summarizes the
   matching logs: `level=error | count() by service`. The functions are
   `count`, `count_distinct`, `sum`, `avg`, `min`, `max` and `p50` to `p99`,
@@ -64,6 +84,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrade notes
 
+- The `sources` table accepts the new source type `loki` (SQLite migration
+  000047, Postgres 000021). Back up the metadata database first: the SQLite
+  migration rebuilds `sources` and keeps every row, link and ID. Rolling back
+  needs every Loki source deleted first.
 - A new `[audit]` config section bounds the `audit_events` table:
   `retention_days` (default 365) and `max_rows` (default 1,000,000), pruned
   every five minutes, 5,000 rows at a time. `log_events` (default `true`)

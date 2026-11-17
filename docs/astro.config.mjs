@@ -185,6 +185,7 @@ Key areas of the docs:
             { label: "LogchefQL Aggregations", link: "/guide/aggregations" },
             { label: "SQL Examples", link: "/guide/examples" },
             { label: "LogsQL Queries", link: "/guide/logsql-queries" },
+            { label: "LogQL Queries", link: "/guide/logql-queries" },
             { label: "Time Macros", link: "/guide/time-macros" },
             { label: "VictoriaLogs Windowed Search", link: "/guide/windowed-search" },
             { label: "Field Sidebar", link: "/features/field-sidebar" },
@@ -223,6 +224,7 @@ Key areas of the docs:
           items: [
             { label: "VictoriaLogs", link: "/tutorials/victorialogs" },
             { label: "VictoriaLogs Explorer", link: "/tutorials/victorialogs-explorer" },
+            { label: "Grafana Loki", link: "/tutorials/loki" },
             { label: "NGINX Logs", link: "/tutorials/nginx-logs" },
           ],
         },
