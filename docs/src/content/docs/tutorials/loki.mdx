@@ -211,7 +211,10 @@ The sidebar lists `_time`, `_msg`, the stream labels, then the detected fields
 of the last `schema_lookback_seconds` that have no parser or the source's
 parser.
 
-Click a field to load its values with counts. Logchef runs one instant query,
+Stream label values load when the sidebar opens, in one request that reads
+the index under the query's stream selector: the first 30 labels, without
+counts. A label past the first 30, and any other field, loads its values with
+counts on click. Logchef runs one instant query,
 `topk(<limit>, sum by (<field>) (count_over_time(<query> | <field>!="" [<range>])))`,
 over the selected range capped at `sidebar_lookback_seconds`, so the counts
 cover at most the last 15 minutes by default.
@@ -221,9 +224,8 @@ cover at most the last 15 minutes by default.
   but cannot be filtered from the sidebar yet.
 - A field with more than 500 distinct values in the range fails with Loki's
   `max_query_series` message. Narrow the query or the range.
-- Values load on click, one field at a time. The sidebar does not use the
-  index-only preload of stream label values that the server offers (it is used
-  by MCP `get_all_field_dimensions`).
+- Preloaded label values ignore the filters after the stream selector, such
+  as a condition on a detected field.
 
 ## Live tail
 
@@ -238,10 +240,8 @@ A poll reads pages of 1,000 entries. When more than 1,000 entries share one
 nanosecond timestamp, the tail shows the first 1,000, skips the rest of that
 timestamp and logs a server warning.
 
-Each user may hold two tails at once (`tail.max_per_user`). The server frees a
-stopped tail's slot only when its next 15-second heartbeat fails to write, so
-starting a third tail within 15 seconds of stopping two gets a 429. Wait and
-retry.
+Each user may hold two tails at once (`tail.max_per_user`). A tail frees its
+slot as soon as its client disconnects.
 
 ## Log context
 
@@ -256,8 +256,9 @@ stream, or the request fails with "This row does not identify one stream".
 Paging asks Loki for `offset + limit` entries and drops the first `offset`, so
 a page that would read past `max_entries_per_query` is refused.
 
-The MCP tool `get_log_context` does not work on Loki sources: it sends no
-stream labels and gets "Context on Loki needs the row's stream labels".
+The MCP tool `get_log_context` takes the same labels as `stream_labels`: the
+row's value for every schema field of type `label`. Without them it fails with
+"Context on Loki needs the row's stream labels".
 
 ## Dashboards
 
@@ -315,9 +316,9 @@ logchef sql '{service_name="payments-api"} |= "gateway"' --since 1h
 "Generated LogQL" with `--show-sql` or `explain`. Loki reports a fractional
 `execution_time_ms`; the CLI rounds it to whole milliseconds in its output.
 
-The MCP server's `query_logs`, `query_logchefql`, `get_field_values` and
-`get_all_field_dimensions` work on Loki sources. `get_log_context` does not,
-as described above.
+The MCP server's `query_logs`, `query_logchefql`, `get_field_values`,
+`get_all_field_dimensions` and `get_log_context` work on Loki sources.
+`get_log_context` needs the row's `stream_labels`, as described above.
 
 ## Provisioning
 

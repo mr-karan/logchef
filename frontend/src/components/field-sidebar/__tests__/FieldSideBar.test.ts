@@ -168,3 +168,53 @@ it('says a field has too many distinct values instead of listing fragments', asy
     app.unmount()
   }
 })
+
+it('preloads Loki stream label values in one request and loads a label it skips on click', async () => {
+  const labelValues = (field: string, values: string[]) => ({
+    field_name: field, field_type: 'label', is_low_cardinality: true,
+    values: values.map(value => ({ value, count: 0 })), total_distinct: values.length,
+  })
+  // The preload covers app and level only, as when pod is past its 30-label cap.
+  const getAllFieldValues = vi.spyOn(sourcesApi, 'getAllFieldValues').mockResolvedValue({
+    status: 'success',
+    data: { app: labelValues('app', ['api', 'web']), level: labelValues('level', ['error', 'info']) },
+  })
+  const getFieldValues = vi.spyOn(sourcesApi, 'getFieldValues').mockImplementation(async (_team, _source, fieldName, fieldType) => ({
+    status: 'success',
+    data: { field_name: fieldName, field_type: fieldType, is_low_cardinality: true, values: [{ value: 'pod-a', count: 7 }], total_distinct: 1 },
+  }))
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useExploreStore().setWindow({ kind: "relative", spec: "15m" })
+  const fields = [
+    { name: 'app', type: 'label' }, { name: 'level', type: 'label' },
+    { name: 'pod', type: 'label' }, { name: 'trace_id', type: 'String' },
+  ]
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp({ render: () => h(FieldSideBar, { fields, expanded: true, sourceId: 1, teamId: 1 }) })
+  app.use(pinia)
+  app.use(i18n)
+  const trigger = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('[data-slot="collapsible-trigger"]')]
+    .find(button => button.textContent?.includes(name))
+  const valueButton = (value: string) => [...host.querySelectorAll<HTMLButtonElement>('button[title]')]
+    .find(button => button.title.endsWith(`"${value}"`))
+  try {
+    app.mount(host)
+    await flush()
+    expect(getAllFieldValues).toHaveBeenCalledOnce()
+    expect(getFieldValues).not.toHaveBeenCalled()
+    // Index values have no counts, so a value row shows no count.
+    expect(valueButton('api')?.textContent?.trim()).toBe('api')
+    expect(valueButton('error')?.textContent?.trim()).toBe('error')
+
+    trigger('pod')?.click()
+    await flush()
+    expect(getFieldValues).toHaveBeenCalledOnce()
+    expect(getFieldValues.mock.calls[0][2]).toBe('pod')
+    expect(valueButton('pod-a')?.textContent).toContain('7')
+    expect(getAllFieldValues).toHaveBeenCalledOnce()
+  } finally {
+    app.unmount()
+  }
+})

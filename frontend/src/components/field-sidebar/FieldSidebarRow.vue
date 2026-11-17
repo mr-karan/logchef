@@ -135,7 +135,8 @@ const tooManyValues = computed(() => hasTooManyValues(props.field, values.value)
                   <span class="text-xs text-foreground truncate flex-1">
                     {{ valueInfo.value || '(empty)' }}
                   </span>
-                  <span class="text-[10px] text-muted-foreground flex-shrink-0">
+                  <!-- A Loki label preload reads values from the index, without counts. -->
+                  <span v-if="valueInfo.count > 0" class="text-[10px] text-muted-foreground flex-shrink-0">
                     {{ formatCount(valueInfo.count) }}
                   </span>
                 </button>

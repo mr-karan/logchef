@@ -132,6 +132,8 @@ jobs:
         run: go test ./internal/loki/ -run Integration -v
       - name: Alert conditions against Loki
         run: go test ./internal/alerts/ -run '^TestLogchefQLConditionLoki$' -v
+      - name: MCP log context against Loki
+        run: go test ./internal/mcp/ -run '^TestLokiLogContextUsesStreamLabels$' -v
       # The test job runs the rest of internal/server; these are the tests that
       # skip there for lack of a Loki URL. Add new ones here.
       - name: Server responses against Loki
