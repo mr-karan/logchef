@@ -496,7 +496,7 @@ fn json_value_to_line(value: &serde_json::Value) -> String {
 
 /// The columns the table prints: every result column of an aggregation in
 /// the server's order, or the first six log columns.
-fn result_columns(response: &logchef_core::api::QueryResponse) -> Vec<&str> {
+pub(crate) fn result_columns(response: &logchef_core::api::QueryResponse) -> Vec<&str> {
     match &response.aggregation {
         Some(aggregation) => aggregation
             .columns
@@ -513,7 +513,7 @@ fn result_columns(response: &logchef_core::api::QueryResponse) -> Vec<&str> {
     }
 }
 
-fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[&str]) {
+pub(crate) fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[&str]) {
     if entries.is_empty() {
         println!("No results");
         return;

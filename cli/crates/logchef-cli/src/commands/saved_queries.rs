@@ -3,7 +3,8 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::{
-    Client, Collection, CollectionQueryContent, Column, QueryRequest, QueryStats, SqlQueryRequest,
+    AggregationInfo, Client, Collection, CollectionQueryContent, Column, QueryRequest, QueryStats,
+    SqlQueryRequest,
 };
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
@@ -14,6 +15,7 @@ use serde::Serialize;
 use url::Url;
 
 use crate::cli::GlobalArgs;
+use crate::commands::query;
 use crate::session;
 use crate::ui;
 
@@ -95,6 +97,8 @@ struct JsonOutput<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     generated_sql: Option<&'a str>,
     columns: &'a [Column],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aggregation: Option<&'a AggregationInfo>,
 }
 
 #[derive(Debug)]
@@ -326,6 +330,7 @@ fn print_query_response(
                 query_id: response.query_id.as_deref(),
                 generated_sql: response.generated_sql.as_deref(),
                 columns: &response.columns,
+                aggregation: response.aggregation.as_ref(),
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -343,8 +348,19 @@ fn print_query_response(
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
+        // An aggregated result has no timestamp or message, so text output
+        // prints it as the table.
+        OutputFormat::Table | OutputFormat::Text if response.aggregation.is_some() => {
+            query::print_table(entries, &query::result_columns(response));
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
+        }
         OutputFormat::Table => {
-            print_table(entries, &response.columns);
+            query::print_table(entries, &query::result_columns(response));
             ui::print_stats(
                 quiet,
                 entries.len(),
@@ -774,39 +790,6 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     } else {
         s.to_string()
-    }
-}
-
-fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core::api::Column]) {
-    if entries.is_empty() {
-        println!("No results");
-        return;
-    }
-
-    let display_cols: Vec<_> = columns
-        .iter()
-        .filter(|c| !c.name.starts_with('_') || c.name == "_timestamp")
-        .take(6)
-        .collect();
-
-    let header: Vec<_> = display_cols.iter().map(|c| c.name.as_str()).collect();
-    println!("{}", header.join(" | "));
-    println!("{}", "-".repeat(80));
-
-    for entry in entries {
-        let row: Vec<_> = display_cols
-            .iter()
-            .map(|c| {
-                entry
-                    .get(&c.name)
-                    .map(|v| match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        _ => v.to_string(),
-                    })
-                    .unwrap_or_default()
-            })
-            .collect();
-        println!("{}", row.join(" | "));
     }
 }
 

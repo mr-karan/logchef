@@ -346,9 +346,9 @@ logchef query 'status>=500 | count() by host' --output json | jq '.aggregation.c
   query applies as well. The smaller one wins.
 - `tail`, `tail --poll` and `histogram` need log rows. They refuse an
   aggregation and exit 1.
-- `saved-queries` and `collections` run a saved aggregation, but they have no
-  `--interval` and their `text` output prints each result row as a log line.
-  Run an aggregation with `logchef query` for the table output.
+- `saved-queries` and `collections` print a saved aggregation the same way,
+  but they have no `--interval`. A saved bare `by time` key fails with the
+  server's message. Run it with `logchef query --interval` instead.
 
 ### Raw Native Queries
 
