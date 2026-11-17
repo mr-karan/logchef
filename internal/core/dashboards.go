@@ -525,25 +525,30 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 	return before, updated, nil
 }
 
-// DeleteDashboard removes a dashboard by id and returns the row it deleted,
-// read under the row lock of the delete.
-func DeleteDashboard(ctx context.Context, db store.Store, log *slog.Logger, id int) (*models.Dashboard, error) {
+// DeleteDashboard removes a dashboard by id. It returns the row it deleted,
+// read under the row lock of the delete, and the number of reports the
+// delete removed with it.
+func DeleteDashboard(ctx context.Context, db store.Store, log *slog.Logger, id int) (*models.Dashboard, int, error) {
 	var deleted *models.Dashboard
+	var reports int
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		var err error
 		if deleted, err = tx.GetDashboardForUpdate(ctx, id); err != nil {
+			return err
+		}
+		if reports, err = tx.DeleteDashboardReports(ctx, id); err != nil {
 			return err
 		}
 		return tx.DeleteDashboard(ctx, id)
 	})
 	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, ErrDashboardNotFound
+			return nil, 0, ErrDashboardNotFound
 		}
 		log.Error("failed to delete dashboard", "dashboard_id", id, "error", err)
-		return nil, fmt.Errorf("failed to delete dashboard: %w", err)
+		return nil, 0, fmt.Errorf("failed to delete dashboard: %w", err)
 	}
-	return deleted, nil
+	return deleted, reports, nil
 }
 
 // UserCanEditDashboard returns true if the user is the creator or a global

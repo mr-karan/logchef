@@ -55,6 +55,24 @@ func (db *DB) ListReports(ctx context.Context) ([]*models.Report, error) {
 	return reportsFromSQLC(rows)
 }
 
+// DeleteDashboardReports needs no lock of its own: a SQLite transaction
+// holds the single write connection.
+func (db *DB) DeleteDashboardReports(ctx context.Context, dashboardID int) (int, error) {
+	n, err := db.writeQueries.DeleteDashboardReports(ctx, sql.NullInt64{Int64: int64(dashboardID), Valid: true})
+	if err != nil {
+		return 0, fmt.Errorf("error deleting reports on dashboard %d: %w", dashboardID, translateBusy(err))
+	}
+	return int(n), nil
+}
+
+func (db *DB) DeleteSavedQueryReports(ctx context.Context, queryID int) (int, error) {
+	n, err := db.writeQueries.DeleteSavedQueryReports(ctx, sql.NullInt64{Int64: int64(queryID), Valid: true})
+	if err != nil {
+		return 0, fmt.Errorf("error deleting reports on saved query %d: %w", queryID, translateBusy(err))
+	}
+	return int(n), nil
+}
+
 func (db *DB) ListReportsByOwner(ctx context.Context, owner models.UserID) ([]*models.Report, error) {
 	rows, err := db.readQueries.ListReportsByOwner(ctx, sql.NullInt64{Int64: int64(owner), Valid: true})
 	if err != nil {

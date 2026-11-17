@@ -1837,6 +1837,12 @@ SELECT * FROM reports WHERE id = sqlc.arg(id);
 -- name: ListReports :many
 SELECT * FROM reports ORDER BY name, id;
 
+-- name: DeleteDashboardReports :execrows
+DELETE FROM reports WHERE dashboard_id = sqlc.arg(dashboard_id);
+
+-- name: DeleteSavedQueryReports :execrows
+DELETE FROM reports WHERE saved_query_id = sqlc.arg(saved_query_id);
+
 -- name: ListReportsByOwner :many
 SELECT * FROM reports WHERE owner_id = sqlc.arg(owner_id) ORDER BY name, id;
 

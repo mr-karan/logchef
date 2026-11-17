@@ -180,6 +180,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteDashboardStmt, err = db.PrepareContext(ctx, deleteDashboard); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteDashboard: %w", err)
 	}
+	if q.deleteDashboardReportsStmt, err = db.PrepareContext(ctx, deleteDashboardReports); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteDashboardReports: %w", err)
+	}
 	if q.deleteExpiredExportJobsStmt, err = db.PrepareContext(ctx, deleteExpiredExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredExportJobs: %w", err)
 	}
@@ -215,6 +218,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteSavedQueryStmt, err = db.PrepareContext(ctx, deleteSavedQuery); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSavedQuery: %w", err)
+	}
+	if q.deleteSavedQueryReportsStmt, err = db.PrepareContext(ctx, deleteSavedQueryReports); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSavedQueryReports: %w", err)
 	}
 	if q.deleteSavedViewStmt, err = db.PrepareContext(ctx, deleteSavedView); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSavedView: %w", err)
@@ -1087,6 +1093,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteDashboardStmt: %w", cerr)
 		}
 	}
+	if q.deleteDashboardReportsStmt != nil {
+		if cerr := q.deleteDashboardReportsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteDashboardReportsStmt: %w", cerr)
+		}
+	}
 	if q.deleteExpiredExportJobsStmt != nil {
 		if cerr := q.deleteExpiredExportJobsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteExpiredExportJobsStmt: %w", cerr)
@@ -1145,6 +1156,11 @@ func (q *Queries) Close() error {
 	if q.deleteSavedQueryStmt != nil {
 		if cerr := q.deleteSavedQueryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSavedQueryStmt: %w", cerr)
+		}
+	}
+	if q.deleteSavedQueryReportsStmt != nil {
+		if cerr := q.deleteSavedQueryReportsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSavedQueryReportsStmt: %w", cerr)
 		}
 	}
 	if q.deleteSavedViewStmt != nil {
@@ -2248,6 +2264,7 @@ type Queries struct {
 	deleteClaimedJobStmt                   *sql.Stmt
 	deleteCollectionStmt                   *sql.Stmt
 	deleteDashboardStmt                    *sql.Stmt
+	deleteDashboardReportsStmt             *sql.Stmt
 	deleteExpiredExportJobsStmt            *sql.Stmt
 	deleteExpiredOAuthAccessTokensStmt     *sql.Stmt
 	deleteExpiredOAuthAuthRequestsStmt     *sql.Stmt
@@ -2260,6 +2277,7 @@ type Queries struct {
 	deleteReportRecipientsStmt             *sql.Stmt
 	deleteReportUserRecipientStmt          *sql.Stmt
 	deleteSavedQueryStmt                   *sql.Stmt
+	deleteSavedQueryReportsStmt            *sql.Stmt
 	deleteSavedViewStmt                    *sql.Stmt
 	deleteSchemaAdvisorDismissalStmt       *sql.Stmt
 	deleteSessionStmt                      *sql.Stmt
@@ -2520,6 +2538,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteClaimedJobStmt:                   q.deleteClaimedJobStmt,
 		deleteCollectionStmt:                   q.deleteCollectionStmt,
 		deleteDashboardStmt:                    q.deleteDashboardStmt,
+		deleteDashboardReportsStmt:             q.deleteDashboardReportsStmt,
 		deleteExpiredExportJobsStmt:            q.deleteExpiredExportJobsStmt,
 		deleteExpiredOAuthAccessTokensStmt:     q.deleteExpiredOAuthAccessTokensStmt,
 		deleteExpiredOAuthAuthRequestsStmt:     q.deleteExpiredOAuthAuthRequestsStmt,
@@ -2532,6 +2551,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteReportRecipientsStmt:             q.deleteReportRecipientsStmt,
 		deleteReportUserRecipientStmt:          q.deleteReportUserRecipientStmt,
 		deleteSavedQueryStmt:                   q.deleteSavedQueryStmt,
+		deleteSavedQueryReportsStmt:            q.deleteSavedQueryReportsStmt,
 		deleteSavedViewStmt:                    q.deleteSavedViewStmt,
 		deleteSchemaAdvisorDismissalStmt:       q.deleteSchemaAdvisorDismissalStmt,
 		deleteSessionStmt:                      q.deleteSessionStmt,

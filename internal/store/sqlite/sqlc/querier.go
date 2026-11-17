@@ -127,6 +127,7 @@ type Querier interface {
 	DeleteCollection(ctx context.Context, id int64) error
 	// Delete a dashboard; RETURNING lets callers detect not-found.
 	DeleteDashboard(ctx context.Context, id int64) (int64, error)
+	DeleteDashboardReports(ctx context.Context, dashboardID sql.NullInt64) (int64, error)
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, before string) error
 	DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt int64) error
@@ -148,6 +149,7 @@ type Querier interface {
 	DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error)
 	// Delete a saved query
 	DeleteSavedQuery(ctx context.Context, id int64) error
+	DeleteSavedQueryReports(ctx context.Context, savedQueryID sql.NullInt64) (int64, error)
 	DeleteSavedView(ctx context.Context, id int64) (int64, error)
 	DeleteSchemaAdvisorDismissal(ctx context.Context, arg DeleteSchemaAdvisorDismissalParams) (int64, error)
 	// Delete a session by ID

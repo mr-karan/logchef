@@ -87,7 +87,7 @@ before the change records nothing, except a failed sign-in.
 | Collection item | `collection_item.add`, `collection_item.update`, `collection_item.remove` | A saved query is added to, converted in, or removed from a collection |
 | Collection member | `collection_member.add`, `collection_member.remove` | A user is given or loses access to a collection |
 | Collection team | `collection_team.add`, `collection_team.remove` | A collection is shared with or unshared from a team |
-| Dashboard | `dashboard.create`, `dashboard.update`, `dashboard.delete` | A dashboard changes |
+| Dashboard | `dashboard.create`, `dashboard.update`, `dashboard.delete` | A dashboard changes. A delete also removes the dashboard's scheduled reports, with no `report.delete` of their own: `detail.reports_removed` counts them |
 | Log export | `log_export.create`, `log_export.download` | Logs are exported, streamed (`detail.mode` `stream`) or as a job (`job`), and a job's file is downloaded. Creation fails closed |
 | Notification destination | `notification_destination.create`, `notification_destination.update`, `notification_destination.delete`, `notification_destination.test` | A destination changes or is tested |
 | OAuth consent | `oauth_consent.approve`, `oauth_consent.deny` | A user decides an OAuth authorization request. The event holds the client, the resource and the scopes |
@@ -95,7 +95,7 @@ before the change records nothing, except a failed sign-in.
 | Query share | `query_share.create`, `query_share.delete` | A share link is created or deleted |
 | Report | `report.create`, `report.update`, `report.delete`, `report.pause`, `report.resume`, `report.claim` | A scheduled report's configuration changes, or it is paused (by a user or by the scheduler), resumed, or claimed by a new owner. Report runs and sends are in the report's own run history |
 | Report recipient | `report_recipient.remove` | A direct recipient takes themself off a report. Recipients that the owner adds or removes are in the `recipients` field of `report.create` and `report.update` |
-| Saved query | `saved_query.create`, `saved_query.update`, `saved_query.delete` | A saved query changes |
+| Saved query | `saved_query.create`, `saved_query.update`, `saved_query.delete` | A saved query changes. A delete also removes the query's scheduled reports, with no `report.delete` of their own: `detail.reports_removed` counts them |
 | Saved view | `saved_view.create`, `saved_view.update`, `saved_view.delete`, `saved_view.set_default`, `saved_view.clear_default` | An Explorer view changes or becomes or stops being a default |
 | Schema advisor dismissal | `schema_advisor_dismissal.create`, `schema_advisor_dismissal.delete` | An admin dismisses or restores a schema advisor finding |
 | Service account | `service_account.create`, `service_account.delete` | A service account is created or deleted |

@@ -204,6 +204,23 @@ func testReportDeletedSource(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.CreateReport(ctx, onDash); err != nil {
 		t.Fatal(err)
 	}
+	deleted := func(what string, f func(context.Context, int) (int, error), id, want int) {
+		t.Helper()
+		if n, err := f(ctx, id); err != nil || n != want {
+			t.Errorf("deleted reports on %s = %d, %v, want %d", what, n, err, want)
+		}
+	}
+	deleted("a dashboard without reports", s.DeleteDashboardReports, mkReportDashboard(t, ctx, s, owner).ID, 0)
+	deleted("a missing dashboard", s.DeleteDashboardReports, 1<<30, 0)
+	deleted("the saved query", s.DeleteSavedQueryReports, sq.ID, 1)
+	deleted("the saved query again", s.DeleteSavedQueryReports, sq.ID, 0)
+	if _, err := s.GetReport(ctx, r.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("report after DeleteSavedQueryReports: %v, want ErrNotFound", err)
+	}
+	if _, err := s.GetSavedQuery(ctx, sq.ID); err != nil {
+		t.Errorf("DeleteSavedQueryReports removed the saved query: %v", err)
+	}
+	r, _, sq = mkSavedQueryReport(t, ctx, s, "delsource2")
 	if err := s.DeleteSavedQuery(ctx, sq.ID); err != nil {
 		t.Fatal(err)
 	}

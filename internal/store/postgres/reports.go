@@ -58,6 +58,38 @@ func (s *Store) ListReports(ctx context.Context) ([]*models.Report, error) {
 	return reportsFromSQLC(rows)
 }
 
+// DeleteDashboardReports locks the dashboard's key before the delete, in a
+// statement of its own: the delete's snapshot then sees every report whose
+// insert held the key share lock, and no later insert gets one. A missing
+// dashboard has no reports.
+func (s *Store) DeleteDashboardReports(ctx context.Context, dashboardID int) (int, error) {
+	if _, err := s.q.LockDashboardKey(ctx, int64(dashboardID)); err != nil {
+		if notFound(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("error locking dashboard %d: %w", dashboardID, err)
+	}
+	n, err := s.q.DeleteDashboardReports(ctx, int8Val(int64(dashboardID)))
+	if err != nil {
+		return 0, fmt.Errorf("error deleting reports on dashboard %d: %w", dashboardID, err)
+	}
+	return int(n), nil
+}
+
+func (s *Store) DeleteSavedQueryReports(ctx context.Context, queryID int) (int, error) {
+	if _, err := s.q.LockSavedQueryKey(ctx, int64(queryID)); err != nil {
+		if notFound(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("error locking saved query %d: %w", queryID, err)
+	}
+	n, err := s.q.DeleteSavedQueryReports(ctx, int8Val(int64(queryID)))
+	if err != nil {
+		return 0, fmt.Errorf("error deleting reports on saved query %d: %w", queryID, err)
+	}
+	return int(n), nil
+}
+
 func (s *Store) ListReportsByOwner(ctx context.Context, owner models.UserID) ([]*models.Report, error) {
 	rows, err := s.q.ListReportsByOwner(ctx, int8Val(int64(owner)))
 	if err != nil {

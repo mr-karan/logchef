@@ -469,6 +469,13 @@ type ReportStore interface {
 	GetReport(ctx context.Context, id models.ReportID) (*models.Report, error)
 	// ListReports returns every report, by name.
 	ListReports(ctx context.Context) ([]*models.Report, error)
+	// DeleteDashboardReports and DeleteSavedQueryReports delete the reports
+	// on a source and return how many they deleted. Called in the
+	// transaction that then deletes the source, they also keep a report from
+	// being added to it before the transaction ends, so the count is every
+	// report the source's delete removes.
+	DeleteDashboardReports(ctx context.Context, dashboardID int) (int, error)
+	DeleteSavedQueryReports(ctx context.Context, queryID int) (int, error)
 	ListReportsByOwner(ctx context.Context, owner models.UserID) ([]*models.Report, error)
 	// ListReportsForRecipient returns the reports that name the user directly,
 	// a team the user belongs to, or the user's address ignoring case.
