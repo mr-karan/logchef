@@ -309,6 +309,36 @@ type Source struct {
 	// Provisioning
 	Managed   bool   `db:"managed" json:"managed"`
 	SecretRef string `db:"secret_ref" json:"secret_ref,omitempty"`
+	// HeaderSecretRefs maps a custom header, by its lower-case name, to the
+	// environment variable that provisioning read its value from, so an
+	// export keeps that name. A reference to the name export generates
+	// anyway is not kept.
+	HeaderSecretRefs map[string]string `db:"header_secret_refs" json:"-"`
+}
+
+// EncodeHeaderSecretRefs returns the header_secret_refs column value: a JSON
+// object, or nil for a source with no references.
+func EncodeHeaderSecretRefs(refs map[string]string) ([]byte, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(refs)
+	if err != nil {
+		return nil, fmt.Errorf("encode header_secret_refs: %w", err)
+	}
+	return raw, nil
+}
+
+// DecodeHeaderSecretRefs reads the header_secret_refs column value.
+func DecodeHeaderSecretRefs(raw []byte) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var refs map[string]string
+	if err := json.Unmarshal(raw, &refs); err != nil {
+		return nil, fmt.Errorf("decode header_secret_refs: %w", err)
+	}
+	return refs, nil
 }
 
 func BuildClickHouseIdentityKey(conn ConnectionInfo) string {

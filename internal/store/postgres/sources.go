@@ -24,6 +24,8 @@ func sourceToModel(r sqlc.Source) *models.Source {
 		Managed:           r.Managed,
 		SecretRef:         textStr(r.SecretRef),
 	}
+	// Only EncodeHeaderSecretRefs writes the column, so it always decodes.
+	source.HeaderSecretRefs, _ = models.DecodeHeaderSecretRefs(r.HeaderSecretRefs)
 	_ = source.HydrateConnection()
 	return source
 }
@@ -32,6 +34,10 @@ func sourceToModel(r sqlc.Source) *models.Source {
 func (s *Store) CreateSource(ctx context.Context, source *models.Source) error {
 	if err := source.SyncConnectionConfig(); err != nil {
 		return fmt.Errorf("prepare source connection config: %w", err)
+	}
+	headerSecretRefs, err := models.EncodeHeaderSecretRefs(source.HeaderSecretRefs)
+	if err != nil {
+		return err
 	}
 	id, err := s.q.CreateSource(ctx, sqlc.CreateSourceParams{
 		Name:              source.Name,
@@ -45,6 +51,7 @@ func (s *Store) CreateSource(ctx context.Context, source *models.Source) error {
 		TtlDays:           int64(source.TTLDays),
 		Managed:           source.Managed,
 		SecretRef:         text(source.SecretRef),
+		HeaderSecretRefs:  headerSecretRefs,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -119,7 +126,11 @@ func (s *Store) UpdateSource(ctx context.Context, source *models.Source) error {
 	if err := source.SyncConnectionConfig(); err != nil {
 		return fmt.Errorf("prepare source connection config: %w", err)
 	}
-	err := s.q.UpdateSource(ctx, sqlc.UpdateSourceParams{
+	headerSecretRefs, err := models.EncodeHeaderSecretRefs(source.HeaderSecretRefs)
+	if err != nil {
+		return err
+	}
+	err = s.q.UpdateSource(ctx, sqlc.UpdateSourceParams{
 		Name:              source.Name,
 		MetaIsAutoCreated: source.MetaIsAutoCreated,
 		SourceType:        source.SourceType.String(),
@@ -131,6 +142,7 @@ func (s *Store) UpdateSource(ctx context.Context, source *models.Source) error {
 		TtlDays:           int64(source.TTLDays),
 		Managed:           source.Managed,
 		SecretRef:         text(source.SecretRef),
+		HeaderSecretRefs:  headerSecretRefs,
 		ID:                int64(source.ID),
 	})
 	if err != nil {

@@ -208,9 +208,8 @@ it adopts by name, because that would repoint the source's team links and
 saved queries at other data. Create a new source instead.
 
 An export writes a Loki source with its token and password blanked and a
-`secret_ref` in their place, and keeps the principal. Custom header values are
-exported in plain text, as for VictoriaLogs, because provisioning has no
-`secret_ref` for headers.
+`secret_ref` in their place, and keeps the principal. Custom header values
+become `header_secret_refs` entries, as for VictoriaLogs.
 
 
 ### Source Views
@@ -362,7 +361,7 @@ curl -s https://logchef.example.com/api/v1/admin/provisioning/export \
 
 This returns a JSON representation of all sources with their source views, teams, and memberships, useful as a starting point for writing your `provisioning.toml`. Exported views import unchanged: no revision moves and no default changes.
 
-The export never holds a secret. A source's password or token becomes a `secret_ref`: the stored one, or `LOGCHEF_SOURCE_<SOURCE>_PASSWORD` (or `_TOKEN` for bearer auth). Each custom header with a value becomes a `header_secret_refs` entry naming `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`, where `<SOURCE>` and `<HEADER>` are the names in upper case with every character other than a letter, digit or underscore replaced by `_`. Logchef does not store header references, so the export uses this name even for a header you declared with another variable. When two generated names come out the same, for example for sources named `prod-eu` and `prod_eu`, the export fails and names both, because one variable cannot hold two secrets; rename one of them. Before you apply an export, set each of these variables to the secret or header value; with them set, importing the export changes nothing.
+The export never holds a secret. A source's password or token becomes a `secret_ref`: the stored one, or `LOGCHEF_SOURCE_<SOURCE>_PASSWORD` (or `_TOKEN` for bearer auth). Each custom header with a value becomes a `header_secret_refs` entry naming `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`, where `<SOURCE>` and `<HEADER>` are the names in upper case with every character other than a letter, digit or underscore replaced by `_`. A header provisioned through `header_secret_refs` keeps the variable it was declared with. Several sources may declare the same variable. When a generated name comes out the same as another generated or declared name, for example for sources named `prod-eu` and `prod_eu`, the export answers 409 and names both, because one variable cannot hold two secrets; rename a source, or declare a variable of its own in `secret_ref` or `header_secret_refs`. Before you apply an export, set each of these variables to the secret or header value; with them set, importing the export changes nothing.
 
 ## Inline vs Separate File
 

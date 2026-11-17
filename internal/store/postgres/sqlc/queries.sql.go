@@ -1471,8 +1471,8 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createSource = `-- name: CreateSource :one
 
 INSERT INTO sources (
-    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, header_secret_refs, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id
 `
 
@@ -1488,6 +1488,7 @@ type CreateSourceParams struct {
 	TtlDays           int64       `json:"ttl_days"`
 	Managed           bool        `json:"managed"`
 	SecretRef         pgtype.Text `json:"secret_ref"`
+	HeaderSecretRefs  []byte      `json:"header_secret_refs"`
 }
 
 // Sources
@@ -1505,6 +1506,7 @@ func (q *Queries) CreateSource(ctx context.Context, arg CreateSourceParams) (int
 		arg.TtlDays,
 		arg.Managed,
 		arg.SecretRef,
+		arg.HeaderSecretRefs,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -2945,7 +2947,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE id = $1
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key, header_secret_refs FROM sources WHERE id = $1
 `
 
 // Get a single source by ID
@@ -2967,12 +2969,13 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 		&i.SourceType,
 		&i.ConnectionConfig,
 		&i.IdentityKey,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
 
 const getSourceByIdentityKey = `-- name: GetSourceByIdentityKey :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE identity_key = $1
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key, header_secret_refs FROM sources WHERE identity_key = $1
 `
 
 // Get a single source by provider-computed identity key
@@ -2994,12 +2997,13 @@ func (q *Queries) GetSourceByIdentityKey(ctx context.Context, identityKey string
 		&i.SourceType,
 		&i.ConnectionConfig,
 		&i.IdentityKey,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
 
 const getSourceByNameForProvisioning = `-- name: GetSourceByNameForProvisioning :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE name = $1
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key, header_secret_refs FROM sources WHERE name = $1
 `
 
 // Get source by name for provisioning lookup
@@ -3021,12 +3025,13 @@ func (q *Queries) GetSourceByNameForProvisioning(ctx context.Context, name strin
 		&i.SourceType,
 		&i.ConnectionConfig,
 		&i.IdentityKey,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
 
 const getSourceForUpdate = `-- name: GetSourceForUpdate :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE id = $1 FOR NO KEY UPDATE
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key, header_secret_refs FROM sources WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // Get a source by ID and lock the row until the transaction ends
@@ -3048,6 +3053,7 @@ func (q *Queries) GetSourceForUpdate(ctx context.Context, id int64) (Source, err
 		&i.SourceType,
 		&i.ConnectionConfig,
 		&i.IdentityKey,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
@@ -4973,7 +4979,7 @@ func (q *Queries) ListManagedSavedViews(ctx context.Context) ([]SavedView, error
 }
 
 const listManagedSources = `-- name: ListManagedSources :many
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE managed = true ORDER BY id
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key, header_secret_refs FROM sources WHERE managed = true ORDER BY id
 `
 
 // Get all sources managed by provisioning config
@@ -5001,6 +5007,7 @@ func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 			&i.SourceType,
 			&i.ConnectionConfig,
 			&i.IdentityKey,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -5992,7 +5999,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 }
 
 const listSources = `-- name: ListSources :many
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources ORDER BY created_at DESC
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key, header_secret_refs FROM sources ORDER BY created_at DESC
 `
 
 // Get all sources ordered by creation date
@@ -6020,6 +6027,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.SourceType,
 			&i.ConnectionConfig,
 			&i.IdentityKey,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -6032,7 +6040,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSourcesForUser = `-- name: ListSourcesForUser :many
-SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.description, s.ttl_days, s.managed, s.secret_ref, s.created_at, s.updated_at, s.source_type, s.connection_config, s.identity_key FROM sources s
+SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.description, s.ttl_days, s.managed, s.secret_ref, s.created_at, s.updated_at, s.source_type, s.connection_config, s.identity_key, s.header_secret_refs FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 JOIN team_members tm ON ts.team_id = tm.team_id
 WHERE tm.user_id = $1
@@ -6064,6 +6072,7 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.SourceType,
 			&i.ConnectionConfig,
 			&i.IdentityKey,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -6233,7 +6242,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.description, s.ttl_days, s.managed, s.secret_ref, s.created_at, s.updated_at, s.source_type, s.connection_config, s.identity_key
+SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.description, s.ttl_days, s.managed, s.secret_ref, s.created_at, s.updated_at, s.source_type, s.connection_config, s.identity_key, s.header_secret_refs
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = $1
@@ -6265,6 +6274,7 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 			&i.SourceType,
 			&i.ConnectionConfig,
 			&i.IdentityKey,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -8338,8 +8348,9 @@ SET name = $1,
     ttl_days = $9,
     managed = $10,
     secret_ref = $11,
+    header_secret_refs = $12,
     updated_at = now()
-WHERE id = $12
+WHERE id = $13
 `
 
 type UpdateSourceParams struct {
@@ -8354,6 +8365,7 @@ type UpdateSourceParams struct {
 	TtlDays           int64       `json:"ttl_days"`
 	Managed           bool        `json:"managed"`
 	SecretRef         pgtype.Text `json:"secret_ref"`
+	HeaderSecretRefs  []byte      `json:"header_secret_refs"`
 	ID                int64       `json:"id"`
 }
 
@@ -8371,6 +8383,7 @@ func (q *Queries) UpdateSource(ctx context.Context, arg UpdateSourceParams) erro
 		arg.TtlDays,
 		arg.Managed,
 		arg.SecretRef,
+		arg.HeaderSecretRefs,
 		arg.ID,
 	)
 	return err
