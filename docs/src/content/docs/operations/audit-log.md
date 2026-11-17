@@ -46,7 +46,7 @@ object.
 | `oauth_mcp` | An OAuth access token for `/mcp` | grant ID |
 | `assistant` | Ask Chef acting for a user | empty |
 | `provisioning` | A provisioning run | run ID |
-| `startup` | Admin setup from `auth.admin_emails`, and OIDC auto-provisioning | empty |
+| `startup` | Admin setup from `auth.admin_emails` and `[auth.local]`, and OIDC auto-provisioning | empty |
 | `scheduler` | A background job, such as a report run | `report_run:<id>` |
 | `none` | A failed sign-in | empty |
 
@@ -116,6 +116,7 @@ at `/oauth/revoke`, they have `actor_type` `system` and no IP address.
 |--------|---------|-------|
 | [Provisioning](/getting-started/provisioning/) | `source.*`, `team.*`, `team_member.*`, `team_source.*`, `user.create`, and `user.update` when a run marks an existing user as managed | `provisioning`, with one run ID per run in `credential_id`. Adopting an existing source or team is an `update` with `managed` going from `false` to `true` |
 | Admins from `auth.admin_emails` at startup | `user.create`, `user.update` | `startup`, label `auth.admin_emails` |
+| The local admin from `[auth.local]` at startup | `user.create` | `startup`, label `auth.local` |
 | OIDC auto-provisioning on first sign-in | `user.create`, `team_member.add` | `startup`, label `auth.auto_provision`, with the matched domain in `detail.domain` |
 | The OAuth server | `oauth_grant.revoke` | On a replayed authorization code or refresh token, with `detail.cause` `code_replay` or `refresh_replay`. A client revoke at `/oauth/revoke` has the grant's user as actor |
 | The report scheduler | `report.pause` | `scheduler`, with the run in `credential_id` and the cause in `detail.reason` |
