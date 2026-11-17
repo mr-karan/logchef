@@ -435,3 +435,111 @@ func TestIntegrationHistogram(t *testing.T) {
 		}
 	})
 }
+
+func TestIntegrationEvaluateAlert(t *testing.T) {
+	url := integrationURL(t)
+	runID := newRunID(t)
+	tenant := "logchef-" + runID
+
+	// 3 error lines an hour ago, then 5 error and 2 info lines now. Each line
+	// carries a latency for the unwrap aggregates.
+	now := time.Now().UTC().Truncate(time.Second)
+	hourAgo := now.Add(-time.Hour)
+	line := func(latency int) string { return fmt.Sprintf(`{"latency":%d}`, latency) }
+	errorLines := pushStream{Stream: map[string]string{"service_name": "it-api", "test_run": runID, "level": "error"}}
+	for i, latency := range []int{100, 200, 300} {
+		errorLines.Values = append(errorLines.Values, [2]string{fmt.Sprint(hourAgo.Add(-time.Duration(3-i) * time.Second).UnixNano()), line(latency)})
+	}
+	for i, latency := range []int{10, 20, 30, 40, 50} {
+		errorLines.Values = append(errorLines.Values, [2]string{fmt.Sprint(now.Add(-time.Duration(5-i) * time.Second).UnixNano()), line(latency)})
+	}
+	info := pushStream{Stream: map[string]string{"service_name": "it-api", "test_run": runID, "level": "info"}}
+	for i := range 2 {
+		info.Values = append(info.Values, [2]string{fmt.Sprint(now.Add(-time.Duration(2-i) * time.Second).UnixNano()), line(1)})
+	}
+	push(t, url, tenant, []pushStream{errorLines, info})
+
+	p := testProvider()
+	t.Cleanup(func() { _ = p.Close() })
+	selector := `{test_run="` + runID + `"}`
+	source := testSource(t, models.LokiConnectionInfo{BaseURL: url, TenantID: tenant, Selector: selector, Parser: "json"})
+	start, end := hourAgo.Add(-time.Minute), now.Add(time.Minute)
+	waitForRows(t, p, source, datasource.QueryRequest{RawQuery: selector, StartTime: &start, EndTime: &end, Limit: 100}, 10)
+
+	evaluate := func(t *testing.T, query string, at time.Time) *models.QueryResult {
+		t.Helper()
+		result, err := p.EvaluateAlert(t.Context(), source, datasource.AlertQueryRequest{Language: models.QueryLanguageLogQL, Query: query, At: at, LookbackSeconds: 300})
+		if err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		return result
+	}
+	value := func(t *testing.T, query string, at time.Time) string {
+		t.Helper()
+		result := evaluate(t, query, at)
+		if len(result.Logs) != 1 {
+			t.Fatalf("%s: rows %v", query, result.Logs)
+		}
+		return result.Logs[0]["value"].(string)
+	}
+
+	count := `sum(count_over_time(` + selector + ` [5m]))`
+	t.Run("a count reads the window that ends at At", func(t *testing.T) {
+		if got := value(t, count, now.Add(time.Second)); got != "7" {
+			t.Fatalf("count at now %s, want 7", got)
+		}
+		if got := value(t, count, hourAgo.Add(time.Second)); got != "3" {
+			t.Fatalf("count an hour ago %s, want 3", got)
+		}
+	})
+
+	t.Run("a grouped count has one row per level", func(t *testing.T) {
+		result := evaluate(t, `sum by (level) (count_over_time(`+selector+` [5m]))`, now.Add(time.Second))
+		got := map[string]any{}
+		for _, row := range result.Logs {
+			got[row["level"].(string)] = row["value"]
+		}
+		if len(result.Logs) != 2 || got["error"] != "5" || got["info"] != "2" || result.Columns[0].Name != "value" {
+			t.Fatalf("rows %v columns %v", result.Logs, result.Columns)
+		}
+	})
+
+	t.Run("no matching lines is zero rows", func(t *testing.T) {
+		result := evaluate(t, `sum(count_over_time({test_run="`+runID+`", level="debug"} [5m]))`, now.Add(time.Second))
+		if len(result.Logs) != 0 {
+			t.Fatalf("rows %v", result.Logs)
+		}
+	})
+
+	t.Run("a log query gets the named error", func(t *testing.T) {
+		_, err := p.EvaluateAlert(t.Context(), source, datasource.AlertQueryRequest{Language: models.QueryLanguageLogQL, Query: selector, At: now, LookbackSeconds: 300})
+		assertValidation(t, err, logQueryAlertMessage)
+	})
+
+	// The condition editor compiles LogchefQL and wraps it as the frontend
+	// does (frontend/src/composables/useAlertForm.ts).
+	t.Run("condition-mode queries on level=\"error\" run", func(t *testing.T) {
+		columns, err := p.GetSourceSchema(t.Context(), source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source.Columns = columns
+		compiled, err := p.CompileLogchefQL(t.Context(), source, datasource.LogchefQLCompileRequest{Query: `level="error"`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := compiled.Query
+		at := now.Add(time.Second)
+		for query, want := range map[string]string{
+			`sum(count_over_time(` + q + ` [300s]))`:                                "5",
+			`sum(sum_over_time(` + q + ` | unwrap latency | __error__="" [300s]))`:  "150",
+			`min(min_over_time(` + q + ` | unwrap latency | __error__="" [300s]))`:  "10",
+			`max(max_over_time(` + q + ` | unwrap latency | __error__="" [300s]))`:  "50",
+			`avg_over_time(` + q + ` | unwrap latency | __error__="" [300s]) by ()`: "30",
+		} {
+			if got := value(t, query, at); got != want {
+				t.Errorf("%s = %s, want %s", query, got, want)
+			}
+		}
+	})
+}

@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "Requête {language}",
   "alerts.generatedQuery": "{language} généré",
   "alerts.logsQLTemplateHint": "Choisissez un modèle LogsQL. La fenêtre d’analyse est appliquée automatiquement.",
+  "alerts.logQLTemplateHint": "Écrivez une requête de métrique LogQL. Sa plage, par exemple [5m], détermine les journaux comptés.",
+  "alerts.logQLLookbackMismatch": "La requête n’a pas de plage {range}. Sa propre plage détermine la fenêtre, pas la fenêtre d’analyse.",
   "alerts.sqlTemplateHint": "Choisissez un modèle pour remplir la table, le champ d’horodatage et la fenêtre d’analyse.",
   "alerts.missingContext": "Équipe ou source indisponible",
   "alerts.invalidCondition": "Condition invalide",

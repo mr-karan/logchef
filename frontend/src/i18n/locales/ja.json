@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "{language} クエリ",
   "alerts.generatedQuery": "生成された {language}",
   "alerts.logsQLTemplateHint": "LogsQL テンプレートを選択します。検索対象期間は自動適用されます。",
+  "alerts.logQLTemplateHint": "LogQL のメトリッククエリを書いてください。[5m] のような範囲で、数えるログが決まります。",
+  "alerts.logQLLookbackMismatch": "クエリに {range} の範囲がありません。ウィンドウはルックバックではなく、クエリ自身の範囲で決まります。",
   "alerts.sqlTemplateHint": "テンプレートを選択するとテーブル、タイムスタンプ列、検索対象期間を入力します。",
   "alerts.missingContext": "チームまたはソースを利用できません",
   "alerts.invalidCondition": "無効な条件",

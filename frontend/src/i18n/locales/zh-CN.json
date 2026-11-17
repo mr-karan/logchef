@@ -721,6 +721,8 @@
   "alerts.nativeQueryLabel": "{language} 查询",
   "alerts.generatedQuery": "生成的 {language}",
   "alerts.logsQLTemplateHint": "选择 LogsQL 模板。回溯窗口将自动应用。",
+  "alerts.logQLTemplateHint": "编写 LogQL 指标查询。其范围（如 [5m]）决定统计哪些日志。",
+  "alerts.logQLLookbackMismatch": "查询中没有 {range} 范围。窗口由查询自身的范围决定，而不是回溯时间。",
   "alerts.sqlTemplateHint": "选择模板以填入表名、时间戳字段和回溯窗口。",
   "alerts.missingContext": "团队或数据源不可用",
   "alerts.invalidCondition": "条件无效",

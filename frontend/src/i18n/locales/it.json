@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "Query {language}",
   "alerts.generatedQuery": "{language} generato",
   "alerts.logsQLTemplateHint": "Scegli un modello LogsQL. La finestra di analisi viene applicata automaticamente.",
+  "alerts.logQLTemplateHint": "Scrivi una query di metrica LogQL. Il suo intervallo, come [5m], decide quali log vengono contati.",
+  "alerts.logQLLookbackMismatch": "La query non ha un intervallo {range}. La finestra è decisa dal suo intervallo, non dal periodo di lookback.",
   "alerts.sqlTemplateHint": "Scegli un modello per compilare tabella, campo temporale e finestra di analisi.",
   "alerts.missingContext": "Team o fonte non disponibile",
   "alerts.invalidCondition": "Condizione non valida",

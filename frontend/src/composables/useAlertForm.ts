@@ -4,7 +4,7 @@ import { useAlertsStore } from "@/stores/alerts";
 import { useSourcesStore } from "@/stores/sources";
 import { useTeamsStore } from "@/stores/teams";
 import { alertsApi } from "@/api/alerts";
-import { asClickHouseConnection } from "@/api/sources";
+import { asClickHouseConnection, getLokiSelector } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
 import { getErrorMessage } from "@/api/types";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
@@ -44,6 +44,56 @@ export interface AlertFormState {
   labels: Array<{ id: number; key: string; value: string }>;
   annotations: Array<{ id: number; key: string; value: string }>;
   destination_ids: number[];
+}
+
+type AggregateFunction = AlertFormState["aggregate_function"];
+
+/** Writes seconds as a LogQL duration, such as 5m or 1h30m. */
+export function logqlDuration(seconds: number): string {
+  const parts: string[] = [];
+  let rest = seconds;
+  for (const [unit, size] of [["h", 3600], ["m", 60], ["s", 1]] as const) {
+    if (rest >= size) {
+      parts.push(`${Math.floor(rest / size)}${unit}`);
+      rest %= size;
+    }
+  }
+  return parts.join("") || "0s";
+}
+
+/** The LogQL metric query of a condition alert on a Loki source. */
+export function logqlConditionQuery(filter: string, aggregate: AggregateFunction, field: string, lookbackSeconds: number): string {
+  const range = `[${lookbackSeconds}s]`;
+  if (aggregate === "count") {
+    return `sum(count_over_time(${filter} ${range}))`;
+  }
+  const unwrapped = `${filter} | unwrap ${field} | __error__="" ${range}`;
+  if (aggregate === "avg") {
+    return `avg_over_time(${unwrapped}) by ()`;
+  }
+  return `${aggregate}(${aggregate}_over_time(${unwrapped}))`;
+}
+
+/**
+ * Whether a LogQL query holds a range equal to the lookback, as [300s] or
+ * [5m]. A LogQL query carries its own range, so the lookback does not change
+ * what it counts.
+ */
+export function logqlHasLookbackRange(query: string, lookbackSeconds: number): boolean {
+  return query.includes(`[${lookbackSeconds}s]`) || query.includes(`[${logqlDuration(lookbackSeconds)}]`);
+}
+
+/** The aggregate a saved condition alert used, read back from its query. */
+function conditionAggregate(query: string, sourceType: string): { aggregate: AggregateFunction; field: string } | null {
+  if (sourceType === "loki") {
+    const aggregate = query.match(/(count|sum|avg|min|max)_over_time\(/)?.[1] as AggregateFunction | undefined;
+    if (!aggregate) return null;
+    return { aggregate, field: aggregate === "count" ? "" : query.match(/\| unwrap ([A-Za-z_]\w*)/)?.[1] ?? "" };
+  }
+  const match = query.match(/(count|sum|avg|min|max)\(\s*[`"]?([^`")]*)[`"]?\s*\)/);
+  if (!match) return null;
+  const aggregate = match[1] as AggregateFunction;
+  return { aggregate, field: aggregate === "count" ? "" : match[2].trim() };
 }
 
 /** Splits the Group by field into column names. */
@@ -103,10 +153,11 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   const supportsConditionEditor = computed(() => supportsAlertEditorMode(currentSource.value, "condition"));
 
   // Column suggestions for the aggregate field. ClickHouse schemas narrow to
-  // numeric types; VictoriaLogs fields are untyped so all names are offered.
+  // numeric types; VictoriaLogs and Loki values are strings that may hold
+  // numbers, so all names are offered.
   const aggregateFieldSuggestions = computed(() => {
     const columns = currentSource.value?.columns || [];
-    if (sourceType.value === "victorialogs") {
+    if (sourceType.value === "victorialogs" || sourceType.value === "loki") {
       return columns.map((c) => c.name);
     }
     return columns
@@ -120,12 +171,9 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
   const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
   const nativeQueryLabel = computed(() => t('alerts.nativeQueryLabel', { language: nativeEditorLabel.value }));
-  const generatedQueryLanguageLabel = computed(() => {
-    if (alertMetadata.value.queryLanguage === "logsql") {
-      return t('alerts.generatedQuery', { language: 'LogsQL' });
-    }
-    return t('alerts.generatedQuery', { language: 'SQL' });
-  });
+  const generatedQueryLanguageLabel = computed(() =>
+    t('alerts.generatedQuery', { language: getQueryLanguageLabel(alertMetadata.value.queryLanguage) })
+  );
 
   // Get current source table name for SQL generation
   const currentTableName = computed(() => {
@@ -178,9 +226,14 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   // evaluation instant, so a query can also run for a past instant.
   const timeFilter = "{{__time_filter}}";
 
+  const lokiSelector = computed(() => getLokiSelector(currentSource.value) ?? `{app="api"}`);
+
   const nativeQueryPlaceholder = computed(() => {
     if (sourceType.value === "victorialogs") {
       return `level:="error" | stats count() as value`;
+    }
+    if (sourceType.value === "loki") {
+      return `sum(count_over_time(${lokiSelector.value} |= "error" [${logqlDuration(form.lookback_seconds)}]))`;
     }
 
     return `SELECT count(*) as value FROM ${currentTableName.value} WHERE severity = 'ERROR' AND ${timeFilter}`;
@@ -189,6 +242,9 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   const nativeQueryHelpText = computed(() => {
     if (sourceType.value === "victorialogs") {
       return t("alerts.logsQLTemplateHint");
+    }
+    if (sourceType.value === "loki") {
+      return t("alerts.logQLTemplateHint");
     }
 
     return t("alerts.sqlTemplateHint");
@@ -256,6 +312,13 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
             ? "count()"
             : `${form.aggregate_function}(${logsqlFieldRef(aggregateField)})`;
           generatedQuery.value = `${filterQuery} | stats ${statsExpression} as value`;
+        } else if (translatedLanguage === "logql") {
+          if (form.aggregate_function !== "count" && !/^[A-Za-z_]\w*$/.test(aggregateField)) {
+            conditionError.value = `LogQL can unwrap only a field named with letters, digits and underscores, not ${aggregateField}`;
+            generatedQuery.value = "";
+            return;
+          }
+          generatedQuery.value = logqlConditionQuery(translatedQuery.trim(), form.aggregate_function, aggregateField, form.lookback_seconds);
         } else {
           const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(\`${aggregateField}\`)`;
           const tableName = currentTableName.value;
@@ -295,7 +358,9 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   watch(
     () => [props.open, props.teamId, props.sourceId, form.editor_mode,
       form.condition_json, form.aggregate_function, form.aggregate_field,
-      currentTableName.value, nativeQueryLanguage.value, supportsConditionEditor.value],
+      currentTableName.value, nativeQueryLanguage.value, supportsConditionEditor.value,
+      // A LogQL condition query holds the lookback as its range.
+      sourceType.value === "loki" ? form.lookback_seconds : null],
     () => {
       invalidateTranslation();
       if (form.editor_mode !== "condition") return;
@@ -404,9 +469,39 @@ WHERE ${timeFilter}`,
     ];
   }
 
-  const queryTemplates = computed(() =>
-    sourceType.value === "victorialogs" ? getVictoriaLogsQueryTemplates() : getClickHouseQueryTemplates()
-  );
+  function getLokiQueryTemplates(): QueryTemplate[] {
+    const range = `[${logqlDuration(form.lookback_seconds)}]`;
+    return [
+      {
+        name: t("alerts.templates.highErrorCount"),
+        description: t("alerts.templates.highErrorCountHelp"),
+        editorMode: "native",
+        query: `sum(count_over_time(${lokiSelector.value} |~ "(?i)error" ${range}))`,
+      },
+      {
+        name: t("alerts.templates.criticalLogs"),
+        description: t("alerts.templates.criticalLogsHelp"),
+        editorMode: "native",
+        query: `sum(count_over_time(${lokiSelector.value} |~ "(?i)critical" ${range}))`,
+      },
+    ];
+  }
+
+  const queryTemplates = computed(() => {
+    if (sourceType.value === "victorialogs") return getVictoriaLogsQueryTemplates();
+    if (sourceType.value === "loki") return getLokiQueryTemplates();
+    return getClickHouseQueryTemplates();
+  });
+
+  // A native LogQL query keeps its own range; say so when it differs from the
+  // lookback. The warning never blocks a save.
+  const lookbackWarning = computed(() => {
+    if (sourceType.value !== "loki" || form.editor_mode !== "native" || !form.query.trim() || form.lookback_seconds <= 0) {
+      return null;
+    }
+    if (logqlHasLookbackRange(form.query, form.lookback_seconds)) return null;
+    return t("alerts.logQLLookbackMismatch", { range: `[${logqlDuration(form.lookback_seconds)}]` });
+  });
 
   // LogChefQL condition templates
   const conditionTemplates = computed<ConditionTemplate[]>(() => [
@@ -535,15 +630,9 @@ WHERE ${timeFilter}`,
     form.editor_mode = supportsConditionEditor.value ? alert.editor_mode : "native";
     form.query = alert.query;
     form.condition_json = alert.condition_json ?? "";
-    form.aggregate_function = "count";
-    form.aggregate_field = "";
-    const aggMatch = (alert.query || "").match(/(count|sum|avg|min|max)\(\s*[`"]?([^`")]*)[`"]?\s*\)/);
-    if (aggMatch) {
-      form.aggregate_function = aggMatch[1] as typeof form.aggregate_function;
-      if (aggMatch[1] !== "count") {
-        form.aggregate_field = aggMatch[2].trim();
-      }
-    }
+    const saved = conditionAggregate(alert.query || "", sourceType.value);
+    form.aggregate_function = saved?.aggregate ?? "count";
+    form.aggregate_field = saved?.field ?? "";
     form.group_by = (alert.group_by ?? []).join(", ");
     form.lookback_seconds = alert.lookback_seconds;
     form.threshold_operator = alert.threshold_operator;
@@ -701,6 +790,7 @@ WHERE ${timeFilter}`,
     conditionError,
     conditionTemplates,
     queryTemplates,
+    lookbackWarning,
     applyConditionTemplate,
     applyTemplate,
     teamMembers,

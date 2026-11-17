@@ -379,12 +379,93 @@ func storageMetrics(stats indexStatsResponse) []datasource.InspectionMetric {
 	}
 }
 
-// notYetSupported is what a method returns until the unit of RFC 0011 that
-// owns it lands. Describe does not advertise these capabilities.
-func notYetSupported(operation string) error {
-	return &datasource.ValidationError{Field: "source_type", Message: operation + " is not supported on Loki sources yet"}
+// logQueryAlertMessage names what a Loki alert needs. Loki answers an
+// instant log query with a 400 that says "log queries are not supported as an
+// instant query type".
+const logQueryAlertMessage = `A Loki alert needs a metric query, such as sum(count_over_time({app="api"} |= "error" [5m]))`
+
+type lokiSample struct {
+	Metric map[string]string `json:"metric"`
+	// Value is a [unix seconds, sample as a string] pair.
+	Value [2]json.RawMessage `json:"value"`
 }
 
-func (p *Provider) EvaluateAlert(context.Context, *models.Source, datasource.AlertQueryRequest) (*models.QueryResult, error) {
-	return nil, notYetSupported("Alerts")
+// EvaluateAlert runs a LogQL metric query as an instant query at req.At. The
+// query keeps its own range, such as [5m], so the window is that range ending
+// at At. Each vector sample becomes a row of value, then the series labels.
+func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req datasource.AlertQueryRequest) (*models.QueryResult, error) {
+	conn, err := p.connectionForSource(source)
+	if err != nil {
+		return nil, err
+	}
+	if language := models.NormalizeQueryLanguage(req.Language); language != models.QueryLanguageLogQL {
+		return nil, fmt.Errorf("loki alerts require %q, got %q", models.QueryLanguageLogQL, language)
+	}
+	query := strings.TrimSpace(req.Query)
+	if query == "" {
+		return nil, fmt.Errorf("alert query is required")
+	}
+	if req.At.IsZero() {
+		return nil, fmt.Errorf("alert evaluation needs the instant it stands for")
+	}
+	// Loki has no per-request timeout, so the query timeout is the deadline.
+	if req.QueryTimeout != nil && *req.QueryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(*req.QueryTimeout)*time.Second)
+		defer cancel()
+	}
+
+	params := lokiParams{"query": {query}, "time": {nanos(req.At)}}
+	body, err := p.get(ctx, conn, "/loki/api/v1/query", params, defaultMaxResponseBytes)
+	if errors.Is(err, errBodyTooLarge) {
+		return nil, &datasource.ValidationError{Field: "query", Message: fmt.Sprintf("Loki's alert result exceeds %d MiB. Aggregate it to fewer series, such as with sum by (label)", defaultMaxResponseBytes>>20)}
+	}
+	if validation, ok := errors.AsType[*datasource.ValidationError](err); ok && strings.Contains(validation.Message, "not supported as an instant query") {
+		return nil, &datasource.ValidationError{Field: "query", Message: logQueryAlertMessage, Err: validation}
+	}
+	if err != nil {
+		return nil, err
+	}
+	// An instant query answers in the shape of a range query.
+	var resp queryRangeResponse
+	if err := decodeBody(body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Data.ResultType != "vector" {
+		return nil, &datasource.ValidationError{Field: "query", Message: fmt.Sprintf("Loki returned a %q result. %s", resp.Data.ResultType, logQueryAlertMessage)}
+	}
+	var samples []lokiSample
+	if err := decodeBody(resp.Data.Result, &samples); err != nil {
+		return nil, err
+	}
+	return vectorResult(samples, resp.Data.Stats.Summary), nil
+}
+
+// vectorResult orders the series by their labels, so an ungrouped rule that
+// reads the first row reads the same series every time.
+func vectorResult(samples []lokiSample, summary lokiSummary) *models.QueryResult {
+	slices.SortFunc(samples, func(a, b lokiSample) int { return strings.Compare(labelString(a.Metric), labelString(b.Metric)) })
+	names := map[string]struct{}{}
+	rows := make([]map[string]any, 0, len(samples))
+	for _, s := range samples {
+		row := make(map[string]any, len(s.Metric)+1)
+		for name, value := range s.Metric {
+			row[name] = value
+			names[name] = struct{}{}
+		}
+		// A series label named value loses to the sample.
+		row["value"] = sampleValue(s.Value[1])
+		rows = append(rows, row)
+	}
+	columns := append([]models.ColumnInfo{{Name: "value", Type: stringColumnType}}, labelColumns(names, "value")...)
+	return &models.QueryResult{
+		Logs:    rows,
+		Columns: columns,
+		Stats: models.QueryStats{
+			ExecutionTimeMs: summary.ExecTime * 1000,
+			RowsRead:        int(summary.TotalLinesProcessed),
+			BytesRead:       int(summary.TotalBytesProcessed),
+			RowsReturned:    len(rows),
+		},
+	}
 }

@@ -723,6 +723,8 @@
   "alerts.nativeQueryLabel": "Consulta {language}",
   "alerts.generatedQuery": "{language} generado",
   "alerts.logsQLTemplateHint": "Elige una plantilla LogsQL. La ventana de evaluación se aplica automáticamente.",
+  "alerts.logQLTemplateHint": "Escribe una consulta de métricas LogQL. Su rango, como [5m], decide qué registros se cuentan.",
+  "alerts.logQLLookbackMismatch": "La consulta no tiene un rango de {range}. Su propio rango decide la ventana, no el periodo de revisión.",
   "alerts.sqlTemplateHint": "Elige una plantilla para rellenar la tabla, el campo temporal y la ventana de evaluación.",
   "alerts.missingContext": "Equipo o fuente no disponible",
   "alerts.invalidCondition": "Condición no válida",
