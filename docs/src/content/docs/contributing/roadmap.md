@@ -1,6 +1,9 @@
 ---
 title: Roadmap
-description: What Logchef has shipped recently, what's being built now, and where the log analytics project is headed next.
+head:
+  - tag: title
+    content: "Logchef Log Analytics Roadmap | Logchef"
+description: "Explore the Logchef roadmap for self-hosted log analytics. See shipped capabilities, current development, and planned improvements to log investigations."
 ---
 
 This is a snapshot of where Logchef is and where it's going. Near-term items are a

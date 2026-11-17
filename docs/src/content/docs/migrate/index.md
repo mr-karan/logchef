@@ -1,5 +1,8 @@
 ---
 title: Migrate to Logchef
+head:
+  - tag: title
+    content: "Log Analytics Migration Guides | Logchef"
 description: Guides for moving log analytics from Elasticsearch/Kibana or Loki/Grafana to ClickHouse or VictoriaLogs with Logchef as the query UI.
 ---
 

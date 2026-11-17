@@ -1,5 +1,5 @@
 ---
-title: "OpenTelemetry Logs in ClickHouse, Made Actually Queryable with Logchef"
+title: "OpenTelemetry Logs in ClickHouse"
 description: "Exporting OTel logs to ClickHouse solves storage, not search. Logchef adds a query UI, field explorer, and alerting over your existing otel_logs table."
 pubDate: 2026-07-15
 tags: ["opentelemetry", "clickhouse", "observability", "logs", "otel"]

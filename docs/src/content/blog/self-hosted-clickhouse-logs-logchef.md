@@ -1,5 +1,5 @@
 ---
-title: "Self-Hosted Log Analytics: Pairing ClickHouse with Logchef Instead of a SaaS Log Bill"
+title: "Self-Hosted Log Analytics with ClickHouse"
 description: "ClickHouse wins on log cost and speed. Logchef adds the query UI, RBAC, and alerting to run it self-hosted. An honest tradeoff breakdown."
 pubDate: 2026-07-15
 tags: ["clickhouse", "observability", "self-hosted", "cost", "log-management"]

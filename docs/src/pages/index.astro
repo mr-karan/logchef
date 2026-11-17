@@ -4,7 +4,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
 ---
 
 <BaseLayout
-  title="Logchef 2.0: Open-Source Log Analytics for ClickHouse and VictoriaLogs"
+  title="Open Source Log Analytics for Your Stack | Logchef"
   description="Search, live tail, dashboards, and alerts for logs stored in ClickHouse or VictoriaLogs. One open-source, self-hosted binary with no new log storage layer."
   activeNav="home"
 >
@@ -850,6 +850,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
             <p>
               Mix ClickHouse and VictoriaLogs panels on one grid. Stats, time series,
               breakdowns, and tables share the same time range and refresh together.
+              <a href="/features/dashboards/">Build a log dashboard</a>.
             </p>
           </div>
         </article>
@@ -933,6 +934,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
           <strong>Your backend stays the source of truth.</strong>&#32;
           Logchef queries ClickHouse and VictoriaLogs directly. There is no re-ingestion,
           duplicate storage, or schema migration.
+          <a href="/guide/search-syntax/">Learn LogchefQL search syntax</a>.
         </p>
       </div>
     </div>
@@ -1044,6 +1046,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
               Save a query as a rule and pick how often it runs. When it matches, Logchef sends
               email or hits a webhook. The query that found the problem is the one that warns
               you next time.
+              <a href="/features/alerting/">Configure log alerts</a>.
             </p>
           </div>
         </article>
@@ -1367,7 +1370,8 @@ curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/config.toml
       <div class="closing-card">
         <span class="kicker">Open source · Self-hosted</span>
         <h2>Your logs are already there. Put Logchef in front of them.</h2>
-        <p>Start with the live demo, or deploy the single binary and connect your first ClickHouse or VictoriaLogs source.</p>
+        <p>Start with the live demo, or deploy the single binary and connect your first ClickHouse or VictoriaLogs source.
+          <a href="/comparisons/">Compare log analytics tools</a> before choosing your stack.</p>
         <div class="closing-actions">
           <a href="https://demo.logchef.app" class="btn btn-primary">
             Explore the demo

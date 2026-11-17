@@ -1,6 +1,9 @@
 ---
 title: Search Syntax
-description: Learn LogchefQL, Logchef's search syntax for filtering and querying logs without writing SQL.
+head:
+  - tag: title
+    content: "LogchefQL Log Search Syntax | Logchef"
+description: "Filter logs with LogchefQL using field comparisons, logical operators, and text search. Query ClickHouse or VictoriaLogs without writing native queries."
 ---
 
 **LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL, and to count and summarize them with an [aggregation pipe](/guide/aggregations).

@@ -1,6 +1,6 @@
 ---
 title: Shipping NGINX Logs to ClickHouse
-description: How to collect, parse, and store NGINX logs in ClickHouse for analysis with Logchef
+description: "Collect and parse NGINX access logs with Vector, store them in ClickHouse, and use Logchef to investigate requests, response codes, and errors."
 ---
 
 This tutorial sets up a custom ClickHouse schema for NGINX access logs and configures Vector to collect, parse, and ship them. Unlike the OpenTelemetry example, it uses a schema built specifically for NGINX logs instead of a general-purpose one.

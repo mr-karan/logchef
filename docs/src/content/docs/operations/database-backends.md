@@ -1,6 +1,9 @@
 ---
 title: Database Backends
-description: Choose between the default SQLite metadata store and the opt-in Postgres backend for multi-replica deployments
+head:
+  - tag: title
+    content: "SQLite and Postgres Metadata Stores | Logchef"
+description: "Choose SQLite or Postgres for Logchef metadata. Configure the default local store or use Postgres to share metadata across multiple replicas."
 ---
 
 Logchef stores its **application metadata** (users, teams, sources, sessions,

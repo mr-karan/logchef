@@ -1,6 +1,9 @@
 ---
 title: Development Setup
-description: Complete guide to setting up a local Logchef development environment for building and contributing to the project.
+head:
+  - tag: title
+    content: "Logchef Local Development Setup | Logchef"
+description: "Set up a local Logchef development environment with Go, Bun, and Docker. Run the backend and frontend, then test your changes before contributing."
 ---
 
 This guide covers multiple ways to set up your Logchef development environment.
@@ -21,18 +24,18 @@ Logchef requires:
 
 Install dependencies using your system's package manager (or the methods below).
 
-#### Go Installation
+### Go Installation
 
 Download Go 1.27 or newer from [go.dev/dl](https://go.dev/dl/), or use your
 package manager (for example `brew install go`).
 
-#### Bun
+### Bun
 
 Install Bun with your package manager (for example `brew install oven-sh/bun/bun`),
 or follow [bun.sh/docs/installation](https://bun.sh/docs/installation). The
 frontend lockfile is `frontend/bun.lock`; do not use npm, pnpm, or yarn.
 
-#### Additional Tools
+### Additional Tools
 
 ```bash
 # just - command runner
