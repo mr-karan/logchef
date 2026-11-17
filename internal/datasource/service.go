@@ -420,22 +420,31 @@ func (s *Service) CompileLogchefQL(ctx context.Context, sourceID models.SourceID
 	if !ok {
 		return nil, ErrOperationNotSupported
 	}
-	// Share inspection fills with the source page, including its revision checks
-	// and short schema freshness TTL. Keep enrichment local so concurrent
-	// compiles never mutate the source.
-	if provider.Describe().LogchefQLNeedsColumns && len(source.Columns) == 0 {
-		columns, cerr := s.compileColumns(ctx, source, provider)
-		if cerr != nil {
-			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: %w", cerr)
-		}
-		if len(columns) == 0 {
-			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: schema is unavailable")
-		}
-		sourceCopy := *source
-		sourceCopy.Columns = columns
-		source = &sourceCopy
+	source, err = s.compileSource(ctx, source, provider)
+	if err != nil {
+		return nil, err
 	}
 	return compiler.CompileLogchefQL(ctx, source, req)
+}
+
+// compileSource returns source with the column types that LogchefQL
+// compilation needs. Share inspection fills with the source page, including
+// its revision checks and short schema freshness TTL. Keep enrichment local so
+// concurrent compiles never mutate the source.
+func (s *Service) compileSource(ctx context.Context, source *models.Source, provider Provider) (*models.Source, error) {
+	if !provider.Describe().LogchefQLNeedsColumns || len(source.Columns) > 0 {
+		return source, nil
+	}
+	columns, err := s.compileColumns(ctx, source, provider)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: %w", err)
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: schema is unavailable")
+	}
+	sourceCopy := *source
+	sourceCopy.Columns = columns
+	return &sourceCopy, nil
 }
 
 // compileColumns resolves the column types LogchefQL translation needs from the
@@ -456,12 +465,28 @@ func (s *Service) compileColumns(ctx context.Context, source *models.Source, pro
 	return nil, fmt.Errorf("schema is unavailable")
 }
 
+// EvaluateAlert runs an alert query for the lookback that ends at req.At. A
+// LogchefQL condition is compiled first, at every evaluation, so live
+// evaluation, the test route and backtest run the same native query.
 func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, req AlertQueryRequest) (*models.QueryResult, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	return provider.EvaluateAlert(ctx, source, req)
+	if models.NormalizeQueryLanguage(req.Language) != models.QueryLanguageLogchefQL {
+		return provider.EvaluateAlert(ctx, source, req)
+	}
+	condition, err := s.compileAlertCondition(ctx, source, provider, req.Query, req.LookbackSeconds)
+	if err != nil {
+		return nil, err
+	}
+	req.Language, req.Query = condition.Language, condition.Query
+	result, err := provider.EvaluateAlert(ctx, source, req)
+	if err != nil {
+		return nil, err
+	}
+	condition.nameGroups(result)
+	return result, nil
 }
 
 func (s *Service) GetFieldValues(ctx context.Context, sourceID models.SourceID, req FieldValuesRequest) (*FieldValuesResult, error) {

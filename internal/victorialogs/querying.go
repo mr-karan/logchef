@@ -359,6 +359,12 @@ func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, re
 	return compiled, nil
 }
 
+// CompileAlertCondition compiles a LogchefQL alert condition into a LogsQL
+// stats query. EvaluateAlert bounds it to the lookback that ends at At.
+func (p *Provider) CompileAlertCondition(ctx context.Context, source *models.Source, query string, _ int) (*datasource.CompiledLogchefQL, error) {
+	return p.CompileLogchefQL(ctx, source, datasource.LogchefQLCompileRequest{Query: query, AllowAggregation: true})
+}
+
 func (p *Provider) GetSourceSchema(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
 	conn, err := p.connectionForSource(source)
 	if err != nil {

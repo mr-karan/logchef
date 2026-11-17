@@ -90,10 +90,11 @@ func TestLokiConditionAlertTests(t *testing.T) {
 		return c.Next()
 	}, s.handleTestAlertQuery)
 
-	// The query the alert form generates for the condition level="error".
-	request := fmt.Sprintf(`{"source_id":%d,"query_language":"logql","editor_mode":"condition","condition_json":"level=\"error\"",`+
-		`"query":"sum(count_over_time({test_run=\"%s\", level=\"error\"} [300s]))","lookback_seconds":300,"threshold_operator":"gte","threshold_value":2}`,
-		source.ID, runID)
+	// The rule the alert form sends for the condition level="error". The
+	// server compiles it to a LogQL metric query.
+	request := fmt.Sprintf(`{"source_id":%d,"query_language":"logchefql","editor_mode":"condition","condition_json":"level=\"error\"",`+
+		`"query":"level=\"error\" | count() as value","lookback_seconds":300,"threshold_operator":"gte","threshold_value":2}`,
+		source.ID)
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		status, _, parsed := postJSON(t, app, "/alerts/test", request)

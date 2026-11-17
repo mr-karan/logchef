@@ -30,13 +30,11 @@ defineProps<{
   nativeQueryLabel: string;
   nativeQueryPlaceholder: string;
   nativeQueryHelpText: string;
-  generatedQueryLanguageLabel: string;
   aggregateFieldSuggestions: string[];
   conditionTemplates: ConditionTemplate[];
   queryTemplates: QueryTemplate[];
   lookbackWarning: string | null;
-  conditionError: string | null;
-  generatedQuery: string;
+  conditionGroupBy: boolean;
   isTestingQuery: boolean;
   testQueryResult: TestAlertQueryResponse | null;
   testQueryError: string | null;
@@ -129,7 +127,7 @@ defineProps<{
             type="button"
             variant="outline"
             size="sm"
-            :disabled="!generatedQuery || disabled || isTestingQuery"
+            :disabled="!backtestRequest || disabled || isTestingQuery"
             @click="onTestQuery"
           >
             {{ isTestingQuery ? t('ui.testing') : t('ui.testQuery') }}
@@ -142,7 +140,6 @@ defineProps<{
           :disabled="disabled"
           class="font-mono text-sm"
         />
-        <p v-if="conditionError" class="text-xs text-destructive">{{ conditionError }}</p>
         <p class="text-xs text-muted-foreground">
           {{ t('ui.examples2') }} <code class='bg-muted px-1 rounded'>severity = "ERROR"</code>,
           <code class="bg-muted px-1 rounded">status_code >= 500</code>,
@@ -150,10 +147,6 @@ defineProps<{
         </p>
       </div>
 
-      <div v-if="generatedQuery" class="space-y-2">
-        <Label class='text-xs text-muted-foreground'>{{ generatedQueryLanguageLabel }} {{ t('ui.readOnly') }}</Label>
-        <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedQuery }}</pre>
-      </div>
     </template>
 
     <!-- Native Mode -->
@@ -215,10 +208,10 @@ defineProps<{
         id="alert-group-by"
         v-model="form.group_by"
         placeholder="service, region"
-        :disabled="disabled || form.editor_mode !== 'native'"
+        :disabled="disabled || (form.editor_mode !== 'native' && !conditionGroupBy)"
         class="font-mono text-sm"
       />
-      <p v-if="form.editor_mode !== 'native'" class="text-xs text-muted-foreground">
+      <p v-if="form.editor_mode !== 'native' && !conditionGroupBy" class="text-xs text-muted-foreground">
         {{ t('alerts.groupByNeedsNativeQuery') }}
       </p>
     </div>

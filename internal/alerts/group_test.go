@@ -105,7 +105,7 @@ func TestGroupedSamples(t *testing.T) {
 		samples, err := SamplesFromResult(groupedResult(
 			map[string]any{"service": "checkout", "value": uint64(12)},
 			map[string]any{"service": "search", "value": uint64(3)},
-		), []string{"service"})
+		), []string{"service"}, models.QueryLanguageClickHouseSQL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +123,7 @@ func TestGroupedSamples(t *testing.T) {
 			Columns: []models.ColumnInfo{{Name: "service"}, {Name: "region"}, {Name: "errors"}, {Name: "total"}},
 			Logs:    []map[string]any{{"service": "api", "region": "eu", "errors": "7", "total": 100}},
 		}
-		samples, err := SamplesFromResult(result, []string{"region", "service"})
+		samples, err := SamplesFromResult(result, []string{"region", "service"}, models.QueryLanguageClickHouseSQL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,7 +137,7 @@ func TestGroupedSamples(t *testing.T) {
 			Columns: []models.ColumnInfo{{Name: "value"}, {Name: "service"}},
 			Logs:    []map[string]any{{"value": "4", "service": "api"}, {"value": "2"}},
 		}
-		samples, err := SamplesFromResult(result, []string{"service"})
+		samples, err := SamplesFromResult(result, []string{"service"}, models.QueryLanguageClickHouseSQL)
 		if err != nil || len(samples) != 2 || samples[1].GroupKey != `[""]` {
 			t.Fatalf("samples = %+v, %v; want a second group with an empty value", samples, err)
 		}
@@ -145,7 +145,7 @@ func TestGroupedSamples(t *testing.T) {
 
 	t.Run("long values", func(t *testing.T) {
 		long := strings.Repeat("x", 600)
-		samples, err := SamplesFromResult(groupedResult(map[string]any{"service": long, "value": 1}), []string{"service"})
+		samples, err := SamplesFromResult(groupedResult(map[string]any{"service": long, "value": 1}), []string{"service"}, models.QueryLanguageClickHouseSQL)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,7 +208,7 @@ func TestGroupedSamples(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			samples, err := SamplesFromResult(tc.result, tc.groupBy)
+			samples, err := SamplesFromResult(tc.result, tc.groupBy, models.QueryLanguageClickHouseSQL)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("samples = %+v, err = %v; want an error containing %q", samples, err, tc.want)
 			}

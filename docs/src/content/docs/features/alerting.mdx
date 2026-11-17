@@ -15,17 +15,25 @@ Logchef evaluates alert queries on a schedule and sends notifications when thres
 6. Add recipients and/or webhook URLs
 7. Save
 
-For ClickHouse, VictoriaLogs and Loki sources, Logchef can generate the executable alert query automatically from a LogchefQL condition. Native mode remains available when you want to write SQL, LogsQL or LogQL directly.
+For ClickHouse, VictoriaLogs and Loki sources, an alert can be a LogchefQL condition, which the server compiles to the source's query language at every evaluation. Native mode remains available when you want to write SQL, LogsQL or LogQL directly.
 
 ## Query Modes
 
-**Condition mode**: Write a LogchefQL filter condition and pick an aggregate function (`count`, `sum`, `avg`, `min`, `max`). For anything beyond `count`, also pick the field to aggregate over: schema-backed suggestions show all fields for VictoriaLogs sources and numeric columns for ClickHouse. Logchef generates the backend-native executable query and adds the alert window automatically.
+**Condition mode**: Write a LogchefQL filter condition and pick an aggregate function (`count`, `sum`, `avg`, `min`, `max`). For anything beyond `count`, also pick the field to aggregate over: schema-backed suggestions show all fields for VictoriaLogs sources and numeric columns for ClickHouse. On ClickHouse and VictoriaLogs, **Group by** names up to four fields, and each group fires on its own.
 
 ```
 severity_text = "ERROR"
 status_code >= 500 and service = "api"
 body ~ "timeout"
 ```
+
+The rule is stored as one LogchefQL aggregation, with `query_language` set to `logchefql`:
+
+```text
+status_code >= 500 | count() as value by service
+```
+
+The server compiles it at every evaluation, for the lookback that ends at the evaluation time, so a test, a backtest and the scheduled run read the same query. Through the API, the query takes one aggregate and no `time` key, and `group_by` may be left empty: the `by` keys fill it. A window where the aggregate had no numeric input, such as `sum` over no matching row, counts as no data and follows the rule's no-data policy. A condition saved before the server compiled conditions keeps the native query the form generated and runs it unchanged; saving it from the form stores it as LogchefQL.
 
 **Native mode**: Write the source's native alert query. The query must return a single numeric value.
 
@@ -47,10 +55,11 @@ an instant query at the run's due time. The range in the query, such as
 `[5m]`, decides what is counted, and Logchef does not rewrite it. The form
 still asks for a lookback, because backtests use it, and warns without
 blocking a save when the query has no range equal to the lookback. Condition
-mode on Loki wraps the compiled filter in `count_over_time` for `count`, and in
+mode on Loki compiles the filter into `count_over_time` for `count`, and into
 `unwrap` with `sum_over_time`, `min_over_time`, `max_over_time` or
-`avg_over_time` for the other aggregates. A log query is refused with "A Loki
-alert needs a metric query".
+`avg_over_time` for the other aggregates, over a range equal to the lookback.
+A Loki condition cannot group; write a native LogQL query with `sum by (...)`
+for that. A log query is refused with "A Loki alert needs a metric query".
 
 ```text
 sum(count_over_time({service_name="payments-api", level="error"} [5m]))

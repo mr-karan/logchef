@@ -499,6 +499,32 @@ func BuildFullQueryFromTranslation(params QueryBuildParams, translateResult *Tra
 	return buildFullQueryFromTranslation(params, start, end, translateResult)
 }
 
+// BuildAggregationQuery writes the aggregated SELECT of a translated query
+// with timeCondition as its time filter. An alert passes the
+// {{__time_filter}} macro, which its renderer expands for each evaluation
+// window. A time key needs a range to check its buckets, so it is rejected.
+func BuildAggregationQuery(translateResult *TranslateResult, tableName, timestampField, timeCondition string) (string, error) {
+	agg := translateResult.Aggregation
+	if agg == nil {
+		return "", &ParseError{Code: ErrInvalidAggregation, Message: "the query has no aggregation, such as | count()"}
+	}
+	if slices.ContainsFunc(agg.node.By, func(key GroupKey) bool { return key.Time }) {
+		return "", &ParseError{Code: ErrInvalidAggregation, Message: "a time key needs a time range. Remove time from by"}
+	}
+	if err := validateTableName(tableName); err != nil {
+		return "", err
+	}
+	if err := validateIdentifier(timestampField, "timestamp field"); err != nil {
+		return "", err
+	}
+	var query strings.Builder
+	params := QueryBuildParams{TableName: tableName, TimestampField: timestampField}
+	if err := agg.writeQuery(&query, params, timeCondition, translateResult.SQL); err != nil {
+		return "", err
+	}
+	return query.String(), nil
+}
+
 // timeBound is one end of the query time range: a SQL timestamp and the
 // timezone ClickHouse reads it in.
 type timeBound struct {

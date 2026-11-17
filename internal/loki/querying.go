@@ -271,22 +271,9 @@ func schemaColumns(labels []string, detected detectedFieldsResponse, parser stri
 // callers pass it to QueryLogs separately.
 func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
 	compiled := &datasource.CompiledLogchefQL{Language: models.QueryLanguageLogQL}
-	conn, err := p.connectionForSource(source)
+	options, err := p.logQLOptions(source)
 	if err != nil {
 		return compiled, err
-	}
-	selector, err := models.ParseLokiSelector(conn.Selector)
-	if err != nil {
-		return compiled, fmt.Errorf("read the source selector: %w", err)
-	}
-	options := logchefql.LogQLTranslateOptions{Parser: conn.Parser}
-	for _, m := range selector {
-		options.Selector = append(options.Selector, logchefql.LogQLMatcher{Name: m.Name, Op: m.Op, Value: m.Value})
-	}
-	for _, column := range source.Columns {
-		if column.Type == labelColumnType {
-			options.StreamLabels = append(options.StreamLabels, column.Name)
-		}
 	}
 
 	result := logchefql.TranslateToLogQL(req.Query, options)
@@ -300,6 +287,51 @@ func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, re
 		return compiled, result.Error
 	}
 	return compiled, nil
+}
+
+// CompileAlertCondition compiles a LogchefQL alert condition into a LogQL
+// metric query whose range is the lookback. EvaluateAlert runs it as an
+// instant query at At, so the range ends there.
+func (p *Provider) CompileAlertCondition(_ context.Context, source *models.Source, query string, lookbackSeconds int) (*datasource.CompiledLogchefQL, error) {
+	options, err := p.logQLOptions(source)
+	if err != nil {
+		return nil, err
+	}
+	result := logchefql.TranslateToLogQLMetric(query, options, lookbackSeconds)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &datasource.CompiledLogchefQL{
+		Language:    models.QueryLanguageLogQL,
+		Valid:       true,
+		Conditions:  result.Conditions,
+		FieldsUsed:  result.FieldsUsed,
+		Query:       result.Query,
+		Aggregation: result.Aggregation,
+	}, nil
+}
+
+// logQLOptions are the source's selector, parser and stream labels, which
+// every compiled query starts from.
+func (p *Provider) logQLOptions(source *models.Source) (logchefql.LogQLTranslateOptions, error) {
+	conn, err := p.connectionForSource(source)
+	if err != nil {
+		return logchefql.LogQLTranslateOptions{}, err
+	}
+	selector, err := models.ParseLokiSelector(conn.Selector)
+	if err != nil {
+		return logchefql.LogQLTranslateOptions{}, fmt.Errorf("read the source selector: %w", err)
+	}
+	options := logchefql.LogQLTranslateOptions{Parser: conn.Parser}
+	for _, m := range selector {
+		options.Selector = append(options.Selector, logchefql.LogQLMatcher{Name: m.Name, Op: m.Op, Value: m.Value})
+	}
+	for _, column := range source.Columns {
+		if column.Type == labelColumnType {
+			options.StreamLabels = append(options.StreamLabels, column.Name)
+		}
+	}
+	return options, nil
 }
 
 type indexStatsResponse struct {

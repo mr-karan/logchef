@@ -94,6 +94,8 @@ jobs:
           exit 1
       - name: Integration tests (VictoriaLogs)
         run: go test ./internal/victorialogs/ -run Integration -v
+      - name: Alert conditions against VictoriaLogs
+        run: go test ./internal/alerts/ -run '^TestLogchefQLConditionVictoriaLogs$' -v
 
   # The Loki provider integration tests (RFC 0011) run against the dev stack's
   # config (auth_enabled, filesystem storage). The image is distroless, so the
@@ -128,6 +130,8 @@ jobs:
           exit 1
       - name: Integration tests (Loki)
         run: go test ./internal/loki/ -run Integration -v
+      - name: Alert conditions against Loki
+        run: go test ./internal/alerts/ -run '^TestLogchefQLConditionLoki$' -v
       # The test job runs the rest of internal/server; these are the tests that
       # skip there for lack of a Loki URL. Add new ones here.
       - name: Server responses against Loki
@@ -184,6 +188,8 @@ jobs:
           test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.clusters WHERE cluster = 'logchef_two_shards'")" = 2
       - name: Query, schema, and lifecycle compatibility
         run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql ./internal/advisor ./internal/core -count=1
+      - name: Alert conditions against ClickHouse
+        run: go test -race ./internal/alerts -count=1 -run '^TestLogchefQLConditionClickHouse$'
       # The test job runs the rest of internal/server; these are the tests that
       # skip there for lack of a ClickHouse address. Add new ones here.
       - name: Server responses against ClickHouse

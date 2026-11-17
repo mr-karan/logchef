@@ -51,7 +51,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert, at tim
 		return fmt.Errorf("alert query failed: %w", err)
 	}
 
-	samples, err := SamplesFromResult(result, alert.GroupBy)
+	samples, err := SamplesFromResult(result, alert.GroupBy, alert.QueryLanguage)
 	if err != nil {
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to extract alert result: %w", err))
 		return fmt.Errorf("failed to extract alert result: %w", err)
