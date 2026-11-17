@@ -652,7 +652,7 @@ func TestCompareAlertThreshold(t *testing.T) {
 }
 
 func TestGenerateQueryWarningsNamesTruncationCause(t *testing.T) {
-	const query = "SELECT count() AS value FROM logs WHERE ts > now() - INTERVAL 5 MINUTE"
+	alert := &models.Alert{QueryLanguage: models.QueryLanguageClickHouseSQL, Query: "SELECT count() AS value FROM logs WHERE ts > now() - INTERVAL 5 MINUTE"}
 	rows := []map[string]any{{"value": 1}, {"value": 2}, {"value": 3}}
 
 	tests := []struct {
@@ -666,7 +666,7 @@ func TestGenerateQueryWarningsNamesTruncationCause(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			warnings := generateQueryWarnings(query, time.Millisecond, &models.QueryResult{Logs: rows, Stats: tc.stats}, false)
+			warnings := generateQueryWarnings(alert, "ts", time.Millisecond, &models.QueryResult{Logs: rows, Stats: tc.stats}, false)
 			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], tc.prefix) {
 				t.Fatalf("warnings = %q, want one starting with %q", warnings, tc.prefix)
 			}

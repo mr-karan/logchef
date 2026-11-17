@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -601,7 +603,8 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}
 
 	// Load source to verify access
-	if _, err := db.GetSource(ctx, sourceID); err != nil {
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
 		if models.IsNotFound(err) {
 			return nil, fmt.Errorf("source not found")
 		}
@@ -630,7 +633,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}
 
 	if len(tempAlert.GroupBy) > 0 {
-		return groupedTestResponse(tempAlert, result, executionTime)
+		return groupedTestResponse(tempAlert, source.MetaTSField, result, executionTime)
 	}
 
 	// Extract numeric value from result. No matching rows is not an error —
@@ -654,7 +657,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}
 
 	// Generate additional warnings
-	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result, false)...)
+	warnings = append(warnings, generateQueryWarnings(tempAlert, source.MetaTSField, executionTime, result, false)...)
 
 	return &models.TestAlertQueryResponse{
 		Value:           value,
@@ -745,7 +748,7 @@ func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Servic
 
 // groupedTestResponse reads the samples the scheduler would read. A result
 // the scheduler rejects, such as a duplicate group, is a 400 here.
-func groupedTestResponse(alert *models.Alert, result *models.QueryResult, executionTime time.Duration) (*models.TestAlertQueryResponse, error) {
+func groupedTestResponse(alert *models.Alert, timestampColumn string, result *models.QueryResult, executionTime time.Duration) (*models.TestAlertQueryResponse, error) {
 	samples, err := alerts.SamplesFromResult(result, alert.GroupBy)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
@@ -771,7 +774,7 @@ func groupedTestResponse(alert *models.Alert, result *models.QueryResult, execut
 		resp.ThresholdMet = noRowsThresholdMet(alert)
 		resp.Warnings = append(resp.Warnings, noRowsWarning(alert.NoDataPolicy))
 	}
-	resp.Warnings = append(resp.Warnings, generateQueryWarnings(alert.Query, executionTime, result, true)...)
+	resp.Warnings = append(resp.Warnings, generateQueryWarnings(alert, timestampColumn, executionTime, result, true)...)
 	return resp, nil
 }
 
@@ -794,9 +797,8 @@ func noRowsWarning(policy models.AlertNoDataPolicy) string {
 
 // generateQueryWarnings flags slow or unbounded queries. A grouped rule reads
 // every row, so only an ungrouped one is warned about returning several.
-func generateQueryWarnings(query string, executionTime time.Duration, result *models.QueryResult, grouped bool) []string {
+func generateQueryWarnings(alert *models.Alert, timestampColumn string, executionTime time.Duration, result *models.QueryResult, grouped bool) []string {
 	var warnings []string
-	queryLower := strings.ToLower(query)
 
 	// Warn if query took more than 5 seconds
 	if executionTime > 5*time.Second {
@@ -805,8 +807,7 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 		warnings = append(warnings, fmt.Sprintf("Query took %v. This is acceptable but consider optimization if possible.", executionTime.Round(time.Millisecond)))
 	}
 
-	// Warn if query doesn't have a time filter (for SQL queries)
-	if !strings.Contains(queryLower, "where") && !strings.Contains(queryLower, "interval") && !strings.Contains(queryLower, "now()") {
+	if lacksTimeFilter(alert, timestampColumn) {
 		warnings = append(warnings, "Query appears to lack a time-based filter. Consider adding a time window (e.g., WHERE {{__time_filter}}) to improve performance and relevance.")
 	}
 
@@ -825,4 +826,28 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 	}
 
 	return warnings
+}
+
+// lacksTimeFilter reports whether a ClickHouse SQL alert query appears to read
+// every row: it uses no time macro, and its WHERE clause does not name the
+// source's timestamp column. LogsQL and LogQL need no check, because their
+// providers bound the query to the lookback that ends at the evaluation instant.
+func lacksTimeFilter(alert *models.Alert, timestampColumn string) bool {
+	if alert.QueryLanguage != models.QueryLanguageClickHouseSQL {
+		return false
+	}
+	if slices.ContainsFunc(template.ReferencedNames(alert.Query), isTimeMacro) {
+		return false
+	}
+	// strings.Cut on "where" also finds PREWHERE.
+	_, where, found := strings.Cut(strings.ToLower(alert.Query), "where")
+	if !found || timestampColumn == "" {
+		return true
+	}
+	column := regexp.MustCompile(`(^|[^a-z0-9_])` + regexp.QuoteMeta(strings.ToLower(timestampColumn)) + `($|[^a-z0-9_])`)
+	return !column.MatchString(where)
+}
+
+func isTimeMacro(name string) bool {
+	return name == "__time_filter" || name == "__from" || name == "__to"
 }
