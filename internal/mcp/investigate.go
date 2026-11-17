@@ -266,7 +266,7 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 	s.AddTool(logContextTool, mcp.NewTypedToolHandler(t.handleGetLogContext))
 
 	listAlertsTool := mcp.NewTool("list_alerts",
-		mcp.WithDescription("List all alert rules configured for a source. Shows name, severity, active status, query mode, and last state (firing/resolved)."),
+		mcp.WithDescription("List alert rules, optionally for one source. Shows name, severity, active status, query and threshold, group_by, no_data_policy, last_state (firing, no_data or resolved) and instance_counts (groups firing, with no data, and ok)."),
 		mcp.WithInputSchema[ListAlertsParams](),
 		mcp.WithTitleAnnotation("List Alerts"),
 		readOnlyTool,
@@ -274,7 +274,7 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 	s.AddTool(listAlertsTool, mcp.NewTypedToolHandler(t.handleListAlerts))
 
 	alertHistoryTool := mcp.NewTool("get_alert_history",
-		mcp.WithDescription("Get the evaluation history for a specific alert. Shows when it triggered, resolved, or errored, with the actual metric values."),
+		mcp.WithDescription("Get the history of a specific alert. Each entry is one episode of one group (group_key, group) with status triggered, no_data, resolved or error, the value, its times and the state of each notification delivery. silenced_by in the payload means a silence muted the episode."),
 		mcp.WithInputSchema[GetAlertHistoryParams](),
 		mcp.WithTitleAnnotation("Get Alert History"),
 		readOnlyTool,

@@ -75,9 +75,18 @@ Set `[jobs] enabled = false` (`LOGCHEF_JOBS__ENABLED=false`) on a replica that
 should serve HTTP only. `[alerts] max_concurrent_evaluations` (default `4`)
 bounds the rules one replica evaluates at once.
 
-A notification is still sent by the replica that evaluated the tick. A replica
-that stalls or dies between a send and its bookkeeping can send that
-notification again on a later tick.
+An evaluation sends nothing itself. It writes its notifications as delivery
+rows in the same transaction as the rule's state, and the `notify.deliver` job
+sends them. Each row is reserved by one replica at a time, and rows for the
+same group go out in order. A replica that stalls or dies after a webhook,
+Slack or PagerDuty request was accepted and before its result was written
+sends that message again once the reservation ends; an email is never sent
+twice and is marked `unknown` instead. See
+[Delivery and retries](/features/alerting/#delivery-and-retries).
+
+This release cannot be rolled out one replica at a time when upgrading from
+2.7: stop every old replica before the first new one starts. See
+[Upgrading from 2.7](/features/alerting/#upgrading-from-27).
 
 [Scheduled reports](/features/scheduled-reports/) use the same runner, one job
 per report. The report's run row is its claim: one row per scheduled tick and

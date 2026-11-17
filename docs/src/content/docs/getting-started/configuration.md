@@ -707,7 +707,7 @@ request_timeout = "5s"
 tls_insecure_skip_verify = false
 ```
 
-Webhook requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only. A short excerpt of the response body goes to the server log.
+Webhook, Slack and PagerDuty requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only, and the server log names the destination and the status, never the response body. `request_timeout` bounds each webhook, Slack, PagerDuty and SMTP request.
 
 To use an internal receiver, add its exact hostname or IP address to the static configuration and restart Logchef:
 

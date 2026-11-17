@@ -55,6 +55,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `now() - toIntervalSecond(...)`. Save-time validation renders the macros
   through the same path as evaluation, so a query that saves also runs. A
   query without macros runs unchanged.
+- Alert conditions are LogchefQL rules compiled on the server. The condition
+  editor stores one aggregation, such as
+  `status >= 500 | count() as value by service`, with `query_language`
+  `logchefql`, and the server compiles it at every evaluation, so the test,
+  the backtest and the scheduled run read the same query. **Group by** works
+  in condition mode on ClickHouse and VictoriaLogs, with up to four keys that
+  fill `group_by`. A Loki condition takes one ungrouped `count`, `sum`, `avg`,
+  `min` or `max`. A condition with no aggregation, a `time` key, more than one
+  aggregate or more than four keys answers 400. An aggregate with no numeric
+  input in the window counts as no data and follows the no-data policy. The
+  form no longer previews the compiled query.
+- Alert rules decide what an empty result means. **When the query returns no
+  rows** is `zero` (compare 0 with the threshold, the default and the old
+  behavior), `no_data` (open a no-data episode and notify once) or `keep`
+  (keep the state). Under `no_data` and `keep` a named group that returns no
+  row for 24 hours is forgotten and its episode resolves; an ungrouped rule's
+  `no_data` episode stays open until rows return. A rule tracks at most 200
+  groups. **Notify when resolved** (`notify_on_resolve`, default on) turns the
+  resolved notification off per rule.
+- Silences mute notifications without stopping evaluation. A silence covers a
+  source, one rule or all of the source's rules, and up to five label
+  matchers. It runs once for up to 30 days, or every week on chosen days for
+  up to 24 hours in an IANA time zone, for maintenance windows. A silenced
+  group still changes state and writes history, and queues no notification
+  (one already queued still goes out); the notification it owes goes
+  out when the silence ends, and a group that fired and resolved inside a
+  silence sends nothing. Anyone who sees the source and holds `alerts:write`
+  can create one; the creator and global admins edit and delete it. The
+  **Silences** tab lists them, and **Silence** on a group of a rule starts one
+  for an hour. Routes: `/api/v1/alert-silences`.
+- Backtest. **Run backtest** in the alert form replays an unsaved rule over
+  the last hour, 6 hours, 24 hours or 7 days, at up to 120 instants, through
+  the same grouping, no-data and threshold rules as live evaluation, and shows
+  the episodes, the notifications it would have sent and a state strip. It
+  writes nothing. A ClickHouse query must read its window from the time macros
+  (422 otherwise); VictoriaLogs and Loki queries always replay. One backtest
+  per user and two in total run at once (429 otherwise), each for at most 60
+  seconds. Route: `POST /api/v1/alerts/backtest`.
+- Notification destinations. Alert targets are reusable email, webhook, Slack
+  and PagerDuty destinations, private to their creator, shared with a team or
+  global, managed on the **Destinations** tab and picked in the alert form. A
+  destination's URL or routing key is never returned by the API, written to an
+  audit event or logged. Only global admins can add an email address outside
+  Logchef. Routes: `/api/v1/notification-destinations`, with the new token
+  scopes `destinations:read` and `destinations:write`.
+  - Slack destinations post Block Kit messages to an incoming webhook on
+    `hooks.slack.com` or `hooks.slack-gov.com`.
+  - PagerDuty destinations send Events API v2 events with one `dedup_key` per
+    group, so a resolve closes the incident its trigger opened.
+  - Webhook payload version 2 has the event, the rule, and the group in
+    `instances`. New webhook destinations default to it. Version 1 is the 2.7
+    payload byte for byte.
+- Alert notifications go through a delivery queue. The evaluation writes
+  delivery rows with the rule's state, and a drain sends them every 10
+  seconds with retries after 30 seconds, 2, 10 and 30 minutes, honoring
+  `Retry-After` up to 10 minutes, and fails after five attempts. Email is sent
+  at most once, and an email whose outcome is unknown is marked `unknown`.
+  Webhook requests carry the header `Logchef-Delivery-Id`. Each history entry
+  lists its deliveries with their state and last error.
+- Metrics for the job runner (`logchef_jobs_runs_total`,
+  `logchef_jobs_run_duration_seconds`, `logchef_jobs_schedule_lag_seconds`),
+  notification deliveries (`logchef_notification_deliveries_total`) and
+  backtests (`logchef_alert_backtests_total`). The Alerting docs page is
+  rewritten for all of the above.
 
 - Saved Explorer views. A view holds a source's visible columns with their
   order and widths, the sort, the display mode, and optionally a LogchefQL
@@ -118,12 +182,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token scopes, and four `logchef_report_*` metrics count runs, panels and
   deliveries. The new Scheduled Reports docs page covers it.
 
+### Changed
+
+- Alert rules run on the background job runner. Each rule is a job at its own
+  frequency, and one replica evaluates each tick, so several replicas on
+  Postgres no longer each evaluate every rule. The window ends at the tick's
+  due time. After downtime, each rule evaluates once, at its latest due tick.
+  New and edited rules need a frequency of at least 10 seconds.
+- A grouped rule sends one notification per group to every destination type,
+  including email, Slack and webhook version 2.
+- MCP `list_alerts`, `get_alert_history` and the `investigate_alert` prompt
+  describe groups, no-data episodes, silences and deliveries.
+
+### Removed
+
+- `alerts.evaluation_interval`. Each rule runs at its own frequency.
+- `recipient_user_ids` and `webhook_urls` in alert requests and responses.
+  Use `destination_ids`.
+- `POST /api/v1/admin/settings/test-webhook` and the webhook test dialog in
+  Administration. Use `POST /api/v1/notification-destinations/test` or **Send
+  test** on a destination.
+
 ### Fixed
 
 - Provisioning on Postgres no longer rewrites every managed source on each
   startup. Postgres stores the connection as JSONB, whose text never matched
   the declared connection, so each run updated every source and recorded a
   source update audit event even when nothing changed.
+- The alert test route warned about a missing time filter on every LogsQL and
+  LogQL query, whose window Logchef always applies, and missed ClickHouse SQL
+  with a `WHERE` but no time condition. It now warns only on ClickHouse SQL
+  that uses no time macro and names no timestamp column in `WHERE` or
+  `PREWHERE`.
 
 ### Security
 
@@ -138,6 +228,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header, instead of saving an empty header. Plain header values in
   `connection.headers` keep working. To apply an export, set each named
   variable to the header's value.
+- A failed webhook delivery no longer writes the receiver's response body to
+  the server log. A receiver that echoed the request URL put the URL's token
+  in the log. The log line names the destination and the HTTP status only.
 
 ### Upgrade notes
 
@@ -176,14 +269,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   000049, 000051 and 000053, Postgres 000023, 000025 and 000027). Each creates
   a new table and rebuilds none. Shape rows older than 90 days are pruned once
   a day.
-- Alert state moves to a per-rule instance table (SQLite migration 000043,
-  Postgres 000017). Back up the metadata database first, and stop every old
-  replica before a new one starts: the migration rebuilds the SQLite `alerts`
-  and `alert_history` tables. A firing rule keeps its open episode and sends
-  no second firing message after the upgrade. A delivery retry that was
-  pending or interrupted at upgrade time is dropped; the later resolved
-  message still goes out. When a rule has more than one open history row, the
-  newest stays open and the older ones close as "superseded at upgrade".
+- **Alerting v2: back up the metadata database, then stop every old replica
+  before the first new one starts.** A rolling upgrade is not supported. The
+  migrations rebuild the SQLite `alerts` and `alert_history` tables and drop
+  the targets that rules held, and an old binary writes columns that no longer
+  exist and evaluates without the new state. The down migrations do not put
+  the targets back: rolling back means restoring the backup. The alert
+  migrations are:
+
+  | Change | SQLite | Postgres |
+  |---|---|---|
+  | `jobs` table for the job runner | 000042 | 000016 |
+  | `alert_instances`, group columns, `no_data` states; rebuilds `alerts` and `alert_history` on SQLite | 000043 | 000017 |
+  | One `alert.evaluate` job per rule; deletes the stored `alerts.evaluation_interval` setting | 000048 | 000022 |
+  | `notification_destinations` and `alert_destinations`; moves each rule's targets; drops `recipient_user_ids_json` and `webhook_urls_json` | 000050 | 000024 |
+  | `alerts.notify_on_resolve` | 000052 | 000026 |
+  | `alert_silences` | 000054 | 000028 |
+  | `notification_deliveries`; removes the `delivery_*` keys from open history entries | 000055 | 000029 |
+
+- Existing rules keep their behavior: each is an ungrouped rule with the
+  `zero` no-data policy and resolved notifications on. A firing rule keeps its
+  open episode and sends no second firing message after the upgrade, and its
+  resolved message still goes out. A delivery retry that was pending or
+  interrupted at upgrade time is dropped. When a rule has more than one open
+  history entry, the newest stays open and the older ones close as
+  "superseded at upgrade". History entries from before the upgrade show no
+  delivery detail.
+- Each rule's targets become destinations. Every distinct webhook URL of one
+  creator becomes one private webhook destination of that creator, named
+  `Webhook <host>`, on **payload version 1**, so receivers see the same body
+  as before. Each rule with recipients gets a private `Email for <rule name>`
+  destination with the same users. A rule without a creator gets
+  destinations without a creator, which only global admins can edit. Move a
+  receiver to version 2 in the destination form when it is ready. Webhook
+  requests now carry `Logchef-Delivery-Id`, and delivery is at least once, so
+  a receiver that must not act twice should drop a repeated id.
+- **Breaking for scripts:** an alert create or update that contains
+  `recipient_user_ids` or `webhook_urls`, even as an empty array, answers 400.
+  Create a destination with `POST /api/v1/notification-destinations` and pass
+  its id in `destination_ids`. Alert responses no longer carry the two
+  fields. A `frequency_seconds` below 10 answers 400 on create and update; an
+  existing rule below 10 seconds keeps its stored value and runs every 10
+  seconds. `POST /api/v1/admin/settings/test-webhook` is removed: use
+  `POST /api/v1/notification-destinations/test`.
+- Condition rules saved before this release keep the native query the form
+  generated and run it unchanged. Saving one from the form stores it as a
+  LogchefQL rule. No migration changes them.
+- Two token scopes are new, `destinations:read` and `destinations:write`. A
+  token issued with an explicit scope list before this release, including the
+  Read-only and Alerts manager presets, gets 403 on the destination routes
+  until it is reissued with the scope.
+- Config: remove `alerts.evaluation_interval` (and
+  `LOGCHEF_ALERTS__EVALUATION_INTERVAL`). Logchef ignores it, and the
+  migration deletes its stored setting. New: `[jobs] enabled` (default
+  `true`), `[jobs] poll_interval` (default `2s`) and
+  `[alerts] max_concurrent_evaluations` (default `4`). At least one replica
+  needs `[jobs] enabled = true`, or no rule is evaluated and no notification
+  is sent. Drop any "run alerts on exactly one replica" setup: every replica
+  with jobs enabled shares the rules.
+- Retries changed: a failed notification retries after 30 seconds, 2, 10 and
+  30 minutes and fails after five attempts, instead of retrying at the rule's
+  next ticks.
 
 ## [2.7.0] - 2026-11-15
 
