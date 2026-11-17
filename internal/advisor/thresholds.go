@@ -22,6 +22,10 @@ const (
 	bloomMinQueries  = 20
 	bloomMinDistinct = 10_000
 
+	// R2 text_index.
+	textIndexMinShare   = 0.10
+	textIndexMinQueries = 20
+
 	// R3 materialized_column.
 	materializedMinShare   = 0.10
 	materializedMinQueries = 20

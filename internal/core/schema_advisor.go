@@ -281,7 +281,7 @@ func schemaAdviceUsage(ctx context.Context, db store.QueryHistoryStore, sourceID
 		Retention:  retention,
 	}
 	for _, shape := range shapes {
-		usage.Shapes = append(usage.Shapes, advisor.ShapeUsage{Shape: shape.Shape, Queries: shape.QueryCount, DurationMs: shape.TotalDurationMs})
+		usage.Shapes = append(usage.Shapes, advisor.ShapeUsage{Language: shape.QueryLanguage, Shape: shape.Shape, Queries: shape.QueryCount, DurationMs: shape.TotalDurationMs})
 	}
 	return usage, nil
 }

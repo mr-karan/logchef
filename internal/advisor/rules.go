@@ -20,6 +20,7 @@ import (
 // left out of it.
 var rules = []func(a *analysis) []finding{
 	bloomFindings,
+	textIndexFindings,
 	materializedColumnFindings,
 	lowCardinalityFindings,
 	codecFindings,
@@ -38,6 +39,8 @@ type finding struct {
 type analysis struct {
 	meta  *clickhouse.AdvisorMetadata
 	usage Usage
+	// notes are the rules' notes for the report.
+	notes []string
 	// ts is the source's timestamp column.
 	ts string
 	// q is Q, the analyzed queries with at least one filter item.
@@ -89,6 +92,7 @@ func Analyze(f Facts) models.SchemaAdvisorReport {
 	for _, rule := range rules {
 		found = append(found, rule(a)...)
 	}
+	report.Notes = append(report.Notes, a.notes...)
 	slices.SortFunc(found, func(x, y finding) int {
 		return cmp.Or(
 			cmp.Compare(impactRank(y.Impact), impactRank(x.Impact)),
@@ -200,6 +204,11 @@ func (a *analysis) usageNotes() []string {
 	return notes
 }
 
+// note adds a note to the report.
+func (a *analysis) note(text string) {
+	a.notes = append(a.notes, text)
+}
+
 // column returns a target column that the source exposes under its name.
 func (a *analysis) column(name string) (clickhouse.AdvisorColumn, bool) {
 	column, ok := a.columns[name]
@@ -240,8 +249,13 @@ func (s *usageStat) meanDurationMs() int64 {
 // groupUsage sums the queries whose shape holds an item that key maps to a
 // subject. A query counts once per subject, whatever its items.
 func (a *analysis) groupUsage(key func(models.FilterItem) (string, bool)) map[string]*usageStat {
+	return groupShapes(a.usage.Shapes, key)
+}
+
+// groupShapes is groupUsage over the given shapes.
+func groupShapes(shapes []ShapeUsage, key func(models.FilterItem) (string, bool)) map[string]*usageStat {
 	stats := map[string]*usageStat{}
-	for _, shape := range a.usage.Shapes {
+	for _, shape := range shapes {
 		seen := map[string]bool{}
 		for _, item := range shape.Shape {
 			subject, ok := key(item)

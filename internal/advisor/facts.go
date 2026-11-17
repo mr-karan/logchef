@@ -44,6 +44,7 @@ type Usage struct {
 
 // ShapeUsage is how often one filter shape ran.
 type ShapeUsage struct {
+	Language   models.QueryLanguage
 	Shape      models.FilterShape
 	Queries    int64
 	DurationMs int64
