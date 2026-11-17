@@ -1,0 +1,364 @@
+---
+title: Using Grafana Loki with Logchef
+description: Connect a Grafana Loki tenant to Logchef, query it with LogchefQL or LogQL, and use the histogram, field sidebar, live tail, log context, dashboards and alerts on it.
+---
+
+Logchef reads Grafana Loki as a third backend beside ClickHouse and
+VictoriaLogs. You keep Loki and its shippers as they are, and point Logchef at
+Loki's HTTP API. Logchef does not write to Loki and does not use Loki's ruler.
+
+This page covers connecting a Loki source and what each Logchef feature does on
+it. For the query language itself, see [LogQL Queries](/guide/logql-queries).
+
+## What works
+
+- **Search** with LogchefQL, which Logchef compiles to LogQL, or with native
+  LogQL in the editor's **LogQL** tab.
+- **Histogram**, **field sidebar**, **live tail** and **log context**.
+- **Saved queries**, **collections** and **dashboards**, with LogchefQL or
+  LogQL panels.
+- **Alerts** in condition mode (a LogchefQL filter) and native mode (a LogQL
+  metric query).
+- **AI query generation**: LogQL in native mode, LogchefQL in LogchefQL mode.
+- The **CLI** (`logchef query`, `sql`, `explain`, `tail`, `histogram`) and the
+  **MCP server**.
+
+Not available on Loki: exports, [windowed search](/guide/windowed-search), the
+source activity chart, extra stream filters and
+[LogchefQL aggregations](/guide/aggregations). See
+[Known gaps](#known-gaps).
+
+Logchef targets Loki 3.x and is tested against `grafana/loki:3.7.6`. Loki 3.0
+is the minimum, because structured metadata and the detected fields API are on
+by default from 3.0. The source's inspection page shows the version that
+Logchef read from `/loki/api/v1/status/buildinfo`.
+
+## Who can read what
+
+Linking a Loki source to a team gives that team everything the source's
+credential and tenant can read. Two rules follow from that.
+
+- **The default stream selector is not a boundary.** Native LogQL runs as
+  written and can name any stream in the tenant. The selector only seeds
+  LogchefQL queries, the empty editor, the schema and the field sidebar.
+- **Use a Loki source only for teams that may read the whole tenant.** Today a
+  team admin can link any existing source to their team, so a second source
+  with a narrower tenant does not keep a team away from a broader one. Logchef
+  does not yet present a Loki source as restricted.
+
+The tenant is fixed when the source is created. Users cannot set or change
+`X-Scope-OrgID`: the header is reserved in custom headers, and no request field
+feeds it.
+
+## Try it locally
+
+The repo's dev stack runs Loki on port 3100 with `auth_enabled: true`, so every
+request needs a tenant.
+
+```bash
+just dev-setup          # starts ClickHouse, VictoriaLogs, Loki and Dex
+dev/ingest-loki.sh      # pushes sample entries into tenant "dev"
+just run-backend        # provisions the "Loki Demo" source for Dev Team
+```
+
+`dev/ingest-loki.sh` writes four streams labelled `service_name`, `env` and
+`level`. Each line is JSON with `message`, `request_id`, `status` and
+`duration_ms`, and each entry carries `trace_id` as structured metadata.
+`just dev-ingest-logs` also starts a Vector pipeline (`dev/loki.toml`) that
+keeps pushing entries with `service_name="loki-vector"`.
+
+The examples on this page and on [LogQL Queries](/guide/logql-queries) run on
+that seed.
+
+To try Loki outside the repo, start it with the repo's config and push one
+line:
+
+```bash
+docker run -d --name loki -p 3100:3100 \
+  -v "$PWD/dev/loki.yaml:/etc/loki/logchef.yaml:ro" \
+  grafana/loki:3.7.6 -config.file=/etc/loki/logchef.yaml
+
+until curl -fsS http://localhost:3100/ready >/dev/null; do sleep 1; done
+
+curl -fsS -X POST http://localhost:3100/loki/api/v1/push \
+  -H 'Content-Type: application/json' -H 'X-Scope-OrgID: demo' \
+  --data-binary "{\"streams\":[{\"stream\":{\"service_name\":\"checkout-api\",\"level\":\"error\"},\"values\":[[\"$(date +%s)000000000\",\"{\\\"message\\\":\\\"payment gateway timeout\\\",\\\"status\\\":504}\"]]}]}"
+```
+
+## Add the source
+
+As a global admin, open **Sources**, choose **Add Source**, select
+**Grafana Loki**, and fill in:
+
+| Field | What to enter |
+|---|---|
+| **Base URL** | Loki's API root, such as `http://loki:3100`. Logchef appends `/loki/api/v1/...`. A URL with `user:password@` is rejected; use the auth fields |
+| **Auth** | **None**, **Basic** or **Bearer**. An unset mode means none. Loki does not authenticate by itself, so a credential is for the gateway in front of it |
+| **Tenant ID** | Sent as `X-Scope-OrgID`. Optional. At most 150 bytes of letters, digits and `` !-_.*'() ``. A pipe-separated list queries several tenants and needs `multi_tenant_queries_enabled` on the querier |
+| **Default stream selector** | One stream selector, such as `{namespace="payments"}`. Required. It needs a matcher that does not match the empty string, as Loki requires. The form suggests `{service_name=~".+"}` |
+| **Parser** | **None**, **JSON** or **logfmt**. See [Parser](#parser) |
+| **Access principal** | Optional name for what the credential can read, such as `payments-readonly`. Not sent to Loki. Set it when two sources share a URL, tenant and selector |
+| **Custom headers** | Extra request headers. `Authorization` and `X-Scope-OrgID` are reserved |
+| **Timestamp / Severity field** | `_time` and `detected_level` by default. Loki adds `detected_level` as structured metadata when `discover_log_levels` is on, which is its default |
+
+Grafana Cloud takes the tenant (the numeric user ID) as the basic auth
+username and an access token as the password, with no tenant header.
+
+**Validate** runs three calls within 8 seconds: `buildinfo` for the version,
+`labels` over the last five minutes to prove the credential and tenant, and a
+one-entry `query_range` with the selector to prove that it parses. A 401 or 403
+says the credentials or tenant were rejected. A selector that Loki cannot parse
+is reported against the selector field with Loki's message. A Loki older than
+3.0 gives a warning, not an error.
+
+Then open **Access > Teams** and add the source to a team. Creating a source
+grants no team access to it.
+
+### What you can change later
+
+The base URL, tenant, selector and principal form the source's identity and
+cannot change after creation. The edit form shows them read-only, the API
+answers a change with a 400 such as `tenant_id cannot be changed after the
+source is created`, and provisioning refuses it too. To point at another
+tenant or selector, create a new source.
+
+Auth, parser, headers, limits, name, description and the field mapping can
+change. A blank password, token or header value on edit keeps the stored one.
+
+Two sources with the same URL, tenant, selector and principal are the same
+source: creating the second gets a 409 that asks for a different access
+principal.
+
+### Limits
+
+The source's optional `limits` bound what Logchef asks of Loki:
+
+| Limit | Default | Range | Bounds |
+|---|---|---|---|
+| `max_entries_per_query` | 5000 | 100 to 50000 | Entries per request. Keep it at or below the tenant's `max_entries_limit_per_query` |
+| `sidebar_lookback_seconds` | 900 | 60 to 86400 | The range of a field-values count |
+| `schema_lookback_seconds` | 3600 | 60 to 86400 | The range that detected fields are read from |
+
+### Parser
+
+A Loki entry has three kinds of field, and the schema records the kind:
+
+| Kind | Example in the dev seed | Schema type | Needs a parser |
+|---|---|---|---|
+| Stream label | `service_name`, `env`, `level` | `label` | No. Also valid inside `{...}` |
+| Structured metadata | `trace_id`, `detected_level` | `string`, `int`, ... | No |
+| Parsed field | `status`, `request_id` from the JSON line | `string`, `int`, ... | Yes |
+
+With **JSON** or **logfmt**, every compiled LogchefQL query runs that parser,
+so parsed fields appear as columns and LogchefQL can filter on them. With
+**None**, Logchef shows stream labels and structured metadata only, and you
+write `| json` yourself in native LogQL. Native LogQL never gets the parser
+added.
+
+## Search
+
+**LogchefQL** works as on the other backends:
+
+```text
+level="error"
+service_name="payments-api" and status>=500
+_msg~"gateway"
+```
+
+Logchef compiles it to LogQL with the source selector first. A condition on a
+stream label joins the selector, so `level="error"` becomes
+`{service_name=~".+", level="error"} | json | drop __error__, __error_details__`
+on the dev source. [LogQL Queries](/guide/logql-queries#how-logchefql-compiles-to-logql)
+lists every mapping and the constructs that Loki cannot express.
+
+**LogQL** runs as written in the **LogQL** tab. Logchef adds no selector,
+parser or limit pipe. An empty editor runs the source selector. Switching from
+LogchefQL to LogQL fills the editor with the compiled query.
+
+The time picker's range always applies, sent as Loki's `start` and `end`.
+Results come back newest first. A log query reads at most the row limit you
+pick, capped by the server's maximum: Logchef pages through Loki in requests of
+`max_entries_per_query` entries and shows the **rows** truncation chip when more
+entries exist. A metric query returns one row per sample, with `value`,
+`time` and the series labels.
+
+## Histogram
+
+The histogram counts with `sum(count_over_time(<query> [<width>]))`. It needs a
+log query: a metric query in the editor gets "The histogram needs a LogQL log
+query", followed by Loki's message.
+
+Two things differ from the other backends:
+
+- **Buckets start on UTC boundaries.** Loki aligns its windows to multiples of
+  the step since the Unix epoch, so a one-day bucket starts at 00:00 UTC
+  whatever your timezone. Dashboard panels on Loki say so with a notice when
+  your offset does not line up with the bucket size, such as one-hour buckets
+  in Asia/Kolkata.
+- **Entries exactly on a boundary can count differently from the search.**
+  Loki counts each window as `(start, end]`, and the search reads
+  `[start, end)`. An entry exactly at the range start is not counted, one
+  exactly at the range end is, and one exactly on a bucket boundary counts in
+  the bucket before it. Entries strictly inside a bucket always count in that
+  bucket.
+
+With **Group by**, the histogram shows the ten largest groups and an **Other**
+series, with the same notice as the other backends.
+
+## Field sidebar
+
+The sidebar lists `_time`, `_msg`, the stream labels, then the detected fields
+of the last `schema_lookback_seconds` that have no parser or the source's
+parser.
+
+Click a field to load its values with counts. Logchef runs one instant query,
+`topk(<limit>, sum by (<field>) (count_over_time(<query> | <field>!="" [<range>])))`,
+over the selected range capped at `sidebar_lookback_seconds`, so the counts
+cover at most the last 15 minutes by default.
+
+- Stream labels and string fields can be filtered from the sidebar. Detected
+  fields of type `int`, `float`, `boolean`, `duration` and `bytes` are listed
+  but cannot be filtered from the sidebar yet.
+- A field with more than 500 distinct values in the range fails with Loki's
+  `max_query_series` message. Narrow the query or the range.
+- Values load on click, one field at a time. The sidebar does not use the
+  index-only preload of stream label values that the server offers (it is used
+  by MCP `get_all_field_dimensions`).
+
+## Live tail
+
+Turn on **Live** in LogchefQL mode or in the LogQL tab. Logchef polls
+`query_range` forward every 2 seconds instead of using Loki's `/tail`
+WebSocket, which needs a WebSocket client, rejects multi-tenant IDs and is
+limited to ten tails per tenant. Each poll rescans the last 5 seconds for late
+entries and does not emit an entry twice. A tail never replays logs from before
+it started, and a metric query ends it with "Live tail needs a LogQL log query".
+
+A poll reads pages of 1,000 entries. When more than 1,000 entries share one
+nanosecond timestamp, the tail shows the first 1,000, skips the rest of that
+timestamp and logs a server warning.
+
+Each user may hold two tails at once (`tail.max_per_user`). The server frees a
+stopped tail's slot only when its next 15-second heartbeat fails to write, so
+starting a third tail within 15 seconds of stopping two gets a 429. Wait and
+retry.
+
+## Log context
+
+**Show Context** lists the lines before and after a row in the row's own
+stream, within an hour on each side. It is available on rows of a LogchefQL
+query only. On a native LogQL row the button is disabled with "Context on Loki
+needs a LogchefQL query, because a native pipeline can change stream labels".
+
+The Explorer sends the row's stream labels. Logchef checks them against
+`/loki/api/v1/series` first: they must be the complete label set of exactly one
+stream, or the request fails with "This row does not identify one stream".
+Paging asks Loki for `offset + limit` entries and drops the first `offset`, so
+a page that would read past `max_entries_per_query` is refused.
+
+The MCP tool `get_log_context` does not work on Loki sources: it sends no
+stream labels and gets "Context on Loki needs the row's stream labels".
+
+## Dashboards
+
+Panels can use LogchefQL or LogQL on a Loki source.
+
+- A chart, breakdown or stat in **count** mode runs the histogram path, so a
+  LogQL count panel needs a log query, and its buckets start on UTC
+  boundaries.
+- A panel in **result** mode with LogQL runs the query as written. A metric query such as
+  `sum by (level) (count_over_time({service_name=~".+"} [{{__interval}}]))`
+  returns `value`, `time` and `level` columns. Values are strings, so the
+  frame is untyped, as for LogsQL.
+
+`{{__interval}}` and `{{__interval_s}}` work in LogQL. `{{__from}}`, `{{__to}}`,
+`{{__time_filter}}`, `{{__timezone}}` and `{{__tz_offset}}` are rejected,
+because LogQL has no time literal and the request range always applies.
+
+## Alerts
+
+A Loki alert evaluates an instant metric query at the run's due time, so a
+catch-up run reads the logs of that time.
+
+**Condition mode** compiles your LogchefQL filter and wraps it:
+
+| Aggregate | Generated LogQL |
+|---|---|
+| count | `sum(count_over_time(<q> [<lookback>s]))` |
+| sum, min, max | `sum(sum_over_time(<q> \| unwrap <field> \| __error__="" [<lookback>s]))`, and the same with `min` and `max` |
+| avg | `avg_over_time(<q> \| unwrap <field> \| __error__="" [<lookback>s]) by ()` |
+
+**Native mode** takes a metric query. The range in the query decides what is
+counted; Logchef does not rewrite it. The form still asks for a lookback,
+because backtests need it, and warns without blocking a save when the query
+has no range equal to it, written as `[300s]` or `[5m]`:
+
+```logql
+sum(count_over_time({service_name="payments-api", level="error"} [5m]))
+```
+
+A log query gets "A Loki alert needs a metric query, such as
+`sum(count_over_time({app="api"} |= "error" [5m]))`". A query that matches
+nothing returns zero rows, which the rule's no-data policy handles. With
+**Group by**, write the grouping into the query, such as
+`sum by (service_name) (...)`.
+
+## CLI and MCP
+
+`logchef sql` runs native LogQL with the time window sent separately:
+
+```bash
+logchef sql '{service_name="payments-api"} |= "gateway"' --since 1h
+```
+
+`logchef query`, `explain`, `tail` and `histogram` take LogchefQL and print
+"Generated LogQL" with `--show-sql` or `explain`. Loki reports a fractional
+`execution_time_ms`; the CLI rounds it to whole milliseconds in its output.
+
+The MCP server's `query_logs`, `query_logchefql`, `get_field_values` and
+`get_all_field_dimensions` work on Loki sources. `get_log_context` does not,
+as described above.
+
+## Provisioning
+
+A Loki source can be declared in the provisioning TOML. See
+[Provisioning](/getting-started/provisioning#loki-sources) for the fields and
+`secret_ref`.
+
+## Errors
+
+| Loki answers | Logchef answers |
+|---|---|
+| 400, 404, 422 | 400 with Loki's message |
+| 401, 403 | 502, "The source rejected Logchef's credentials" |
+| 429 | 429, "Loki is busy". No retry |
+| 5xx, network failure, malformed body | 502 |
+
+Logchef also passes on Loki's own bounds as 400s with Loki's message: a range
+longer than `max_query_length` (30d1h by default) and a metric query with more
+than `max_query_series` series (500 by default). A source whose
+`max_entries_per_query` is above the tenant's `max_entries_limit_per_query`
+gets Loki's 400 naming both numbers.
+
+## Known gaps
+
+- **Exports** are not available: both export paths read ClickHouse directly.
+- **Windowed search** and the **source activity chart** are not available.
+  Loki's query frontend already splits a query by time.
+- **LogchefQL aggregations** are rejected on Loki. Write a LogQL metric query
+  instead.
+- **Extra stream filters** stay VictoriaLogs-only. A LogchefQL condition on a
+  stream label already joins the stream selector.
+- **The field sidebar does not use the label preload.** Values load one field
+  at a time on click.
+- **MCP log context does not work** on Loki sources.
+- **Provisioning export writes custom header values in plain text**, as it does
+  for VictoriaLogs. Provisioning has no `secret_ref` for header values yet.
+- **Restricted sources** are not offered yet. See [Who can read what](#who-can-read-what).
+
+## Next steps
+
+- [LogQL Queries](/guide/logql-queries) for native LogQL in Logchef and the
+  LogchefQL mapping
+- [From Loki](/migrate/from-loki) to compare keeping Loki with moving off it
+- [Alerting](/features/alerting) and [Dashboards](/features/dashboards)

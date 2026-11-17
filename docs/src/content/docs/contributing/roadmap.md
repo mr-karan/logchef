@@ -8,6 +8,7 @@ committed direction, not dated promises. Timelines shift as we learn.
 
 ## Recently shipped
 
+- **Grafana Loki as a datasource** (unreleased): LogchefQL compiles to LogQL, with a native LogQL editor, the histogram, field sidebar, live tail, log context, dashboards, alerts, the CLI and MCP. See [Using Grafana Loki with Logchef](/tutorials/loki).
 - **Dashboards v2** (v2.7): panels run SQL and LogsQL as written and draw the result as stats with comparisons and sparklines, line, area and bar charts, toplists, pies, or tables with rules and formats. Dashboards gain tabs, free panel sizes, per-panel ranges and bucket sizes, thresholds, and built-in time macros. See [dashboards](/features/dashboards).
 - **Dashboards** (v2.0): grids of panels with a shared time range and auto-refresh. Panels can mix ClickHouse and VictoriaLogs sources.
 - **VictoriaLogs as a first-class datasource** (v2.0): LogchefQL compiles to LogsQL as well as ClickHouse SQL, with a native LogsQL editor and a capability-driven UI that adapts to what each backend supports.

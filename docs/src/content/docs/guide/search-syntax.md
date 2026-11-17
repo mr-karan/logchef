@@ -9,6 +9,7 @@ LogchefQL is the quick-filter language shared across supported datasources:
 
 - **ClickHouse** sources compile LogchefQL to SQL
 - **VictoriaLogs** sources compile LogchefQL to LogsQL
+- **Grafana Loki** sources compile LogchefQL to LogQL
 
 ## Basic Syntax
 
@@ -265,17 +266,44 @@ Compiles to:
 
 Logchef applies the selected time range separately when executing LogsQL queries.
 
+### Grafana Loki
+
+For Loki sources, LogchefQL compiles to a LogQL log query that starts with the
+source's default stream selector. A condition on a stream label joins the
+selector, a condition on `_msg` becomes a line filter, and the rest becomes a
+label filter after the source's parser.
+
+For example, on a source with the selector `{service_name=~".+"}` and the JSON
+parser:
+
+```text
+level="error" and status>=500
+```
+
+Compiles to:
+
+```text
+{service_name=~".+", level="error"} | json | drop __error__, __error_details__ | status>=500 | __error__=""
+```
+
+A few constructs cannot be written in LogQL and are rejected on Loki: ordering
+comparisons on `_msg`, an `or` that joins `_msg` to another field, `null`
+comparisons and aggregation pipes. See [LogQL Queries](/guide/logql-queries#how-logchefql-compiles-to-logql)
+for the full mapping.
+
 ## Native Mode
 
 For advanced queries that go beyond LogchefQL's capabilities, you can switch to the datasource's **native mode** in the query editor:
 
 - **SQL** for ClickHouse
 - **LogsQL** for VictoriaLogs
+- **LogQL** for Grafana Loki
 
 Native mode gives you direct access to backend-specific capabilities, including:
 
 - Aggregations that a LogchefQL [aggregation pipe](/guide/aggregations) does not cover, such as arithmetic between aggregates or a filter on an aggregated value
 - VictoriaLogs-specific LogsQL pipes and processing operators
+- LogQL parsers, line formatting and metric queries on Loki
 - Subqueries
 - Joins
 - Custom functions

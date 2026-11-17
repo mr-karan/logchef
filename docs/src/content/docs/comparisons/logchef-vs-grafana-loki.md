@@ -1,6 +1,6 @@
 ---
 title: Logchef vs Grafana Loki
-description: "How Logchef over ClickHouse or VictoriaLogs compares to Grafana Loki: indexing model, high-cardinality search, query languages, and when each fits."
+description: "How Logchef over ClickHouse or VictoriaLogs compares to Grafana Loki: indexing model, high-cardinality search, query languages, when each fits, and Logchef as a UI over Loki."
 ---
 
 Both let you search logs without paying for a hosted SaaS, but they take
@@ -10,8 +10,8 @@ including picking Loki, if that's the better fit.
 
 ## The short version
 
-**Logchef** is a query and control-plane UI you point at ClickHouse tables or
-VictoriaLogs instances you already run. It doesn't collect logs and doesn't
+**Logchef** is a query and control-plane UI you point at ClickHouse tables,
+VictoriaLogs instances or Grafana Loki tenants you already run. It doesn't collect logs and doesn't
 force a schema — collectors write logs into your backend, and Logchef reads
 them back out with fast full-text search, SQL, dashboards, alerting, and
 team access control.
@@ -40,12 +40,13 @@ Bit, or an OpenTelemetry pipeline write logs into ClickHouse or VictoriaLogs,
 and Logchef only reads them back. Beyond a timestamp column it doesn't require
 a specific [table schema](/integration/schema-design/).
 
-- **Backends**: ClickHouse and VictoriaLogs, chosen per source
+- **Backends**: ClickHouse, VictoriaLogs and Grafana Loki, chosen per source
 - **Indexing**: whatever the backend does — ClickHouse indexes columns
   (including high-cardinality ones) and supports full-text via tokenized
   indexes; VictoriaLogs indexes all fields
 - **Query languages**: LogchefQL (Logchef's own filter syntax), plus each
-  backend's native language (ClickHouse SQL or VictoriaLogs LogsQL)
+  backend's native language (ClickHouse SQL, VictoriaLogs LogsQL or Loki
+  LogQL)
 - **Signals**: logs (ClickHouse sources can carry `trace_id`/`span_id` columns
   for correlation; there is no trace/APM UI)
 - **Deployment**: single Go binary, SQLite metadata by default, optional
@@ -77,12 +78,12 @@ at the cost of pushing content search into a scan of the matched chunks.
 | | Logchef | Grafana Loki |
 |---|---|---|
 | Role | Query UI over existing storage | Full log backend (ingest + store + query) |
-| Backend(s) | ClickHouse, VictoriaLogs | Loki's own object-storage engine |
+| Backend(s) | ClickHouse, VictoriaLogs, Loki | Loki's own object-storage engine |
 | Owns ingestion? | No — reads existing data | Yes — via Promtail / Alloy agents |
 | Indexing model | Backend columns/fields (high-cardinality OK) | Labels only; content is scanned, not indexed |
 | High-cardinality fields | Handled well (columnar / per-field) | A known weak spot — too many label values hurt performance |
 | Full-text search | Yes (tokenized indexes on ClickHouse, native on VictoriaLogs) | Filter expressions scan matched chunks; no content index |
-| Query languages | LogchefQL, ClickHouse SQL, VictoriaLogs LogsQL | LogQL |
+| Query languages | LogchefQL, ClickHouse SQL, VictoriaLogs LogsQL, Loki LogQL | LogQL |
 | SQL / ad-hoc analytics | Yes (native ClickHouse SQL) | No SQL; LogQL metric queries only |
 | Built-in UI | Yes (explorer, dashboards, alerting, RBAC) | No — uses Grafana |
 | Signals | Logs | Logs (metrics/traces via the wider LGTM stack) |
@@ -118,7 +119,15 @@ Loki + Grafana setup, with stronger full-text and high-cardinality behavior.
 
 ## They can coexist
 
-These aren't mutually exclusive. A common split: keep Grafana + Loki (or
+These aren't mutually exclusive. Logchef can query Loki directly: add a
+Loki source and your team gets LogchefQL and LogQL search, the histogram,
+field sidebar, live tail, log context, dashboards and alerts over the logs
+already in Loki, with no change to ingestion. Search on a Loki source is
+still Loki's label-plus-scan model, so the high-cardinality and SQL points
+above still apply to it. See [Using Grafana Loki with
+Logchef](/tutorials/loki/).
+
+Another common split: keep Grafana + Loki (or
 Prometheus/Tempo) for metrics, traces, and cheap high-volume logs, and point
 Logchef at a ClickHouse or VictoriaLogs source for the log workloads that need
 high-cardinality search and SQL analysis. Logchef reads your existing storage,
@@ -128,5 +137,6 @@ so adding it doesn't disturb an existing Grafana setup.
 
 - [Logchef architecture](/core/architecture/)
 - [Connecting VictoriaLogs](/tutorials/victorialogs/)
+- [Using Grafana Loki with Logchef](/tutorials/loki/)
 - [Schema design](/integration/schema-design/)
 - [Dashboards](/features/dashboards/) and [alerting](/features/alerting/)

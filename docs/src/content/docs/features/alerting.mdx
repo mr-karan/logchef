@@ -1,6 +1,6 @@
 ---
 title: Alerting
-description: Set up scheduled log alerts on ClickHouse or VictoriaLogs sources with email and webhook notifications when thresholds are exceeded.
+description: Set up scheduled log alerts on ClickHouse, VictoriaLogs or Grafana Loki sources with email and webhook notifications when thresholds are exceeded.
 ---
 
 Logchef evaluates alert queries on a schedule and sends notifications when thresholds are exceeded. Alerts fire via email (SMTP) and webhooks, so you don't need a separate alerting system.
@@ -15,7 +15,7 @@ Logchef evaluates alert queries on a schedule and sends notifications when thres
 6. Add recipients and/or webhook URLs
 7. Save
 
-For ClickHouse and VictoriaLogs sources, Logchef can generate the executable alert query automatically from a LogchefQL condition. Native mode remains available when you want to write SQL or LogsQL directly.
+For ClickHouse, VictoriaLogs and Loki sources, Logchef can generate the executable alert query automatically from a LogchefQL condition. Native mode remains available when you want to write SQL, LogsQL or LogQL directly.
 
 ## Query Modes
 
@@ -42,13 +42,27 @@ For VictoriaLogs sources, native mode uses LogsQL and evaluates through `stats_q
 level:="error" | stats count() as value
 ```
 
+For Grafana Loki sources, native mode takes a LogQL metric query, evaluated as
+an instant query at the run's due time. The range in the query, such as
+`[5m]`, decides what is counted, and Logchef does not rewrite it. The form
+still asks for a lookback, because backtests use it, and warns without
+blocking a save when the query has no range equal to the lookback. Condition
+mode on Loki wraps the compiled filter in `count_over_time` for `count`, and in
+`unwrap` with `sum_over_time`, `min_over_time`, `max_over_time` or
+`avg_over_time` for the other aggregates. A log query is refused with "A Loki
+alert needs a metric query".
+
+```text
+sum(count_over_time({service_name="payments-api", level="error"} [5m]))
+```
+
 ## Alert Configuration
 
 | Field | Description |
 |-------|-------------|
 | Name | Human-readable identifier |
 | Severity | `info`, `warning`, or `critical` |
-| Query | LogchefQL condition, ClickHouse SQL, or VictoriaLogs LogsQL depending on source |
+| Query | LogchefQL condition, ClickHouse SQL, VictoriaLogs LogsQL or Loki LogQL depending on source |
 | Threshold | Value + operator (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
 | Frequency | Evaluation interval in seconds |
 | Lookback | Time range for the query |
@@ -133,4 +147,4 @@ for running several replicas.
 
 **False positives:** Increase the threshold, extend the lookback window, or use `avg()` instead of `count()` for smoother signals.
 
-For VictoriaLogs-specific guidance, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).
+For backend-specific guidance, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs) and [Using Grafana Loki with Logchef](/tutorials/loki#alerts).
