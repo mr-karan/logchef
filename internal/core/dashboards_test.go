@@ -321,6 +321,56 @@ func TestListDashboardsVisibility(t *testing.T) {
 	}
 }
 
+// TestListDashboardsReportCount checks that the list tells a caller who can
+// delete a dashboard how many reports the delete removes (RFC 0008), and
+// tells a viewer who cannot nothing.
+func TestListDashboardsReportCount(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	teamMember := newTestUser(t, db, "teammate@test.dev", "Teammate")
+	admin := newTestUser(t, db, "admin@test.dev", "Admin")
+	admin.Role = models.UserRoleAdmin
+	if err := db.UpdateUser(ctx, admin); err != nil {
+		t.Fatalf("UpdateUser(admin): %v", err)
+	}
+	teamA, srcA := seedTeamWithSource(t, db, "team-a", creator, teamMember)
+	dash, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: "reported", Panels: panelBlob(teamA.ID, srcA.ID)})
+	if err != nil {
+		t.Fatalf("CreateDashboard: %v", err)
+	}
+	for _, name := range []string{"daily", "weekly"} {
+		r := &models.Report{Name: name, OwnerID: &teamMember.ID, SourceKind: models.ReportSourceDashboard, DashboardID: &dash.ID,
+			Schedule: models.ReportSchedule{Frequency: models.ReportDaily, Hour: new(9)}, Timezone: "UTC", RangeAnchor: models.ReportAnchorSendTime, MaxRows: 25}
+		if err := db.CreateReport(ctx, r); err != nil {
+			t.Fatalf("CreateReport(%s): %v", name, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		user *models.User
+		want int
+	}{
+		{creator, 2},
+		{admin, 2},
+		{teamMember, 0}, // owns both reports, but cannot delete the dashboard
+	} {
+		list, err := ListDashboards(ctx, db, log, tc.user)
+		if err != nil {
+			t.Fatalf("ListDashboards(%s): %v", tc.user.Email, err)
+		}
+		i := slices.IndexFunc(list, func(s *models.DashboardSummary) bool { return s.ID == dash.ID })
+		if i < 0 {
+			t.Fatalf("%s does not see the dashboard", tc.user.Email)
+		}
+		if got := list[i].ReportCount; got != tc.want {
+			t.Errorf("%s report_count = %d, want %d", tc.user.Email, got, tc.want)
+		}
+	}
+}
+
 // twoPanelBlob builds a dashboard blob with panel p1 on (teamA, srcA) and panel
 // p2 on (teamB, srcB), each carrying a distinct query so redaction is
 // observable.

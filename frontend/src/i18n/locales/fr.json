@@ -495,6 +495,7 @@
   "explore.noMatches": "Aucun log ne correspond à « {search} »",
   "dashboards.noMatches": "Aucun tableau de bord ne correspond à « {search} »",
   "dashboards.panelCount": "{count} panneau | {count} panneaux",
+  "dashboards.deleteRemovesReports": "Son {count} rapport planifié est supprimé avec lui. | Ses {count} rapports planifiés sont supprimés avec lui.",
   "dashboards.sortBy": "Trier par",
   "dashboards.sortRecentlyUpdated": "Mis à jour récemment",
   "dashboards.sortRecentlyCreated": "Créés récemment",

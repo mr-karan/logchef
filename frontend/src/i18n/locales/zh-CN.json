@@ -493,6 +493,7 @@
   "explore.noMatches": "没有匹配“{search}”的日志",
   "dashboards.noMatches": "没有匹配“{search}”的仪表盘",
   "dashboards.panelCount": "{count} 个面板",
+  "dashboards.deleteRemovesReports": "其 {count} 个定时报告也会一并删除。",
   "dashboards.sortBy": "排序方式",
   "dashboards.sortRecentlyUpdated": "最近更新",
   "dashboards.sortRecentlyCreated": "最近创建",

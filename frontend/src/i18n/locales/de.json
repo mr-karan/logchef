@@ -495,6 +495,7 @@
   "explore.noMatches": "Keine Logs für „{search}“",
   "dashboards.noMatches": "Keine Dashboards für „{search}“",
   "dashboards.panelCount": "{count} Panel | {count} Panels",
+  "dashboards.deleteRemovesReports": "Sein {count} geplanter Bericht wird mit gelöscht. | Seine {count} geplanten Berichte werden mit gelöscht.",
   "dashboards.sortBy": "Sortieren nach",
   "dashboards.sortRecentlyUpdated": "Zuletzt aktualisiert",
   "dashboards.sortRecentlyCreated": "Zuletzt erstellt",

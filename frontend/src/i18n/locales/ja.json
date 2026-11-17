@@ -495,6 +495,7 @@
   "explore.noMatches": "「{search}」に一致するログはありません",
   "dashboards.noMatches": "「{search}」に一致するダッシュボードはありません",
   "dashboards.panelCount": "{count} 個のパネル",
+  "dashboards.deleteRemovesReports": "スケジュールされたレポート {count} 件も削除されます。",
   "dashboards.sortBy": "並べ替え",
   "dashboards.sortRecentlyUpdated": "最近更新",
   "dashboards.sortRecentlyCreated": "最近作成",

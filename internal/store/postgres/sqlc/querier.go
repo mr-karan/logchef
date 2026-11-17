@@ -328,7 +328,7 @@ type Querier interface {
 	ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error)
 	// List every dashboard's summary, newest-updated first, from the derived
 	// columns and never from panels_json. A name or description from before the
-	// bound is cut to it.
+	// bound is cut to it. report_count is the number of reports a delete removes.
 	ListDashboardSummaries(ctx context.Context) ([]ListDashboardSummariesRow, error)
 	ListDeliverySummaries(ctx context.Context, arg ListDeliverySummariesParams) ([]ListDeliverySummariesRow, error)
 	// List artifact paths for expired export jobs

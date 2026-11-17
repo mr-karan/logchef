@@ -261,6 +261,12 @@ func ListDashboards(ctx context.Context, db store.StoreOps, log *slog.Logger, us
 			continue
 		}
 		s.CanEdit = admin || isOwner
+		// A report is visible to its owner, admins and its recipients, so
+		// a viewer who cannot delete the dashboard does not learn how many
+		// reports it has.
+		if !s.CanEdit {
+			s.ReportCount = 0
+		}
 		visible = append(visible, s)
 	}
 	return visible, nil

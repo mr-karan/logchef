@@ -495,6 +495,7 @@
   "explore.noMatches": "“{search}” से मेल खाने वाला कोई लॉग नहीं",
   "dashboards.noMatches": "“{search}” से मेल खाने वाला कोई डैशबोर्ड नहीं",
   "dashboards.panelCount": "{count} पैनल",
+  "dashboards.deleteRemovesReports": "इसकी {count} शेड्यूल की गई रिपोर्ट भी हट जाएगी।",
   "dashboards.sortBy": "इसके अनुसार क्रमबद्ध करें",
   "dashboards.sortRecentlyUpdated": "हाल ही में अपडेट किए गए",
   "dashboards.sortRecentlyCreated": "हाल ही में बनाए गए",

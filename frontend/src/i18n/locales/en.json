@@ -493,6 +493,7 @@
   "explore.noMatches": "No logs matching \"{search}\"",
   "dashboards.noMatches": "No dashboards match \"{search}\"",
   "dashboards.panelCount": "{count} panel | {count} panels",
+  "dashboards.deleteRemovesReports": "Its {count} scheduled report is deleted with it. | Its {count} scheduled reports are deleted with it.",
   "dashboards.sortBy": "Sort by",
   "dashboards.sortRecentlyUpdated": "Recently updated",
   "dashboards.sortRecentlyCreated": "Recently created",

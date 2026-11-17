@@ -495,6 +495,7 @@
   "explore.noMatches": "沒有符合「{search}」的日誌",
   "dashboards.noMatches": "沒有符合「{search}」的儀表板",
   "dashboards.panelCount": "{count} 個面板",
+  "dashboards.deleteRemovesReports": "其 {count} 個排程報告也會一併刪除。",
   "dashboards.sortBy": "排序方式",
   "dashboards.sortRecentlyUpdated": "最近更新",
   "dashboards.sortRecentlyCreated": "最近建立",

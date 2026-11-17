@@ -247,7 +247,8 @@ it. A global admin who edits a report does not become its owner.
   inactive**.
 - When the owner is deleted, the report stays with **No owner** and does not
   run.
-- Deleting a dashboard or saved query deletes its reports.
+- Deleting a dashboard or saved query deletes its reports. The delete dialog
+  of a dashboard says how many reports go with it.
 
 **Claim** in the row menu takes over a report with no owner or with an
 inactive owner. It makes you the owner, so the report runs with your access,
