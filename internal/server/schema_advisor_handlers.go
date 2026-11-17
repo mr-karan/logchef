@@ -57,6 +57,32 @@ func (s *Server) handleRefreshSchemaAdvice(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, advice)
 }
 
+// schemaAdviceScheduleBody is the body and the result of a schedule change.
+type schemaAdviceScheduleBody struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// handleSetSchemaAdviceSchedule turns the weekly refresh of a source's
+// report on or off.
+// URL: PUT /api/v1/admin/sources/:sourceID/advisor/schedule
+func (s *Server) handleSetSchemaAdviceSchedule(c fiber.Ctx) error {
+	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+	}
+	var req schemaAdviceScheduleBody
+	if err := c.Bind().Body(&req); err != nil || req.Enabled == nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Request body must be {\"enabled\": true or false}", models.ValidationErrorType)
+	}
+	p := principalFromLocals(c)
+	before, err := core.SetSchemaAdviceSchedule(c.Context(), s.store, s.datasources, p, sourceID, *req.Enabled)
+	if err != nil {
+		return s.sendSchemaAdviceError(c, p, sourceID, err)
+	}
+	auditSet(c, audit.SourceIDTarget(sourceID), audit.SchemaAdvisorScheduleFields(before), audit.SchemaAdvisorScheduleFields(*req.Enabled))
+	return SendSuccess(c, fiber.StatusOK, req)
+}
+
 // schemaFindingDismissalRequest is the optional body of a dismissal.
 type schemaFindingDismissalRequest struct {
 	Reason string `json:"reason"`

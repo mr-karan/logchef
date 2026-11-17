@@ -33,8 +33,20 @@ evidence, the DDL with a **Copy DDL** button, the gain, the cost and a query
 to verify the gain. **Needs a table rebuild** marks a finding with no in-place
 `ALTER`. **Validate first** marks a finding whose evidence comes from a sample.
 
-Logchef keeps one report per source. A new run replaces it. A report stays
-until someone runs the analysis again: nothing refreshes it on a schedule.
+Logchef keeps one report per source. A new run replaces it.
+
+## Weekly refresh
+
+**Refresh weekly** in the section header runs the analysis every Monday at
+03:00 UTC with a 30-day window. It is off for every source until a global
+admin turns it on, and needs `sources:write`. A scheduled run reads ClickHouse
+exactly as **Run analysis** does, and its report has no author
+(`generated_by` is `null`). The run is a job on the [job
+runner](/operations/database-backends/), so one replica runs each week's
+analysis, and a replica with `[jobs] enabled = false` runs none. After
+downtime the runner runs the latest missed week once. The report is stamped
+with that week's time, not the time the run started, and its window ends on
+that day.
 
 ## What Logchef records
 
@@ -95,7 +107,12 @@ reported for it:
 
 The report's status is `ok`, `partial` when an input other than a skipped one
 did not read cleanly, or `unavailable` when no rule could run.
-`system.query_log` is read and its state is shown, but no finding uses it yet.
+When `system.query_log` reads cleanly, every finding ends with one evidence
+line, **Reads of the source in 7 days, all clients**: the number of finished
+`SELECT`s on the source's table, their median and p95 duration, and their
+median rows and bytes read. It counts every client, not only Logchef, but only
+on the server that answered, because `system.query_log` is local to each
+server. When the read is denied, missing or limited, the line is left out.
 
 ### Views and Distributed tables
 
@@ -291,8 +308,9 @@ report is still listed and can be restored.
 
 Dismissing and restoring need `sources:write` and are recorded in the [audit
 log](/operations/audit-log/) as `schema_advisor_dismissal.create` and
-`schema_advisor_dismissal.delete`. Running an analysis records no audit event;
-the report keeps who ran it and when.
+`schema_advisor_dismissal.delete`. Turning the weekly refresh on or off is
+recorded as `schema_advisor_schedule.update`. Running an analysis records no
+audit event; the report keeps who ran it and when.
 
 ## API
 
@@ -306,12 +324,14 @@ get 403, as on every admin route.
 | `POST /api/v1/admin/sources/:sourceID/advisor/refresh` | `sources:read` | 200 with the new report |
 | `PUT /api/v1/admin/sources/:sourceID/advisor/findings/:findingID/dismissal` | `sources:write` | 200 with the dismissal |
 | `DELETE /api/v1/admin/sources/:sourceID/advisor/findings/:findingID/dismissal` | `sources:write` | 204 |
+| `PUT /api/v1/admin/sources/:sourceID/advisor/schedule` | `sources:write` | 200 with `{"enabled": true}` or `false` |
 
 `GET` and refresh return `source_id`, `generated_at`, `generated_by`,
-`window_days`, `stale`, `report` and `dismissals`. Before the first run,
+`window_days`, `stale`, `report`, `dismissals` and `scheduled_refresh`. Before the first run,
 `generated_at`, `generated_by`, `window_days` and `report` are `null`. The
 refresh body is optional: `{"window_days": 30}`. The dismissal body is
-optional: `{"reason": "..."}`.
+optional: `{"reason": "..."}`. The schedule body is required:
+`{"enabled": true}` or `{"enabled": false}`.
 
 | Case | Status |
 |---|---|

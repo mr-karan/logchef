@@ -437,11 +437,13 @@ type QueryHistoryStore interface {
 	// the three counters sum and the larger lookback is kept.
 	IncrementQueryShapeStats(ctx context.Context, inc models.QueryShapeIncrement) error
 	// ListQueryShapeStats returns a source's analyzed shapes with bucket_date
-	// >= since, summed over days, by query count desc, capped at limit. Rows
-	// under the unanalyzed and overflow hashes are left out.
-	ListQueryShapeStats(ctx context.Context, sourceID models.SourceID, since string, limit int) ([]models.QueryShapeUsage, error)
-	// QueryShapeCoverage summarizes every row of a source with bucket_date >= since.
-	QueryShapeCoverage(ctx context.Context, sourceID models.SourceID, since string) (models.QueryShapeCoverage, error)
+	// from since to until, both inclusive, summed over days, by query count
+	// desc, capped at limit. Rows under the unanalyzed and overflow hashes are
+	// left out.
+	ListQueryShapeStats(ctx context.Context, sourceID models.SourceID, since, until string, limit int) ([]models.QueryShapeUsage, error)
+	// QueryShapeCoverage summarizes every row of a source with bucket_date
+	// from since to until, both inclusive.
+	QueryShapeCoverage(ctx context.Context, sourceID models.SourceID, since, until string) (models.QueryShapeCoverage, error)
 	// PruneQueryShapeStats deletes the rows with bucket_date < before.
 	PruneQueryShapeStats(ctx context.Context, before string) error
 }

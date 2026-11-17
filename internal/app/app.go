@@ -290,6 +290,7 @@ func (a *App) startJobs(ctx context.Context) error {
 		}
 		a.Jobs.Register(a.server.ReportJobKind())
 	}
+	a.Jobs.Register(core.SchemaAdviceJobKind(a.SQLite, a.Datasources))
 	a.Jobs.Start(ctx)
 	return nil
 }

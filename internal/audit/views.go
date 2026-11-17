@@ -299,6 +299,12 @@ func SchemaAdvisorDismissalFields(d *models.SchemaAdvisorDismissal) *Fields {
 		Set("reason", d.Reason)
 }
 
+// SchemaAdvisorScheduleFields records whether a source's schema advisor
+// report refreshes weekly. The target is the source.
+func SchemaAdvisorScheduleFields(enabled bool) *Fields {
+	return NewFields().Set("enabled", enabled)
+}
+
 // AlertSilenceFields records a silence: its rule, matchers, comment and
 // schedule. Matchers are recorded as "label=value", sorted.
 func AlertSilenceFields(s *models.AlertSilence) *Fields {

@@ -14,8 +14,9 @@ import (
 
 // SchemaAdvisorProvider is implemented by providers that can analyze a
 // source's table for the schema advisor (RFC 0010). Only ClickHouse does.
+// at is the evaluation time that the sample and the rules measure from.
 type SchemaAdvisorProvider interface {
-	AdviseSchema(ctx context.Context, source *models.Source, usage advisor.Usage) (*models.SchemaAdvisorReport, error)
+	AdviseSchema(ctx context.Context, source *models.Source, usage advisor.Usage, at time.Time) (*models.SchemaAdvisorReport, error)
 }
 
 // ErrSchemaAdvisorBusy means the process already runs as many schema

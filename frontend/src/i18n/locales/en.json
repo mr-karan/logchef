@@ -2083,6 +2083,7 @@
   "advisor.generatedAt": "Analyzed {time}",
   "advisor.stale": "Stale",
   "advisor.runAnalysis": "Run analysis",
+  "advisor.refreshWeekly": "Refresh weekly",
   "advisor.running": "Analyzing…",
   "advisor.loadFailed": "Could not load schema advice",
   "advisor.runFailed": "Analysis failed",

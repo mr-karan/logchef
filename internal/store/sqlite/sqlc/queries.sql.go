@@ -5437,15 +5437,17 @@ SELECT
 FROM query_shape_stats_daily
 WHERE source_id = ?1
   AND bucket_date >= ?2
+  AND bucket_date <= ?3
   AND shape_hash NOT IN ('unanalyzed', 'overflow')
 GROUP BY query_language, shape_hash, shape
 ORDER BY query_count DESC, query_language ASC, shape_hash ASC
-LIMIT ?3
+LIMIT ?4
 `
 
 type ListQueryShapeStatsParams struct {
 	SourceID int64  `json:"source_id"`
 	Since    string `json:"since"`
+	Until    string `json:"until"`
 	Limit    int64  `json:"limit"`
 }
 
@@ -5460,12 +5462,18 @@ type ListQueryShapeStatsRow struct {
 	MaxLookbackS    int64  `json:"max_lookback_s"`
 }
 
-// A source's analyzed shapes on/after `since`, summed over days, most used
+// A source's analyzed shapes from `since` to `until`, both inclusive, summed
+// over days, most used
 // first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
 // counts them. lookback_rows is 0 when no row has a lookback, and then
 // max_lookback_s means nothing.
 func (q *Queries) ListQueryShapeStats(ctx context.Context, arg ListQueryShapeStatsParams) ([]ListQueryShapeStatsRow, error) {
-	rows, err := q.query(ctx, q.listQueryShapeStatsStmt, listQueryShapeStats, arg.SourceID, arg.Since, arg.Limit)
+	rows, err := q.query(ctx, q.listQueryShapeStatsStmt, listQueryShapeStats,
+		arg.SourceID,
+		arg.Since,
+		arg.Until,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -7023,12 +7031,13 @@ SELECT
     CAST(COUNT(max_lookback_s) AS INTEGER) AS lookback_rows,
     CAST(COALESCE(MAX(max_lookback_s), 0) AS INTEGER) AS max_lookback_s
 FROM query_shape_stats_daily
-WHERE source_id = ?1 AND bucket_date >= ?2
+WHERE source_id = ?1 AND bucket_date >= ?2 AND bucket_date <= ?3
 `
 
 type QueryShapeCoverageParams struct {
 	SourceID int64  `json:"source_id"`
 	Since    string `json:"since"`
+	Until    string `json:"until"`
 }
 
 type QueryShapeCoverageRow struct {
@@ -7042,13 +7051,14 @@ type QueryShapeCoverageRow struct {
 	MaxLookbackS      int64 `json:"max_lookback_s"`
 }
 
-// Totals over every rollup row of a source on/after `since`, not only the rows
+// Totals over every rollup row of a source from `since` to `until`, both
+// inclusive, not only the rows
 // that ListQueryShapeStats returns. filtered_days counts the days with a
 // query that has a filter: the empty shape, also kept by the 'unanalyzed' and
 // 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
 // and then max_lookback_s means nothing.
 func (q *Queries) QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error) {
-	row := q.queryRow(ctx, q.queryShapeCoverageStmt, queryShapeCoverage, arg.SourceID, arg.Since)
+	row := q.queryRow(ctx, q.queryShapeCoverageStmt, queryShapeCoverage, arg.SourceID, arg.Since, arg.Until)
 	var i QueryShapeCoverageRow
 	err := row.Scan(
 		&i.Days,

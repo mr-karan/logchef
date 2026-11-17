@@ -305,6 +305,7 @@ export interface SchemaAdvice {
   stale: boolean;
   report: SchemaAdvisorReport | null;
   dismissals: SchemaAdvisorDismissal[];
+  scheduled_refresh: boolean;
 }
 
 // Field values types for sidebar exploration
@@ -352,6 +353,8 @@ export const sourcesApi = {
   // The server stops an analysis after 30 s.
   refreshSchemaAdvice: (sourceId: number) =>
     apiClient.post<SchemaAdvice>(`/admin/sources/${sourceId}/advisor/refresh`, {}, { timeout: 40, suppressErrorToast: true }),
+  setSchemaAdviceSchedule: (sourceId: number, enabled: boolean) =>
+    apiClient.put<{ enabled: boolean }>(`/admin/sources/${sourceId}/advisor/schedule`, { enabled }),
   dismissSchemaFinding: (sourceId: number, findingId: string, reason: string) =>
     apiClient.put<SchemaAdvisorDismissal>(`/admin/sources/${sourceId}/advisor/findings/${findingId}/dismissal`, { reason }),
   // A restore answers 204 with no body; a failure rejects with its envelope.

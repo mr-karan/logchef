@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   refreshSchemaAdvice: vi.fn(),
   dismissSchemaFinding: vi.fn(),
   restoreSchemaFinding: vi.fn(),
+  setSchemaAdviceSchedule: vi.fn(),
 }));
 vi.mock("@/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/sources")>()),
@@ -47,8 +48,8 @@ const report: SchemaAdvisorReport = {
   }],
   notes: ["usage record is incomplete"],
 };
-const empty: SchemaAdvice = { source_id: 7, generated_at: null, generated_by: null, window_days: null, stale: false, report: null, dismissals: [] };
-const stored: SchemaAdvice = { source_id: 7, generated_at: "2026-11-16T10:00:00Z", generated_by: 1, window_days: 30, stale: true, report, dismissals: [] };
+const empty: SchemaAdvice = { source_id: 7, generated_at: null, generated_by: null, window_days: null, stale: false, report: null, dismissals: [], scheduled_refresh: false };
+const stored: SchemaAdvice = { source_id: 7, generated_at: "2026-11-16T10:00:00Z", generated_by: 1, window_days: 30, stale: true, report, dismissals: [], scheduled_refresh: false };
 const findingId = "0123456789abcdef";
 
 const ok = <T>(data: T) => Promise.resolve({ status: "success" as const, data });
@@ -238,6 +239,36 @@ describe("SourceInspectionAdvisor", () => {
     root.querySelector<HTMLButtonElement>("#advisor-show-dismissed")?.click();
     await flush();
     expect(root.querySelector(`[data-dismissed="${gone}"]`)?.textContent).toContain(i18n.global.t("advisor.findingGone", { id: gone }));
+  });
+
+  it("turns the weekly refresh on and off", async () => {
+    api.getSchemaAdvice.mockReturnValue(ok(empty));
+    api.setSchemaAdviceSchedule.mockImplementation((_id: number, enabled: boolean) => ok({ enabled }));
+    const root = await render();
+    const toggle = () => root.querySelector<HTMLButtonElement>("#advisor-refresh-weekly");
+    expect(root.querySelector('label[for="advisor-refresh-weekly"]')?.textContent?.trim()).toBe(i18n.global.t("advisor.refreshWeekly"));
+    expect(toggle()?.getAttribute("aria-checked")).toBe("false");
+
+    toggle()?.click();
+    await flush();
+    expect(api.setSchemaAdviceSchedule).toHaveBeenLastCalledWith(7, true);
+    expect(toggle()?.getAttribute("aria-checked")).toBe("true");
+
+    toggle()?.click();
+    await flush();
+    expect(api.setSchemaAdviceSchedule).toHaveBeenLastCalledWith(7, false);
+    expect(toggle()?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("keeps the switch off when turning it on fails", async () => {
+    api.getSchemaAdvice.mockReturnValue(ok(empty));
+    api.setSchemaAdviceSchedule.mockImplementation(() => fail("Admin access required", "AuthorizationError"));
+    const root = await render();
+
+    root.querySelector<HTMLButtonElement>("#advisor-refresh-weekly")?.click();
+    await flush();
+    expect(api.setSchemaAdviceSchedule).toHaveBeenCalledWith(7, true);
+    expect(root.querySelector("#advisor-refresh-weekly")?.getAttribute("aria-checked")).toBe("false");
   });
 
   it("keeps the dialog open and blocks a reason over 500 bytes", async () => {

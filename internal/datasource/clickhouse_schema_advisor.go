@@ -12,7 +12,7 @@ import (
 
 // AdviseSchema reads the metadata of the source's target table, samples the
 // columns whose cardinality a rule needs, and runs the rules.
-func (p *ClickHouseProvider) AdviseSchema(ctx context.Context, source *models.Source, usage advisor.Usage) (*models.SchemaAdvisorReport, error) {
+func (p *ClickHouseProvider) AdviseSchema(ctx context.Context, source *models.Source, usage advisor.Usage, at time.Time) (*models.SchemaAdvisorReport, error) {
 	client, err := p.manager.GetConnection(source.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get client for source %d: %w", source.ID, err)
@@ -29,7 +29,7 @@ func (p *ClickHouseProvider) AdviseSchema(ctx context.Context, source *models.So
 			return nil, fmt.Errorf("read %s: %s", name, input.Detail)
 		}
 	}
-	facts := advisor.Facts{Metadata: meta, TimestampColumn: source.MetaTSField, Usage: usage, Now: time.Now()}
+	facts := advisor.Facts{Metadata: meta, TimestampColumn: source.MetaTSField, Usage: usage, Now: at}
 	if columns := advisor.SampleColumns(facts); len(columns) > 0 {
 		if facts.Sample, err = client.AdvisorSample(ctx, meta, source.MetaTSField, columns, facts.Now); err != nil {
 			return nil, err

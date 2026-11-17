@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "Analizzato {time}",
   "advisor.stale": "Non aggiornato",
   "advisor.runAnalysis": "Esegui analisi",
+  "advisor.refreshWeekly": "Aggiorna ogni settimana",
   "advisor.running": "Analisi in corso…",
   "advisor.loadFailed": "Impossibile caricare i consigli sullo schema",
   "advisor.runFailed": "Analisi non riuscita",

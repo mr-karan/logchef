@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "分析於 {time}",
   "advisor.stale": "已過期",
   "advisor.runAnalysis": "執行分析",
+  "advisor.refreshWeekly": "每週重新整理",
   "advisor.running": "正在分析…",
   "advisor.loadFailed": "無法載入資料表結構建議",
   "advisor.runFailed": "分析失敗",

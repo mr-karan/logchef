@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -104,7 +105,11 @@ func Analyze(f Facts) models.SchemaAdvisorReport {
 		report.Notes = append(report.Notes, fmt.Sprintf("%d more findings not shown", len(found)-maxFindings))
 		found = found[:maxFindings]
 	}
+	readLine, hasReadLine := a.queryLogEvidence()
 	for i := range found {
+		if hasReadLine {
+			found[i].Evidence = append(found[i].Evidence, readLine)
+		}
 		report.Findings = append(report.Findings, found[i].SchemaFinding)
 	}
 	return report
@@ -300,6 +305,28 @@ func (a *analysis) usageEvidence(label string, stat *usageStat) []models.Advisor
 		{Label: label, Value: fmt.Sprintf("%s of %s (%s)", formatCount(stat.queries), formatCount(a.q), formatPercent(a.share(stat.queries))), Source: "logchef"},
 		{Label: "Mean duration of those queries", Value: fmt.Sprintf("%s ms", formatCount(stat.meanDurationMs())), Source: "logchef"},
 	}
+}
+
+// queryLogEvidence describes every client's reads of the source in the
+// last 7 days, from the system.query_log of the server that answered. It
+// returns false when the log was not read.
+func (a *analysis) queryLogEvidence() (models.AdvisorEvidence, bool) {
+	log := a.meta.QueryLog
+	if log == nil {
+		return models.AdvisorEvidence{}, false
+	}
+	line := models.AdvisorEvidence{Label: "Reads of the source in 7 days, all clients", Source: clickhouse.AdvisorInputQueryLog}
+	if log.Queries == 0 {
+		line.Value = "none on the server that answered"
+		return line, true
+	}
+	line.Value = fmt.Sprintf("%s on the server that answered: median %s ms, p95 %s ms, median %s rows and %s read",
+		formatCount(log.Queries),
+		formatCount(uint64(math.Round(log.MedianDurationMs))),
+		formatCount(uint64(math.Round(log.P95DurationMs))),
+		formatCount(uint64(math.Round(log.MedianReadRows))),
+		formatBytes(uint64(math.Round(log.MedianReadBytes))))
+	return line, true
 }
 
 // tableShare returns a column's compressed bytes as a share of the table's,

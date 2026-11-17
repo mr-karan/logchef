@@ -2083,6 +2083,7 @@
   "advisor.generatedAt": "分析于 {time}",
   "advisor.stale": "已过期",
   "advisor.runAnalysis": "运行分析",
+  "advisor.refreshWeekly": "每周刷新",
   "advisor.running": "正在分析…",
   "advisor.loadFailed": "无法加载表结构建议",
   "advisor.runFailed": "分析失败",

@@ -1279,6 +1279,7 @@
   "advisor.generatedAt": "{time} に分析",
   "advisor.stale": "古い",
   "advisor.runAnalysis": "分析を実行",
+  "advisor.refreshWeekly": "毎週更新",
   "advisor.running": "分析中…",
   "advisor.loadFailed": "スキーマの推奨事項を読み込めませんでした",
   "advisor.runFailed": "分析に失敗しました",

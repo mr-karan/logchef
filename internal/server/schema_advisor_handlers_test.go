@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -30,7 +31,7 @@ type fakeSchemaAdvisor struct {
 
 func (p *fakeSchemaAdvisor) Type() models.SourceType         { return models.SourceTypeClickHouse }
 func (p *fakeSchemaAdvisor) Describe() datasource.Descriptor { return datasource.Descriptor{} }
-func (p *fakeSchemaAdvisor) AdviseSchema(ctx context.Context, source *models.Source, usage advisor.Usage) (*models.SchemaAdvisorReport, error) {
+func (p *fakeSchemaAdvisor) AdviseSchema(ctx context.Context, source *models.Source, usage advisor.Usage, _ time.Time) (*models.SchemaAdvisorReport, error) {
 	return p.advise(ctx, source, usage)
 }
 
@@ -523,5 +524,93 @@ func TestSchemaFindingDismissalSnapshots(t *testing.T) {
 	}
 	if fmt.Sprint(replaced) != fmt.Sprint(want) {
 		t.Fatalf("previous reasons across events = %v\nwant each replaced reason once: %v", replaced, want)
+	}
+}
+
+// TestSchemaAdviceSchedule turns a source's weekly refresh on and off. GET
+// shows the switch, each change stores one audit event with the state it
+// replaced, and the error rows store none.
+func TestSchemaAdviceSchedule(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnvWithConfig(t, testOAuthConfig(), models.UserRoleAdmin)
+	ctx := context.Background()
+	_, src := mkTestTeam(t, e.db, "schedule", e.user)
+	_, vlSource := e.vlSourceFor("http://127.0.0.1:1")
+
+	set := func(id models.SourceID, session, body string) *testResponse {
+		return e.consentRequest(http.MethodPut, advisorPath(id, "/schedule"), session, body, sameOriginJSON)
+	}
+	expect := func(name string, resp *testResponse, status int) {
+		t.Helper()
+		var body struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		if resp.StatusCode != status {
+			t.Fatalf("%s: status %d (%s), want %d", name, resp.StatusCode, body.Message, status)
+		}
+	}
+	scheduled := func() bool {
+		t.Helper()
+		var body struct {
+			Data struct {
+				ScheduledRefresh *bool `json:"scheduled_refresh"`
+			} `json:"data"`
+		}
+		resp := e.consentRequest(http.MethodGet, advisorPath(src.ID, ""), e.session, "", nil)
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusOK || body.Data.ScheduledRefresh == nil {
+			t.Fatalf("GET: status %d, decode error %v, scheduled_refresh %v", resp.StatusCode, err, body.Data.ScheduledRefresh)
+		}
+		return *body.Data.ScheduledRefresh
+	}
+
+	if scheduled() {
+		t.Fatal("a new source refreshes on a schedule; want off by default")
+	}
+	expect("turn on", set(src.ID, e.session, `{"enabled":true}`), http.StatusOK)
+	if !scheduled() {
+		t.Fatal("scheduled_refresh after turning it on = false")
+	}
+	expect("turn on again", set(src.ID, e.session, `{"enabled":true}`), http.StatusOK)
+	expect("turn off", set(src.ID, e.session, `{"enabled":false}`), http.StatusOK)
+	if scheduled() {
+		t.Fatal("scheduled_refresh after turning it off = true")
+	}
+
+	expect("no body", set(src.ID, e.session, ""), http.StatusBadRequest)
+	expect("no enabled field", set(src.ID, e.session, `{}`), http.StatusBadRequest)
+	expect("unknown source", set(src.ID+1000, e.session, `{"enabled":true}`), http.StatusNotFound)
+	expect("VictoriaLogs source", set(vlSource.ID, e.session, `{"enabled":true}`), http.StatusBadRequest)
+	_, memberSession := e.newSessionUser("schedule-member@example.com")
+	expect("member", set(src.ID, memberSession, `{"enabled":true}`), http.StatusForbidden)
+	pat, err := core.CreateAPIToken(ctx, e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), &e.cfg.Auth, e.user.ID, "sources-read", nil, []models.TokenScope{models.TokenScopeSourcesRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPut, testIssuer+advisorPath(src.ID, "/schedule"), strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Authorization", "Bearer "+pat.Token)
+	req.Header.Set("Content-Type", "application/json")
+	expect("token without sources:write", e.do(req), http.StatusForbidden)
+	if scheduled() {
+		t.Fatal("a refused request turned the schedule on")
+	}
+
+	events, err := e.db.ListAuditEvents(ctx, models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, ev := range events {
+		if ev.Action != "schema_advisor_schedule.update" {
+			continue
+		}
+		if ev.TargetType != "source" || ev.TargetID != fmt.Sprint(src.ID) || ev.Outcome != models.AuditOutcomeSuccess || strings.Contains(string(ev.Detail), "unstaged") {
+			t.Errorf("event %s:%s %s detail %s, want a staged success on source %d", ev.TargetType, ev.TargetID, ev.Outcome, ev.Detail, src.ID)
+		}
+		got = append(got, string(ev.Changes))
+	}
+	want := []string{`{"enabled":{"from":false,"to":true}}`, `{}`, `{"enabled":{"from":true,"to":false}}`}
+	if !slices.Equal(got, want) {
+		t.Errorf("schedule event changes = %q, want %q", got, want)
 	}
 }

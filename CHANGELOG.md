@@ -156,7 +156,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key or JSON path, `LowCardinality`, a codec, and, with no DDL, a sorting
   key, a partition key and a retention review. Logchef never runs the DDL.
   Every ClickHouse read has a budget, and the report shows what each read.
-  Findings can be dismissed and restored, with audit events. The report is
+  Findings can be dismissed and restored, with audit events. Every finding
+  also shows how often all clients read the table in the last 7 days, from
+  `system.query_log`. A per-source **Refresh weekly** switch, off by default,
+  runs the analysis every Monday at 03:00 UTC on the job runner. The report is
   also served at `GET /api/v1/admin/sources/:id/advisor` and its `/refresh`,
   and printed by `logchef advisor <source>` with `--refresh`, `--ddl` and
   `--output json`. The new Schema Advisor docs page covers the rules,

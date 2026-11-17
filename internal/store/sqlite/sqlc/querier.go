@@ -344,7 +344,8 @@ type Querier interface {
 	ListQueryActivity(ctx context.Context, limit int64) ([]ListQueryActivityRow, error)
 	// List one user's recent history, newest first.
 	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
-	// A source's analyzed shapes on/after `since`, summed over days, most used
+	// A source's analyzed shapes from `since` to `until`, both inclusive, summed
+	// over days, most used
 	// first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
 	// counts them. lookback_rows is 0 when no row has a lookback, and then
 	// max_lookback_s means nothing.
@@ -424,7 +425,8 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	PruneQueryShapeStats(ctx context.Context, bucketDate string) error
 	PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error
-	// Totals over every rollup row of a source on/after `since`, not only the rows
+	// Totals over every rollup row of a source from `since` to `until`, both
+	// inclusive, not only the rows
 	// that ListQueryShapeStats returns. filtered_days counts the days with a
 	// query that has a filter: the empty shape, also kept by the 'unanalyzed' and
 	// 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,

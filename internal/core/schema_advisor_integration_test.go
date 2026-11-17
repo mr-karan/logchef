@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,19 @@ func TestRefreshSchemaAdviceClickHouse(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Three reads that system.query_log records, flushed so the refresh sees
+	// them. The refresh reads the log before it samples the table, so its own
+	// sample is not counted.
+	for range 3 {
+		var n uint64
+		if err := conn.QueryRow(ctx, "SELECT count() FROM default."+table+" WHERE request_id = 'req-1'").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := conn.Exec(ctx, "SYSTEM FLUSH LOGS"); err != nil {
+		t.Fatal(err)
+	}
+
 	advice, err := RefreshSchemaAdvice(ctx, db, ds, access.SessionPrincipal(admin), source.ID, 30)
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +106,11 @@ func TestRefreshSchemaAdviceClickHouse(t *testing.T) {
 	}
 	if bloom == nil {
 		t.Fatalf("no bloom filter finding for request_id: status %q, notes %q, inputs %+v, findings %+v", report.Status, report.Notes, report.Inputs, report.Findings)
+	}
+	readLine := bloom.Evidence[len(bloom.Evidence)-1]
+	if readLine.Source != clickhouse.AdvisorInputQueryLog || readLine.Label != "Reads of the source in 7 days, all clients" ||
+		!strings.HasPrefix(readLine.Value, "3 on the server that answered: median ") {
+		t.Errorf("last evidence of the bloom finding = %+v, want the 3 reads from system.query_log", readLine)
 	}
 	stored, err := GetSchemaAdvice(ctx, db, ds, access.SessionPrincipal(admin), source.ID)
 	if err != nil {
