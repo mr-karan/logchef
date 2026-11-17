@@ -260,3 +260,55 @@ fn histogram_rejects_an_aggregation() {
     );
     assert!(server.state().histogram_requests.is_empty());
 }
+
+/// Runs a stored LogchefQL aggregation through `saved-queries` (by id) and
+/// `collections` (by name).
+fn run_saved(command: &str, extra: &[&str]) -> std::process::Output {
+    let server = FakeServer::start(false);
+    server.state().saved_query = json!({
+        "id": 7, "source_id": 2, "name": "By service", "query_language": "logchefql",
+        "editor_mode": "builder", "query_content": json!({
+            "version": 2, "content": "level=error | count() by service", "limit": 10,
+        }).to_string()
+    });
+    server.state().query_response = Some(grouped_response());
+    let selector = if command == "collections" {
+        "By service"
+    } else {
+        "7"
+    };
+    let mut args = vec![command, selector];
+    args.extend_from_slice(extra);
+    logchef(&server, &format!("agg-{command}"), &args)
+}
+
+#[test]
+fn saved_queries_and_collections_print_an_aggregation_as_a_table() {
+    let dashes = "-".repeat(80);
+    for command in ["saved-queries", "collections"] {
+        for output in ["text", "table"] {
+            let out = run_saved(command, &["--output", output]);
+            assert_success(&out);
+            assert_eq!(
+                stdout(&out),
+                format!("service | count\n{dashes}\napi | 12\nweb | 3\n"),
+                "{command} --output {output}"
+            );
+        }
+    }
+}
+
+#[test]
+fn saved_queries_and_collections_json_adds_the_aggregation() {
+    for command in ["saved-queries", "collections"] {
+        let out = run_saved(command, &["--output", "json"]);
+        assert_success(&out);
+        let output: Value = serde_json::from_str(&stdout(&out)).unwrap();
+        assert_eq!(
+            output["logs"],
+            json!([{"service": "api", "count": 12}, {"service": "web", "count": 3}]),
+            "{command}"
+        );
+        assert_eq!(output["aggregation"], grouped_info(), "{command}");
+    }
+}
