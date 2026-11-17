@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge-bar smoke suite: ClickHouse regression + VictoriaLogs e2e via the HTTP API."""
+"""Merge-bar smoke suite: ClickHouse regression + VictoriaLogs and Loki e2e via the HTTP API."""
 import json, sys, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timedelta, timezone
 NOW = datetime.now(timezone.utc)
@@ -173,6 +173,90 @@ if vl_id:
     check("VL source update", code == 200, str(r)[:300])
 
     call("DELETE", f"/admin/sources/{vl_id}")
+
+# ── Loki e2e ──────────────────────────────────────────────
+# Reads the dev seed (just dev-ingest-logs, dev/ingest-loki.sh) in tenant "dev".
+LOKI_CONN = {"base_url": "http://localhost:3100", "tenant_id": "dev",
+             "selector": '{service_name=~".+"}', "parser": "json"}
+_, existing = call("GET", "/admin/sources")
+for src in (existing.get("data") or []):
+    if src.get("name") == "Loki Smoke":
+        call("DELETE", f"/admin/sources/{src['id']}")
+code, r = call("POST", "/admin/sources", {
+    "name": "Loki Smoke", "source_type": "loki",
+    "meta_ts_field": "_time", "meta_severity_field": "level", "connection": LOKI_CONN,
+})
+check("Loki source create", code in (200, 201), str(r)[:400])
+loki_id = r["data"]["id"] if code in (200, 201) else None
+
+if loki_id:
+    code, r = call("POST", f"/teams/{team_id}/sources", {"source_id": loki_id})
+    check("Loki source linked to team", code in (200, 201), str(r)[:200])
+
+    code, r = call("GET", f"/teams/{team_id}/sources/{loki_id}")
+    check("Loki capabilities expose logql", "logql" in json.dumps(r.get("data", {}).get("query_languages", [])), str(r)[:300])
+
+    code, r = call("POST", f"/teams/{team_id}/sources/{loki_id}/logs/query",
+                   {"query_text": '{service_name=~".+"} | json | status >= 200', "limit": 5, **TR_RFC})
+    check("Loki native LogQL query", code == 200 and len(r["data"].get("data", [])) > 0, str(r)[:300])
+
+    code, r = call("POST", f"/teams/{team_id}/sources/{loki_id}/logs/query",
+                   {"query_text": 'sum by (level) (count_over_time({service_name=~".+"} [5m]))', "limit": 100, **TR_RFC})
+    check("Loki metric query", code == 200 and len(r["data"].get("data", [])) > 0, str(r)[:300])
+
+    code, r = call("POST", f"/teams/{team_id}/sources/{loki_id}/logchefql/query",
+                   {"query": 'level="info"', "limit": 1, **TR})
+    rows = (r.get("data") or {}).get("logs") or []
+    check("Loki LogchefQL→LogQL query", code == 200 and len(rows) == 1, str(r)[:300])
+    gen = (r.get("data") or {}).get("generated_query", "")
+    check("Loki generated LogQL", gen.startswith("{") and "info" in gen, gen[:200])
+
+    code, r = call("POST", f"/teams/{team_id}/sources/{loki_id}/logs/histogram",
+                   {"query_text": '{service_name=~".+"}', "window": "5m", **TR_RFC})
+    buckets = (r.get("data") or {}).get("data") or []
+    check("Loki histogram", code == 200 and sum(b["log_count"] for b in buckets) > 0, str(r)[:300])
+
+    code, r = call("GET", f"/teams/{team_id}/sources/{loki_id}/schema")
+    columns = r.get("data") or []
+    labels = {c["name"] for c in columns if c.get("type") == "label"}
+    check("Loki schema has stream labels", code == 200 and {"service_name", "level"} <= labels, str(r)[:300])
+
+    qs = urllib.parse.urlencode({"type": "string", "limit": 5, **TR_RFC})
+    code, r = call("GET", f"/teams/{team_id}/sources/{loki_id}/fields/level/values?" + qs)
+    check("Loki field values", code == 200 and len((r.get("data") or {}).get("values") or []) > 0, str(r)[:250])
+
+    if rows:
+        row = rows[0]
+        code, r = call("POST", f"/teams/{team_id}/sources/{loki_id}/logs/context", {
+            "timestamp_rfc3339": row["_time"], "before_limit": 2, "after_limit": 2,
+            "stream_labels": {k: row[k] for k in labels if isinstance(row.get(k), str)},
+        })
+        check("Loki log context", code == 200 and "before_logs" in (r.get("data") or {}), str(r)[:300])
+
+    code, r = call("POST", "/saved-queries", {
+        "name": "smoke-loki", "source_id": loki_id, "query_language": "logql", "editor_mode": "native",
+        "query_content": json.dumps({"version": 1, "sourceId": loki_id, "timeRange": {"relative": "1h", "absolute": {"start": 0, "end": 0}}, "limit": 100, "content": '{service_name=~".+"}', "variables": []}),
+    })
+    check("Loki saved query create", code in (200, 201), str(r)[:300])
+    if code in (200, 201):
+        qid = r["data"]["id"]
+        code, r = call("GET", f"/saved-queries/{qid}")
+        check("Loki saved query round-trip", code == 200 and r["data"]["query_language"] == "logql", str(r)[:200])
+        call("DELETE", f"/saved-queries/{qid}")
+
+    code, r = call("POST", "/alerts/test", {
+        "source_id": loki_id,
+        "query_language": "logql", "editor_mode": "native",
+        "query": 'sum(count_over_time({service_name=~".+"} [1h]))',
+        "lookback_seconds": 3600, "threshold_operator": "gt", "threshold_value": 0,
+    })
+    check("Loki alert test", code == 200 and "value" in r.get("data", {}), str(r)[:300])
+
+    # A Loki source keeps its tenant: an in-place tenant change is refused.
+    code, r = call("PUT", f"/admin/sources/{loki_id}", {"connection": {**LOKI_CONN, "tenant_id": "other"}})
+    check("Loki tenant change rejected", code == 400 and "tenant_id cannot be changed" in r.get("message", ""), f"code={code} {str(r)[:200]}")
+
+    call("DELETE", f"/admin/sources/{loki_id}")
 
 # ── Dashboards CRUD (#56/#73) ─────────────────────────────
 # Dashboards are a top-level resource (not team-scoped in the path); the panel
