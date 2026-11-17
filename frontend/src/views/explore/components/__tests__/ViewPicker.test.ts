@@ -178,3 +178,32 @@ it("names a share's layout and offers No view and Save as new view", async () =>
   await nextTick();
   expect(selected).toEqual([null]);
 });
+
+it("says the view changed when Update view is stale, and offers Save as new view or Reload", async () => {
+  const { host, store } = await mount([view(1, "team", "team view")], 1);
+  store.reportTableLayout(1, { columns: [{ name: "level" }] });
+  await nextTick();
+  api.update.mockRejectedValue({ status: "error", message: "This view changed. Reload it and apply your changes again.", error_type: "ConflictError" });
+  const update = async () => {
+    (await openMenu(host)).find(item => item.textContent?.trim() === "Update view")!.click();
+    await vi.waitFor(() => expect(document.body.querySelector("[role=alertdialog]")).not.toBeNull());
+    return document.body.querySelector<HTMLElement>("[role=alertdialog]")!;
+  };
+  const button = (dialog: HTMLElement, label: string) => [...dialog.querySelectorAll<HTMLElement>("button")].find(b => b.textContent?.trim() === label)!;
+
+  const dialog = await update();
+  expect(dialog.textContent).toContain("This view changed");
+  expect(dialog.textContent).toContain("Reload it and apply your changes again");
+  button(dialog, "Save as new view").click();
+  await vi.waitFor(() => expect(document.body.querySelector("#view-name")).not.toBeNull());
+  // The working copy is kept for the new view.
+  expect(store.isModified).toBe(true);
+  button(document.body.querySelector<HTMLElement>("[role=dialog]")!, "Cancel").click();
+  await vi.waitFor(() => expect(document.body.querySelector("#view-name")).toBeNull());
+
+  // Reload reads the newer revision and resets to it.
+  api.list.mockResolvedValue({ data: { views: [{ ...view(1, "team", "team view"), revision: 2 }], default_view_id: null } });
+  const again = await update();
+  button(again, "Reload view").click();
+  await vi.waitFor(() => expect(store.activeView?.revision).toBe(2));
+});
