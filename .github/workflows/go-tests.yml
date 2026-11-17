@@ -128,6 +128,12 @@ jobs:
           exit 1
       - name: Integration tests (Loki)
         run: go test ./internal/loki/ -run Integration -v
+      # The test job runs the rest of internal/server; these are the tests that
+      # skip there for lack of a Loki URL. Add new ones here.
+      - name: Server responses against Loki
+        run: >-
+          go test -race -gcflags='modernc.org/...=-d=checkptr=0' ./internal/server -count=1
+          -run '^(TestLokiConditionAlertTests)$'
 
   clickhouse-integration:
     runs-on: ubuntu-latest
