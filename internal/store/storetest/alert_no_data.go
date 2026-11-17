@@ -76,7 +76,7 @@ func testNoDataEpisode(t *testing.T, ctx context.Context, s store.Store, alertID
 	testNoDataEpisodePruned(t, ctx, s, alertID, entry.ID)
 	testNoDataEpisodeMoves(t, ctx, s, alertID, entry.ID)
 
-	if err := s.ResolveAlertGroup(ctx, alertID, key, "forgotten"); err != nil {
+	if err := s.ResolveAlertGroup(ctx, alertID, key, "forgotten", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.GetAlertHistoryEntry(ctx, alertID, entry.ID); err != nil || got.Status != models.AlertStatusResolved || got.ResolvedAt == nil {
@@ -178,7 +178,7 @@ func testNoDataRefreshState(t *testing.T, ctx context.Context, s store.Store, al
 		t.Fatalf("counts = %+v, %v; want one of each state", counts[alertID], err)
 	}
 
-	if err := s.ResolveAlertGroup(ctx, alertID, `["a"]`, "fixed"); err != nil {
+	if err := s.ResolveAlertGroup(ctx, alertID, `["a"]`, "fixed", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := state(); got.LastState != models.AlertStateNoData {
@@ -187,7 +187,7 @@ func testNoDataRefreshState(t *testing.T, ctx context.Context, s store.Store, al
 	if err := s.DeleteAlertInstance(ctx, alertID, `["c"]`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ResolveAlertGroup(ctx, alertID, `["b"]`, "fixed"); err != nil {
+	if err := s.ResolveAlertGroup(ctx, alertID, `["b"]`, "fixed", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := state(); got.LastState != models.AlertStateResolved {

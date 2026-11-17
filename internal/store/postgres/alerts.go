@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -224,9 +225,11 @@ func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, messag
 }
 
 // ResolveAlertGroup resolves the open episode of one group of the alert.
-func (s *Store) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string) error {
+func (s *Store) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string, resolvedAt time.Time) error {
 	if s.pool != nil {
-		return s.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertGroup(ctx, alertID, groupKey, message) })
+		return s.WithTx(ctx, func(tx store.StoreOps) error {
+			return tx.ResolveAlertGroup(ctx, alertID, groupKey, message, resolvedAt)
+		})
 	}
 	ids, err := s.q.ListOpenAlertGroupHistoryIDs(ctx, sqlc.ListOpenAlertGroupHistoryIDsParams{AlertID: int64(alertID), GroupKey: groupKey})
 	if err != nil {
@@ -235,7 +238,12 @@ func (s *Store) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, g
 	if len(ids) == 0 {
 		return models.ErrNotFound
 	}
-	if err := s.q.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{AlertID: int64(alertID), GroupKey: groupKey, Message: text(message)}); err != nil {
+	if err := s.q.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{
+		AlertID:    int64(alertID),
+		GroupKey:   groupKey,
+		Message:    text(message),
+		ResolvedAt: ts(resolvedAt),
+	}); err != nil {
 		return fmt.Errorf("failed to resolve alert episode: %w", err)
 	}
 	if err := s.q.DeleteAlertInstance(ctx, sqlc.DeleteAlertInstanceParams{AlertID: int64(alertID), GroupKey: groupKey}); err != nil {

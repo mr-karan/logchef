@@ -768,7 +768,7 @@ WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND stat
 -- name: ResolveAlertGroupHistory :exec
 UPDATE alert_history
 SET status = 'resolved',
-    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    resolved_at = sqlc.arg(resolved_at),
     message = sqlc.arg(message)
 WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status IN ('triggered', 'no_data');
 
