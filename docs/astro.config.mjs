@@ -235,7 +235,13 @@ Key areas of the docs:
           items: [
             { label: "Overview", link: "/comparisons" },
             { label: "Logchef vs ClickStack", link: "/comparisons/logchef-vs-clickstack" },
+            { label: "Logchef vs SigNoz", link: "/comparisons/logchef-vs-signoz" },
             { label: "Logchef vs Grafana Loki", link: "/comparisons/logchef-vs-grafana-loki" },
+            { label: "Logchef vs Grafana", link: "/comparisons/logchef-vs-grafana" },
+            { label: "Logchef vs Elasticsearch", link: "/comparisons/logchef-vs-elasticsearch" },
+            { label: "Logchef vs OpenObserve", link: "/comparisons/logchef-vs-openobserve" },
+            { label: "Logchef vs Graylog", link: "/comparisons/logchef-vs-graylog" },
+            { label: "Logchef vs Datadog", link: "/comparisons/logchef-vs-datadog" },
           ],
         },
         {
