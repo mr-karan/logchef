@@ -1,7 +1,11 @@
 package server
 
 import (
+	"bufio"
+	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +14,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -193,5 +198,111 @@ func TestResolveTailQueryRejectsRawSQL(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 written by resolveTailQuery", resp.StatusCode)
+	}
+}
+
+// tailUntilCancelled tails until its context ends, as every provider does when
+// no rows arrive, and reports when it stops.
+type tailUntilCancelled struct {
+	datasource.Provider
+	sourceType models.SourceType
+	started    chan struct{}
+	stopped    chan struct{}
+}
+
+func (p *tailUntilCancelled) Type() models.SourceType { return p.sourceType }
+
+func (p *tailUntilCancelled) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		Capabilities:   []datasource.Capability{datasource.CapabilityLiveTail},
+		QueryLanguages: []models.QueryLanguage{models.QueryLanguageLogchefQL},
+	}
+}
+
+func (p *tailUntilCancelled) CompileLogchefQL(context.Context, *models.Source, datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	return &datasource.CompiledLogchefQL{Valid: true, Language: models.QueryLanguageLogQL, Query: "{app=\"api\"}"}, nil
+}
+
+func (p *tailUntilCancelled) TailLogs(ctx context.Context, _ *models.Source, _ datasource.TailRequest, _ datasource.TailEmitter) error {
+	close(p.started)
+	<-ctx.Done()
+	close(p.stopped)
+	return ctx.Err()
+}
+
+func tailTracked(queryID string) bool {
+	queryTracker.mu.Lock()
+	defer queryTracker.mu.Unlock()
+	_, ok := queryTracker.queries[queryID]
+	return ok
+}
+
+// A tail frees its slot when the client disconnects, not at the next
+// heartbeat 15 seconds later, on every backend.
+func TestTailFreesItsSlotWhenTheClientDisconnects(t *testing.T) {
+	for _, sourceType := range []models.SourceType{models.SourceTypeClickHouse, models.SourceTypeVictoriaLogs, models.SourceTypeLoki} {
+		t.Run(string(sourceType), func(t *testing.T) {
+			provider := &tailUntilCancelled{sourceType: sourceType, started: make(chan struct{}), stopped: make(chan struct{})}
+			s, source := newAggregationTestServer(t, provider, sourceType)
+			user, src := authorizeTestSource(t, s.store, source.ID)
+
+			// fasthttp leaves this read deadline on the connection; it must
+			// not end a tail whose client is still connected.
+			const readTimeout = 100 * time.Millisecond
+			app := fiber.New(fiber.Config{ReadTimeout: readTimeout})
+			app.Get("/teams/:teamID/sources/:sourceID/logs/tail", func(c fiber.Ctx) error {
+				c.Locals("user", user)
+				c.Locals("auth_method", "session")
+				return c.Next()
+			}, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleTailLogs)
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() { _ = app.Listener(listener, fiber.ListenConfig{DisableStartupMessage: true}) }()
+			t.Cleanup(func() { _ = app.Shutdown() })
+
+			conn, err := net.Dial("tcp", listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			fmt.Fprintf(conn, "GET /teams/%d/sources/%d/logs/tail?query=x HTTP/1.1\r\nHost: logchef\r\n\r\n", src.TeamID(), source.ID)
+			resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			queryID := resp.Header.Get("X-LogChef-Query-ID")
+			if resp.StatusCode != http.StatusOK || queryID == "" {
+				t.Fatalf("status %d, query ID %q", resp.StatusCode, queryID)
+			}
+			select {
+			case <-provider.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the tail did not start")
+			}
+
+			time.Sleep(3 * readTimeout)
+			select {
+			case <-provider.stopped:
+				t.Fatal("the tail stopped while its client was connected")
+			default:
+			}
+
+			_ = conn.Close()
+			select {
+			case <-provider.stopped:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the tail kept running after its client disconnected")
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for tailTracked(queryID) {
+				if time.Now().After(deadline) {
+					t.Fatal("the tail kept its slot after its client disconnected")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		})
 	}
 }

@@ -36,6 +36,9 @@ type GetLogContextParams struct {
 	Timestamp   int64 `json:"timestamp" jsonschema:"Target timestamp in milliseconds (from a log entry)"`
 	BeforeLimit int   `json:"before_limit,omitempty" jsonschema:"Number of logs before the target (default 10)"`
 	AfterLimit  int   `json:"after_limit,omitempty" jsonschema:"Number of logs after the target (default 10)"`
+	// Loki keeps context to the row's stream, which only the row's stream
+	// labels identify.
+	StreamLabels map[string]string `json:"stream_labels,omitempty" jsonschema:"Loki sources only, and required there: the target row's value for every schema field of type label. Rows from a LogchefQL query carry them all"`
 }
 
 type ListAlertsParams struct {
@@ -171,6 +174,7 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 			TargetTime:      &targetTime,
 			BeforeLimit:     beforeLimit,
 			AfterLimit:      afterLimit,
+			StreamLabels:    params.StreamLabels,
 		})
 		return err
 	})

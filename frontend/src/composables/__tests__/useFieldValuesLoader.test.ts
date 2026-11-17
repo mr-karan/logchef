@@ -127,6 +127,22 @@ describe('field values loader', () => {
     expect(useFieldValuesStore().findCachedValues(2, 'level')?.values[0].value).toBe('current')
   })
 
+  it.each(['fail', 'clearCache'] as const)('settles every preloaded label when the preload %s', async (outcome) => {
+    const loader = useFieldValuesLoader(loaderOptions())
+    const preload = loader.preloadLabels([{ name: 'app', type: 'label' }, { name: 'pod', type: 'label' }, { name: 'msg', type: 'String' }])
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0].config.url).toContain('/fields/values?')
+    expect(loader.getFieldState('app').status).toBe('loading')
+    expect(loader.getFieldState('msg').status).toBe('idle')
+    if (outcome === 'fail') requests[0].fail()
+    else loader.clearCache()
+    await preload
+    const settled = outcome === 'fail' ? 'error' : 'idle'
+    expect(loader.getFieldState('app').status).toBe(settled)
+    expect(loader.getFieldState('pod').status).toBe(settled)
+    expect(loader.isAnyLoading.value).toBe(false)
+  })
+
   it('replaces a queued load for the same field without sending the obsolete request', async () => {
     const loader = useFieldValuesLoader(loaderOptions())
     const busy = Array.from({ length: 4 }, (_, i) => loader.loadField(`busy${i}`, 'Int64'))
