@@ -2,7 +2,7 @@ import { defineStore, storeToRefs } from "pinia";
 import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { z } from "zod";
 import { savedViewsApi, type SavedView, type SavedViewList, type SavedViewScope } from "@/api/savedViews";
-import { isAbortError } from "@/api/error-handler";
+import { getErrorType, isAbortError, showErrorToast } from "@/api/error-handler";
 import { useActiveSavedViewStore } from "@/stores/activeSavedView";
 import {
   tableLayoutToDefinition,
@@ -108,6 +108,8 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
   // The view the server's default rules pick for the caller.
   const defaultViewId = ref<number | null>(null);
   const workingDisplayMode = ref<DisplayMode | null>(null);
+  // Set when a save was refused because someone saved the view after it loaded.
+  const staleSave = ref(false);
   // The last layout the table reported, and the view it belongs to.
   const tableLayout = shallowRef<{ viewId: number | null; layout: SavedViewLayout } | null>(null);
   // Bumped by Reset to view, so a mounted table discards its working copy.
@@ -326,7 +328,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     }
   }
 
-  /** Writes a view at the revision it loaded. Returns null on failure, which the API client reports. */
+  /** Writes a view at the revision it loaded. Returns null on failure, after reporting it. */
   async function updateView(view: SavedView, changes: Partial<Pick<SavedView, "name" | "description" | "definition">>): Promise<SavedView | null> {
     const target = scope.value;
     if (!target) return null;
@@ -341,7 +343,12 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
       upsert(updated);
       return updated;
     } catch (error) {
-      console.error("error updating saved view", error);
+      // A conflict on a save that keeps the view's own name can only be a
+      // stale revision. A rename can also take a name in use, and the
+      // server's message tells which.
+      const keepsName = changes.name === undefined || changes.name === view.name;
+      if (keepsName && getErrorType(error) === "ConflictError") staleSave.value = true;
+      else showErrorToast(error);
       return null;
     }
   }
@@ -443,6 +450,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     sharedLayout,
     displayMode,
     isModified,
+    staleSave,
     layoutResetToken,
     load,
     enter,

@@ -29,6 +29,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useExploreStore } from '@/stores/explore'
 import { useExploreRuns } from '@/stores/exploreRuns'
 import { missingViewColumns } from '@/lib/savedViewLayout'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import ManageViewsDialog from './ManageViewsDialog.vue'
 import { useSavedViewsStore, type DisplayMode } from '@/stores/savedViews'
 import { useTeamsStore } from '@/stores/teams'
@@ -109,6 +110,11 @@ async function update() {
   if (updated) toast({ title: t('explore.viewUpdated', { name: updated.name }) })
 }
 
+// Reload reads the newer revision, then resets the working copy to it.
+async function reloadStale() {
+  if (await store.refresh()) emit('reset')
+}
+
 const scopeLabel: Record<SavedViewScope, string> = {
   personal: 'explore.viewScopePersonal',
   team: 'explore.viewScopeTeam',
@@ -152,6 +158,16 @@ const groupLabel: Record<SavedViewScope, string> = {
       <DropdownMenuItem class="text-xs" @select="manageOpen = true">{{ t('explore.manageViews') }}</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+
+  <ConfirmDialog
+    v-model:open="store.staleSave"
+    :title="t('explore.viewChanged')"
+    :description="t('explore.viewChangedDescription')"
+    :confirm-text="t('explore.saveAsNewView')"
+    :cancel-text="t('explore.reloadView')"
+    @confirm="openSave"
+    @cancel="reloadStale"
+  />
 
   <ManageViewsDialog v-if="manageOpen" v-model:open="manageOpen" :result-columns="resultColumns" @select="emit('select', $event)" />
 

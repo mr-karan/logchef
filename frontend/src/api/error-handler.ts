@@ -27,7 +27,7 @@ export function formatErrorMessage(error: unknown, fallback = "An unexpected err
 /**
  * Gets the error type from an error object
  */
-function getErrorType(error: unknown): string {
+export function getErrorType(error: unknown): string {
   // API error response
   if (error && typeof error === "object" && "status" in error) {
     const response = error as APIErrorResponse;
