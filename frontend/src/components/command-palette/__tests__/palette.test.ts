@@ -335,7 +335,7 @@ describe('buildPaletteView', () => {
 
   describe('permissions', () => {
     const pages = (viewer: Viewer) => ids(view('', context({ viewer })), 'goto').map((id) => id.replace('page:', ''))
-    const everyone = ['LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'AlertSilences', 'Dashboards']
+    const everyone = ['LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'AlertSilences', 'NotificationDestinations', 'Dashboards']
     const settings = ['Profile', 'Preferences', 'ConnectedApps']
 
     it('shows admins every page', () => {
