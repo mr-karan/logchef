@@ -53,7 +53,7 @@ Key areas of the docs:
 
 - Getting Started: install, configure, and understand the architecture.
 - Querying Logs: LogchefQL syntax, SQL examples, the query interface, and the field sidebar.
-- Features: collections/saved queries, dashboards, alerting, AI SQL generation, user management, service tokens, and declarative provisioning.
+- Features: collections/saved queries, dashboards, alerting, AI SQL generation, the ClickHouse schema advisor, user management, service tokens, and declarative provisioning.
 - Integration: CLI, MCP server (for AI assistants), and schema design guidance.
 - Tutorials: connecting VictoriaLogs, ingesting via Vector/OTEL, and a worked NGINX logs example.
 - Operations: database backends (SQLite vs Postgres), reverse proxy and subpath setup, and the Prometheus metrics reference.`,
@@ -199,6 +199,7 @@ Key areas of the docs:
             { label: "Dashboard Gallery", link: "/features/dashboard-gallery" },
             { label: "Alerting", link: "/features/alerting" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
+            { label: "Schema Advisor", link: "/features/schema-advisor" },
             { label: "User Management", link: "/core/user-management" },
             { label: "Service Tokens", link: "/features/service-tokens" },
             { label: "Provisioning", link: "/getting-started/provisioning" },

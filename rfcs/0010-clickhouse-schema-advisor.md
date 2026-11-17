@@ -14,8 +14,8 @@ it". Each finding shows its evidence, the expected gain and the cost. A finding
 that an in-place `ALTER` can apply also shows the DDL to copy.
 
 Logchef never runs the DDL. A global admin reads the report on the source
-inspection page, through the CLI or through MCP, and applies the statements
-with a ClickHouse user that may alter the table. The advisor adds one write
+inspection page or through the CLI, and applies the statements with a
+ClickHouse user that may alter the table. The advisor adds one write
 path: a daily rollup of the filter shape of each query (columns and match
 kinds, never values). Analysis runs on demand, reads system tables plus one
 budgeted sample, and stores the latest report per source.
@@ -207,7 +207,7 @@ type SchemaAdvisorReport struct {
 
 The server writes `Title`, `Gain`, `Cost` and evidence labels in English, as
 inspection labels already are (`internal/datasource/clickhouse_provider.go:912`).
-The CLI and MCP need the same text. A finding id is stable across refreshes.
+The CLI needs the same text. A finding id is stable across refreshes.
 It is the hash of `rule | target database | target table | column | path | access`.
 
 #### `schema_advisor_dismissals` (migration "add schema advisor dismissals")
@@ -649,13 +649,8 @@ route is already admin-only (`frontend/src/router/index.ts:201`).
 raw response with `--output json`. `--refresh` refreshes first, and `--ddl`
 prints only the statements. A 403 exits non-zero and names the needed scope.
 
-**MCP.** One read-only tool `get_schema_recommendations` with input
-`{source_id}`, registered in `addSourcesTools` (`internal/mcp/sources.go:176`).
-It returns the stored report through the same core function as `GET`. It
-never runs an analysis, so a model cannot put load on ClickHouse.
-
-**Ask Chef and provisioning TOML.** Not affected. The tool is left out of
-`allowedTools` (`internal/askchef/tools.go:42`).
+**MCP, Ask Chef and provisioning TOML.** Not affected. See "Changes after
+build".
 
 **Docs.** A new page `docs/src/content/docs/features/schema-advisor.mdx`, and
 one line per metric in `docs/src/content/docs/operations/metrics.mdx`.
@@ -754,7 +749,7 @@ report row keeps who ran it and when. No field holds query text.
 ## Implementation plan
 
 U1 and U3 have no dependencies. U2 and U4 depend on U1. Units in one row of
-dependencies can be built in parallel, as can U6 and U8 to U12 after U5. U5
+dependencies can be built in parallel, as can U6 and U8 to U11 after U5. U5
 with U6 is the first slice that a user can use. A build gate is an
 integration test in the `clickhouse-integration` job, which runs ClickHouse
 23.7, 24.1 and 26.8 (`.github/workflows/go-tests.yml:103`). It runs on every
@@ -856,17 +851,29 @@ its test.
 - Check: `just check-cli` passes. `logchef advisor <source> --ddl` prints
   only statements. A member token exits non-zero with the scope message.
 
-**U12. MCP tool.** Depends on U5. Edits `internal/mcp/sources.go` and
-`internal/mcp/mcp_test.go`.
-- Check: a test calls the tool as an admin and as a member. A test asserts
-  that the Ask Chef toolbox does not hold the tool.
-
 **U13. Docs, then scheduled refresh.** Docs depend on U6 to U10. The refresh
 depends on U5 and RFC 0006 and is its own PR, with a per-source switch.
 - Files: the docs page, `operations/metrics.mdx` and `CHANGELOG.md`. The
   refresh PR registers the weekly job per "Seams".
 - Check: the docs build passes. With two replicas on Postgres, one tick
   writes one report per opted-in source and none for the others.
+
+## Changes after build
+
+- **U12 (MCP tool) is dropped.** No MCP caller can be a global admin. `/mcp`
+  accepts only OAuth access tokens (`internal/server/mcp_handlers.go:66`), and
+  `Principal.RequireGlobalAdmin` rejects OAuth and Ask Chef's assistant
+  principal whatever the user's role (`internal/core/access/access.go:149`).
+  The tool could never return a report. This is the same rule that keeps
+  `audit:read` token-only in RFC 0009. Admins read the report in the web UI
+  or with `logchef advisor`, using an API token.
+- **G2 and R2 match U10 (#325).** ClickHouse 26.8 serves `LIKE '%token%'` and
+  `ILIKE` from a `text` index by a dictionary scan. The R2 "False positives"
+  cell and the G2 row say so, and R2 still does not count those items.
+- **U13 shipped its docs only.** The page is
+  `docs/src/content/docs/features/schema-advisor.mdx`. The weekly scheduled
+  refresh on the RFC 0006 job runner is a follow-up PR. Until it lands, a
+  report changes only when an admin runs an analysis.
 
 ## Open questions for Karan
 

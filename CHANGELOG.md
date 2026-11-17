@@ -61,6 +61,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored, the request answers 503 and no token or data leaves the server. The
   new Audit Log docs page covers the event format, every action, retention and
   the metrics.
+- ClickHouse schema advisor. Logchef records the filter shape of each
+  Explorer query on a ClickHouse source (columns, Map keys, JSON paths and
+  match kinds, never values) and joins it with the table's metadata. A global
+  admin presses **Run analysis** on Source Inspection and gets findings, each
+  with evidence, gain, cost and the DDL to review: a bloom filter index, a
+  text index (ClickHouse 26.8 or later), a materialized column for a hot Map
+  key or JSON path, `LowCardinality`, a codec, and, with no DDL, a sorting
+  key, a partition key and a retention review. Logchef never runs the DDL.
+  Every ClickHouse read has a budget, and the report shows what each read.
+  Findings can be dismissed and restored, with audit events. The report is
+  also served at `GET /api/v1/admin/sources/:id/advisor` and its `/refresh`,
+  and printed by `logchef advisor <source>` with `--refresh`, `--ddl` and
+  `--output json`. The new Schema Advisor docs page covers the rules,
+  thresholds, budgets and metrics.
 
 ### Upgrade notes
 
@@ -77,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   made before this release lacks `saved_views:read`: run `logchef auth` again.
   An MCP client signed in before this release does not see `list_saved_views`
   until it signs in again.
+- The schema advisor adds three tables: `query_shape_stats_daily`,
+  `schema_advisor_reports` and `schema_advisor_dismissals` (SQLite migrations
+  000049, 000051 and 000053, Postgres 000023, 000025 and 000027). Each creates
+  a new table and rebuilds none. Shape rows older than 90 days are pruned once
+  a day.
 - Alert state moves to a per-rule instance table (SQLite migration 000043,
   Postgres 000017). Back up the metadata database first, and stop every old
   replica before a new one starts: the migration rebuilds the SQLite `alerts`
