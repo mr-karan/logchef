@@ -717,6 +717,44 @@ func renderAlertQuery(source *models.Source, query string, from, to time.Time) (
 	return formatAlertQuery(rendered)
 }
 
+// ReplayError is the reason an alert query cannot be run for a past instant.
+type ReplayError struct {
+	Reason string
+}
+
+func (e *ReplayError) Error() string { return e.Reason }
+
+// alertTimeMacros are the built-ins that put the evaluation window into
+// alert SQL.
+var alertTimeMacros = []string{"__from", "__to", "__time_filter"}
+
+// CheckAlertReplayable reports whether EvaluateAlert reads the window that
+// ends at At, so that a backtest can run the query for past instants. A
+// LogsQL query always does: the provider owns the window. ClickHouse SQL
+// does only when it names a time macro and reads no current-time function
+// such as now(). It returns *ReplayError when the query cannot be replayed,
+// and the validation error of a query that would not run at all.
+func CheckAlertReplayable(source *models.Source, language models.QueryLanguage, query string) error {
+	if models.NormalizeQueryLanguage(language) != models.QueryLanguageClickHouseSQL {
+		return nil
+	}
+	rendered, err := renderAlertQuery(source, query, alertSampleTo.Add(-time.Hour), alertSampleTo)
+	if err != nil {
+		return err
+	}
+	current, err := clickhouse.ReadsCurrentTime(rendered)
+	if err != nil {
+		return &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	if current {
+		return &ReplayError{Reason: "This query reads the current time. Replace the time filter with {{__time_filter}} to backtest it."}
+	}
+	if !slices.ContainsFunc(template.ReferencedNames(query), func(name string) bool { return slices.Contains(alertTimeMacros, name) }) {
+		return &ReplayError{Reason: "This query has no time window. Add {{__time_filter}} to its WHERE clause to backtest it."}
+	}
+	return nil
+}
+
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")

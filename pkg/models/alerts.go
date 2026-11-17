@@ -343,5 +343,85 @@ type TestAlertQueryResponse struct {
 	NoData          bool          `json:"no_data"`
 }
 
+// Backtest bounds: the range a backtest replays, and the evaluations it runs.
+const (
+	MinBacktestRangeSeconds = 3600
+	MaxBacktestRangeSeconds = 7 * 24 * 3600
+	MaxBacktestEvaluations  = 120
+	// MaxBacktestGroups bounds the groups a backtest response lists.
+	MaxBacktestGroups = 20
+)
+
+// BacktestAlertRequest replays an unsaved rule over the past range_seconds.
+type BacktestAlertRequest struct {
+	TestAlertQueryRequest
+	FrequencySeconds int `json:"frequency_seconds"`
+	RangeSeconds     int `json:"range_seconds"`
+	// NotifyOnResolve defaults to true when absent, as on a new rule.
+	NotifyOnResolve *bool `json:"notify_on_resolve"`
+}
+
+// BacktestStatus is a rule's state after one replayed evaluation.
+type BacktestStatus string
+
+const (
+	BacktestStatusOK     BacktestStatus = "ok"
+	BacktestStatusFiring BacktestStatus = "firing"
+	BacktestStatusNoData BacktestStatus = "no_data"
+	BacktestStatusError  BacktestStatus = "error"
+)
+
+// BacktestResult is what a rule would have done over a past range.
+// Coverage is the share of the range that the evaluated lookback windows
+// read. Partial reports that the deadline ended the replay, so Series ends
+// early.
+type BacktestResult struct {
+	Start         time.Time       `json:"start"`
+	End           time.Time       `json:"end"`
+	StepSeconds   int             `json:"step_seconds"`
+	Evaluations   int             `json:"evaluations"`
+	Coverage      float64         `json:"coverage"`
+	Partial       bool            `json:"partial"`
+	Summary       BacktestSummary `json:"summary"`
+	Series        []BacktestPoint `json:"series"`
+	Groups        []BacktestGroup `json:"groups"`
+	GroupsOmitted int             `json:"groups_omitted"`
+	// FirstError is the message of the first evaluation that failed, made
+	// from FirstErr by the caller, which knows what a user may read.
+	FirstError string `json:"first_error,omitempty"`
+	FirstErr   error  `json:"-"`
+}
+
+// BacktestSummary counts what the replay saw. FiringSeconds is the time at
+// least one group was firing. BreachingEvaluations counts group samples that
+// met the threshold. Notifications counts the messages the rule would have
+// sent: one per episode and per move between firing and no data, plus one
+// per resolve when notify_on_resolve is set.
+type BacktestSummary struct {
+	Episodes             int `json:"episodes"`
+	FiringSeconds        int `json:"firing_seconds"`
+	BreachingEvaluations int `json:"breaching_evaluations"`
+	Notifications        int `json:"notifications"`
+	NoDataEvaluations    int `json:"no_data_evaluations"`
+	Errors               int `json:"errors"`
+}
+
+// BacktestPoint is the rule after one evaluation. Value is the sample of an
+// ungrouped rule, nil for a grouped rule or an evaluation without one.
+type BacktestPoint struct {
+	T            time.Time      `json:"t"`
+	Status       BacktestStatus `json:"status"`
+	Value        *float64       `json:"value"`
+	FiringGroups int            `json:"firing_groups"`
+}
+
+// BacktestGroup is one group of a grouped rule over the replay.
+type BacktestGroup struct {
+	Group                map[string]string `json:"group"`
+	Episodes             int               `json:"episodes"`
+	BreachingEvaluations int               `json:"breaching_evaluations"`
+	MaxValue             *float64          `json:"max_value"`
+}
+
 // DefaultAlertHistoryLimit controls the number of history entries returned when unspecified.
 const DefaultAlertHistoryLimit = 100

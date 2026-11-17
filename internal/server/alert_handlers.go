@@ -11,6 +11,8 @@ import (
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v3"
@@ -341,4 +343,89 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+// BacktestTimeout bounds one backtest. A replay that reaches it returns what
+// it evaluated so far, marked partial.
+const BacktestTimeout = 60 * time.Second
+
+// handleBacktestAlert replays an unsaved rule over a past range. It writes no
+// alert state and sends nothing.
+func (s *Server) handleBacktestAlert(c fiber.Ctx) error {
+	user := currentUser(c)
+	if user == nil {
+		return sendMissingUser(c)
+	}
+	var req struct {
+		SourceID models.SourceID `json:"source_id"`
+		models.BacktestAlertRequest
+	}
+	if err := c.Bind().Body(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+	if req.SourceID == 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "source_id is required", models.ValidationErrorType)
+	}
+	if req.LookbackSeconds <= 0 {
+		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), BacktestTimeout)
+	defer cancel()
+	maxPerUser, maxGlobal := s.admissionLimits(QueryClassBacktest)
+	queryID, err := queryTracker.StartQuery(QueryClassBacktest, user.ID, req.SourceID, 0, req.Query, cancel, maxPerUser, maxGlobal)
+	if err != nil {
+		if _, ok := errors.AsType[*QueryAdmissionError](err); ok {
+			metrics.RecordAlertBacktest("busy")
+			return SendErrorWithType(c, fiber.StatusTooManyRequests, "A backtest is already running", models.ValidationErrorType)
+		}
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
+	}
+	defer queryTracker.RemoveQuery(queryID)
+
+	p := principalFromLocals(c)
+	result, err := core.BacktestAlertForPrincipal(ctx, s.store, s.datasources, p, req.SourceID, &req.BacktestAlertRequest)
+	if err != nil {
+		return s.sendBacktestError(c, p, req.SourceID, err)
+	}
+	if result.FirstErr != nil {
+		result.FirstError = s.backtestErrorMessage(req.SourceID, result.FirstErr)
+	}
+	if result.Partial {
+		metrics.RecordAlertBacktest("partial")
+	} else {
+		metrics.RecordAlertBacktest("ok")
+	}
+	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+func (s *Server) sendBacktestError(c fiber.Ctx, p access.Principal, sourceID models.SourceID, err error) error {
+	if replayErr, ok := errors.AsType[*datasource.ReplayError](err); ok {
+		metrics.RecordAlertBacktest("not_replayable")
+		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, replayErr.Reason, models.ValidationErrorType)
+	}
+	switch {
+	case errors.Is(err, core.ErrSourceAccessDenied):
+		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
+	case errors.Is(err, core.ErrAccessCheck):
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	case errors.Is(err, access.ErrInsufficientScope):
+		return sendInsufficientScope(c, p.User)
+	case errors.Is(err, core.ErrInvalidAlertConfiguration):
+		metrics.RecordAlertBacktest("invalid")
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	metrics.RecordAlertBacktest("error")
+	return s.sendQueryError(c, sourceID, err, "Failed to backtest alert", "Alert evaluation")
+}
+
+// backtestErrorMessage is the message a user may read for a failed replayed
+// evaluation, as the query routes report it. A failure those routes hide is
+// logged here instead.
+func (s *Server) backtestErrorMessage(sourceID models.SourceID, err error) string {
+	response := classifyQueryError(err, "The alert query failed", "Alert evaluation")
+	if response.status >= fiber.StatusInternalServerError {
+		s.log.Error("alert backtest evaluation failed", "error", err, "source_id", sourceID)
+	}
+	return response.message
 }

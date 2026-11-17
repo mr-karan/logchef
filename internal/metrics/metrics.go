@@ -137,6 +137,13 @@ func ObserveSchemaAdvisorRunDuration(d time.Duration) {
 	metrics.GetOrCreateHistogram("logchef_schema_advisor_run_duration_seconds").Update(d.Seconds())
 }
 
+// RecordAlertBacktest counts alert backtests by result: ok, partial,
+// not_replayable, invalid, busy or error.
+func RecordAlertBacktest(result string) {
+	labels := fmt.Sprintf(`logchef_alert_backtests_total{result=%q}`, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
 // ObserveJobRunDuration records how long a job handler ran.
 func ObserveJobRunDuration(kind string, d time.Duration) {
 	labels := fmt.Sprintf(`logchef_jobs_run_duration_seconds{kind=%q}`, kind)

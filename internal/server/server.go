@@ -548,6 +548,7 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Get("/", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlerts)
 	alertRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateAlert).Name(string(audit.AlertCreate))
 	alertRoutes.Post("/test", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleTestAlertQuery)
+	alertRoutes.Post("/backtest", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleBacktestAlert)
 	alertRoutes.Get("/:alertID", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleGetAlert)
 	alertRoutes.Put("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateAlert).Name(string(audit.AlertUpdate))
 	alertRoutes.Delete("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteAlert).Name(string(audit.AlertDelete))

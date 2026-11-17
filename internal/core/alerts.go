@@ -608,21 +608,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
 
-	tempAlert := &models.Alert{
-		SourceID:          sourceID,
-		Name:              "test-alert",
-		QueryLanguage:     req.QueryLanguage,
-		EditorMode:        req.EditorMode,
-		Query:             req.Query,
-		ConditionJSON:     req.ConditionJSON,
-		LookbackSeconds:   req.LookbackSeconds,
-		ThresholdOperator: req.ThresholdOperator,
-		ThresholdValue:    req.ThresholdValue,
-		FrequencySeconds:  60,
-		Severity:          models.AlertSeverityWarning,
-		GroupBy:           req.GroupBy,
-		NoDataPolicy:      req.NoDataPolicy,
-	}
+	tempAlert := unsavedAlert(sourceID, req, 60)
 	if err := validateAlertModel(ctx, db, ds, sourceID, tempAlert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
@@ -678,6 +664,83 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		Warnings:        warnings,
 		NoData:          noData,
 	}, nil
+}
+
+// unsavedAlert is the rule that the test and backtest routes run.
+func unsavedAlert(sourceID models.SourceID, req *models.TestAlertQueryRequest, frequencySeconds int) *models.Alert {
+	return &models.Alert{
+		SourceID:          sourceID,
+		Name:              "test-alert",
+		QueryLanguage:     req.QueryLanguage,
+		EditorMode:        req.EditorMode,
+		Query:             req.Query,
+		ConditionJSON:     req.ConditionJSON,
+		LookbackSeconds:   req.LookbackSeconds,
+		ThresholdOperator: req.ThresholdOperator,
+		ThresholdValue:    req.ThresholdValue,
+		FrequencySeconds:  frequencySeconds,
+		Severity:          models.AlertSeverityWarning,
+		GroupBy:           req.GroupBy,
+		NoDataPolicy:      req.NoDataPolicy,
+	}
+}
+
+// backtestAlert replays an unsaved rule over the range_seconds that end now.
+// It does not authorize; callers use BacktestAlertForPrincipal. A query that
+// cannot be run for a past instant returns *datasource.ReplayError.
+func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, req *models.BacktestAlertRequest) (*models.BacktestResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("%w: backtest request is required", ErrInvalidAlertConfiguration)
+	}
+	if req.RangeSeconds < models.MinBacktestRangeSeconds || req.RangeSeconds > models.MaxBacktestRangeSeconds {
+		return nil, fmt.Errorf("%w: range_seconds must be between %d and %d", ErrInvalidAlertConfiguration, models.MinBacktestRangeSeconds, models.MaxBacktestRangeSeconds)
+	}
+	if err := validateFrequency(req.FrequencySeconds); err != nil {
+		return nil, err
+	}
+	if req.FrequencySeconds > req.RangeSeconds {
+		return nil, fmt.Errorf("%w: frequency_seconds must not exceed range_seconds", ErrInvalidAlertConfiguration)
+	}
+	if req.LookbackSeconds <= 0 {
+		return nil, fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+	}
+	alert := unsavedAlert(sourceID, &req.TestAlertQueryRequest, req.FrequencySeconds)
+	if err := validateAlertModel(ctx, db, ds, sourceID, alert, true); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load source: %w", err)
+	}
+	if err := datasource.CheckAlertReplayable(source, alert.QueryLanguage, alert.Query); err != nil {
+		if _, ok := errors.AsType[*datasource.ReplayError](err); ok {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+
+	rule := alerts.BacktestRule{
+		Rule: alerts.Rule{
+			Operator:  alert.ThresholdOperator,
+			Threshold: alert.ThresholdValue,
+			NoData:    alert.NoDataPolicy,
+		},
+		GroupBy:          alert.GroupBy,
+		FrequencySeconds: alert.FrequencySeconds,
+		LookbackSeconds:  alert.LookbackSeconds,
+		NotifyOnResolve:  req.NotifyOnResolve == nil || *req.NotifyOnResolve,
+	}
+	timeout := models.DefaultQueryTimeoutSeconds
+	query := func(ctx context.Context, at time.Time) (*models.QueryResult, error) {
+		return ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
+			At:              at,
+			Language:        alert.QueryLanguage,
+			Query:           alert.Query,
+			LookbackSeconds: alert.LookbackSeconds,
+			QueryTimeout:    &timeout,
+		})
+	}
+	return alerts.Backtest(ctx, rule, time.Now().UTC().Truncate(time.Second), req.RangeSeconds, query)
 }
 
 // groupedTestResponse reads the samples the scheduler would read. A result
