@@ -18,6 +18,7 @@ function go(name: string | number) {
     <TabsList>
       <TabsTrigger value="AlertsOverview">{{ t("alerts.tabRules") }}</TabsTrigger>
       <TabsTrigger value="AlertSilences">{{ t("alerts.tabSilences") }}</TabsTrigger>
+      <TabsTrigger value="NotificationDestinations">{{ t("alerts.destinations") }}</TabsTrigger>
     </TabsList>
   </Tabs>
 </template>
