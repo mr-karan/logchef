@@ -13,6 +13,7 @@ pub mod histogram;
 pub mod history;
 pub mod open;
 pub mod query;
+pub mod reports;
 pub mod saved_queries;
 pub mod schema;
 pub mod skills;

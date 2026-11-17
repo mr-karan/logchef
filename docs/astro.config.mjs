@@ -199,6 +199,7 @@ Key areas of the docs:
             { label: "Dashboards", link: "/features/dashboards" },
             { label: "Dashboard Gallery", link: "/features/dashboard-gallery" },
             { label: "Alerting", link: "/features/alerting" },
+            { label: "Scheduled Reports", link: "/features/scheduled-reports" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "Schema Advisor", link: "/features/schema-advisor" },
             { label: "User Management", link: "/core/user-management" },

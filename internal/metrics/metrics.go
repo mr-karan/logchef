@@ -156,6 +156,36 @@ func ObserveJobScheduleLag(kind string, d time.Duration) {
 	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
 }
 
+// RecordReportRun counts one report run that reached its final update, or a
+// scheduled tick that was skipped without running. trigger is "schedule"
+// or "manual"; status is "sent", "partial", "skipped" or "failed".
+func RecordReportRun(trigger, status string) {
+	labels := fmt.Sprintf(`logchef_report_runs_total{trigger=%q,status=%q}`, trigger, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// ObserveReportRunDuration records how long a report run took, from the
+// start of its execution to its final update.
+func ObserveReportRunDuration(trigger string, d time.Duration) {
+	labels := fmt.Sprintf(`logchef_report_run_duration_seconds{trigger=%q}`, trigger)
+	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
+}
+
+// RecordReportPanel counts one panel of a finished report run. status is
+// "ok", "empty", "locked", "failed" or "unsupported".
+func RecordReportPanel(status string) {
+	labels := fmt.Sprintf(`logchef_report_panels_total{status=%q}`, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// RecordReportDelivery counts one recipient of a finished report run. kind
+// is "user" or "external"; status is "sent", "failed", "skipped" or
+// "unknown".
+func RecordReportDelivery(kind, status string) {
+	labels := fmt.Sprintf(`logchef_report_deliveries_total{kind=%q,status=%q}`, kind, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
 func IncrementActiveRequests() {
 	metrics.GetOrCreateGauge("logchef_http_active_requests", nil).Inc()
 }

@@ -26,6 +26,7 @@ Logchef emits metrics across several categories:
 - **ClickHouse Metrics**: Database connection and operation health
 - **Audit Metrics**: Audit events stored, failed and limited
 - **Schema Advisor Metrics**: Query shapes recorded and schema analyses run
+- **Report Metrics**: Scheduled report runs, panels and deliveries
 
 ## HTTP Metrics
 
@@ -143,6 +144,28 @@ records and the analyses admins run. These metrics have no per-source labels.
 - A rising `error` share of `logchef_query_shape_records_total` means the metadata database refuses rollup writes
 - A rising `overflow` share means reports will note an incomplete usage record
 - Repeated `logchef_schema_advisor_runs_total{status="error"}` means ClickHouse is unreachable or runs hit their deadline
+## Report Metrics
+
+Track [scheduled reports](/features/scheduled-reports/). No label names a
+report, a user or an address.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_report_runs_total` | Runs that reached their final update, and scheduled ticks skipped without running (paused, or another run in flight). `status` is `sent`, `partial`, `skipped` or `failed` | Counter | `trigger`, `status` |
+| `logchef_report_run_duration_seconds` | Time from the start of a run, including the wait for a run slot, to its final update | Histogram | `trigger` |
+| `logchef_report_panels_total` | Panels of finished runs, by `status`: `ok`, `empty`, `locked`, `failed` or `unsupported` | Counter | `status` |
+| `logchef_report_deliveries_total` | Recipients of finished runs. `kind` is `user` (a Logchef user) or `external` (an [external address](/features/scheduled-reports/#external-addresses)); `status` is `sent`, `failed`, `skipped` or `unknown` | Counter | `kind`, `status` |
+
+`trigger` is `schedule` or `manual`. A run that the cleanup marks
+`interrupted`, because its replica stopped, is not counted here; the run
+history shows it. The job runner also counts report jobs in
+`logchef_jobs_runs_total{kind="report"}`.
+
+**Key Use Cases:**
+- Alert on `increase(logchef_report_runs_total{status="failed"}[1h]) > 0`: a report sent nothing. The run history names the reason
+- `logchef_report_deliveries_total{status="unknown"}` rising points at a mail server that drops connections after accepting a message
+- A rising `locked` panel count means report owners lost access to sources
+- `logchef_report_deliveries_total{kind="external",status="skipped"}` rising after a settings change means reports still name addresses that the external-recipient settings now refuse
 
 ## Example Queries
 

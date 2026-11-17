@@ -85,6 +85,8 @@ export interface Report {
   owner: { id: number; name: string; email: string } | null;
   state: ReportState;
   pause_reason: ReportPauseReason;
+  /** The next tick; null for a paused report, one without an owner, and a recipient's reduced view. */
+  next_run_at: string | null;
   last_run: { id: number; status: ReportRunStatus; reason: string; started_at: string; finished_at?: string } | null;
   can_edit: boolean;
   warnings: ReportWarning[];

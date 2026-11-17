@@ -42,6 +42,8 @@ const { search, rows, sortKey, sortDir, toggleSort } = useTableSearchSort(() => 
   sortAccessors: {
     name: (r) => r.name.toLowerCase(),
     source: (r) => r.source.name.toLowerCase(),
+    // A report with no next run sorts after every scheduled one.
+    nextRun: (r) => (r.next_run_at ? Date.parse(r.next_run_at) : Number.POSITIVE_INFINITY),
     lastRun: (r) => (r.last_run ? new Date(r.last_run.started_at) : new Date(0)),
     owner: (r) => ownerName(r).toLowerCase(),
   },
@@ -195,6 +197,7 @@ onMounted(async () => {
           <TableHead><SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t("ui.name") }}</SortHeader></TableHead>
           <TableHead><SortHeader column="source" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t("reports.source") }}</SortHeader></TableHead>
           <TableHead>{{ t("reports.schedule") }}</TableHead>
+          <TableHead><SortHeader column="nextRun" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t("reports.nextRun") }}</SortHeader></TableHead>
           <TableHead><SortHeader column="lastRun" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t("reports.lastRun") }}</SortHeader></TableHead>
           <TableHead><SortHeader column="owner" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t("reports.owner") }}</SortHeader></TableHead>
           <TableHead class="w-32 text-right">{{ t("ui.actions") }}</TableHead>
@@ -213,6 +216,10 @@ onMounted(async () => {
           <TableCell class="py-3 text-sm">
             <div>{{ describeSchedule(r.schedule, t, locale) }}</div>
             <div class="text-xs text-muted-foreground">{{ r.timezone }}</div>
+          </TableCell>
+          <TableCell class="py-3 text-sm" data-cell="next-run">
+            <template v-if="r.next_run_at">{{ when(r.next_run_at) }}</template>
+            <span v-else-if="r.can_edit" class="text-muted-foreground">—</span>
           </TableCell>
           <TableCell class="py-3 text-sm">
             <template v-if="r.last_run">

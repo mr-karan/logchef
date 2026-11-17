@@ -21,6 +21,8 @@ export type TokenScope =
   | "alerts:write"
   | "dashboards:read"
   | "dashboards:write"
+  | "reports:read"
+  | "reports:write"
   | "query_shares:read"
   | "query_shares:write"
   | "settings:read"
@@ -49,6 +51,7 @@ export const READ_ONLY_SCOPES: TokenScope[] = [
   "dashboards:read",
   "query_shares:read",
   "settings:read",
+  "reports:read",
   "saved_views:read",
   "destinations:read",
 ];
@@ -77,6 +80,8 @@ export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
   { value: "destinations:write", labelKey: "tokens.scopes.destinationsWrite", descriptionKey: "tokens.scopeDescriptions.destinationsWrite", groupKey: "tokens.groups.alerts" },
   { value: "dashboards:read", labelKey: "tokens.scopes.dashboardsRead", descriptionKey: "tokens.scopeDescriptions.dashboardsRead", groupKey: "tokens.groups.dashboards" },
   { value: "dashboards:write", labelKey: "tokens.scopes.dashboardsWrite", descriptionKey: "tokens.scopeDescriptions.dashboardsWrite", groupKey: "tokens.groups.dashboards" },
+  { value: "reports:read", labelKey: "tokens.scopes.reportsRead", descriptionKey: "tokens.scopeDescriptions.reportsRead", groupKey: "tokens.groups.dashboards" },
+  { value: "reports:write", labelKey: "tokens.scopes.reportsWrite", descriptionKey: "tokens.scopeDescriptions.reportsWrite", groupKey: "tokens.groups.dashboards" },
   { value: "query_shares:read", labelKey: "tokens.scopes.querySharesRead", descriptionKey: "tokens.scopeDescriptions.querySharesRead", groupKey: "tokens.groups.sharing" },
   { value: "query_shares:write", labelKey: "tokens.scopes.querySharesWrite", descriptionKey: "tokens.scopeDescriptions.querySharesWrite", groupKey: "tokens.groups.sharing" },
   { value: "settings:read", labelKey: "tokens.scopes.settingsRead", descriptionKey: "tokens.scopeDescriptions.settingsRead", groupKey: "tokens.groups.administration" },

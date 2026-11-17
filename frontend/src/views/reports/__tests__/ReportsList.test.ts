@@ -44,7 +44,7 @@ function report(input: Omit<ReportInput, "recipients">, id = 9): Report {
     id, name: input.name, source: { ...input.source, name: savedQuery.name }, schedule: input.schedule, timezone: input.timezone,
     time_range: input.time_range, range_anchor: input.range_anchor, variables: input.variables, max_rows: input.max_rows,
     skip_if_empty: input.skip_if_empty, attach_csv: input.attach_csv, owner: { id: 1, name: "Owner", email: "owner@example.com" }, state: "active",
-    pause_reason: "", last_run: null, can_edit: true, warnings: [], created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-16T00:00:00Z",
+    pause_reason: "", next_run_at: null, last_run: null, can_edit: true, warnings: [], created_at: "2026-11-16T00:00:00Z", updated_at: "2026-11-16T00:00:00Z",
   };
 }
 
@@ -250,6 +250,24 @@ describe("ReportsList", () => {
     button(i18n.global.t("ui.save")).click();
     await settle();
     expect(mocks.reports.update.mock.calls.map((c) => [c[0], (c[1] as ReportInput).name])).toEqual([[1, "A changed"], [2, "B edited"]]);
+  });
+
+  it("shows each report's next run, soonest first when sorted", async () => {
+    const daily = { source: { kind: "saved_query" as const, saved_query_id: 5 }, schedule: { frequency: "daily" as const, hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time" as const, variables: {}, max_rows: 25, skip_if_empty: false, attach_csv: false };
+    const later = { ...report({ ...daily, name: "A later" }, 1), next_run_at: "2026-11-20T09:00:00Z" };
+    const paused = { ...report({ ...daily, name: "B paused" }, 2), state: "paused" as const, pause_reason: "user" as const };
+    const sooner = { ...report({ ...daily, name: "C sooner" }, 3), next_run_at: "2026-11-18T09:00:00Z" };
+    await mount("/reports", [later, paused, sooner]);
+    const nextRun = (id: number) => host.querySelector(`[data-report-id="${id}"] [data-cell="next-run"]`)!.textContent!.trim();
+    expect(nextRun(1)).toMatch(/2026/);
+    expect(nextRun(3)).toMatch(/2026/);
+    expect(nextRun(1)).not.toBe(nextRun(3));
+    expect(nextRun(2)).toBe("—");
+
+    button(i18n.global.t("reports.nextRun")).click();
+    await settle();
+    const order = [...host.querySelectorAll<HTMLElement>("[data-report-id]")].map((row) => row.dataset.reportId);
+    expect(order).toEqual(["3", "1", "2"]);
   });
 
   it("deletes a report only after the confirm dialog", async () => {

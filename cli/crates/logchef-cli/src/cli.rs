@@ -4,8 +4,8 @@ use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
     advisor, agent, audit, auth, collections, completions, config, doctor, explain, fields, find,
-    histogram, history, open, query, saved_queries, schema, skills, sources, sql, tail, teams,
-    views, whoami,
+    histogram, history, open, query, reports, saved_queries, schema, skills, sources, sql, tail,
+    teams, views, whoami,
 };
 
 const LONG_ABOUT: &str = "\
@@ -121,6 +121,9 @@ enum Commands {
     #[command(about = "List audit events (global admins, API token with audit:read)")]
     Audit(audit::AuditArgs),
 
+    #[command(about = "List scheduled reports and their runs, and send one now")]
+    Reports(reports::ReportsArgs),
+
     #[command(about = "Find sources that contain a service, job, host, or message pattern")]
     Find(find::FindArgs),
 
@@ -209,6 +212,7 @@ impl Cli {
             Some(Commands::SavedQueries(args)) => saved_queries::run(args, global).await,
             Some(Commands::Views(args)) => views::run(args, global).await,
             Some(Commands::Audit(args)) => audit::run(args, global).await,
+            Some(Commands::Reports(args)) => reports::run(args, global).await,
             Some(Commands::Find(args)) => find::run(args, global).await,
             Some(Commands::Tail(args)) => tail::run(args, global).await,
             Some(Commands::Teams(args)) => teams::run(args, global).await,

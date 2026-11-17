@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	vmetrics "github.com/VictoriaMetrics/metrics"
+
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
@@ -201,6 +203,44 @@ func TestReportRunSendsToTheOwner(t *testing.T) {
 	if !strings.Contains(raw, "'"+today+"'") {
 		t.Errorf("query %q does not carry the day default resolved to %s", raw, today)
 	}
+}
+
+// counter reads a metric series; a series nothing wrote yet reads 0.
+func counter(name string) uint64 {
+	return vmetrics.GetOrCreateCounter(name).Get()
+}
+
+// TestReportRunRecordsMetrics: a manual run that sends counts the run, its
+// panel and its delivery, and records its duration.
+func TestReportRunRecordsMetrics(t *testing.T) {
+	const (
+		runs       = `logchef_report_runs_total{trigger="manual",status="sent"}`
+		panels     = `logchef_report_panels_total{status="ok"}`
+		deliveries = `logchef_report_deliveries_total{kind="user",status="sent"}`
+	)
+	duration := vmetrics.GetOrCreateHistogram(`logchef_report_run_duration_seconds{trigger="manual"}`)
+	durationsBefore := histogramCount(duration)
+	runsBefore, panelsBefore, deliveriesBefore := counter(runs), counter(panels), counter(deliveries)
+
+	e := newReportEnv(t)
+	if run := e.run(e.create(), e.owner, ReportRunToMe); run.Status != models.ReportRunSent {
+		t.Fatalf("run = %s/%s, want sent", run.Status, run.Reason)
+	}
+	for name, before := range map[string]uint64{runs: runsBefore, panels: panelsBefore, deliveries: deliveriesBefore} {
+		if got := counter(name); got != before+1 {
+			t.Errorf("%s = %d, want %d", name, got, before+1)
+		}
+	}
+	if got := histogramCount(duration); got != durationsBefore+1 {
+		t.Errorf("duration observations = %d, want %d", got, durationsBefore+1)
+	}
+}
+
+// histogramCount is how many values h holds.
+func histogramCount(h *vmetrics.Histogram) uint64 {
+	var n uint64
+	h.VisitNonZeroBuckets(func(_ string, count uint64) { n += count })
+	return n
 }
 
 func mustLocation(t *testing.T, name string) *time.Location {

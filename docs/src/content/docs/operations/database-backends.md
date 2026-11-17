@@ -79,6 +79,14 @@ A notification is still sent by the replica that evaluated the tick. A replica
 that stalls or dies between a send and its bookkeeping can send that
 notification again on a later tick.
 
+[Scheduled reports](/features/scheduled-reports/) use the same runner, one job
+per report. The report's run row is its claim: one row per scheduled tick and
+one running run per report, so two replicas never send the same edition, and a
+manual run answers 409 while any replica runs that report. A replica whose claim
+was taken over writes nothing; the cleanup marks its run `interrupted` two
+minutes after the run's deadline. `[reports] max_concurrent_runs` (default `2`)
+bounds the runs one replica executes at once.
+
 ### Give each export replica a stable identity
 
 Set `export.instance_id` separately for each replica, for example with

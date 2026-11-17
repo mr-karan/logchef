@@ -96,6 +96,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--output json`. The new Schema Advisor docs page covers the rules,
   thresholds, budgets and metrics.
 
+- Scheduled reports. A report emails a dashboard, one dashboard tab or a saved
+  query on an hourly, daily, weekly or monthly schedule in its own timezone,
+  to its owner, chosen users and teams, and, when a global admin allows them,
+  email addresses outside Logchef. The email is HTML with a text copy:
+  stat panels become tiles, tables become tables, and charts, toplists and
+  pies become bar tables of at most 24 bars and 5 series. A saved query can
+  attach its rows as a CSV file. A report runs with its owner's access,
+  checked at every run, and each user's copy locks the panels that user
+  cannot see in the UI; an external address gets the owner's view. Two
+  settings, off by default and changed only by a global admin from a browser
+  session, gate external addresses: `reports.external_recipients` and
+  `reports.allowed_email_domains` (`*` for every domain). Reports pause when the owner is deactivated
+  or after three failed runs, and a report with no owner can be claimed. The
+  Reports page lists your reports with their next and last run, the reports
+  sent to you, and every report for global admins; it has an editor with a
+  preview and a test send, and a run history. **Schedule report** opens the
+  editor from a dashboard or a saved query. `logchef reports list`, `runs` and
+  `run` list reports, read the history and send one now. The routes live
+  under `/api/v1/reports` with the new `reports:read` and `reports:write`
+  token scopes, and four `logchef_report_*` metrics count runs, panels and
+  deliveries. The new Scheduled Reports docs page covers it.
+
 ### Fixed
 
 - Provisioning on Postgres no longer rewrites every managed source on each
@@ -123,6 +145,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   000047, Postgres 000021). Back up the metadata database first: the SQLite
   migration rebuilds `sources` and keeps every row, link and ID. Rolling back
   needs every Loki source deleted first.
+- Scheduled reports add the `reports`, `report_recipients` and `report_runs`
+  tables (SQLite migrations 000046 and 000056, Postgres 000020 and 000030), a
+  `reports` settings category with the two external-recipient settings
+  (SQLite 000057, which rebuilds `system_settings`; Postgres 000031), and
+  a `[reports]` config section: `enabled` (default `true`), `query_budget`
+  (default `5m`; the server refuses to start outside 1 to 30 minutes),
+  `max_concurrent_runs` (default `2`) and `max_attachment_bytes` (default
+  5 MiB). Reports send through the alert SMTP settings and on the job runner,
+  so set `[jobs] enabled = true` on at least one replica. A token issued with
+  the Read-only preset before this release lacks `reports:read`; reissue it to
+  read reports. OAuth sign-ins, including `logchef auth`, cannot reach
+  reports: use an API token.
+
 - A new `[audit]` config section bounds the `audit_events` table:
   `retention_days` (default 365) and `max_rows` (default 1,000,000), pruned
   every five minutes, 5,000 rows at a time. `log_events` (default `true`)
