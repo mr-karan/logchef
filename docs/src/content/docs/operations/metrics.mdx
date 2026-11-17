@@ -25,6 +25,7 @@ Logchef emits metrics across several categories:
 - **Authorization Metrics**: Access control failures and patterns
 - **ClickHouse Metrics**: Database connection and operation health
 - **Audit Metrics**: Audit events stored, failed and limited
+- **Schema Advisor Metrics**: Query shapes recorded and schema analyses run
 
 ## HTTP Metrics
 
@@ -126,6 +127,22 @@ per-user or per-source labels.
 **Key Use Cases:**
 - Alert on `increase(logchef_audit_events_total{result="failed"}[5m]) > 0`: events are reaching only the log line
 - A rising `limited` count is a burst of failed sign-ins, such as credential stuffing
+
+## Schema Advisor Metrics
+
+Track the [schema advisor](/features/schema-advisor/): the filter shapes it
+records and the analyses admins run. These metrics have no per-source labels.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_query_shape_records_total` | Queries offered to the shape rollup by result: `analyzed`, `unanalyzed` (a query the advisor cannot read, such as a `JOIN`), `overflow` (past the 500 shapes per source per day) or `error` (the write failed; the query still succeeded) | Counter | `result` |
+| `logchef_schema_advisor_runs_total` | Schema analyses by report status: `ok`, `partial`, `unavailable`, or `error` when no report was stored | Counter | `status` |
+| `logchef_schema_advisor_run_duration_seconds` | How long each schema analysis ran, up to its 30 s deadline | Histogram | - |
+
+**Key Use Cases:**
+- A rising `error` share of `logchef_query_shape_records_total` means the metadata database refuses rollup writes
+- A rising `overflow` share means reports will note an incomplete usage record
+- Repeated `logchef_schema_advisor_runs_total{status="error"}` means ClickHouse is unreachable or runs hit their deadline
 
 ## Example Queries
 
