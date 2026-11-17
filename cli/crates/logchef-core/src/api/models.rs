@@ -993,3 +993,90 @@ pub struct AuditEventFilter {
     pub target_id: Option<String>,
     pub outcome: Option<String>,
 }
+
+/// The schema advisor's stored report of a ClickHouse source, as
+/// `GET .../advisor` and its refresh return it. `report` is `None` before the
+/// first analysis.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvice {
+    pub source_id: i64,
+    pub generated_at: Option<DateTime<Utc>>,
+    pub window_days: Option<u32>,
+    pub stale: bool,
+    pub report: Option<SchemaAdvisorReport>,
+    #[serde(default)]
+    pub dismissals: Vec<SchemaFindingDismissal>,
+}
+
+/// Statuses and impacts stay strings: the server adds kinds without a CLI
+/// release.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvisorReport {
+    pub status: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub clickhouse_version: String,
+    pub target: Option<SchemaAdvisorTarget>,
+    #[serde(default)]
+    pub inputs: Vec<SchemaAdvisorInput>,
+    pub queries_analyzed: i64,
+    pub queries_unanalyzed: i64,
+    #[serde(default)]
+    pub findings: Vec<SchemaFinding>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvisorTarget {
+    pub kind: String,
+    pub database: String,
+    pub table: String,
+    #[serde(default)]
+    pub cluster: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvisorInput {
+    pub name: String,
+    pub state: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaFinding {
+    pub id: String,
+    pub rule: String,
+    pub impact: String,
+    pub title: String,
+    #[serde(default)]
+    pub evidence: Vec<SchemaFindingEvidence>,
+    /// Statements in the order to run them; empty when `rebuild` is set.
+    #[serde(default)]
+    pub ddl: Vec<String>,
+    #[serde(default)]
+    pub rebuild: bool,
+    #[serde(default)]
+    pub candidate: bool,
+    #[serde(default)]
+    pub gain: String,
+    #[serde(default)]
+    pub cost: String,
+    #[serde(default)]
+    pub verify: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaFindingEvidence {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaFindingDismissal {
+    pub finding_id: String,
+    #[serde(default)]
+    pub reason: String,
+}
