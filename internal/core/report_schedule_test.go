@@ -246,6 +246,8 @@ func TestScheduledReportPausedDoesNotFire(t *testing.T) {
 // TestScheduledReportPausedAfterTheClaim: a pause that lands between the
 // claim and the run records the tick as skipped with reason paused.
 func TestScheduledReportPausedAfterTheClaim(t *testing.T) {
+	const skipped = `logchef_report_runs_total{trigger="schedule",status="skipped"}`
+	skippedBefore := counter(skipped)
 	e := newReportEnv(t)
 	ctx := context.Background()
 	r, tick := e.createDaily(30 * time.Minute)
@@ -262,6 +264,9 @@ func TestScheduledReportPausedAfterTheClaim(t *testing.T) {
 	}
 	if n := len(e.mailer.messages()); n != 0 {
 		t.Errorf("messages = %d, want none", n)
+	}
+	if got := counter(skipped); got != skippedBefore+1 {
+		t.Errorf("%s = %d, want %d", skipped, got, skippedBefore+1)
 	}
 }
 
@@ -307,6 +312,8 @@ func TestScheduledReportPauseDuringTheClaim(t *testing.T) {
 // TestScheduledReportBusy: a tick that finds a manual run in flight is
 // recorded as skipped with reason busy.
 func TestScheduledReportBusy(t *testing.T) {
+	const skipped = `logchef_report_runs_total{trigger="schedule",status="skipped"}`
+	skippedBefore := counter(skipped)
 	e := newReportEnv(t)
 	ctx := context.Background()
 	r, tick := e.createDaily(30 * time.Minute)
@@ -324,6 +331,9 @@ func TestScheduledReportBusy(t *testing.T) {
 	}
 	if tickRun == nil || tickRun.Status != models.ReportRunSkipped || tickRun.Reason != models.ReportReasonBusy || !tickRun.ScheduledFor.Equal(tick) {
 		t.Fatalf("tick run = %+v, want skipped/busy for %v", tickRun, tick)
+	}
+	if got := counter(skipped); got != skippedBefore+1 {
+		t.Errorf("%s = %d, want %d", skipped, got, skippedBefore+1)
 	}
 }
 

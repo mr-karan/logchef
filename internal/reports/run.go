@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -257,4 +258,24 @@ func DeliveryOutcome(panels []models.ReportPanelOutcome, deliveries []models.Rep
 		return models.ReportRunPartial, models.ReportReasonDeadline
 	}
 	return models.ReportRunSent, models.ReportReasonNone
+}
+
+// RecordRun counts a run that reached its final update: its status, how
+// long it took, and each of its panels and deliveries. No label names the
+// report, so the series stay few.
+func RecordRun(trigger models.ReportRunTrigger, res models.ReportRunResult, took time.Duration) {
+	metrics.RecordReportRun(string(trigger), string(res.Status))
+	metrics.ObserveReportRunDuration(string(trigger), took)
+	for i := range res.Panels {
+		metrics.RecordReportPanel(string(res.Panels[i].Status))
+	}
+	for i := range res.Deliveries {
+		metrics.RecordReportDelivery(string(res.Deliveries[i].Class), string(res.Deliveries[i].Status))
+	}
+}
+
+// RecordSkippedTick counts a scheduled tick that was recorded as skipped
+// without running: the report was paused, or another run was in flight.
+func RecordSkippedTick() {
+	metrics.RecordReportRun(string(models.ReportTriggerSchedule), string(models.ReportRunSkipped))
 }

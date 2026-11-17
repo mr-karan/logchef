@@ -1,6 +1,8 @@
 mod models;
+mod reports;
 
 pub use models::*;
+pub use reports::*;
 
 use crate::auth::{self, SavedCredential};
 use crate::error::{Error, Result};
@@ -807,6 +809,47 @@ mod tests {
         assert_eq!(events.len(), 3);
         let lines = server.join().expect("join test server");
         assert_eq!(lines, ["GET /api/v1/admin/audit-events?limit=100 HTTP/1.1"]);
+    }
+
+    #[tokio::test]
+    async fn list_reports_and_runs_send_the_scope_and_limit() {
+        let report = serde_json::json!({
+            "id": 4, "name": "Daily 5xx",
+            "source": {"kind": "saved_query", "name": "5xx by status", "saved_query_id": 9},
+            "schedule": {"frequency": "weekly", "minute": 30, "hour": 9, "weekdays": [1, 5]},
+            "timezone": "Asia/Kolkata", "time_range": "24h",
+            "owner": null, "state": "active", "pause_reason": "",
+            "next_run_at": "2026-11-20T04:00:00Z",
+            "last_run": {"id": 12, "status": "sent", "reason": "", "started_at": "2026-11-17T04:00:01Z"},
+            "can_edit": true
+        });
+        let run = serde_json::json!({
+            "id": 12, "report_id": 4, "trigger": "schedule",
+            "scheduled_for": "2026-11-17T04:00:00Z", "status": "partial", "reason": "panel_locked",
+            "panels": [{"panel_id": "query", "title": "5xx", "status": "ok", "rows": 3}],
+            "deliveries": [{"class": "user", "target": "7", "via": "team:3", "status": "sent", "attempts": 1}],
+            "started_at": "2026-11-17T04:00:01Z"
+        });
+        let (server_url, server) = serve_each(vec![
+            serde_json::json!({"status": "success", "data": [report]}).to_string(),
+            serde_json::json!({"status": "success", "data": [run]}).to_string(),
+        ]);
+        let client = Client::new(&server_url, 5).expect("create client");
+
+        let reports = client.list_reports("received").await.expect("list reports");
+        assert_eq!(reports[0].schedule.weekdays, [1, 5]);
+        assert!(reports[0].owner.is_none());
+        let runs = client.list_report_runs(4, 20).await.expect("list runs");
+        assert_eq!(runs[0].deliveries[0].via, "team:3");
+
+        let lines = server.join().expect("server thread");
+        assert_eq!(
+            lines,
+            [
+                "GET /api/v1/reports?scope=received HTTP/1.1",
+                "GET /api/v1/reports/4/runs?limit=20 HTTP/1.1",
+            ]
+        );
     }
 
     #[tokio::test]

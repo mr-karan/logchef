@@ -59,7 +59,7 @@ account** and the picker filters to service principals only.
 
 | Preset | Scopes | Use case |
 |--------|--------|----------|
-| **Read-only** | the `:read` scopes except `reports:read` and `audit:read` | Default for log shippers and dashboards |
+| **Read-only** | the `:read` scopes except `audit:read` | Default for log shippers and dashboards |
 | **Logs viewer** | `profile:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read` | Smallest footprint for "just run queries" |
 | **Logs analyst** | Logs viewer + `saved_queries:write`, `collections:write`, `query_shares:*` | Read logs and save/share queries |
 | **Alerts manager** | `alerts:*`, `logs:read`, `sources:read`, `saved_queries:read`, `profile:read` | Manage alert definitions end-to-end |
@@ -72,6 +72,13 @@ read them and `saved_views:write` to change them. The Read-only preset includes
 issued before saved views existed, with an explicit scope list, has neither and
 gets 403 on the [saved view routes](/features/saved-views/#api) until you
 reissue it with the scope.
+
+[Scheduled reports](/features/scheduled-reports/#api) have their own scopes:
+`reports:read` to list reports and read their run history, and
+`reports:write` to create, change, delete and send them. The Read-only preset
+includes `reports:read`. A report preview also needs `logs:read`. The
+`logchef reports` CLI needs one of these on an API token, because an OAuth
+sign-in cannot reach reports.
 
 `audit:read` lets a token read the [audit log](/operations/audit-log/). No
 preset includes it, because events hold emails and IP addresses: add it by

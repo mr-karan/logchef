@@ -135,7 +135,10 @@ func (rr *ReportRunner) runScheduled(ctx context.Context, job jobs.Job) error {
 	switch {
 	case models.IsNotFound(err):
 		return jobs.ErrGone
-	case errors.Is(err, models.ErrReportTickTaken), err == nil && paused:
+	case err == nil && paused:
+		reports.RecordSkippedTick()
+		return nil
+	case errors.Is(err, models.ErrReportTickTaken):
 		return nil
 	case errors.Is(err, models.ErrReportRunInFlight):
 		return rr.skipTick(ctx, job, id, models.ReportReasonBusy)
@@ -162,7 +165,10 @@ func (rr *ReportRunner) skipTick(ctx context.Context, job jobs.Job, id models.Re
 		return err
 	})
 	switch {
-	case err == nil, errors.Is(err, models.ErrReportTickTaken):
+	case err == nil:
+		reports.RecordSkippedTick()
+		return nil
+	case errors.Is(err, models.ErrReportTickTaken):
 		return nil
 	case errors.Is(err, jobs.ErrLeaseLost):
 		rr.Log.Warn("a later claim owns this report's job; the skipped tick was not recorded", "report_id", id)
@@ -189,6 +195,7 @@ func (rr *ReportRunner) complete(ctx context.Context, run *models.ReportRun, to 
 		r   *models.Report
 		res models.ReportRunResult
 	)
+	start := time.Now()
 	release, err := rr.acquire(ctx)
 	if err == nil {
 		defer release()
@@ -215,6 +222,7 @@ func (rr *ReportRunner) complete(ctx context.Context, run *models.ReportRun, to 
 	if err != nil {
 		return err
 	}
+	reports.RecordRun(run.Trigger, res, time.Since(start))
 	if r == nil {
 		return nil
 	}

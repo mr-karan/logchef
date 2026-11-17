@@ -540,6 +540,24 @@ max_concurrent_evaluations = 4  # alert rules this replica evaluates at once
 These are static settings: they live in `config.toml` or `LOGCHEF_` variables,
 not in the Admin Settings UI.
 
+### Scheduled reports
+
+[Scheduled reports](/features/scheduled-reports/) email dashboards and saved
+queries through the SMTP settings of **Alerts**, and send on the background
+job runner.
+
+```toml
+[reports]
+enabled = true                  # false: the report routes answer 503 and nothing sends
+query_budget = "5m"             # time one run may spend on queries, 1m to 30m
+max_concurrent_runs = 2         # runs this replica executes at once; later runs wait
+max_attachment_bytes = 5242880  # largest CSV attachment before encoding (5 MiB)
+```
+
+A `query_budget` outside 1 to 30 minutes stops the server at startup. A run
+then has 5 more minutes to deliver. The scheduler does not run when
+`demo.read_only` is set.
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.

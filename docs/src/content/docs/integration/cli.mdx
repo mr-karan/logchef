@@ -745,6 +745,52 @@ ID     NAME                           SCOPE     DEFAULT  SETS
 
 A browser sign-in made before saved views existed does not hold the `saved_views:read` scope, so `views list` and `open --view <name>` answer that the token lacks the required scope. Run `logchef auth` again to sign in with it.
 
+### Reports
+
+The `reports` command lists [scheduled reports](/features/scheduled-reports/), reads their run history, and sends one now. Create and edit reports in the web UI.
+
+It needs an API token with the `reports:read` scope, and `reports:write` for `reports run`, passed with `--token` or `LOGCHEF_AUTH_TOKEN`. A `logchef auth` sign-in cannot reach reports, and a 403 says which scope the command needs.
+
+```bash
+logchef reports list
+```
+
+```
+ID     NAME                         SOURCE                   SCHEDULE                             NEXT RUN (UTC)     LAST RUN                       OWNER
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+4      Daily 5xx summary            HTTP edge                weekdays 09:00 Asia/Kolkata          2026-11-18 03:30   sent                           Asha
+6      Checkout errors              Checkout 5xx             hourly at :15 UTC                    paused (failures)  failed/smtp_not_configured     Asha
+
+2 reports
+```
+
+`SCHEDULE` is in the report's timezone. `NEXT RUN` is in UTC, and shows the pause reason for a paused report. `LAST RUN` is the status, with the reason code when there is one.
+
+| Option | Description | Default |
+| :--- | :--- | :--- |
+| `--scope` | `mine` (reports you own), `received` (reports sent to you) or `all` (global admins) | `mine` |
+| `--output` | `table` or `json` | `table` |
+
+```bash
+logchef reports runs 4
+```
+
+```
+ID       STARTED (UTC)      TRIGGER   STATUS       REASON                 PANELS       DELIVERIES
+----------------------------------------------------------------------------------------------------
+31       2026-11-17 03:30   schedule  partial      panel_locked           1/2 ok       2/2 sent
+29       2026-11-16 11:02   manual    sent         -                      2/2 ok       1/1 sent
+```
+
+`runs <id>` lists a report's runs, newest first. `PANELS` counts panels that ran (with rows or empty), and `DELIVERIES` counts recipients sent to. `--output json` adds each panel's rows and error and each delivery's reason. `--limit` takes 1 to 100 (default 20). Only the owner and global admins read the runs.
+
+```bash
+logchef reports run 4          # send to you now
+logchef reports run 4 --all    # send to every recipient now
+```
+
+`run <id>` starts a manual run and returns at once with its ID; follow it with `reports runs`. Only the owner and global admins start one. A report allows one manual run per minute, and a run while another is in flight is refused.
+
 ### Saved Queries
 
 The `saved-queries` command lists and runs saved queries from the Logchef web UI. You can pass a saved-query ID, exact name, or an explorer URL copied from the browser.
