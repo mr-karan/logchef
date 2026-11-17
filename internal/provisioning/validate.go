@@ -3,8 +3,10 @@ package provisioning
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -144,6 +146,9 @@ func validateClickHouseSource(prefix string, src config.ProvisionSource) (errs [
 	if err := conn.Activity.Validate(); err != nil {
 		errs = append(errs, fmt.Sprintf("%s: connection.activity: %v", prefix, err))
 	}
+	if len(src.HeaderSecretRefs) > 0 {
+		errs = append(errs, fmt.Sprintf("%s: header_secret_refs applies to victorialogs and loki sources only", prefix))
+	}
 	return errs, true
 }
 
@@ -179,6 +184,7 @@ func validateVictoriaLogsSource(prefix string, src config.ProvisionSource) (errs
 	default:
 		errs = append(errs, fmt.Sprintf("%s: unsupported victorialogs auth mode %q", prefix, conn.Auth.Mode))
 	}
+	errs = append(errs, validateHeaderSecretRefs(prefix, src.HeaderSecretRefs, conn.Headers)...)
 	return errs, true
 }
 
@@ -206,7 +212,33 @@ func validateLokiSource(prefix string, src config.ProvisionSource) (errs []strin
 		}
 		errs = append(errs, fmt.Sprintf("%s: %s", prefix, msg))
 	}
+	errs = append(errs, validateHeaderSecretRefs(prefix, src.HeaderSecretRefs, conn.Headers)...)
 	return errs, true
+}
+
+// validateHeaderSecretRefs reports each header_secret_refs entry that
+// resolution left without a value, so a missing variable fails startup
+// instead of saving an empty header.
+func validateHeaderSecretRefs(prefix string, refs, headers map[string]string) []string {
+	var errs []string
+	seen := make(map[string]string, len(refs))
+	for _, name := range slices.Sorted(maps.Keys(refs)) {
+		envVar := refs[name]
+		folded := strings.ToLower(strings.TrimSpace(name))
+		first, dup := seen[folded]
+		seen[folded] = name
+		switch {
+		case folded == "":
+			errs = append(errs, fmt.Sprintf("%s: header_secret_refs has an empty header name", prefix))
+		case dup:
+			errs = append(errs, fmt.Sprintf("%s: header_secret_refs names header %q twice, as %q and %q; keep one", prefix, folded, first, name))
+		case strings.TrimSpace(envVar) == "":
+			errs = append(errs, fmt.Sprintf("%s: header %q: header_secret_refs names no env var", prefix, name))
+		case headers[headerKey(headers, name)] == "":
+			errs = append(errs, fmt.Sprintf("%s: header %q: header_secret_refs env var %q is empty or not set", prefix, name, envVar))
+		}
+	}
+	return errs
 }
 
 // lokiSecretField returns the connection field that secret_ref fills: the
@@ -351,6 +383,7 @@ func resolveVictoriaLogsSource(source *config.ProvisionSource) {
 				conn.Auth.Password = os.Getenv(source.SecretRef)
 			}
 		}
+		conn.Headers = resolveHeaderSecretRefs(conn.Headers, source.HeaderSecretRefs)
 		_ = source.SetConnectionConfig(conn)
 	}
 	if source.MetaTSField == "" {
@@ -364,6 +397,7 @@ func resolveLokiSource(source *config.ProvisionSource) {
 		if secret := lokiSecretField(&conn); secret != nil && *secret == "" && source.SecretRef != "" {
 			*secret = os.Getenv(source.SecretRef)
 		}
+		conn.Headers = resolveHeaderSecretRefs(conn.Headers, source.HeaderSecretRefs)
 		_ = source.SetConnectionConfig(conn)
 	}
 	if source.MetaTSField == "" {
@@ -373,6 +407,36 @@ func resolveLokiSource(source *config.ProvisionSource) {
 	if source.MetaSeverityField == "" {
 		source.MetaSeverityField = "detected_level"
 	}
+}
+
+// resolveHeaderSecretRefs fills each header that header_secret_refs names from
+// its environment variable. Like secret_ref, a value set in the connection
+// wins. Header names match without regard to case, as HTTP does, so a
+// reference fills a blank entry rather than adding a second one.
+func resolveHeaderSecretRefs(headers, refs map[string]string) map[string]string {
+	if len(refs) == 0 {
+		return headers
+	}
+	if headers == nil {
+		headers = make(map[string]string, len(refs))
+	}
+	for name, envVar := range refs {
+		if key := headerKey(headers, name); headers[key] == "" {
+			headers[key] = os.Getenv(envVar)
+		}
+	}
+	return headers
+}
+
+// headerKey returns the key under which headers holds the header name, or
+// name itself when it is absent.
+func headerKey(headers map[string]string, name string) string {
+	for key := range headers {
+		if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(name)) {
+			return key
+		}
+	}
+	return name
 }
 
 func normalizedAuthMode(mode string) string {

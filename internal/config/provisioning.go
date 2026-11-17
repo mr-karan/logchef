@@ -63,6 +63,11 @@ type ProvisionSource struct {
 	// If set and Password is empty, the value is resolved from the environment at startup.
 	SecretRef string `koanf:"secret_ref" json:"secret_ref,omitempty"`
 
+	// HeaderSecretRefs maps a custom header of a VictoriaLogs or Loki source
+	// to the environment variable that holds its value, resolved like
+	// SecretRef. Export writes header values only as these references.
+	HeaderSecretRefs map[string]string `koanf:"header_secret_refs" json:"header_secret_refs,omitempty"`
+
 	Description       string `koanf:"description" json:"description,omitempty"`
 	TTLDays           int    `koanf:"ttl_days" json:"ttl_days,omitempty"`
 	MetaTSField       string `koanf:"meta_ts_field" json:"meta_ts_field,omitempty"`

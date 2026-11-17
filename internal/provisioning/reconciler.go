@@ -1,10 +1,13 @@
 package provisioning
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -601,13 +604,28 @@ func sourceNeedsUpdate(existing *models.Source, desired config.ProvisionSource) 
 	}
 
 	return existing.SourceType != source.SourceType ||
-		string(existing.ConnectionConfig) != string(source.ConnectionConfig) ||
+		!sameJSON(existing.ConnectionConfig, source.ConnectionConfig) ||
 		existing.IdentityKey != source.IdentityKey ||
 		existing.Description != desired.Description ||
 		existing.TTLDays != desired.TTLDays ||
 		existing.MetaTSField != desired.MetaTSField ||
 		existing.MetaSeverityField != desired.MetaSeverityField ||
 		existing.SecretRef != desired.SecretRef, nil
+}
+
+// sameJSON compares two JSON documents by value. Postgres stores
+// connection_config as JSONB, which reorders keys and drops spacing, so the
+// stored text never matches the marshaled config byte for byte. A document
+// that does not parse is different, so the update rewrites it.
+func sameJSON(a, b []byte) bool {
+	if bytes.Equal(a, b) {
+		return true
+	}
+	var av, bv any
+	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
+		return false
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 func buildProvisionedSourceModel(src config.ProvisionSource) (models.Source, error) {
