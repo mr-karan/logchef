@@ -26,7 +26,10 @@ import (
 )
 
 func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
-	entered := make(chan struct{})
+	// The datasource never answers, so the query ends only when its request
+	// is canceled. Its own timeout is a minute, longer than the budget.
+	const budget = 10 * time.Second
+	entered, canceled := make(chan struct{}), make(chan struct{})
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
@@ -35,6 +38,7 @@ func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		close(entered)
 		<-r.Context().Done()
+		close(canceled)
 	}))
 	defer remote.Close()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -67,22 +71,26 @@ func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
 	runner.Register(manager.EvaluationKind())
 	cfg := &config.Config{}
 	a := &App{Logger: log, SQLite: db, Alerts: manager, Jobs: runner, server: server.New(server.ServerOptions{Config: cfg, SQLite: db, Audit: audit.New(audit.Options{Store: db, Logger: log}), Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})}
-	evaluationCtx, cancelEvaluation := context.WithTimeout(context.Background(), time.Second)
-	defer cancelEvaluation()
-	runner.Start(evaluationCtx)
+	// t.Context ends after the test body, so only Shutdown can cancel the run.
+	runner.Start(t.Context())
 	select {
 	case <-entered:
-	case <-evaluationCtx.Done():
+	case <-time.After(budget):
 		t.Fatal("alert query did not reach datasource")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	start := time.Now()
 	if err := a.Shutdown(ctx); err != nil {
 		t.Errorf("signal shutdown returned an error: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
+	if elapsed := time.Since(start); elapsed >= budget {
 		t.Errorf("shutdown took %s, exceeded budget", elapsed)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(budget):
+		t.Error("shutdown returned but the alert query request was not canceled")
 	}
 }
 

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -161,12 +163,12 @@ func TestDiscoverProvider(t *testing.T) {
 
 	t.Run("fails fast on a malformed URL", func(t *testing.T) {
 		t.Parallel()
-		start := time.Now()
-		if _, err := discoverProvider(context.Background(), "http://[::1", retry, log); err == nil {
+		var logs bytes.Buffer
+		if _, err := discoverProvider(context.Background(), "http://[::1", retry, slog.New(slog.NewTextHandler(&logs, nil))); err == nil {
 			t.Fatal("expected error")
 		}
-		if elapsed := time.Since(start); elapsed > retry.initialBackoff {
-			t.Fatalf("discoverProvider took %v, want no retry", elapsed)
+		if strings.Contains(logs.String(), "retrying") {
+			t.Fatalf("discoverProvider retried a malformed URL:\n%s", logs.String())
 		}
 	})
 
@@ -208,13 +210,13 @@ func TestDiscoverProvider(t *testing.T) {
 	t.Run("gives up after maxWait", func(t *testing.T) {
 		t.Parallel()
 		srv, hits := newIDP(t, 1<<30, http.StatusServiceUnavailable, "")
-		short := retry
-		short.maxWait = 200 * time.Millisecond
+		// maxWait holds dozens of attempts at these backoffs; a loaded
+		// machine has delayed the first request past 200ms.
 		start := time.Now()
-		if _, err := discoverProvider(context.Background(), srv.URL, short, log); err == nil {
+		if _, err := discoverProvider(context.Background(), srv.URL, retry, log); err == nil {
 			t.Fatal("expected error when the IdP never comes up")
 		}
-		if elapsed := time.Since(start); elapsed > time.Second {
+		if elapsed := time.Since(start); elapsed > 2*retry.maxWait {
 			t.Fatalf("discoverProvider took %v, want it bounded by maxWait", elapsed)
 		}
 		if hits.Load() < 2 {

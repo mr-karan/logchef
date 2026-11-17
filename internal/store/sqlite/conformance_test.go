@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -62,8 +63,40 @@ func TestCollectionLinkRaces(t *testing.T) {
 // TestJobs runs the job claim and takeover tests with two store instances on
 // one file, so a claim waits on SQLite's write lock, not on Go.
 func TestJobs(t *testing.T) {
-	storetest.RunJobs(t, opener(sqlitetest.Path(t)), false)
-	storetest.RunDeliveries(t, opener(sqlitetest.Path(t)))
+	jobsPath, deliveriesPath := sqlitetest.Path(t), sqlitetest.Path(t)
+	storetest.RunJobs(t, opener(jobsPath), false, leaseHooks(t, jobsPath))
+	storetest.RunDeliveries(t, opener(deliveriesPath), leaseHooks(t, deliveriesPath))
+}
+
+// leaseHooks end leases one second ago on SQLite's clock, in the format the
+// store writes them.
+func leaseHooks(t *testing.T, path string) storetest.LeaseHooks {
+	t.Helper()
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	expire := func(query string) func(context.Context, int64) error {
+		return func(ctx context.Context, id int64) error {
+			res, err := raw.ExecContext(ctx, query, id)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return fmt.Errorf("updated %d rows, want 1", n)
+			}
+			return nil
+		}
+	}
+	return storetest.LeaseHooks{
+		ExpireJobLease:            expire(`UPDATE jobs SET lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE id = ?`),
+		ExpireDeliveryReservation: expire(`UPDATE notification_deliveries SET reserved_until = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE id = ?`),
+	}
 }
 
 // TestReports runs the report store tests with two store instances on one

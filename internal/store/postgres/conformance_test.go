@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -67,8 +68,35 @@ func TestCollectionLinkRaces(t *testing.T) {
 // TestJobs runs the job claim and takeover tests with separate pools, like
 // separate replicas.
 func TestJobs(t *testing.T) {
-	storetest.RunJobs(t, opener(postgrestest.DSN(t)), true)
-	storetest.RunDeliveries(t, opener(postgrestest.DSN(t)))
+	jobsDSN, deliveriesDSN := postgrestest.DSN(t), postgrestest.DSN(t)
+	storetest.RunJobs(t, opener(jobsDSN), true, leaseHooks(t, jobsDSN))
+	storetest.RunDeliveries(t, opener(deliveriesDSN), leaseHooks(t, deliveriesDSN))
+}
+
+// leaseHooks end leases one second ago on the database clock.
+func leaseHooks(t *testing.T, dsn string) storetest.LeaseHooks {
+	t.Helper()
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect for lease hooks: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	expire := func(query string) func(context.Context, int64) error {
+		return func(ctx context.Context, id int64) error {
+			tag, err := conn.Exec(ctx, query, id)
+			if err != nil {
+				return err
+			}
+			if n := tag.RowsAffected(); n != 1 {
+				return fmt.Errorf("updated %d rows, want 1", n)
+			}
+			return nil
+		}
+	}
+	return storetest.LeaseHooks{
+		ExpireJobLease:            expire(`UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1`),
+		ExpireDeliveryReservation: expire(`UPDATE notification_deliveries SET reserved_until = now() - interval '1 second' WHERE id = $1`),
+	}
 }
 
 // TestReports runs the report store tests with separate pools, like
