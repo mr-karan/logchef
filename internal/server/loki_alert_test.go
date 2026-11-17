@@ -102,6 +102,13 @@ func TestLokiConditionAlertTests(t *testing.T) {
 		}
 		data, _ := parsed["data"].(map[string]any)
 		if data["value"] == 2.0 && data["threshold_met"] == true && data["no_data"] == false {
+			// Loki bounds the query to the lookback, so no time filter is missing.
+			warnings, _ := data["warnings"].([]any)
+			for _, w := range warnings {
+				if text, _ := w.(string); strings.HasPrefix(text, "Query appears to lack a time-based filter") {
+					t.Fatalf("warnings %v, want none about a time filter", data["warnings"])
+				}
+			}
 			return
 		}
 		if time.Now().After(deadline) {
