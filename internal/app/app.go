@@ -247,9 +247,10 @@ func (a *App) initAlerts() {
 	// The senders read their settings from the database at each send.
 	web := notify.NewDynamicWebhookSender(a.SQLite, notify.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
 	a.senders = map[models.DestinationType]notify.Sender{
-		models.DestinationTypeEmail:   notify.NewEmailSender(a.SQLite),
-		models.DestinationTypeWebhook: web,
-		models.DestinationTypeSlack:   notify.NewSlackSender(web, a.Logger),
+		models.DestinationTypeEmail:     notify.NewEmailSender(a.SQLite),
+		models.DestinationTypeWebhook:   web,
+		models.DestinationTypeSlack:     notify.NewSlackSender(web, a.Logger),
+		models.DestinationTypePagerDuty: notify.NewPagerDutySender(web, a.Logger),
 	}
 	alertOpts := alerts.Options{
 		Config:      a.Config.Alerts,

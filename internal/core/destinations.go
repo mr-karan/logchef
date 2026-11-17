@@ -182,9 +182,13 @@ func applyDestinationConfig(ctx context.Context, db store.StoreOps, user *models
 		d.Config = models.DestinationConfig{}
 		return applyDestinationSecret(d, req, "Slack webhook URL", notify.ValidateSlackWebhookURL)
 	case models.DestinationTypePagerDuty:
-		return invalidDestination("type %s is not available yet", d.Type)
+		if len(req.Config.UserIDs) > 0 || len(req.Config.Addresses) > 0 || req.Config.PayloadVersion != 0 {
+			return invalidDestination("config: a PagerDuty destination has no settings besides its routing key")
+		}
+		d.Config = models.DestinationConfig{}
+		return applyDestinationSecret(d, req, "PagerDuty routing key", notify.ValidatePagerDutyRoutingKey)
 	default:
-		return invalidDestination("type must be email, webhook or slack")
+		return invalidDestination("type must be email, webhook, slack or pagerduty")
 	}
 }
 

@@ -1,0 +1,5 @@
+{
+  "routing_key": "R0UT1NGKEYR0UT1NGKEYR0UT1NGKEY12",
+  "event_action": "resolve",
+  "dedup_key": "logchef:alert:42:f9f77b923b27b024"
+}

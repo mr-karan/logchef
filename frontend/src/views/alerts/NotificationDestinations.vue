@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Bell, Mail, Pencil, Plus, RefreshCcw, Search, Send, Slack, Webhook } from "lucide-vue-next";
+import { Bell, Mail, Pencil, Plus, RefreshCcw, Search, Send, Siren, Slack, Webhook } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,7 +47,8 @@ function scopeLabel(d: NotificationDestination): string {
 
 function typeLabel(d: NotificationDestination): string {
   if (d.type === "email") return t("destinations.typeEmail");
-  return d.type === "slack" ? t("destinations.typeSlack") : t("destinations.typeWebhook");
+  if (d.type === "slack") return t("destinations.typeSlack");
+  return d.type === "pagerduty" ? t("destinations.typePagerDuty") : t("destinations.typeWebhook");
 }
 
 function target(d: NotificationDestination): string {
@@ -214,6 +215,7 @@ onMounted(initializeContext);
                   <span class="inline-flex items-center gap-1.5">
                     <Mail v-if="d.type === 'email'" class="h-3.5 w-3.5 text-muted-foreground" />
                     <Slack v-else-if="d.type === 'slack'" class="h-3.5 w-3.5 text-muted-foreground" />
+                    <Siren v-else-if="d.type === 'pagerduty'" class="h-3.5 w-3.5 text-muted-foreground" />
                     <Webhook v-else class="h-3.5 w-3.5 text-muted-foreground" />
                     {{ typeLabel(d) }}
                   </span>

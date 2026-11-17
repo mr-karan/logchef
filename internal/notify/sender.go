@@ -32,6 +32,9 @@ type Message struct {
 	Title string            `json:"title"`
 	Text  string            `json:"text"`
 	Group map[string]string `json:"group,omitempty"`
+	// DedupKey names the incident of one group: its firing and its resolved
+	// share it. PagerDuty uses it as the event's dedup_key.
+	DedupKey string `json:"dedup_key,omitempty"`
 	// Alert is the body of a version 1 webhook.
 	Alert *AlertPayload `json:"alert,omitempty"`
 }

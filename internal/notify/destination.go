@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/mail"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -45,6 +46,18 @@ func ValidateSlackWebhookURL(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme != "https" || parsed.User != nil || !slices.Contains(slackWebhookHosts, strings.ToLower(parsed.Host)) {
 		return errors.New("the Slack webhook URL must start with https://hooks.slack.com/ or https://hooks.slack-gov.com/")
+	}
+	return nil
+}
+
+// pagerDutyRoutingKey is the integration key of a PagerDuty Events API v2
+// integration.
+var pagerDutyRoutingKey = regexp.MustCompile(`^[A-Za-z0-9]{32}$`)
+
+// ValidatePagerDutyRoutingKey accepts a 32-character routing key.
+func ValidatePagerDutyRoutingKey(key string) error {
+	if !pagerDutyRoutingKey.MatchString(key) {
+		return errors.New("the PagerDuty routing key is the 32 letters and digits of an Events API v2 integration key")
 	}
 	return nil
 }

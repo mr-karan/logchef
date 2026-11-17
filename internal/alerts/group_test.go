@@ -3,6 +3,7 @@ package alerts
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -481,5 +483,49 @@ func TestGroupedWebhookPerGroup(t *testing.T) {
 	slices.Sort(services)
 	if want := []string{"checkout", "search"}; !slices.Equal(services, want) {
 		t.Fatalf("webhook requests carried services %v, want one per group %v", services, want)
+	}
+}
+
+// TestGroupedIncidentKeys: each group's notifications carry the group's
+// incident key, logchef:alert:<id>: and 16 hex characters of the SHA-256 of
+// the group key. A resolved shares its firing's key, so a PagerDuty resolve
+// closes that incident, and a later episode of the group reuses it.
+func TestGroupedIncidentKeys(t *testing.T) {
+	f := newGroupedFixture(t)
+	keys := func(result *models.QueryResult) map[string]string {
+		t.Helper()
+		alert, err := f.db.GetAlert(t.Context(), f.alert.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.provider.results = append(f.provider.results, result)
+		if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, row := range f.queue.rows() {
+			var msg notify.Message
+			if err := json.Unmarshal([]byte(row.MessageJSON), &msg); err != nil {
+				t.Fatal(err)
+			}
+			out[string(msg.Event)+" "+msg.Group["service"]] = msg.DedupKey
+		}
+		return out
+	}
+	// printf '%s' '["checkout"]' | sha256sum, and the same for search.
+	checkout := fmt.Sprintf("logchef:alert:%d:f9f77b923b27b024", f.alert.ID)
+	search := fmt.Sprintf("logchef:alert:%d:f0d9e5f71a7c8bca", f.alert.ID)
+	steps := []struct {
+		result *models.QueryResult
+		want   map[string]string
+	}{
+		{groupedResult(row("checkout", 12), row("search", 30)), map[string]string{"firing checkout": checkout, "firing search": search}},
+		{groupedResult(row("checkout", 3), row("search", 30)), map[string]string{"resolved checkout": checkout}},
+		{groupedResult(row("checkout", 20), row("search", 30)), map[string]string{"firing checkout": checkout}},
+	}
+	for i, step := range steps {
+		if got := keys(step.result); !reflect.DeepEqual(got, step.want) {
+			t.Fatalf("tick %d enqueued %v, want %v", i+1, got, step.want)
+		}
 	}
 }

@@ -1,0 +1,29 @@
+{
+  "routing_key": "R0UT1NGKEYR0UT1NGKEYR0UT1NGKEY12",
+  "event_action": "trigger",
+  "dedup_key": "logchef:alert:42:f9f77b923b27b024",
+  "payload": {
+    "summary": "High error rate [service=checkout]: value 412.5 \u003e 100",
+    "source": "app-logs",
+    "severity": "critical",
+    "timestamp": "2026-11-15T10:00:00Z",
+    "group": "service=checkout",
+    "custom_details": {
+      "description": "5xx above normal",
+      "event": "firing",
+      "labels": {
+        "service": "checkout",
+        "team": "payments"
+      },
+      "query": "SELECT service, count() AS value FROM logs WHERE status \u003e= 500 GROUP BY service",
+      "threshold": "\u003e 100",
+      "value": 412.5
+    }
+  },
+  "links": [
+    {
+      "href": "https://logchef.example.com/logs/alerts/42?source=7",
+      "text": "Open in Logchef"
+    }
+  ]
+}
