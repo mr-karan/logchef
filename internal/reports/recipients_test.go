@@ -65,3 +65,44 @@ func TestCanReceive(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveEmailRows looks every email row up among the users at send
+// time: an address that belongs to a user, in any case, is that user, and
+// only the rest are external.
+func TestResolveEmailRows(t *testing.T) {
+	users := map[models.UserID]*models.User{
+		1: {ID: 1, Email: "known@example.com"},
+		2: {ID: 2, Email: "Late@Example.com"},
+		3: {ID: 3, Email: "late@example.com"},
+	}
+	uid := func(id models.UserID) *models.UserID { return &id }
+	email := func(addr string) models.ReportRecipient {
+		return models.ReportRecipient{Kind: models.ReportRecipientEmail, Email: addr}
+	}
+	rows := []models.ReportRecipient{
+		email("zed@partner.example"),
+		email("KNOWN@example.com"),
+		email("late@example.com"),
+		email("Zed@partner.example"),
+		email("amy@partner.example"),
+		{Kind: models.ReportRecipientUser, UserID: uid(1)},
+	}
+	got, err := ResolveRecipients(rows, users, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parts []string
+	for _, r := range got {
+		if r.User != nil {
+			parts = append(parts, fmt.Sprintf("user %d:%s", r.User.ID, r.Via))
+		} else {
+			parts = append(parts, r.Address+":"+r.Via)
+		}
+	}
+	// The user row wins over the email row with its address; two users
+	// whose addresses differ in case resolve to the lower id; externals
+	// come after the users, once per address.
+	if want := "user 1:direct, user 2:email, amy@partner.example:email, zed@partner.example:email"; strings.Join(parts, ", ") != want {
+		t.Errorf("resolved = %s, want %s", strings.Join(parts, ", "), want)
+	}
+}

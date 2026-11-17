@@ -145,6 +145,8 @@ type Querier interface {
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	DeleteReport(ctx context.Context, id int64) (int64, error)
 	DeleteReportRecipients(ctx context.Context, reportID int64) error
+	// A direct recipient is named by a user row, or by an email row that
+	// matches the user's address, ignoring case.
 	DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error)
 	// Delete a saved query
 	DeleteSavedQuery(ctx context.Context, id int64) error

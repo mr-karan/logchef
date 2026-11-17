@@ -1135,6 +1135,8 @@
   "reports.tabReceived": "寄給我的",
   "reports.sectionRecipients": "收件人",
   "reports.addRecipient": "新增收件人",
+  "reports.addEmail": "新增地址",
+  "reports.emailPlaceholder": "name{'@'}example.com",
   "reports.recipientUsers": "使用者",
   "reports.recipientTeams": "團隊",
   "reports.recipientTeam": "團隊：{name}",

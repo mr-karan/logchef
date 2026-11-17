@@ -1135,6 +1135,8 @@
   "reports.tabReceived": "Enviados a mí",
   "reports.sectionRecipients": "Destinatarios",
   "reports.addRecipient": "Añadir un destinatario",
+  "reports.addEmail": "Añadir dirección",
+  "reports.emailPlaceholder": "nombre{'@'}example.com",
   "reports.recipientUsers": "Personas",
   "reports.recipientTeams": "Equipos",
   "reports.recipientTeam": "Equipo: {name}",

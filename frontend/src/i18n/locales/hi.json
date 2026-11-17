@@ -1135,6 +1135,8 @@
   "reports.tabReceived": "मुझे भेजी गई",
   "reports.sectionRecipients": "प्राप्तकर्ता",
   "reports.addRecipient": "प्राप्तकर्ता जोड़ें",
+  "reports.addEmail": "पता जोड़ें",
+  "reports.emailPlaceholder": "name{'@'}example.com",
   "reports.recipientUsers": "लोग",
   "reports.recipientTeams": "टीमें",
   "reports.recipientTeam": "टीम: {name}",

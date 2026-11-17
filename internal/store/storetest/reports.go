@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -321,10 +323,10 @@ func testReportRecipients(t *testing.T, ctx context.Context, s store.Store) {
 		t.Errorf("ListReportsForRecipient(outsider) = %v, %v", reports, err)
 	}
 
-	testReportRecipientEdits(t, ctx, s, r.ID, want, direct, member, team)
+	testReportRecipientEdits(t, ctx, s, r.ID, want, direct, member, byMail, team)
 }
 
-func testReportRecipientEdits(t *testing.T, ctx context.Context, s store.Store, id models.ReportID, want []models.ReportRecipient, direct, member *models.User, team *models.Team) {
+func testReportRecipientEdits(t *testing.T, ctx context.Context, s store.Store, id models.ReportID, want []models.ReportRecipient, direct, member, byMail *models.User, team *models.Team) {
 	dup := []models.ReportRecipient{want[0], {Kind: models.ReportRecipientUser, UserID: &direct.ID}}
 	if err := s.ReplaceReportRecipients(ctx, id, dup); !errors.Is(err, models.ErrConflict) {
 		t.Errorf("a duplicate recipient = %v, want ErrConflict", err)
@@ -344,6 +346,13 @@ func testReportRecipientEdits(t *testing.T, ctx context.Context, s store.Store, 
 	}
 	if err := s.RemoveReportUserRecipient(ctx, id, member.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("removing a team member as a direct recipient = %v, want ErrNotFound", err)
+	}
+	// An email row with the user's address, in another case, names them too.
+	if err := s.RemoveReportUserRecipient(ctx, id, byMail.ID); err != nil {
+		t.Errorf("removing the user an email row names = %v", err)
+	}
+	if left, _ := s.ListReportRecipients(ctx, id); len(left) != len(want)-2 || slices.ContainsFunc(left, func(r models.ReportRecipient) bool { return strings.EqualFold(r.Email, byMail.Email) }) {
+		t.Errorf("recipients after removing the email row = %+v, want only the team and the other address", left)
 	}
 	if err := s.ReplaceReportRecipients(ctx, id, nil); err != nil {
 		t.Fatal(err)

@@ -1762,7 +1762,10 @@ func (q *Queries) DeleteReportRecipients(ctx context.Context, reportID int64) er
 
 const deleteReportUserRecipient = `-- name: DeleteReportUserRecipient :execrows
 DELETE FROM report_recipients
-WHERE report_id = $1 AND kind = 'user' AND user_id = $2
+WHERE report_id = $1
+  AND ((kind = 'user' AND user_id = $2)
+    OR (kind = 'email' AND lower(email) = (
+        SELECT lower(u.email) FROM users u WHERE u.id = $2)))
 `
 
 type DeleteReportUserRecipientParams struct {
@@ -1770,6 +1773,8 @@ type DeleteReportUserRecipientParams struct {
 	UserID   pgtype.Int8 `json:"user_id"`
 }
 
+// A direct recipient is named by a user row, or by an email row that
+// matches the user's address, ignoring case.
 func (q *Queries) DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteReportUserRecipient, arg.ReportID, arg.UserID)
 	if err != nil {

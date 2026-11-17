@@ -32,6 +32,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
@@ -66,9 +67,16 @@ const editForm = ref<UpdateSettingRequest>({
 })
 
 const alertsSettings = computed(() => settingsStore.getSettingsByCategory('alerts'))
-const aiSettings = computed(() => settingsStore.getSettingsByCategory('ai'))
-const authSettings = computed(() => settingsStore.getSettingsByCategory('auth'))
-const serverSettings = computed(() => settingsStore.getSettingsByCategory('server'))
+// Alerts has its own tab, with the test email action.
+const tableCategories = ['ai', 'auth', 'server', 'reports'] as const
+
+// With external recipients on and no domain listed, no address passes.
+const externalWithoutDomains = computed(() => {
+  const reports = settingsStore.getSettingsByCategory('reports')
+  const value = (key: string) => reports.find((s) => s.key === key)?.value ?? ''
+  // The server reads the flag with Go's ParseBool.
+  return ['1', 't', 'true'].includes(value('reports.external_recipients').trim().toLowerCase()) && value('reports.allowed_email_domains').trim() === ''
+})
 
 const loadSettings = async () => {
   await settingsStore.loadSettings()
@@ -131,6 +139,8 @@ const getCategoryDescription = (category: string) => {
       return t('admin.categoryAuth')
     case 'server':
       return t('admin.categoryServer')
+    case 'reports':
+      return t('admin.categoryReports')
     default:
       return ''
   }
@@ -181,6 +191,7 @@ onMounted(() => {
             <TabsTrigger value="ai">{{ t('admin.ai') }}</TabsTrigger>
             <TabsTrigger value="auth">{{ t('sources.authentication') }}</TabsTrigger>
             <TabsTrigger value="server">{{ t('admin.server') }}</TabsTrigger>
+            <TabsTrigger value="reports">{{ t('routes.reports') }}</TabsTrigger>
           </TabsList>
 
           <!-- Alerts Tab -->
@@ -243,11 +254,13 @@ onMounted(() => {
             </div>
           </TabsContent>
 
-          <!-- AI Tab -->
-          <TabsContent value="ai" class="space-y-4">
+          <TabsContent v-for="category in tableCategories" :key="category" :value="category" class="space-y-4">
             <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('ai') }}
+              {{ getCategoryDescription(category) }}
             </div>
+            <Alert v-if="category === 'reports' && externalWithoutDomains" data-testid="external-no-domains">
+              <AlertDescription>{{ t('admin.externalRecipientsNoDomains') }}</AlertDescription>
+            </Alert>
             <div class="rounded-md border">
               <Table>
                 <TableHeader>
@@ -260,111 +273,7 @@ onMounted(() => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow v-for="setting in aiSettings" :key="setting.key">
-                    <TableCell class="font-medium">{{ formatKey(setting.key) }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2">
-                        <span class="font-mono text-sm">{{ getDisplayValue(setting) }}</span>
-                        <Button
-                          v-if="setting.is_sensitive"
-                          variant="ghost"
-                          size="icon"
-                          class="h-6 w-6"
-                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
-                          @click="toggleShowValue(setting.key)"
-                        >
-                          <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
-                          <EyeOff v-else class="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <code class="text-xs bg-muted px-1 py-0.5 rounded">{{ setting.value_type }}</code>
-                    </TableCell>
-                    <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2 justify-end">
-                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
-                          <Pencil class="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-
-          <!-- Auth Tab -->
-          <TabsContent value="auth" class="space-y-4">
-            <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('auth') }}
-            </div>
-            <div class="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{{ t('admin.setting') }}</TableHead>
-                    <TableHead>{{ t('ui.value2') }}</TableHead>
-                    <TableHead>{{ t('admin.type') }}</TableHead>
-                    <TableHead>{{ t('ui.description') }}</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="setting in authSettings" :key="setting.key">
-                    <TableCell class="font-medium">{{ formatKey(setting.key) }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2">
-                        <span class="font-mono text-sm">{{ getDisplayValue(setting) }}</span>
-                        <Button
-                          v-if="setting.is_sensitive"
-                          variant="ghost"
-                          size="icon"
-                          class="h-6 w-6"
-                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
-                          @click="toggleShowValue(setting.key)"
-                        >
-                          <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
-                          <EyeOff v-else class="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <code class="text-xs bg-muted px-1 py-0.5 rounded">{{ setting.value_type }}</code>
-                    </TableCell>
-                    <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2 justify-end">
-                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
-                          <Pencil class="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-
-          <!-- Server Tab -->
-          <TabsContent value="server" class="space-y-4">
-            <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('server') }}
-            </div>
-            <div class="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{{ t('admin.setting') }}</TableHead>
-                    <TableHead>{{ t('ui.value2') }}</TableHead>
-                    <TableHead>{{ t('admin.type') }}</TableHead>
-                    <TableHead>{{ t('ui.description') }}</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="setting in serverSettings" :key="setting.key">
+                  <TableRow v-for="setting in settingsStore.getSettingsByCategory(category)" :key="setting.key">
                     <TableCell class="font-medium">{{ formatKey(setting.key) }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2">

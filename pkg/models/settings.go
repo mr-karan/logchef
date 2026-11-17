@@ -27,13 +27,16 @@ func IsSensitiveSetting(key string) bool {
 	}
 }
 
-// IsSessionOnlySetting reports whether a key contains a secret or selects its destination.
+// IsSessionOnlySetting reports whether a key contains a secret or selects its
+// destination. The report external-recipient settings decide where report
+// data may be mailed, so they count as destinations.
 func IsSessionOnlySetting(key string) bool {
 	if IsSensitiveSetting(key) {
 		return true
 	}
 	switch key {
-	case "alerts.smtp_host", "alerts.smtp_port", "alerts.smtp_security", "alerts.tls_insecure_skip_verify", "ai.base_url", "server.frontend_url":
+	case "alerts.smtp_host", "alerts.smtp_port", "alerts.smtp_security", "alerts.tls_insecure_skip_verify", "ai.base_url", "server.frontend_url",
+		"reports.external_recipients", "reports.allowed_email_domains":
 		return true
 	default:
 		return false

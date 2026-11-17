@@ -1135,6 +1135,8 @@
   "reports.tabReceived": "나에게 보낸 보고서",
   "reports.sectionRecipients": "받는 사람",
   "reports.addRecipient": "받는 사람 추가",
+  "reports.addEmail": "주소 추가",
+  "reports.emailPlaceholder": "name{'@'}example.com",
   "reports.recipientUsers": "사용자",
   "reports.recipientTeams": "팀",
   "reports.recipientTeam": "팀: {name}",

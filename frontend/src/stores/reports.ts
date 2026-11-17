@@ -20,7 +20,7 @@ interface ReportsState {
 export const RUNS_PAGE = 20;
 
 export const useReportsStore = defineStore("reports", () => {
-  const state = useBaseStore<ReportsState>({ reports: [], scope: "mine", savedQueries: [], dashboards: [], dashboardTabs: {}, runs: {}, recipientOptions: { users: [], teams: [] } });
+  const state = useBaseStore<ReportsState>({ reports: [], scope: "mine", savedQueries: [], dashboards: [], dashboardTabs: {}, runs: {}, recipientOptions: { users: [], teams: [], external: { enabled: false, domains: [] } } });
 
   const reports = computed(() => state.data.value.reports);
   const scope = computed(() => state.data.value.scope);

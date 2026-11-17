@@ -1135,6 +1135,8 @@
   "reports.tabReceived": "自分宛て",
   "reports.sectionRecipients": "受信者",
   "reports.addRecipient": "受信者を追加",
+  "reports.addEmail": "アドレスを追加",
+  "reports.emailPlaceholder": "name{'@'}example.com",
   "reports.recipientUsers": "ユーザー",
   "reports.recipientTeams": "チーム",
   "reports.recipientTeam": "チーム: {name}",

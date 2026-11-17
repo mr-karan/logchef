@@ -500,7 +500,8 @@ type ReportStore interface {
 	// merge. A duplicate target returns models.ErrConflict and a missing
 	// report models.ErrNotFound.
 	ReplaceReportRecipients(ctx context.Context, id models.ReportID, recipients []models.ReportRecipient) error
-	// RemoveReportUserRecipient deletes the direct user row of userID and
+	// RemoveReportUserRecipient deletes the rows that name userID directly:
+	// its user row, and an email row with its address in any case. It
 	// returns models.ErrNotFound when there is none.
 	RemoveReportUserRecipient(ctx context.Context, id models.ReportID, userID models.UserID) error
 
