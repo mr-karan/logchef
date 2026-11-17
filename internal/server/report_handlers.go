@@ -9,6 +9,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/reports"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -30,6 +31,12 @@ func (s *Server) newReportRunner(opts ServerOptions) *core.ReportRunner {
 		Slots:              make(chan struct{}, s.config.Reports.MaxConcurrentRuns),
 		MaxAttachmentBytes: s.config.Reports.MaxAttachmentBytes,
 	}
+}
+
+// ReportJobKind is the report job registration for the job runner, with
+// reports.max_concurrent_runs as its concurrency.
+func (s *Server) ReportJobKind() jobs.KindSpec {
+	return s.reports.JobKind(s.config.Reports.MaxConcurrentRuns)
 }
 
 func (s *Server) reportDeps() core.ReportDeps {

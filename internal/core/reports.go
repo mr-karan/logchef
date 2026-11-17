@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/reports"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -380,9 +381,69 @@ type SavedReport struct {
 	Recipients []models.ReportRecipient
 }
 
+// writeReport applies change to report r in one transaction and keeps the
+// report's job in step with it. The transaction takes the job row before
+// the report row, the order of a scheduled run's writes (jobs.Hold, then the
+// report), so an edit and a run cannot deadlock. A scheduled run takes the
+// job row with its claim; any other writer writes the job from r. The job
+// is then written from the report as stored, which also corrects a job
+// written from an r that a concurrent write made stale.
+func writeReport(ctx context.Context, db store.Store, r *models.Report, claim *jobs.Job, change func(tx store.StoreOps) error) (*models.Report, error) {
+	var after *models.Report
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		if claim != nil {
+			err = jobs.Hold(ctx, tx, *claim)
+		} else {
+			err = reports.UpsertJob(ctx, tx, r)
+		}
+		if err != nil {
+			return err
+		}
+		if err := change(tx); err != nil {
+			return err
+		}
+		if after, err = tx.GetReport(ctx, r.ID); err != nil {
+			return err
+		}
+		return reports.UpsertJob(ctx, tx, after)
+	})
+	if models.IsNotFound(err) {
+		return nil, ErrReportNotFound
+	}
+	return after, err
+}
+
+// SyncReportJobs gives a job to every report that has none: a report
+// saved before reports ran on a schedule. A report with a job keeps it.
+func SyncReportJobs(ctx context.Context, db store.Store) error {
+	list, err := db.ListReports(ctx)
+	if err != nil {
+		return fmt.Errorf("listing reports: %w", err)
+	}
+	for _, r := range list {
+		spec, err := reports.Job(r)
+		if err != nil {
+			return err
+		}
+		_, err = db.GetJob(ctx, string(spec.Kind), spec.Key)
+		if err == nil {
+			continue
+		}
+		if !models.IsNotFound(err) {
+			return fmt.Errorf("loading the job of report %d: %w", r.ID, err)
+		}
+		_, err = writeReport(ctx, db, r, nil, func(store.StoreOps) error { return nil })
+		if err != nil && !errors.Is(err, ErrReportNotFound) {
+			return fmt.Errorf("writing the job of report %d: %w", r.ID, err)
+		}
+	}
+	return nil
+}
+
 // CreateReport validates in and stores an active report owned by the
-// caller, with its recipients.
-func CreateReport(ctx context.Context, db store.StoreOps, p access.Principal, in *ReportInput) (*SavedReport, error) {
+// caller, with its job and its recipients.
+func CreateReport(ctx context.Context, db store.Store, p access.Principal, in *ReportInput) (*SavedReport, error) {
 	r, err := validateReport(ctx, db, p.User, in, time.Now())
 	if err != nil {
 		return nil, err
@@ -395,7 +456,13 @@ func CreateReport(ctx context.Context, db store.StoreOps, p access.Principal, in
 		return nil, err
 	}
 	r.OwnerID = &p.User.ID
-	if err := db.CreateReport(ctx, r); err != nil {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.CreateReport(ctx, r); err != nil {
+			return err
+		}
+		return reports.UpsertJob(ctx, tx, r)
+	})
+	if err != nil {
 		return nil, fmt.Errorf("creating report: %w", err)
 	}
 	if err := db.ReplaceReportRecipients(ctx, r.ID, recipients); err != nil {
@@ -408,7 +475,7 @@ func CreateReport(ctx context.Context, db store.StoreOps, p access.Principal, in
 // the caller may edit. The source check uses the owner, also when a global
 // admin edits; a recipient row the save adds must be one the caller may
 // add. It returns the report before and after the change.
-func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID, in *ReportInput) (before, after *SavedReport, err error) {
+func UpdateReport(ctx context.Context, db store.Store, p access.Principal, id models.ReportID, in *ReportInput) (before, after *SavedReport, err error) {
 	existing, err := GetReportForEditor(ctx, db, p, id)
 	if err != nil {
 		return nil, nil, err
@@ -435,9 +502,10 @@ func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id
 		return nil, nil, err
 	}
 	r.ID = existing.ID
-	if err := db.UpdateReport(ctx, r); err != nil {
-		if models.IsNotFound(err) {
-			return nil, nil, ErrReportNotFound
+	stored, err := writeReport(ctx, db, existing, nil, func(tx store.StoreOps) error { return tx.UpdateReport(ctx, r) })
+	if err != nil {
+		if errors.Is(err, ErrReportNotFound) {
+			return nil, nil, err
 		}
 		return nil, nil, fmt.Errorf("updating report %d: %w", id, err)
 	}
@@ -447,7 +515,7 @@ func UpdateReport(ctx context.Context, db store.StoreOps, p access.Principal, id
 		}
 		return nil, nil, fmt.Errorf("storing recipients of report %d: %w", id, err)
 	}
-	return &SavedReport{Report: existing, Recipients: held}, &SavedReport{Report: r, Recipients: recipients}, nil
+	return &SavedReport{Report: existing, Recipients: held}, &SavedReport{Report: stored, Recipients: recipients}, nil
 }
 
 // GetReportForViewer returns the report to its owner, a global admin or a
@@ -470,13 +538,21 @@ func GetReportForViewer(ctx context.Context, db store.StoreOps, p access.Princip
 	return r, false, nil
 }
 
-// DeleteReport deletes a report the caller may edit and returns it.
-func DeleteReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID) (*models.Report, error) {
+// DeleteReport deletes a report the caller may edit, with its job, and
+// returns it.
+func DeleteReport(ctx context.Context, db store.Store, p access.Principal, id models.ReportID) (*models.Report, error) {
 	r, err := GetReportForEditor(ctx, db, p, id)
 	if err != nil {
 		return nil, err
 	}
-	if err := db.DeleteReport(ctx, id); err != nil {
+	// The job row first, as in writeReport.
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := reports.DeleteJob(ctx, tx, id); err != nil {
+			return err
+		}
+		return tx.DeleteReport(ctx, id)
+	})
+	if err != nil {
 		if models.IsNotFound(err) {
 			return nil, ErrReportNotFound
 		}
@@ -485,34 +561,40 @@ func DeleteReport(ctx context.Context, db store.StoreOps, p access.Principal, id
 	return r, nil
 }
 
-// PauseReport pauses a report the caller may edit, with reason user.
-func PauseReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID) (*models.Report, error) {
-	if _, err := GetReportForEditor(ctx, db, p, id); err != nil {
+// PauseReport pauses a report the caller may edit, with reason user, and
+// disables its job.
+func PauseReport(ctx context.Context, db store.Store, p access.Principal, id models.ReportID) (*models.Report, error) {
+	r, err := GetReportForEditor(ctx, db, p, id)
+	if err != nil {
 		return nil, err
 	}
-	if err := db.PauseReport(ctx, id, models.ReportPauseUser); err != nil {
+	after, err := writeReport(ctx, db, r, nil, func(tx store.StoreOps) error { return tx.PauseReport(ctx, id, models.ReportPauseUser) })
+	if err != nil && !errors.Is(err, ErrReportNotFound) {
 		return nil, fmt.Errorf("pausing report %d: %w", id, err)
 	}
-	return reloadReport(ctx, db, id)
+	return after, err
 }
 
-// ResumeReport makes a report the caller may edit active and clears its
-// failure streak.
-func ResumeReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID) (*models.Report, error) {
-	if _, err := GetReportForEditor(ctx, db, p, id); err != nil {
+// ResumeReport makes a report the caller may edit active, clears its
+// failure streak and enables its job.
+func ResumeReport(ctx context.Context, db store.Store, p access.Principal, id models.ReportID) (*models.Report, error) {
+	r, err := GetReportForEditor(ctx, db, p, id)
+	if err != nil {
 		return nil, err
 	}
-	if err := db.ResumeReport(ctx, id); err != nil {
+	after, err := writeReport(ctx, db, r, nil, func(tx store.StoreOps) error { return tx.ResumeReport(ctx, id) })
+	if err != nil && !errors.Is(err, ErrReportNotFound) {
 		return nil, fmt.Errorf("resuming report %d: %w", id, err)
 	}
-	return reloadReport(ctx, db, id)
+	return after, err
 }
 
 // ClaimReport makes the caller the owner of a report that has no owner, or
-// whose owner is inactive. A global admin may claim any such report; anyone
-// else must reach its source, because the claim lends the caller's access.
-// It returns the report before the claim and after it.
-func ClaimReport(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID) (before, after *models.Report, err error) {
+// whose owner is inactive, and enables its job when the claim ends a pause.
+// A global admin may claim any such report; anyone else must reach its
+// source, because the claim lends the caller's access. It returns the
+// report before the claim and after it.
+func ClaimReport(ctx context.Context, db store.Store, p access.Principal, id models.ReportID) (before, after *models.Report, err error) {
 	r, err := db.GetReport(ctx, id)
 	if err != nil {
 		if models.IsNotFound(err) {
@@ -533,14 +615,16 @@ func ClaimReport(ctx context.Context, db store.StoreOps, p access.Principal, id 
 	if !claimable {
 		return nil, nil, fmt.Errorf("%w: the report has an active owner", ErrReportForbidden)
 	}
-	if err := db.ClaimReport(ctx, id, p.User.ID); err != nil {
-		if errors.Is(err, models.ErrReportOwned) {
-			return nil, nil, fmt.Errorf("%w: the report has an active owner", ErrReportForbidden)
-		}
+	after, err = writeReport(ctx, db, r, nil, func(tx store.StoreOps) error { return tx.ClaimReport(ctx, id, p.User.ID) })
+	switch {
+	case errors.Is(err, models.ErrReportOwned):
+		return nil, nil, fmt.Errorf("%w: the report has an active owner", ErrReportForbidden)
+	case errors.Is(err, ErrReportNotFound):
+		return nil, nil, err
+	case err != nil:
 		return nil, nil, fmt.Errorf("claiming report %d: %w", id, err)
 	}
-	after, err = reloadReport(ctx, db, id)
-	return r, after, err
+	return r, after, nil
 }
 
 // userCanViewReportSource reports whether u can view the report's source:
@@ -661,11 +745,14 @@ type ReportResponse struct {
 	Owner       *ReportOwner              `json:"owner"`
 	State       models.ReportState        `json:"state"`
 	PauseReason models.ReportPauseReason  `json:"pause_reason"`
-	LastRun     *ReportLastRun            `json:"last_run"`
-	CanEdit     bool                      `json:"can_edit"`
-	Warnings    []ReportWarning           `json:"warnings"`
-	CreatedAt   time.Time                 `json:"created_at"`
-	UpdatedAt   time.Time                 `json:"updated_at"`
+	// NextRunAt is the next tick, null for a paused report or one without
+	// an owner.
+	NextRunAt *time.Time      `json:"next_run_at"`
+	LastRun   *ReportLastRun  `json:"last_run"`
+	CanEdit   bool            `json:"can_edit"`
+	Warnings  []ReportWarning `json:"warnings"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // buildReportResponses reads the owners, the saved queries and the newest
@@ -707,8 +794,12 @@ func buildReportResponses(ctx context.Context, d ReportDeps, p access.Principal,
 	for _, run := range runs {
 		lastRuns[run.ReportID] = run
 	}
+	now := time.Now()
 	for _, r := range list {
 		resp := reportResponse(p, r, lastRuns[r.ID])
+		if resp.NextRunAt, err = reports.NextRunAt(r, now); err != nil {
+			return nil, err
+		}
 		switch {
 		case r.SavedQueryID != nil:
 			resp.Source.Name = queryNames[*r.SavedQueryID]

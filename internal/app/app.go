@@ -264,7 +264,8 @@ func (a *App) initAlerts() {
 }
 
 // startJobs starts the job runner. Every replica with jobs enabled claims due
-// jobs; a claim makes one replica run each tick.
+// jobs; a claim makes one replica run each tick. A demo instance sends no
+// scheduled reports.
 func (a *App) startJobs(ctx context.Context) error {
 	if a.Jobs == nil {
 		a.Logger.Info("job runner disabled; this replica runs no background jobs")
@@ -276,6 +277,12 @@ func (a *App) startJobs(ctx context.Context) error {
 		}
 		a.Jobs.Register(a.Alerts.EvaluationKind())
 		a.Jobs.Register(notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Logger: a.Logger}).Kind())
+	}
+	if a.Config.Reports.Enabled && !a.Config.Demo.ReadOnly {
+		if err := core.SyncReportJobs(ctx, a.SQLite); err != nil {
+			return fmt.Errorf("failed to schedule reports: %w", err)
+		}
+		a.Jobs.Register(a.server.ReportJobKind())
 	}
 	a.Jobs.Start(ctx)
 	return nil
