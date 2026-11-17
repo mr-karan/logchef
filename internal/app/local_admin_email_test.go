@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
@@ -34,7 +35,7 @@ func TestLocalAdminEmailLength(t *testing.T) {
 			t.Cleanup(func() { _ = db.Close() })
 			email := tc.email
 			cfg := &config.Config{Auth: config.AuthConfig{Local: config.LocalAuthConfig{Enabled: true, AdminEmail: email}}}
-			err = ensureLocalAdmin(t.Context(), cfg, db, log)
+			err = ensureLocalAdmin(t.Context(), cfg, db, audit.New(audit.Options{Store: db, Logger: log}), log)
 			if !tc.rejected {
 				if err != nil {
 					t.Fatal(err)

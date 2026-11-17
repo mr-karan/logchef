@@ -165,7 +165,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 
 	// Bootstrap the local-auth admin when configured (idempotent).
-	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Logger); err != nil {
+	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Audit, a.Logger); err != nil {
 		return fmt.Errorf("failed to bootstrap local auth admin: %w", err)
 	}
 
@@ -625,8 +625,9 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 }
 
 // ensureLocalAdmin creates or updates the bootstrap admin for local
-// email+password auth. Idempotent: safe to run on every startup.
-func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, log *slog.Logger) error {
+// email+password auth. Idempotent: safe to run on every startup. A created
+// admin is recorded as an audit event by the system actor.
+func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, rec *audit.Recorder, log *slog.Logger) error {
 	local := cfg.Auth.Local
 	if !local.Enabled || local.AdminEmail == "" {
 		return nil
@@ -641,6 +642,17 @@ func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, l
 		if err != nil {
 			return fmt.Errorf("creating local admin: %w", err)
 		}
+		rec.Record(ctx, audit.Event{
+			Action:  audit.UserCreate,
+			Outcome: models.AuditOutcomeSuccess,
+			Actor: audit.Actor{
+				Type:       models.AuditActorSystem,
+				Label:      "auth.local",
+				AuthMethod: models.AuditAuthStartup,
+			},
+			Target: audit.UserTarget(user),
+			After:  audit.UserFields(user),
+		})
 	}
 
 	// Only re-hash when the stored hash doesn't already match the configured

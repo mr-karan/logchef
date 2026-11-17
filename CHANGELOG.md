@@ -213,6 +213,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name is not stored, so importing an export still changes nothing.
 - When two secrets would export as one environment variable, the export
   answers 409 with a message that names both, instead of a bare 500.
+- Creating the local admin from `[auth.local]` at startup records a
+  `user.create` audit event by the system actor, label `auth.local`.
 - Provisioning on Postgres no longer rewrites every managed source on each
   startup. Postgres stores the connection as JSONB, whose text never matched
   the declared connection, so each run updated every source and recorded a
