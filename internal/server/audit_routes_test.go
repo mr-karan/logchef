@@ -51,6 +51,7 @@ var auditExemptRoutes = []auditExemption{
 	{http.MethodPost, teamSourcePrefix + "/logchefql/query", "query execution"},
 	{http.MethodPost, "/api/v1" + askChefTurnsPath, "read-only assistant"},
 	{http.MethodPost, "/api/v1/alerts/test", "runs a query, stores nothing"},
+	{http.MethodPost, "/api/v1/alerts/backtest", "read-only query"},
 	{http.MethodPost, oauth.AuthorizePath, "creates a pending request, the decision is the event"},
 	{http.MethodPost, oauth.TokenPath, "code exchange and refresh, the grant is the event"},
 	{http.MethodPost, oauth.RevokePath, "internal/oauth records oauth_grant.revoke for this route"},

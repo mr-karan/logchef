@@ -15,9 +15,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { TestAlertQueryResponse } from "@/api/alerts";
+import type { BacktestAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import type { AlertFormState, ConditionTemplate, QueryTemplate } from "@/composables/useAlertForm";
 import { formatAlertGroup } from "@/utils/alertGroups";
+import AlertBacktest from "./AlertBacktest.vue";
 
 const { t } = useI18n();
 
@@ -39,6 +40,7 @@ defineProps<{
   isTestingQuery: boolean;
   testQueryResult: TestAlertQueryResponse | null;
   testQueryError: string | null;
+  backtestRequest: Omit<BacktestAlertRequest, "range_seconds"> | null;
   onApplyConditionTemplate: (template: ConditionTemplate) => void;
   onApplyTemplate: (template: QueryTemplate) => void;
   onTestQuery: () => void;
@@ -278,5 +280,7 @@ defineProps<{
         <span class="text-red-900 dark:text-red-100">{{ testQueryError }}</span>
       </div>
     </div>
+
+    <AlertBacktest :request="backtestRequest" :disabled="disabled" />
   </section>
 </template>

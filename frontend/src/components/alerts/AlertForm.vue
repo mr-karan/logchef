@@ -43,6 +43,7 @@ const emit = defineEmits<{
 
 const {
   form,
+  backtestRequest,
   supportsConditionEditor,
   aggregateFieldSuggestions,
   nativeEditorLabel,
@@ -110,6 +111,7 @@ function handleClose() {
           :is-testing-query="isTestingQuery"
           :test-query-result="testQueryResult"
           :test-query-error="testQueryError"
+          :backtest-request="backtestRequest"
           :on-apply-condition-template="applyConditionTemplate"
           :on-apply-template="applyTemplate"
           :on-test-query="handleTestQuery"
@@ -175,6 +177,7 @@ function handleClose() {
       :is-testing-query="isTestingQuery"
       :test-query-result="testQueryResult"
       :test-query-error="testQueryError"
+      :backtest-request="backtestRequest"
       :on-apply-condition-template="applyConditionTemplate"
       :on-apply-template="applyTemplate"
       :on-test-query="handleTestQuery"

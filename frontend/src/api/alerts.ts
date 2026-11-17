@@ -166,6 +166,54 @@ export interface TestAlertQueryResponse {
   no_data: boolean;
 }
 
+export interface BacktestAlertRequest extends TestAlertQueryRequest {
+  frequency_seconds: number;
+  /** 3,600 to 604,800 seconds. */
+  range_seconds: number;
+  notify_on_resolve?: boolean;
+}
+
+export type BacktestStatus = "ok" | "firing" | "no_data" | "error";
+
+export interface BacktestPoint {
+  t: string;
+  status: BacktestStatus;
+  /** The sample of an ungrouped rule; null for a grouped rule or no row. */
+  value: number | null;
+  firing_groups: number;
+}
+
+export interface BacktestGroup {
+  group: Record<string, string>;
+  episodes: number;
+  breaching_evaluations: number;
+  max_value: number | null;
+}
+
+export interface BacktestResult {
+  start: string;
+  end: string;
+  step_seconds: number;
+  evaluations: number;
+  /** Share of the range that the evaluated lookback windows read, 0 to 1. */
+  coverage: number;
+  /** The server's deadline ended the replay, so series ends early. */
+  partial: boolean;
+  summary: {
+    episodes: number;
+    firing_seconds: number;
+    breaching_evaluations: number;
+    notifications: number;
+    no_data_evaluations: number;
+    errors: number;
+  };
+  series: BacktestPoint[];
+  /** The 20 groups with the most breaching evaluations. */
+  groups: BacktestGroup[];
+  groups_omitted: number;
+  first_error?: string;
+}
+
 export const alertsApi = {
   list: (sourceId?: number, options?: RequestOptions) => {
     const url =
@@ -192,4 +240,6 @@ export const alertsApi = {
     apiClient.get<AlertInstance[]>(`/alerts/${alertId}/instances`, options),
   testQuery: (payload: TestAlertQueryRequest) =>
     apiClient.post<TestAlertQueryResponse>("/alerts/test", payload),
+  backtest: (payload: BacktestAlertRequest, options?: RequestOptions) =>
+    apiClient.post<BacktestResult>("/alerts/backtest", payload, options),
 };

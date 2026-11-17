@@ -43,6 +43,15 @@ const (
 	// preview budget makes ordinary exploration reject itself.
 	QueryClassHistogram QueryClass = "histogram"
 	QueryClassDashboard QueryClass = "dashboard"
+	// QueryClassBacktest is an alert backtest, which runs up to
+	// models.MaxBacktestEvaluations queries in a row. It has its own fixed caps.
+	QueryClassBacktest QueryClass = "backtest"
+)
+
+// Backtest admission: one per user and two in total.
+const (
+	backtestMaxPerUser = 1
+	backtestMaxGlobal  = 2
 )
 
 // admissionLimits returns the per-user and global caps for class. Dashboard
@@ -50,6 +59,9 @@ const (
 // every waiter on that panel, and a multi-panel refresh would reject its own
 // panels under the interactive preview cap.
 func (s *Server) admissionLimits(class QueryClass) (maxPerUser, maxGlobal int) {
+	if class == QueryClassBacktest {
+		return backtestMaxPerUser, backtestMaxGlobal
+	}
 	if class == QueryClassDashboard {
 		// The per-user cap is the cache's fill budget. Cached fills are also
 		// bounded by the fill semaphore; uncached panel queries (TTL 0, or the

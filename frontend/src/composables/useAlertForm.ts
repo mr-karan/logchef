@@ -7,7 +7,7 @@ import { alertsApi } from "@/api/alerts";
 import { asClickHouseConnection, getLokiSelector } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
 import { getErrorMessage } from "@/api/types";
-import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
+import type { Alert, BacktestAlertRequest, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryRequest, TestAlertQueryResponse } from "@/api/alerts";
 import {
   getNativeQueryLanguageForSource,
   getQueryLanguageLabel,
@@ -657,8 +657,34 @@ WHERE ${timeFilter}`,
   // A LogchefQL condition is evaluated ungrouped until the server compiles it.
   const groupBy = computed(() => (form.editor_mode === "native" ? parseGroupBy(form.group_by) : []));
 
-  async function handleTestQuery() {
+  // The rule as the test and backtest routes run it; null until it has a query.
+  const testRequest = computed<TestAlertQueryRequest | null>(() => {
     if (!props.teamId || !props.sourceId || !form.query.trim()) {
+      return null;
+    }
+    return {
+      source_id: props.sourceId,
+      query_language: alertMetadata.value.queryLanguage,
+      editor_mode: alertMetadata.value.editorMode,
+      query: form.query.trim(),
+      condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
+      lookback_seconds: Number(form.lookback_seconds),
+      threshold_operator: form.threshold_operator,
+      threshold_value: Number(form.threshold_value),
+      group_by: groupBy.value,
+      no_data_policy: form.no_data_policy,
+    };
+  });
+
+  const backtestRequest = computed<Omit<BacktestAlertRequest, "range_seconds"> | null>(() =>
+    testRequest.value
+      ? { ...testRequest.value, frequency_seconds: Number(form.frequency_seconds), notify_on_resolve: form.notify_on_resolve }
+      : null,
+  );
+
+  async function handleTestQuery() {
+    const request = testRequest.value;
+    if (!request) {
       return;
     }
 
@@ -667,18 +693,7 @@ WHERE ${timeFilter}`,
     testQueryResult.value = null;
 
     try {
-      const result = await alertsApi.testQuery({
-        source_id: props.sourceId,
-        query_language: alertMetadata.value.queryLanguage,
-        editor_mode: alertMetadata.value.editorMode,
-        query: form.query.trim(),
-        condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
-        lookback_seconds: form.lookback_seconds,
-        threshold_operator: form.threshold_operator,
-        threshold_value: form.threshold_value,
-        group_by: groupBy.value,
-        no_data_policy: form.no_data_policy,
-      });
+      const result = await alertsApi.testQuery(request);
       testQueryResult.value = result.data;
     } catch (error: any) {
       testQueryError.value = error?.response?.data?.message || error.message || t("alerts.testFailed");
@@ -779,6 +794,7 @@ WHERE ${timeFilter}`,
 
   return {
     form,
+    backtestRequest,
     supportsConditionEditor,
     aggregateFieldSuggestions,
     nativeEditorLabel,

@@ -89,6 +89,19 @@ func TestAlertQueryForPrincipal(ctx context.Context, db store.StoreOps, ds *data
 	return testAlertQuery(ctx, db, ds, sourceID, req)
 }
 
+// BacktestAlertForPrincipal replays an unsaved rule over a past range. It
+// authorizes like TestAlertQueryForPrincipal: alerts:write and the source
+// visible through a team, with no bypass for global admins.
+func BacktestAlertForPrincipal(ctx context.Context, db store.StoreOps, ds *datasource.Service, p access.Principal, sourceID models.SourceID, req *models.BacktestAlertRequest) (*models.BacktestResult, error) {
+	if err := p.Require(models.TokenScopeAlertsWrite); err != nil {
+		return nil, err
+	}
+	if err := requireSourceVisible(ctx, db, p, sourceID); err != nil {
+		return nil, err
+	}
+	return backtestAlert(ctx, db, ds, sourceID, req)
+}
+
 func requireSourceVisible(ctx context.Context, db store.StoreOps, p access.Principal, sourceID models.SourceID) error {
 	if p.User == nil {
 		return ErrSourceAccessDenied
