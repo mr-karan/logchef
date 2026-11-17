@@ -1,13 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick, reactive } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
+import { createApp, h, reactive } from 'vue'
 import { createPinia } from 'pinia'
 import { i18n } from '@/i18n'
-import { parseGroupBy, useAlertForm, type UseAlertFormProps } from '../useAlertForm'
+import { conditionQuery, parseGroupBy, useAlertForm, type UseAlertFormProps } from '../useAlertForm'
 import { controlledApi } from '@/test/controlledApi'
-
-function translation(sql: string) {
-  return { valid: true, sql, conditions: [], fields_used: [] }
-}
 
 function mountForm() {
   const props = reactive<UseAlertFormProps>({ open: true, mode: 'create', teamId: 1, sourceId: 1, alert: null })
@@ -20,84 +16,35 @@ function mountForm() {
   return { form, props, unmount: () => { if (!unmounted) app.unmount(); unmounted = true } }
 }
 
-describe('alert condition translation ownership', () => {
-  let network: ReturnType<typeof controlledApi>
-  let mounted: ReturnType<typeof mountForm>
-  beforeEach(() => {
-    vi.useFakeTimers()
-    network = controlledApi(config => config.url?.endsWith('/translate') === true)
-    mounted = mountForm()
-    mounted.form.form.name = 'Error count'
-  })
-  afterEach(() => { mounted.unmount(); network.restore(); vi.useRealTimers() })
-
-  async function edit(condition: string) {
-    mounted.form.form.condition_json = condition
-    await nextTick()
-    await vi.advanceTimersByTimeAsync(300)
-  }
-
-  it('keeps the newer SQL when translations finish in reverse order', async () => {
-    await edit('severity = "old"')
-    await edit('severity = "new"')
-    expect(network.requests).toHaveLength(2)
-    network.requests[1].succeed(translation("severity = 'new'"))
-    await vi.advanceTimersByTimeAsync(0)
-    const query = mounted.form.form.query
-    expect(query).toContain("severity = 'new'")
-    network.requests[0].succeed(translation("severity = 'old'"))
-    await vi.advanceTimersByTimeAsync(0)
-    expect(mounted.form.form.query).toBe(query)
-    expect(mounted.form.isValid.value).toBe(true)
+describe('condition rule', () => {
+  it('writes the filter, one aggregate named value and the by keys as LogchefQL', () => {
+    expect(conditionQuery('level="error"', 'count', '', [])).toBe('level="error" | count() as value')
+    expect(conditionQuery('level="error"', 'avg', 'dur', [])).toBe('level="error" | avg(dur) as value')
+    expect(conditionQuery('status >= 500', 'sum', 'log.bytes', ['service', 'region'])).toBe('status >= 500 | sum(log.bytes) as value by service, region')
   })
 
-  it('bounds the generated SQL with the time filter macro', async () => {
-    await edit('severity = "error"')
-    network.requests[0].succeed(translation("severity = 'error'"))
-    await vi.advanceTimersByTimeAsync(0)
-    expect(mounted.form.form.query).toContain("(severity = 'error') AND {{__time_filter}}")
-    expect(mounted.form.form.query).not.toContain('now()')
-  })
-
-  it('invalidates pending SQL immediately during the next debounce', async () => {
-    await edit('severity = "old"')
-    mounted.form.form.condition_json = 'severity = "new"'
-    await nextTick()
-    network.requests[0].succeed(translation("severity = 'old'"))
-    await vi.advanceTimersByTimeAsync(0)
-    expect(mounted.form.generatedQuery.value).toBe('')
-    expect(mounted.form.isValid.value).toBe(false)
-  })
-
-  it('ignores an old failure after a successful newer translation', async () => {
-    await edit('severity = "old"')
-    await edit('severity = "new"')
-    network.requests[1].succeed(translation("severity = 'new'"))
-    await vi.advanceTimersByTimeAsync(0)
-    network.requests[0].fail('Old translation failed')
-    await vi.advanceTimersByTimeAsync(0)
-    expect(mounted.form.conditionError.value).toBeNull()
-    expect(mounted.form.isValid.value).toBe(true)
-  })
-
-  it('does not leave a translation timer after unmount', async () => {
-    mounted.form.form.condition_json = 'severity = "new"'
-    await nextTick()
-    mounted.unmount()
-    await vi.advanceTimersByTimeAsync(300)
-    expect(network.requests).toHaveLength(0)
-  })
-
-  it.each(['close', 'source', 'native'] as const)('invalidates an in-flight translation on %s', async change => {
-    await edit('severity = "old"')
-    if (change === 'close') mounted.props.open = false
-    if (change === 'source') mounted.props.sourceId = 2
-    if (change === 'native') { mounted.form.form.editor_mode = 'native'; mounted.form.form.query = 'SELECT 42' }
-    await nextTick()
-    network.requests[0].succeed(translation("severity = 'old'"))
-    await vi.advanceTimersByTimeAsync(0)
-    expect(mounted.form.generatedQuery.value).toBe('')
-    if (change === 'native') expect(mounted.form.form.query).toBe('SELECT 42')
+  it('tests the LogchefQL rule and leaves its compile to the server', async () => {
+    const network = controlledApi(config => config.url === '/alerts/test')
+    const mounted = mountForm()
+    try {
+      mounted.form.form.name = 'Slow requests'
+      mounted.form.form.condition_json = 'status >= 500'
+      mounted.form.form.aggregate_function = 'max'
+      expect(mounted.form.isValid.value).toBe(false)
+      mounted.form.form.aggregate_field = 'dur'
+      expect(mounted.form.isValid.value).toBe(true)
+      void mounted.form.handleTestQuery()
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+      const body = JSON.parse(String(network.requests[0].config.data))
+      expect(body).toMatchObject({
+        query_language: 'logchefql', editor_mode: 'condition', condition_json: 'status >= 500',
+        query: 'status >= 500 | max(dur) as value', group_by: [],
+      })
+      network.requests[0].succeed({ value: 0, threshold_met: false, execution_time_ms: 1, rows_returned: 0, warnings: [], samples: [], groups_total: 0 })
+    } finally {
+      mounted.unmount()
+      network.restore()
+    }
   })
 })
 

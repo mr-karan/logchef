@@ -136,14 +136,34 @@ func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.S
 	if _, ok := validSeverities[alert.Severity]; !ok {
 		return fmt.Errorf("invalid severity %q", alert.Severity)
 	}
-	if checkQuery {
-		source, err := db.GetSource(ctx, sourceID)
-		if err != nil {
-			return fmt.Errorf("failed to load source: %w", err)
-		}
+	if !checkQuery {
+		return nil
+	}
+	return validateAlertQuery(ctx, db, ds, sourceID, alert)
+}
+
+// validateAlertQuery rejects a query that evaluation would refuse to run. A
+// LogchefQL condition is compiled for the source, and its by keys become the
+// rule's group_by.
+func validateAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert) error {
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
+		return fmt.Errorf("failed to load source: %w", err)
+	}
+	if alert.QueryLanguage != models.QueryLanguageLogchefQL {
 		return datasource.ValidateAlertQuery(source, alert.QueryLanguage, alert.Query)
 	}
-	return nil
+	condition, err := ds.CompileAlertCondition(ctx, sourceID, alert.Query, alert.LookbackSeconds)
+	if err != nil {
+		return err
+	}
+	// The by keys of the condition are its groups. A group_by in the request
+	// may repeat them, never differ.
+	if len(alert.GroupBy) > 0 && !slices.Equal(alert.GroupBy, condition.GroupBy) {
+		return fmt.Errorf("group_by %q differs from the by keys %q of the LogchefQL condition. Leave group_by empty", alert.GroupBy, condition.GroupBy)
+	}
+	alert.GroupBy = condition.GroupBy
+	return datasource.ValidateAlertQuery(source, condition.Language, condition.Query)
 }
 
 // normalizeGroupingAndPolicy checks group_by against the editor mode and
@@ -153,8 +173,10 @@ func normalizeGroupingAndPolicy(alert *models.Alert) error {
 	if alert.GroupBy, err = normalizeGroupBy(alert.GroupBy); err != nil {
 		return err
 	}
-	if len(alert.GroupBy) > 0 && alert.EditorMode != models.AlertEditorModeNative {
-		return fmt.Errorf("group_by needs a native query; a LogchefQL condition is evaluated ungrouped")
+	// A condition saved before the server compiled conditions holds the
+	// native query the form generated, which is ungrouped.
+	if len(alert.GroupBy) > 0 && alert.EditorMode == models.AlertEditorModeCondition && alert.QueryLanguage != models.QueryLanguageLogchefQL {
+		return fmt.Errorf("group_by on a condition needs query_language logchefql")
 	}
 	alert.NoDataPolicy = alert.NoDataPolicy.OrZero()
 	if !alert.NoDataPolicy.Valid() {
@@ -265,7 +287,10 @@ func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, lo
 	// An unchanged query skips the SQL check so owners can still pause, rename
 	// or delete an alert whose stored query the parser rejects. Evaluation
 	// still refuses to run it.
-	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode
+	// A LogchefQL condition's groups come from its compile, so a group_by
+	// change is checked against the query too.
+	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode ||
+		!slices.Equal(existing.GroupBy, previous.GroupBy)
 	if err := validateAlertModel(ctx, db, ds, existing.SourceID, existing, queryChanged); err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
@@ -636,23 +661,22 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		return groupedTestResponse(tempAlert, source.MetaTSField, result, executionTime)
 	}
 
-	// Extract numeric value from result. No matching rows is not an error —
-	// ExtractFirstNumeric returns (0, nil) for an empty result — so check the
-	// row count independently and surface a warning, otherwise the user can't
-	// tell "waiting for data" from a real zero. An extraction failure on a
-	// non-empty result is still a genuine error.
-	value, err := util.ExtractFirstNumeric(result)
+	// No sample is not an error, so surface a warning, otherwise the user
+	// can't tell "waiting for data" from a real zero. An extraction failure on
+	// a non-empty result is still a genuine error.
+	samples, err := alerts.SamplesFromResult(result, nil, tempAlert.QueryLanguage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
+	}
+	var value float64
 	var warnings []string
 	var thresholdMet bool
-	noData := len(result.Logs) == 0
-	switch {
-	case noData:
-		value = 0
+	noData := len(samples) == 0
+	if noData {
 		thresholdMet = noRowsThresholdMet(tempAlert)
 		warnings = append(warnings, noRowsWarning(tempAlert.NoDataPolicy))
-	case err != nil:
-		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
-	default:
+	} else {
+		value = samples[0].Value
 		thresholdMet = util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 	}
 
@@ -729,6 +753,7 @@ func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Servic
 			NoData:    alert.NoDataPolicy,
 		},
 		GroupBy:          alert.GroupBy,
+		Language:         alert.QueryLanguage,
 		FrequencySeconds: alert.FrequencySeconds,
 		LookbackSeconds:  alert.LookbackSeconds,
 		NotifyOnResolve:  req.NotifyOnResolve == nil || *req.NotifyOnResolve,
@@ -749,7 +774,7 @@ func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Servic
 // groupedTestResponse reads the samples the scheduler would read. A result
 // the scheduler rejects, such as a duplicate group, is a 400 here.
 func groupedTestResponse(alert *models.Alert, timestampColumn string, result *models.QueryResult, executionTime time.Duration) (*models.TestAlertQueryResponse, error) {
-	samples, err := alerts.SamplesFromResult(result, alert.GroupBy)
+	samples, err := alerts.SamplesFromResult(result, alert.GroupBy, alert.QueryLanguage)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}

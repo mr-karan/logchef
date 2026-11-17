@@ -26,17 +26,23 @@ const (
 )
 
 // SamplesFromResult turns a query result into one sample per group. An
-// ungrouped rule reads the first column of the first row.
-func SamplesFromResult(result *models.QueryResult, groupBy []string) ([]Sample, error) {
+// ungrouped rule reads the first column of the first row. In the result of a
+// LogchefQL condition, a null value is no sample: the aggregate had no
+// numeric input (RFC 0005), and VictoriaLogs writes that null as NaN or "".
+func SamplesFromResult(result *models.QueryResult, groupBy []string, language models.QueryLanguage) ([]Sample, error) {
+	nullIsNoSample := language == models.QueryLanguageLogchefQL
 	if len(groupBy) == 0 {
-		return ungroupedSamples(result)
+		return ungroupedSamples(result, nullIsNoSample)
 	}
-	return groupedSamples(result, groupBy)
+	return groupedSamples(result, groupBy, nullIsNoSample)
 }
 
 // ungroupedSamples reads the first column of the first row. No rows is no sample.
-func ungroupedSamples(result *models.QueryResult) ([]Sample, error) {
+func ungroupedSamples(result *models.QueryResult, nullIsNoSample bool) ([]Sample, error) {
 	if result == nil || len(result.Logs) == 0 {
+		return nil, nil
+	}
+	if nullIsNoSample && len(result.Columns) > 0 && isNullValue(result.Logs[0][result.Columns[0].Name]) {
 		return nil, nil
 	}
 	value, err := util.ExtractFirstNumeric(result)
@@ -50,7 +56,7 @@ func ungroupedSamples(result *models.QueryResult) ([]Sample, error) {
 // groupBy; the value is the column named value, otherwise the first column
 // that is not a group column. A cut result is an error, never a partial set
 // of groups, because a missing group would read as resolved.
-func groupedSamples(result *models.QueryResult, groupBy []string) ([]Sample, error) {
+func groupedSamples(result *models.QueryResult, groupBy []string, nullIsNoSample bool) ([]Sample, error) {
 	if result == nil || len(result.Logs) == 0 {
 		return nil, nil
 	}
@@ -88,6 +94,9 @@ func groupedSamples(result *models.QueryResult, groupBy []string) ([]Sample, err
 			return nil, fmt.Errorf("the query returned more than one row for the group %s. Group by every column named in group_by", formatGroup(group))
 		}
 		seen[key] = struct{}{}
+		if nullIsNoSample && isNullValue(row[valueColumn]) {
+			continue
+		}
 		value, err := util.NumericValue(row[valueColumn])
 		if err != nil {
 			return nil, fmt.Errorf("the value of group %s: %w", formatGroup(group), err)
@@ -95,6 +104,17 @@ func groupedSamples(result *models.QueryResult, groupBy []string) ([]Sample, err
 		samples = append(samples, Sample{GroupKey: key, Group: group, Value: value})
 	}
 	return samples, nil
+}
+
+// isNullValue reports a null cell, or the NaN or empty text that
+// VictoriaLogs returns for an aggregate without input.
+func isNullValue(raw any) bool {
+	value := reflect.ValueOf(raw)
+	if !value.IsValid() || (value.Kind() == reflect.Pointer && value.IsNil()) {
+		return true
+	}
+	text, ok := raw.(string)
+	return ok && (text == "" || text == "NaN")
 }
 
 // resultCut reports a result the backend may have cut. A provider that does

@@ -1159,6 +1159,34 @@ func buildLogchefQLSchema(source *models.Source) *logchefql.Schema {
 	return &logchefql.Schema{Columns: columns}
 }
 
+// CompileAlertCondition compiles a LogchefQL alert condition into aggregated
+// SQL whose time filter is {{__time_filter}}. EvaluateAlert renders it with
+// the lookback that ends at At, as it renders native alert SQL, so the window
+// is the same half-open range.
+func (p *ClickHouseProvider) CompileAlertCondition(_ context.Context, source *models.Source, query string, _ int) (*CompiledLogchefQL, error) {
+	result := logchefql.TranslateWithOptions(query, buildLogchefQLSchema(source), logchefql.TranslateOptions{AllowAggregation: true})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	compiled := &CompiledLogchefQL{
+		Language:   models.QueryLanguageClickHouseSQL,
+		Valid:      true,
+		Conditions: result.Conditions,
+		FieldsUsed: result.FieldsUsed,
+		FilterOnly: result.SQL,
+	}
+	if result.Aggregation == nil {
+		return compiled, nil
+	}
+	compiled.Aggregation = result.Aggregation.Info()
+	sql, err := logchefql.BuildAggregationQuery(result, source.GetFullTableName(), source.MetaTSField, "{{__time_filter}}")
+	if err != nil {
+		return nil, err
+	}
+	compiled.Query = sql
+	return compiled, nil
+}
+
 // CompileLogchefQL compiles a LogchefQL query into executable ClickHouse SQL.
 // When a complete time window is supplied it returns the full SELECT ... WHERE
 // ... query with the time range baked in; otherwise Query and FilterOnly both

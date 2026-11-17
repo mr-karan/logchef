@@ -1,19 +1,19 @@
-import { computed, onScopeDispose, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAlertsStore } from "@/stores/alerts";
 import { useSourcesStore } from "@/stores/sources";
 import { useTeamsStore } from "@/stores/teams";
 import { alertsApi } from "@/api/alerts";
 import { asClickHouseConnection, getLokiSelector } from "@/api/sources";
-import { logchefqlApi } from "@/api/logchefql";
-import { getErrorMessage } from "@/api/types";
 import type { Alert, BacktestAlertRequest, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryRequest, TestAlertQueryResponse } from "@/api/alerts";
 import {
   getNativeQueryLanguageForSource,
   getQueryLanguageLabel,
-  resolveAlertMetadata,
+  hasSourceCapability,
+  type QueryLanguage,
   supportsAlertEditorMode,
 } from "@/lib/queryMetadata";
+import { aggregationOutline } from "@/utils/logchefql/aggregation";
 
 // Extended types for local usage until API types are updated.
 // The form doesn't include source_id — the caller adds it from context.
@@ -31,7 +31,7 @@ export interface AlertFormState {
   condition_json: string; // LogChefQL condition string
   aggregate_function: "count" | "sum" | "avg" | "min" | "max";
   aggregate_field: string;
-  /** Comma-separated result column names; native mode only. */
+  /** Comma-separated result column names, or the condition's by keys. */
   group_by: string;
   lookback_seconds: number;
   threshold_operator: Alert["threshold_operator"];
@@ -61,17 +61,15 @@ export function logqlDuration(seconds: number): string {
   return parts.join("") || "0s";
 }
 
-/** The LogQL metric query of a condition alert on a Loki source. */
-export function logqlConditionQuery(filter: string, aggregate: AggregateFunction, field: string, lookbackSeconds: number): string {
-  const range = `[${lookbackSeconds}s]`;
-  if (aggregate === "count") {
-    return `sum(count_over_time(${filter} ${range}))`;
-  }
-  const unwrapped = `${filter} | unwrap ${field} | __error__="" ${range}`;
-  if (aggregate === "avg") {
-    return `avg_over_time(${unwrapped}) by ()`;
-  }
-  return `${aggregate}(${aggregate}_over_time(${unwrapped}))`;
+/**
+ * The LogchefQL rule of the condition editor: the filter, then one aggregate
+ * named value, by the Group by keys. The server compiles it for the source at
+ * each evaluation.
+ */
+export function conditionQuery(condition: string, aggregate: AggregateFunction, field: string, groupBy: string[]): string {
+  const value = aggregate === "count" ? "count()" : `${aggregate}(${field})`;
+  const by = groupBy.length > 0 ? ` by ${groupBy.join(", ")}` : "";
+  return `${condition} | ${value} as value${by}`;
 }
 
 /**
@@ -84,7 +82,15 @@ export function logqlHasLookbackRange(query: string, lookbackSeconds: number): b
 }
 
 /** The aggregate a saved condition alert used, read back from its query. */
-function conditionAggregate(query: string, sourceType: string): { aggregate: AggregateFunction; field: string } | null {
+function conditionAggregate(alert: Alert, sourceType: string): { aggregate: AggregateFunction; field: string } | null {
+  const query = alert.query || "";
+  if (alert.query_language === "logchefql") {
+    const item = aggregationOutline(query)?.items[0];
+    if (!item) return null;
+    return { aggregate: item.func as AggregateFunction, field: item.field?.name ?? "" };
+  }
+  // A condition saved before the server compiled conditions holds the native
+  // query that the form generated.
   if (sourceType === "loki") {
     const aggregate = query.match(/(count|sum|avg|min|max)_over_time\(/)?.[1] as AggregateFunction | undefined;
     if (!aggregate) return null;
@@ -151,6 +157,8 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   });
   const sourceType = computed(() => currentSource.value?.source_type || "clickhouse");
   const supportsConditionEditor = computed(() => supportsAlertEditorMode(currentSource.value, "condition"));
+  // Loki compiles a condition with no by keys.
+  const conditionGroupBy = computed(() => hasSourceCapability(currentSource.value, "logchefql_aggregation"));
 
   // Column suggestions for the aggregate field. ClickHouse schemas narrow to
   // numeric types; VictoriaLogs and Loki values are strings that may hold
@@ -165,17 +173,11 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
       .map((c) => c.name);
   });
 
-  function logsqlFieldRef(field: string): string {
-    return /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(field) ? field : JSON.stringify(field);
-  }
   const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
   const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
   const nativeQueryLabel = computed(() => t('alerts.nativeQueryLabel', { language: nativeEditorLabel.value }));
-  const generatedQueryLanguageLabel = computed(() =>
-    t('alerts.generatedQuery', { language: getQueryLanguageLabel(alertMetadata.value.queryLanguage) })
-  );
 
-  // Get current source table name for SQL generation
+  // The source's table, for the native SQL templates.
   const currentTableName = computed(() => {
     const chConn = asClickHouseConnection(currentSource.value?.connection);
     const database = chConn?.database;
@@ -208,20 +210,6 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     destination_ids: [],
   });
 
-  // UI state for adding webhook
-
-  // LogChefQL validation state
-  const conditionError = ref<string | null>(null);
-
-  const alertMetadata = computed(() =>
-    resolveAlertMetadata({
-      editor_mode: form.editor_mode,
-      source_type: sourceType.value,
-      query_languages: currentSource.value?.query_languages,
-      alert_editor_modes: currentSource.value?.alert_editor_modes,
-    })
-  );
-
   // The server expands this to the lookback window that ends at the
   // evaluation instant, so a query can also run for a past instant.
   const timeFilter = "{{__time_filter}}";
@@ -250,10 +238,6 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     return t("alerts.sqlTemplateHint");
   });
 
-  // Generated executable query from LogchefQL condition
-  const generatedQuery = ref("");
-  const isTranslating = ref(false);
-
   // Team members, offered as recipients of a new email destination
   const teamMembers = computed(() => {
     if (!props.teamId) return [];
@@ -266,122 +250,6 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
       teamsStore.listTeamMembers(id);
     }
   }, { immediate: true });
-
-  let translationSequence = 0;
-
-  // Translate LogChefQL condition to SQL using backend API
-  async function translateCondition() {
-    const requestId = ++translationSequence;
-    if (!supportsConditionEditor.value) {
-      conditionError.value = null;
-      generatedQuery.value = "";
-      return;
-    }
-    if (form.editor_mode !== "condition" || !form.condition_json.trim()) {
-      conditionError.value = null;
-      generatedQuery.value = "";
-      return;
-    }
-
-    const teamId = props.teamId;
-
-    if (!teamId || !props.sourceId) {
-      conditionError.value = t("alerts.missingContext");
-      return;
-    }
-
-    isTranslating.value = true;
-    try {
-      const response = await logchefqlApi.translate(teamId, props.sourceId, { query: form.condition_json });
-      if (requestId !== translationSequence) return;
-
-      if (response.data && response.data.valid) {
-        conditionError.value = null;
-        const translatedQuery = response.data.generated_query || response.data.sql || "";
-        const translatedLanguage = response.data.generated_query_language || nativeQueryLanguage.value;
-
-        if (form.aggregate_function !== "count" && !form.aggregate_field.trim()) {
-          conditionError.value = `Select the numeric field to ${form.aggregate_function}() over`;
-          generatedQuery.value = "";
-          return;
-        }
-        const aggregateField = form.aggregate_field.trim();
-        if (translatedLanguage === "logsql") {
-          const filterQuery = translatedQuery.trim() || "*";
-          const statsExpression = form.aggregate_function === "count"
-            ? "count()"
-            : `${form.aggregate_function}(${logsqlFieldRef(aggregateField)})`;
-          generatedQuery.value = `${filterQuery} | stats ${statsExpression} as value`;
-        } else if (translatedLanguage === "logql") {
-          if (form.aggregate_function !== "count" && !/^[A-Za-z_]\w*$/.test(aggregateField)) {
-            conditionError.value = `LogQL can unwrap only a field named with letters, digits and underscores, not ${aggregateField}`;
-            generatedQuery.value = "";
-            return;
-          }
-          generatedQuery.value = logqlConditionQuery(translatedQuery.trim(), form.aggregate_function, aggregateField, form.lookback_seconds);
-        } else {
-          const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(\`${aggregateField}\`)`;
-          const tableName = currentTableName.value;
-
-          let whereClause = response.data.sql ? `(${response.data.sql})` : "1=1";
-          whereClause += ` AND ${timeFilter}`;
-
-          generatedQuery.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
-        }
-      } else if (response.data && !response.data.valid) {
-        conditionError.value = response.data.error?.message || t("alerts.invalidCondition");
-        generatedQuery.value = "";
-      } else {
-        conditionError.value = 'status' in response && response.status === 'error' ? response.message : t("alerts.translationFailed");
-        generatedQuery.value = "";
-      }
-    } catch (error: unknown) {
-      if (requestId !== translationSequence) return;
-      conditionError.value = getErrorMessage(error) || t("alerts.translationFailed");
-      generatedQuery.value = "";
-    } finally {
-      if (requestId === translationSequence) isTranslating.value = false;
-    }
-  }
-
-  let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function invalidateTranslation() {
-    translationSequence++;
-    if (translateDebounceTimer !== null) clearTimeout(translateDebounceTimer);
-    translateDebounceTimer = null;
-    isTranslating.value = false;
-    generatedQuery.value = "";
-    conditionError.value = null;
-  }
-
-  watch(
-    () => [props.open, props.teamId, props.sourceId, form.editor_mode,
-      form.condition_json, form.aggregate_function, form.aggregate_field,
-      currentTableName.value, nativeQueryLanguage.value, supportsConditionEditor.value,
-      // A LogQL condition query holds the lookback as its range.
-      sourceType.value === "loki" ? form.lookback_seconds : null],
-    () => {
-      invalidateTranslation();
-      if (form.editor_mode !== "condition") return;
-      form.query = "";
-      if (!props.open) return;
-      translateDebounceTimer = setTimeout(() => {
-        translateDebounceTimer = null;
-        translateCondition();
-      }, 300);
-    },
-    { flush: "sync" }
-  );
-
-  onScopeDispose(invalidateTranslation);
-
-  // Sync generated query to query field when using condition mode
-  watch(generatedQuery, (query) => {
-    if (form.editor_mode === "condition" && query) {
-      form.query = query;
-    }
-  });
 
   const labelCounter = ref(0);
   const annotationCounter = ref(0);
@@ -542,8 +410,6 @@ WHERE ${timeFilter}`,
     form.aggregate_function = template.aggregate;
     testQueryResult.value = null;
     testQueryError.value = null;
-    conditionError.value = null;
-    generatedQuery.value = "";
   }
 
   const isSubmitting = computed(() => {
@@ -561,14 +427,7 @@ WHERE ${timeFilter}`,
     const hasFrequency = form.frequency_seconds > 0;
     const hasLookback = form.lookback_seconds > 0;
 
-    // For condition mode, check if condition is valid and generates SQL
-    if (form.editor_mode === "condition") {
-      return hasName && hasThreshold && hasFrequency && hasLookback &&
-             !!form.condition_json.trim() && !conditionError.value && !!generatedQuery.value;
-    }
-
-    // For SQL mode, just check if query is not empty
-    return hasName && !!form.query.trim() && hasThreshold && hasFrequency && hasLookback;
+    return hasName && !!ruleQuery.value && hasThreshold && hasFrequency && hasLookback;
   });
 
   function addLabel() {
@@ -594,11 +453,8 @@ WHERE ${timeFilter}`,
   }
 
   function resetForm(alert: Alert | null) {
-    invalidateTranslation();
     testQueryResult.value = null;
     testQueryError.value = null;
-    conditionError.value = null;
-    generatedQuery.value = "";
 
     if (!alert) {
       form.name = "";
@@ -628,9 +484,9 @@ WHERE ${timeFilter}`,
     form.name = alert.name;
     form.description = alert.description ?? "";
     form.editor_mode = supportsConditionEditor.value ? alert.editor_mode : "native";
-    form.query = alert.query;
+    form.query = form.editor_mode === "condition" ? "" : alert.query;
     form.condition_json = alert.condition_json ?? "";
-    const saved = conditionAggregate(alert.query || "", sourceType.value);
+    const saved = form.editor_mode === "condition" ? conditionAggregate(alert, sourceType.value) : null;
     form.aggregate_function = saved?.aggregate ?? "count";
     form.aggregate_field = saved?.field ?? "";
     form.group_by = (alert.group_by ?? []).join(", ");
@@ -654,19 +510,35 @@ WHERE ${timeFilter}`,
     form.destination_ids = alert.destination_ids ? [...alert.destination_ids] : [];
   }
 
-  // A LogchefQL condition is evaluated ungrouped until the server compiles it.
-  const groupBy = computed(() => (form.editor_mode === "native" ? parseGroupBy(form.group_by) : []));
+  const groupBy = computed(() =>
+    form.editor_mode === "native" || conditionGroupBy.value ? parseGroupBy(form.group_by) : []
+  );
+  const queryLanguage = computed<QueryLanguage>(() => (form.editor_mode === "condition" ? "logchefql" : nativeQueryLanguage.value));
+
+  // The query the rule stores: a condition's LogchefQL, or the native query.
+  // Empty until the form has one.
+  const ruleQuery = computed(() => {
+    if (form.editor_mode === "native") {
+      return form.query.trim();
+    }
+    const condition = form.condition_json.trim();
+    const field = form.aggregate_field.trim();
+    if (!condition || (form.aggregate_function !== "count" && !field)) {
+      return "";
+    }
+    return conditionQuery(condition, form.aggregate_function, field, groupBy.value);
+  });
 
   // The rule as the test and backtest routes run it; null until it has a query.
   const testRequest = computed<TestAlertQueryRequest | null>(() => {
-    if (!props.teamId || !props.sourceId || !form.query.trim()) {
+    if (!props.teamId || !props.sourceId || !ruleQuery.value) {
       return null;
     }
     return {
       source_id: props.sourceId,
-      query_language: alertMetadata.value.queryLanguage,
-      editor_mode: alertMetadata.value.editorMode,
-      query: form.query.trim(),
+      query_language: queryLanguage.value,
+      editor_mode: form.editor_mode,
+      query: ruleQuery.value,
       condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
       lookback_seconds: Number(form.lookback_seconds),
       threshold_operator: form.threshold_operator,
@@ -734,13 +606,11 @@ WHERE ${timeFilter}`,
   watch(supportsConditionEditor, () => {
     if (!supportsConditionEditor.value && form.editor_mode === "condition") {
       form.editor_mode = "native";
-      conditionError.value = null;
-      generatedQuery.value = "";
     }
   });
 
   watch(
-    () => [form.query, form.threshold_operator, form.threshold_value, form.group_by, form.no_data_policy],
+    () => [ruleQuery.value, form.threshold_operator, form.threshold_value, form.group_by, form.no_data_policy],
     () => {
       testQueryResult.value = null;
       testQueryError.value = null;
@@ -767,9 +637,9 @@ WHERE ${timeFilter}`,
     const basePayload = {
       name: form.name.trim(),
       description: form.description.trim(),
-      query_language: alertMetadata.value.queryLanguage,
-      editor_mode: alertMetadata.value.editorMode,
-      query: form.query.trim(),
+      query_language: queryLanguage.value,
+      editor_mode: form.editor_mode,
+      query: ruleQuery.value,
       condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
       lookback_seconds: Number(form.lookback_seconds),
       threshold_operator: form.threshold_operator,
@@ -801,9 +671,7 @@ WHERE ${timeFilter}`,
     nativeQueryLabel,
     nativeQueryPlaceholder,
     nativeQueryHelpText,
-    generatedQueryLanguageLabel,
-    generatedQuery,
-    conditionError,
+    conditionGroupBy,
     conditionTemplates,
     queryTemplates,
     lookbackWarning,

@@ -224,11 +224,11 @@ func TestEvaluateAlert(t *testing.T) {
 			t.Fatalf("stats %+v", result.Stats)
 		}
 
-		samples, err := alerts.SamplesFromResult(result, []string{"pod"})
+		samples, err := alerts.SamplesFromResult(result, []string{"pod"}, models.QueryLanguageLogQL)
 		if err != nil || len(samples) != 2 || samples[0].Value != 3 || samples[1].Value != 7 {
 			t.Fatalf("grouped samples %+v, %v", samples, err)
 		}
-		samples, err = alerts.SamplesFromResult(result, nil)
+		samples, err = alerts.SamplesFromResult(result, nil, models.QueryLanguageLogQL)
 		if err != nil || len(samples) != 1 || samples[0].Value != 3 {
 			t.Fatalf("ungrouped samples %+v, %v", samples, err)
 		}

@@ -18,6 +18,7 @@ type BacktestQuery func(ctx context.Context, at time.Time) (*models.QueryResult,
 type BacktestRule struct {
 	Rule
 	GroupBy          []string
+	Language         models.QueryLanguage
 	FrequencySeconds int
 	LookbackSeconds  int
 	NotifyOnResolve  bool
@@ -123,7 +124,7 @@ func (r *replay) stopped(ctx context.Context) (bool, error) {
 // evaluation with a datasource.ValidationError, whose message is the user's
 // to read.
 func (r *replay) evaluate(at time.Time, result *models.QueryResult) {
-	samples, err := SamplesFromResult(result, r.rule.GroupBy)
+	samples, err := SamplesFromResult(result, r.rule.GroupBy, r.rule.Language)
 	if err == nil {
 		var changes []Change
 		if changes, err = Transition(r.rule.Rule, r.tracked(), samples, at); err == nil {

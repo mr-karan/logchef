@@ -50,9 +50,7 @@ const {
   nativeQueryLabel,
   nativeQueryPlaceholder,
   nativeQueryHelpText,
-  generatedQueryLanguageLabel,
-  generatedQuery,
-  conditionError,
+  conditionGroupBy,
   conditionTemplates,
   queryTemplates,
   lookbackWarning,
@@ -101,13 +99,11 @@ function handleClose() {
           :native-query-label="nativeQueryLabel"
           :native-query-placeholder="nativeQueryPlaceholder"
           :native-query-help-text="nativeQueryHelpText"
-          :generated-query-language-label="generatedQueryLanguageLabel"
           :aggregate-field-suggestions="aggregateFieldSuggestions"
           :condition-templates="conditionTemplates"
           :query-templates="queryTemplates"
           :lookback-warning="lookbackWarning"
-          :condition-error="conditionError"
-          :generated-query="generatedQuery"
+          :condition-group-by="conditionGroupBy"
           :is-testing-query="isTestingQuery"
           :test-query-result="testQueryResult"
           :test-query-error="testQueryError"
@@ -167,13 +163,11 @@ function handleClose() {
       :native-query-label="nativeQueryLabel"
       :native-query-placeholder="nativeQueryPlaceholder"
       :native-query-help-text="nativeQueryHelpText"
-      :generated-query-language-label="generatedQueryLanguageLabel"
       :aggregate-field-suggestions="aggregateFieldSuggestions"
       :condition-templates="conditionTemplates"
       :query-templates="queryTemplates"
       :lookback-warning="lookbackWarning"
-      :condition-error="conditionError"
-      :generated-query="generatedQuery"
+      :condition-group-by="conditionGroupBy"
       :is-testing-query="isTestingQuery"
       :test-query-result="testQueryResult"
       :test-query-error="testQueryError"

@@ -36,6 +36,8 @@ type LogQLTranslateResult struct {
 	Error      *ParseError       `json:"error,omitempty"`
 	Conditions []FilterCondition `json:"conditions"`
 	FieldsUsed []string          `json:"fields_used"`
+	// Aggregation describes the result of a metric query. Nil for a log query.
+	Aggregation *AggregationInfo `json:"aggregation,omitempty"`
 }
 
 // logQLMessageField is the log line. LogQL filters it with line filters, never
@@ -86,6 +88,80 @@ func TranslateToLogQL(query string, options LogQLTranslateOptions) *LogQLTransla
 		result.Conditions = extractConditionsFromAST(ast)
 	}
 	return result
+}
+
+// TranslateToLogQLMetric compiles an alert condition, a filter then one
+// count, sum, avg, min or max with no by key, to a LogQL metric query over the
+// last rangeSeconds. Loki runs it as an instant query, so the range ends at the
+// evaluation time. This is the only aggregation the LogQL generator compiles:
+// RFC 0011 defers the rest. A query without an aggregation compiles to its log
+// query with a nil Aggregation, and the caller rejects it.
+func TranslateToLogQLMetric(query string, options LogQLTranslateOptions, rangeSeconds int) *LogQLTranslateResult {
+	result := &LogQLTranslateResult{Conditions: []FilterCondition{}, FieldsUsed: []string{}}
+	ast, perr := parseQuery(query)
+	if perr != nil {
+		result.Error = perr
+		return result
+	}
+	node, _ := ast.(*QueryNode)
+	if node == nil || node.Aggregate == nil {
+		return TranslateToLogQL(query, options)
+	}
+	agg := node.Aggregate
+	if err := checkLogQLMetric(agg); err != nil {
+		result.Error = err
+		return result
+	}
+	filter, perr := generateLogQL(node.Where, options)
+	if perr != nil {
+		result.Error = perr
+		return result
+	}
+	result.Valid = true
+	result.Query = logQLMetricQuery(filter, agg.Aggregates[0], rangeSeconds)
+	result.Aggregation = agg.Info("")
+	result.FieldsUsed = extractFieldsFromAST(ast)
+	result.Conditions = extractConditionsFromAST(ast)
+	return result
+}
+
+// checkLogQLMetric accepts the aggregations that one LogQL range aggregation
+// computes: a single count, sum, avg, min or max of a label, ungrouped.
+func checkLogQLMetric(agg *AggregationNode) *ParseError {
+	unsupported := func(message string) *ParseError {
+		pos := agg.pos
+		return &ParseError{Code: ErrAggregationNotSupported, Message: message, Position: &pos}
+	}
+	if len(agg.Aggregates) != 1 || len(agg.By) > 0 || agg.Sort != nil || agg.Limit > 0 {
+		return unsupported("a Loki alert condition takes one count, sum, avg, min or max with no by, sort or limit. Write a native LogQL query to group")
+	}
+	item := agg.Aggregates[0]
+	switch item.Func {
+	case AggCount:
+		return nil
+	case AggSum, AggAvg, AggMin, AggMax:
+	default:
+		return unsupported(fmt.Sprintf("a Loki alert condition cannot compute %s(). Use count, sum, avg, min or max", item.Func))
+	}
+	if field, ok := item.Field.(string); !ok || !logQLLabelNamePattern.MatchString(field) {
+		return unsupported(fmt.Sprintf("LogQL can unwrap only a field named with letters, digits and underscores, not %s", getFieldName(item.Field)))
+	}
+	return nil
+}
+
+// logQLMetricQuery wraps a log query in the range aggregation of item over
+// [rangeSeconds s], reduced to one series.
+func logQLMetricQuery(filter string, item Aggregate, rangeSeconds int) string {
+	window := fmt.Sprintf("[%ds]", rangeSeconds)
+	if item.Func == AggCount {
+		return fmt.Sprintf("sum(count_over_time(%s %s))", filter, window)
+	}
+	unwrapped := fmt.Sprintf(`%s | unwrap %s | __error__="" %s`, filter, item.Field, window)
+	if item.Func == AggAvg {
+		// avg(avg_over_time(...)) would average the series averages.
+		return fmt.Sprintf("avg_over_time(%s) by ()", unwrapped)
+	}
+	return fmt.Sprintf("%s(%s_over_time(%s))", item.Func, item.Func, unwrapped)
 }
 
 type logQLQuery struct {

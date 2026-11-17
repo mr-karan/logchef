@@ -28,7 +28,7 @@ func TestAlertGroupByValidation(t *testing.T) {
 		{name: "five columns", groupBy: []string{"a", "b", "c", "d", "e"}, want: "at most 4"},
 		{name: "blank name", groupBy: []string{"service", " "}, want: "blank column name"},
 		{name: "repeated name", groupBy: []string{"service", " service "}, want: `"service" twice`},
-		{name: "condition mode", groupBy: []string{"service"}, mode: models.AlertEditorModeCondition, want: "needs a native query"},
+		{name: "condition mode in a native language", groupBy: []string{"service"}, mode: models.AlertEditorModeCondition, want: "needs query_language logchefql"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := newTestCreateAlertRequest()

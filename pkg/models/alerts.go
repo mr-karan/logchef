@@ -78,12 +78,19 @@ func ResolveAlertMetadata(language QueryLanguage, mode AlertEditorMode) (QueryLa
 
 	switch normalizedLanguage {
 	case QueryLanguageClickHouseSQL, QueryLanguageLogsQL, QueryLanguageLogQL:
+		if normalizedMode == "" {
+			normalizedMode = AlertEditorModeNative
+		}
+	case QueryLanguageLogchefQL:
+		// The server compiles a LogchefQL condition at each evaluation.
+		if normalizedMode == "" {
+			normalizedMode = AlertEditorModeCondition
+		}
+		if normalizedMode != AlertEditorModeCondition {
+			return "", "", ErrInvalidAlertQueryConfiguration{Value: "query_language logchefql needs editor_mode condition"}
+		}
 	default:
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(normalizedLanguage)}
-	}
-
-	if normalizedMode == "" {
-		normalizedMode = AlertEditorModeNative
 	}
 
 	if !normalizedMode.Valid() {
