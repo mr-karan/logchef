@@ -1,20 +1,51 @@
 ---
-title: Comparisons
-description: Honest comparisons between Logchef and other log analytics and observability tools, covering architecture, features, and when to choose each.
+title: Logchef Alternatives and Comparisons
+head:
+  - tag: title
+    content: "Logchef Alternatives and Comparisons"
+description: "How Logchef compares to ClickStack, SigNoz, Grafana Loki, Grafana, Elasticsearch and Kibana, OpenObserve, Graylog and Datadog for self-hosted log search."
 ---
 
-Logchef is a query and control-plane UI over ClickHouse, VictoriaLogs or
-Grafana Loki data you already have — it doesn't collect logs or own a schema. That makes it a
-good fit for some teams and the wrong tool for others. These pages compare
-Logchef against adjacent projects on architecture and features, and try to
-be direct about where another tool is the better choice.
+Logchef is a log search, dashboard and alerting UI for log data you already
+store in ClickHouse, VictoriaLogs or Grafana Loki. It does not collect logs
+and does not own your schema. That makes it the right tool for some teams and the wrong
+one for others. Each page below compares architecture, licensing, features
+and cost model, links its sources, and says plainly when the other tool is
+the better choice.
 
-- [Logchef vs ClickStack](/comparisons/logchef-vs-clickstack/) — how Logchef's
-  schema-agnostic log UI compares to ClickStack (HyperDX), ClickHouse's
-  end-to-end observability stack covering logs, traces, metrics, and session
-  replay.
-- [Logchef vs Grafana Loki](/comparisons/logchef-vs-grafana-loki/) — how
-  Logchef's ClickHouse/VictoriaLogs-backed search compares to Loki's
-  label-indexed, object-storage logging, why high-cardinality fields behave
-  differently, how Logchef + VictoriaLogs is itself a Loki alternative, and
-  what Logchef adds when it queries Loki directly.
+## Observability stacks on ClickHouse
+
+- [Logchef vs ClickStack](/comparisons/logchef-vs-clickstack/): ClickHouse's
+  OpenTelemetry stack (formerly HyperDX) for logs, traces, metrics and
+  session replay, compared with a log UI over tables you already have.
+- [Logchef vs SigNoz](/comparisons/logchef-vs-signoz/): an
+  OpenTelemetry-native APM and logs platform on ClickHouse, and whether
+  Logchef can read SigNoz's log tables.
+
+## Grafana
+
+- [Logchef vs Grafana Loki](/comparisons/logchef-vs-grafana-loki/): Logchef
+  as a log UI over the Loki you already run, with LogQL, and when to move
+  logs to ClickHouse or VictoriaLogs for high-cardinality search and SQL.
+- [Logchef vs Grafana](/comparisons/logchef-vs-grafana/): why not just use
+  Grafana with the ClickHouse, VictoriaLogs or Loki data source, and how to
+  run both on the same backend.
+
+## Search-engine log platforms
+
+- [Logchef vs Elasticsearch and Kibana](/comparisons/logchef-vs-elasticsearch/):
+  the ELK stack and OpenSearch, which features need a paid Elastic
+  subscription, and moving logs to ClickHouse or VictoriaLogs.
+- [Logchef vs Graylog](/comparisons/logchef-vs-graylog/): Graylog Open and
+  its paid tiers, its OpenSearch and MongoDB footprint, and its SSPL license.
+- [Logchef vs OpenObserve](/comparisons/logchef-vs-openobserve/): Parquet on
+  object storage, and which of SSO and RBAC the open source edition includes.
+
+## SaaS
+
+- [Logchef vs Datadog Log Management](/comparisons/logchef-vs-datadog/): what
+  a self-hosted Logchef replaces in Datadog's log product, and what it does
+  not.
+
+Moving off one of these tools? See the [migration guides](/migrate/), or
+start with the [quick start](/getting-started/quickstart/).
