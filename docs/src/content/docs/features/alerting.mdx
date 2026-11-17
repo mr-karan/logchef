@@ -302,8 +302,7 @@ twice should drop a repeated id.
   and `history_id` on a test. `triage` is always `null` in this release.
 - `alert.labels` and `alert.annotations` hold the rule's own pairs only.
 - Each group sends its own request, so `instances` holds one entry and
-  `instances_omitted` is 0. The array leaves room for one request per rule
-  later, without a change to any field.
+  `instances_omitted` is 0.
 - `title` is at most 200 characters.
 
 **Payload version 1** is the payload of Logchef 2.7 and earlier, byte for

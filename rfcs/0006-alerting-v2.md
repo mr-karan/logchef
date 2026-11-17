@@ -151,7 +151,7 @@ A webhook URL is a secret because it often carries a token. The API returns `sec
 | `id` | bigint, primary key | Also the send order |
 | `destination_id` | bigint, references `notification_destinations` on delete cascade | |
 | `producer` | text | `alert` |
-| `producer_ref` | text | For alerts, `<alert_id>:<history_id>` or `<alert_id>:tick:<unix>` |
+| `producer_ref` | text | For alerts, `<alert_id>:<history_id>`: the episode of the one group that the message is about |
 | `recipient` | text, default `''` | For an `email` destination, one recipient: `user:<id>` or an address. Empty for other types. |
 | `sequence_key` | text | Rows with the same destination, recipient and sequence key go out in `id` order |
 | `event` | text | `firing`, `resolved`, `no_data` or `test` |
@@ -543,17 +543,15 @@ func (m *Mailer) Send(ctx context.Context, to string, msg MailMessage) error
 func ExpandEmailDestination(ctx context.Context, db store.StoreOps, id models.DestinationID) ([]Recipient, error)
 ```
 
-Each sender renders `Message` into its wire format. `internal/alerts` builds the messages and never sees a destination type, with one exception: a destination type declares whether it wants one message per group.
+Each sender renders `Message` into its wire format. `internal/alerts` builds the messages and never sees a destination type. Every destination type gets one message per group that changed: a tick in which three groups change sends three messages to each destination. See "Changes after build".
 
 | Type | Messages per tick | Wire format |
 |---|---|---|
-| `email` | One per rule and recipient, listing the groups that changed | The existing HTML template, with a group table |
-| `slack` | One per rule | `POST` to the webhook URL with `text` and Block Kit `blocks` |
-| `webhook`, version 2 | One per rule | The version 2 JSON below |
+| `email` | One per group and recipient | Plain text (`text/plain`), as before. The subject names the group and the event. |
+| `slack` | One per group | `POST` to the webhook URL with `text` and Block Kit `blocks` |
+| `webhook`, version 2 | One per group | The version 2 JSON below |
 | `webhook`, version 1 | One per group | The existing payload, unchanged |
 | `pagerduty` | One per group | Events API v2, one `dedup_key` per group |
-
-A message that lists groups shows at most 20 and states how many it left out.
 
 **The drain.** `notify.deliver` is one job with the key `default`, an interval of 10 seconds and a timeout of 2 minutes. The job decides when a drain runs. It does not decide who may send a row, because the runner allows two handlers to overlap after a stall. Each row has its own reservation.
 
@@ -644,7 +642,7 @@ The marker is conservative. A crash after the marker and before the connection a
 	"version": 2,
 	"kind": "alert",
 	"event": "firing",
-	"title": "High error rate: 2 groups firing",
+	"title": "High error rate: service=checkout firing",
 	"url": "https://logchef.example.com/logs/alerts/42?source=7",
 	"severity": "critical",
 	"sent_at": "2026-11-15T10:00:03Z",
@@ -665,7 +663,7 @@ The marker is conservative. A crash after the marker and before the connection a
 	"triage": null
 }
 ```
-`status` in an instance is `firing`, `resolved` or `no_data`.
+`status` in an instance is `firing`, `resolved` or `no_data`. `instances` holds the one group of the message, so `instances_omitted` is always 0.
 
 ### Migration of existing alerts and of the webhook payload
 
@@ -910,7 +908,7 @@ A rule update that adds a destination checks that the editor can use it. Destina
 | Recipients per email destination | 20, users and addresses together | 400 on save |
 | Delivery reservation | 2 minutes, with a 60-second deadline per send | A slower send is taken over and may arrive twice |
 | Silent group | Forgotten after 24 hours without a row | Its episode resolves with the reason |
-| Delivery message | 256 KiB | The group list is cut and the message says how many were left out |
+| Delivery message | 256 KiB | Not sent. `Enqueue` writes the row as `failed` with the size in its error, so the evaluation still commits. |
 | Delivery attempts | 5 over about 43 minutes | The history row shows `failed` with the last error |
 | Send timeout | `alerts.request_timeout`, default 5 seconds | Counts as a transient failure |
 | Drain batch | 50 rows, 4 at once | Deliveries wait for the next run, at most 10 seconds |
@@ -1122,7 +1120,7 @@ Four tracks can run in parallel after A1: A (A2 to A5), J (J1, then J2), S (S1, 
 **D4. Slack sender.** Depends on D2. Parallel with D5 and D6.
 
 - Creates `internal/notify/slack.go` and its test. Edits `DestinationForm.vue`.
-- Check: a golden test of the body for a firing message with two groups. Tests for `ok`, for `no_service` as permanent and for 429 with `Retry-After`. A test that a URL on another host is refused on save.
+- Check: a golden test of the body for a firing message of one group. Tests for `ok`, for `no_service` as permanent and for 429 with `Retry-After`. A test that a URL on another host is refused on save.
 
 **D5. PagerDuty sender.** Depends on D2.
 
@@ -1163,6 +1161,12 @@ Four tracks can run in parallel after A1: A (A2 to A5), J (J1, then J2), S (S1, 
 
 - Edits `evaluate.go` (compile at each evaluation), `internal/core/alerts.go`, `useAlertForm.ts` (delete the query generator), `AlertQuerySection.vue` (enable **Group by** in condition mode).
 - Check: a grouped LogchefQL rule fires per group on both dev backends, an existing condition-mode rule returns the same value before and after, and a backtest of a LogchefQL rule runs by replay.
+
+## Changes after build
+
+- **One message per group, for every destination type.** The design sent email, Slack and webhook version 2 one message per rule and tick that listed up to 20 groups. The build sends one message per group to every destination type, as webhook version 1 and PagerDuty already did, and Karan kept that. With one group per message, a silence holds or cancels a queued delivery for exactly the group it mutes, and history finds each delivery by its episode ref, `<alert_id>:<history_id>` (`DeliveryRef` in `internal/alerts/messages.go`). A message that listed several groups would belong to no single episode, and a silence on one of its groups would hold back the others. The cost is volume: a tick in which many groups change sends that many messages to a channel or an inbox. The 20-group list and the cut group list are gone. Webhook version 2 keeps the `instances` array, with one entry.
+- **A message over 256 KiB is not sent.** With one group per message there is no group list to cut, and a cut would change the version 1 payload. `Enqueue` writes the row as `failed` with the size in its error, so the transaction that produced it still commits and history shows why (`internal/notify/queue.go`, #345).
+- **Email is plain text.** Alert email has always been `text/plain` (`internal/notify/mailer.go`). The design's "existing HTML template" did not exist, and none was added.
 
 ## Open questions for Karan
 
