@@ -1134,7 +1134,7 @@ WHERE d.id = $1;
 -- name: ListDashboardSummaries :many
 -- List every dashboard's summary, newest-updated first, from the derived
 -- columns and never from panels_json. A name or description from before the
--- bound is cut to it.
+-- bound is cut to it. report_count is the number of reports a delete removes.
 SELECT
     d.id,
     left(d.name, 200)::text AS name,
@@ -1151,7 +1151,8 @@ SELECT
     d.summary_revision,
     d.summary_version,
     u.email AS created_by_email,
-    u.full_name AS created_by_name
+    u.full_name AS created_by_name,
+    (SELECT COUNT(*) FROM reports r WHERE r.dashboard_id = d.id) AS report_count
 FROM dashboards d
 LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC;

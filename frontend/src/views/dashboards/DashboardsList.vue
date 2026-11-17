@@ -233,6 +233,13 @@ function confirmDelete(d: DashboardSummary) {
   deleteOpen.value = true;
 }
 
+// A dashboard's reports are deleted with it, so the dialog says how many go.
+const deleteDescription = computed(() => {
+  const d = deleteTarget.value;
+  const base = t("pages.deleteDashboardConfirmation", { name: d?.name ?? "" });
+  return d?.report_count ? `${base} ${t("dashboards.deleteRemovesReports", { count: d.report_count }, d.report_count)}` : base;
+});
+
 async function doDelete() {
   if (!deleteTarget.value) return;
   await store.deleteDashboard(deleteTarget.value.id);
@@ -481,7 +488,7 @@ function deleteAction(d: DashboardSummary) {
     <ConfirmDialog
       v-model:open="deleteOpen"
       :title="t('ui.deleteDashboard')"
-      :description="t('pages.deleteDashboardConfirmation', { name: deleteTarget?.name ?? '' })"
+      :description="deleteDescription"
       :confirm-text="t('ui.delete')"
       destructive
       @confirm="doDelete"

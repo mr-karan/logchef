@@ -495,6 +495,7 @@
   "explore.noMatches": "No hay logs que coincidan con «{search}»",
   "dashboards.noMatches": "Ningún panel coincide con «{search}»",
   "dashboards.panelCount": "{count} panel | {count} paneles",
+  "dashboards.deleteRemovesReports": "Su {count} informe programado se elimina con él. | Sus {count} informes programados se eliminan con él.",
   "dashboards.sortBy": "Ordenar por",
   "dashboards.sortRecentlyUpdated": "Actualizados recientemente",
   "dashboards.sortRecentlyCreated": "Creados recientemente",

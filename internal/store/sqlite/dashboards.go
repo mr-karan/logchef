@@ -107,6 +107,7 @@ func (db *DB) ListDashboardSummaries(ctx context.Context) ([]*models.DashboardSu
 			CreatedByName:   r.CreatedByName.String,
 			Revision:        int(r.Revision),
 			Corrupt:         r.PanelsCorrupt != 0,
+			ReportCount:     int(r.ReportCount),
 			Timestamps:      models.Timestamps{CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt},
 			PanelTeamIDs:    teams,
 			SummaryRevision: int(r.SummaryRevision),

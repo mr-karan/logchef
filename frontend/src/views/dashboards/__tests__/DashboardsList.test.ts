@@ -38,6 +38,7 @@ function summary(id: number, overrides: Partial<DashboardSummary> = {}): Dashboa
     revision: 1,
     can_edit: true,
     corrupt: false,
+    report_count: 0,
     created_at: "2026-07-08T00:00:00Z",
     updated_at: "2026-07-08T00:00:00Z",
     ...overrides,
@@ -207,6 +208,21 @@ describe("DashboardsList", () => {
     const labels = items.map((i) => i.textContent?.trim());
     expect(labels).not.toContain(i18n.global.t("ui.duplicate"));
     expect(labels).toContain(i18n.global.t("ui.delete"));
+  });
+
+  it("says in the delete dialog how many reports go with the dashboard", async () => {
+    await mount([summary(1, { report_count: 3 }), summary(2)]);
+    const [withReports, without] = cards();
+    await clickMenuItem(withReports, i18n.global.t("ui.delete"));
+    let confirm = document.querySelector<HTMLElement>("[role=alertdialog]");
+    expect(confirm?.textContent).toContain("Its 3 scheduled reports are deleted with it.");
+    (document.activeElement as HTMLElement | null)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[role=alertdialog]")).toBeNull());
+
+    await clickMenuItem(without, i18n.global.t("ui.delete"));
+    confirm = document.querySelector<HTMLElement>("[role=alertdialog]");
+    expect(confirm?.textContent).toContain("Board 2");
+    expect(confirm?.textContent).not.toContain("scheduled report");
   });
 
   it("creates an empty dashboard as a schema 2 blob", async () => {

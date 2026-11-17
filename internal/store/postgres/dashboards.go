@@ -97,6 +97,7 @@ func (s *Store) ListDashboardSummaries(ctx context.Context) ([]*models.Dashboard
 			CreatedByName:   textStr(r.CreatedByName),
 			Revision:        int(r.Revision),
 			Corrupt:         r.PanelsCorrupt,
+			ReportCount:     int(r.ReportCount),
 			Timestamps:      models.Timestamps{CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time},
 			CreatedBy:       userIDPtr(r.CreatedBy),
 			PanelTeamIDs:    teams,

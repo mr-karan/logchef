@@ -202,6 +202,8 @@ export interface DashboardSummary {
   revision: number;
   can_edit: boolean;
   corrupt: boolean;
+  /** The reports a delete removes with the dashboard; 0 for a caller who cannot delete it. */
+  report_count: number;
   created_at: string;
   updated_at: string;
 }

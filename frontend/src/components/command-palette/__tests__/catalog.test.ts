@@ -24,7 +24,7 @@ function apiSource(id: number): Source {
 }
 
 function dashboard(id: number): DashboardSummary {
-  return { id, revision: 1, name: `Board ${id}`, description: '', panel_count: 0, panel_types: [], tab_count: 1, can_edit: true, corrupt: false, created_at: '', updated_at: '' }
+  return { id, revision: 1, name: `Board ${id}`, description: '', panel_count: 0, panel_types: [], tab_count: 1, can_edit: true, corrupt: false, report_count: 0, created_at: '', updated_at: '' }
 }
 
 function collection(id: number): Collection {

@@ -210,7 +210,19 @@ func testReportDeletedSource(t *testing.T, ctx context.Context, s store.Store) {
 			t.Errorf("deleted reports on %s = %d, %v, want %d", what, n, err, want)
 		}
 	}
-	deleted("a dashboard without reports", s.DeleteDashboardReports, mkReportDashboard(t, ctx, s, owner).ID, 0)
+	empty := mkReportDashboard(t, ctx, s, owner)
+	summaries, err := s.ListDashboardSummaries(ctx)
+	if err != nil {
+		t.Fatalf("ListDashboardSummaries: %v", err)
+	}
+	counts := map[int]int{}
+	for _, d := range summaries {
+		counts[d.ID] = d.ReportCount
+	}
+	if counts[dash.ID] != 1 || counts[empty.ID] != 0 {
+		t.Errorf("summary report_count = %d and %d, want 1 for the dashboard with a report and 0 for the empty one", counts[dash.ID], counts[empty.ID])
+	}
+	deleted("a dashboard without reports", s.DeleteDashboardReports, empty.ID, 0)
 	deleted("a missing dashboard", s.DeleteDashboardReports, 1<<30, 0)
 	deleted("the saved query", s.DeleteSavedQueryReports, sq.ID, 1)
 	deleted("the saved query again", s.DeleteSavedQueryReports, sq.ID, 0)

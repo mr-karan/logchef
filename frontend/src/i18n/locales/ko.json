@@ -495,6 +495,7 @@
   "explore.noMatches": "“{search}”와 일치하는 로그가 없습니다",
   "dashboards.noMatches": "“{search}”와 일치하는 대시보드가 없습니다",
   "dashboards.panelCount": "패널 {count}개",
+  "dashboards.deleteRemovesReports": "예약된 보고서 {count}개도 함께 삭제됩니다.",
   "dashboards.sortBy": "정렬 기준",
   "dashboards.sortRecentlyUpdated": "최근 업데이트",
   "dashboards.sortRecentlyCreated": "최근 생성",

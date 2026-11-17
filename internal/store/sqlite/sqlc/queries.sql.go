@@ -4735,7 +4735,8 @@ SELECT
     d.summary_revision,
     d.summary_version,
     u.email AS created_by_email,
-    u.full_name AS created_by_name
+    u.full_name AS created_by_name,
+    (SELECT COUNT(*) FROM reports r WHERE r.dashboard_id = d.id) AS report_count
 FROM dashboards d
 LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC
@@ -4758,11 +4759,12 @@ type ListDashboardSummariesRow struct {
 	SummaryVersion  int64          `json:"summary_version"`
 	CreatedByEmail  sql.NullString `json:"created_by_email"`
 	CreatedByName   sql.NullString `json:"created_by_name"`
+	ReportCount     int64          `json:"report_count"`
 }
 
 // List every dashboard's summary, newest-updated first, from the derived
 // columns and never from panels_json. A name or description from before the
-// bound is cut to it.
+// bound is cut to it. report_count is the number of reports a delete removes.
 func (q *Queries) ListDashboardSummaries(ctx context.Context) ([]ListDashboardSummariesRow, error) {
 	rows, err := q.query(ctx, q.listDashboardSummariesStmt, listDashboardSummaries)
 	if err != nil {
@@ -4789,6 +4791,7 @@ func (q *Queries) ListDashboardSummaries(ctx context.Context) ([]ListDashboardSu
 			&i.SummaryVersion,
 			&i.CreatedByEmail,
 			&i.CreatedByName,
+			&i.ReportCount,
 		); err != nil {
 			return nil, err
 		}
