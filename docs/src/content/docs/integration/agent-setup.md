@@ -1,5 +1,8 @@
 ---
 title: Agent Setup
+head:
+  - tag: title
+    content: "AI Agent Setup for Log Search | Logchef"
 description: Connect Claude Code, Codex, Cursor, Claude.ai, and ChatGPT to Logchef. Use the CLI for a read-only setup preview, or the built-in MCP endpoint with OAuth.
 ---
 

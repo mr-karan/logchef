@@ -1,5 +1,8 @@
 ---
 title: Query Examples
+head:
+  - tag: title
+    content: "ClickHouse SQL Log Query Examples | Logchef"
 description: Practical LogchefQL query examples for common log analytics scenarios, from basic filters to more advanced field searches.
 ---
 

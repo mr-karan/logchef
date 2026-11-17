@@ -34,6 +34,7 @@ export default defineConfig({
       // Header override: adds a "Blog" link next to the social icons in the
       // top-right of the docs header (keeps it out of the sidebar).
       components: {
+        Head: "./src/components/starlight/Head.astro",
         SocialIcons: "./src/components/starlight/SocialIcons.astro",
       },
       // "<Page title> | Logchef" for all docs pages.
@@ -113,8 +114,7 @@ Key areas of the docs:
           tag: "meta",
           attrs: { name: "twitter:image:alt", content: "Logchef log explorer" },
         },
-        // Sitewide JSON-LD (WebSite + Organization). Per-page structured data
-        // (e.g. Article/BreadcrumbList) is left to whoever owns BaseLayout.astro.
+        // Sitewide JSON-LD. The Head override adds per-page breadcrumbs.
         {
           tag: "script",
           attrs: { type: "application/ld+json" },

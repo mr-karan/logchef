@@ -1,5 +1,8 @@
 ---
 title: Aggregations
+head:
+  - tag: title
+    content: "LogchefQL Log Aggregations | Logchef"
 description: Count, sum, average and take percentiles of matching logs with a LogchefQL aggregation pipe. The same query runs on ClickHouse and VictoriaLogs.
 ---
 

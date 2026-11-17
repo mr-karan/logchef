@@ -1,5 +1,8 @@
 ---
 title: LogsQL Queries
+head:
+  - tag: title
+    content: "VictoriaLogs LogsQL Queries | Logchef"
 description: Use native LogsQL in Logchef against VictoriaLogs — common query patterns, how LogchefQL compiles to LogsQL, and tenancy/scope behavior.
 ---
 

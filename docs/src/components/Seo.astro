@@ -56,6 +56,7 @@ const jsonLd = {
       "@id": appId,
       name: "Logchef",
       applicationCategory: "DeveloperApplication",
+      license: "https://www.gnu.org/licenses/agpl-3.0.html",
       operatingSystem: "Linux, macOS, Windows",
       description:
         "Open-source, self-hosted log exploration and alerting UI that connects to existing ClickHouse or VictoriaLogs data without owning ingestion or forcing a schema.",
@@ -83,7 +84,7 @@ const jsonLd = {
       name: "Logchef",
       codeRepository: githubUrl,
       license: "https://www.gnu.org/licenses/agpl-3.0.html",
-      programmingLanguage: ["Go", "TypeScript"],
+      programmingLanguage: ["Go", "TypeScript", "Rust"],
       isPartOf: { "@id": appId },
     },
   ],

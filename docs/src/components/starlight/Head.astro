@@ -1,0 +1,23 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+
+const { entry } = Astro.locals.starlightRoute;
+const breadcrumbs = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Home', item: new URL('/', Astro.site).href },
+    {
+      '@type': 'ListItem',
+      position: 2,
+      name: entry.data.title,
+      item: new URL(Astro.url.pathname, Astro.site).href,
+    },
+  ],
+};
+---
+
+<DefaultHead />
+{Astro.url.pathname !== '/404' && Astro.url.pathname !== '/404/' && (
+  <script type="application/ld+json" set:html={JSON.stringify(breadcrumbs).replace(/</g, '\\u003c')} />
+)}

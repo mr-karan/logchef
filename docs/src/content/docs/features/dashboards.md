@@ -1,5 +1,8 @@
 ---
 title: Dashboards
+head:
+  - tag: title
+    content: "ClickHouse and VictoriaLogs Dashboards | Logchef"
 description: Build multi-panel Logchef dashboards that group log-query visualizations into a shared grid with one time range and auto-refresh.
 ---
 

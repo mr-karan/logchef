@@ -74,9 +74,11 @@ const jsonLd = {
 ---
 
 <BaseLayout
-  title={`${post.data.title} — Logchef Blog`}
+  title={`${post.data.title} | Logchef`}
   description={post.data.description}
   activeNav="blog"
+  type="article"
+  image={heroImageUrl}
 >
   <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
 

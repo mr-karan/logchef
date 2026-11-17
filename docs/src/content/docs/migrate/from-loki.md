@@ -1,5 +1,8 @@
 ---
 title: From Loki
+head:
+  - tag: title
+    content: "Migrate Logs from Grafana Loki | Logchef"
 description: Query an existing Loki from Logchef, or move Loki log analytics to ClickHouse or VictoriaLogs, with the pipeline change, label-to-column mapping and LogQL to LogchefQL/SQL examples.
 ---
 

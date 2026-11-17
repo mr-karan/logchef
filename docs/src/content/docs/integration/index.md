@@ -1,6 +1,9 @@
 ---
 title: Integrations
-description: How to get logs into ClickHouse or VictoriaLogs so Logchef can query them — shippers, schemas, and the CLI/MCP tooling.
+head:
+  - tag: title
+    content: "Log Ingestion and Tool Integrations | Logchef"
+description: "Send logs to ClickHouse or VictoriaLogs with Vector and OpenTelemetry, then query them with Logchef through the web UI, CLI, or MCP server."
 ---
 
 Logchef is a query and control plane for logs that already live in ClickHouse or VictoriaLogs — it doesn't collect or ship logs itself. Getting logs in front of Logchef is a three-step pipeline:
