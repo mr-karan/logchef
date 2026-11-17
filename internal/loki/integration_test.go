@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/datasource/providertest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -541,5 +542,35 @@ func TestIntegrationEvaluateAlert(t *testing.T) {
 				t.Errorf("%s = %s, want %s", query, got, want)
 			}
 		}
+	})
+}
+
+func TestIntegrationProviderConformance(t *testing.T) {
+	url := integrationURL(t)
+	runID := newRunID(t)
+	tenant := "logchef-" + runID
+	selector := `{test_run="` + runID + `"}`
+	p := testProvider()
+	t.Cleanup(func() { _ = p.Close() })
+	providertest.Run(t, providertest.Harness{
+		Provider: p,
+		Source:   testSource(t, models.LokiConnectionInfo{BaseURL: url, TenantID: tenant, Selector: selector}),
+		Language: models.QueryLanguageLogQL,
+		// level is a stream label, as on the dev seed.
+		Ingest: func(t *testing.T, rows []providertest.Row) {
+			var streams []pushStream
+			for _, row := range rows {
+				streams = append(streams, pushStream{
+					Stream: map[string]string{"service_name": "it-conformance", "test_run": runID, "level": row.Level},
+					Values: [][2]string{{fmt.Sprint(row.Time.UnixNano()), row.Message}},
+				})
+			}
+			push(t, url, tenant, streams)
+		},
+		Queries: providertest.Queries{
+			All:        selector,
+			Count:      `sum(count_over_time(` + selector + ` [1h]))`,
+			LevelError: `{test_run="` + runID + `", level="error"}`,
+		},
 	})
 }
