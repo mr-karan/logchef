@@ -254,7 +254,7 @@ func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this query", models.AuthorizationErrorType)
 	}
 
-	deleted, delErr := core.DeleteSavedQuery(c.Context(), s.store, s.log, query.ID)
+	deleted, reports, delErr := core.DeleteSavedQuery(c.Context(), s.store, s.log, query.ID)
 	if errors.Is(delErr, core.ErrQueryNotFound) {
 		return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 	}
@@ -262,6 +262,7 @@ func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete saved query", models.GeneralErrorType)
 	}
 	auditSet(c, audit.SavedQueryTarget(deleted), audit.SavedQueryFields(deleted), nil)
+	auditDetail(c, "reports_removed", reports)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Saved query deleted successfully"})
 }
 

@@ -290,25 +290,30 @@ func UpdateSavedQuery(ctx context.Context, db store.Store, ds *datasource.Servic
 	return before, after, nil
 }
 
-// DeleteSavedQuery removes a saved query and returns the row it deleted, read
-// under the row lock of the delete.
-func DeleteSavedQuery(ctx context.Context, db store.Store, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
+// DeleteSavedQuery removes a saved query. It returns the row it deleted, read
+// under the row lock of the delete, and the number of reports the delete
+// removed with it.
+func DeleteSavedQuery(ctx context.Context, db store.Store, log *slog.Logger, queryID int) (*models.SavedQuery, int, error) {
 	var deleted *models.SavedQuery
+	var reports int
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		var err error
 		if deleted, err = tx.GetSavedQueryForUpdate(ctx, queryID); err != nil {
+			return err
+		}
+		if reports, err = tx.DeleteSavedQueryReports(ctx, queryID); err != nil {
 			return err
 		}
 		return tx.DeleteSavedQuery(ctx, queryID)
 	})
 	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, ErrQueryNotFound
+			return nil, 0, ErrQueryNotFound
 		}
 		log.Error("failed to delete saved query", "error", err, "query_id", queryID)
-		return nil, fmt.Errorf("error deleting saved query: %w", err)
+		return nil, 0, fmt.Errorf("error deleting saved query: %w", err)
 	}
-	return deleted, nil
+	return deleted, reports, nil
 }
 
 // ListSavedQueriesForUser returns every saved query the user can see (cross-team, source-mediated).

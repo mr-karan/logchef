@@ -205,7 +205,7 @@ func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this dashboard", models.AuthorizationErrorType)
 	}
 
-	deleted, delErr := core.DeleteDashboard(c.Context(), s.store, s.log, id)
+	deleted, reports, delErr := core.DeleteDashboard(c.Context(), s.store, s.log, id)
 	if delErr != nil {
 		if errors.Is(delErr, core.ErrDashboardNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Dashboard not found", models.NotFoundErrorType)
@@ -213,5 +213,6 @@ func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete dashboard", models.GeneralErrorType)
 	}
 	auditSet(c, audit.DashboardTarget(deleted.ID, deleted.Name), audit.DashboardFields(deleted), nil)
+	auditDetail(c, "reports_removed", reports)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Dashboard deleted"})
 }

@@ -1855,6 +1855,21 @@ SELECT * FROM reports WHERE id = sqlc.arg(id);
 -- name: ListReports :many
 SELECT * FROM reports ORDER BY name, id;
 
+-- name: LockDashboardKey :one
+-- FOR UPDATE, unlike LockDashboard, conflicts with the key share lock of a
+-- foreign key check, so no report can be added to the dashboard until the
+-- transaction ends.
+SELECT id FROM dashboards WHERE id = sqlc.arg(id) FOR UPDATE;
+
+-- name: LockSavedQueryKey :one
+SELECT id FROM saved_queries WHERE id = sqlc.arg(id) FOR UPDATE;
+
+-- name: DeleteDashboardReports :execrows
+DELETE FROM reports WHERE dashboard_id = sqlc.arg(dashboard_id);
+
+-- name: DeleteSavedQueryReports :execrows
+DELETE FROM reports WHERE saved_query_id = sqlc.arg(saved_query_id);
+
 -- name: ListReportsByOwner :many
 SELECT * FROM reports WHERE owner_id = sqlc.arg(owner_id) ORDER BY name, id;
 

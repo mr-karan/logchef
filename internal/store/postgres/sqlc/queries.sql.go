@@ -1641,6 +1641,18 @@ func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) 
 	return id_2, err
 }
 
+const deleteDashboardReports = `-- name: DeleteDashboardReports :execrows
+DELETE FROM reports WHERE dashboard_id = $1
+`
+
+func (q *Queries) DeleteDashboardReports(ctx context.Context, dashboardID pgtype.Int8) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDashboardReports, dashboardID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
 WHERE expires_at < $1
@@ -1791,6 +1803,18 @@ DELETE FROM saved_queries WHERE id = $1
 func (q *Queries) DeleteSavedQuery(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, deleteSavedQuery, id)
 	return err
+}
+
+const deleteSavedQueryReports = `-- name: DeleteSavedQueryReports :execrows
+DELETE FROM reports WHERE saved_query_id = $1
+`
+
+func (q *Queries) DeleteSavedQueryReports(ctx context.Context, savedQueryID pgtype.Int8) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSavedQueryReports, savedQueryID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteSavedView = `-- name: DeleteSavedView :one
@@ -6506,6 +6530,20 @@ func (q *Queries) LockDashboard(ctx context.Context, id int64) (int64, error) {
 	return id_2, err
 }
 
+const lockDashboardKey = `-- name: LockDashboardKey :one
+SELECT id FROM dashboards WHERE id = $1 FOR UPDATE
+`
+
+// FOR UPDATE, unlike LockDashboard, conflicts with the key share lock of a
+// foreign key check, so no report can be added to the dashboard until the
+// transaction ends.
+func (q *Queries) LockDashboardKey(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDashboardKey, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const lockMembershipWrites = `-- name: LockMembershipWrites :exec
 SELECT pg_advisory_xact_lock($1)
 `
@@ -6536,6 +6574,17 @@ SELECT id FROM saved_queries WHERE id = $1 FOR NO KEY UPDATE
 // Lock a saved query row until the transaction ends
 func (q *Queries) LockSavedQuery(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRow(ctx, lockSavedQuery, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const lockSavedQueryKey = `-- name: LockSavedQueryKey :one
+SELECT id FROM saved_queries WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockSavedQueryKey(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockSavedQueryKey, id)
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err

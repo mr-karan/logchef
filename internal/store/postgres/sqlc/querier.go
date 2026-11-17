@@ -129,6 +129,7 @@ type Querier interface {
 	DeleteCollection(ctx context.Context, id int64) error
 	// Delete a dashboard; RETURNING lets callers detect not-found.
 	DeleteDashboard(ctx context.Context, id int64) (int64, error)
+	DeleteDashboardReports(ctx context.Context, dashboardID pgtype.Int8) (int64, error)
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt pgtype.Timestamptz) error
 	DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt pgtype.Timestamptz) error
@@ -150,6 +151,7 @@ type Querier interface {
 	DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error)
 	// Delete a saved query
 	DeleteSavedQuery(ctx context.Context, id int64) error
+	DeleteSavedQueryReports(ctx context.Context, savedQueryID pgtype.Int8) (int64, error)
 	DeleteSavedView(ctx context.Context, id int64) (int64, error)
 	DeleteSchemaAdvisorDismissal(ctx context.Context, arg DeleteSchemaAdvisorDismissalParams) (int64, error)
 	// Delete a session by ID
@@ -406,6 +408,10 @@ type Querier interface {
 	LockCollection(ctx context.Context, id int64) (int64, error)
 	// Lock a dashboard row until the transaction ends
 	LockDashboard(ctx context.Context, id int64) (int64, error)
+	// FOR UPDATE, unlike LockDashboard, conflicts with the key share lock of a
+	// foreign key check, so no report can be added to the dashboard until the
+	// transaction ends.
+	LockDashboardKey(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock
 	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	// Holds the report row until the transaction ends, so two replacements of
@@ -413,6 +419,7 @@ type Querier interface {
 	LockReport(ctx context.Context, id int64) (int64, error)
 	// Lock a saved query row until the transaction ends
 	LockSavedQuery(ctx context.Context, id int64) (int64, error)
+	LockSavedQueryKey(ctx context.Context, id int64) (int64, error)
 	// Hold a transaction-scoped advisory lock, which also covers a key with no row
 	LockSettingWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	// Records an evaluation and the rule's summary state. last_triggered_at moves

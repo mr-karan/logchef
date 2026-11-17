@@ -1671,6 +1671,18 @@ func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) 
 	return id_2, err
 }
 
+const deleteDashboardReports = `-- name: DeleteDashboardReports :execrows
+DELETE FROM reports WHERE dashboard_id = ?1
+`
+
+func (q *Queries) DeleteDashboardReports(ctx context.Context, dashboardID sql.NullInt64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteDashboardReportsStmt, deleteDashboardReports, dashboardID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
 WHERE expires_at < CAST(?1 AS TEXT)
@@ -1821,6 +1833,18 @@ DELETE FROM saved_queries WHERE id = ?
 func (q *Queries) DeleteSavedQuery(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.deleteSavedQueryStmt, deleteSavedQuery, id)
 	return err
+}
+
+const deleteSavedQueryReports = `-- name: DeleteSavedQueryReports :execrows
+DELETE FROM reports WHERE saved_query_id = ?1
+`
+
+func (q *Queries) DeleteSavedQueryReports(ctx context.Context, savedQueryID sql.NullInt64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteSavedQueryReportsStmt, deleteSavedQueryReports, savedQueryID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteSavedView = `-- name: DeleteSavedView :one

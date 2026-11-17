@@ -263,6 +263,46 @@ func TestReportRoutesAudit(t *testing.T) {
 	}
 }
 
+// A report that goes with its saved query or dashboard records no event of
+// its own: the delete event of its source counts it in detail.reports_removed.
+func TestReportSourceDeleteAudit(t *testing.T) {
+	e := newReportRouteEnv(t, true)
+	ctx := context.Background()
+	e.create("Daily 5xx")
+	e.create("Weekly 5xx")
+	dash := &models.Dashboard{Name: "Payments", PanelsJSON: json.RawMessage(`{"version":1,"layout":[],"panels":[]}`), CreatedBy: &e.owner.ID}
+	if err := e.db.CreateDashboard(ctx, dash); err != nil {
+		t.Fatal(err)
+	}
+	onDash := &models.Report{Name: "Board", OwnerID: &e.owner.ID, SourceKind: models.ReportSourceDashboard, DashboardID: &dash.ID, Schedule: models.ReportSchedule{Frequency: models.ReportHourly}, Timezone: "UTC", RangeAnchor: models.ReportAnchorSendTime, MaxRows: 25}
+	if err := e.db.CreateReport(ctx, onDash); err != nil {
+		t.Fatal(err)
+	}
+
+	e.expect(e.owner, http.MethodDelete, fmt.Sprintf("/api/v1/saved-queries/%d", e.sq.ID), "", http.StatusOK)
+	e.expect(e.owner, http.MethodDelete, fmt.Sprintf("/api/v1/dashboards/%d", dash.ID), "", http.StatusOK)
+
+	got, err := e.db.ListAuditEvents(ctx, models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"saved_query.delete": `"reports_removed":2`, "dashboard.delete": `"reports_removed":1`}
+	for _, ev := range got {
+		switch ev.Action {
+		case "report.delete":
+			t.Errorf("a report removed with its source recorded %s on %s", ev.Action, ev.TargetID)
+		case "saved_query.delete", "dashboard.delete":
+			if !strings.Contains(string(ev.Detail), want[ev.Action]) {
+				t.Errorf("%s detail = %s, want %s", ev.Action, ev.Detail, want[ev.Action])
+			}
+			delete(want, ev.Action)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("missing delete events %v in %+v", want, got)
+	}
+}
+
 // A run started over HTTP goes through the server's own wiring to
 // delivery: with a datasource that answers and no SMTP settings, it ends
 // failed with smtp_not_configured.
