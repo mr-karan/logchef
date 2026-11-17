@@ -111,6 +111,13 @@ func RecordJobRun(kind, result string) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
+// RecordNotificationDelivery counts one delivery attempt. result is "sent",
+// "retry", "failed", "unknown" or "reservation_lost".
+func RecordNotificationDelivery(destinationType, result string) {
+	labels := fmt.Sprintf(`logchef_notification_deliveries_total{type=%q,result=%q}`, destinationType, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
 // RecordQueryShape counts one query offered to the schema advisor's shape
 // rollup. result is "analyzed", "unanalyzed", "overflow" or "error".
 func RecordQueryShape(result string) {

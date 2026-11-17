@@ -2,9 +2,10 @@ package alerts
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,19 +16,11 @@ import (
 )
 
 // messageContext holds what every message of one evaluation shares, so a
-// grouped rule reads the source, the destinations and the settings once.
+// grouped rule reads the source and the settings once.
 type messageContext struct {
 	alert        *models.Alert
 	sourceName   string
-	targets      targets
 	generatorURL string
-}
-
-// targets are the resolved targets of a rule's destinations.
-type targets struct {
-	webhooks []WebhookTarget
-	emails   []EmailTarget
-	unusable []UnusableTarget
 }
 
 func (m *Manager) newMessageContext(ctx context.Context, alert *models.Alert) *messageContext {
@@ -36,13 +29,6 @@ func (m *Manager) newMessageContext(ctx context.Context, alert *models.Alert) *m
 		mc.sourceName = source.Name
 	} else {
 		m.log.Warn("failed to fetch source name for alert metadata", "source_id", alert.SourceID, "error", err)
-	}
-	destinations, err := m.db.ListAlertDestinations(ctx, alert.ID)
-	if err != nil {
-		m.log.Error("failed to load alert destinations", "alert_id", alert.ID, "error", err)
-		mc.targets.unusable = []UnusableTarget{{Target: deliveryTargetID("destinations", "lookup"), Err: "destination lookup failed"}}
-	} else {
-		mc.targets = m.resolveTargets(ctx, destinations, false)
 	}
 	mc.generatorURL = m.generatorURL(ctx, alert)
 	return mc
@@ -122,78 +108,109 @@ func (mc *messageContext) notification(history *models.AlertHistoryEntry, labels
 		ResolvedAt:     history.ResolvedAt,
 		GeneratorURL:   mc.generatorURL,
 		Message:        history.Message,
-		Webhooks:       slices.Clone(mc.targets.webhooks),
-		Emails:         slices.Clone(mc.targets.emails),
-		Unusable:       slices.Clone(mc.targets.unusable),
 	}
 }
 
-// sendResolved sends the resolved message of one closed episode.
-func (m *Manager) sendResolved(ctx context.Context, mc *messageContext, entry *models.AlertHistoryEntry, value float64, extra map[string]string) error {
+// resolvedNotification is the resolved message of one closed episode.
+func (mc *messageContext) resolvedNotification(entry *models.AlertHistoryEntry, value float64, extra map[string]string) AlertNotification {
 	labels, annotations := mc.metadata(models.AlertStatusResolved, value, entry.Group)
 	if entry.ResolvedAt != nil {
 		annotations["resolved_at"] = entry.ResolvedAt.Format(time.RFC3339Nano)
 	}
 	maps.Copy(annotations, extra)
-	return m.deliver(ctx, mc.notification(entry, labels, annotations, models.AlertStatusResolved, value)).Err()
+	return mc.notification(entry, labels, annotations, models.AlertStatusResolved, value)
 }
 
-// deliver sends to the selected targets and reports the selected unusable
-// targets as failed.
-func (m *Manager) deliver(ctx context.Context, notification AlertNotification) DeliveryResults {
-	return append(m.sender.Send(ctx, notification), notification.unusableResults()...)
+// DeliveryProducer names alert rows in the delivery queue.
+const DeliveryProducer = "alert"
+
+// DeliveryRef is the producer ref of the rows of one history entry.
+func DeliveryRef(alertID models.AlertID, historyID int64) string {
+	return fmt.Sprintf("%d:%d", alertID, historyID)
 }
 
-// resolveTargets resolves destinations into targets. An inactive destination
-// is unusable unless includeInactive is set. An email address reached
-// through two destinations is mailed once.
-func (m *Manager) resolveTargets(ctx context.Context, destinations []*models.NotificationDestination, includeInactive bool) targets {
-	var out targets
-	mailed := make(map[string]struct{})
-	for _, d := range destinations {
-		if !d.IsActive && !includeInactive {
-			out.unusable = append(out.unusable, UnusableTarget{Target: destinationTarget(d.ID), Err: fmt.Sprintf("destination %q is inactive", d.Name)})
-			continue
+// outbox enqueues the notifications of one transaction. It reads the rule's
+// destinations once, in that transaction, so the rows match the destinations
+// that the commit sees.
+type outbox struct {
+	alert        *models.Alert
+	loaded       bool
+	destinations []*models.NotificationDestination
+	recipients   map[models.DestinationID][]notify.Recipient
+	enqueued     int
+}
+
+// add writes the rows of one notification of the episode: one per
+// destination, and one per recipient of an email destination. An address
+// that two active email destinations reach is mailed once. tag tells apart the
+// notifications of one episode, such as the evaluation's eval_seq.
+func (o *outbox) add(ctx context.Context, tx store.StoreOps, n AlertNotification, episode *models.AlertHistoryEntry, tag string) error {
+	if !o.loaded {
+		destinations, err := tx.ListAlertDestinations(ctx, o.alert.ID)
+		if err != nil {
+			return fmt.Errorf("failed to load alert destinations: %w", err)
 		}
-		switch d.Type {
-		case models.DestinationTypeWebhook:
-			out.webhooks = append(out.webhooks, WebhookTarget{Target: webhookTarget(d.ID), URL: d.Secret})
-		case models.DestinationTypeEmail:
-			recipients, err := notify.ExpandEmailDestination(ctx, m.db, d)
-			if err != nil {
-				m.log.Error("failed to resolve email recipients", "destination_id", d.ID, "error", err)
-				out.unusable = append(out.unusable, UnusableTarget{Target: destinationTarget(d.ID), Err: "recipient resolution failed"})
+		o.destinations = destinations
+		o.recipients = make(map[models.DestinationID][]notify.Recipient)
+		for _, d := range destinations {
+			if d.Type != models.DestinationTypeEmail {
 				continue
 			}
-			for _, r := range recipients {
-				target := emailAddressTarget(d.ID, r.Address)
-				if r.UserID != nil {
-					target = emailUserTarget(d.ID, *r.UserID)
-				}
-				if r.Address == "" {
-					out.unusable = append(out.unusable, UnusableTarget{Target: target, Err: fmt.Sprintf("missing recipient user ID: %d", *r.UserID)})
-					continue
-				}
-				if _, seen := mailed[r.Address]; seen {
-					continue
-				}
-				mailed[r.Address] = struct{}{}
-				out.emails = append(out.emails, EmailTarget{Target: target, Address: r.Address})
+			recipients, err := notify.ExpandEmailDestination(ctx, tx, d)
+			if err != nil {
+				return fmt.Errorf("failed to resolve email recipients of destination %d: %w", d.ID, err)
 			}
-		default:
-			out.unusable = append(out.unusable, UnusableTarget{Target: destinationTarget(d.ID), Err: fmt.Sprintf("destination type %q has no sender yet", d.Type)})
+			o.recipients[d.ID] = recipients
+		}
+		o.loaded = true
+	}
+	ev := event(n.Status)
+	msg := n.message(ev)
+	ref := DeliveryRef(o.alert.ID, episode.ID)
+	// A group's notifications go out in order: its resolved never overtakes
+	// its firing.
+	sequence := fmt.Sprintf("alert:%d:%x", o.alert.ID, sha256.Sum256([]byte(episode.GroupKey)))
+	row := func(d models.DestinationID, recipient string) notify.Delivery {
+		return notify.Delivery{
+			DestinationID: d, Producer: DeliveryProducer, ProducerRef: ref, Recipient: recipient, SequenceKey: sequence,
+			DedupKey: fmt.Sprintf("alert:%s:%s:%s:%d:%s", ref, ev, tag, d, recipient),
+			Message:  msg,
 		}
 	}
-	return out
+	var rows []notify.Delivery
+	mailed := make(map[string]struct{})
+	for _, d := range o.destinations {
+		if d.Type != models.DestinationTypeEmail {
+			rows = append(rows, row(d.ID, ""))
+			continue
+		}
+		for _, r := range o.recipients[d.ID] {
+			recipient, key := r.Address, r.Address
+			if r.UserID != nil {
+				recipient = notify.UserRecipient(*r.UserID)
+				if key == "" {
+					key = recipient
+				}
+			}
+			// An inactive destination's rows fail and show it in history;
+			// they do not claim the address from an active destination.
+			if d.IsActive {
+				if _, seen := mailed[key]; seen {
+					continue
+				}
+				mailed[key] = struct{}{}
+			}
+			rows = append(rows, row(d.ID, recipient))
+		}
+	}
+	o.enqueued += len(rows)
+	return notify.Enqueue(ctx, tx, rows)
 }
 
-// TestDestination sends a test notification to every target of d, active or
-// not, and returns one result per target.
-func (m *Manager) TestDestination(ctx context.Context, d *models.NotificationDestination) []models.DestinationTestResult {
-	resolved := m.resolveTargets(ctx, []*models.NotificationDestination{d}, true)
-	notification := AlertNotification{
+func testNotification(description string) AlertNotification {
+	return AlertNotification{
 		AlertName:      "Test Alert",
-		Description:    "This is a test notification to verify a notification destination.",
+		Description:    description,
 		Status:         models.AlertStatusTriggered,
 		Severity:       models.AlertSeverityInfo,
 		SourceName:     "Test Source",
@@ -205,28 +222,48 @@ func (m *Manager) TestDestination(ctx context.Context, d *models.NotificationDes
 		Query:          "SELECT 1",
 		TriggeredAt:    time.Now().UTC(),
 		Message:        "Test notification - please ignore",
-		Webhooks:       resolved.webhooks,
-		Emails:         resolved.emails,
-		Unusable:       resolved.unusable,
 	}
-	labels := make(map[DeliveryTargetID]string)
-	for _, w := range resolved.webhooks {
-		labels[w.Target] = string(d.Type)
-	}
-	for _, e := range resolved.emails {
-		labels[e.Target] = e.Address
-	}
-	for _, u := range resolved.unusable {
-		labels[u.Target] = string(d.Type)
-	}
-	results := m.deliver(ctx, notification)
-	out := make([]models.DestinationTestResult, 0, len(results))
-	for _, r := range results {
-		result := models.DestinationTestResult{Target: labels[r.Target], OK: r.Err == nil}
-		if r.Err != nil {
-			result.Error = boundedDeliveryError(r.Err).Error()
+}
+
+// TestEmail is the message that tests the SMTP settings.
+func TestEmail() notify.MailMessage {
+	n := testNotification("This is a test notification to verify your SMTP configuration.")
+	return notify.MailMessage{Subject: emailSubject(n), Text: emailBody(n)}
+}
+
+// TestDestination sends a test notification to every target of d, active or
+// not, now, and returns one result per target.
+func (m *Manager) TestDestination(ctx context.Context, d *models.NotificationDestination) []models.DestinationTestResult {
+	msg := testNotification("This is a test notification to verify a notification destination.").message(notify.EventTest)
+	result := func(target string, err error) models.DestinationTestResult {
+		r := models.DestinationTestResult{Target: target, OK: err == nil}
+		if err != nil {
+			r.Error = notify.BoundedError(err)
 		}
-		out = append(out, result)
+		return r
+	}
+	sender := m.senders[d.Type]
+	if sender == nil {
+		return []models.DestinationTestResult{result(string(d.Type), fmt.Errorf("destination type %q has no sender yet", d.Type))}
+	}
+	if d.Type != models.DestinationTypeEmail {
+		return []models.DestinationTestResult{result(string(d.Type), sender.Send(ctx, d, "", 0, msg))}
+	}
+	recipients, err := notify.ExpandEmailDestination(ctx, m.db, d)
+	if err != nil {
+		m.log.Error("failed to resolve email recipients", "destination_id", d.ID, "error", err)
+		return []models.DestinationTestResult{result(string(d.Type), errors.New("recipient resolution failed"))}
+	}
+	out := make([]models.DestinationTestResult, 0, len(recipients))
+	for _, r := range recipients {
+		recipient, target := r.Address, r.Address
+		if r.UserID != nil {
+			recipient = notify.UserRecipient(*r.UserID)
+			if target == "" {
+				target = recipient
+			}
+		}
+		out = append(out, result(target, sender.Send(ctx, d, recipient, 0, msg)))
 	}
 	return out
 }

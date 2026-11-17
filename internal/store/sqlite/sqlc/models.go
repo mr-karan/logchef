@@ -218,6 +218,27 @@ type Job struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
+type NotificationDelivery struct {
+	ID            int64          `json:"id"`
+	DestinationID int64          `json:"destination_id"`
+	Producer      string         `json:"producer"`
+	ProducerRef   string         `json:"producer_ref"`
+	Recipient     string         `json:"recipient"`
+	SequenceKey   string         `json:"sequence_key"`
+	Event         string         `json:"event"`
+	DedupKey      string         `json:"dedup_key"`
+	MessageJson   string         `json:"message_json"`
+	Status        string         `json:"status"`
+	Attempts      int64          `json:"attempts"`
+	NextAttemptAt time.Time      `json:"next_attempt_at"`
+	ReservedBy    sql.NullString `json:"reserved_by"`
+	ReservedToken int64          `json:"reserved_token"`
+	ReservedUntil sql.NullTime   `json:"reserved_until"`
+	LastError     sql.NullString `json:"last_error"`
+	CreatedAt     time.Time      `json:"created_at"`
+	SentAt        sql.NullTime   `json:"sent_at"`
+}
+
 type NotificationDestination struct {
 	ID                 int64          `json:"id"`
 	Name               string         `json:"name"`

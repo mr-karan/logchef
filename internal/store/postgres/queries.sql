@@ -739,18 +739,6 @@ INSERT INTO alert_history (
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
--- name: InterruptAlertDeliveries :exec
-UPDATE alert_history
-SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
-    'delivery_in_progress', false,
-    'delivery_failed', true,
-    'delivery_error', 'delivery interrupted',
-    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
-WHERE status IN ('triggered', 'no_data')
-  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
-  AND (sqlc.arg(history_id)::bigint = 0 OR id = sqlc.arg(history_id))
-  AND (sqlc.arg(alert_id)::bigint = 0 OR alert_id = sqlc.arg(alert_id));
-
 -- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
 WHERE id = $1 AND status IN ('triggered', 'no_data')
@@ -2154,3 +2142,102 @@ RETURNING *;
 -- name: DeleteAlertSilence :one
 DELETE FROM alert_silences WHERE id = $1
 RETURNING id;
+
+-- Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
+-- the database clock.
+
+-- name: EnqueueDelivery :execrows
+-- A row whose dedup_key exists is left as it is.
+INSERT INTO notification_deliveries (
+    destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, next_attempt_at
+) VALUES (
+    sqlc.arg(destination_id), sqlc.arg(producer), sqlc.arg(producer_ref), sqlc.arg(recipient),
+    sqlc.arg(sequence_key), sqlc.arg(event), sqlc.arg(dedup_key), sqlc.arg(message_json), now()
+)
+ON CONFLICT (dedup_key) DO NOTHING;
+
+-- name: ExpireEmailAttempts :execrows
+-- An email row still attempting after its reservation ended belongs to a
+-- process that crashed or stalled during SMTP. The raised token keeps that
+-- process from overwriting the outcome.
+UPDATE notification_deliveries
+SET status = 'unknown',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = sqlc.arg(last_error)
+WHERE status = 'attempting' AND reserved_until < now();
+
+-- name: ReserveDeliveries :many
+-- A row waits while an earlier row of its destination, recipient and
+-- sequence key is pending or attempting, so a resolved never overtakes its
+-- firing. Concurrent drains receive disjoint rows.
+UPDATE notification_deliveries
+SET reserved_by = sqlc.arg(owner),
+    reserved_token = reserved_token + 1,
+    reserved_until = now() + make_interval(secs => sqlc.arg(lease_seconds)::double precision),
+    attempts = attempts + 1
+WHERE id IN (
+    SELECT c.id FROM notification_deliveries c
+    WHERE c.status = 'pending'
+      AND c.next_attempt_at <= now()
+      AND (c.reserved_until IS NULL OR c.reserved_until < now())
+      AND NOT EXISTS (
+          SELECT 1 FROM notification_deliveries e
+          WHERE e.destination_id = c.destination_id AND e.recipient = c.recipient
+            AND e.sequence_key = c.sequence_key AND e.status IN ('pending', 'attempting')
+            AND e.id < c.id)
+    ORDER BY c.id
+    LIMIT sqlc.arg(max_rows)
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
+-- name: MarkDeliveryAttempting :execrows
+UPDATE notification_deliveries
+SET status = 'attempting'
+WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status = 'pending';
+
+-- name: ReleaseDelivery :execrows
+-- Hands back a reserved row that was not sent, with the attempt that its
+-- reservation counted.
+UPDATE notification_deliveries
+SET reserved_by = NULL,
+    reserved_until = NULL,
+    attempts = attempts - 1
+WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status = 'pending';
+
+-- name: FinishDelivery :execrows
+-- Writes one attempt's outcome while the reservation is current. A pending
+-- outcome is due again after retry_seconds.
+UPDATE notification_deliveries
+SET status = sqlc.arg(status),
+    next_attempt_at = now() + make_interval(secs => sqlc.arg(retry_seconds)::double precision),
+    last_error = sqlc.narg(last_error),
+    sent_at = CASE WHEN sqlc.arg(status)::text = 'sent' THEN now() ELSE sent_at END,
+    reserved_by = NULL,
+    reserved_until = NULL
+WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status IN ('pending', 'attempting');
+
+-- name: PruneDeliveries :execrows
+DELETE FROM notification_deliveries
+WHERE status IN ('sent', 'failed', 'unknown')
+  AND created_at < now() - make_interval(secs => sqlc.arg(age_seconds)::double precision);
+
+-- name: RecordDestinationDelivery :exec
+UPDATE notification_destinations
+SET last_delivery_at = now(),
+    last_delivery_status = sqlc.arg(status),
+    last_delivery_error = sqlc.narg(last_error)
+WHERE id = sqlc.arg(id);
+
+-- name: GetDelivery :one
+SELECT * FROM notification_deliveries WHERE id = $1;
+
+-- name: ListDeliverySummaries :many
+SELECT n.producer_ref, n.destination_id, d.name AS destination_name, d.type AS destination_type,
+       n.recipient, n.event, n.status, n.attempts, n.last_error, n.sent_at, n.created_at
+FROM notification_deliveries n
+JOIN notification_destinations d ON d.id = n.destination_id
+WHERE n.producer = sqlc.arg(producer) AND n.producer_ref = ANY(sqlc.arg(refs)::text[])
+ORDER BY n.id;

@@ -1877,6 +1877,69 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	return err
 }
 
+const enqueueDelivery = `-- name: EnqueueDelivery :execrows
+
+INSERT INTO notification_deliveries (
+    destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, next_attempt_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8, now()
+)
+ON CONFLICT (dedup_key) DO NOTHING
+`
+
+type EnqueueDeliveryParams struct {
+	DestinationID int64  `json:"destination_id"`
+	Producer      string `json:"producer"`
+	ProducerRef   string `json:"producer_ref"`
+	Recipient     string `json:"recipient"`
+	SequenceKey   string `json:"sequence_key"`
+	Event         string `json:"event"`
+	DedupKey      string `json:"dedup_key"`
+	MessageJson   string `json:"message_json"`
+}
+
+// Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
+// the database clock.
+// A row whose dedup_key exists is left as it is.
+func (q *Queries) EnqueueDelivery(ctx context.Context, arg EnqueueDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, enqueueDelivery,
+		arg.DestinationID,
+		arg.Producer,
+		arg.ProducerRef,
+		arg.Recipient,
+		arg.SequenceKey,
+		arg.Event,
+		arg.DedupKey,
+		arg.MessageJson,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const expireEmailAttempts = `-- name: ExpireEmailAttempts :execrows
+UPDATE notification_deliveries
+SET status = 'unknown',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = $1
+WHERE status = 'attempting' AND reserved_until < now()
+`
+
+// An email row still attempting after its reservation ended belongs to a
+// process that crashed or stalled during SMTP. The raised token keeps that
+// process from overwriting the outcome.
+func (q *Queries) ExpireEmailAttempts(ctx context.Context, lastError pgtype.Text) (int64, error) {
+	result, err := q.db.Exec(ctx, expireEmailAttempts, lastError)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const failExportJob = `-- name: FailExportJob :one
 UPDATE export_jobs
 SET
@@ -1908,6 +1971,41 @@ func (q *Queries) FailExportJob(ctx context.Context, arg FailExportJobParams) (s
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const finishDelivery = `-- name: FinishDelivery :execrows
+UPDATE notification_deliveries
+SET status = $1,
+    next_attempt_at = now() + make_interval(secs => $2::double precision),
+    last_error = $3,
+    sent_at = CASE WHEN $1::text = 'sent' THEN now() ELSE sent_at END,
+    reserved_by = NULL,
+    reserved_until = NULL
+WHERE id = $4 AND reserved_token = $5 AND status IN ('pending', 'attempting')
+`
+
+type FinishDeliveryParams struct {
+	Status        string      `json:"status"`
+	RetrySeconds  float64     `json:"retry_seconds"`
+	LastError     pgtype.Text `json:"last_error"`
+	ID            int64       `json:"id"`
+	ReservedToken int64       `json:"reserved_token"`
+}
+
+// Writes one attempt's outcome while the reservation is current. A pending
+// outcome is due again after retry_seconds.
+func (q *Queries) FinishDelivery(ctx context.Context, arg FinishDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, finishDelivery,
+		arg.Status,
+		arg.RetrySeconds,
+		arg.LastError,
+		arg.ID,
+		arg.ReservedToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const finishJob = `-- name: FinishJob :execrows
@@ -2308,6 +2406,36 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 		&i.Revision,
 		&i.CreatedByEmail,
 		&i.CreatedByName,
+	)
+	return i, err
+}
+
+const getDelivery = `-- name: GetDelivery :one
+SELECT id, destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, status, attempts, next_attempt_at, reserved_by, reserved_token, reserved_until, last_error, created_at, sent_at FROM notification_deliveries WHERE id = $1
+`
+
+func (q *Queries) GetDelivery(ctx context.Context, id int64) (NotificationDelivery, error) {
+	row := q.db.QueryRow(ctx, getDelivery, id)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.DestinationID,
+		&i.Producer,
+		&i.ProducerRef,
+		&i.Recipient,
+		&i.SequenceKey,
+		&i.Event,
+		&i.DedupKey,
+		&i.MessageJson,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ReservedBy,
+		&i.ReservedToken,
+		&i.ReservedUntil,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.SentAt,
 	)
 	return i, err
 }
@@ -3551,29 +3679,6 @@ func (q *Queries) InsertTeamMember(ctx context.Context, arg InsertTeamMemberPara
 	return result.RowsAffected(), nil
 }
 
-const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
-UPDATE alert_history
-SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
-    'delivery_in_progress', false,
-    'delivery_failed', true,
-    'delivery_error', 'delivery interrupted',
-    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
-WHERE status IN ('triggered', 'no_data')
-  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
-  AND ($1::bigint = 0 OR id = $1)
-  AND ($2::bigint = 0 OR alert_id = $2)
-`
-
-type InterruptAlertDeliveriesParams struct {
-	HistoryID int64 `json:"history_id"`
-	AlertID   int64 `json:"alert_id"`
-}
-
-func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
-	_, err := q.db.Exec(ctx, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
-	return err
-}
-
 const interruptStaleReportRuns = `-- name: InterruptStaleReportRuns :execrows
 UPDATE report_runs
 SET status = 'interrupted',
@@ -4613,6 +4718,66 @@ func (q *Queries) ListDashboardSummaries(ctx context.Context) ([]ListDashboardSu
 			&i.SummaryVersion,
 			&i.CreatedByEmail,
 			&i.CreatedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeliverySummaries = `-- name: ListDeliverySummaries :many
+SELECT n.producer_ref, n.destination_id, d.name AS destination_name, d.type AS destination_type,
+       n.recipient, n.event, n.status, n.attempts, n.last_error, n.sent_at, n.created_at
+FROM notification_deliveries n
+JOIN notification_destinations d ON d.id = n.destination_id
+WHERE n.producer = $1 AND n.producer_ref = ANY($2::text[])
+ORDER BY n.id
+`
+
+type ListDeliverySummariesParams struct {
+	Producer string   `json:"producer"`
+	Refs     []string `json:"refs"`
+}
+
+type ListDeliverySummariesRow struct {
+	ProducerRef     string             `json:"producer_ref"`
+	DestinationID   int64              `json:"destination_id"`
+	DestinationName string             `json:"destination_name"`
+	DestinationType string             `json:"destination_type"`
+	Recipient       string             `json:"recipient"`
+	Event           string             `json:"event"`
+	Status          string             `json:"status"`
+	Attempts        int32              `json:"attempts"`
+	LastError       pgtype.Text        `json:"last_error"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListDeliverySummaries(ctx context.Context, arg ListDeliverySummariesParams) ([]ListDeliverySummariesRow, error) {
+	rows, err := q.db.Query(ctx, listDeliverySummaries, arg.Producer, arg.Refs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeliverySummariesRow{}
+	for rows.Next() {
+		var i ListDeliverySummariesRow
+		if err := rows.Scan(
+			&i.ProducerRef,
+			&i.DestinationID,
+			&i.DestinationName,
+			&i.DestinationType,
+			&i.Recipient,
+			&i.Event,
+			&i.Status,
+			&i.Attempts,
+			&i.LastError,
+			&i.SentAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6431,6 +6596,25 @@ func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
 	return err
 }
 
+const markDeliveryAttempting = `-- name: MarkDeliveryAttempting :execrows
+UPDATE notification_deliveries
+SET status = 'attempting'
+WHERE id = $1 AND reserved_token = $2 AND status = 'pending'
+`
+
+type MarkDeliveryAttemptingParams struct {
+	ID            int64 `json:"id"`
+	ReservedToken int64 `json:"reserved_token"`
+}
+
+func (q *Queries) MarkDeliveryAttempting(ctx context.Context, arg MarkDeliveryAttemptingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markDeliveryAttempting, arg.ID, arg.ReservedToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markSavedViewManaged = `-- name: MarkSavedViewManaged :one
 UPDATE saved_views SET managed = TRUE WHERE id = $1
 RETURNING id
@@ -6519,6 +6703,20 @@ func (q *Queries) PruneAuditEvents(ctx context.Context, arg PruneAuditEventsPara
 		arg.BoundID,
 		arg.BatchSize,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const pruneDeliveries = `-- name: PruneDeliveries :execrows
+DELETE FROM notification_deliveries
+WHERE status IN ('sent', 'failed', 'unknown')
+  AND created_at < now() - make_interval(secs => $1::double precision)
+`
+
+func (q *Queries) PruneDeliveries(ctx context.Context, ageSeconds float64) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneDeliveries, ageSeconds)
 	if err != nil {
 		return 0, err
 	}
@@ -6724,6 +6922,25 @@ func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterru
 	return items, nil
 }
 
+const recordDestinationDelivery = `-- name: RecordDestinationDelivery :exec
+UPDATE notification_destinations
+SET last_delivery_at = now(),
+    last_delivery_status = $1,
+    last_delivery_error = $2
+WHERE id = $3
+`
+
+type RecordDestinationDeliveryParams struct {
+	Status    pgtype.Text `json:"status"`
+	LastError pgtype.Text `json:"last_error"`
+	ID        int64       `json:"id"`
+}
+
+func (q *Queries) RecordDestinationDelivery(ctx context.Context, arg RecordDestinationDeliveryParams) error {
+	_, err := q.db.Exec(ctx, recordDestinationDelivery, arg.Status, arg.LastError, arg.ID)
+	return err
+}
+
 const refreshAlertState = `-- name: RefreshAlertState :exec
 UPDATE alerts
 SET last_state = CASE WHEN EXISTS (
@@ -6741,6 +6958,29 @@ WHERE id = $1
 func (q *Queries) RefreshAlertState(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, refreshAlertState, id)
 	return err
+}
+
+const releaseDelivery = `-- name: ReleaseDelivery :execrows
+UPDATE notification_deliveries
+SET reserved_by = NULL,
+    reserved_until = NULL,
+    attempts = attempts - 1
+WHERE id = $1 AND reserved_token = $2 AND status = 'pending'
+`
+
+type ReleaseDeliveryParams struct {
+	ID            int64 `json:"id"`
+	ReservedToken int64 `json:"reserved_token"`
+}
+
+// Hands back a reserved row that was not sent, with the attempt that its
+// reservation counted.
+func (q *Queries) ReleaseDelivery(ctx context.Context, arg ReleaseDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseDelivery, arg.ID, arg.ReservedToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const releaseJob = `-- name: ReleaseJob :execrows
@@ -6923,6 +7163,77 @@ func (q *Queries) ReportTickExists(ctx context.Context, arg ReportTickExistsPara
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const reserveDeliveries = `-- name: ReserveDeliveries :many
+UPDATE notification_deliveries
+SET reserved_by = $1,
+    reserved_token = reserved_token + 1,
+    reserved_until = now() + make_interval(secs => $2::double precision),
+    attempts = attempts + 1
+WHERE id IN (
+    SELECT c.id FROM notification_deliveries c
+    WHERE c.status = 'pending'
+      AND c.next_attempt_at <= now()
+      AND (c.reserved_until IS NULL OR c.reserved_until < now())
+      AND NOT EXISTS (
+          SELECT 1 FROM notification_deliveries e
+          WHERE e.destination_id = c.destination_id AND e.recipient = c.recipient
+            AND e.sequence_key = c.sequence_key AND e.status IN ('pending', 'attempting')
+            AND e.id < c.id)
+    ORDER BY c.id
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, status, attempts, next_attempt_at, reserved_by, reserved_token, reserved_until, last_error, created_at, sent_at
+`
+
+type ReserveDeliveriesParams struct {
+	Owner        pgtype.Text `json:"owner"`
+	LeaseSeconds float64     `json:"lease_seconds"`
+	MaxRows      int32       `json:"max_rows"`
+}
+
+// A row waits while an earlier row of its destination, recipient and
+// sequence key is pending or attempting, so a resolved never overtakes its
+// firing. Concurrent drains receive disjoint rows.
+func (q *Queries) ReserveDeliveries(ctx context.Context, arg ReserveDeliveriesParams) ([]NotificationDelivery, error) {
+	rows, err := q.db.Query(ctx, reserveDeliveries, arg.Owner, arg.LeaseSeconds, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDelivery{}
+	for rows.Next() {
+		var i NotificationDelivery
+		if err := rows.Scan(
+			&i.ID,
+			&i.DestinationID,
+			&i.Producer,
+			&i.ProducerRef,
+			&i.Recipient,
+			&i.SequenceKey,
+			&i.Event,
+			&i.DedupKey,
+			&i.MessageJson,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ReservedBy,
+			&i.ReservedToken,
+			&i.ReservedUntil,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.SentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resolveAlertGroupHistory = `-- name: ResolveAlertGroupHistory :exec

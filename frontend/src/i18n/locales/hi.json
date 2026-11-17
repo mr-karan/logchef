@@ -837,7 +837,6 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "डिलीवरी बाधित हुई",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
   "ui.activateUser": "{name} को सक्रिय करें",
   "ui.deactivateUser": "{name} को निष्क्रिय करें",
   "ui.showSettingValue": "{key} का मान दिखाएँ",

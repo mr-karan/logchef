@@ -837,7 +837,6 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "전송 중단",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
   "ui.activateUser": "{name} 활성화",
   "ui.deactivateUser": "{name} 비활성화",
   "ui.showSettingValue": "{key} 값 표시",

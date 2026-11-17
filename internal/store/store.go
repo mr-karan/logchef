@@ -249,7 +249,6 @@ type AlertStore interface {
 	// GetAlertHistoryEntry returns models.ErrNotFound when the alert has no
 	// entry with that ID.
 	GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error)
-	RecoverAlertDeliveries(ctx context.Context) error
 	// ResolveAlertHistory resolves every unresolved firing entry of the alert
 	// that owns historyID, deletes the alert's instances and advances its
 	// eval_seq, so an evaluation that read the old state commits nothing.
@@ -281,6 +280,41 @@ type AlertStore interface {
 	// MarkAlertInstanceNotified sets notified on the instance whose open
 	// episode is historyID, and returns models.ErrNotFound when there is none.
 	MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error
+}
+
+// DeliveryStore is the notification delivery queue (RFC 0006 unit D2). Every
+// time comparison uses the database clock. A reservation token, raised by
+// every reservation, fences each write of a send's outcome.
+type DeliveryStore interface {
+	// EnqueueDelivery inserts the row, due now. A row whose DedupKey exists
+	// is left as it is, and the result is false.
+	EnqueueDelivery(ctx context.Context, d *models.NotificationDelivery) (bool, error)
+	// ExpireEmailAttempts marks unknown every attempting row whose
+	// reservation ended, stores errText and raises its token.
+	ExpireEmailAttempts(ctx context.Context, errText string) (int64, error)
+	// ReserveDeliveries reserves to owner for lease up to limit pending rows
+	// that are due and not reserved, in ID order, and counts an attempt on
+	// each. A row waits while an earlier row of its destination, recipient
+	// and sequence key is pending or attempting. On Postgres concurrent
+	// reservations receive disjoint rows.
+	ReserveDeliveries(ctx context.Context, owner string, lease time.Duration, limit int) ([]*models.NotificationDelivery, error)
+	// MarkDeliveryAttempting moves a reserved pending row to attempting.
+	MarkDeliveryAttempting(ctx context.Context, id, token int64) (bool, error)
+	// ReleaseDelivery hands back a reserved pending row that was not sent:
+	// it clears the reservation and takes back the attempt it counted.
+	ReleaseDelivery(ctx context.Context, id, token int64) (bool, error)
+	// FinishDelivery records an attempt's outcome and clears the
+	// reservation. It reports false when a later reservation or
+	// ExpireEmailAttempts took the row over.
+	FinishDelivery(ctx context.Context, id, token int64, out models.DeliveryOutcome) (bool, error)
+	// PruneDeliveries deletes finished rows created more than age ago.
+	PruneDeliveries(ctx context.Context, age time.Duration) (int64, error)
+	// RecordDestinationDelivery writes the destination's last delivery.
+	RecordDestinationDelivery(ctx context.Context, id models.DestinationID, status models.DeliveryStatus, errText string) error
+	GetDelivery(ctx context.Context, id int64) (*models.NotificationDelivery, error)
+	// ListDeliverySummaries returns the deliveries of producer's refs, keyed
+	// by ref, each in send order.
+	ListDeliverySummaries(ctx context.Context, producer string, refs []string) (map[string][]models.DeliverySummary, error)
 }
 
 // DestinationStore persists notification destinations and their links to
@@ -697,6 +731,7 @@ type StoreOps interface {
 	DashboardStore
 	AlertStore
 	DestinationStore
+	DeliveryStore
 	AlertSilenceStore
 	JobStore
 	ReportStore

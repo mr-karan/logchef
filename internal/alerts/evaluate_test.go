@@ -46,13 +46,14 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 	}}
 	sources := datasource.NewService(db, logger)
 	sources.Register(provider)
+	queue := recordQueue(t, db, alert)
 	sends := 0
-	sender := alertSenderFunc(func(context.Context, AlertNotification) error { sends++; return nil })
-	m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+	m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
 
 	if err := m.evaluateAlert(ctx, alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	sends += len(queue.take())
 	history, err := db.ListAlertHistory(ctx, alert.ID, 10)
 	if err != nil || len(history) != 0 || sends != 0 {
 		t.Fatalf("after a concurrent edit: history %d, sends %d, %v; want none", len(history), sends, err)
@@ -70,6 +71,7 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 	if err := m.evaluateAlert(ctx, alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	sends += len(queue.take())
 	if history, err := db.ListAlertHistory(ctx, alert.ID, 10); err != nil || len(history) != 0 || sends != 0 {
 		t.Fatalf("after an edit before evaluation: history %d, sends %d, %v; want none", len(history), sends, err)
 	}
@@ -81,6 +83,7 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 	if err := m.evaluateAlert(ctx, fresh, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	sends += len(queue.take())
 	history, err = db.ListAlertHistory(ctx, alert.ID, 10)
 	if err != nil || len(history) != 1 || sends != 1 {
 		t.Fatalf("next tick: history %d, sends %d, %v; want one firing", len(history), sends, err)
@@ -96,12 +99,8 @@ func TestEditDuringEvaluationDiscardsResult(t *testing.T) {
 func TestFiringEpisodeTracksValue(t *testing.T) {
 	db, alert, logger := newManagerTestAlert(t)
 	ctx := t.Context()
-	var statuses []models.AlertStatus
-	sender := alertSenderFunc(func(_ context.Context, n AlertNotification) error {
-		statuses = append(statuses, n.Status)
-		return nil
-	})
-	m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+	queue := recordQueue(t, db, alert)
+	m := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
 	for _, value := range []float64{12, 15} {
 		if err := m.handleTriggered(ctx, alert, value); err != nil {
 			t.Fatal(err)
@@ -117,6 +116,10 @@ func TestFiringEpisodeTracksValue(t *testing.T) {
 	history, err := db.ListAlertHistory(ctx, alert.ID, 10)
 	if err != nil || len(history) != 1 || history[0].Message != "alert errors resolved with value 3.0000" {
 		t.Fatalf("history = %+v, %v; want one episode resolved with value 3", history, err)
+	}
+	var statuses []models.AlertStatus
+	for _, n := range queue.take() {
+		statuses = append(statuses, n.Status)
 	}
 	if want := []models.AlertStatus{models.AlertStatusTriggered, models.AlertStatusResolved}; !slices.Equal(statuses, want) {
 		t.Errorf("notifications = %v, want %v", statuses, want)

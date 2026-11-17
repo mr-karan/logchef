@@ -837,7 +837,6 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "Invio interrotto",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
   "ui.activateUser": "Attiva {name}",
   "ui.deactivateUser": "Disattiva {name}",
   "ui.showSettingValue": "Mostra il valore di {key}",

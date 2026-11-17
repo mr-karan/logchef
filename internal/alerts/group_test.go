@@ -241,6 +241,7 @@ type groupedFixture struct {
 	alert    *models.Alert
 	manager  *Manager
 	provider *scriptedProvider
+	queue    *queueRecorder
 	sent     []AlertNotification
 }
 
@@ -255,11 +256,8 @@ func newGroupedFixture(t *testing.T) *groupedFixture {
 	f := &groupedFixture{db: db, alert: alert, provider: &scriptedProvider{}}
 	sources := datasource.NewService(db, logger)
 	sources.Register(f.provider)
-	sender := alertSenderFunc(func(_ context.Context, n AlertNotification) error {
-		f.sent = append(f.sent, n)
-		return nil
-	})
-	f.manager = NewManager(Options{DB: db, Datasources: sources, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+	f.queue = recordQueue(t, db, alert)
+	f.manager = NewManager(Options{DB: db, Datasources: sources, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
 	return f
 }
 
@@ -272,10 +270,10 @@ func (f *groupedFixture) tick(t *testing.T, result *models.QueryResult) []string
 		t.Fatal(err)
 	}
 	f.provider.results = append(f.provider.results, result)
-	f.sent = nil
 	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
+	f.sent = f.queue.take()
 	var got []string
 	for i := range f.sent {
 		n := &f.sent[i]
@@ -368,10 +366,11 @@ func TestGroupedEvaluationErrorKeepsState(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.provider.results = append(f.provider.results, groupedResult(row("checkout", 1), row("checkout", 2)))
-	f.sent = nil
+	f.queue.take()
 	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err == nil || !strings.Contains(err.Error(), "more than one row") {
 		t.Fatalf("evaluate with a duplicate group err = %v, want the duplicate named", err)
 	}
+	f.sent = f.queue.take()
 	if len(f.sent) != 0 {
 		t.Errorf("a failed evaluation sent %d notifications", len(f.sent))
 	}
@@ -389,11 +388,12 @@ func TestGroupedEvaluationErrorKeepsState(t *testing.T) {
 func TestManualResolveOneGroup(t *testing.T) {
 	f := newGroupedFixture(t)
 	f.tick(t, groupedResult(row("checkout", 12), row("search", 30)))
-	f.sent = nil
+	f.queue.take()
 	key := `["checkout"]`
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, &key, "fixed"); err != nil {
 		t.Fatal(err)
 	}
+	f.sent = f.queue.take()
 	if len(f.sent) != 1 || f.sent[0].Status != models.AlertStatusResolved || f.sent[0].Group["service"] != "checkout" || f.sent[0].Annotations["resolved_by"] != "manual" {
 		t.Fatalf("manual resolve sent %+v, want one manual resolved for checkout", f.sent)
 	}
@@ -403,10 +403,11 @@ func TestManualResolveOneGroup(t *testing.T) {
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, &key, "again"); !models.IsNotFound(err) {
 		t.Errorf("second resolve of checkout err = %v, want not found", err)
 	}
-	f.sent = nil
+	f.queue.take()
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, nil, "all"); err != nil {
 		t.Fatal(err)
 	}
+	f.sent = f.queue.take()
 	if len(f.sent) != 1 || f.sent[0].Group["service"] != "search" {
 		t.Fatalf("resolve all sent %+v, want one resolved for search", f.sent)
 	}
@@ -416,10 +417,11 @@ func TestManualResolveOneGroup(t *testing.T) {
 func TestManualResolveAllGroups(t *testing.T) {
 	f := newGroupedFixture(t)
 	f.tick(t, groupedResult(row("checkout", 12), row("search", 30)))
-	f.sent = nil
+	f.queue.take()
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, nil, "all"); err != nil {
 		t.Fatal(err)
 	}
+	f.sent = f.queue.take()
 	var got []string
 	for i := range f.sent {
 		got = append(got, f.sent[i].Annotations["group"])
@@ -451,7 +453,6 @@ func TestGroupedWebhookPerGroup(t *testing.T) {
 	}))
 	defer receiver.Close()
 	linkWebhooks(t, f.db, f.alert, receiver.URL)
-	f.manager.sender = NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	f.provider.results = append(f.provider.results, groupedResult(row("checkout", 12), row("search", 30)))
 	alert, err := f.db.GetAlert(t.Context(), f.alert.ID)
 	if err != nil {
@@ -460,6 +461,7 @@ func TestGroupedWebhookPerGroup(t *testing.T) {
 	if err := f.manager.evaluateAlert(t.Context(), alert, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	drainQueue(t, f.db)
 
 	var services []string
 	for _, body := range bodies {

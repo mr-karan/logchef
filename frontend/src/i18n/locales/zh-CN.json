@@ -1647,7 +1647,6 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "投递中断",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
   "ui.activateUser": "启用{name}",
   "ui.deactivateUser": "停用{name}",
   "ui.showSettingValue": "显示{key}的值",

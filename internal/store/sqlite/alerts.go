@@ -63,10 +63,6 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
-	if !alert.IsActive && !db.inTx {
-		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.UpdateAlert(ctx, alert) })
-	}
-
 	params, err := alertUpdateParams(alert)
 	if err != nil {
 		return err
@@ -76,11 +72,6 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert: %w", err)
-	}
-	if !alert.IsActive {
-		if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: int64(alert.ID)}); err != nil {
-			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
-		}
 	}
 	return nil
 }
@@ -225,9 +216,6 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
-	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: alertID}); err != nil {
-		return fmt.Errorf("failed to interrupt legacy alert deliveries: %w", err)
-	}
 	if err := db.writeQueries.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: nullString(message)}); err != nil {
 		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
 	}
@@ -251,11 +239,6 @@ func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, gro
 	}
 	if len(ids) == 0 {
 		return models.ErrNotFound
-	}
-	for _, id := range ids {
-		if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{HistoryID: id}); err != nil {
-			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
-		}
 	}
 	if err := db.writeQueries.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{AlertID: int64(alertID), GroupKey: groupKey, Message: nullString(message)}); err != nil {
 		return fmt.Errorf("failed to resolve alert episode: %w", err)
@@ -519,14 +502,6 @@ func nullFloat64(value *float64) sql.NullFloat64 {
 		return sql.NullFloat64{}
 	}
 	return sql.NullFloat64{Float64: *value, Valid: true}
-}
-
-// RecoverAlertDeliveries finalizes delivery reservations left by a stopped manager.
-func (db *DB) RecoverAlertDeliveries(ctx context.Context) error {
-	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
-		return fmt.Errorf("failed to recover alert deliveries: %w", err)
-	}
-	return nil
 }
 
 // AdvanceAlertEvalSeq increments eval_seq when it still equals seq.

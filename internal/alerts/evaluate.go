@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,9 +84,8 @@ func openEpisodes(instances []*models.AlertInstance, open []*models.AlertHistory
 }
 
 // currentInstance returns the instance of an open episode. A row without a
-// matching instance is adopted in the row's state with notified unset, so the
-// row's delivery bookkeeping decides retries as it did before instances
-// existed.
+// matching instance predates instances; it is adopted in the row's state as
+// notified, so nothing is sent twice.
 func currentInstance(instance *models.AlertInstance, open *models.AlertHistoryEntry) *models.AlertInstance {
 	if instance != nil && instance.HistoryID != nil && *instance.HistoryID == open.ID {
 		return instance
@@ -103,6 +103,7 @@ func currentInstance(instance *models.AlertInstance, open *models.AlertHistoryEn
 		Value:      open.Value,
 		StateSince: open.TriggeredAt,
 		HistoryID:  &historyID,
+		Notified:   true,
 	}
 }
 
@@ -119,18 +120,16 @@ type openStep struct {
 	payload      map[string]any
 	message      string
 	notify       bool
-	attempts     int
-	retry        bool
-	selected     []string
 	notification AlertNotification
 }
 
 // resolveStep is one group's closing change.
 type resolveStep struct {
-	change  Change
-	history *models.AlertHistoryEntry
-	message string
-	notify  bool
+	change       Change
+	history      *models.AlertHistoryEntry
+	message      string
+	notify       bool
+	notification AlertNotification
 }
 
 // evaluationPlan is what one evaluation writes, then sends.
@@ -144,6 +143,11 @@ type evaluationPlan struct {
 	state      models.AlertState
 	at         time.Time
 	newEpisode bool
+	// outbox enqueues the plan's notifications in the commit. tag is the
+	// eval_seq the commit sets, which tells apart the notifications of one
+	// episode.
+	outbox *outbox
+	tag    string
 }
 
 func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq int64, samples []Sample, at time.Time) error {
@@ -155,6 +159,9 @@ func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq
 		return mc
 	}
 	plan, err := m.planEvaluation(ctx, alert, samples, at, messages)
+	if err == nil {
+		plan.outbox, plan.tag = &outbox{alert: alert}, strconv.FormatInt(seq+1, 10)
+	}
 	if errors.Is(err, ErrTooManyGroups) {
 		m.recordEvaluationError(ctx, alert, err)
 		return err
@@ -164,7 +171,7 @@ func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq
 	}
 	err = m.commit(ctx, alert.ID, seq, func(tx store.StoreOps) error { return plan.write(ctx, tx, alert.ID) })
 	if err != nil {
-		// Nothing was reserved, so nothing is sent; the next tick evaluates again.
+		// Nothing was enqueued, so nothing is sent; the next tick evaluates again.
 		if !models.IsNotFound(err) && !models.IsConflict(err) {
 			m.log.Error("failed to commit alert evaluation", "alert_id", alert.ID, "error", err)
 		}
@@ -175,15 +182,8 @@ func (m *Manager) commitEvaluation(ctx context.Context, alert *models.Alert, seq
 			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", err)
 		}
 	}
-	for _, step := range plan.opens {
-		if step.notify {
-			m.deliverOpen(ctx, alert, step)
-		}
-	}
-	for _, step := range plan.resolves {
-		if step.notify {
-			m.deliverResolved(ctx, alert, step, messages())
-		}
+	if plan.outbox.enqueued > 0 {
+		m.kickDrain(ctx)
 	}
 	return nil
 }
@@ -244,12 +244,19 @@ func (m *Manager) planEvaluation(ctx context.Context, alert *models.Alert, sampl
 			if len(silenced) > 0 {
 				m.log.Debug("silenced alert resolve", "alert_id", alert.ID, "group_key", change.GroupKey, "silences", silenced)
 			}
-			plan.resolves = append(plan.resolves, &resolveStep{
+			step := &resolveStep{
 				change:  change,
 				history: ep.history,
 				message: resolveMessage(alert, change),
-				notify:  alert.NotifyOnResolve && announced(ep.history) && len(silenced) == 0,
-			})
+				// Only an announced episode resolves aloud, so a group that
+				// fired and resolved inside a silence sends nothing.
+				notify: alert.NotifyOnResolve && ep.instance.Notified && len(silenced) == 0,
+			}
+			if step.notify {
+				m.log.Info("alert resolved", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", change.GroupKey, "value", change.Value, "threshold", alert.ThresholdValue)
+				step.notification = resolvedNotification(step, messages())
+			}
+			plan.resolves = append(plan.resolves, step)
 			if !change.Untracked {
 				plan.tracks = append(plan.tracks, okInstance(alert.ID, nil, change, at))
 			}
@@ -318,8 +325,8 @@ func resolveMessage(alert *models.Alert, change Change) string {
 }
 
 // write commits the plan inside the evaluation's eval_seq transaction: the
-// open episodes and their delivery reservations, the closed episodes, the ok
-// instances and the rule's summary state.
+// open episodes, the closed episodes, their delivery rows, the ok instances
+// and the rule's summary state.
 func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertID models.AlertID) error {
 	for _, step := range plan.opens {
 		if err := plan.writeOpen(ctx, tx, alertID, step); err != nil {
@@ -329,6 +336,11 @@ func (plan *evaluationPlan) write(ctx context.Context, tx store.StoreOps, alertI
 	for _, step := range plan.resolves {
 		if err := tx.ResolveAlertGroup(ctx, alertID, step.change.GroupKey, step.message); err != nil {
 			return err
+		}
+		if step.notify {
+			if err := plan.outbox.add(ctx, tx, step.notification, step.history, plan.tag); err != nil {
+				return err
+			}
 		}
 	}
 	for _, groupKey := range plan.untracks {
@@ -372,20 +384,21 @@ func (plan *evaluationPlan) writeOpen(ctx context.Context, tx store.StoreOps, al
 			return err
 		}
 	}
-	return tx.UpsertAlertInstance(ctx, &step.instance)
+	if err := tx.UpsertAlertInstance(ctx, &step.instance); err != nil {
+		return err
+	}
+	if !step.notify {
+		return nil
+	}
+	step.notification.TriggeredAt = step.history.TriggeredAt
+	return plan.outbox.add(ctx, tx, step.notification, step.history, plan.tag)
 }
 
-// deliverResolved sends one group's resolved notification after its episode
-// closed.
-func (m *Manager) deliverResolved(ctx context.Context, alert *models.Alert, step *resolveStep, mc *messageContext) {
-	m.log.Info("alert resolved",
-		"alert_id", alert.ID,
-		"alert_name", alert.Name,
-		"group_key", step.change.GroupKey,
-		"value", step.change.Value,
-		"threshold", alert.ThresholdValue)
+// resolvedNotification is the resolved message of a group whose episode the
+// evaluation closes.
+func resolvedNotification(step *resolveStep, mc *messageContext) AlertNotification {
 	now := time.Now().UTC()
-	entry := step.history
+	entry := *step.history
 	entry.Message = step.message
 	entry.ResolvedAt = &now
 	entry.Status = models.AlertStatusResolved
@@ -397,20 +410,17 @@ func (m *Manager) deliverResolved(ctx context.Context, alert *models.Alert, step
 	if !step.change.Sampled && entry.Value != nil {
 		value = *entry.Value
 	}
-	if err := m.sendResolved(ctx, mc, entry, value, nil); err != nil {
-		m.log.Warn("failed to send resolved alert notifications", "alert_id", alert.ID, "group_key", step.change.GroupKey, "error", err)
-		return
-	}
-	m.log.Debug("resolved alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
+	return mc.resolvedNotification(&entry, value, nil)
 }
 
 // planOpen decides what one group in firing or no_data writes and whether it
-// notifies. An open episode in the same state notifies again only while its
-// instance is not notified and its delivery bookkeeping asks for a retry, or a
-// silence held its notification back. An open episode that moves between
-// firing and no_data notifies its new state. A group that a silence mutes
-// writes its episode with silenced_by in the payload and stays not notified,
-// so the evaluation after the silence ends sends the notification it owes.
+// notifies. A new episode, and an open one that moves between firing and
+// no_data, owes a notification. An open episode owes one while its instance is
+// not notified, which is how a notification that a silence held back goes out
+// once the silence ends. A group that a silence mutes writes its episode with
+// silenced_by in the payload and stays not notified. A notification goes into
+// the delivery queue in the evaluation's commit, which marks the instance
+// notified.
 func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.AlertInstance, prev *models.AlertHistoryEntry, change Change, at time.Time, silencedBy []int64, messages func() *messageContext) *openStep {
 	status := models.AlertStatusTriggered
 	if change.To == models.AlertInstanceStateNoData {
@@ -418,26 +428,14 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 	}
 	step := &openStep{change: change, status: status, instance: openInstance(alert.ID, rule, current, change, at), history: prev}
 	step.moved = prev != nil && change.From != change.To
-	attempts, retry := deliveryRetryState(prev)
-	owed := prev != nil && prev.Payload["delivery_silenced"] == true
 	if prev == nil {
 		step.instance.Notified = false
 		step.instance.HistoryID = nil
 	}
 	if step.moved {
-		attempts, retry = 0, false
 		step.instance.Notified = false
-	} else if prev != nil && (current.Notified || (!retry && !owed)) {
-		step.instance.Notified = true
-		if attempts >= maxDeliveryAttempts && prev.Payload["delivery_in_progress"] == true {
-			prev.Payload["delivery_in_progress"] = false
-			delete(prev.Payload, "delivery_deadline_at")
-			prev.Payload["delivery_failed"] = true
-			prev.Payload["delivery_retries_exhausted"] = true
-			prev.Payload["delivery_error"] = "delivery interrupted"
-			step.payload = prev.Payload
-		}
-		m.log.Debug("suppressing duplicate alert notification", "alert_id", alert.ID, "group_key", change.GroupKey, "delivery_attempts", attempts)
+	} else if prev != nil && current.Notified {
+		m.log.Debug("suppressing duplicate alert notification", "alert_id", alert.ID, "group_key", change.GroupKey)
 		return step
 	}
 
@@ -470,37 +468,19 @@ func (m *Manager) planOpen(alert *models.Alert, rule Rule, current *models.Alert
 		}
 		notificationHistory = &entry
 	}
-	notification := mc.notification(notificationHistory, labels, annotations, status, value)
-	if retry {
-		notification.deliveryTargets = pendingDeliveryTargets(prev.Payload)
-		notification.attemptedTargets = storedDeliveryTargets(prev.Payload, "delivery_attempted")
-	}
-	selected := notification.targetIDs()
-	attempted := notification.attemptedTargetIDs()
-	attempts++
 	payload := make(map[string]any)
 	if prev != nil {
 		maps.Copy(payload, prev.Payload)
 	}
 	maps.Copy(payload, map[string]any{
-		"labels":                     copyStringMap(labels),
-		"annotations":                copyStringMap(annotations),
-		"status":                     string(status),
-		"delivery_failed":            false,
-		"delivery_in_progress":       true,
-		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
-		"delivery_attempted":         attempted,
-		"delivery_attempts":          attempts,
-		"delivery_pending":           selected,
-		"delivery_retries_exhausted": attempts >= maxDeliveryAttempts,
+		"labels":      copyStringMap(labels),
+		"annotations": copyStringMap(annotations),
+		"status":      string(status),
 	})
-	delete(payload, "delivery_silenced")
 	step.notify = true
-	step.attempts = attempts
-	step.retry = retry
-	step.selected = selected
+	step.instance.Notified = true
 	step.payload = payload
-	step.notification = notification
+	step.notification = mc.notification(notificationHistory, labels, annotations, status, value)
 	return step
 }
 
@@ -512,20 +492,9 @@ func openMessage(alert *models.Alert, status models.AlertStatus, value float64) 
 	return fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
 }
 
-// announced reports that a notification of the episode was sent or
-// attempted. Only an episode whose notification a silence held back, and
-// that has had no attempt since, is not announced; it sends no resolved
-// notification, so a group that fired and resolved inside a silence sends
-// nothing.
-func announced(history *models.AlertHistoryEntry) bool {
-	_, attempted := history.Payload["delivery_attempts"]
-	return attempted || history.Payload["delivery_silenced"] != true
-}
-
 // planSilencedOpen records a group in firing or no_data that a silence
 // mutes: the episode is written, nothing is sent, and the instance stays not
-// notified. An announced episode that moves state while silenced owes its
-// new notification with a fresh set of attempts.
+// notified, so it owes its notification once the silence ends.
 func (m *Manager) planSilencedOpen(alert *models.Alert, step *openStep, silencedBy []int64) *openStep {
 	m.log.Info("alert changed state while silenced", "alert_id", alert.ID, "alert_name", alert.Name, "group_key", step.change.GroupKey, "status", step.status, "silences", silencedBy)
 	step.instance.Notified = false
@@ -534,18 +503,8 @@ func (m *Manager) planSilencedOpen(alert *models.Alert, step *openStep, silenced
 	if step.history != nil {
 		maps.Copy(payload, step.history.Payload)
 	}
-	if _, attempted := payload["delivery_attempts"]; attempted && step.moved {
-		payload["delivery_attempts"] = 0
-		payload["delivery_failed"] = false
-		payload["delivery_in_progress"] = false
-		payload["delivery_retries_exhausted"] = false
-		for _, key := range []string{"delivery_pending", "delivery_attempted", "delivery_error", "delivery_deadline_at"} {
-			delete(payload, key)
-		}
-	}
 	payload["status"] = string(step.status)
 	payload["silenced_by"] = silencedBy
-	payload["delivery_silenced"] = true
 	step.payload = payload
 	return step
 }
@@ -573,35 +532,6 @@ func (m *Manager) silencedBy(alert *models.Alert, silences []*models.AlertSilenc
 		}
 	}
 	return ids
-}
-
-// deliverOpen sends one group's firing or no-data notification after its
-// reservation committed, then records the outcome.
-func (m *Manager) deliverOpen(ctx context.Context, alert *models.Alert, step *openStep) {
-	step.notification.TriggeredAt = step.history.TriggeredAt
-	results := m.deliver(ctx, step.notification)
-	deliveryErr := results.Err()
-	// Removing every pending target leaves delivery failed until a current target succeeds.
-	if step.retry && len(step.selected) == 0 && len(results) == 0 {
-		deliveryErr = errors.New("no pending notification targets remain")
-	}
-	payload := step.payload
-	payload["delivery_in_progress"] = false
-	delete(payload, "delivery_deadline_at")
-	payload["delivery_pending"] = results.failedTargets()
-	payload["delivery_retries_exhausted"] = deliveryErr != nil && step.attempts >= maxDeliveryAttempts
-	delete(payload, "delivery_error")
-	payload["delivery_failed"] = deliveryErr != nil
-	if deliveryErr != nil {
-		payload["delivery_error"] = deliveryErr.Error()
-		m.log.Warn("failed to send alert notifications", "alert_id", alert.ID, "group_key", step.change.GroupKey, "error", deliveryErr)
-		if step.attempts == maxDeliveryAttempts {
-			m.log.Error("alert delivery retries exhausted", "alert_id", alert.ID, "history_id", step.history.ID, "attempts", step.attempts)
-		}
-	} else {
-		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
-	}
-	m.recordDeliveryOutcome(ctx, alert.ID, step.change.GroupKey, step.history.ID, payload, deliveryErr == nil || step.attempts >= maxDeliveryAttempts)
 }
 
 // openInstance is the instance after an evaluation that left the group in
@@ -727,33 +657,5 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 	// Prune old history entries to prevent unbounded growth from repeated errors
 	if pruneErr := m.pruneHistory(ctx, alert.ID); pruneErr != nil {
 		m.log.Warn("failed to prune alert history after error", "alert_id", alert.ID, "error", pruneErr)
-	}
-}
-
-// recordDeliveryOutcome writes the attempt's result. A settled episode, sent or
-// out of attempts, marks its instance notified in the same transaction.
-func (m *Manager) recordDeliveryOutcome(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64, payload map[string]any, settled bool) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBookkeepingTimeout)
-	defer cancel()
-	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
-		if err := holdClaim(ctx, tx); err != nil {
-			return err
-		}
-		if err := tx.UpdateAlertHistoryPayload(ctx, historyID, payload); err != nil {
-			return err
-		}
-		if !settled {
-			return nil
-		}
-		return tx.MarkAlertInstanceNotified(ctx, alertID, groupKey, historyID)
-	})
-	switch {
-	case err == nil:
-	case models.IsNotFound(err):
-		m.log.Debug("alert history resolved during delivery", "alert_id", alertID, "history_id", historyID)
-	case errors.Is(err, jobs.ErrLeaseLost):
-		m.log.Warn("a later claim owns this alert's evaluation; delivery outcome not recorded", "alert_id", alertID, "history_id", historyID)
-	default:
-		m.log.Error("failed to update alert history payload after delivery", "alert_id", alertID, "history_id", historyID, "error", err)
 	}
 }

@@ -522,3 +522,39 @@ func TestAlertDestinationsUpgrade(t *testing.T) {
 	defer db.Close()
 	storetest.CheckAlertDestinationsUpgrade(t, db)
 }
+
+// alertDeliveriesVersion adds the notification delivery queue (RFC 0006 unit
+// D2).
+const alertDeliveriesVersion = 55
+
+// TestAlertDeliveriesUpgrade seeds open episodes with delivery bookkeeping at
+// the newest version below alertDeliveriesVersion, then opens the database
+// through New, which runs the remaining migrations.
+func TestAlertDeliveriesUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	before := lastVersionBefore(t, alertDeliveriesVersion)
+	m := newMigrator(t, raw)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.AlertDeliveriesUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckAlertDeliveriesUpgrade(t, db)
+}
