@@ -704,6 +704,17 @@ webhook_allowed_hosts = ["receiver.example.internal", "127.0.0.1"]
 
 For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
 
+### Scheduled report recipients
+
+A scheduled report goes to Logchef users and teams. Two settings under **Administration → System Settings → Reports** decide whether it may also go to an email address that belongs to no Logchef user:
+
+- **External Recipients** (`reports.external_recipients`, default `false`): when false, no external address receives a report.
+- **Allowed Email Domains** (`reports.allowed_email_domains`, default empty): domains separated by commas, such as `example.com, partner.example`. An external address must be in one of them exactly; a subdomain does not match. `*` allows every domain. With external recipients on and this list empty, no address passes.
+
+Logchef checks both settings when a report is saved and again at every send, so turning them off stops delivery on the next run; the run history records the address as `skipped` with `external_disabled` or `domain_not_allowed`. An external address receives every panel that the report owner can reach. An address that belongs to a Logchef user, in any letter case, is that user, and receives only the panels the user can reach, whatever these settings say.
+
+Both settings decide where report data may be mailed, so they change only from a browser session, not with an API token, and every change is in the audit log.
+
 ## Environment Variables
 
 All configuration options set in the TOML file can be overridden or supplied via environment variables. This is particularly useful for sensitive information like API keys or for containerized deployments.

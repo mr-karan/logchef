@@ -603,3 +603,78 @@ func TestReportOwnerRecipientsUpgrade(t *testing.T) {
 	mustExec(t, check, string(up))
 	assertRow(t, check, `SELECT count(*) FROM report_recipients`, "2")
 }
+
+// reportExternalSettingsVersion adds the reports settings category and the
+// external-recipient settings (RFC 0008 unit R9).
+const reportExternalSettingsVersion = 57
+
+func TestReportExternalSettingsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer raw.Close()
+	m := newMigrator(t, raw)
+	before := lastVersionBefore(t, reportExternalSettingsVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.ReportExternalSettingsSeed {
+		mustExec(t, raw, query)
+	}
+	rows := `SELECT count(*) FROM system_settings`
+	var n int
+	if err := raw.QueryRow(rows).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Migrate(reportExternalSettingsVersion); err != nil {
+		t.Fatalf("migrate to v%d: %v", reportExternalSettingsVersion, err)
+	}
+	assertRow(t, raw, rows, fmt.Sprint(n+2))
+	assertRow(t, raw, `SELECT sql FROM sqlite_master WHERE name = 'idx_system_settings_category'`, "CREATE INDEX idx_system_settings_category ON system_settings(category)")
+
+	// Down drops the report settings and the category, and keeps the rest.
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate down to v%d: %v", before, err)
+	}
+	assertRow(t, raw, rows, fmt.Sprint(n))
+	if _, err := raw.Exec(`INSERT INTO system_settings (key, value, value_type, category) VALUES ('reports.x', '', 'string', 'reports')`); err == nil {
+		t.Error("the down migration kept the reports category")
+	}
+	if err := m.Migrate(reportExternalSettingsVersion); err != nil {
+		t.Fatalf("migrate up again: %v", err)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckReportExternalSettings(t, db)
+}
+
+// TestReportExternalSettingsLeaveAnEmptyTable: a table without rows is
+// seeded at first boot, which skips a table that has rows, so the
+// migration adds nothing to it.
+func TestReportExternalSettingsLeaveAnEmptyTable(t *testing.T) {
+	raw, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "empty.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer raw.Close()
+	m := newMigrator(t, raw)
+	if err := m.Migrate(lastVersionBefore(t, reportExternalSettingsVersion)); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, raw, `DELETE FROM system_settings`)
+	if err := m.Migrate(reportExternalSettingsVersion); err != nil {
+		t.Fatal(err)
+	}
+	assertRow(t, raw, `SELECT count(*) FROM system_settings`, "0")
+}

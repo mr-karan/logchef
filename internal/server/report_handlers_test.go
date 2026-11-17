@@ -359,3 +359,75 @@ func TestReportRecipientRoutes(t *testing.T) {
 		t.Errorf("remove event = %s %s %s", remove.TargetType, remove.TargetID, remove.Detail)
 	}
 }
+
+// TestReportExternalRecipientRoutes covers R9 over HTTP: the settings are
+// a global admin's to change and refuse bad values, the picker shows them,
+// and an email recipient is refused until they allow its domain.
+func TestReportExternalRecipientRoutes(t *testing.T) {
+	e := newReportRouteEnv(t, true)
+	ctx := context.Background()
+	id := e.create("Daily 5xx")
+	path := fmt.Sprintf("/api/v1/reports/%d", id)
+	withEmail := func(addr string) string {
+		return strings.Replace(e.body("Daily 5xx"), `"variables"`, fmt.Sprintf(`"recipients":[{"kind":"email","email":%q}],"variables"`, addr), 1)
+	}
+	setting := func(value, valueType string) string {
+		return fmt.Sprintf(`{"value":%q,"value_type":%q,"category":"reports"}`, value, valueType)
+	}
+
+	options := e.expect(e.owner, http.MethodGet, "/api/v1/reports/recipient-options", "", http.StatusOK)
+	if !strings.Contains(options.body, `"external":{"enabled":false,"domains":[]}`) {
+		t.Errorf("options with the migrated defaults = %s, want external off", options.body)
+	}
+	if got := e.expect(e.owner, http.MethodPut, path, withEmail("oncall@example.com"), http.StatusBadRequest); !strings.Contains(got.body, "external email recipients are off") {
+		t.Errorf("an email recipient with the setting off = %s", got.body)
+	}
+
+	const enabled, domains = "/api/v1/admin/settings/reports.external_recipients", "/api/v1/admin/settings/reports.allowed_email_domains"
+	for _, p := range []string{enabled, domains} {
+		if got := e.do(e.owner, "", http.MethodPut, p, setting("true", "boolean")); got.status != http.StatusForbidden {
+			t.Errorf("a non-admin PUT %s = %d %s, want 403", p, got.status, got.body)
+		}
+	}
+	if v, err := e.db.GetSetting(ctx, "reports.external_recipients"); err != nil || v != "false" {
+		t.Fatalf("after a refused PUT the setting = %q, %v; want the migrated default false", v, err)
+	}
+	e.expect(e.admin, http.MethodPut, enabled, setting("yes", "string"), http.StatusBadRequest)
+	e.expect(e.admin, http.MethodPut, domains, setting("*.example.com", "string"), http.StatusBadRequest)
+	e.expect(e.admin, http.MethodPut, enabled, setting("true", "boolean"), http.StatusOK)
+	if got := e.expect(e.owner, http.MethodPut, path, withEmail("oncall@example.com"), http.StatusBadRequest); !strings.Contains(got.body, "domain is not one") {
+		t.Errorf("an email recipient with no domain allowed = %s", got.body)
+	}
+	e.expect(e.admin, http.MethodPut, domains, setting("Example.com", "string"), http.StatusOK)
+
+	options = e.expect(e.owner, http.MethodGet, "/api/v1/reports/recipient-options", "", http.StatusOK)
+	if !strings.Contains(options.body, `"external":{"enabled":true,"domains":["example.com"]}`) {
+		t.Errorf("options = %s, want external on with example.com", options.body)
+	}
+	e.expect(e.owner, http.MethodPut, path, withEmail("oncall@example.org"), http.StatusBadRequest)
+	updated := e.expect(e.owner, http.MethodPut, path, withEmail("oncall@example.com"), http.StatusOK)
+	if !strings.Contains(updated.body, `"kind":"email"`) || !strings.Contains(updated.body, `"email":"oncall@example.com"`) {
+		t.Errorf("the editor's response lacks the address: %s", updated.body)
+	}
+
+	events, err := e.db.ListAuditEvents(ctx, models.AuditFilter{Ascending: true, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settingKeys []string
+	var update string
+	for _, ev := range events {
+		switch {
+		case ev.TargetType == "setting" && ev.Outcome == models.AuditOutcomeSuccess:
+			settingKeys = append(settingKeys, ev.TargetID)
+		case ev.Action == "report.update":
+			update = string(ev.Changes)
+		}
+	}
+	if strings.Join(settingKeys, " ") != "reports.external_recipients reports.allowed_email_domains" {
+		t.Errorf("setting events = %v, want one per changed setting", settingKeys)
+	}
+	if !strings.Contains(update, "email:oncall@example.com") {
+		t.Errorf("report.update changes = %s, want the address in full", update)
+	}
+}

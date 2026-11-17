@@ -1956,8 +1956,13 @@ INSERT INTO report_recipients (report_id, kind, user_id, team_id, email, added_b
 VALUES (sqlc.arg(report_id), sqlc.arg(kind), sqlc.narg(user_id), sqlc.narg(team_id), sqlc.arg(email), sqlc.narg(added_by));
 
 -- name: DeleteReportUserRecipient :execrows
+-- A direct recipient is named by a user row, or by an email row that
+-- matches the user's address, ignoring case.
 DELETE FROM report_recipients
-WHERE report_id = sqlc.arg(report_id) AND kind = 'user' AND user_id = sqlc.arg(user_id);
+WHERE report_id = sqlc.arg(report_id)
+  AND ((kind = 'user' AND user_id = sqlc.arg(user_id))
+    OR (kind = 'email' AND lower(email) = (
+        SELECT lower(u.email) FROM users u WHERE u.id = sqlc.arg(user_id))));
 
 -- name: InsertRunningReportRun :one
 -- A conflict on either partial unique index inserts nothing and returns no

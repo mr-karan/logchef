@@ -607,6 +607,16 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 		a.Logger.Debug("seeded server.frontend_url", "value", a.Config.Server.FrontendURL)
 	}
 
+	// Seed the report external-recipient settings: off, with no domain.
+	for _, setting := range []struct{ key, value, valueType, description string }{
+		{core.SettingReportsExternalRecipients, "false", "boolean", "Send reports to email addresses that belong to no Logchef user"},
+		{core.SettingReportsAllowedEmailDomains, "", "string", "Domains, separated by commas, that external report recipients may use; * allows every domain"},
+	} {
+		if err := a.SQLite.UpsertSetting(ctx, setting.key, setting.value, setting.valueType, "reports", setting.description, false); err != nil {
+			a.Logger.Warn("failed to seed report setting", "key", setting.key, "error", err)
+		}
+	}
+
 	a.Logger.Info("system settings seeded from config.toml successfully")
 	return nil
 }

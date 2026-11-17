@@ -16,6 +16,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/notify"
+	"github.com/mr-karan/logchef/internal/reports"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -152,9 +153,9 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	}
 
 	// Validate category
-	validCategories := map[string]bool{"alerts": true, "ai": true, "auth": true, "server": true}
+	validCategories := map[string]bool{"alerts": true, "ai": true, "auth": true, "server": true, "reports": true}
 	if !validCategories[req.Category] {
-		return SendError(c, fiber.StatusBadRequest, "invalid category (must be: alerts, ai, auth, or server)")
+		return SendError(c, fiber.StatusBadRequest, "invalid category (must be: alerts, ai, auth, server, or reports)")
 	}
 
 	// Additional validation for specific settings
@@ -307,6 +308,20 @@ var specificSettingValidators = map[string]func(string) error{
 	"alerts.smtp_reply_to":         validateEmailAddress,
 	"ai.temperature":               validateTemperature,
 	"ai.reasoning_effort":          validateReasoningEffort,
+	// A stored value that does not parse would stop every report run that
+	// has an external recipient, so a bad one is refused here.
+	core.SettingReportsExternalRecipients: validateBoolean,
+	core.SettingReportsAllowedEmailDomains: func(value string) error {
+		_, err := reports.ParseAllowedDomains(value)
+		return err
+	},
+}
+
+func validateBoolean(value string) error {
+	if _, err := strconv.ParseBool(value); err != nil {
+		return fmt.Errorf("must be true or false")
+	}
+	return nil
 }
 
 // validateReasoningEffort accepts the Bedrock reasoning effort levels, or an

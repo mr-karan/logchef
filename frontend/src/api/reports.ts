@@ -31,16 +31,21 @@ export interface ReportSourceRef {
   tab_id?: string;
 }
 
-/** A user or team row. A team expands to its members when a report runs. */
-export type ReportRecipientInput = { kind: "user"; user_id: number } | { kind: "team"; team_id: number };
+/**
+ * A user, team or address row. A team expands to its members when a report
+ * runs, and an address that belongs to a user is that user.
+ */
+export type ReportRecipientInput = { kind: "user"; user_id: number } | { kind: "team"; team_id: number } | { kind: "email"; email: string };
 
 /** A recipient row as an editor reads it, with the name it shows as. */
 export type ReportRecipient = ReportRecipientInput & { name: string; email?: string };
 
-/** The users and teams the caller may add as recipients. */
+/** The users and teams the caller may add as recipients, and whether external addresses are on. */
 export interface ReportRecipientOptions {
   users: { id: number; name: string; email: string }[];
   teams: { id: number; name: string }[];
+  /** Domains are lower case; "*" allows every domain. */
+  external: { enabled: boolean; domains: string[] };
 }
 
 export interface ReportInput {

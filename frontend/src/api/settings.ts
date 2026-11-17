@@ -4,7 +4,7 @@ export interface SystemSetting {
   key: string;
   value: string;
   value_type: "string" | "number" | "boolean" | "duration";
-  category: "alerts" | "ai" | "auth" | "server";
+  category: "alerts" | "ai" | "auth" | "server" | "reports";
   description?: string;
   is_sensitive: boolean;
   masked_value?: string;
@@ -20,7 +20,7 @@ export interface SettingsByCategory {
 export interface UpdateSettingRequest {
   value: string;
   value_type: "string" | "number" | "boolean" | "duration";
-  category: "alerts" | "ai" | "auth" | "server";
+  category: "alerts" | "ai" | "auth" | "server" | "reports";
   description: string;
   is_sensitive: boolean;
 }

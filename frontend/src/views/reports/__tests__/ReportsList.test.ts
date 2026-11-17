@@ -99,7 +99,7 @@ describe("ReportsList", () => {
     mocks.reports.runs.mockResolvedValue({ status: "success", data: [sentRun] });
     mocks.reports.remove.mockResolvedValue({ status: "success", data: null });
     mocks.dashboards.list.mockResolvedValue({ status: "success", data: [{ id: 4, name: "Edge" }] });
-    mocks.reports.recipientOptions.mockResolvedValue({ status: "success", data: { users: [{ id: 1, name: "Owner", email: "owner@example.com" }, { id: 2, name: "Mate", email: "mate@example.com" }], teams: [{ id: 3, name: "payments" }] } });
+    mocks.reports.recipientOptions.mockResolvedValue({ status: "success", data: { users: [{ id: 1, name: "Owner", email: "owner@example.com" }, { id: 2, name: "Mate", email: "mate@example.com" }], teams: [{ id: 3, name: "payments" }], external: { enabled: false, domains: [] } } });
     mocks.reports.leave.mockResolvedValue({ status: "success", data: null });
     mocks.dashboards.get.mockResolvedValue({ status: "success", data: { id: 4, corrupt: false, panels: { tabs: [{ id: "main", title: "Main", layout: [] }] } } });
   });
@@ -148,6 +148,34 @@ describe("ReportsList", () => {
     expect(document.querySelector('[data-run-status="sent"]')!.textContent).toContain(i18n.global.t("reports.status_sent"));
     // The list's last run follows the history the drawer loaded.
     expect(host.querySelector('[data-report-id="9"]')!.textContent).toContain(i18n.global.t("reports.status_sent"));
+  });
+
+  it("offers an address field only while external recipients are on", async () => {
+    await mount("/reports?saved_query=5");
+    await vi.waitFor(() => expect(document.querySelector("#report-add-recipient")).not.toBeNull());
+    await settle();
+    expect(document.querySelector("#report-add-email")).toBeNull();
+    app.unmount();
+    host.remove();
+
+    mocks.reports.recipientOptions.mockResolvedValue({ status: "success", data: { users: [], teams: [], external: { enabled: true, domains: ["example.com"] } } });
+    await mount("/reports?saved_query=5");
+    await vi.waitFor(() => expect(document.querySelector("#report-add-email")).not.toBeNull());
+    setValue(document.querySelector<HTMLInputElement>("#report-name")!, "Daily 5xx");
+    setValue(document.querySelector<HTMLInputElement>("#report-add-email")!, " oncall@example.com ");
+    await settle();
+    button(i18n.global.t("reports.addEmail")).click();
+    await settle();
+    // The same address twice, in another case, is listed once.
+    setValue(document.querySelector<HTMLInputElement>("#report-add-email")!, "OnCall@example.com");
+    await settle();
+    button(i18n.global.t("reports.addEmail")).click();
+    await settle();
+    expect(document.querySelector('[data-recipient="email:oncall@example.com"]')!.textContent).toContain("oncall@example.com");
+    button(i18n.global.t("reports.create")).click();
+    await settle();
+    const input = mocks.reports.create.mock.calls[0][0] as ReportInput;
+    expect(input.recipients).toEqual([{ kind: "user", user_id: 1 }, { kind: "email", email: "oncall@example.com" }]);
   });
 
   it("offers the CSV attachment for a saved query only", async () => {

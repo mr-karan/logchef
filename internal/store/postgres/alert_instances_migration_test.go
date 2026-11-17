@@ -198,3 +198,59 @@ func TestReportOwnerRecipientsUpgrade(t *testing.T) {
 		t.Errorf("recipient rows after a second run = %d, %v; want 2", n, err)
 	}
 }
+
+// TestReportExternalSettingsUpgrade applies every migration before
+// add_report_external_settings and records them as applied, seeds a
+// setting, then lets postgres.New run the rest (RFC 0008 unit R9).
+func TestReportExternalSettingsUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const version = 31
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, version) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, version-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.ReportExternalSettingsSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+	storetest.CheckReportExternalSettings(t, opener(dsn)(t))
+
+	// The statement adds nothing when it runs again.
+	if _, err := conn.Exec(ctx, readMigration(t, "000031_add_report_external_settings.up.sql")); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM system_settings`).Scan(&n); err != nil || n != 3 {
+		t.Errorf("settings after a second run = %d, %v; want 3", n, err)
+	}
+}
+
+// TestReportExternalSettingsLeaveAnEmptyTable: a fresh database is seeded
+// at first boot, which skips a table that has rows, so the migration adds
+// no rows to an empty table.
+func TestReportExternalSettingsLeaveAnEmptyTable(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	s := opener(dsn)(t)
+	settings, err := s.ListSettings(context.Background())
+	if err != nil || len(settings) != 0 {
+		t.Errorf("settings after migrating a fresh database = %+v, %v; want none", settings, err)
+	}
+}

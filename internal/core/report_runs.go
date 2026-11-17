@@ -685,7 +685,8 @@ func (rr *ReportRunner) execute(ctx context.Context, run *models.ReportRun, r *m
 	base := reports.MailMessage{Subject: reports.Subject(r.Name, run.ScheduledFor, plan.loc), Date: time.Now()}
 	// Every recipient that receives the message reaches the saved query,
 	// whose one panel would be locked otherwise, so the file goes only to
-	// users who reach its source.
+	// users who reach its source, and to external addresses, which receive
+	// every panel the owner reaches.
 	if rendered.csv != nil && !rendered.csv.HeaderTooLarge {
 		base.Attachments = []reports.Attachment{{
 			Name:        reports.CSVName(r.Name, run.ScheduledFor, plan.loc),
@@ -693,36 +694,33 @@ func (rr *ReportRunner) execute(ctx context.Context, run *models.ReportRun, r *m
 			Data:        rendered.csv.Data,
 		}}
 	}
+	// The settings are read again at every send, so turning external
+	// recipients off stops them on the next run.
+	var policy reports.ExternalPolicy
+	if slices.ContainsFunc(people, func(p reports.Resolved) bool { return p.User == nil }) {
+		if policy, err = LoadExternalPolicy(ctx, rr.DB); err != nil {
+			return models.ReportRunResult{}, err
+		}
+	}
 	cache := map[string]reports.Rendered{}
 	for i, person := range people {
-		u := person.User
-		recipient := reports.Recipient{
-			Address: mail.Address{Name: u.FullName, Address: u.Email},
-			Class:   models.ReportDeliveryUser,
-			Target:  strconv.FormatInt(int64(u.ID), 10),
-			Via:     person.Via,
-		}
-		skip := func(reason string) {
+		recipient := recipientFor(person)
+		skip := func(reason string, locked []bool) {
 			res.Deliveries = append(res.Deliveries, models.ReportDelivery{
 				Class: recipient.Class, Target: recipient.Target, Via: recipient.Via,
-				Status: models.ReportDeliverySkipped, Reason: reason,
+				Status: models.ReportDeliverySkipped, Reason: reason, LockedPanels: lockedIDs(plan.panels, locked),
 			})
 		}
 		if i >= reports.MaxResolvedRecipients {
-			skip(reports.SkipRecipientLimit)
+			skip(reports.SkipRecipientLimit, nil)
 			continue
 		}
-		if reason := reports.CanReceive(u); reason != "" {
-			skip(reason)
-			continue
-		}
-		locked, reachable, err := reach.lockedFor(ctx, rr.DB, u)
+		locked, reason, err := reach.admit(ctx, rr.DB, person, policy)
 		if err != nil {
 			return models.ReportRunResult{}, err
 		}
-		if reachable == 0 {
-			skip(string(models.ReportReasonNoAccess))
-			res.Deliveries[len(res.Deliveries)-1].LockedPanels = lockedIDs(plan.panels, locked)
+		if reason != "" {
+			skip(reason, locked)
 			continue
 		}
 		body, err := rendered.renderFor(plan, locked, cache)

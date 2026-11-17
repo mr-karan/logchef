@@ -11,7 +11,7 @@ import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/compon
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReportScheduleFields from "./ReportScheduleFields.vue";
 import { useReportsStore } from "@/stores/reports";
-import type { Report, ReportInput, ReportRangeAnchor, ReportRecipient, ReportSchedule, ReportSourceRef } from "@/api/reports";
+import type { Report, ReportInput, ReportRangeAnchor, ReportRecipient, ReportRecipientInput, ReportSchedule, ReportSourceRef } from "@/api/reports";
 import { REPORT_TIME_RANGES, isCalendarRange, savedQueryVariables, splitValues } from "@/utils/reportSchedule";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useAuthStore } from "@/stores/auth";
@@ -110,11 +110,13 @@ async function loadRecipients(id: number, started: number) {
   saved.value = JSON.stringify(input.value);
 }
 
-function recipientKey(r: { kind: string; user_id?: number; team_id?: number }): string {
+function recipientKey(r: ReportRecipientInput): string {
+  if (r.kind === "email") return `email:${r.email.toLowerCase()}`;
   return r.kind === "user" ? `user:${r.user_id}` : `team:${r.team_id}`;
 }
 
 function recipientLabel(r: ReportRecipient): string {
+  if (r.kind === "email") return r.email;
   return r.kind === "team" ? t("reports.recipientTeam", { name: r.name }) : r.name || r.email || String(r.user_id);
 }
 
@@ -137,6 +139,17 @@ function addRecipient(event: Event) {
     const tm = store.recipientOptions.teams.find((x) => x.id === id);
     if (tm) recipients.value = [...recipients.value, { kind: "team", team_id: tm.id, name: tm.name }];
   }
+}
+
+// The server checks the address and the allowed domains when the report
+// is saved.
+const newEmail = ref("");
+function addEmail() {
+  const email = newEmail.value.trim();
+  if (!email) return;
+  newEmail.value = "";
+  if (held.value.has(`email:${email.toLowerCase()}`)) return;
+  recipients.value = [...recipients.value, { kind: "email", email, name: "" }];
 }
 
 function removeRecipient(r: ReportRecipient) {
@@ -207,7 +220,10 @@ const input = computed<ReportInput>(() => ({
   skip_if_empty: skipIfEmpty.value,
   // Only a saved query attaches its rows; a dashboard refuses the flag.
   attach_csv: !isDashboard.value && attachCSV.value,
-  recipients: recipients.value.map((r) => (r.kind === "user" ? { kind: "user", user_id: r.user_id } : { kind: "team", team_id: r.team_id })),
+  recipients: recipients.value.map((r): ReportRecipientInput => {
+    if (r.kind === "email") return { kind: "email", email: r.email };
+    return r.kind === "user" ? { kind: "user", user_id: r.user_id } : { kind: "team", team_id: r.team_id };
+  }),
 }));
 const dirty = computed(() => !current.value || JSON.stringify(input.value) !== saved.value);
 
@@ -359,6 +375,18 @@ function warningText(code: string): string {
                 <NativeSelectOption v-for="tm in teamOptions" :key="tm.id" :value="`team:${tm.id}`">{{ tm.name }}</NativeSelectOption>
               </NativeSelectOptGroup>
             </NativeSelect>
+            <div v-if="store.recipientOptions.external.enabled && !readOnly" class="flex gap-2">
+              <Input
+                id="report-add-email"
+                v-model="newEmail"
+                type="email"
+                class="flex-1"
+                :placeholder="t('reports.emailPlaceholder')"
+                :aria-label="t('reports.addEmail')"
+                @keydown.enter.prevent="addEmail"
+              />
+              <Button type="button" variant="outline" :disabled="!newEmail.trim()" @click="addEmail">{{ t("reports.addEmail") }}</Button>
+            </div>
           </section>
 
           <section class="space-y-3">
