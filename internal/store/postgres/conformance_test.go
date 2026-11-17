@@ -68,6 +68,7 @@ func TestCollectionLinkRaces(t *testing.T) {
 // separate replicas.
 func TestJobs(t *testing.T) {
 	storetest.RunJobs(t, opener(postgrestest.DSN(t)), true)
+	storetest.RunDeliveries(t, opener(postgrestest.DSN(t)))
 }
 
 // TestReports runs the report store tests with separate pools, like

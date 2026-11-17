@@ -19,6 +19,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/jobs"
 	"github.com/mr-karan/logchef/internal/loki"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
@@ -47,6 +48,8 @@ type App struct {
 	Audit        *audit.Recorder
 	// Jobs is nil on a replica with jobs.enabled = false.
 	Jobs *jobs.Runner
+
+	senders map[models.DestinationType]notify.Sender
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -199,18 +202,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.VictoriaLogs.StartBackgroundHealthChecks(0)
 	a.Loki.StartBackgroundHealthChecks(0)
 
-	// Initialize alerts manager with dynamic senders that read config from DB
-	emailSender := alerts.NewDynamicEmailSender(a.SQLite)
-	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, alerts.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
-	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
-
-	a.Alerts = alerts.NewManager(alerts.Options{
-		Config:      a.Config.Alerts,
-		DB:          a.SQLite,
-		Datasources: a.Datasources,
-		Logger:      a.Logger,
-		Sender:      alertSender,
-	})
+	a.initAlerts()
 
 	// Initialize HTTP server with alerts manager for manual resolution.
 	serverOpts := server.ServerOptions{
@@ -245,23 +237,48 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	a.server = server.New(serverOpts) //nolint:contextcheck // starts an app-lifetime cleanup janitor with its own timeout context; no request ctx to propagate
 
-	a.startJobs(ctx)
-	return nil
+	return a.startJobs(ctx)
+}
+
+// initAlerts builds the notification senders, the job runner when this
+// replica runs jobs, and the alerts manager, which kicks the delivery drain
+// through that runner.
+func (a *App) initAlerts() {
+	// The senders read their settings from the database at each send.
+	a.senders = map[models.DestinationType]notify.Sender{
+		models.DestinationTypeEmail:   notify.NewEmailSender(a.SQLite),
+		models.DestinationTypeWebhook: notify.NewDynamicWebhookSender(a.SQLite, notify.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist}),
+	}
+	alertOpts := alerts.Options{
+		Config:      a.Config.Alerts,
+		DB:          a.SQLite,
+		Datasources: a.Datasources,
+		Logger:      a.Logger,
+		Senders:     a.senders,
+	}
+	if a.Config.Jobs.Enabled {
+		a.Jobs = jobs.New(jobs.Options{Store: a.SQLite, Logger: a.Logger, PollInterval: a.Config.Jobs.PollInterval})
+		alertOpts.Jobs = a.Jobs
+	}
+	a.Alerts = alerts.NewManager(alertOpts)
 }
 
 // startJobs starts the job runner. Every replica with jobs enabled claims due
 // jobs; a claim makes one replica run each tick.
-func (a *App) startJobs(ctx context.Context) {
-	if !a.Config.Jobs.Enabled {
+func (a *App) startJobs(ctx context.Context) error {
+	if a.Jobs == nil {
 		a.Logger.Info("job runner disabled; this replica runs no background jobs")
-		return
+		return nil
 	}
-	a.Jobs = jobs.New(jobs.Options{Store: a.SQLite, Logger: a.Logger, PollInterval: a.Config.Jobs.PollInterval})
 	if a.Config.Alerts.Enabled {
-		a.Alerts.RecoverDeliveries(ctx)
+		if err := a.SQLite.WithTx(ctx, func(tx store.StoreOps) error { return jobs.Upsert(ctx, tx, notify.DrainJob()) }); err != nil {
+			return fmt.Errorf("failed to store the delivery drain job: %w", err)
+		}
 		a.Jobs.Register(a.Alerts.EvaluationKind())
+		a.Jobs.Register(notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Logger: a.Logger}).Kind())
 	}
 	a.Jobs.Start(ctx)
+	return nil
 }
 
 // Start begins the application's main execution loop (starts the HTTP server).

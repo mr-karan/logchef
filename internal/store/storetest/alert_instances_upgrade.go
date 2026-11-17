@@ -2,10 +2,10 @@ package storetest
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"reflect"
-	"sync"
 	"testing"
 	"time"
 
@@ -128,13 +128,11 @@ func firstTickAfterUpgrade(t *testing.T, s store.Store) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sources := datasource.NewService(s, logger)
 	sources.Register(fixedValueProvider{value: 12})
-	sender := &recordingSender{}
 	manager := alerts.NewManager(alerts.Options{
 		Config:      config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 4, HistoryLimit: 50},
 		DB:          s,
 		Datasources: sources,
 		Logger:      logger,
-		Sender:      sender,
 	})
 	runner := jobs.New(jobs.Options{Store: s, Logger: logger, PollInterval: 20 * time.Millisecond})
 	runner.Register(manager.EvaluationKind())
@@ -165,9 +163,30 @@ func firstTickAfterUpgrade(t *testing.T, s store.Store) {
 	}
 	stop()
 
-	sent := sender.sent()
-	if len(sent) != 1 || sent[0].AlertID != 5 || sent[0].Status != models.AlertStatusTriggered {
-		t.Errorf("first tick notifications = %+v, want one firing for alert 5", sent)
+	// Every rule has the migrated webhook destination, so each notification
+	// is one queued row.
+	queued := map[models.AlertID][]string{}
+	for alertID := models.AlertID(1); alertID <= 5; alertID++ {
+		history, err := s.ListAlertHistory(context.Background(), alertID, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refs := make([]string, len(history))
+		for i, entry := range history {
+			refs[i] = fmt.Sprintf("%d:%d", alertID, entry.ID)
+		}
+		deliveries, err := s.ListDeliverySummaries(context.Background(), "alert", refs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rows := range deliveries {
+			for i := range rows {
+				queued[alertID] = append(queued[alertID], rows[i].Event)
+			}
+		}
+	}
+	if !reflect.DeepEqual(queued, map[models.AlertID][]string{5: {"firing"}}) {
+		t.Errorf("first tick notifications = %v, want one firing for alert 5", queued)
 	}
 }
 
@@ -183,22 +202,4 @@ func (p fixedValueProvider) EvaluateAlert(context.Context, *models.Source, datas
 		Columns: []models.ColumnInfo{{Name: "value", Type: "Float64"}},
 		Logs:    []map[string]any{{"value": p.value}},
 	}, nil
-}
-
-type recordingSender struct {
-	mu            sync.Mutex
-	notifications []alerts.AlertNotification
-}
-
-func (r *recordingSender) Send(_ context.Context, notification alerts.AlertNotification) alerts.DeliveryResults {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.notifications = append(r.notifications, notification)
-	return nil
-}
-
-func (r *recordingSender) sent() []alerts.AlertNotification {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]alerts.AlertNotification(nil), r.notifications...)
 }

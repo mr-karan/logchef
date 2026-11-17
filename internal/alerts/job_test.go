@@ -91,9 +91,8 @@ func TestStalledEvaluationWritesNothingAfterTakeover(t *testing.T) {
 			}}
 			sources := datasource.NewService(db, logger)
 			sources.Register(provider)
-			var sends atomic.Int32
-			sender := alertSenderFunc(func(context.Context, AlertNotification) error { sends.Add(1); return nil })
-			m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+			queue := recordQueue(t, db, alert)
+			m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
 			ctx := t.Context()
 
 			if err := m.runEvaluation(ctx, stale); err != nil {
@@ -104,8 +103,8 @@ func TestStalledEvaluationWritesNothingAfterTakeover(t *testing.T) {
 				t.Fatal("a failing query returned no error")
 			}
 			history, err := db.ListAlertHistory(ctx, alert.ID, 10)
-			if err != nil || len(history) != 0 || sends.Load() != 0 {
-				t.Fatalf("stale run wrote history %+v, sent %d, %v; want nothing", history, sends.Load(), err)
+			if rows := queue.rows(); err != nil || len(history) != 0 || len(rows) != 0 {
+				t.Fatalf("stale run wrote history %+v, delivery rows %d, %v; want nothing", history, len(rows), err)
 			}
 			if instances, err := db.ListAlertInstances(ctx, alert.ID); err != nil || len(instances) != 0 {
 				t.Fatalf("stale run wrote instances %+v, %v", instances, err)
@@ -119,8 +118,8 @@ func TestStalledEvaluationWritesNothingAfterTakeover(t *testing.T) {
 				t.Fatal(err)
 			}
 			history, err = db.ListAlertHistory(ctx, alert.ID, 10)
-			if err != nil || len(history) != 1 || history[0].Status != models.AlertStatusTriggered || sends.Load() != 1 {
-				t.Fatalf("current run: history %+v, sent %d, %v; want one firing", history, sends.Load(), err)
+			if rows := queue.rows(); err != nil || len(history) != 1 || history[0].Status != models.AlertStatusTriggered || len(rows) != 1 {
+				t.Fatalf("current run: history %+v, delivery rows %d, %v; want one firing", history, len(rows), err)
 			}
 		})
 	}
@@ -169,13 +168,13 @@ func TestTwoReplicasEvaluateEachTickOnce(t *testing.T) {
 			}
 			upsertEvaluationJob(t, first, alert)
 
-			var queries, sends atomic.Int32
-			sender := alertSenderFunc(func(context.Context, AlertNotification) error { sends.Add(1); return nil })
+			queue := recordQueue(t, first, alert)
+			var queries atomic.Int32
 			var runners []*jobs.Runner
 			for _, db := range []store.Store{first, open()} {
 				sources := datasource.NewService(db, logger)
 				sources.Register(countingProvider{queries: &queries})
-				m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Sender: sender, Config: config.AlertsConfig{MaxConcurrentEvaluations: 4, HistoryLimit: 100}})
+				m := NewManager(Options{DB: db, Datasources: sources, Logger: logger, Config: config.AlertsConfig{MaxConcurrentEvaluations: 4, HistoryLimit: 100}})
 				runner := jobs.New(jobs.Options{Store: db, Logger: logger, PollInterval: 100 * time.Millisecond})
 				runner.Register(m.EvaluationKind())
 				runners = append(runners, runner)
@@ -194,8 +193,8 @@ func TestTwoReplicasEvaluateEachTickOnce(t *testing.T) {
 			if err != nil || len(history) != 1 || history[0].Status != models.AlertStatusTriggered {
 				t.Fatalf("history = %+v, %v; want one firing episode", history, err)
 			}
-			if sends.Load() != 1 {
-				t.Errorf("notifications = %d, want 1", sends.Load())
+			if rows := queue.rows(); len(rows) != 1 {
+				t.Errorf("queued notifications = %d, want 1", len(rows))
 			}
 			// Ticks at 0, 10, ... 60 seconds: at most seven. A tick that ran on
 			// both replicas would push the count past that. A starved runner

@@ -103,3 +103,66 @@ func DestinationSecretHint(t DestinationType, secret string) string {
 	}
 	return parsed.Hostname()
 }
+
+// DeliveryStatus is the state of one queued notification.
+type DeliveryStatus string
+
+const (
+	// DeliveryPending waits for its next attempt.
+	DeliveryPending DeliveryStatus = "pending"
+	// DeliveryAttempting is an email row inside its SMTP transaction.
+	DeliveryAttempting DeliveryStatus = "attempting"
+	DeliverySent       DeliveryStatus = "sent"
+	DeliveryFailed     DeliveryStatus = "failed"
+	// DeliveryUnknown may have reached the receiver; it is never retried.
+	DeliveryUnknown DeliveryStatus = "unknown"
+)
+
+// NotificationDelivery is one row of the delivery queue: one message for one
+// destination, or for one recipient of an email destination.
+type NotificationDelivery struct {
+	ID            int64
+	DestinationID DestinationID
+	Producer      string
+	ProducerRef   string
+	// Recipient is "user:<id>" or an address for an email destination, and
+	// empty for other types.
+	Recipient string
+	// Rows with the same destination, recipient and sequence key go out in
+	// ID order.
+	SequenceKey   string
+	Event         string
+	DedupKey      string
+	MessageJSON   string
+	Status        DeliveryStatus
+	Attempts      int
+	NextAttemptAt time.Time
+	ReservedToken int64
+	ReservedUntil *time.Time
+	LastError     string
+	CreatedAt     time.Time
+	SentAt        *time.Time
+}
+
+// DeliveryOutcome is what one send attempt records. A pending outcome is
+// tried again after RetryAfter.
+type DeliveryOutcome struct {
+	Status     DeliveryStatus
+	RetryAfter time.Duration
+	Error      string
+}
+
+// DeliverySummary is one delivery of an alert history entry, as the API
+// shows it.
+type DeliverySummary struct {
+	DestinationID   DestinationID   `json:"destination_id"`
+	DestinationName string          `json:"destination_name"`
+	DestinationType DestinationType `json:"destination_type"`
+	Recipient       string          `json:"recipient,omitempty"`
+	Event           string          `json:"event"`
+	Status          DeliveryStatus  `json:"status"`
+	Attempts        int             `json:"attempts"`
+	LastError       string          `json:"last_error,omitempty"`
+	SentAt          *time.Time      `json:"sent_at,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+}

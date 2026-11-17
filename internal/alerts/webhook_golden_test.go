@@ -2,7 +2,6 @@ package alerts
 
 import (
 	"bytes"
-	"context"
 	"flag"
 	"io"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -19,7 +19,8 @@ var updateWebhookGolden = flag.Bool("update-webhook-golden", false, "rewrite tes
 
 // TestWebhookV1PayloadGolden: a version 1 webhook destination receives the
 // payload that a rule's webhook URL received before destinations existed,
-// byte for byte. The fixture was written by the sender before the move.
+// byte for byte, after the message went through the delivery queue. The
+// fixture was written by the sender before the move.
 func TestWebhookV1PayloadGolden(t *testing.T) {
 	bodies := make(chan []byte, 1)
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,15 +28,19 @@ func TestWebhookV1PayloadGolden(t *testing.T) {
 		bodies <- body
 	}))
 	defer receiver.Close()
-	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	defer sender.client.CloseIdleConnections()
+	db, alert, _ := newManagerTestAlert(t)
+	destination := webhookDestination(t, db, receiver.URL)
 
 	triggered := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	resolved := triggered.Add(time.Hour)
-	notification := goldenNotification(receiver.URL, triggered, &resolved)
-	if err := sender.Send(context.Background(), notification).Err(); err != nil {
+	msg := goldenNotification(triggered, &resolved).message(notify.EventResolved)
+	if err := notify.Enqueue(t.Context(), db, []notify.Delivery{{
+		DestinationID: destination, Producer: DeliveryProducer, ProducerRef: DeliveryRef(alert.ID, 1),
+		SequenceKey: "golden", DedupKey: "golden", Message: msg,
+	}}); err != nil {
 		t.Fatal(err)
 	}
+	drainQueue(t, db)
 	got := <-bodies
 	path := filepath.Join("testdata", "webhook_v1.golden.json")
 	if *updateWebhookGolden {
@@ -53,7 +58,7 @@ func TestWebhookV1PayloadGolden(t *testing.T) {
 	}
 }
 
-func goldenNotification(url string, triggered time.Time, resolved *time.Time) AlertNotification {
+func goldenNotification(triggered time.Time, resolved *time.Time) AlertNotification {
 	return AlertNotification{
 		AlertID: 42, AlertName: "High error rate", Description: "5xx above normal",
 		Status: models.AlertStatusResolved, Severity: models.AlertSeverityCritical,
@@ -66,6 +71,5 @@ func goldenNotification(url string, triggered time.Time, resolved *time.Time) Al
 		TriggeredAt: triggered, ResolvedAt: resolved,
 		GeneratorURL: "https://logchef.example.com/logs/alerts/42?source=7",
 		Message:      "alert High error rate resolved with value 412.5000",
-		Webhooks:     testWebhooks(url),
 	}
 }

@@ -63,6 +63,7 @@ func TestCollectionLinkRaces(t *testing.T) {
 // one file, so a claim waits on SQLite's write lock, not on Go.
 func TestJobs(t *testing.T) {
 	storetest.RunJobs(t, opener(sqlitetest.Path(t)), false)
+	storetest.RunDeliveries(t, opener(sqlitetest.Path(t)))
 }
 
 // TestReports runs the report store tests with two store instances on one

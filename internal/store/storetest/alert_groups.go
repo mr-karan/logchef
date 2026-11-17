@@ -165,9 +165,6 @@ func assertOneGroupResolved(t *testing.T, ctx context.Context, s store.Store, al
 	if resolved.Status != models.AlertStatusResolved || resolved.ResolvedAt == nil || resolved.Message != "resolved checkout" {
 		t.Errorf("resolved entry = %+v, want resolved with the message", resolved)
 	}
-	if resolved.Payload["delivery_in_progress"] != false {
-		t.Errorf("resolved entry payload = %v, want its delivery interrupted", resolved.Payload)
-	}
 	untouched, err := s.GetAlertHistoryEntry(ctx, alertID, searchID)
 	if err != nil || untouched.Status != models.AlertStatusTriggered || untouched.Payload["delivery_in_progress"] != true {
 		t.Fatalf("other group's entry = %+v, %v; want it open and untouched", untouched, err)

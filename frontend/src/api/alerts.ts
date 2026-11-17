@@ -54,6 +54,20 @@ export interface AlertInstance {
   history_id?: number | null;
 }
 
+/** One queued notification of a history entry. */
+export interface AlertDelivery {
+  destination_id: number;
+  destination_name: string;
+  destination_type: string;
+  recipient?: string;
+  event: "firing" | "resolved" | "no_data" | "test";
+  status: "pending" | "attempting" | "sent" | "failed" | "unknown";
+  attempts: number;
+  last_error?: string;
+  sent_at?: string;
+  created_at: string;
+}
+
 export interface AlertHistoryEntry {
   id: number;
   alert_id: number;
@@ -66,6 +80,7 @@ export interface AlertHistoryEntry {
   payload?: Record<string, unknown>;
   message?: string | null;
   created_at: string;
+  deliveries?: AlertDelivery[];
 }
 
 export interface CreateAlertRequest {

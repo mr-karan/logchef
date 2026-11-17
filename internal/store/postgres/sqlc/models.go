@@ -217,6 +217,27 @@ type Job struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type NotificationDelivery struct {
+	ID            int64              `json:"id"`
+	DestinationID int64              `json:"destination_id"`
+	Producer      string             `json:"producer"`
+	ProducerRef   string             `json:"producer_ref"`
+	Recipient     string             `json:"recipient"`
+	SequenceKey   string             `json:"sequence_key"`
+	Event         string             `json:"event"`
+	DedupKey      string             `json:"dedup_key"`
+	MessageJson   string             `json:"message_json"`
+	Status        string             `json:"status"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	ReservedBy    pgtype.Text        `json:"reserved_by"`
+	ReservedToken int64              `json:"reserved_token"`
+	ReservedUntil pgtype.Timestamptz `json:"reserved_until"`
+	LastError     pgtype.Text        `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+}
+
 type NotificationDestination struct {
 	ID                 int64              `json:"id"`
 	Name               string             `json:"name"`

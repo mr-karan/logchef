@@ -835,7 +835,6 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "配信が中断されました",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
   "ui.activateUser": "{name}を有効にする",
   "ui.deactivateUser": "{name}を無効にする",
   "ui.showSettingValue": "{key}の値を表示",

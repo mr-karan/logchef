@@ -437,28 +437,8 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	auditTarget(c, audit.SettingTestTarget("email"))
 	auditDetail(c, "kind", "email")
 
-	sender := alerts.NewEmailSender(mailer)
-
-	// Build test notification
-	notification := alerts.AlertNotification{
-		AlertName:      "Test Alert",
-		Description:    "This is a test notification to verify your SMTP configuration.",
-		Status:         models.AlertStatusTriggered,
-		Severity:       models.AlertSeverityInfo,
-		SourceName:     "Test Source",
-		Value:          1.0,
-		ThresholdOp:    models.AlertThresholdGreaterThan,
-		ThresholdValue: 0.0,
-		FrequencySecs:  60,
-		LookbackSecs:   300,
-		Query:          "SELECT 1",
-		TriggeredAt:    time.Now(),
-		Message:        "Test notification - please ignore",
-		Emails:         []alerts.EmailTarget{{Target: "test", Address: recipientEmail}},
-	}
-
 	// Send test email
-	if err := sender.Send(c.Context(), notification).Err(); err != nil {
+	if err := mailer.Send(c.Context(), recipientEmail, alerts.TestEmail()); err != nil {
 		s.log.Error("failed to send test email", "error", err, "recipient", recipientEmail, "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test email: %v", err))
 	}

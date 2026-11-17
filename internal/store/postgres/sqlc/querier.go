@@ -161,8 +161,19 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
 	DeleteUserSessions(ctx context.Context, userID int64) error
+	// Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
+	// the database clock.
+	// A row whose dedup_key exists is left as it is.
+	EnqueueDelivery(ctx context.Context, arg EnqueueDeliveryParams) (int64, error)
+	// An email row still attempting after its reservation ended belongs to a
+	// process that crashed or stalled during SMTP. The raised token keeps that
+	// process from overwriting the outcome.
+	ExpireEmailAttempts(ctx context.Context, lastError pgtype.Text) (int64, error)
 	// Mark an export job as failed and return its ID
 	FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error)
+	// Writes one attempt's outcome while the reservation is current. A pending
+	// outcome is due again after retry_seconds.
+	FinishDelivery(ctx context.Context, arg FinishDeliveryParams) (int64, error)
 	// The next run applies only while the job keeps the schedule the run used,
 	// so a schedule change made during the run is not overwritten.
 	FinishJob(ctx context.Context, arg FinishJobParams) (int64, error)
@@ -184,6 +195,7 @@ type Querier interface {
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
 	// Look up one dashboard by id, with creator identity like ListDashboardSummaries.
 	GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error)
+	GetDelivery(ctx context.Context, id int64) (NotificationDelivery, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetJob(ctx context.Context, arg GetJobParams) (Job, error)
@@ -267,7 +279,6 @@ type Querier interface {
 	// Add a member to a team and report through the row count whether this call
 	// inserted it; an existing member is left as it is.
 	InsertTeamMember(ctx context.Context, arg InsertTeamMemberParams) (int64, error)
-	InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error
 	InterruptStaleReportRuns(ctx context.Context, graceSeconds float64) (int64, error)
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (bool, error)
@@ -310,6 +321,7 @@ type Querier interface {
 	// columns and never from panels_json. A name or description from before the
 	// bound is cut to it.
 	ListDashboardSummaries(ctx context.Context) ([]ListDashboardSummariesRow, error)
+	ListDeliverySummaries(ctx context.Context, arg ListDeliverySummariesParams) ([]ListDeliverySummariesRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtype.Timestamptz) ([]pgtype.Text, error)
 	// The newest run of every report, for the report list.
@@ -406,6 +418,7 @@ type Querier interface {
 	MarkAlertEvaluated(ctx context.Context, arg MarkAlertEvaluatedParams) error
 	MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error)
 	MarkAlertResolved(ctx context.Context, id int64) error
+	MarkDeliveryAttempting(ctx context.Context, arg MarkDeliveryAttemptingParams) (int64, error)
 	// Provisioning adopts a view; the definition and revision stay as they are.
 	MarkSavedViewManaged(ctx context.Context, id int64) (int64, error)
 	PauseReport(ctx context.Context, arg PauseReportParams) (int64, error)
@@ -414,6 +427,7 @@ type Querier interface {
 	// Deletes up to batch_size of the oldest events that are older than before or
 	// at or below the row-count boundary. A NULL argument disables its rule.
 	PruneAuditEvents(ctx context.Context, arg PruneAuditEventsParams) (int64, error)
+	PruneDeliveries(ctx context.Context, ageSeconds float64) (int64, error)
 	// Delete expired query shares
 	PruneExpiredQueryShares(ctx context.Context, expiresAt pgtype.Timestamptz) error
 	// Delete a user's history rows beyond the newest `offset` (the per-user cap),
@@ -430,9 +444,13 @@ type Querier interface {
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error)
+	RecordDestinationDelivery(ctx context.Context, arg RecordDestinationDeliveryParams) error
 	// After a manual resolve of one group: the rule is firing while any group
 	// fires, else no_data while any group has no data.
 	RefreshAlertState(ctx context.Context, id int64) error
+	// Hands back a reserved row that was not sent, with the attempt that its
+	// reservation counted.
+	ReleaseDelivery(ctx context.Context, arg ReleaseDeliveryParams) (int64, error)
 	ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error)
 	// Remove a link of either kind
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) (int64, error)
@@ -450,6 +468,10 @@ type Querier interface {
 	// revision and is still stale. Changes neither revision nor updated_at.
 	RepairDashboardSummary(ctx context.Context, arg RepairDashboardSummaryParams) (int64, error)
 	ReportTickExists(ctx context.Context, arg ReportTickExistsParams) (bool, error)
+	// A row waits while an earlier row of its destination, recipient and
+	// sequence key is pending or attempting, so a resolved never overtakes its
+	// firing. Concurrent drains receive disjoint rows.
+	ReserveDeliveries(ctx context.Context, arg ReserveDeliveriesParams) ([]NotificationDelivery, error)
 	ResolveAlertGroupHistory(ctx context.Context, arg ResolveAlertGroupHistoryParams) error
 	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
 	ResumeReport(ctx context.Context, id int64) (int64, error)

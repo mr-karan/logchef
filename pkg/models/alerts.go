@@ -246,6 +246,8 @@ type AlertHistoryEntry struct {
 	Message     string            `json:"message,omitempty"`
 	Payload     map[string]any    `json:"payload,omitempty"`
 	CreatedAt   time.Time         `json:"created_at"`
+	// Deliveries are the queued notifications of the entry, in send order.
+	Deliveries []DeliverySummary `json:"deliveries,omitempty"`
 }
 
 // CreateAlertRequest defines the payload required to create a new alert rule.

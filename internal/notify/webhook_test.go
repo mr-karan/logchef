@@ -1,4 +1,4 @@
-package alerts
+package notify
 
 import (
 	"bytes"
@@ -21,8 +21,17 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/jobs"
+	"github.com/mr-karan/logchef/pkg/models"
 )
+
+var testMessage = Message{Event: EventFiring, Alert: &AlertPayload{AlertName: "errors", Value: 12}}
+
+// hook is a webhook destination that posts to url.
+func hook(target string) *models.NotificationDestination {
+	return &models.NotificationDestination{ID: 1, Name: "hook", Type: models.DestinationTypeWebhook, Secret: target, IsActive: true}
+}
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func TestWebhookRefusesLoopbackByDefault(t *testing.T) {
 	var calls atomic.Int32
@@ -30,7 +39,7 @@ func TestWebhookRefusesLoopbackByDefault(t *testing.T) {
 	defer receiver.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err()
+	err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage)
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Errorf("delivery error = %v; want destination not allowed", err)
 	}
@@ -39,38 +48,8 @@ func TestWebhookRefusesLoopbackByDefault(t *testing.T) {
 	}
 }
 
-func TestWebhookResponseBodyBoundedInHistory(t *testing.T) {
-	db, alert, logger := newManagerTestAlert(t)
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = io.WriteString(w, strings.Repeat("x", 64*1024)+"private-response-tail")
-	}))
-	defer receiver.Close()
-	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	defer sender.client.CloseIdleConnections()
-	linkWebhooks(t, db, alert, receiver.URL)
-	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
-	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
-		t.Fatal(err)
-	}
-	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
-	if err != nil || len(history) != 1 {
-		t.Fatalf("history = %v, %v", history, err)
-	}
-	deliveryError, ok := history[0].Payload["delivery_error"].(string)
-	if !ok {
-		t.Fatalf("missing delivery error in %v", history[0].Payload)
-	}
-	if len(deliveryError) > 512 || strings.Contains(deliveryError, "xxx") || strings.Contains(deliveryError, "private-response-tail") {
-		t.Fatalf("history retained the response body, error length %d", len(deliveryError))
-	}
-	if !strings.Contains(deliveryError, "status 502") {
-		t.Errorf("missing HTTP status in %q", deliveryError)
-	}
-}
-
 func TestDynamicWebhookReusesConnections(t *testing.T) {
-	db, _, logger := newManagerTestAlert(t)
+	db, logger := openStore(t), discardLogger()
 	var connections atomic.Int32
 	receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	receiver.Config.ConnState = func(_ net.Conn, state http.ConnState) {
@@ -82,7 +61,7 @@ func TestDynamicWebhookReusesConnections(t *testing.T) {
 	defer receiver.Close()
 	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	for range 3 {
-		if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err(); err != nil {
+		if err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,7 +75,7 @@ func TestWebhookRejectsPrivateDestinations(t *testing.T) {
 		t.Run(host, func(t *testing.T) {
 			sender := NewWebhookSender(WebhookSenderOptions{Timeout: time.Second})
 			defer sender.client.CloseIdleConnections()
-			err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://" + host + ":8888")}).Err()
+			err := sender.Send(t.Context(), hook("http://"+host+":8888"), "", 1, testMessage)
 			if err == nil || !strings.Contains(err.Error(), "not allowed") {
 				t.Fatalf("delivery error = %v; want destination not allowed", err)
 			}
@@ -109,7 +88,7 @@ func TestWebhookAllowsListedHost(t *testing.T) {
 		if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("invalid webhook request")
 		}
-		var payload webhookPayload
+		var payload AlertPayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Error(err)
 		}
@@ -128,7 +107,7 @@ func TestWebhookAllowsListedHost(t *testing.T) {
 			sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, strings.ToUpper(host)+".")})
 			defer sender.client.CloseIdleConnections()
 			destination := "http://" + net.JoinHostPort(host, parsed.Port())
-			if err := sender.Send(t.Context(), AlertNotification{AlertName: "errors", Value: 12, Webhooks: testWebhooks(destination)}).Err(); err != nil {
+			if err := sender.Send(t.Context(), hook(destination), "", 1, testMessage); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -145,7 +124,7 @@ func TestWebhookDoesNotFollowRedirects(t *testing.T) {
 	defer redirector.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(redirector.URL)}).Err()
+	err := sender.Send(t.Context(), hook(redirector.URL), "", 1, testMessage)
 	if err == nil || !strings.Contains(err.Error(), "status 307") {
 		t.Errorf("redirect error = %v; want status 307", err)
 	}
@@ -168,7 +147,7 @@ func TestWebhookTimeout(t *testing.T) {
 	defer sender.client.CloseIdleConnections()
 	done := make(chan error, 1)
 	go func() {
-		done <- sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err()
+		done <- sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage)
 	}()
 	select {
 	case err := <-done:
@@ -181,13 +160,12 @@ func TestWebhookTimeout(t *testing.T) {
 }
 
 func TestDynamicWebhookConcurrentSendsAndSettingsChange(t *testing.T) {
-	db, _, logger := newManagerTestAlert(t)
+	db, logger := openStore(t), discardLogger()
 	var calls atomic.Int32
 	receiver := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(http.StatusNoContent) }))
 	defer receiver.Close()
 	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	notification := AlertNotification{Webhooks: testWebhooks(receiver.URL)}
-	if err := sender.Send(t.Context(), notification).Err(); err == nil {
+	if err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage); err == nil {
 		t.Fatal("accepted untrusted TLS certificate")
 	}
 	if err := db.UpsertSetting(t.Context(), "alerts.tls_insecure_skip_verify", "true", "boolean", "alerts", "", false); err != nil {
@@ -196,7 +174,7 @@ func TestDynamicWebhookConcurrentSendsAndSettingsChange(t *testing.T) {
 	var workers sync.WaitGroup
 	for range 8 {
 		workers.Go(func() {
-			if err := sender.Send(t.Context(), notification).Err(); err != nil {
+			if err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage); err != nil {
 				t.Error(err)
 			}
 		})
@@ -210,7 +188,7 @@ func TestDynamicWebhookConcurrentSendsAndSettingsChange(t *testing.T) {
 func TestWebhookErrorOmitsDestinationURL(t *testing.T) {
 	sender := NewWebhookSender(WebhookSenderOptions{})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://127.0.0.1:8888/receiver?token=example-token")}).Err()
+	err := sender.Send(t.Context(), hook("http://127.0.0.1:8888/receiver?token=example-token"), "", 1, testMessage)
 	if err == nil {
 		t.Fatal("accepted loopback destination")
 	}
@@ -233,84 +211,12 @@ func TestWebhookDoesNotRetainStatusReason(t *testing.T) {
 	defer receiver.Close()
 	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err()
+	err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage)
 	if err == nil || !strings.Contains(err.Error(), "status 500") {
 		t.Fatalf("error = %v; want HTTP status", err)
 	}
 	if len(err.Error()) > 100 {
 		t.Fatalf("error retained %d-byte status reason", len(err.Error()))
-	}
-}
-
-func TestWebhookMalformedStatusBoundedInHistory(t *testing.T) {
-	db, alert, logger := newManagerTestAlert(t)
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		connection, buffer, err := w.(http.Hijacker).Hijack()
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		defer connection.Close()
-		_, _ = buffer.WriteString("HTTP/1.1 " + strings.Repeat("x", 10000) + "\r\n\r\n")
-		_ = buffer.Flush()
-	}))
-	defer receiver.Close()
-	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	defer sender.client.CloseIdleConnections()
-	linkWebhooks(t, db, alert, receiver.URL)
-	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
-	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
-		t.Fatal(err)
-	}
-	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
-	if err != nil || len(history) != 1 {
-		t.Fatalf("history = %v, %v", history, err)
-	}
-	deliveryError, ok := history[0].Payload["delivery_error"].(string)
-	if !ok || len(deliveryError) > 512 || strings.Contains(deliveryError, strings.Repeat("x", 100)) {
-		t.Fatalf("malformed-status delivery error retained parser text, length %d", len(deliveryError))
-	}
-}
-
-func TestManagerStopRecordsInFlightDeliveryError(t *testing.T) {
-	db, alert, logger := newManagerTestAlert(t)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	receiver := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { close(started); <-release }))
-	defer receiver.Close()
-	defer close(release)
-	sender := NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	defer sender.client.CloseIdleConnections()
-	linkWebhooks(t, db, alert, receiver.URL)
-	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{Enabled: true, MaxConcurrentEvaluations: 1, HistoryLimit: 100}})
-	upsertEvaluationJob(t, db, alert)
-	kind := manager.EvaluationKind()
-	kind.Handler = func(ctx context.Context, job jobs.Job) error {
-		return manager.handleTriggered(withClaim(ctx, job), alert, 12)
-	}
-	runner := jobs.New(jobs.Options{Store: db, Logger: logger, PollInterval: 20 * time.Millisecond})
-	runner.Register(kind)
-	runner.Start(t.Context())
-	defer func() { _ = runner.Stop(context.Background()) }()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("delivery did not start")
-	}
-	stopped := make(chan struct{})
-	go func() { _ = runner.Stop(context.Background()); close(stopped) }()
-	select {
-	case <-stopped:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Stop did not finish")
-	}
-	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
-	if err != nil || len(history) != 1 {
-		t.Fatalf("history = %v, %v", history, err)
-	}
-	deliveryError, ok := history[0].Payload["delivery_error"].(string)
-	if !ok || !strings.Contains(deliveryError, "canceled") || history[0].Payload["delivery_failed"] != true {
-		t.Fatalf("missing canceled delivery outcome in %v", history[0].Payload)
 	}
 }
 
@@ -328,7 +234,7 @@ func TestWebhookProxyEnvironmentCannotBypassGuard(t *testing.T) {
 		t.Fatal("webhook transport must ignore environment proxies")
 	}
 	for _, destination := range []string{"http://169.254.169.254/", "https://169.254.169.254/"} {
-		err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(destination)}).Err()
+		err := sender.Send(t.Context(), hook(destination), "", 1, testMessage)
 		if err == nil || !strings.Contains(err.Error(), "not allowed") {
 			t.Errorf("proxy delivery = %v; want blocked destination", err)
 		}
@@ -376,7 +282,7 @@ func TestWebhookLocalNAT64Policy(t *testing.T) {
 			}
 			sender := NewWebhookSender(WebhookSenderOptions{Timeout: 50 * time.Millisecond, AllowedHosts: webhookTestAllowlist(t, address)})
 			defer sender.client.CloseIdleConnections()
-			err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://[" + address + "]/")}).Err()
+			err := sender.Send(t.Context(), hook("http://["+address+"]/"), "", 1, testMessage)
 			if err != nil && strings.Contains(err.Error(), "not allowed") {
 				t.Fatal("explicit host exception was denied")
 			}
@@ -397,24 +303,12 @@ func TestWebhookTransportErrorCategories(t *testing.T) {
 		{"timeout", context.DeadlineExceeded, "request timed out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, alert, logger := newManagerTestAlert(t)
 			sender := NewWebhookSender(WebhookSenderOptions{})
 			sender.client.Transport = webhookErrorTransport{err: tc.err}
-			linkWebhooks(t, db, alert, "https://internal.example/")
-			want := "webhook delivery failed: webhook 1: " + tc.want
-			if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("https://internal.example/")}).Err(); err == nil || err.Error() != want {
-				t.Fatalf("API delivery error = %v, want %q", err, want)
-			}
-			manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
-			if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
-				t.Fatal(err)
-			}
-			history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
-			if err != nil || len(history) != 1 {
-				t.Fatalf("history count = %d, error = %v", len(history), err)
-			}
-			if got := history[0].Payload["delivery_error"]; got != want {
-				t.Fatalf("stored delivery error = %v, want %q", got, want)
+			want := "webhook delivery failed: " + tc.want
+			err := sender.Send(t.Context(), hook("https://internal.example/"), "", 1, testMessage)
+			if err == nil || err.Error() != want || IsPermanent(err) {
+				t.Fatalf("delivery error = %v, want transient %q", err, want)
 			}
 		})
 	}
@@ -435,9 +329,11 @@ func TestWebhookCapsEachResponseExcerpt(t *testing.T) {
 	var logs bytes.Buffer
 	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 	defer sender.client.CloseIdleConnections()
-	err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL, receiver.URL)}).Err()
-	if err == nil || strings.Contains(err.Error(), "xxx") || !strings.Contains(err.Error(), "webhook 2: status 502") {
-		t.Fatalf("response error retained body or lost status: %v", err)
+	for range 2 {
+		err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage)
+		if err == nil || strings.Contains(err.Error(), "xxx") || !strings.Contains(err.Error(), "status 502") {
+			t.Fatalf("response error retained body or lost status: %v", err)
+		}
 	}
 	entries := strings.Split(strings.TrimSpace(logs.String()), "\n")
 	if len(entries) != 2 {
@@ -457,7 +353,7 @@ func TestWebhookCapsEachResponseExcerpt(t *testing.T) {
 }
 
 func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
-	db, _, logger := newManagerTestAlert(t)
+	db, logger := openStore(t), discardLogger()
 	release := make(chan struct{})
 	receiver := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/slow" {
@@ -468,11 +364,11 @@ func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
 	defer receiver.Close()
 	defer close(release)
 	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, Timeout: 200 * time.Millisecond, SkipTLSVerify: true, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
-	if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err(); err != nil {
+	if err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage); err != nil {
 		t.Fatalf("option TLS default ignored: %v", err)
 	}
 	started := time.Now()
-	if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL + "/slow")}).Err(); err == nil {
+	if err := sender.Send(t.Context(), hook(receiver.URL+"/slow"), "", 1, testMessage); err == nil {
 		t.Fatal("timeout default ignored")
 	}
 	if time.Since(started) > time.Second {
@@ -481,7 +377,7 @@ func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
 	if err := db.UpsertSetting(t.Context(), "alerts.tls_insecure_skip_verify", "false", "boolean", "alerts", "", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks(receiver.URL)}).Err(); err == nil {
+	if err := sender.Send(t.Context(), hook(receiver.URL), "", 1, testMessage); err == nil {
 		t.Fatal("saved TLS setting did not override option default")
 	}
 }
@@ -503,7 +399,7 @@ func TestWebhookTranslationPrefixes(t *testing.T) {
 					opts.AllowedHosts = webhookTestAllowlist(t, address)
 				}
 				sender := NewWebhookSender(opts)
-				err := sender.Send(t.Context(), AlertNotification{Webhooks: testWebhooks("http://[" + address + "]/")}).Err()
+				err := sender.Send(t.Context(), hook("http://["+address+"]/"), "", 1, testMessage)
 				sender.client.CloseIdleConnections()
 				blocked := err != nil && strings.Contains(err.Error(), "not allowed")
 				if blocked == allowed {
@@ -511,70 +407,5 @@ func TestWebhookTranslationPrefixes(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestWebhookPolicyDenialLogAndHistory(t *testing.T) {
-	db, alert, logger := newManagerTestAlert(t)
-	var logs bytes.Buffer
-	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
-	defer sender.client.CloseIdleConnections()
-	linkWebhooks(t, db, alert, "http://127.0.0.1:8888/")
-	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
-	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
-		t.Fatal(err)
-	}
-	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
-	if err != nil || len(history) != 1 {
-		t.Fatalf("history = %v, %v", history, err)
-	}
-	const want = "webhook delivery failed: webhook 1: webhook destination is not allowed"
-	if got := history[0].Payload["delivery_error"]; got != want {
-		t.Errorf("stored delivery error = %v, want %q", got, want)
-	}
-	var entry struct {
-		Level      string `json:"level"`
-		Message    string `json:"msg"`
-		Rule       string `json:"rule"`
-		ResolvedIP string `json:"resolved_ip"`
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
-		t.Fatalf("want one denial log, got %q: %v", logs.String(), err)
-	}
-	if entry.Level != "WARN" || entry.Message != "webhook destination blocked by policy" || entry.Rule != alert.Name || entry.ResolvedIP != "127.0.0.1" {
-		t.Errorf("denial log = %+v", entry)
-	}
-}
-
-func TestManagerRetriesOnlyFailedWebhookTargets(t *testing.T) {
-	db, alert, logger := newManagerTestAlert(t)
-	var successCount, failureCount atomic.Int32
-	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { successCount.Add(1); w.WriteHeader(http.StatusNoContent) }))
-	defer success.Close()
-	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		failureCount.Add(1)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer failure.Close()
-	linkWebhooks(t, db, alert, success.URL, failure.URL)
-	sender := NewMultiSender(NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")}))
-	for range 5 {
-		manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
-		if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if got := successCount.Load(); got != 1 {
-		t.Errorf("successful target requests = %d, want 1", got)
-	}
-	if got := failureCount.Load(); got != 3 {
-		t.Errorf("failing target requests = %d, want 3", got)
-	}
-	history, err := db.GetLatestUnresolvedAlertHistory(t.Context(), alert.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if history.Payload["delivery_retries_exhausted"] != true {
-		t.Errorf("exhausted retries = %v, want true", history.Payload["delivery_retries_exhausted"])
 	}
 }

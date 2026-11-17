@@ -36,10 +36,10 @@ func (f *groupedFixture) tickAt(t *testing.T, at time.Time, result *models.Query
 		t.Fatal(err)
 	}
 	f.provider.results = append(f.provider.results, result)
-	f.sent = nil
 	if err := f.manager.evaluateAlert(t.Context(), alert, at); err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
+	f.sent = f.queue.take()
 	got := make([]string, 0, len(f.sent))
 	for i := range f.sent {
 		got = append(got, strings.TrimSpace(string(f.sent[i].Status)+" "+f.sent[i].Group["service"]))
@@ -131,10 +131,11 @@ func TestNotifyOnResolveOff(t *testing.T) {
 	f.withPolicy(t, models.AlertNoDataZero, false, "service")
 	expectSent(t, "fire", f.tick(t, groupedResult(row("checkout", 12), row("search", 30))), "triggered checkout", "triggered search")
 	expectSent(t, "resolve", f.tick(t, groupedResult(row("checkout", 1), row("search", 30))))
-	f.sent = nil
+	f.queue.take()
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, nil, "fixed"); err != nil {
 		t.Fatal(err)
 	}
+	f.sent = f.queue.take()
 	if len(f.sent) != 0 {
 		t.Fatalf("manual resolve sent %d notifications, want none", len(f.sent))
 	}
@@ -235,9 +236,9 @@ func TestNoDataWebhookV1(t *testing.T) {
 	}))
 	defer receiver.Close()
 	linkWebhooks(t, f.db, f.alert, receiver.URL)
-	f.manager.sender = NewWebhookSender(WebhookSenderOptions{AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
 
 	f.tickAt(t, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC), ungroupedResult())
+	drainQueue(t, f.db)
 	if len(bodies) != 1 {
 		t.Fatalf("webhook received %d requests, want 1", len(bodies))
 	}

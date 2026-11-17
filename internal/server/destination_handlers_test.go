@@ -18,14 +18,15 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// newDestinationEnv is a full server whose alerts manager sends through
-// sender, with alerting enabled.
-func newDestinationEnv(t *testing.T, logger *slog.Logger, sender alerts.AlertSender) *collectionRouteEnv {
+// newDestinationEnv is a full server whose alerts manager tests webhook
+// destinations through webhook, with alerting enabled.
+func newDestinationEnv(t *testing.T, logger *slog.Logger, webhook notify.Sender) *collectionRouteEnv {
 	t.Helper()
 	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: sqlitetest.Path(t)}})
 	if err != nil {
@@ -38,7 +39,7 @@ func newDestinationEnv(t *testing.T, logger *slog.Logger, sender alerts.AlertSen
 		Config:        cfg,
 		SQLite:        db,
 		Audit:         testAuditRecorder(t, db),
-		AlertsManager: alerts.NewManager(alerts.Options{DB: db, Logger: logger, Sender: sender}),
+		AlertsManager: alerts.NewManager(alerts.Options{DB: db, Logger: logger, Senders: map[models.DestinationType]notify.Sender{models.DestinationTypeWebhook: webhook}}),
 		FS:            http.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/" />`)}}),
 		Logger:        logger,
 	})
@@ -269,7 +270,7 @@ func TestDestinationTestHonorsAllowedHosts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			e := newDestinationEnv(t, logger, alerts.NewWebhookSender(alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}))
+			e := newDestinationEnv(t, logger, notify.NewWebhookSender(notify.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}))
 			user := mkTestUser(t, e.s.store, "probe@example.com", models.UserRoleMember)
 			token := e.token(user, models.TokenScopeDestinationsWrite)
 			url := strings.Replace(receiver.URL, "://", "://user:secret-userinfo@", 1) + "/receiver?token=secret-query"
@@ -340,7 +341,7 @@ func TestDestinationTestTransportErrors(t *testing.T) {
 			if tc.name == "timeout" {
 				timeout = 30 * time.Millisecond
 			}
-			e := newDestinationEnv(t, logger, alerts.NewWebhookSender(alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist, Timeout: timeout}))
+			e := newDestinationEnv(t, logger, notify.NewWebhookSender(notify.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist, Timeout: timeout}))
 			user := mkTestUser(t, e.s.store, "probe@example.com", models.UserRoleMember)
 			status, out, raw := testUnsavedWebhook(t, e, e.token(user, models.TokenScopeDestinationsWrite), receiver.URL)
 			if status != http.StatusOK || out.OK || len(out.Results) != 1 || !strings.Contains(out.Results[0].Error, tc.want) || strings.Contains(raw, "127.0.0.1") {

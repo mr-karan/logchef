@@ -1644,7 +1644,6 @@
   "alerts.delivering": "Delivering",
   "alerts.deliveryInterrupted": "Delivery interrupted",
   "alerts.deliveryFailed": "Delivery failed",
-  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted",
   "ui.activateUser": "Activate {name}",
   "ui.deactivateUser": "Deactivate {name}",
   "ui.showSettingValue": "Show value for {key}",

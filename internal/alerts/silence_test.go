@@ -1,8 +1,6 @@
 package alerts
 
 import (
-	"context"
-	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -139,10 +137,10 @@ func (f *groupedFixture) evalAt(t *testing.T, at time.Time, result *models.Query
 		t.Fatal(err)
 	}
 	f.provider.results = append(f.provider.results, result)
-	f.sent = nil
 	if err := f.manager.evaluateAlert(t.Context(), alert, at); err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
+	f.sent = f.queue.take()
 	got := []string{}
 	for i := range f.sent {
 		got = append(got, string(f.sent[i].Status)+" "+f.sent[i].Group["service"])
@@ -233,10 +231,11 @@ func TestManualResolveOfSilencedEpisode(t *testing.T) {
 	at := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	f.silence(t, at, map[string]string{"service": "checkout"})
 	wantSent(t, "fire", f.evalAt(t, at, groupedResult(row("checkout", 12), row("search", 30))), "triggered search")
-	f.sent = nil
+	f.queue.take()
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, nil, "fixed"); err != nil {
 		t.Fatal(err)
 	}
+	f.sent = f.queue.take()
 	if len(f.sent) != 1 || f.sent[0].Group["service"] != "search" {
 		t.Fatalf("manual resolve sent %+v, want only search's resolved", f.sent)
 	}
@@ -259,39 +258,13 @@ func TestManualResolveWhileSilenced(t *testing.T) {
 	f := newGroupedFixture(t)
 	wantSent(t, "fire", f.evalAt(t, time.Now(), groupedResult(row("checkout", 12))), "triggered checkout")
 	f.silence(t, time.Now().Add(-time.Minute), nil)
-	f.sent = nil
+	f.queue.take()
 	if err := f.manager.ManualResolve(t.Context(), f.alert.ID, nil, "fixed"); err != nil {
 		t.Fatal(err)
 	}
+	f.sent = f.queue.take()
 	if len(f.sent) != 0 {
 		t.Fatalf("manual resolve inside a silence sent %+v, want nothing", f.sent)
-	}
-}
-
-// TestSilencedNotificationGetsEveryAttempt: the notification a silence held
-// back gets all its delivery attempts once the silence ends.
-func TestSilencedNotificationGetsEveryAttempt(t *testing.T) {
-	f := newGroupedFixture(t)
-	at := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
-	f.silence(t, at, nil)
-	calls := 0
-	f.manager.sender = alertSenderFunc(func(context.Context, AlertNotification) error {
-		calls++
-		if calls < maxDeliveryAttempts {
-			return errors.New("receiver unavailable")
-		}
-		return nil
-	})
-	f.evalAt(t, at, groupedResult(row("checkout", 12)))
-	for i := range maxDeliveryAttempts + 1 {
-		f.evalAt(t, at.Add(time.Duration(10+i)*time.Minute), groupedResult(row("checkout", 12)))
-	}
-	if calls != maxDeliveryAttempts {
-		t.Fatalf("delivery calls = %d, want %d: the held-back notification gets every attempt", calls, maxDeliveryAttempts)
-	}
-	instances, err := f.db.ListAlertInstances(t.Context(), f.alert.ID)
-	if err != nil || len(instances) != 1 || !instances[0].Notified {
-		t.Fatalf("instances = %+v, %v; want the group notified after the last attempt succeeded", instances, err)
 	}
 }
 
@@ -312,7 +285,7 @@ func TestSilenceHoldsBackNoData(t *testing.T) {
 
 // TestSilenceHoldsBackMovedEpisode: an announced firing group that loses its
 // data inside a silence moves to no_data without a notification. After the
-// silence it owes the no_data notification, with every delivery attempt.
+// silence it owes the no_data notification, and enqueues it once.
 func TestSilenceHoldsBackMovedEpisode(t *testing.T) {
 	f := newGroupedFixture(t)
 	f.withPolicy(t, models.AlertNoDataNoData, true, "service")
@@ -326,21 +299,6 @@ func TestSilenceHoldsBackMovedEpisode(t *testing.T) {
 		t.Fatalf("open episodes = %+v, %v; want the episode moved to no_data", open, err)
 	}
 
-	calls := 0
-	f.manager.sender = alertSenderFunc(func(_ context.Context, n AlertNotification) error {
-		calls++
-		if n.Status != models.AlertStatusNoData {
-			t.Errorf("sent %s, want no_data", n.Status)
-		}
-		if calls < maxDeliveryAttempts {
-			return errors.New("receiver unavailable")
-		}
-		return nil
-	})
-	for i := range maxDeliveryAttempts + 1 {
-		f.evalAt(t, at.Add(time.Duration(11+i)*time.Minute), groupedResult())
-	}
-	if calls != maxDeliveryAttempts {
-		t.Fatalf("no_data delivery calls = %d, want %d", calls, maxDeliveryAttempts)
-	}
+	wantSent(t, "after the silence", f.evalAt(t, at.Add(11*time.Minute), groupedResult()), "no_data checkout")
+	wantSent(t, "the tick after", f.evalAt(t, at.Add(12*time.Minute), groupedResult()))
 }

@@ -1,43 +1,14 @@
 package alerts
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// smtpDialTimeout is the SMTP budget inside an alert delivery attempt.
-const smtpDialTimeout = notify.DefaultSMTPTimeout
-
-// EmailSender mails a notification to the email targets, one message per
-// recipient, through a notify.Mailer.
-type EmailSender struct {
-	mailer *notify.Mailer
-}
-
-func NewEmailSender(mailer *notify.Mailer) *EmailSender {
-	return &EmailSender{mailer: mailer}
-}
-
-func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
-	var results DeliveryResults
-	for index, target := range notification.Emails {
-		if !notification.selects(target.Target) {
-			continue
-		}
-		err := s.mailer.Send(ctx, target.Address, notify.MailMessage{Subject: emailSubject(notification), Text: s.buildBody(notification)})
-		if err != nil {
-			err = fmt.Errorf("email delivery failed: email recipient %d: %w", index+1, err)
-		}
-		results = append(results, DeliveryResult{Target: target.Target, Err: err})
-	}
-	return results
-}
-
+// emailSubject is the subject of a notification's email.
 func emailSubject(notification AlertNotification) string {
 	name := notification.AlertName
 	if len(notification.Group) > 0 {
@@ -54,7 +25,8 @@ func statusLabel(status models.AlertStatus) string {
 	return strings.ToUpper(string(status))
 }
 
-func (s *EmailSender) buildBody(notification AlertNotification) string {
+// emailBody is the plain-text body of a notification's email.
+func emailBody(notification AlertNotification) string {
 	status := statusLabel(notification.Status)
 	severity := strings.ToUpper(string(notification.Severity))
 	lines := []string{

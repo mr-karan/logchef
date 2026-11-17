@@ -545,6 +545,17 @@ func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.Ale
 		}
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
 	}
+	refs := make([]string, len(history))
+	for i, entry := range history {
+		refs[i] = alerts.DeliveryRef(alertID, entry.ID)
+	}
+	deliveries, err := db.ListDeliverySummaries(ctx, alerts.DeliveryProducer, refs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert deliveries: %w", err)
+	}
+	for i, entry := range history {
+		entry.Deliveries = deliveries[refs[i]]
+	}
 	return history, nil
 }
 
