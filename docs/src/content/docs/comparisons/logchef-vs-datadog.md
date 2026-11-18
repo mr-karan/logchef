@@ -67,12 +67,18 @@ Datadog lists ingestion, Standard indexing, and Flex pricing on its
 [pricing page](https://www.datadoghq.com/pricing/?product=log-management) on
 2026-11-18:
 
-- Ingest costs $0.10 per ingested GB, billed annually.
+- Ingest starts at $0.10 per GB of uncompressed data per month, billed
+  annually or on demand. This covers processing, live tail, and forwarding to
+  your own archive bucket.
 - Standard indexing costs $1.70 per million log events per month at 15-day
-  retention when billed annually, or $2.55 on demand. Other retention periods
-  have their own prices.
-- Flex Logs storage costs $0.05 per million events per month, billed
-  annually, plus Flex compute, which the page lists as "Contact Us".
+  retention when billed annually, or $2.55 on demand.
+- Flex Logs is metered per million events stored, with each million billed
+  for at least 30 days at a minimum of $0.05. Flex compute is sized
+  separately.
+- Rehydrating archived logs costs $0.10 per compressed GB scanned, plus
+  indexing for the events it brings back.
+- Forwarding logs to other destinations, such as an external SIEM, starts at
+  $0.25 per uncompressed GB per destination.
 
 Check the pricing page for current numbers before you compare.
 
