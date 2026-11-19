@@ -1267,6 +1267,17 @@ DO UPDATE SET
     query_count = query_stats_daily.query_count + 1,
     total_duration_ms = query_stats_daily.total_duration_ms + EXCLUDED.total_duration_ms;
 
+-- name: QueryStatsSummary :one
+SELECT
+    COALESCE(SUM(query_count), 0)::bigint AS query_count,
+    COUNT(DISTINCT user_id)::bigint AS active_users,
+    COUNT(DISTINCT source_id)::bigint AS active_sources,
+    (CASE WHEN SUM(query_count) > 0
+        THEN TRUNC(SUM(total_duration_ms)::numeric / SUM(query_count))
+        ELSE 0 END)::bigint AS avg_duration_ms
+FROM query_stats_daily
+WHERE bucket_date >= $1;
+
 -- name: TopSourcesByQueries :many
 -- Top sources by total query count over rollup rows on/after `since`, with the
 -- source display name (LEFT JOIN so a deleted source yields ''), and integer

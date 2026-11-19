@@ -199,3 +199,17 @@ func (s *Store) QueryVolumeByDay(ctx context.Context, since string) ([]models.Da
 	}
 	return out, nil
 }
+
+// QueryStatsSummary aggregates every recorded query in the selected window.
+func (s *Store) QueryStatsSummary(ctx context.Context, since string) (models.QueryStatsSummary, error) {
+	row, err := s.q.QueryStatsSummary(ctx, bucketDateParam(since))
+	if err != nil {
+		return models.QueryStatsSummary{}, fmt.Errorf("error summarizing query stats: %w", err)
+	}
+	return models.QueryStatsSummary{
+		QueryCount:    row.QueryCount,
+		ActiveUsers:   row.ActiveUsers,
+		ActiveSources: row.ActiveSources,
+		AvgDurationMs: row.AvgDurationMs,
+	}, nil
+}

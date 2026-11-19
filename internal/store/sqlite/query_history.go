@@ -185,3 +185,17 @@ func (db *DB) QueryVolumeByDay(ctx context.Context, since string) ([]models.Dail
 	}
 	return out, nil
 }
+
+// QueryStatsSummary aggregates every recorded query in the selected window.
+func (db *DB) QueryStatsSummary(ctx context.Context, since string) (models.QueryStatsSummary, error) {
+	row, err := db.readQueries.QueryStatsSummary(ctx, since)
+	if err != nil {
+		return models.QueryStatsSummary{}, fmt.Errorf("error summarizing query stats: %w", err)
+	}
+	return models.QueryStatsSummary{
+		QueryCount:    row.QueryCount,
+		ActiveUsers:   row.ActiveUsers,
+		ActiveSources: row.ActiveSources,
+		AvgDurationMs: row.AvgDurationMs,
+	}, nil
+}

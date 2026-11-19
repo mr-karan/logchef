@@ -24,6 +24,7 @@ const (
 // the window; top_sources/top_users are count-desc (capped at 10); volume_by_day
 // is ascending by date.
 type queryStatsResponse struct {
+	Summary     models.QueryStatsSummary  `json:"summary"`
 	Since       string                    `json:"since"`
 	Days        int                       `json:"days"`
 	TopSources  []models.SourceQueryStat  `json:"top_sources"`
@@ -56,6 +57,12 @@ func (s *Server) handleAdminQueryStats(c fiber.Ctx) error {
 
 	since := time.Now().UTC().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
 
+	summary, err := s.store.QueryStatsSummary(c.Context(), since)
+	if err != nil {
+		s.log.Error("failed to summarize query stats", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
+	}
+
 	topSources, err := s.store.TopSourcesByQueries(c.Context(), since, queryStatsTopN)
 	if err != nil {
 		s.log.Error("failed to list top sources by queries", "error", err)
@@ -73,6 +80,7 @@ func (s *Server) handleAdminQueryStats(c fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, queryStatsResponse{
+		Summary:     summary,
 		Since:       since,
 		Days:        days,
 		TopSources:  topSources,

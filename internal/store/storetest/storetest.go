@@ -817,6 +817,33 @@ func testQueryStats(t *testing.T, ctx context.Context, s store.Store) {
 	verifyTopSources(t, ctx, s, srcA, srcB, ghostSource)
 	verifyTopUsers(t, ctx, s, userA, userB)
 	verifyQueryVolumeByDay(t, ctx, s, day1, day2)
+
+	for _, tc := range []struct {
+		name  string
+		since string
+		want  models.QueryStatsSummary
+	}{
+		{"all queries", day1, models.QueryStatsSummary{QueryCount: 5, ActiveUsers: 2, ActiveSources: 3, AvgDurationMs: 42}},
+		{"inclusive start excludes earlier day", day2, models.QueryStatsSummary{QueryCount: 1, ActiveUsers: 1, ActiveSources: 1, AvgDurationMs: 20}},
+		{"empty window", "2026-08-01", models.QueryStatsSummary{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := s.QueryStatsSummary(ctx, tc.since)
+			if err != nil || got != tc.want {
+				t.Fatalf("QueryStatsSummary(%s) = %+v / %v, want %+v", tc.since, got, err, tc.want)
+			}
+		})
+	}
+
+	// Recorded IDs survive without metadata rows. An older, distinct ID must
+	// contribute neither counts nor duration to the selected window.
+	inc("2026-06-30", 999998, 999998, models.QueryLanguageLogchefQL, 10000)
+	inc(day2, 999999, ghostSource, models.QueryLanguageClickHouseSQL, 7)
+	got, err := s.QueryStatsSummary(ctx, day1)
+	want := models.QueryStatsSummary{QueryCount: 6, ActiveUsers: 3, ActiveSources: 3, AvgDurationMs: 36}
+	if err != nil || got != want {
+		t.Fatalf("QueryStatsSummary with missing metadata = %+v / %v, want %+v", got, err, want)
+	}
 }
 
 func verifyTopSources(t *testing.T, ctx context.Context, s store.Store, srcA, srcB *models.Source, ghost models.SourceID) {

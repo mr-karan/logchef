@@ -651,6 +651,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.queryShapeCoverageStmt, err = db.PrepareContext(ctx, queryShapeCoverage); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryShapeCoverage: %w", err)
 	}
+	if q.queryStatsSummaryStmt, err = db.PrepareContext(ctx, queryStatsSummary); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryStatsSummary: %w", err)
+	}
 	if q.queryVolumeByDayStmt, err = db.PrepareContext(ctx, queryVolumeByDay); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryVolumeByDay: %w", err)
 	}
@@ -1884,6 +1887,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing queryShapeCoverageStmt: %w", cerr)
 		}
 	}
+	if q.queryStatsSummaryStmt != nil {
+		if cerr := q.queryStatsSummaryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryStatsSummaryStmt: %w", cerr)
+		}
+	}
 	if q.queryVolumeByDayStmt != nil {
 		if cerr := q.queryVolumeByDayStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing queryVolumeByDayStmt: %w", cerr)
@@ -2437,6 +2445,7 @@ type Queries struct {
 	pruneQueryShapeStatsStmt               *sql.Stmt
 	pruneReportRunsStmt                    *sql.Stmt
 	queryShapeCoverageStmt                 *sql.Stmt
+	queryStatsSummaryStmt                  *sql.Stmt
 	queryVolumeByDayStmt                   *sql.Stmt
 	reapInterruptedExportJobsStmt          *sql.Stmt
 	recordDestinationDeliveryStmt          *sql.Stmt
@@ -2713,6 +2722,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneQueryShapeStatsStmt:               q.pruneQueryShapeStatsStmt,
 		pruneReportRunsStmt:                    q.pruneReportRunsStmt,
 		queryShapeCoverageStmt:                 q.queryShapeCoverageStmt,
+		queryStatsSummaryStmt:                  q.queryStatsSummaryStmt,
 		queryVolumeByDayStmt:                   q.queryVolumeByDayStmt,
 		reapInterruptedExportJobsStmt:          q.reapInterruptedExportJobsStmt,
 		recordDestinationDeliveryStmt:          q.recordDestinationDeliveryStmt,
