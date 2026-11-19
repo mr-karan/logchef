@@ -2,7 +2,7 @@
 title: Dashboards
 head:
   - tag: title
-    content: "ClickHouse and VictoriaLogs Dashboards | Logchef"
+    content: "Log Dashboards for ClickHouse, VictoriaLogs and Loki | Logchef"
 description: Build multi-panel Logchef dashboards that group log-query visualizations into a shared grid with one time range and auto-refresh.
 ---
 
@@ -19,7 +19,8 @@ its panels.
 
 A dashboard holds a set of **panels** laid out on a 12-column grid. Each panel is a
 self-contained visualization: it points at a team and source, carries its own query
-(LogchefQL, ClickHouse SQL, or native LogsQL for a VictoriaLogs source), and renders as one of
+(LogchefQL, ClickHouse SQL, native LogsQL for a VictoriaLogs source, or
+native LogQL for a Loki source), and renders as one of
 the panel types below.
 Panels do not share a query, only the dashboard's time range and refresh interval.
 A panel can also [pin its own range and bucket size](#panel-time).
@@ -62,10 +63,12 @@ severity over high-cardinality request and trace IDs.
 ### Multiple data sources
 
 Each panel picks its own team and source, so a single dashboard can mix panels from
-different backends: a ClickHouse time series next to a VictoriaLogs stat. LogchefQL
+different backends: a ClickHouse time series next to a VictoriaLogs stat or a
+Loki table. LogchefQL
 compiles to whatever the panel's source speaks, so the same filter works across
 backends. The panel builder offers **ClickHouse SQL** for ClickHouse sources
-and **LogsQL** for VictoriaLogs sources. Selecting ClickHouse SQL starts a
+**LogsQL** for VictoriaLogs sources and **LogQL** for
+[Loki sources](/tutorials/loki/). Selecting ClickHouse SQL starts a
 result query. Existing SQL count panels continue to work.
 
 If a viewer lacks access to a panel's source, that panel renders a locked state
@@ -75,7 +78,8 @@ collection items.
 ### Chart a LogchefQL aggregation
 
 A LogchefQL panel in result mode can chart an
-[aggregation](/guide/aggregations), on ClickHouse and VictoriaLogs sources alike:
+[aggregation](/guide/aggregations), on ClickHouse and VictoriaLogs sources alike
+(Loki sources do not support LogchefQL aggregations):
 
 ```text
 service=api | p95(duration_ms) by time, service
