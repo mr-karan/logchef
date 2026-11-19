@@ -518,11 +518,8 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Get("/:alertID/history", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertHistory)
 	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert)
 
-	// Dashboards (saved grids of visualization panels). Visibility: any
-	// authenticated user can list/view. Edit/delete: creator + global admin
-	// (dashboards whose author was deleted are global-admin-only). Panel data is
-	// fetched by the frontend through the existing team-scoped log endpoints, so
-	// there is no source-access gate here.
+	// Dashboard handlers authorize access to the stored panels. Panel queries
+	// run through the team-scoped log endpoints.
 	dashboardRoutes := api.Group("/dashboards", s.requireAuth)
 	dashboardRoutes.Get("/", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleListDashboards)
 	dashboardRoutes.Post("/", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleCreateDashboard)

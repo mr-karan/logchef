@@ -220,7 +220,8 @@ func DashboardPanelRefs(raw json.RawMessage) ([]DashboardPanelRef, error) {
 		return nil, nil
 	}
 	var blob struct {
-		Panels []struct {
+		Version int `json:"version"`
+		Panels  []struct {
 			ID       string             `json:"id"`
 			Kind     DashboardPanelKind `json:"kind"`
 			TeamID   int                `json:"team_id"`
@@ -233,7 +234,7 @@ func DashboardPanelRefs(raw json.RawMessage) ([]DashboardPanelRef, error) {
 	refs := make([]DashboardPanelRef, 0, len(blob.Panels))
 	for i := range blob.Panels {
 		p := &blob.Panels[i]
-		if p.Kind != "" && p.Kind != DashboardPanelKindQuery {
+		if blob.Version != DashboardPanelsVersion && p.Kind != "" && p.Kind != DashboardPanelKindQuery {
 			continue
 		}
 		refs = append(refs, DashboardPanelRef{PanelID: p.ID, TeamID: p.TeamID, SourceID: p.SourceID})

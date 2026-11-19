@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Team owners, admins, and editors can edit shared dashboards when they have
+  edit rights on every team the dashboard uses. Dashboard summaries return
+  `can_delete` separately. Reload an open Logchef tab after upgrading to get
+  the new edit and delete controls.
+
 ## [2.7.0] - 2026-11-15
 
 Dashboards grow up. Panels run SQL as written and show the result as stats

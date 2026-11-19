@@ -37,6 +37,7 @@ function summary(id: number, overrides: Partial<DashboardSummary> = {}): Dashboa
     tab_count: 1,
     revision: 1,
     can_edit: true,
+    can_delete: true,
     corrupt: false,
     created_at: "2026-07-08T00:00:00Z",
     updated_at: "2026-07-08T00:00:00Z",
@@ -207,6 +208,13 @@ describe("DashboardsList", () => {
     const labels = items.map((i) => i.textContent?.trim());
     expect(labels).not.toContain(i18n.global.t("ui.duplicate"));
     expect(labels).toContain(i18n.global.t("ui.delete"));
+  });
+
+  it("offers no Delete to a team editor who can edit but not delete", async () => {
+    await mount([summary(1, { can_edit: true, can_delete: false })]);
+    const labels = (await openMenu(cards()[0])).map((i) => i.textContent?.trim());
+    expect(labels).toContain(i18n.global.t("ui.duplicate"));
+    expect(labels).not.toContain(i18n.global.t("ui.delete"));
   });
 
   it("creates an empty dashboard as a schema 2 blob", async () => {

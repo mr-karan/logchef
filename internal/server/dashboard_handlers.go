@@ -132,10 +132,11 @@ func (s *Server) handleGetDashboard(c fiber.Ctx) error {
 	return s.sendDashboard(c, fiber.StatusOK, user, client, dashboard)
 }
 
-// handleUpdateDashboard updates a dashboard. Editing is allowed only for the
-// creator or a global admin; the new panels are additionally checked for
-// team/source existence and (for non-admins) team membership (B2/B4). The body
-// must carry the revision the client loaded: without it the answer is 428,
+// handleUpdateDashboard updates a dashboard. The creator and global admins
+// edit it; so does a team owner, admin or editor of every team its stored and
+// new query panels use, when no stored panel is locked for them. The new
+// panels are checked for team/source existence and membership (B2/B4).
+// The body must carry the revision the client loaded: without it the answer is 428,
 // and when another save already moved the revision it is 409. A save that
 // would drop state its client does not know is 409 as well.
 func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
@@ -198,7 +199,7 @@ func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load dashboard", models.GeneralErrorType)
 	}
-	if !core.UserCanEditDashboard(existing, user) {
+	if !core.DashboardCreatorOrAdmin(existing.CreatedBy, user) {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this dashboard", models.AuthorizationErrorType)
 	}
 

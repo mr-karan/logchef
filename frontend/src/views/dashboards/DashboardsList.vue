@@ -239,13 +239,13 @@ async function doDelete() {
 }
 
 // Row actions are hidden in the read-only demo. Anyone who can see a dashboard
-// may duplicate it, unless its stored panels are unreadable; only editors may
-// delete it.
+// may duplicate it, unless its stored panels are unreadable; only its creator
+// and global admins may delete it.
 function duplicateAction(d: DashboardSummary) {
   return demoReadOnly.value || d.corrupt ? undefined : () => void openDuplicate(d);
 }
 function deleteAction(d: DashboardSummary) {
-  return d.can_edit && !demoReadOnly.value ? () => confirmDelete(d) : undefined;
+  return d.can_delete && !demoReadOnly.value ? () => confirmDelete(d) : undefined;
 }
 </script>
 

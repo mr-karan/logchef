@@ -369,8 +369,17 @@ limited to 200 characters, descriptions to 2,000 and tab names to 60.
 
 ## Who can edit
 
-- **Anyone signed in** can list and view dashboards.
-- **The creator** and **global admins** can edit and delete a dashboard.
+- **Viewing.** The creator, global admins and members of any team that one of
+  the dashboard's query panels uses can list and view it. A panel whose source
+  the viewer cannot reach shows as locked, without its query.
+- **Editing.** The creator and global admins can edit a dashboard. So can a
+  team owner, admin or editor of every team its query panels use. That team
+  rule applies to the saved panels too: a team editor cannot add a panel on a
+  team where they are only a member, and cannot remove every query panel. A
+  team editor also cannot save while a panel is locked for them, for example
+  after its source was unlinked from the team. Creators see locked panels too.
+  They can remove them and save. Global admins can see and repair all panels.
+- **Deleting.** Only the creator and global admins can delete a dashboard.
 
 Per-dashboard sharing roles are not part of this release. As always, viewing a panel
 never grants access to its underlying source; source access is enforced when the
@@ -398,7 +407,7 @@ request.
   copy a dashboard's stored `features` list into the header.
 
 `GET /dashboards` returns one summary per dashboard (panel count, panel
-kinds, tab count, revision, edit rights and a corrupt flag) and no panel
+kinds, tab count, revision, `can_edit`, `can_delete` and a corrupt flag) and no panel
 blobs. Read a dashboard's panels with `GET /dashboards/:id`. Every update
 must carry the `revision` from that read, and the panel blob may be up to
 512 KiB.
