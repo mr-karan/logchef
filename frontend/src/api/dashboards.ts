@@ -201,6 +201,8 @@ export interface DashboardSummary {
   created_by_email?: string;
   revision: number;
   can_edit: boolean;
+  /** Creator or global admin only; a team editor may edit a shared dashboard but not delete it. */
+  can_delete: boolean;
   corrupt: boolean;
   /** The reports a delete removes with the dashboard; 0 for a caller who cannot delete it. */
   report_count: number;

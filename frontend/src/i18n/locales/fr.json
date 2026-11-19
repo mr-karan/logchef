@@ -771,6 +771,7 @@
   "dashboards.duplicateTitle": "Dupliquer le tableau de bord",
   "dashboards.duplicateDescription": "Crée une copie qui vous appartient, avec les mêmes panneaux et la même disposition.",
   "dashboards.duplicateSkipsLockedPanels": "{count} panneau utilise une source à laquelle vous n'avez pas accès. Il ne sera pas copié. | {count} panneaux utilisent des sources auxquelles vous n'avez pas accès. Ils ne seront pas copiés.",
+  "dashboards.cannotAddPanel": "Ce tableau de bord est en lecture seule. Vous ne pouvez pas ajouter de panneau.",
   "alerts.searchAlerts": "Rechercher des alertes…",
   "alerts.noMatches": "Aucune alerte ne correspond à « {search} »",
   "alerts.viewLogs": "Voir les logs",

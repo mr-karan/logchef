@@ -1566,6 +1566,7 @@
   "dashboards.duplicateTitle": "复制仪表盘",
   "dashboards.duplicateDescription": "创建一个归你所有的副本，包含相同的面板和布局。",
   "dashboards.duplicateSkipsLockedPanels": "{count} 个面板使用了你无权访问的数据源，不会被复制。",
+  "dashboards.cannotAddPanel": "此仪表盘为只读，无法添加面板。",
   "alerts.searchAlerts": "搜索告警…",
   "alerts.noMatches": "没有与“{search}”匹配的告警",
   "alerts.viewLogs": "查看日志",

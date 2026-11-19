@@ -113,7 +113,10 @@ type DashboardSummary struct {
 	CreatedByEmail string   `json:"created_by_email,omitempty"`
 	Revision       int      `json:"revision"`
 	CanEdit        bool     `json:"can_edit"`
-	Corrupt        bool     `json:"corrupt"`
+	// CanDelete is true for the creator and global admins only; a team
+	// editor who can edit a shared dashboard cannot delete it.
+	CanDelete bool `json:"can_delete"`
+	Corrupt   bool `json:"corrupt"`
 	// ReportCount is the number of reports that a delete of the dashboard
 	// removes with it. Only a caller who can delete the dashboard gets it.
 	ReportCount int `json:"report_count"`
