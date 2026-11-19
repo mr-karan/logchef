@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -49,7 +50,7 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 	if _, _, err := AddTeamMember(ctx, db, log, teamA.ID, creator.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(creator, team-a): %v", err)
 	}
-	if _, err := AddTeamSource(ctx, db, log, teamA.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), teamA.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(team-a, src): %v", err)
 	}
 
@@ -64,7 +65,7 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 	if _, _, err := AddTeamMember(ctx, db, log, teamB.ID, crossTeamUser.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(crossTeamUser, team-b): %v", err)
 	}
-	if _, err := AddTeamSource(ctx, db, log, teamB.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), teamB.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(team-b, src): %v", err)
 	}
 
@@ -193,7 +194,7 @@ func TestMarkSavedQueriesRunnable(t *testing.T) {
 	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember: %v", err)
 	}
-	if _, err := AddTeamSource(ctx, db, log, team.ID, accessibleSrc.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), team.ID, accessibleSrc.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 

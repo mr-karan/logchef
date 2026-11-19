@@ -8,6 +8,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/victorialogs"
@@ -254,7 +255,7 @@ func TestReconcilePostgresConcurrentAdminTeamSourceWrite(t *testing.T) {
 					started = true
 					go func() {
 						if operation == "add" {
-							_, err := core.AddTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							_, err := core.AddTeamSource(ctx, db, quietLogger(), access.SystemPrincipal(), team.ID, source.ID)
 							result <- err
 						} else {
 							_, err := core.RemoveTeamSource(ctx, db, quietLogger(), team.ID, source.ID)

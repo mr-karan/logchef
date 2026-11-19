@@ -333,7 +333,7 @@ func (s *Server) handleLinkSourceToTeam(c fiber.Ctx) error {
 	}
 
 	// Call core function to create the link.
-	existed, err := core.AddTeamSource(c.Context(), s.store, s.log, teamID, req.SourceID)
+	existed, err := core.AddTeamSource(c.Context(), s.store, s.log, principalFromLocals(c), teamID, req.SourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) || errors.Is(err, core.ErrSourceNotFound) {
 			// Return 404 if either team or source doesn't exist.
