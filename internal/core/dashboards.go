@@ -100,7 +100,11 @@ func CreateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, u
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyDashboardPanelRefs(ctx, db, user, stored); err != nil {
+	roles, err := dashboardTeamRoles(ctx, db, user)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyDashboardPanelRefs(ctx, db, user, roles, stored); err != nil {
 		return nil, err
 	}
 
@@ -130,7 +134,7 @@ func CreateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, u
 //
 // Global admins bypass the membership check (B2) but not the existence check
 // (B4) — a dangling reference is a data-integrity problem regardless of role.
-func verifyDashboardPanelRefs(ctx context.Context, db store.StoreOps, user *models.User, raw json.RawMessage) error {
+func verifyDashboardPanelRefs(ctx context.Context, db store.StoreOps, user *models.User, roles teamRoles, raw json.RawMessage) error {
 	refs, err := models.DashboardPanelRefs(raw)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
@@ -140,14 +144,6 @@ func verifyDashboardPanelRefs(ctx context.Context, db store.StoreOps, user *mode
 	}
 
 	admin := user.Role == models.UserRoleAdmin
-	var userTeams map[models.TeamID]struct{}
-	if !admin {
-		userTeams, err = userTeamSet(ctx, db, user.ID)
-		if err != nil {
-			return err
-		}
-	}
-
 	for _, ref := range refs {
 		teamID := models.TeamID(ref.TeamID)
 		sourceID := models.SourceID(ref.SourceID)
@@ -172,7 +168,7 @@ func verifyDashboardPanelRefs(ctx context.Context, db store.StoreOps, user *mode
 			return fmt.Errorf("%w: panel %q references source %d which is not linked to team %d", ErrInvalidDashboard, ref.PanelID, ref.SourceID, ref.TeamID)
 		}
 		if !admin {
-			if _, ok := userTeams[teamID]; !ok {
+			if _, ok := roles[teamID]; !ok {
 				return fmt.Errorf("%w: you are not a member of team %d referenced by panel %q", ErrDashboardForbidden, ref.TeamID, ref.PanelID)
 			}
 		}
@@ -180,16 +176,59 @@ func verifyDashboardPanelRefs(ctx context.Context, db store.StoreOps, user *mode
 	return nil
 }
 
-func userTeamSet(ctx context.Context, db store.StoreOps, userID models.UserID) (map[models.TeamID]struct{}, error) {
-	teams, err := db.ListUserTeams(ctx, userID)
+// teamRoles maps each team the caller belongs to onto their role in it.
+type teamRoles map[models.TeamID]models.TeamRole
+
+// dashboardTeamRoles loads the caller's current team roles in one read. A
+// global admin passes every team check without one, so it is nil for them.
+func dashboardTeamRoles(ctx context.Context, db store.StoreOps, user *models.User) (teamRoles, error) {
+	if user.Role == models.UserRoleAdmin {
+		return nil, nil
+	}
+	teams, err := db.ListTeamsForUser(ctx, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load caller teams: %w", err)
 	}
-	set := make(map[models.TeamID]struct{}, len(teams))
+	roles := make(teamRoles, len(teams))
 	for _, t := range teams {
-		set[t.ID] = struct{}{}
+		roles[t.ID] = t.Role
 	}
-	return set, nil
+	return roles, nil
+}
+
+// memberOfAny reports whether the caller belongs to any of teamIDs.
+func (r teamRoles) memberOfAny(teamIDs []int) bool {
+	for _, id := range teamIDs {
+		if _, ok := r[models.TeamID(id)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// editsEvery reports whether the caller is a team owner, admin or editor of
+// every one of teamIDs, and there is at least one. A dashboard with no query
+// panel belongs to no team, so only its creator and global admins edit it.
+func (r teamRoles) editsEvery(teamIDs []int) bool {
+	if len(teamIDs) == 0 {
+		return false
+	}
+	for _, id := range teamIDs {
+		switch r[models.TeamID(id)] {
+		case models.TeamRoleOwner, models.TeamRoleAdmin, models.TeamRoleEditor:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func panelRefTeamIDs(refs []models.DashboardPanelRef) []int {
+	ids := make([]int, len(refs))
+	for i, ref := range refs {
+		ids[i] = ref.TeamID
+	}
+	return ids
 }
 
 // GetDashboard retrieves a single stored dashboard row by id.
@@ -237,30 +276,20 @@ func ListDashboards(ctx context.Context, db store.StoreOps, log *slog.Logger, us
 		return nil, ErrDashboardListUnavailable
 	}
 
-	admin := user.Role == models.UserRoleAdmin
-	var userTeams map[models.TeamID]struct{}
-	if !admin {
-		var err error
-		userTeams, err = userTeamSet(ctx, db, user.ID)
-		if err != nil {
-			return nil, err
-		}
+	roles, err := dashboardTeamRoles(ctx, db, user)
+	if err != nil {
+		return nil, err
 	}
 
 	visible := make([]*models.DashboardSummary, 0, len(rows))
 	for _, s := range rows {
-		isOwner := s.CreatedBy != nil && *s.CreatedBy == user.ID
-		allowed := admin || isOwner
-		for _, teamID := range s.PanelTeamIDs {
-			if allowed {
-				break
-			}
-			_, allowed = userTeams[models.TeamID(teamID)]
-		}
-		if !allowed {
+		s.CanDelete = DashboardCreatorOrAdmin(s.CreatedBy, user)
+		if !s.CanDelete && !roles.memberOfAny(s.PanelTeamIDs) {
 			continue
 		}
-		s.CanEdit = admin || isOwner
+		// The list reads no blob, so it cannot see a panel locked by an
+		// unlinked source; the detail and the save check that.
+		s.CanEdit = s.CanDelete || roles.editsEvery(s.PanelTeamIDs)
 		visible = append(visible, s)
 	}
 	return visible, nil
@@ -307,19 +336,19 @@ func BackfillDashboardSummaries(ctx context.Context, db store.StoreOps, log *slo
 }
 
 // lockedDashboardPanels returns the ids of the query panels in panels whose
-// source the viewer cannot reach. The creator and global admins see every
-// panel in this release.
-func lockedDashboardPanels(ctx context.Context, db store.StoreOps, log *slog.Logger, user *models.User, dashboard *models.Dashboard, panels json.RawMessage) (map[string]struct{}, error) {
-	if user.Role == models.UserRoleAdmin || (dashboard.CreatedBy != nil && *dashboard.CreatedBy == user.ID) {
+// source the viewer cannot reach.
+func lockedDashboardPanels(ctx context.Context, db store.StoreOps, user *models.User, roles teamRoles, refs []models.DashboardPanelRef) (map[string]struct{}, error) {
+	if user.Role == models.UserRoleAdmin {
 		return nil, nil
-	}
-	refs, err := models.DashboardPanelRefs(panels)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read panel references: %w", err)
 	}
 	locked := make(map[string]struct{})
 	for _, ref := range refs {
-		hasAccess, err := UserHasAccessToTeamSource(ctx, db, log, user.ID, models.TeamID(ref.TeamID), models.SourceID(ref.SourceID))
+		teamID := models.TeamID(ref.TeamID)
+		if _, member := roles[teamID]; !member {
+			locked[ref.PanelID] = struct{}{}
+			continue
+		}
+		hasAccess, err := db.TeamHasSource(ctx, teamID, models.SourceID(ref.SourceID))
 		if err != nil {
 			return nil, fmt.Errorf("failed to check panel source access: %w", err)
 		}
@@ -346,7 +375,7 @@ func BuildDashboardResponse(ctx context.Context, db store.StoreOps, log *slog.Lo
 		CreatedByName:  dashboard.CreatedByName,
 		CreatedByEmail: dashboard.CreatedByEmail,
 		Revision:       dashboard.Revision,
-		CanEdit:        UserCanEditDashboard(dashboard, user),
+		CanEdit:        DashboardCreatorOrAdmin(dashboard.CreatedBy, user),
 		Timestamps:     dashboard.Timestamps,
 	}
 	if len(models.DashboardPanelsUnknownFeatures(dashboard.PanelsJSON)) > 0 {
@@ -369,10 +398,19 @@ func BuildDashboardResponse(ctx context.Context, db store.StoreOps, log *slog.Lo
 		}
 		panels = upgraded
 	}
-	locked, err := lockedDashboardPanels(ctx, db, log, user, dashboard, panels)
+	refs, err := models.DashboardPanelRefs(panels)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read panel references: %w", err)
+	}
+	roles, err := dashboardTeamRoles(ctx, db, user)
 	if err != nil {
 		return nil, err
 	}
+	locked, err := lockedDashboardPanels(ctx, db, user, roles, refs)
+	if err != nil {
+		return nil, err
+	}
+	resp.CanEdit = resp.CanEdit || canEditSharedDashboard(roles, refs, locked)
 	redacted, err := models.RedactDashboardPanels(panels, locked)
 	if err != nil {
 		return nil, fmt.Errorf("failed to redact dashboard panels: %w", err)
@@ -403,10 +441,7 @@ func UserCanViewDashboard(ctx context.Context, db store.StoreOps, user *models.U
 	if user == nil || dashboard == nil {
 		return false, nil
 	}
-	if user.Role == models.UserRoleAdmin {
-		return true, nil
-	}
-	if dashboard.CreatedBy != nil && *dashboard.CreatedBy == user.ID {
+	if DashboardCreatorOrAdmin(dashboard.CreatedBy, user) {
 		return true, nil
 	}
 	// A row with a feature this server does not know is readable enough for
@@ -420,16 +455,15 @@ func UserCanViewDashboard(ctx context.Context, db store.StoreOps, user *models.U
 	if err != nil || len(refs) == 0 {
 		return false, nil //nolint:nilerr // an unreadable blob grants no team-based visibility
 	}
-	userTeams, err := userTeamSet(ctx, db, user.ID)
+	roles, err := dashboardTeamRoles(ctx, db, user)
 	if err != nil {
 		return false, err
 	}
-	for _, ref := range refs {
-		if _, ok := userTeams[models.TeamID(ref.TeamID)]; ok {
-			return true, nil
-		}
-	}
-	return false, nil
+	return roles.memberOfAny(panelRefTeamIDs(refs)), nil
+}
+
+func canEditSharedDashboard(roles teamRoles, refs []models.DashboardPanelRef, locked map[string]struct{}) bool {
+	return len(locked) == 0 && roles.editsEvery(panelRefTeamIDs(refs))
 }
 
 // dashboardWriteContract applies the client schema contract to a save: a
@@ -486,13 +520,21 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 			}
 			return fmt.Errorf("failed to load dashboard: %w", err)
 		}
-		if !UserCanEditDashboard(existing, user) {
-			return ErrDashboardForbidden
+		roles, err := dashboardTeamRoles(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		if err := authorizeDashboardSave(ctx, tx, user, roles, existing, stored); err != nil {
+			return err
 		}
 		if err := dashboardWriteContract(existing, client, stored); err != nil {
 			return err
 		}
-		if err := verifyDashboardPanelRefs(ctx, tx, user, stored); err != nil {
+		// Bind authorization and the audit preimage to the revision used by the CAS.
+		if existing.Revision != *req.Revision {
+			return ErrDashboardConflict
+		}
+		if err := verifyDashboardPanelRefs(ctx, tx, user, roles, stored); err != nil {
 			return err
 		}
 
@@ -523,6 +565,49 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 	return updated, nil
 }
 
+func authorizeDashboardSave(ctx context.Context, tx store.StoreOps, user *models.User, roles teamRoles, existing *models.Dashboard, proposed json.RawMessage) error {
+	if user.Role == models.UserRoleAdmin {
+		return nil
+	}
+	creator := DashboardCreatorOrAdmin(existing.CreatedBy, user)
+	if err := models.ValidateDashboardPanels(existing.PanelsJSON); err != nil {
+		if creator {
+			return nil
+		}
+		return ErrDashboardForbidden
+	}
+	storedRefs, err := models.DashboardPanelRefs(existing.PanelsJSON)
+	if err != nil {
+		return fmt.Errorf("failed to read stored panel references: %w", err)
+	}
+	locked, err := lockedDashboardPanels(ctx, tx, user, roles, storedRefs)
+	if err != nil {
+		return err
+	}
+	if !creator && !canEditSharedDashboard(roles, storedRefs, locked) {
+		return ErrDashboardForbidden
+	}
+	proposedRefs, err := models.DashboardPanelRefs(proposed)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
+	}
+	if creator {
+		for _, ref := range proposedRefs {
+			if _, wasLocked := locked[ref.PanelID]; wasLocked {
+				return fmt.Errorf("%w: remove locked panels before saving", ErrDashboardForbidden)
+			}
+		}
+		return nil
+	}
+	if len(proposedRefs) == 0 {
+		return fmt.Errorf("%w: keep at least one query panel so the dashboard stays shared with a team", ErrDashboardForbidden)
+	}
+	if !roles.editsEvery(panelRefTeamIDs(proposedRefs)) {
+		return fmt.Errorf("%w: editing a dashboard you did not create needs the owner, admin or editor role in every team its query panels use", ErrDashboardForbidden)
+	}
+	return nil
+}
+
 // DeleteDashboard removes a dashboard by id.
 func DeleteDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, id int) error {
 	if err := db.DeleteDashboard(ctx, id); err != nil {
@@ -535,15 +620,13 @@ func DeleteDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, i
 	return nil
 }
 
-// UserCanEditDashboard returns true if the user is the creator or a global
-// admin. Dashboards with a nil CreatedBy (author deleted) are editable only by
-// global admins. Mirrors UserCanEditAlert.
-func UserCanEditDashboard(dashboard *models.Dashboard, user *models.User) bool {
-	if dashboard == nil || user == nil {
+// DashboardCreatorOrAdmin grants delete access and permits editing without a team role.
+func DashboardCreatorOrAdmin(createdBy *models.UserID, user *models.User) bool {
+	if user == nil {
 		return false
 	}
 	if user.Role == models.UserRoleAdmin {
 		return true
 	}
-	return dashboard.CreatedBy != nil && *dashboard.CreatedBy == user.ID
+	return createdBy != nil && *createdBy == user.ID
 }

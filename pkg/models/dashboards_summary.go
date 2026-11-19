@@ -113,7 +113,10 @@ type DashboardSummary struct {
 	CreatedByEmail string   `json:"created_by_email,omitempty"`
 	Revision       int      `json:"revision"`
 	CanEdit        bool     `json:"can_edit"`
-	Corrupt        bool     `json:"corrupt"`
+	// CanDelete is true for the creator and global admins only; a team
+	// editor who can edit a shared dashboard cannot delete it.
+	CanDelete bool `json:"can_delete"`
+	Corrupt   bool `json:"corrupt"`
 	Timestamps
 	// Panels and PanelsCorrupt are the constant compatibility fields that a
 	// schema 1 client gets: the empty schema 1 blob and true. They go away

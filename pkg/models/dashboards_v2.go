@@ -1063,6 +1063,15 @@ func CanonicalDashboardPanels(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	if schema, _ := DashboardPanelsSchema(raw); schema != DashboardPanelsVersion2 {
+		var blob dashboardPanels
+		if err := json.Unmarshal(raw, &blob); err != nil {
+			return nil, err
+		}
+		for i := range blob.Panels {
+			if panel := &blob.Panels[i]; panel.Locked {
+				return nil, fmt.Errorf("panel %q is locked", panel.ID)
+			}
+		}
 		return raw, nil
 	}
 	return canonicalDashboardPanelsV2(raw)
