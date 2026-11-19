@@ -230,6 +230,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Linking a source to a team now requires access to that source. A team admin
+  who was not a global admin could link any source in the instance to their
+  team and then query its logs. Such a link is now refused as source not
+  found. Global admins and provisioning are unaffected.
+
 - Provisioning export no longer writes custom header values of VictoriaLogs
   and Loki sources. A header often carries a credential, such as an API key
   for a fronting proxy, and the export ends up in files people commit or
