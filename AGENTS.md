@@ -2,7 +2,8 @@
 
 Logchef is a log analytics platform: Go (Fiber) backend + Vue 3 (TypeScript/Pinia)
 frontend + Rust CLI. Metadata lives in SQLite (default) or Postgres; logs live in
-ClickHouse or VictoriaLogs, queried via SQL or LogchefQL (Logchef's own query DSL).
+ClickHouse, VictoriaLogs or Grafana Loki, queried via SQL, LogsQL, LogQL or
+LogchefQL (Logchef's own query DSL).
 
 ## Repo Layout
 
@@ -14,9 +15,10 @@ internal/
   store/sqlite/    # SQLite metadata store (default): queries.sql + migrations/ + sqlc/
   store/postgres/  # Postgres metadata store: same layout
   datasource/      # pluggable log backends (ClickHouse / VictoriaLogs providers)
-  logchefql/       # LogchefQL grammar (participle) -> ClickHouse SQL / LogsQL generators
+  logchefql/       # LogchefQL grammar (participle) -> ClickHouse SQL / LogsQL / LogQL generators
   clickhouse/      # ClickHouse client
-  victorialogs/    # VictoriaLogs client
+  victorialogs/    # VictoriaLogs provider
+  loki/            # Grafana Loki provider
   auth/            # OIDC + local auth, sessions
   alerts/          # alert evaluation and notification
   ai/              # AI SQL assistant (OpenAI / Bedrock)
@@ -27,7 +29,7 @@ pkg/logger/        # logging
 frontend/          # Vue 3 SPA — src/api (API clients), src/stores (Pinia), src/views
 cli/               # Rust CLI (cargo)
 docs/              # Astro docs site (logchef.app)
-dev/               # docker-compose dev env (ClickHouse, VictoriaLogs, Dex OIDC, seeds)
+dev/               # docker-compose dev env (ClickHouse, VictoriaLogs, Loki, Dex OIDC, seeds)
 rfcs/, plans/      # design docs
 ```
 
@@ -45,7 +47,7 @@ just dev-setup           # one-shot dev env: docker infra + ClickHouse tables
 just run-backend         # terminal 1 (creates local.db, applies migrations, provisions)
 just dev-seed            # optional: dev@localhost API user/token
 just run-frontend        # terminal 2: vite dev server on :5173
-just dev-docker          # infra only (ClickHouse :8123, VictoriaLogs :9428, Dex)
+just dev-docker          # infra only (ClickHouse :8123, VictoriaLogs :9428, Loki :3100, Dex)
 just dev-reset           # wipe dev log data
 ```
 
@@ -84,11 +86,13 @@ sort (`initialSort` name A-Z for named entities, plus a unique `persistKey`),
 for empty, no-match and loading. Duplicated names use `common.copyName`.
 
 **LogchefQL change**: grammar in `internal/logchefql/grammar.go`, generators in
-`sql_generator.go` (ClickHouse) and `logsql_generator.go` (VictoriaLogs). Mirror
+`sql_generator.go` (ClickHouse), `logsql_generator.go` (VictoriaLogs) and
+`logql_generator.go` (Loki). Mirror
 frontend parsing in `frontend/src/utils/logchefql/` and run its vitest suite.
 
 **New log backend**: implement the datasource provider interface in
-`internal/datasource/` (see `clickhouse_provider.go`).
+`internal/datasource/` (see `clickhouse_provider.go`, or the packages
+`internal/victorialogs/` and `internal/loki/`).
 
 ## Hard Rules
 

@@ -26,6 +26,7 @@ func TestVisibilityLoadersStopAfterNotFound(t *testing.T) {
 	s := New(ServerOptions{
 		Config:      cfg,
 		SQLite:      db,
+		Audit:       testAuditRecorder(t, db),
 		Datasources: datasource.NewService(db, logger),
 		Logger:      logger,
 		FS:          http.Dir(t.TempDir()),
@@ -50,6 +51,7 @@ func TestVisibilityLoadersStopAfterNotFound(t *testing.T) {
 		{"invisible saved query", "/api/v1/saved-queries/" + strconv.Itoa(query.ID), outsider},
 		{"missing alert", "/api/v1/alerts/999999", member},
 		{"missing alert history", "/api/v1/alerts/999999/history", member},
+		{"missing alert instances", "/api/v1/alerts/999999/instances", member},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

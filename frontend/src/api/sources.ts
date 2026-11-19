@@ -55,6 +55,33 @@ export interface VictoriaLogsConnectionInfo {
   optimizer?: VictoriaLogsOptimizer;
 }
 
+export interface LokiConnectionInfo {
+  base_url: string;
+  auth?: {
+    mode?: string;
+    username?: string;
+    password?: string;
+    token?: string;
+  };
+  tenant_id?: string;
+  selector: string;
+  principal?: string;
+  parser?: string;
+  headers?: Record<string, string>;
+  limits?: {
+    max_entries_per_query?: number;
+    sidebar_lookback_seconds?: number;
+    schema_lookback_seconds?: number;
+  };
+}
+
+// The default stream selector of a Loki source, or null for other sources.
+export function getLokiSelector(source: Source | undefined | null): string | null {
+  if (source?.source_type !== 'loki') return null;
+  const selector = (source.connection as Partial<LokiConnectionInfo>).selector;
+  return typeof selector === 'string' && selector ? selector : null;
+}
+
 export interface VictoriaLogsOptimizer {
   enabled: boolean;
   max_window_seconds?: number;
@@ -83,6 +110,7 @@ export function getVictoriaLogsOptimizer(source: Source | undefined | null): Vic
 export type SourceConnectionInfo =
   | ClickHouseConnectionInfo
   | VictoriaLogsConnectionInfo
+  | LokiConnectionInfo
   | Record<string, unknown>;
 
 // Narrow a source's connection to the ClickHouse shape. Returns null for
@@ -206,6 +234,80 @@ export interface SourceInspection {
   schema?: SourceSchemaInspection | null;
 }
 
+// Schema advisor (RFC 0010). Finding text comes from the server in English.
+export type AdvisorInputState = "ok" | "denied" | "limited" | "missing" | "error" | "skipped";
+export type AdvisorImpact = "high" | "medium" | "low" | "info";
+
+export interface AdvisorInput {
+  name: string;
+  state: AdvisorInputState;
+  detail?: string;
+  read_rows: number;
+  read_bytes: number;
+}
+
+export interface AdvisorTarget {
+  kind: "table" | "distributed_local" | "view_base";
+  database: string;
+  table: string;
+  cluster?: string;
+  engine: string;
+}
+
+export interface AdvisorEvidence {
+  label: string;
+  value: string;
+  source: string;
+}
+
+export interface SchemaFinding {
+  id: string;
+  rule: string;
+  impact: AdvisorImpact;
+  title: string;
+  column?: string;
+  path?: string[];
+  evidence: AdvisorEvidence[];
+  ddl: string[];
+  rebuild: boolean;
+  candidate: boolean;
+  gain: string;
+  cost: string;
+  verify?: string;
+}
+
+export interface SchemaAdvisorReport {
+  status: "ok" | "partial" | "unavailable";
+  reason?: string;
+  clickhouse_version: string;
+  target?: AdvisorTarget;
+  inputs: AdvisorInput[];
+  queries_analyzed: number;
+  queries_unanalyzed: number;
+  findings: SchemaFinding[];
+  notes?: string[];
+}
+
+export interface SchemaAdvisorDismissal {
+  finding_id: string;
+  reason: string;
+  dismissed_by: number | null;
+  dismissed_at: string;
+}
+
+// Before the first analysis every report field is null. Dismissals can name
+// findings that the current report no longer holds.
+export interface SchemaAdvice {
+  source_id: number;
+  generated_at: string | null;
+  generated_by: number | null;
+  window_days: number | null;
+  stale: boolean;
+  report: SchemaAdvisorReport | null;
+  dismissals: SchemaAdvisorDismissal[];
+  scheduled_refresh: boolean;
+}
+
 // Field values types for sidebar exploration
 export interface FieldValueInfo {
   value: string;
@@ -246,6 +348,18 @@ export const sourcesApi = {
     apiClient.get<SourceActivity>(`/admin/sources/${sourceId}/activity${refresh ? '?refresh=true' : ''}`, { timeout: 5, suppressErrorToast: true }),
   getTeamSourceActivity: (teamId: number, sourceId: number, refresh = false) =>
     apiClient.get<SourceActivity>(`/teams/${teamId}/sources/${sourceId}/activity${refresh ? '?refresh=true' : ''}`, { timeout: 5, suppressErrorToast: true }),
+  getSchemaAdvice: (sourceId: number) =>
+    apiClient.get<SchemaAdvice>(`/admin/sources/${sourceId}/advisor`, { suppressErrorToast: true }),
+  // The server stops an analysis after 30 s.
+  refreshSchemaAdvice: (sourceId: number) =>
+    apiClient.post<SchemaAdvice>(`/admin/sources/${sourceId}/advisor/refresh`, {}, { timeout: 40, suppressErrorToast: true }),
+  setSchemaAdviceSchedule: (sourceId: number, enabled: boolean) =>
+    apiClient.put<{ enabled: boolean }>(`/admin/sources/${sourceId}/advisor/schedule`, { enabled }),
+  dismissSchemaFinding: (sourceId: number, findingId: string, reason: string) =>
+    apiClient.put<SchemaAdvisorDismissal>(`/admin/sources/${sourceId}/advisor/findings/${findingId}/dismissal`, { reason }),
+  // A restore answers 204 with no body; a failure rejects with its envelope.
+  restoreSchemaFinding: async (sourceId: number, findingId: string) =>
+    (await apiClient.delete<null>(`/admin/sources/${sourceId}/advisor/findings/${findingId}/dismissal`)) || { status: "success" as const, data: null },
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
 

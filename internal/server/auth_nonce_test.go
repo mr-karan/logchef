@@ -20,6 +20,7 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -115,7 +116,7 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			db := newServerTestDB(t)
-			s := &Server{log: log, store: db, oidcProvider: provider, config: &config.Config{Auth: config.AuthConfig{
+			s := &Server{log: log, store: db, audit: audit.New(audit.Options{Store: db, Logger: log}), oidcProvider: provider, config: &config.Config{Auth: config.AuthConfig{
 				SessionDuration: time.Hour, MaxConcurrentSessions: 5,
 				AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}},
 			}}}

@@ -1,6 +1,6 @@
 ---
 title: Declarative Provisioning
-description: Manage Logchef teams, ClickHouse and VictoriaLogs sources, and access control via version-controlled config files for GitOps workflows.
+description: Manage Logchef teams, ClickHouse, VictoriaLogs and Loki sources, and access control via version-controlled config files for GitOps workflows.
 ---
 
 Logchef supports declarative provisioning: define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.
@@ -93,11 +93,12 @@ Once satisfied with the dry-run output, set `dry_run = false` and restart.
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `name` | Yes | — | Unique display name (used as identity key) |
-| `source_type` | No | `clickhouse` | Datasource backend: `clickhouse` or `victorialogs` |
+| `source_type` | No | `clickhouse` | Datasource backend: `clickhouse`, `victorialogs` or `loki` |
 | `connection` | Yes for new configs | — | Provider-specific connection block |
 | `secret_ref` | No | — | Environment variable name for the provider secret |
-| `meta_ts_field` | No | `timestamp` for ClickHouse, `_time` for VictoriaLogs | Timestamp field name |
-| `meta_severity_field` | No | — | Severity/level column name |
+| `header_secret_refs` | No | — | VictoriaLogs and Loki: map of custom header name to the environment variable that holds its value |
+| `meta_ts_field` | No | `timestamp` for ClickHouse, `_time` for VictoriaLogs and Loki | Timestamp field name |
+| `meta_severity_field` | No | — (`detected_level` for Loki) | Severity/level column name |
 | `description` | No | — | Human-readable description |
 | `ttl_days` | No | `0` | Data retention in days |
 
@@ -168,6 +169,86 @@ query = "{app=\"payments\"} kubernetes.namespace:=prod"
 
 The provisioning format is now nested and datasource-native. ClickHouse sources must use `source_type` plus the nested `connection` block rather than top-level `host` / `database` / `table_name` fields.
 
+### Loki sources
+
+For **Grafana Loki**, the connection block takes the base URL, the tenant, the
+default stream selector and the parser:
+
+```toml
+[[sources]]
+name = "Loki Demo"
+source_type = "loki"
+secret_ref = "LOGCHEF_SOURCE_LOKI_DEMO_TOKEN"
+
+[sources.connection]
+base_url = "http://127.0.0.1:3100"
+tenant_id = "dev"
+selector = '{service_name=~".+"}'
+parser = "json"
+principal = "payments-readonly"
+auth = { mode = "bearer" }
+
+[sources.connection.limits]
+max_entries_per_query = 5000
+sidebar_lookback_seconds = 900
+schema_lookback_seconds = 3600
+```
+
+Logchef checks a Loki connection with the same rules as the API, and an error
+names the field, such as `loki connection.selector: selector is required`.
+`selector` is required. `auth.mode` is `none` (the default), `basic` or
+`bearer`. `parser` is empty, `json` or `logfmt`. `limits` and `headers` are
+optional, and `Authorization` and `X-Scope-OrgID` are reserved header names.
+See [Using Grafana Loki with Logchef](/tutorials/loki#add-the-source) for what
+each field means.
+
+`base_url`, `tenant_id`, `selector` and `principal` are the source's identity.
+Provisioning refuses to change them on an existing Loki source, including one
+it adopts by name, because that would repoint the source's team links and
+saved queries at other data. Create a new source instead.
+
+An export writes a Loki source with its token and password blanked and a
+`secret_ref` in their place, and keeps the principal. Custom header values
+become `header_secret_refs` entries, as for VictoriaLogs.
+
+
+### Source Views
+
+A source can declare saved Explorer views. A declared view is a source view: every team that reaches the source sees it in the Explorer's view picker. Provisioning manages it, so the UI shows it without edit actions and the API refuses to change or delete it. Team and personal views stay in the UI.
+
+```toml
+[[sources]]
+name = "nginx"
+# ... connection ...
+
+  [[sources.views]]
+  name = "Access"
+  description = "Requests that failed"
+  default = true
+  display_mode = "table"
+  time_range = "1h"
+  filter = 'status >= 400'
+  sort = [{ column = "timestamp", desc = true }]
+  columns = [{ name = "timestamp", width = 190 }, { name = "status" }, { name = "request_uri", width = 520 }]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique per source, up to 200 characters. Provisioning matches a stored view by source and name |
+| `description` | No | Up to 2,000 characters |
+| `default` | No | Makes the view the source default. At most one view per source |
+| `columns` | No | Visible columns in order, 1 to 200 entries. `name` is the column, `width` an optional width from 50 to 3,000 pixels. Columns not listed are hidden |
+| `sort` | No | 1 to 3 entries, most significant first. `column` and an optional `desc` |
+| `display_mode` | No | `table`, `compact` or `json` |
+| `filter` | No | A LogchefQL query that fills an empty editor, up to 8,192 bytes |
+| `time_range` | No | A relative range in minutes, hours, days or weeks: `15m`, `1h`, `7d`, `2w` |
+
+A field you leave out leaves that part of the Explorer as it is. A source holds at most 50 declared views.
+
+Logchef checks every view at startup with the rules the API uses and refuses to start on an error that names the source and the view. The `filter` must parse as LogchefQL. `time_range` must not use seconds: the Explorer's time picker has no seconds unit, so `30s` is an error.
+
+The source default follows the file. A view with `default = true` takes the default from any other source view, including one an admin set in the UI. When no declared view has `default = true`, provisioning clears a default it set before and leaves a default set in the UI alone.
+
 ### Team Fields
 
 | Field | Required | Description |
@@ -206,7 +287,24 @@ Set the environment variable before starting Logchef:
 export LOGCHEF_CH_PROD_PASSWORD="actual-password"
 ```
 
-For VictoriaLogs bearer auth, `secret_ref` fills `connection.auth.token`. For VictoriaLogs basic auth, it fills `connection.auth.password`.
+For VictoriaLogs and Loki bearer auth, `secret_ref` fills `connection.auth.token`. For basic auth, it fills `connection.auth.password`.
+
+Custom headers on VictoriaLogs and Loki sources often carry a credential too, such as an API key for a proxy in front of the backend. Use `header_secret_refs` to read a header's value from an environment variable:
+
+```toml
+[[sources]]
+name = "Payments Logs"
+source_type = "victorialogs"
+
+[sources.connection]
+base_url = "https://logs.example.com"
+headers = { X-Team = "payments" }
+
+[sources.header_secret_refs]
+X-Api-Key = "LOGCHEF_SOURCE_PAYMENTS_LOGS_HEADER_X_API_KEY"
+```
+
+Each entry sets the header to the variable's value. As with `secret_ref`, a non-empty value for the same header in `connection.headers` wins. Header names match without regard to case, so naming one header twice in `header_secret_refs` in different case is an error. Logchef refuses to start when a referenced variable is empty or not set, and the error names the source, the header and the variable, so a missing secret never saves an empty header. A plain value in `connection.headers` still works for a header that holds no secret.
 
 For **Nomad** deployments, use Nomad variables with template blocks:
 ```toml
@@ -219,6 +317,7 @@ When you first enable provisioning on an existing Logchef instance, resources de
 
 - A source named "Production Logs" in config matches an existing source named "Production Logs" in the DB
 - Matched resources are adopted (marked as managed) and updated to match config
+- A declared view matches an existing source view of the same source and name. It keeps its id, so links to it keep working
 - Unmatched config entries create new resources
 
 No special migration flag is needed. Adoption happens automatically on name match.
@@ -230,6 +329,8 @@ With `prune = false` (default), managed resources removed from config are **kept
 ```
 WARN managed source not in config (prune=false, keeping)  name="Old Source"
 ```
+
+A managed view that its source no longer declares is kept and logged the same way. With `prune = true` it is deleted. A source view created in the UI is never pruned.
 
 With `prune = true`, they are **deleted**. Be careful:
 
@@ -258,7 +359,9 @@ curl -s https://logchef.example.com/api/v1/admin/provisioning/export \
   -H "Authorization: Bearer <token>" | jq .
 ```
 
-This returns a JSON representation of all sources, teams, and memberships, useful as a starting point for writing your `provisioning.toml`.
+This returns a JSON representation of all sources with their source views, teams, and memberships, useful as a starting point for writing your `provisioning.toml`. Exported views import unchanged: no revision moves and no default changes.
+
+The export never holds a secret. A source's password or token becomes a `secret_ref`: the stored one, or `LOGCHEF_SOURCE_<SOURCE>_PASSWORD` (or `_TOKEN` for bearer auth). Each custom header with a value becomes a `header_secret_refs` entry naming `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`, where `<SOURCE>` and `<HEADER>` are the names in upper case with every character other than a letter, digit or underscore replaced by `_`. A header provisioned through `header_secret_refs` keeps the variable it was declared with. Several sources may declare the same variable. When a generated name comes out the same as another generated or declared name, for example for sources named `prod-eu` and `prod_eu`, the export answers 409 and names both, because one variable cannot hold two secrets; rename a source, or declare a variable of its own in `secret_ref` or `header_secret_refs`. Before you apply an export, set each of these variables to the secret or header value; with them set, importing the export changes nothing.
 
 ## Inline vs Separate File
 

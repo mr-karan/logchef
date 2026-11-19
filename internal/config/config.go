@@ -29,6 +29,7 @@ type Config struct {
 	Logging        LoggingConfig        `koanf:"logging"`
 	AI             AIConfig             `koanf:"ai"`
 	Alerts         AlertsConfig         `koanf:"alerts"`
+	Jobs           JobsConfig           `koanf:"jobs"`
 	Query          QueryConfig          `koanf:"query"`
 	Export         ExportConfig         `koanf:"export"`
 	Tail           TailConfig           `koanf:"tail"`
@@ -37,6 +38,35 @@ type Config struct {
 	DashboardCache DashboardCacheConfig `koanf:"dashboard_cache"`
 	Provisioning   ProvisioningConfig   `koanf:"provisioning"`
 	Demo           DemoConfig           `koanf:"demo"`
+	Audit          AuditConfig          `koanf:"audit"`
+	Reports        ReportsConfig        `koanf:"reports"`
+}
+
+// ReportsConfig controls scheduled reports (RFC 0008).
+type ReportsConfig struct {
+	// Enabled serves the report routes; when false they answer 503.
+	Enabled bool `koanf:"enabled"`
+	// QueryBudget bounds the queries of one run, from 1 to 30 minutes. The
+	// run's handler deadline is this plus 5 minutes.
+	QueryBudget time.Duration `koanf:"query_budget"`
+	// MaxConcurrentRuns bounds the runs this replica executes at once.
+	// Later runs wait inside their own deadline.
+	MaxConcurrentRuns int `koanf:"max_concurrent_runs"`
+	// MaxAttachmentBytes bounds a CSV attachment before encoding. A larger
+	// file ends at the last whole row that fits.
+	MaxAttachmentBytes int `koanf:"max_attachment_bytes"`
+}
+
+// AuditConfig bounds the audit_events table and controls the audit log line.
+// It lives in the config file, not in system_settings, so an admin session
+// cannot shorten the retention from the UI.
+type AuditConfig struct {
+	// RetentionDays deletes events older than this many days; 0 keeps every event.
+	RetentionDays int `koanf:"retention_days"`
+	// MaxRows deletes the oldest events above this count; 0 removes the bound.
+	MaxRows int `koanf:"max_rows"`
+	// LogEvents writes each event as one "audit" JSON log line.
+	LogEvents bool `koanf:"log_events"`
 }
 
 // DemoConfig controls the public-demo safety mode. When ReadOnly is enabled,
@@ -114,6 +144,10 @@ type QueryConfig struct {
 	MaxConcurrentPerUser int `koanf:"max_concurrent_per_user"`
 	// MaxConcurrentGlobal limits active queries globally, per class.
 	MaxConcurrentGlobal int `koanf:"max_concurrent_global"`
+	// AggregationMaxMemoryBytes is the ClickHouse max_memory_usage of a
+	// LogchefQL aggregation. A lower limit of the source or the ClickHouse
+	// user wins.
+	AggregationMaxMemoryBytes int64 `koanf:"aggregation_max_memory_bytes"`
 }
 
 // ExportConfig contains settings for streaming result exports.
@@ -424,15 +458,24 @@ func (c AIConfig) AskChefEnabled() bool {
 	return false
 }
 
-// AlertsConfig controls scheduling and webhook network access for alert rules.
-// SMTP and other delivery settings are stored in the database and managed via Admin UI.
+// JobsConfig controls the background job runner. A replica with Enabled
+// false serves HTTP and claims no jobs.
+type JobsConfig struct {
+	Enabled      bool          `koanf:"enabled"`
+	PollInterval time.Duration `koanf:"poll_interval"`
+}
+
+// AlertsConfig controls evaluation and webhook network access for alert rules.
+// Each rule's job carries its own frequency. SMTP and other delivery settings
+// are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
-	Enabled             bool             `koanf:"enabled"`
-	EvaluationInterval  time.Duration    `koanf:"evaluation_interval"`
-	DefaultLookback     time.Duration    `koanf:"default_lookback"`
-	HistoryLimit        int              `koanf:"history_limit"`
-	WebhookAllowedHosts []string         `koanf:"webhook_allowed_hosts"`
-	WebhookAllowlist    WebhookAllowlist `koanf:"-"`
+	Enabled bool `koanf:"enabled"`
+	// MaxConcurrentEvaluations bounds the rules this replica evaluates at once.
+	MaxConcurrentEvaluations int              `koanf:"max_concurrent_evaluations"`
+	DefaultLookback          time.Duration    `koanf:"default_lookback"`
+	HistoryLimit             int              `koanf:"history_limit"`
+	WebhookAllowedHosts      []string         `koanf:"webhook_allowed_hosts"`
+	WebhookAllowlist         WebhookAllowlist `koanf:"-"`
 }
 
 const (
@@ -450,10 +493,13 @@ const (
 	defaultPostgresMaxIdleConns    = 5
 	defaultPostgresConnMaxLifetime = 30 * time.Minute
 
-	defaultAlertsEnabled            = true
-	defaultAlertsEvaluationInterval = time.Minute
-	defaultAlertsDefaultLookback    = 5 * time.Minute
-	defaultAlertsHistoryLimit       = 50
+	defaultAlertsEnabled                  = true
+	defaultAlertsMaxConcurrentEvaluations = 4
+	defaultAlertsDefaultLookback          = 5 * time.Minute
+	defaultAlertsHistoryLimit             = 50
+
+	defaultJobsEnabled      = true
+	defaultJobsPollInterval = 2 * time.Second
 
 	defaultAIEnabled     = true
 	defaultAIBaseURL     = "https://api.openai.com/v1"
@@ -473,6 +519,7 @@ const (
 	defaultQueryMCPCallTimeoutSecs   = 60
 	defaultQueryMaxConcurrentPerUser = 3
 	defaultQueryMaxConcurrentGlobal  = 30
+	defaultQueryAggregationMaxMemory = 2 << 30
 
 	defaultExportMaxRows              = 1000000
 	defaultExportDefaultTimeoutSecs   = 120
@@ -490,6 +537,17 @@ const (
 
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
+
+	defaultReportsEnabled     = true
+	defaultReportsQueryBudget = 5 * time.Minute
+	defaultReportsMaxRuns     = 2
+	defaultReportsAttachment  = 5 << 20
+	minReportsQueryBudget     = time.Minute
+	maxReportsQueryBudget     = 30 * time.Minute
+
+	defaultAuditRetentionDays = 365
+	defaultAuditMaxRows       = 1_000_000
+	defaultAuditLogEvents     = true
 
 	// Opt-in: the per-IP auth limiter needs the real client IP, which requires
 	// trusted-proxy / X-Forwarded-For config when running behind a reverse proxy
@@ -849,6 +907,10 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 		return err
 	}
 
+	if cfg.Reports.QueryBudget < minReportsQueryBudget || cfg.Reports.QueryBudget > maxReportsQueryBudget {
+		return fmt.Errorf("reports.query_budget must be from %s to %s, got %s", minReportsQueryBudget, maxReportsQueryBudget, cfg.Reports.QueryBudget)
+	}
+
 	if cfg.Demo.ShowLoginCredentials && !cfg.Demo.ReadOnly {
 		return fmt.Errorf("demo.show_login_credentials requires demo.read_only=true")
 	}
@@ -938,10 +1000,14 @@ func defaultConfig() Config {
 		},
 		Logging: LoggingConfig{Level: defaultLoggingLevel},
 		Alerts: AlertsConfig{
-			Enabled:            defaultAlertsEnabled,
-			EvaluationInterval: defaultAlertsEvaluationInterval,
-			DefaultLookback:    defaultAlertsDefaultLookback,
-			HistoryLimit:       defaultAlertsHistoryLimit,
+			Enabled:                  defaultAlertsEnabled,
+			MaxConcurrentEvaluations: defaultAlertsMaxConcurrentEvaluations,
+			DefaultLookback:          defaultAlertsDefaultLookback,
+			HistoryLimit:             defaultAlertsHistoryLimit,
+		},
+		Jobs: JobsConfig{
+			Enabled:      defaultJobsEnabled,
+			PollInterval: defaultJobsPollInterval,
 		},
 		AI: AIConfig{
 			Enabled:     defaultAIEnabled,
@@ -955,14 +1021,15 @@ func defaultConfig() Config {
 			DefaultTokenExpiry:    defaultAuthDefaultTokenExpiry,
 		},
 		Query: QueryConfig{
-			DefaultPreviewLimit:   defaultQueryDefaultPreviewLimit,
-			MaxPreviewLimit:       defaultQueryMaxPreviewLimit,
-			MaxResponseBytes:      defaultQueryMaxResponseBytes,
-			DefaultTimeoutSeconds: defaultQueryDefaultTimeoutSecs,
-			MaxTimeoutSeconds:     defaultQueryMaxTimeoutSecs,
-			MCPCallTimeoutSeconds: defaultQueryMCPCallTimeoutSecs,
-			MaxConcurrentPerUser:  defaultQueryMaxConcurrentPerUser,
-			MaxConcurrentGlobal:   defaultQueryMaxConcurrentGlobal,
+			DefaultPreviewLimit:       defaultQueryDefaultPreviewLimit,
+			MaxPreviewLimit:           defaultQueryMaxPreviewLimit,
+			MaxResponseBytes:          defaultQueryMaxResponseBytes,
+			DefaultTimeoutSeconds:     defaultQueryDefaultTimeoutSecs,
+			MaxTimeoutSeconds:         defaultQueryMaxTimeoutSecs,
+			MCPCallTimeoutSeconds:     defaultQueryMCPCallTimeoutSecs,
+			MaxConcurrentPerUser:      defaultQueryMaxConcurrentPerUser,
+			MaxConcurrentGlobal:       defaultQueryMaxConcurrentGlobal,
+			AggregationMaxMemoryBytes: defaultQueryAggregationMaxMemory,
 		},
 		Export: ExportConfig{
 			MaxRows:               defaultExportMaxRows,
@@ -983,6 +1050,17 @@ func defaultConfig() Config {
 		Shares: SharesConfig{
 			DefaultTTL:        defaultSharesDefaultTTL,
 			MaxQueryTextBytes: defaultSharesMaxQueryTextBytes,
+		},
+		Reports: ReportsConfig{
+			Enabled:            defaultReportsEnabled,
+			QueryBudget:        defaultReportsQueryBudget,
+			MaxConcurrentRuns:  defaultReportsMaxRuns,
+			MaxAttachmentBytes: defaultReportsAttachment,
+		},
+		Audit: AuditConfig{
+			RetentionDays: defaultAuditRetentionDays,
+			MaxRows:       defaultAuditMaxRows,
+			LogEvents:     defaultAuditLogEvents,
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:               defaultRateLimitEnabled,
@@ -1047,6 +1125,9 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	if cfg.Query.MCPCallTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
 		cfg.Query.MCPCallTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
 	}
+	if cfg.Query.AggregationMaxMemoryBytes <= 0 {
+		cfg.Query.AggregationMaxMemoryBytes = defaultQueryAggregationMaxMemory
+	}
 
 	if cfg.Export.MaxRows <= 0 {
 		cfg.Export.MaxRows = defaultExportMaxRows
@@ -1065,6 +1146,13 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	}
 	if len(cfg.Export.Formats) == 0 {
 		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
+	}
+
+	if cfg.Jobs.PollInterval <= 0 {
+		cfg.Jobs.PollInterval = defaultJobsPollInterval
+	}
+	if cfg.Alerts.MaxConcurrentEvaluations <= 0 {
+		cfg.Alerts.MaxConcurrentEvaluations = defaultAlertsMaxConcurrentEvaluations
 	}
 
 	if cfg.Tail.PollInterval <= 0 {
@@ -1092,6 +1180,21 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	}
 	if cfg.Shares.MaxQueryTextBytes <= 0 {
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+
+	if cfg.Reports.MaxConcurrentRuns <= 0 {
+		cfg.Reports.MaxConcurrentRuns = defaultReportsMaxRuns
+	}
+	if cfg.Reports.MaxAttachmentBytes <= 0 {
+		cfg.Reports.MaxAttachmentBytes = defaultReportsAttachment
+	}
+
+	// Zero disables an audit bound; only a negative value is invalid.
+	if cfg.Audit.RetentionDays < 0 {
+		cfg.Audit.RetentionDays = defaultAuditRetentionDays
+	}
+	if cfg.Audit.MaxRows < 0 {
+		cfg.Audit.MaxRows = defaultAuditMaxRows
 	}
 
 	if strings.TrimSpace(cfg.Server.ProxyHeader) == "" {

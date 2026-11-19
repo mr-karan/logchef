@@ -43,20 +43,19 @@ const emit = defineEmits<{
 
 const {
   form,
+  backtestRequest,
   supportsConditionEditor,
   aggregateFieldSuggestions,
   nativeEditorLabel,
   nativeQueryLabel,
   nativeQueryPlaceholder,
   nativeQueryHelpText,
-  generatedQueryLanguageLabel,
-  generatedQuery,
-  conditionError,
+  conditionGroupBy,
   conditionTemplates,
   queryTemplates,
+  lookbackWarning,
   applyConditionTemplate,
   applyTemplate,
-  newWebhookUrl,
   teamMembers,
   testQueryResult,
   isTestingQuery,
@@ -69,10 +68,6 @@ const {
   removeLabel,
   addAnnotation,
   removeAnnotation,
-  addRecipient,
-  removeRecipient,
-  addWebhook,
-  removeWebhook,
   handleSubmit,
 } = useAlertForm(props, emit);
 
@@ -104,15 +99,15 @@ function handleClose() {
           :native-query-label="nativeQueryLabel"
           :native-query-placeholder="nativeQueryPlaceholder"
           :native-query-help-text="nativeQueryHelpText"
-          :generated-query-language-label="generatedQueryLanguageLabel"
           :aggregate-field-suggestions="aggregateFieldSuggestions"
           :condition-templates="conditionTemplates"
           :query-templates="queryTemplates"
-          :condition-error="conditionError"
-          :generated-query="generatedQuery"
+          :lookback-warning="lookbackWarning"
+          :condition-group-by="conditionGroupBy"
           :is-testing-query="isTestingQuery"
           :test-query-result="testQueryResult"
           :test-query-error="testQueryError"
+          :backtest-request="backtestRequest"
           :on-apply-condition-template="applyConditionTemplate"
           :on-apply-template="applyTemplate"
           :on-test-query="handleTestQuery"
@@ -124,11 +119,7 @@ function handleClose() {
           :form="form"
           :disabled="isDisabled"
           :team-members="teamMembers"
-          v-model:new-webhook-url="newWebhookUrl"
-          :on-add-recipient="addRecipient"
-          :on-remove-recipient="removeRecipient"
-          :on-add-webhook="addWebhook"
-          :on-remove-webhook="removeWebhook"
+          :team-id="teamId"
           :on-add-label="addLabel"
           :on-remove-label="removeLabel"
           :on-add-annotation="addAnnotation"
@@ -172,15 +163,15 @@ function handleClose() {
       :native-query-label="nativeQueryLabel"
       :native-query-placeholder="nativeQueryPlaceholder"
       :native-query-help-text="nativeQueryHelpText"
-      :generated-query-language-label="generatedQueryLanguageLabel"
       :aggregate-field-suggestions="aggregateFieldSuggestions"
       :condition-templates="conditionTemplates"
       :query-templates="queryTemplates"
-      :condition-error="conditionError"
-      :generated-query="generatedQuery"
+      :lookback-warning="lookbackWarning"
+      :condition-group-by="conditionGroupBy"
       :is-testing-query="isTestingQuery"
       :test-query-result="testQueryResult"
       :test-query-error="testQueryError"
+      :backtest-request="backtestRequest"
       :on-apply-condition-template="applyConditionTemplate"
       :on-apply-template="applyTemplate"
       :on-test-query="handleTestQuery"
@@ -192,11 +183,7 @@ function handleClose() {
       :form="form"
       :disabled="isDisabled"
       :team-members="teamMembers"
-      v-model:new-webhook-url="newWebhookUrl"
-      :on-add-recipient="addRecipient"
-      :on-remove-recipient="removeRecipient"
-      :on-add-webhook="addWebhook"
-      :on-remove-webhook="removeWebhook"
+      :team-id="teamId"
       :on-add-label="addLabel"
       :on-remove-label="removeLabel"
       :on-add-annotation="addAnnotation"

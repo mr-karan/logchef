@@ -5,6 +5,7 @@ interface Props {
   title: string;
   description?: string;
   image?: string;
+  type?: "website" | "article";
   activeNav?: 'home' | 'docs' | 'blog' | 'changelog' | 'demo';
   structuredData?: boolean;
   noindex?: boolean;
@@ -14,6 +15,7 @@ const {
   title,
   description = "Open-source log explorer for ClickHouse and VictoriaLogs",
   image,
+  type = "website",
   activeNav,
   structuredData = true,
   noindex = false,
@@ -53,7 +55,7 @@ const {
   <!-- <meta name="google-site-verification" content=""> -->
   <!-- <meta name="msvalidate.01" content=""> -->
 
-  <Seo title={title} description={description} image={image} structuredData={structuredData} />
+  <Seo title={title} description={description} image={image} type={type} structuredData={structuredData} />
 
   <!-- Self-hosted fonts (subsetted latin, matches weights actually used: Inter 400/500/600/700 via variable font, DM Mono 400/500). -->
   <link rel="preload" href="/fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>

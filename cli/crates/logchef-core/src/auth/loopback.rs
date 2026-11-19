@@ -5,7 +5,7 @@
 
 use crate::error::{Error, Result};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -17,6 +17,8 @@ const MAX_REQUEST_LINE: usize = 8 * 1024;
 /// How often a blocked accept or read checks the cancel flag and deadlines.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long the rest of a request may take to arrive after the response.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_ERROR_TEXT: usize = 300;
 
 #[derive(Clone, Copy, Debug)]
@@ -150,7 +152,32 @@ fn handle_connection(
     };
     let (outcome, status, page) = evaluate(&line, expected);
     respond(&mut stream, status, page);
+    drain(&mut stream, deadline);
     Ok(outcome)
+}
+
+/// Closing a socket with request bytes still unread makes the kernel reset
+/// the connection, and the reset can destroy the page before the browser
+/// reads it. So the write side closes first, and the rest of the request is
+/// read and dropped until the browser closes or the time runs out.
+fn drain(stream: &mut TcpStream, deadline: Instant) {
+    if stream.shutdown(Shutdown::Write).is_err() {
+        return;
+    }
+    let deadline = deadline.min(Instant::now() + DRAIN_TIMEOUT);
+    let mut chunk = [0u8; 1024];
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err() {
+            return;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => return,
+            Ok(_) => {}
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(_) => return,
+        }
+    }
 }
 
 /// Reads up to the first `\n`. Returns `None` when the peer closes, the
@@ -405,6 +432,28 @@ mod tests {
         let response = get(run.addr, &valid("abc"));
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         assert!(!response.contains("abc"), "the page must not echo the code");
+        assert_eq!(run.finish(Duration::from_secs(2)).unwrap(), "abc");
+    }
+
+    /// A browser sends headers after the request line. Closing with them
+    /// unread makes the kernel reset the connection, and the reset can
+    /// destroy the page before the browser reads it.
+    #[test]
+    fn page_survives_headers_the_listener_does_not_parse() {
+        let run = start(quick());
+        let mut stream = TcpStream::connect(run.addr).unwrap();
+        let raw = format!(
+            "GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {}\r\n\r\n",
+            valid("abc"),
+            "x".repeat(4096)
+        );
+        stream.write_all(raw.as_bytes()).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.contains("Signed in"), "{response}");
         assert_eq!(run.finish(Duration::from_secs(2)).unwrap(), "abc");
     }
 

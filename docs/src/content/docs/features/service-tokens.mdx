@@ -1,5 +1,8 @@
 ---
 title: Service Tokens
+head:
+  - tag: title
+    content: "Service Tokens for Log API Access | Logchef"
 description: "Non-login service accounts with scoped API tokens for automation and CI: add them to teams and control which sources and actions each token can access."
 ---
 
@@ -59,12 +62,32 @@ account** and the picker filters to service principals only.
 
 | Preset | Scopes | Use case |
 |--------|--------|----------|
-| **Read-only** | every `:read` scope | Default for log shippers, dashboards, audit tools |
+| **Read-only** | the `:read` scopes except `audit:read` | Default for log shippers and dashboards |
 | **Logs viewer** | `profile:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read` | Smallest footprint for "just run queries" |
 | **Logs analyst** | Logs viewer + `saved_queries:write`, `collections:write`, `query_shares:*` | Read logs and save/share queries |
 | **Alerts manager** | `alerts:*`, `logs:read`, `sources:read`, `saved_queries:read`, `profile:read` | Manage alert definitions end-to-end |
 | **Source admin** | `sources:*`, `settings:read`, `profile:read` | Provision/update sources |
 | **Full access** | `*` | Equivalent to a logged-in session; last resort |
+
+Saved Explorer views have their own scopes: `saved_views:read` to list and
+read them and `saved_views:write` to change them. The Read-only preset includes
+`saved_views:read`; the Logs viewer and Logs analyst presets do not. A token
+issued before saved views existed, with an explicit scope list, has neither and
+gets 403 on the [saved view routes](/features/saved-views/#api) until you
+reissue it with the scope.
+
+[Scheduled reports](/features/scheduled-reports/#api) have their own scopes:
+`reports:read` to list reports and read their run history, and
+`reports:write` to create, change, delete and send them. The Read-only preset
+includes `reports:read`. A report preview also needs `logs:read`. The
+`logchef reports` CLI needs one of these on an API token, because an OAuth
+sign-in cannot reach reports.
+
+`audit:read` lets a token read the [audit log](/operations/audit-log/). No
+preset includes it, because events hold emails and IP addresses: add it by
+hand. The audit routes are for global admins, so the token's owner must be a
+global admin. An OAuth sign-in, such as `logchef auth` or an MCP client, cannot
+read the audit log whatever its scopes.
 
 You can deviate from any preset by toggling individual scopes after picking
 one. The active preset stays highlighted while the selection matches; once

@@ -26,10 +26,11 @@ import { sourcesApi, asClickHouseConnection, type Source } from "@/api/sources";
 import { supportsQueryLanguage } from "@/lib/queryMetadata";
 import { isSuccessResponse } from "@/api/types";
 import { usePreferencesStore } from "@/stores/preferences";
-import type { DashboardQueryPanel, DashboardViz } from "@/api/dashboards";
+import type { DashboardQueryPanel, DashboardViz, PanelQueryLanguage } from "@/api/dashboards";
 import { execSignature } from "@/utils/dashboardRuntime";
 import { panelBuilderKind, resultInterval, type PanelBuilderKind } from "@/utils/dashboardPanels";
-import { suggestViz, withSuggestedRoles } from "@/utils/panelCharts";
+import { suggestAggregationViz, suggestViz, withAggregationRoles, withSuggestedRoles } from "@/utils/panelCharts";
+import { isAggregation } from "@/utils/logchefql/aggregation";
 import type { DraftPanelPatch } from "@/stores/dashboards";
 
 const { t } = useI18n();
@@ -99,21 +100,24 @@ const sourceDetail = ref<Source | null>(null);
 // Guards against a stale-response race: a rapid A -> B source switch can let
 // A's async detail fetch resolve after B's has already started (and even
 // after B's has landed), overwriting B's schema with A's - or forcing mode
-// back to logchefql based on A's (stale) supportsLogsql. Every call captures
+// back to logchefql based on A's (stale) native language. Every call captures
 // its own token; only the call whose token still matches the latest one when
 // it resolves is allowed to apply its result.
 let sourceDetailRequestId = 0;
 
-const supportsLogsql = computed(() =>
-  sourceDetail.value ? supportsQueryLanguage(sourceDetail.value, "logsql") : false
-);
+const nativeLanguage = computed<Exclude<PanelQueryLanguage, "logchefql">>(() => {
+  const source = sourceDetail.value;
+  if (source?.source_type === "loki") return "logql";
+  return source && supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
+});
+const nativeLabel = computed(() => ({ "clickhouse-sql": "ClickHouse SQL", logsql: "LogsQL", logql: "LogQL" })[nativeLanguage.value]);
 
 let previousCountPanel: DashboardQueryPanel | null = null;
 
 const mode = computed<"logchefql" | "native">({
   get: () => panel.value?.query.language === "logchefql" ? "logchefql" : "native",
   set: (v) => {
-    const language = v === "native" ? supportsLogsql.value ? "logsql" : "clickhouse-sql" : "logchefql";
+    const language = v === "native" ? nativeLanguage.value : "logchefql";
     if (language === "logchefql" && previousCountPanel && panel.value?.id === previousCountPanel.id && panel.value.source_id === previousCountPanel.source_id) {
       const previous = previousCountPanel;
       previousCountPanel = null;
@@ -145,13 +149,20 @@ function setQueryMode(mode: "count" | "result") {
   patchPanel({ query: mode === "result" ? { mode, language, text, interval: resultInterval(p.query.interval).interval, group_by: undefined, translate_limit: undefined } : { mode, language, text, limit: undefined, interval: p.query.interval ?? "auto" }, viz });
 }
 
+// Count mode charts the histogram of a filter, so an aggregation moves the panel to result mode.
+function onQueryText(text: string) {
+  patchPanel({ query: { text } });
+  const p = panel.value;
+  if (p?.query.mode === "count" && p.query.language === "logchefql" && isAggregation(text)) setQueryMode("result");
+}
+
 function setVisualization(viz: DashboardViz) {
   previousCountPanel = null;
   suggestNextVisualization = false;
   patchPanel({ viz });
 }
 
-// SqlMonacoEditor has no LogsQL grammar; feed native queries to the
+// SqlMonacoEditor has no LogsQL or LogQL grammar; feed native queries to the
 // clickhouse-sql editor too, mirroring the explorer's approach for LogsQL.
 const editorLanguage = computed<"logchefql" | "clickhouse-sql">(() =>
   mode.value === "native" ? "clickhouse-sql" : "logchefql"
@@ -182,8 +193,12 @@ async function loadSourceDetail(teamId: number, sourceId: number) {
     const resp = await sourcesApi.getTeamSource(teamId, sourceId);
     if (requestId !== sourceDetailRequestId) return; // a newer call superseded this one
     sourceDetail.value = isSuccessResponse(resp) ? resp.data : null;
-    if (sourceDetail.value && panel.value?.query.language === "logsql" && !supportsLogsql.value) mode.value = "logchefql";
-    else if (sourceDetail.value && panel.value?.query.language === "clickhouse-sql" && supportsLogsql.value) mode.value = "native";
+    // A native query of another backend cannot run here. A ClickHouse SQL
+    // panel moves to this source's native language, any other to LogchefQL.
+    const language = panel.value?.query.language;
+    if (sourceDetail.value && language && language !== "logchefql" && language !== nativeLanguage.value) {
+      mode.value = language === "clickhouse-sql" ? "native" : "logchefql";
+    }
   } catch {
     if (requestId !== sourceDetailRequestId) return;
     sourceDetail.value = teamSources.value.find((s) => s.id === sourceId) ?? null;
@@ -239,7 +254,10 @@ const previewState = computed(() => store.previewState ?? undefined);
 watch(() => previewState.value?.frame, (frame) => {
   const p = panel.value;
   if (!frame || p?.query.mode !== "result" || previewState.value?.querySignature !== execSignature(p)) return;
-  const viz = suggestNextVisualization ? suggestViz(frame) : withSuggestedRoles(frame, p.viz);
+  const aggregation = previewState.value?.aggregation;
+  const viz = aggregation
+    ? suggestNextVisualization ? suggestAggregationViz(frame, aggregation) : withAggregationRoles(frame, p.viz, aggregation)
+    : suggestNextVisualization ? suggestViz(frame) : withSuggestedRoles(frame, p.viz);
   suggestNextVisualization = false;
   patchPanel({ viz });
 });
@@ -439,7 +457,7 @@ function onOpenChange(value: boolean) {
                     :class="mode === 'native' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'"
                     @click="mode = 'native'"
                   >
-                    {{ supportsLogsql ? 'LogsQL' : 'ClickHouse SQL' }}
+                    {{ nativeLabel }}
                   </button>
                 </div>
               </div>
@@ -459,7 +477,7 @@ function onOpenChange(value: boolean) {
                   :table-name="tableName"
                   :is-executing="isPreviewing"
                   :visible="open"
-                  @change="(v: string) => patchPanel({ query: { text: v } })"
+                  @change="onQueryText"
                   @submit="runNow"
                 />
                 <div v-else class="flex h-full items-center justify-center text-xs text-muted-foreground">

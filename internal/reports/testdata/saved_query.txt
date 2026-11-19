@@ -1,0 +1,16 @@
+Daily 5xx & <errors>
+2026-11-15 09:00 IST to 2026-11-16 09:00 IST (Asia/Kolkata)
+
+== 5xx by service ==
+First 3 rows
+timestamp | day | service | trace_id | bytes | count | message
+2026-11-16 08:55:07 IST | 2026-11-16 | api | NULL | 123456789012345678901234567890 | 42 | <script>alert("x")</script>
+2026-11-16 08:54:07 IST | 2026-11-16 | web | abc | 7 | 1 | line one line two
+1 more rows
+
+--
+Runs as Owner A.
+Sources: logs.http.
+Window: 2026-11-15 09:00 IST to 2026-11-16 09:00 IST, timezone Asia/Kolkata.
+Open in Logchef: https://logchef.example.com/logs/saved/12?start=1&end=2
+Report settings: https://logchef.example.com/reports/3

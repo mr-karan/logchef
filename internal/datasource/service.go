@@ -46,6 +46,8 @@ type Service struct {
 	inspectionFill singleflight.Group
 	activityFill   singleflight.Group
 	activitySlots  chan struct{}
+	advisorRuns    singleflight.Group
+	advisorSlots   chan struct{}
 }
 
 type Capability string
@@ -59,6 +61,9 @@ const (
 	CapabilityLogContext       Capability = "log_context"
 	CapabilityExports          Capability = "exports"
 	CapabilityLiveTail         Capability = "live_tail"
+	// CapabilityLogchefQLAggregation says that the provider compiles the
+	// LogchefQL aggregation pipe.
+	CapabilityLogchefQLAggregation Capability = "logchefql_aggregation"
 )
 
 // Descriptor is the static feature set of a provider.
@@ -80,6 +85,7 @@ func NewService(db store.Store, log *slog.Logger) *Service {
 		inspections:   make(map[models.SourceID]inspectionCacheEntry),
 		activities:    make(map[models.SourceID]activityCacheEntry),
 		activitySlots: make(chan struct{}, 2),
+		advisorSlots:  make(chan struct{}, schemaAdvisorMaxRuns),
 	}
 }
 
@@ -218,12 +224,13 @@ func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.Sour
 	return nil
 }
 
-// ValidateAlertQuery rejects alert SQL that EvaluateAlert would refuse to run.
-func ValidateAlertQuery(language models.QueryLanguage, query string) error {
+// ValidateAlertQuery rejects alert SQL that EvaluateAlert would refuse to
+// run. It renders the time macros for the source with a fixed sample window.
+func ValidateAlertQuery(source *models.Source, language models.QueryLanguage, query string) error {
 	if models.NormalizeQueryLanguage(language) != models.QueryLanguageClickHouseSQL {
 		return nil
 	}
-	_, err := formatAlertQuery(query)
+	_, err := renderAlertQuery(source, query, alertSampleTo.Add(-time.Hour), alertSampleTo)
 	return err
 }
 
@@ -363,6 +370,12 @@ type LogchefQLCompileRequest struct {
 	EndTime   string
 	Timezone  string
 	Limit     int
+	// Interval is the request interval, the bucket window of a `by time`
+	// key that has no window of its own.
+	Interval string
+	// AllowAggregation accepts an aggregation pipe. The default rejects it
+	// with AGGREGATION_NOT_ALLOWED, for callers that need log rows.
+	AllowAggregation bool
 }
 
 // CompiledLogchefQL is the result of compiling LogchefQL into a provider's
@@ -373,13 +386,16 @@ type CompiledLogchefQL struct {
 	// otherwise; the LogsQL query for VictoriaLogs.
 	Query string
 	// FilterOnly is the WHERE-clause-only SQL for ClickHouse; for VictoriaLogs
-	// it mirrors Query.
+	// it is Query without its aggregation pipes.
 	FilterOnly string
 	Language   models.QueryLanguage
 	Valid      bool
 	Error      *logchefql.ParseError
 	Conditions []logchefql.FilterCondition
 	FieldsUsed []string
+	// Aggregation describes the result of an aggregated query. Nil for a
+	// query that returns log rows.
+	Aggregation *logchefql.AggregationInfo
 }
 
 // LogchefQLCompiler is an optional interface for providers that can compile
@@ -404,22 +420,31 @@ func (s *Service) CompileLogchefQL(ctx context.Context, sourceID models.SourceID
 	if !ok {
 		return nil, ErrOperationNotSupported
 	}
-	// Share inspection fills with the source page, including its revision checks
-	// and short schema freshness TTL. Keep enrichment local so concurrent
-	// compiles never mutate the source.
-	if provider.Describe().LogchefQLNeedsColumns && len(source.Columns) == 0 {
-		columns, cerr := s.compileColumns(ctx, source, provider)
-		if cerr != nil {
-			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: %w", cerr)
-		}
-		if len(columns) == 0 {
-			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: schema is unavailable")
-		}
-		sourceCopy := *source
-		sourceCopy.Columns = columns
-		source = &sourceCopy
+	source, err = s.compileSource(ctx, source, provider)
+	if err != nil {
+		return nil, err
 	}
 	return compiler.CompileLogchefQL(ctx, source, req)
+}
+
+// compileSource returns source with the column types that LogchefQL
+// compilation needs. Share inspection fills with the source page, including
+// its revision checks and short schema freshness TTL. Keep enrichment local so
+// concurrent compiles never mutate the source.
+func (s *Service) compileSource(ctx context.Context, source *models.Source, provider Provider) (*models.Source, error) {
+	if !provider.Describe().LogchefQLNeedsColumns || len(source.Columns) > 0 {
+		return source, nil
+	}
+	columns, err := s.compileColumns(ctx, source, provider)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: %w", err)
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: schema is unavailable")
+	}
+	sourceCopy := *source
+	sourceCopy.Columns = columns
+	return &sourceCopy, nil
 }
 
 // compileColumns resolves the column types LogchefQL translation needs from the
@@ -440,12 +465,28 @@ func (s *Service) compileColumns(ctx context.Context, source *models.Source, pro
 	return nil, fmt.Errorf("schema is unavailable")
 }
 
+// EvaluateAlert runs an alert query for the lookback that ends at req.At. A
+// LogchefQL condition is compiled first, at every evaluation, so live
+// evaluation, the test route and backtest run the same native query.
 func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, req AlertQueryRequest) (*models.QueryResult, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	return provider.EvaluateAlert(ctx, source, req)
+	if models.NormalizeQueryLanguage(req.Language) != models.QueryLanguageLogchefQL {
+		return provider.EvaluateAlert(ctx, source, req)
+	}
+	condition, err := s.compileAlertCondition(ctx, source, provider, req.Query, req.LookbackSeconds)
+	if err != nil {
+		return nil, err
+	}
+	req.Language, req.Query = condition.Language, condition.Query
+	result, err := provider.EvaluateAlert(ctx, source, req)
+	if err != nil {
+		return nil, err
+	}
+	condition.nameGroups(result)
+	return result, nil
 }
 
 func (s *Service) GetFieldValues(ctx context.Context, sourceID models.SourceID, req FieldValuesRequest) (*FieldValuesResult, error) {

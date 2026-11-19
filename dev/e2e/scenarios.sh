@@ -104,7 +104,7 @@ scn_time_range() {
 
 # Live tail (SSE): enable Live on the ClickHouse source, ingest a fresh row via
 # clickhouse-client, and assert it streams into the tail view within ~10s; then
-# toggle off. Repeats on the VictoriaLogs source when one is linked. Self-seeding
+# toggle off. Repeats on the VictoriaLogs and Loki sources when linked. Self-seeding
 # and re-runnable. The tail cursor starts at connection time, so fixtures are
 # ingested AFTER the stream opens (a row inserted earlier would not replay).
 #
@@ -113,6 +113,8 @@ scn_time_range() {
 # own hostname to stderr on this image — stderr is discarded; the INSERT lands.
 CH_CONTAINER="${CH_CONTAINER:-dev-clickhouse-local-1}"
 VICTORIALOGS_URL="${VICTORIALOGS_URL:-http://localhost:9428}"
+LOKI_URL="${LOKI_URL:-http://localhost:3100}"
+LOKI_TENANT="${LOKI_TENANT:-dev}"
 
 # ch_insert SQL — run an INSERT inside the ClickHouse dev container. Returns
 # non-zero if the container isn't reachable.
@@ -173,39 +175,62 @@ scn_livetail() {
   settle 1
   assert_control "livetail: Run control restored after stop" 'button "Run'
 
-  # --- VictoriaLogs source (only if one is linked) ---
-  select_team_source "Dev Team" "VictoriaLogs"
-  if ! snapi | grep -qiE 'combobox.*VictoriaLogs'; then
-    pass "livetail: no VictoriaLogs source linked — VL leg skipped"
-    select_team_source "Dev Team" "http"
-    settle 1
-    return
-  fi
-  assert_control "livetail: VictoriaLogs source selected" 'combobox.*VictoriaLogs'
+  # --- Native backends (each only if linked) ---
+  livetail_leg "VictoriaLogs" "VictoriaLogs" vl_ingest "livetail-e2e-vl-$$"
+  livetail_leg "Loki" "Loki" loki_ingest "livetail-e2e-loki-$$"
 
-  if ! go_live; then
-    fail "livetail: Live toggle not available on VictoriaLogs source"
-    select_team_source "Dev Team" "http"
-    return
-  fi
-
-  # Ingest a fresh jsonline row after the VL tail stream opens.
-  local vl_marker="livetail-e2e-vl-$$"
-  local now_ts; now_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  if curl --fail --silent --show-error -X POST \
-      -H 'Content-Type: application/stream+json' \
-      --data-binary "{\"timestamp\":\"${now_ts}\",\"service\":\"livetail-e2e\",\"level\":\"info\",\"message\":\"${vl_marker}\"}" \
-      "${VICTORIALOGS_URL}/insert/jsonline?_stream_fields=service&_time_field=timestamp&_msg_field=message" >/dev/null 2>&1; then
-    assert_tail "livetail: VictoriaLogs row streamed into tail view" "$vl_marker"
-    shot livetail-victorialogs
-  else
-    fail "livetail: VictoriaLogs ingest failed (is VictoriaLogs on :9428?)"
-  fi
-
-  click_by 'button "Stop"' >/dev/null 2>&1
-  settle 1
   # hand the explorer back to the ClickHouse source for any following scenario
   select_team_source "Dev Team" "http"
+  settle 1
+}
+
+# vl_ingest MARKER — write one jsonline row to VictoriaLogs.
+vl_ingest() {
+  local now_ts; now_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  curl --fail --silent --show-error -X POST \
+    -H 'Content-Type: application/stream+json' \
+    --data-binary "{\"timestamp\":\"${now_ts}\",\"service\":\"livetail-e2e\",\"level\":\"info\",\"message\":\"$1\"}" \
+    "${VICTORIALOGS_URL}/insert/jsonline?_stream_fields=service&_time_field=timestamp&_msg_field=message" >/dev/null 2>&1
+}
+
+# loki_ingest MARKER — push one JSON line to Loki. The timestamp is one second
+# ahead, because whole seconds (date +%N is not portable) could fall before
+# the tail's start, which the tail never reads.
+loki_ingest() {
+  local ts; ts="$(($(date -u +%s) + 1))000000000"
+  curl --fail --silent --show-error -X POST \
+    -H 'Content-Type: application/json' \
+    -H "X-Scope-OrgID: ${LOKI_TENANT}" \
+    --data-binary "{\"streams\":[{\"stream\":{\"service_name\":\"livetail-e2e\",\"env\":\"dev\",\"level\":\"info\"},\"values\":[[\"${ts}\",\"{\\\"message\\\":\\\"$1\\\"}\"]]}]}" \
+    "${LOKI_URL}/loki/api/v1/push" >/dev/null 2>&1
+}
+
+# livetail_leg LABEL SOURCE INGEST MARKER — go live on the Dev Team source
+# named SOURCE, run INGEST MARKER once the stream is open, and assert MARKER
+# streams into the tail view. Skips when the source is not linked.
+livetail_leg() {
+  local label="$1" src="$2" ingest="$3" marker="$4"
+  # A user may hold two tails (tail.max_per_user), and the server frees a
+  # stopped tail's slot only when its next heartbeat (15s) fails to write.
+  sleep 16
+  select_team_source "Dev Team" "$src"
+  if ! snapi | grep -qiE "combobox.*${src}"; then
+    pass "livetail: no ${label} source linked — ${label} leg skipped"
+    return
+  fi
+  assert_control "livetail: ${label} source selected" "combobox.*${src}"
+
+  if ! go_live; then
+    fail "livetail: Live toggle not available on ${label} source"
+    return
+  fi
+  if "$ingest" "$marker"; then
+    assert_tail "livetail: ${label} row streamed into tail view" "$marker"
+    shot "livetail-${label,,}"
+  else
+    fail "livetail: ${label} ingest failed"
+  fi
+  click_by 'button "Stop"' >/dev/null 2>&1
   settle 1
 }
 

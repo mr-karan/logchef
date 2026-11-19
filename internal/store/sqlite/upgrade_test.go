@@ -1,14 +1,22 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"io/fs"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/store/storetest"
 )
 
 // preDatasourceVersion is the last schema version before the multi-datasource
@@ -169,6 +177,200 @@ func TestCollectionTeamsUpgradeFromV33(t *testing.T) {
 	assertRow(t, db, `SELECT collection_id || '/' || team_id FROM collection_teams`, "1/1")
 }
 
+// alertInstancesVersion is the migration that adds alert_instances and
+// rebuilds alerts and alert_history (RFC 0006 unit A1).
+const alertInstancesVersion = 43
+
+// TestAlertInstancesUpgrade seeds alert history at the version before
+// alertInstancesVersion, then opens the database through New, which runs the
+// production migration path (a dedicated connection on the bare file path,
+// foreign keys off). The alerts and alert_history rebuild must keep every
+// history row; PRAGMA foreign_key_check alone would not show a cascade delete.
+func TestAlertInstancesUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	m := newMigrator(t, raw)
+	if err := m.Migrate(alertInstancesVersion - 1); err != nil {
+		t.Fatalf("migrate to v%d: %v", alertInstancesVersion-1, err)
+	}
+	for _, query := range storetest.AlertInstancesUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	// Rows above the surviving ids were deleted; their ids must stay retired.
+	mustExec(t, raw, `UPDATE sqlite_sequence SET seq = 1000 WHERE name IN ('alerts', 'alert_history')`)
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckAlertInstancesUpgrade(t, db)
+
+	// The first tick opened an episode for the quiet rule after the retired ids.
+	history, err := db.ListAlertHistory(context.Background(), 5, 1)
+	if err != nil || len(history) != 1 || history[0].ID <= 1000 {
+		t.Fatalf("newest history of alert 5 = %+v, %v; want an id above 1000", history, err)
+	}
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	assertRow(t, check, `SELECT seq FROM sqlite_sequence WHERE name = 'alerts'`, "1000")
+	assertRow(t, check, `SELECT count(*) FROM sqlite_master WHERE name = 'alert_sequences_saved'`, "0")
+}
+
+// allowLokiSourceTypeVersion is the migration that rebuilds sources to accept
+// source_type 'loki' (RFC 0011).
+const allowLokiSourceTypeVersion = 47
+
+// TestAllowLokiSourceTypeUpgrade seeds a source with every kind of child row
+// before the sources rebuild, applies it, and asserts that every child row
+// survives and still joins to its source, that the new CHECK accepts loki, and
+// that the child foreign keys point at the rebuilt table.
+func TestAllowLokiSourceTypeUpgrade(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "upgrade.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	m := newMigrator(t, db)
+	before := previousMigrationVersion(t, allowLokiSourceTypeVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+
+	mustExec(t, db, `INSERT INTO users (id, email, full_name, role, status) VALUES (1, 'admin@test.dev', 'Admin', 'admin', 'active')`)
+	mustExec(t, db, `INSERT INTO teams (id, name) VALUES (1, 'team-a'), (2, 'team-b')`)
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref) VALUES
+			(1, 'logs.app', 0, 'clickhouse', 'timestamp', 'severity_text', '{"host":"ch:9000","database":"logs","table_name":"app"}', 'clickhouse:ch:9000/logs/app', 'app logs', 30, 1, 'LOGCHEF_SOURCE_APP'),
+			(2, 'vl', 0, 'victorialogs', '_time', NULL, '{"base_url":"http://vl:9428"}', 'victorialogs:http://vl:9428|acct=|proj=|scope=', NULL, 0, 0, NULL)`)
+	if _, err := db.Exec(`INSERT INTO sources (name, _meta_is_auto_created, source_type, connection_config, identity_key) VALUES ('loki', 0, 'loki', '{}', 'loki:early')`); err == nil {
+		t.Fatalf("v%d accepted source_type loki before the rebuild", before)
+	}
+	// Source 9 was the newest and is gone; its ID must not be handed out again.
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, connection_config, identity_key) VALUES (9, 'deleted', 0, '{}', 'clickhouse:gone')`)
+	mustExec(t, db, `DELETE FROM sources WHERE id = 9`)
+	mustExec(t, db, `INSERT INTO team_sources (team_id, source_id) VALUES (1, 1), (2, 1), (1, 2)`)
+	mustExec(t, db, `INSERT INTO saved_queries (id, source_id, name, query_language, editor_mode, query_content, created_by, created_from_team_id) VALUES
+			(1, 1, 'errors', 'logchefql', 'builder', '{"content":"status>=500"}', 1, 1),
+			(2, 2, 'vl errors', 'logsql', 'native', '{"content":"error"}', 1, NULL)`)
+	mustExec(t, db, `INSERT INTO alerts (id, source_id, name, query_language, editor_mode, query, threshold_operator, threshold_value, severity, created_by) VALUES
+			(1, 1, 'too many errors', 'clickhouse-sql', 'native', 'SELECT count(*) FROM logs.app', 'gt', 10, 'warning', 1)`)
+	mustExec(t, db, `INSERT INTO query_shares (token, source_id, created_by, payload_json, expires_at, team_id) VALUES ('share-1', 1, 1, '{}', '2999-01-01 00:00:00', 1)`)
+	mustExec(t, db, `INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at) VALUES ('job-1', 1, 1, 'complete', 'csv', '{}', '2999-01-01 00:00:00')`)
+	mustExec(t, db, `INSERT INTO dashboards (id, name, panels_json, created_by) VALUES (1, 'ops', '{"version":1,"panels":[{"source_id":1}]}', 1)`)
+
+	if err := m.Migrate(allowLokiSourceTypeVersion); err != nil {
+		t.Fatalf("migrate to v%d: %v", allowLokiSourceTypeVersion, err)
+	}
+
+	assertRow(t, db, `SELECT group_concat(id || ':' || source_type || ':' || name || ':' || identity_key || ':' || ttl_days || ':' || managed || ':' || COALESCE(secret_ref, '-'), ',') FROM (SELECT * FROM sources ORDER BY id)`,
+		"1:clickhouse:logs.app:clickhouse:ch:9000/logs/app:30:1:LOGCHEF_SOURCE_APP,2:victorialogs:vl:victorialogs:http://vl:9428|acct=|proj=|scope=:0:0:-")
+	assertRow(t, db, `SELECT json_extract(connection_config, '$.table_name') FROM sources WHERE id = 1`, "app")
+	assertRow(t, db, `SELECT group_concat(ts.team_id || '>' || s.name, ',') FROM (SELECT * FROM team_sources ORDER BY team_id, source_id) ts JOIN sources s ON s.id = ts.source_id`, "1>logs.app,1>vl,2>logs.app")
+	assertRow(t, db, `SELECT group_concat(q.name || '>' || s.name, ',') FROM (SELECT * FROM saved_queries ORDER BY id) q JOIN sources s ON s.id = q.source_id`, "errors>logs.app,vl errors>vl")
+	assertRow(t, db, `SELECT a.name || '>' || s.name FROM alerts a JOIN sources s ON s.id = a.source_id`, "too many errors>logs.app")
+	assertRow(t, db, `SELECT q.token || '>' || s.name FROM query_shares q JOIN sources s ON s.id = q.source_id`, "share-1>logs.app")
+	assertRow(t, db, `SELECT j.id || '>' || s.name FROM export_jobs j JOIN sources s ON s.id = j.source_id`, "job-1>logs.app")
+	assertRow(t, db, `SELECT panels_json FROM dashboards WHERE id = 1`, `{"version":1,"panels":[{"source_id":1}]}`)
+	assertRow(t, db, `SELECT group_concat(name, ',') FROM (SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sources' AND sql IS NOT NULL ORDER BY name)`,
+		"idx_sources_created_at,idx_sources_identity_key,idx_sources_source_type")
+
+	mustExec(t, db, `INSERT INTO sources (name, _meta_is_auto_created, source_type, connection_config, identity_key) VALUES ('loki', 0, 'loki', '{"base_url":"http://loki:3100","selector":"{app=\"api\"}"}', 'loki:http://loki:3100|tenant=|selector={app="api"}|principal=')`)
+	assertRow(t, db, `SELECT id FROM sources WHERE name = 'loki'`, "10")
+	if _, err := db.Exec(`INSERT INTO sources (name, _meta_is_auto_created, source_type, connection_config, identity_key) VALUES ('other', 0, 'elastic', '{}', 'elastic:x')`); err == nil {
+		t.Fatal("the rebuilt CHECK accepted source_type elastic")
+	}
+
+	// With foreign keys on, deleting a source must cascade into the children:
+	// that proves their references resolve to the rebuilt table.
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("conn: %v", err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys=on`); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM sources WHERE id = 1`); err != nil {
+		t.Fatalf("delete source: %v", err)
+	}
+	for _, table := range []string{"team_sources", "saved_queries", "alerts", "query_shares", "export_jobs"} {
+		var n int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE source_id = 1`).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("%s kept %d rows of the deleted source", table, n)
+		}
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close conn: %v", err)
+	}
+
+	// The down migration refuses to drop the Loki source silently.
+	if err := m.Migrate(before); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+		t.Fatalf("down migration with a loki source: err = %v, want a CHECK failure", err)
+	}
+}
+
+// TestAllowLokiSourceTypeDowngrade runs the down migration without Loki sources
+// and asserts that it keeps the rows and the AUTOINCREMENT high-water mark.
+func TestAllowLokiSourceTypeDowngrade(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "downgrade.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	m := newMigrator(t, db)
+	if err := m.Migrate(allowLokiSourceTypeVersion); err != nil {
+		t.Fatalf("migrate to v%d: %v", allowLokiSourceTypeVersion, err)
+	}
+	mustExec(t, db, `INSERT INTO teams (id, name) VALUES (1, 'team-a')`)
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, connection_config, identity_key) VALUES (1, 'app', 0, '{}', 'clickhouse:app'), (5, 'gone', 0, '{}', 'clickhouse:gone')`)
+	mustExec(t, db, `DELETE FROM sources WHERE id = 5`)
+	mustExec(t, db, `INSERT INTO team_sources (team_id, source_id) VALUES (1, 1)`)
+
+	if err := m.Migrate(previousMigrationVersion(t, allowLokiSourceTypeVersion)); err != nil {
+		t.Fatalf("down migration: %v", err)
+	}
+	assertRow(t, db, `SELECT ts.team_id || '>' || s.name FROM team_sources ts JOIN sources s ON s.id = ts.source_id`, "1>app")
+	mustExec(t, db, `INSERT INTO sources (name, _meta_is_auto_created, connection_config, identity_key) VALUES ('next', 0, '{}', 'clickhouse:next')`)
+	assertRow(t, db, `SELECT id FROM sources WHERE name = 'next'`, "6")
+}
+
+// previousMigrationVersion returns the migration before version, so a test
+// keeps working when its migration is renumbered at merge time.
+func previousMigrationVersion(t *testing.T, version uint) uint {
+	t.Helper()
+	migrationFS, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatalf("sub fs: %v", err)
+	}
+	sourceDriver, err := iofs.New(migrationFS, ".")
+	if err != nil {
+		t.Fatalf("iofs: %v", err)
+	}
+	prev, err := sourceDriver.Prev(version)
+	if err != nil {
+		t.Fatalf("migration before v%d: %v", version, err)
+	}
+	return prev
+}
+
 func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {
 	t.Helper()
 	migrationFS, err := fs.Sub(migrationsFS, "migrations")
@@ -215,4 +417,264 @@ func assertRow(t *testing.T, db *sql.DB, query, want string) {
 	if got != want {
 		t.Errorf("%s = %q, want %q", query, got, want)
 	}
+}
+
+// alertJobsVersion is the migration that gives every alert its alert.evaluate
+// job (RFC 0006 unit J2).
+const alertJobsVersion = 48
+
+// TestAlertJobsUpgrade seeds alerts at the last version before
+// alertJobsVersion, then opens the database through New, which runs the
+// remaining migrations. A legacy "YYYY-MM-DD HH:MM:SS" evaluation time, which
+// older binaries wrote, schedules the same as the RFC 3339 form.
+func TestAlertJobsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	m := newMigrator(t, raw)
+	before := lastVersionBefore(t, alertJobsVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.AlertJobsUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	mustExec(t, raw, `INSERT INTO alerts (id, source_id, name, query_language, editor_mode, query, lookback_seconds, threshold_operator,
+			threshold_value, frequency_seconds, severity, is_active, last_state, last_evaluated_at)
+		VALUES (5, 1, 'legacy time', 'clickhouse-sql', 'native', 'SELECT 1', 300, 'gt', 10, 60, 'warning', 1, 'resolved', '2026-01-01 00:10:00')`)
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	assertRow(t, check, `SELECT CAST(next_run_at AS TEXT) FROM jobs WHERE kind = 'alert.evaluate' AND key = '5'`, "2026-01-01T00:11:00.000Z")
+	mustExec(t, check, `DELETE FROM jobs WHERE key = '5'`)
+	storetest.CheckAlertJobsUpgrade(t, db)
+}
+
+// lastVersionBefore returns the newest migration version below v. Other
+// branches may hold the numbers in between.
+func lastVersionBefore(t *testing.T, v uint) uint {
+	t.Helper()
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last uint
+	for _, e := range entries {
+		var version uint
+		if _, err := fmt.Sscanf(e.Name(), "%d_", &version); err != nil {
+			t.Fatalf("parse version of %s: %v", e.Name(), err)
+		}
+		if version < v && version > last {
+			last = version
+		}
+	}
+	return last
+}
+
+// alertDestinationsVersion is the migration that moves rule targets into
+// notification destinations (RFC 0006 unit D1).
+const alertDestinationsVersion = 50
+
+// TestAlertDestinationsUpgrade seeds rule targets at the newest version below
+// alertDestinationsVersion, then opens the database through New, which runs
+// the remaining migrations.
+func TestAlertDestinationsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	before := lastVersionBefore(t, alertDestinationsVersion)
+	m := newMigrator(t, raw)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.AlertDestinationsUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckAlertDestinationsUpgrade(t, db)
+}
+
+// alertDeliveriesVersion adds the notification delivery queue (RFC 0006 unit
+// D2).
+const alertDeliveriesVersion = 55
+
+// TestAlertDeliveriesUpgrade seeds open episodes with delivery bookkeeping at
+// the newest version below alertDeliveriesVersion, then opens the database
+// through New, which runs the remaining migrations.
+func TestAlertDeliveriesUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	before := lastVersionBefore(t, alertDeliveriesVersion)
+	m := newMigrator(t, raw)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.AlertDeliveriesUpgradeSeed {
+		mustExec(t, raw, query)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckAlertDeliveriesUpgrade(t, db)
+}
+
+// reportOwnerRecipientsVersion is the migration that gives a report without
+// recipient rows its owner as one (RFC 0008 unit R8).
+const reportOwnerRecipientsVersion = 56
+
+func TestReportOwnerRecipientsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	m := newMigrator(t, raw)
+	before := lastVersionBefore(t, reportOwnerRecipientsVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.ReportOwnerRecipientsSeed {
+		mustExec(t, raw, query)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckReportOwnerRecipients(t, db)
+
+	// The statement adds nothing when it runs again.
+	up, err := migrationsFS.ReadFile("migrations/000056_add_report_owner_recipients.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	mustExec(t, check, string(up))
+	assertRow(t, check, `SELECT count(*) FROM report_recipients`, "2")
+}
+
+// reportExternalSettingsVersion adds the reports settings category and the
+// external-recipient settings (RFC 0008 unit R9).
+const reportExternalSettingsVersion = 57
+
+func TestReportExternalSettingsUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer raw.Close()
+	m := newMigrator(t, raw)
+	before := lastVersionBefore(t, reportExternalSettingsVersion)
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate to v%d: %v", before, err)
+	}
+	for _, query := range storetest.ReportExternalSettingsSeed {
+		mustExec(t, raw, query)
+	}
+	rows := `SELECT count(*) FROM system_settings`
+	var n int
+	if err := raw.QueryRow(rows).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Migrate(reportExternalSettingsVersion); err != nil {
+		t.Fatalf("migrate to v%d: %v", reportExternalSettingsVersion, err)
+	}
+	assertRow(t, raw, rows, fmt.Sprint(n+2))
+	assertRow(t, raw, `SELECT sql FROM sqlite_master WHERE name = 'idx_system_settings_category'`, "CREATE INDEX idx_system_settings_category ON system_settings(category)")
+
+	// Down drops the report settings and the category, and keeps the rest.
+	if err := m.Migrate(before); err != nil {
+		t.Fatalf("migrate down to v%d: %v", before, err)
+	}
+	assertRow(t, raw, rows, fmt.Sprint(n))
+	if _, err := raw.Exec(`INSERT INTO system_settings (key, value, value_type, category) VALUES ('reports.x', '', 'string', 'reports')`); err == nil {
+		t.Error("the down migration kept the reports category")
+	}
+	if err := m.Migrate(reportExternalSettingsVersion); err != nil {
+		t.Fatalf("migrate up again: %v", err)
+	}
+	if sourceErr, dbErr := m.Close(); sourceErr != nil || dbErr != nil {
+		t.Fatalf("close migrator: %v, %v", sourceErr, dbErr)
+	}
+	db, err := New(context.Background(), Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatalf("open migrated store: %v", err)
+	}
+	defer db.Close()
+	storetest.CheckReportExternalSettings(t, db)
+}
+
+// TestReportExternalSettingsLeaveAnEmptyTable: a table without rows is
+// seeded at first boot, which skips a table that has rows, so the
+// migration adds nothing to it.
+func TestReportExternalSettingsLeaveAnEmptyTable(t *testing.T) {
+	raw, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "empty.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer raw.Close()
+	m := newMigrator(t, raw)
+	if err := m.Migrate(lastVersionBefore(t, reportExternalSettingsVersion)); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, raw, `DELETE FROM system_settings`)
+	if err := m.Migrate(reportExternalSettingsVersion); err != nil {
+		t.Fatal(err)
+	}
+	assertRow(t, raw, `SELECT count(*) FROM system_settings`, "0")
 }

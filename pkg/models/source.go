@@ -14,6 +14,7 @@ type SourceType string
 const (
 	SourceTypeClickHouse   SourceType = "clickhouse"
 	SourceTypeVictoriaLogs SourceType = "victorialogs"
+	SourceTypeLoki         SourceType = "loki"
 )
 
 func NormalizeSourceType(sourceType SourceType) SourceType {
@@ -25,7 +26,7 @@ func NormalizeSourceType(sourceType SourceType) SourceType {
 
 func (t SourceType) Valid() bool {
 	switch NormalizeSourceType(t) {
-	case SourceTypeClickHouse, SourceTypeVictoriaLogs:
+	case SourceTypeClickHouse, SourceTypeVictoriaLogs, SourceTypeLoki:
 		return true
 	default:
 		return false
@@ -308,6 +309,36 @@ type Source struct {
 	// Provisioning
 	Managed   bool   `db:"managed" json:"managed"`
 	SecretRef string `db:"secret_ref" json:"secret_ref,omitempty"`
+	// HeaderSecretRefs maps a custom header, by its lower-case name, to the
+	// environment variable that provisioning read its value from, so an
+	// export keeps that name. A reference to the name export generates
+	// anyway is not kept.
+	HeaderSecretRefs map[string]string `db:"header_secret_refs" json:"-"`
+}
+
+// EncodeHeaderSecretRefs returns the header_secret_refs column value: a JSON
+// object, or nil for a source with no references.
+func EncodeHeaderSecretRefs(refs map[string]string) ([]byte, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(refs)
+	if err != nil {
+		return nil, fmt.Errorf("encode header_secret_refs: %w", err)
+	}
+	return raw, nil
+}
+
+// DecodeHeaderSecretRefs reads the header_secret_refs column value.
+func DecodeHeaderSecretRefs(raw []byte) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var refs map[string]string
+	if err := json.Unmarshal(raw, &refs); err != nil {
+		return nil, fmt.Errorf("decode header_secret_refs: %w", err)
+	}
+	return refs, nil
 }
 
 func BuildClickHouseIdentityKey(conn ConnectionInfo) string {
@@ -317,7 +348,7 @@ func BuildClickHouseIdentityKey(conn ConnectionInfo) string {
 	return fmt.Sprintf("%s:%s/%s/%s", SourceTypeClickHouse, host, database, table)
 }
 
-func normalizeVictoriaLogsBaseURL(rawURL string) string {
+func normalizeHTTPBaseURL(rawURL string) string {
 	trimmed := strings.TrimSpace(rawURL)
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
@@ -337,7 +368,7 @@ func BuildVictoriaLogsIdentityKey(conn VictoriaLogsConnectionInfo) string {
 	return fmt.Sprintf(
 		"%s:%s|acct=%s|proj=%s|scope=%s",
 		SourceTypeVictoriaLogs,
-		normalizeVictoriaLogsBaseURL(conn.BaseURL),
+		normalizeHTTPBaseURL(conn.BaseURL),
 		strings.TrimSpace(conn.Tenant.AccountID),
 		strings.TrimSpace(conn.Tenant.ProjectID),
 		strings.TrimSpace(conn.Scope.Query),
@@ -358,6 +389,12 @@ func BuildIdentityKey(sourceType SourceType, connectionConfig json.RawMessage) (
 			return "", fmt.Errorf("unmarshal victorialogs connection config: %w", err)
 		}
 		return BuildVictoriaLogsIdentityKey(conn), nil
+	case SourceTypeLoki:
+		var conn LokiConnectionInfo
+		if err := json.Unmarshal(connectionConfig, &conn); err != nil {
+			return "", fmt.Errorf("unmarshal loki connection config: %w", err)
+		}
+		return BuildLokiIdentityKey(conn), nil
 	default:
 		return "", fmt.Errorf("unsupported source type %q", sourceType)
 	}
@@ -374,9 +411,9 @@ func (s *Source) SyncConnectionConfig() error {
 			return fmt.Errorf("marshal clickhouse connection config: %w", err)
 		}
 		s.ConnectionConfig = payload
-	case SourceTypeVictoriaLogs:
+	case SourceTypeVictoriaLogs, SourceTypeLoki:
 		if len(s.ConnectionConfig) == 0 {
-			return fmt.Errorf("victorialogs sources require connection_config")
+			return fmt.Errorf("%s sources require connection_config", s.SourceType)
 		}
 	default:
 		return fmt.Errorf("unsupported source type %q", s.SourceType)
@@ -405,7 +442,7 @@ func (s *Source) HydrateConnection() error {
 		if s.IdentityKey == "" {
 			s.IdentityKey = BuildClickHouseIdentityKey(s.Connection)
 		}
-	case SourceTypeVictoriaLogs:
+	case SourceTypeVictoriaLogs, SourceTypeLoki:
 		if s.IdentityKey == "" {
 			identityKey, err := BuildIdentityKey(s.SourceType, s.ConnectionConfig)
 			if err != nil {
@@ -426,6 +463,10 @@ func (s *Source) IsClickHouse() bool {
 
 func (s *Source) IsVictoriaLogs() bool {
 	return NormalizeSourceType(s.SourceType) == SourceTypeVictoriaLogs
+}
+
+func (s *Source) IsLoki() bool {
+	return NormalizeSourceType(s.SourceType) == SourceTypeLoki
 }
 
 func (s *Source) SupportsQueryLanguage(language QueryLanguage) bool {
@@ -462,6 +503,31 @@ func (s *Source) VictoriaLogsConnection() (VictoriaLogsConnectionInfo, error) {
 	return conn, nil
 }
 
+func (s *Source) LokiConnection() (LokiConnectionInfo, error) {
+	var conn LokiConnectionInfo
+	if !s.IsLoki() {
+		return conn, fmt.Errorf("source %d is not a loki source", s.ID)
+	}
+	if err := json.Unmarshal(s.ConnectionConfig, &conn); err != nil {
+		return conn, fmt.Errorf("unmarshal loki connection config: %w", err)
+	}
+	return conn, nil
+}
+
+// redactHeaderValues keeps the header names so an editor can show which
+// headers exist, and blanks the values, which often hold secrets. A blank
+// value on update means "keep the stored one".
+func redactHeaderValues(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return headers
+	}
+	redacted := make(map[string]string, len(headers))
+	for key := range headers {
+		redacted[key] = ""
+	}
+	return redacted
+}
+
 func (s *Source) RedactedConnectionConfig() json.RawMessage {
 	switch NormalizeSourceType(s.SourceType) {
 	case SourceTypeClickHouse:
@@ -488,18 +554,20 @@ func (s *Source) RedactedConnectionConfig() json.RawMessage {
 		}
 		conn.Auth.Password = ""
 		conn.Auth.Token = ""
-		// Custom headers commonly hold secrets (e.g. an X-API-Key /
-		// Authorization for a fronting proxy). Blank the values while keeping
-		// the keys so the editor can show which headers exist without leaking
-		// them to source viewers. A blank value on update means "keep existing"
-		// (see UpdateSource).
-		if len(conn.Headers) > 0 {
-			redactedHeaders := make(map[string]string, len(conn.Headers))
-			for key := range conn.Headers {
-				redactedHeaders[key] = ""
-			}
-			conn.Headers = redactedHeaders
+		conn.Headers = redactHeaderValues(conn.Headers)
+		payload, err := json.Marshal(conn)
+		if err != nil {
+			return json.RawMessage(`{}`)
 		}
+		return payload
+	case SourceTypeLoki:
+		conn, err := s.LokiConnection()
+		if err != nil {
+			return json.RawMessage(`{}`)
+		}
+		conn.Auth.Password = ""
+		conn.Auth.Token = ""
+		conn.Headers = redactHeaderValues(conn.Headers)
 		payload, err := json.Marshal(conn)
 		if err != nil {
 			return json.RawMessage(`{}`)

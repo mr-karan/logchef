@@ -93,6 +93,7 @@ const {
   getFieldState,
   loadField,
   loadPriorityFields,
+  preloadLabels,
   cancelAll,
   clearCache
 } = useFieldValuesLoader(loaderOptions)
@@ -193,11 +194,18 @@ const canLoadValues = () => props.expanded && !!props.teamId && !!props.sourceId
 
 const loadableFields = (fields: FieldInfo[]) => fields.filter(field => !skipsValueLoading(field))
 
+// Stream labels load in one preload for the whole schema, before the rendered
+// rows mark the labels it does not cover as click-to-load.
+const loadNewFieldValues = (rendered: FieldInfo[]) => {
+  preloadLabels(loadableFields(props.fields))
+  loadPriorityFields(loadableFields(rendered))
+}
+
 // Fields the user opened stay open across runs and reload their values.
 const reloadFieldValues = () => {
   clearCache()
   if (!canLoadValues()) return
-  loadPriorityFields(loadableFields(renderedFields.value))
+  loadNewFieldValues(renderedFields.value)
   for (const field of loadableFields(renderedFields.value)) {
     if (expandedFields.value.has(field.name) && getFieldState(field.name).status !== 'loading') {
       loadField(field.name, field.type)
@@ -230,7 +238,7 @@ watch(() => runs.shown, reloadFieldValues)
 
 // Search and "show more" only add rows: load the new ones, keep the rest.
 watch(renderedFields, (fields) => {
-  if (canLoadValues()) loadPriorityFields(loadableFields(fields))
+  if (canLoadValues()) loadNewFieldValues(fields)
 })
 
 // Expand a field with few distinct values once, when its values first arrive,

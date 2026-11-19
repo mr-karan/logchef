@@ -139,12 +139,17 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		return nil, err
 	}
 
-	columns := make([]models.ColumnInfo, 0, len(columnNames))
-	for _, name := range orderFieldNames(source, columnNames) {
-		columns = append(columns, models.ColumnInfo{
-			Name: name,
-			Type: inferColumnType(source, name),
-		})
+	var columns []models.ColumnInfo
+	if req.Aggregation != nil {
+		logs, columns = aggregationResult(req.Aggregation, logs)
+	} else {
+		columns = make([]models.ColumnInfo, 0, len(columnNames))
+		for _, name := range orderFieldNames(source, columnNames) {
+			columns = append(columns, models.ColumnInfo{
+				Name: name,
+				Type: inferColumnType(source, name),
+			})
+		}
 	}
 
 	stats := statsFromHeaders(resp, len(logs))
@@ -158,8 +163,9 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		stats.TruncatedReason = truncatedReason
 	}
 
+	// An aggregated result gets no LIMIT_APPLIED: stats.truncation reports a cut.
 	warnings := make([]models.QueryWarning, 0, 2)
-	if req.Limit <= 0 {
+	if req.Limit <= 0 && req.Aggregation == nil {
 		warnings = append(warnings, models.QueryWarning{
 			Code:    "LIMIT_APPLIED",
 			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", limit),
@@ -178,6 +184,50 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		Stats:    stats,
 		Warnings: warnings,
 	}, nil
+}
+
+// aggregationResult writes the rows of a compiled LogchefQL aggregation under
+// the output names, with the columns and types the compiler declared, so an
+// empty result still has its columns. VictoriaLogs returns every value as
+// text and leaves out a field whose value is empty:
+//   - a missing key is the "" group, the one VictoriaLogs grouped it under;
+//   - a Float64 value becomes a JSON number, and NaN (sum or avg with no
+//     numeric input), an infinity, a missing value (min, max or quantile with
+//     no input) and text that is not a number become null;
+//   - every other value, such as a UInt64 count, stays the text VictoriaLogs
+//     returned, so a count keeps every digit.
+func aggregationResult(info *logchefql.AggregationInfo, rows []map[string]any) ([]map[string]any, []models.ColumnInfo) {
+	columns := make([]models.ColumnInfo, len(info.Columns))
+	for i, col := range info.Columns {
+		columns[i] = models.ColumnInfo{Name: col.Name, Type: col.Type}
+	}
+	out := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		cells := make(map[string]any, len(info.Columns))
+		for _, col := range info.Columns {
+			value, ok := row[col.Source]
+			switch {
+			case !ok && col.Role == logchefql.RoleGroup:
+				cells[col.Name] = ""
+			case col.Type == "Float64":
+				cells[col.Name] = floatCell(value)
+			default:
+				cells[col.Name] = value
+			}
+		}
+		out[i] = cells
+	}
+	return out, columns
+}
+
+// floatCell reads a VictoriaLogs value as a finite number, or nil.
+func floatCell(value any) any {
+	text, _ := value.(string)
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+		return nil
+	}
+	return number
 }
 
 // readQueryRows reads VL's newline-delimited JSON query response (one row
@@ -247,10 +297,9 @@ func readQueryRows(body io.Reader, maxResponseBytes, maxRows int) (logs []map[st
 // into LogsQL for this provider. Both the field-values call sites (via
 // compileQueryForVictoriaLogs) and the LogchefQLCompiler interface method wrap
 // it.
-func translateLogchefQLToLogsQL(queryText string, source *models.Source) *logchefql.LogsQLTranslateResult {
-	return logchefql.TranslateToLogsQL(queryText, &logchefql.LogsQLTranslateOptions{
-		DefaultTimestampField: source.MetaTSField,
-	})
+func translateLogchefQLToLogsQL(queryText string, source *models.Source, options logchefql.LogsQLTranslateOptions) *logchefql.LogsQLTranslateResult {
+	options.DefaultTimestampField = source.MetaTSField
+	return logchefql.TranslateToLogsQL(queryText, &options)
 }
 
 func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage, source *models.Source) (string, error) {
@@ -263,7 +312,7 @@ func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage
 		}
 		return query, nil
 	case models.QueryLanguageLogchefQL:
-		result := translateLogchefQLToLogsQL(queryText, source)
+		result := translateLogchefQLToLogsQL(queryText, source, logchefql.LogsQLTranslateOptions{})
 		if !result.Valid {
 			if result.Error != nil {
 				return "", result.Error
@@ -279,15 +328,24 @@ func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage
 // CompileLogchefQL compiles a LogchefQL query into a LogsQL query. The time
 // range is not baked into the query; callers pass it to QueryLogs separately.
 func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
-	result := translateLogchefQLToLogsQL(req.Query, source)
+	offset, err := bucketOffset(req.StartTime, req.Timezone)
+	if err != nil {
+		return &datasource.CompiledLogchefQL{Language: models.QueryLanguageLogsQL}, err
+	}
+	result := translateLogchefQLToLogsQL(req.Query, source, logchefql.LogsQLTranslateOptions{
+		AllowAggregation: req.AllowAggregation,
+		Interval:         req.Interval,
+		BucketOffset:     offset,
+	})
 	compiled := &datasource.CompiledLogchefQL{
-		Language:   models.QueryLanguageLogsQL,
-		Valid:      result.Valid,
-		Error:      result.Error,
-		Conditions: result.Conditions,
-		FieldsUsed: result.FieldsUsed,
-		Query:      result.Query,
-		FilterOnly: result.Query,
+		Language:    models.QueryLanguageLogsQL,
+		Valid:       result.Valid,
+		Error:       result.Error,
+		Conditions:  result.Conditions,
+		FieldsUsed:  result.FieldsUsed,
+		Query:       result.Query,
+		FilterOnly:  result.Filter,
+		Aggregation: result.Aggregation,
 	}
 	if !result.Valid {
 		if result.Error != nil {
@@ -295,7 +353,16 @@ func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, re
 		}
 		return compiled, fmt.Errorf("invalid LogchefQL query")
 	}
+	if err := checkBuckets(result.Aggregation, req); err != nil {
+		return compiled, err
+	}
 	return compiled, nil
+}
+
+// CompileAlertCondition compiles a LogchefQL alert condition into a LogsQL
+// stats query. EvaluateAlert bounds it to the lookback that ends at At.
+func (p *Provider) CompileAlertCondition(ctx context.Context, source *models.Source, query string, _ int) (*datasource.CompiledLogchefQL, error) {
+	return p.CompileLogchefQL(ctx, source, datasource.LogchefQLCompileRequest{Query: query, AllowAggregation: true})
 }
 
 func (p *Provider) GetSourceSchema(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
@@ -713,11 +780,15 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	if query == "" {
 		return nil, fmt.Errorf("alert query is required")
 	}
+	if req.At.IsZero() {
+		return nil, fmt.Errorf("alert evaluation needs the instant it stands for")
+	}
 	query = applyAlertLookback(query, req.LookbackSeconds)
 
 	form := url.Values{}
 	form.Set("query", query)
-	form.Set("time", formatAPITime(time.Now().UTC()))
+	// The lookback filter is relative to time, so the window ends at At.
+	form.Set("time", formatAPITime(req.At.UTC()))
 	if timeout := formatTimeout(req.QueryTimeout); timeout != "" {
 		form.Set("timeout", timeout)
 	}
@@ -1236,6 +1307,59 @@ func formatTimezoneOffset(timezone string, start, end *time.Time) string {
 	}
 
 	return fmt.Sprintf("%ds", offsetSeconds)
+}
+
+// bucketOffset is the LogsQL offset that aligns time buckets to the request
+// timezone. Like {{__tz_offset}} it is one fixed offset, read at the start of
+// the range, or now when the request has no range.
+func bucketOffset(startTime, timezone string) (string, error) {
+	if startTime == "" || timezone == "" || strings.EqualFold(timezone, "UTC") {
+		return formatTimezoneOffset(timezone, nil, nil), nil
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return "", fmt.Errorf("invalid timezone %q: %w", timezone, err)
+	}
+	start, err := requestTime(startTime, loc)
+	if err != nil {
+		return "", fmt.Errorf("invalid start_time: %w", err)
+	}
+	return formatTimezoneOffset(timezone, &start, nil), nil
+}
+
+// requestTime reads a request time bound in loc.
+func requestTime(value string, loc *time.Location) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+		if parsed, err := time.ParseInLocation(layout, value, loc); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported time format %q", value)
+}
+
+// checkBuckets applies the bucket limit of ClickHouse to an aggregation
+// over the request range. Like ClickHouse it runs only when the request
+// has a complete time window.
+func checkBuckets(info *logchefql.AggregationInfo, req datasource.LogchefQLCompileRequest) error {
+	if info == nil || info.Interval == "" || req.StartTime == "" || req.EndTime == "" || req.Timezone == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(req.Timezone)
+	if err != nil {
+		return fmt.Errorf("invalid timezone %q: %w", req.Timezone, err)
+	}
+	from, err := requestTime(req.StartTime, loc)
+	if err != nil {
+		return fmt.Errorf("invalid start_time: %w", err)
+	}
+	to, err := requestTime(req.EndTime, loc)
+	if err != nil {
+		return fmt.Errorf("invalid end_time: %w", err)
+	}
+	if perr := logchefql.CheckBuckets(info.Interval, from, to); perr != nil {
+		return perr
+	}
+	return nil
 }
 
 func statsFromHeaders(resp *http.Response, rowCount int) models.QueryStats {

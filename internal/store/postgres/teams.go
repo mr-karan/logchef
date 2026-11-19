@@ -60,6 +60,19 @@ func (s *Store) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team
 	return teamToModel(row), nil
 }
 
+// GetTeamForUpdate retrieves a team by ID and locks the row until the
+// transaction ends. Returns models.ErrTeamNotFound if absent.
+func (s *Store) GetTeamForUpdate(ctx context.Context, teamID models.TeamID) (*models.Team, error) {
+	row, err := s.q.GetTeamForUpdate(ctx, int64(teamID))
+	if err != nil {
+		if notFound(err) {
+			return nil, models.ErrTeamNotFound
+		}
+		return nil, fmt.Errorf("getting team id %d for update: %w", teamID, err)
+	}
+	return teamToModel(row), nil
+}
+
 // GetTeamByName retrieves a team by name. Returns models.ErrTeamNotFound if absent.
 func (s *Store) GetTeamByName(ctx context.Context, name string) (*models.Team, error) {
 	row, err := s.q.GetTeamByName(ctx, name)
@@ -140,6 +153,32 @@ func (s *Store) AddTeamMember(ctx context.Context, teamID models.TeamID, userID 
 		return fmt.Errorf("error adding team member: %w", err)
 	}
 	return nil
+}
+
+// InsertTeamMember adds a membership and reports whether this call inserted
+// it. An existing membership is left as it is.
+func (s *Store) InsertTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) (bool, error) {
+	n, err := s.q.InsertTeamMember(ctx, sqlc.InsertTeamMemberParams{TeamID: int64(teamID), UserID: int64(userID), Role: string(role)})
+	if err != nil {
+		return false, fmt.Errorf("error inserting team member: %w", err)
+	}
+	return n > 0, nil
+}
+
+// GetTeamMemberForUpdate retrieves a membership and locks the row until the
+// transaction ends. Returns a nil member for a non-member.
+func (s *Store) GetTeamMemberForUpdate(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
+	row, err := s.q.GetTeamMemberForUpdate(ctx, sqlc.GetTeamMemberForUpdateParams{
+		TeamID: int64(teamID),
+		UserID: int64(userID),
+	})
+	if err != nil {
+		if notFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error getting team member for update: %w", err)
+	}
+	return teamMemberToModel(row), nil
 }
 
 // GetTeamMember retrieves a membership. Returns (nil, nil) if not a member.

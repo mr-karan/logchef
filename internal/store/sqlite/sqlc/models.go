@@ -10,31 +10,38 @@ import (
 )
 
 type Alert struct {
-	ID                   int64          `json:"id"`
-	SourceID             int64          `json:"source_id"`
-	Name                 string         `json:"name"`
-	Description          sql.NullString `json:"description"`
-	QueryLanguage        string         `json:"query_language"`
-	EditorMode           string         `json:"editor_mode"`
-	Query                sql.NullString `json:"query"`
-	ConditionJson        sql.NullString `json:"condition_json"`
-	LookbackSeconds      int64          `json:"lookback_seconds"`
-	ThresholdOperator    string         `json:"threshold_operator"`
-	ThresholdValue       float64        `json:"threshold_value"`
-	FrequencySeconds     int64          `json:"frequency_seconds"`
-	Severity             string         `json:"severity"`
-	LabelsJson           sql.NullString `json:"labels_json"`
-	AnnotationsJson      sql.NullString `json:"annotations_json"`
-	GeneratorUrl         sql.NullString `json:"generator_url"`
-	IsActive             int64          `json:"is_active"`
-	LastState            string         `json:"last_state"`
-	LastEvaluatedAt      sql.NullTime   `json:"last_evaluated_at"`
-	LastTriggeredAt      sql.NullTime   `json:"last_triggered_at"`
-	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
-	CreatedBy            sql.NullInt64  `json:"created_by"`
-	CreatedAt            time.Time      `json:"created_at"`
-	UpdatedAt            time.Time      `json:"updated_at"`
+	ID                int64          `json:"id"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryLanguage     string         `json:"query_language"`
+	EditorMode        string         `json:"editor_mode"`
+	Query             sql.NullString `json:"query"`
+	ConditionJson     sql.NullString `json:"condition_json"`
+	LookbackSeconds   int64          `json:"lookback_seconds"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	LabelsJson        sql.NullString `json:"labels_json"`
+	AnnotationsJson   sql.NullString `json:"annotations_json"`
+	GeneratorUrl      sql.NullString `json:"generator_url"`
+	IsActive          int64          `json:"is_active"`
+	LastState         string         `json:"last_state"`
+	LastEvaluatedAt   sql.NullTime   `json:"last_evaluated_at"`
+	LastTriggeredAt   sql.NullTime   `json:"last_triggered_at"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	GroupByJson       sql.NullString `json:"group_by_json"`
+	NoDataPolicy      string         `json:"no_data_policy"`
+	EvalSeq           int64          `json:"eval_seq"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
+}
+
+type AlertDestination struct {
+	AlertID       int64 `json:"alert_id"`
+	DestinationID int64 `json:"destination_id"`
 }
 
 type AlertHistory struct {
@@ -47,6 +54,35 @@ type AlertHistory struct {
 	Message     sql.NullString  `json:"message"`
 	PayloadJson sql.NullString  `json:"payload_json"`
 	CreatedAt   time.Time       `json:"created_at"`
+	GroupKey    string          `json:"group_key"`
+	GroupJson   sql.NullString  `json:"group_json"`
+}
+
+type AlertInstance struct {
+	AlertID    int64           `json:"alert_id"`
+	GroupKey   string          `json:"group_key"`
+	GroupJson  string          `json:"group_json"`
+	State      string          `json:"state"`
+	Value      sql.NullFloat64 `json:"value"`
+	StateSince time.Time       `json:"state_since"`
+	LastSeenAt sql.NullTime    `json:"last_seen_at"`
+	HistoryID  sql.NullInt64   `json:"history_id"`
+	Notified   int64           `json:"notified"`
+}
+
+type AlertSilence struct {
+	ID           int64          `json:"id"`
+	SourceID     int64          `json:"source_id"`
+	AlertID      sql.NullInt64  `json:"alert_id"`
+	MatchersJson string         `json:"matchers_json"`
+	Comment      string         `json:"comment"`
+	ScheduleKind string         `json:"schedule_kind"`
+	StartsAt     sql.NullTime   `json:"starts_at"`
+	EndsAt       sql.NullTime   `json:"ends_at"`
+	WeeklyJson   sql.NullString `json:"weekly_json"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 type ApiToken struct {
@@ -60,6 +96,32 @@ type ApiToken struct {
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
 	Scopes     string       `json:"scopes"`
+}
+
+type AuditEvent struct {
+	ID           string        `json:"id"`
+	OccurredAt   time.Time     `json:"occurred_at"`
+	Action       string        `json:"action"`
+	Outcome      string        `json:"outcome"`
+	Reason       string        `json:"reason"`
+	ActorType    string        `json:"actor_type"`
+	ActorID      sql.NullInt64 `json:"actor_id"`
+	ActorLabel   string        `json:"actor_label"`
+	AuthMethod   string        `json:"auth_method"`
+	CredentialID string        `json:"credential_id"`
+	ClientID     string        `json:"client_id"`
+	TargetType   string        `json:"target_type"`
+	TargetID     string        `json:"target_id"`
+	TargetLabel  string        `json:"target_label"`
+	TeamID       sql.NullInt64 `json:"team_id"`
+	SourceID     sql.NullInt64 `json:"source_id"`
+	Ip           string        `json:"ip"`
+	UserAgent    string        `json:"user_agent"`
+	HttpMethod   string        `json:"http_method"`
+	Route        string        `json:"route"`
+	Status       int64         `json:"status"`
+	Changes      string        `json:"changes"`
+	Detail       string        `json:"detail"`
 }
 
 type Collection struct {
@@ -134,6 +196,66 @@ type ExportJob struct {
 	OwnerProcessID  string         `json:"owner_process_id"`
 }
 
+type Job struct {
+	ID             int64          `json:"id"`
+	Kind           string         `json:"kind"`
+	Key            string         `json:"key"`
+	ScheduleKind   string         `json:"schedule_kind"`
+	ScheduleExpr   string         `json:"schedule_expr"`
+	Timezone       string         `json:"timezone"`
+	Misfire        string         `json:"misfire"`
+	GraceSeconds   int64          `json:"grace_seconds"`
+	Enabled        int64          `json:"enabled"`
+	NextRunAt      time.Time      `json:"next_run_at"`
+	LeaseOwner     sql.NullString `json:"lease_owner"`
+	LeaseToken     int64          `json:"lease_token"`
+	LeaseExpiresAt sql.NullTime   `json:"lease_expires_at"`
+	LastStartedAt  sql.NullTime   `json:"last_started_at"`
+	LastFinishedAt sql.NullTime   `json:"last_finished_at"`
+	LastStatus     sql.NullString `json:"last_status"`
+	LastError      sql.NullString `json:"last_error"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+type NotificationDelivery struct {
+	ID            int64          `json:"id"`
+	DestinationID int64          `json:"destination_id"`
+	Producer      string         `json:"producer"`
+	ProducerRef   string         `json:"producer_ref"`
+	Recipient     string         `json:"recipient"`
+	SequenceKey   string         `json:"sequence_key"`
+	Event         string         `json:"event"`
+	DedupKey      string         `json:"dedup_key"`
+	MessageJson   string         `json:"message_json"`
+	Status        string         `json:"status"`
+	Attempts      int64          `json:"attempts"`
+	NextAttemptAt time.Time      `json:"next_attempt_at"`
+	ReservedBy    sql.NullString `json:"reserved_by"`
+	ReservedToken int64          `json:"reserved_token"`
+	ReservedUntil sql.NullTime   `json:"reserved_until"`
+	LastError     sql.NullString `json:"last_error"`
+	CreatedAt     time.Time      `json:"created_at"`
+	SentAt        sql.NullTime   `json:"sent_at"`
+}
+
+type NotificationDestination struct {
+	ID                 int64          `json:"id"`
+	Name               string         `json:"name"`
+	Type               string         `json:"type"`
+	Scope              string         `json:"scope"`
+	TeamID             sql.NullInt64  `json:"team_id"`
+	ConfigJson         string         `json:"config_json"`
+	Secret             string         `json:"secret"`
+	IsActive           int64          `json:"is_active"`
+	CreatedBy          sql.NullInt64  `json:"created_by"`
+	LastDeliveryAt     sql.NullTime   `json:"last_delivery_at"`
+	LastDeliveryStatus sql.NullString `json:"last_delivery_status"`
+	LastDeliveryError  sql.NullString `json:"last_delivery_error"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
 type OauthAccessToken struct {
 	IDHash    string `json:"id_hash"`
 	GrantID   int64  `json:"grant_id"`
@@ -195,6 +317,18 @@ type QueryHistory struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+type QueryShapeStatsDaily struct {
+	BucketDate      string        `json:"bucket_date"`
+	SourceID        int64         `json:"source_id"`
+	QueryLanguage   string        `json:"query_language"`
+	ShapeHash       string        `json:"shape_hash"`
+	Shape           string        `json:"shape"`
+	QueryCount      int64         `json:"query_count"`
+	TotalDurationMs int64         `json:"total_duration_ms"`
+	TotalRows       int64         `json:"total_rows"`
+	MaxLookbackS    sql.NullInt64 `json:"max_lookback_s"`
+}
+
 type QueryShare struct {
 	Token          string        `json:"token"`
 	SourceID       int64         `json:"source_id"`
@@ -216,6 +350,59 @@ type QueryStatsDaily struct {
 	TotalDurationMs int64  `json:"total_duration_ms"`
 }
 
+type Report struct {
+	ID                  int64          `json:"id"`
+	Name                string         `json:"name"`
+	OwnerID             sql.NullInt64  `json:"owner_id"`
+	SourceKind          string         `json:"source_kind"`
+	DashboardID         sql.NullInt64  `json:"dashboard_id"`
+	TabID               sql.NullString `json:"tab_id"`
+	SavedQueryID        sql.NullInt64  `json:"saved_query_id"`
+	ScheduleJson        string         `json:"schedule_json"`
+	Timezone            string         `json:"timezone"`
+	TimeRange           sql.NullString `json:"time_range"`
+	RangeAnchor         string         `json:"range_anchor"`
+	VariablesJson       string         `json:"variables_json"`
+	MaxRows             int64          `json:"max_rows"`
+	SkipIfEmpty         bool           `json:"skip_if_empty"`
+	AttachCsv           bool           `json:"attach_csv"`
+	State               string         `json:"state"`
+	PauseReason         string         `json:"pause_reason"`
+	ConsecutiveFailures int64          `json:"consecutive_failures"`
+	LastManualRunAt     sql.NullTime   `json:"last_manual_run_at"`
+	LastPreviewAt       sql.NullTime   `json:"last_preview_at"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+}
+
+type ReportRecipient struct {
+	ID        int64         `json:"id"`
+	ReportID  int64         `json:"report_id"`
+	Kind      string        `json:"kind"`
+	UserID    sql.NullInt64 `json:"user_id"`
+	TeamID    sql.NullInt64 `json:"team_id"`
+	Email     string        `json:"email"`
+	AddedBy   sql.NullInt64 `json:"added_by"`
+	CreatedAt time.Time     `json:"created_at"`
+}
+
+type ReportRun struct {
+	ID             int64         `json:"id"`
+	ReportID       int64         `json:"report_id"`
+	Trigger        string        `json:"trigger"`
+	ScheduledFor   time.Time     `json:"scheduled_for"`
+	ActorID        sql.NullInt64 `json:"actor_id"`
+	Status         string        `json:"status"`
+	Reason         string        `json:"reason"`
+	WindowStart    sql.NullTime  `json:"window_start"`
+	WindowEnd      sql.NullTime  `json:"window_end"`
+	PanelsJson     string        `json:"panels_json"`
+	DeliveriesJson string        `json:"deliveries_json"`
+	StartedAt      time.Time     `json:"started_at"`
+	DeadlineAt     sql.NullTime  `json:"deadline_at"`
+	FinishedAt     sql.NullTime  `json:"finished_at"`
+}
+
 type SavedQuery struct {
 	ID                int64          `json:"id"`
 	SourceID          int64          `json:"source_id"`
@@ -228,6 +415,39 @@ type SavedQuery struct {
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
+}
+
+type SavedView struct {
+	ID          int64         `json:"id"`
+	SourceID    int64         `json:"source_id"`
+	Scope       string        `json:"scope"`
+	UserID      sql.NullInt64 `json:"user_id"`
+	TeamID      sql.NullInt64 `json:"team_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Definition  string        `json:"definition"`
+	IsDefault   int64         `json:"is_default"`
+	Managed     int64         `json:"managed"`
+	Revision    int64         `json:"revision"`
+	CreatedBy   sql.NullInt64 `json:"created_by"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+}
+
+type SchemaAdvisorDismissal struct {
+	SourceID    int64         `json:"source_id"`
+	FindingID   string        `json:"finding_id"`
+	Reason      string        `json:"reason"`
+	DismissedBy sql.NullInt64 `json:"dismissed_by"`
+	DismissedAt time.Time     `json:"dismissed_at"`
+}
+
+type SchemaAdvisorReport struct {
+	SourceID    int64         `json:"source_id"`
+	GeneratedAt time.Time     `json:"generated_at"`
+	GeneratedBy sql.NullInt64 `json:"generated_by"`
+	WindowDays  int64         `json:"window_days"`
+	Report      string        `json:"report"`
 }
 
 type Session struct {
@@ -252,6 +472,7 @@ type Source struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
+	HeaderSecretRefs  sql.NullString `json:"header_secret_refs"`
 }
 
 type SystemSetting struct {

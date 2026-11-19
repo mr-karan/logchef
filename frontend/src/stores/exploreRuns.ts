@@ -1,14 +1,15 @@
 import { defineStore } from "pinia";
 import { computed, markRaw, shallowReactive, shallowRef } from "vue";
-import { exploreApi, type ColumnInfo, type QueryStats, type QueryWarning } from "@/api/explore";
+import { exploreApi, type AggregationInfo, type ColumnInfo, type QueryStats, type QueryWarning } from "@/api/explore";
 import { logchefqlApi, type FilterCondition, type TemplateVariable } from "@/api/logchefql";
-import { asClickHouseConnection, getVictoriaLogsOptimizer, type Source } from "@/api/sources";
+import { asClickHouseConnection, getLokiSelector, getVictoriaLogsOptimizer, type Source } from "@/api/sources";
 import { getErrorMessage } from "@/api/types";
 import { WindowedHTTPError, type LogRow } from "@/api/windowed";
 import { useVariables } from "@/composables/useVariables";
 import { getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 import { generateDefaultSql } from "@/services/SqlManager";
 import { prepareLogchefQLTemplate } from "@/utils/logchefql/template";
+import { isAggregation } from "@/utils/logchefql/aggregation";
 import { toRfc3339, type ResolvedWindow, type TimeWindow } from "@/utils/timeWindow";
 import { useExploreStore, type RunQuery } from "./explore";
 import { useExploreHistogramStore } from "./exploreHistogram";
@@ -27,6 +28,8 @@ export interface Results {
   // The SQL that ran: the generated SQL of a LogchefQL query, the text of a native one.
   sql: string;
   compilation: { conditions: FilterCondition[]; fieldsUsed: string[] } | null;
+  // Set when a LogchefQL query aggregates: the rows are its result, not log rows.
+  aggregation: AggregationInfo | null;
 }
 
 /** One run. Everything but its status, error and results is fixed when it starts. */
@@ -87,19 +90,24 @@ function normalizeColumns(columns: ColumnInfo[] | null | undefined, rows: LogRow
 }
 
 function results(rows: LogRow[], columns: ColumnInfo[] | null | undefined, stats: QueryStats | null | undefined, rest: Partial<Results>): Results {
-  return { rows: markRaw(rows), columns: normalizeColumns(columns, rows), stats: stats ?? DEFAULT_QUERY_STATS, warnings: [], sql: "", compilation: null, ...rest };
+  return { rows: markRaw(rows), columns: normalizeColumns(columns, rows), stats: stats ?? DEFAULT_QUERY_STATS, warnings: [], sql: "", compilation: null, aggregation: null, ...rest };
 }
 
-// An empty native query on a ClickHouse source runs the source's default SQL over the run's own window.
+// An empty native query runs the source's default: the default SQL over the run's own
+// window on ClickHouse, the default stream selector on Loki.
 function withDefaultSql(query: RunQuery, source: Source, window: ResolvedWindow, limit: number): RunQuery {
-  if (query.mode !== "native" || query.text.trim() || getNativeQueryLanguageForSource(source) !== "clickhouse-sql") return query;
+  if (query.mode !== "native" || query.text.trim()) return query;
+  const selector = getLokiSelector(source);
+  if (selector) return { mode: "native", text: selector };
+  if (getNativeQueryLanguageForSource(source) !== "clickhouse-sql") return query;
   const connection = asClickHouseConnection(source.connection);
   const tableName = connection?.database && connection.table_name ? `${connection.database}.${connection.table_name}` : "default.logs";
   return { mode: "native", text: generateDefaultSql({ tableName, tsField: source._meta_ts_field || "timestamp", window, limit }) };
 }
 
-function histogramEligible(source: Source | null, mode: RunQuery["mode"]): boolean {
-  if (getVictoriaLogsOptimizer(source)?.histogram_enabled === false) return false;
+// An aggregated result is already counted, and the histogram cannot count its grouped query.
+function histogramEligible(source: Source | null, mode: RunQuery["mode"], aggregated: boolean): boolean {
+  if (aggregated || getVictoriaLogsOptimizer(source)?.histogram_enabled === false) return false;
   return mode === "logchefql" || getNativeQueryLanguageForSource(source) === "logsql";
 }
 
@@ -120,7 +128,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
   const isRunning = computed(() => current.value?.status === "validating" || current.value?.status === "running");
   // A windowed search shows its rows while it pages, so its overlay ends with the first page.
   const showsLoading = computed(() => isRunning.value && current.value !== shown.value);
-  const isHistogramEligible = computed(() => histogramEligible(sources.currentSourceDetails, shown.value?.query.mode ?? explore.activeMode));
+  const isHistogramEligible = computed(() => histogramEligible(sources.currentSourceDetails, shown.value?.query.mode ?? explore.activeMode, !!shown.value?.results?.aggregation));
 
   /** Shows a new location that opened with `opened`: stops its run and drops its results. */
   function enter(opened: RunQuery | null) {
@@ -193,8 +201,10 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
         if (invalid) return finish(execution, "failed", invalid);
         execution.status = "running";
       }
+      // Windowed search pages log rows, and it rejects an aggregation outright.
       const optimizer = getVictoriaLogsOptimizer(execution.source);
-      if (optimizer) {
+      const aggregates = execution.query.mode === "logchefql" && isAggregation(execution.query.text);
+      if (optimizer && !aggregates) {
         try {
           return await searchWindows(execution, optimizer.histogram_enabled !== false);
         } catch (err) {
@@ -282,19 +292,22 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
       query_timeout: timeout,
       variables: variables.length > 0 ? variables : undefined,
     };
+    // The interval feeds {{__interval}} in a native query and `by time` in LogchefQL.
+    const interval = calculateOptimalGranularity(common.start_time, common.end_time);
     if (query.mode === "logchefql") {
-      const response = await logchefqlApi.query(teamId, source.id, { ...common, query: query.text, limit }, { signal: controller.signal, timeout });
+      const response = await logchefqlApi.query(teamId, source.id, { ...common, query: query.text, limit, interval }, { signal: controller.signal, timeout });
       if (response.status !== "success") throw response;
       const data = response.data;
       if (!data) throw new Error("Query execution failed");
       return results(data.logs ?? [], data.columns, data.stats, {
         sql: data.generated_query || data.generated_sql || "",
         compilation: { conditions: data.conditions ?? [], fieldsUsed: data.fields_used ?? [] },
+        aggregation: data.aggregation ?? null,
       });
     }
-    // The interval feeds {{__interval}}, so a panel's query runs here unchanged.
-    const interval = calculateOptimalGranularity(common.start_time, common.end_time);
-    const response = await exploreApi.getLogs(source.id, { ...common, interval, query_text: query.text, limit: optimizer ? limit : undefined }, teamId, controller.signal);
+    // LogQL has no limit stage for log queries, so the picker's limit goes with the request.
+    const sendLimit = optimizer || getNativeQueryLanguageForSource(source) === "logql";
+    const response = await exploreApi.getLogs(source.id, { ...common, interval, query_text: query.text, limit: sendLimit ? limit : undefined }, teamId, controller.signal);
     if (response.status !== "success") throw response;
     const data = response.data;
     if (data && "error" in data) throw new Error(data.details || data.error);
@@ -317,7 +330,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
   }
 
   function fetchHistogram(execution: Execution) {
-    if (!histogramEligible(execution.source, execution.query.mode)) return histogram.clearHistogramData();
+    if (!histogramEligible(execution.source, execution.query.mode, !!execution.results?.aggregation)) return histogram.clearHistogramData();
     void histogram.fetchHistogramData({
       teamId: execution.teamId,
       sourceId: execution.source.id,

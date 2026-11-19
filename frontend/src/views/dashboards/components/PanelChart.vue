@@ -9,8 +9,8 @@ import { getHexValue } from "@unovis/ts/utils/color";
 import { useThemeStore } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { PanelFrame } from "@/utils/panelFrame";
-import { buildPanelChart, chartStacked, chartValue, chartLabelColor, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
-import { chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
+import { buildPanelChart, chartStacked, chartValue, definedRuns, chartLabelColor, type ChartModel, type ChartRow, type ChartViz } from "@/utils/panelCharts";
+import { chartTickLabels, chartTicks, chartTimeFormatter } from "@/utils/panelChartAxes";
 import { addExact, isExact, parseExact, type FrameNumber } from "@/utils/exactNumber";
 import { escapeHtml } from "@/lib/html";
 import type { ResolvedWindow } from "@/utils/timeWindow";
@@ -49,9 +49,14 @@ const model = computed(() => result.value.model ?? emptyModel);
 const horizontal = computed(() => props.viz.orientation === "horizontal" && mark.value === "bar");
 const mark = computed(() => props.viz.mark ?? "line");
 const stacked = computed(() => chartStacked(props.viz));
+// One series stacks on nothing, so its values sit past the bar end like grouped bars.
+const labelsInside = computed(() => stacked.value && model.value.series.length > 1);
+const labelsDropped = ref(false);
 const x = (row: ChartRow) => row.x;
 const accessors = computed(() => model.value.series.map(s => (row: ChartRow) => row.values.get(s.key)?.coordinate ?? Number.NaN));
 const colors = computed(() => model.value.series.map(s => s.color));
+const areaRuns = computed(() => accessors.value.flatMap((accessor, i) =>
+  definedRuns(model.value.rows, accessor).map((rows, j) => ({ key: `${model.value.series[i].key}:${j}`, rows, accessor, color: colors.value[i] }))));
 const plotHost = ref<HTMLElement | null>(null);
 const { height: plotHeight, width: plotWidth } = useElementSize(plotHost);
 const chartHeight = computed(() => Math.max(60, plotHeight.value || props.height - 30));
@@ -123,7 +128,8 @@ const pointLabelSelector = `.${Scatter.selectors.point} > text`;
 function xTick(value: number | Date) {
   return model.value.time ? timeFormatter.value.format(Number(value)).replaceAll(",", "") : model.value.rows[Number(value)]?.label() ?? "";
 }
-const yTick = (value: number | Date) => chartValue(Number(value), props.viz.format).text;
+const yTickLabels = computed(() => chartTickLabels(extent.value, props.viz.format));
+const yTick = (value: number | Date) => yTickLabels.value.get(Number(value)) ?? chartValue(Number(value), props.viz.format).text;
 const active = ref<number | null>(null);
 const sharedTooltip = ref<{ component?: Tooltip }>();
 const crosshair = ref<{ component?: Crosshair<ChartRow> }>();
@@ -167,7 +173,10 @@ const tooltipTemplate = (datum: ChartRow | undefined) => datum ? tooltip(datum) 
 function barLabels(svg: SVGSVGElement) {
   svg.querySelectorAll(pointLabelSelector).forEach(e => e.classList.add('panel-chart__point-value'));
   svg.querySelectorAll('.panel-chart__value').forEach(e => e.remove());
+  labelsDropped.value = false;
   if (!props.viz.show_values || !labelsFit.value || mark.value !== "bar") return;
+  let dropped = false;
+  const drop = (text: SVGTextElement) => { text.remove(); dropped = true; };
   const groups = svg.querySelectorAll(`.${StackedBar.selectors.barGroup}, .${GroupedBar.selectors.barGroup}`);
   groups.forEach((group, rowIndex) => {
     const row = model.value.rows[rowIndex];
@@ -183,7 +192,7 @@ function barLabels(svg: SVGSVGElement) {
       text.setAttribute('class', 'panel-chart__value');
       text.textContent = value.text;
       bar.parentNode?.append(text);
-      if (!stacked.value) {
+      if (!labelsInside.value) {
         // Grouped bars carry their value just past the bar end, in the text colour.
         const negative = value.coordinate < 0;
         if (horizontal.value) {
@@ -191,13 +200,13 @@ function barLabels(svg: SVGSVGElement) {
           text.setAttribute('y', String(box.y + box.height / 2));
           text.setAttribute('text-anchor', negative ? 'end' : 'start');
           text.setAttribute('dominant-baseline', 'central');
-          if (box.height < 10) text.remove();
+          if (box.height < 10) drop(text);
         } else {
           text.setAttribute('x', String(box.x + box.width / 2));
           text.setAttribute('y', String(negative ? box.y + box.height + 4 : box.y - 4));
           text.setAttribute('text-anchor', 'middle');
           text.setAttribute('dominant-baseline', negative ? 'hanging' : 'auto');
-          if (text.getComputedTextLength() > box.width + 6) text.remove();
+          if (text.getComputedTextLength() > box.width + 6) drop(text);
         }
         return;
       }
@@ -209,9 +218,10 @@ function barLabels(svg: SVGSVGElement) {
       // Unovis cannot resolve a CSS variable nested inside hsl(), so fall back to the fill the browser computed.
       const fill = chartLabelColor(getHexValue(series.color, text) ?? getHexValue(getComputedStyle(bar).fill, bar));
       if (fill) text.style.fill = fill;
-      if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) text.remove();
+      if (box.height < 16 || text.getComputedTextLength() + 6 > box.width) drop(text);
     });
   });
+  labelsDropped.value = dropped;
 }
 </script>
 
@@ -221,7 +231,7 @@ function barLabels(svg: SVGSVGElement) {
     <p v-else-if="!model.rows.length" class="text-xs text-muted-foreground">{{ t('ui.noDataForThisTimeRange') }}</p>
     <template v-else>
       <div ref="plotHost" class="panel-chart__plot" tabindex="0" role="img" :aria-label="t('panelChart.inspect', { mark })" @keydown="keydown" @pointerdown="active = null" @pointermove="active = null" @pointerenter="active = null" @blur="active = null">
-        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: horizontal && !stacked && viz.show_values ? 44 : 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
+        <VisXYContainer :height="chartHeight" :duration="0" :x-scale="xScale" :x-domain="horizontal ? domain : xDomain" :y-domain="horizontal ? xDomain : domain" :yDirection="horizontal ? Direction.South : Direction.North" :padding="{ left: 8, right: horizontal && !labelsInside && viz.show_values ? 44 : 8, top: 8, bottom: 0 }" :margin="{ left: 8, right: 12, top: 10, bottom: 5 }" :on-render-complete="barLabels">
           <VisAxis :type="horizontal ? 'y' : 'x'" :tick-format="xTick" tick-text-color="var(--muted-foreground)" :tick-values="categoryTicks" :num-ticks="6" :tick-text-angle="categoryAngle" :tick-text-width="horizontal ? 100 : 80" :tick-text-hide-overlapping="model.time" :min-max-ticks-only-when-width-is-less="0" :grid-line="false" :tick-line="false" />
           <VisAxis :type="horizontal ? 'x' : 'y'" :tick-values="extent" tick-text-color="var(--muted-foreground)" :tick-format="yTick" :tick-line="false" :domain-line="false" />
           <VisStackedBar :data="model.rows" v-if="mark === 'bar' && stacked" :x="x" :y="accessors" :color="colors" :orientation="horizontal ? 'horizontal' : 'vertical'" :bar-padding="0.3" :bar-max-width="40" :rounded-corners="3" />
@@ -229,7 +239,7 @@ function barLabels(svg: SVGSVGElement) {
           <VisLine :data="model.rows" v-else-if="mark === 'line'" :x="x" :y="accessors" :color="colors" />
           <VisArea :data="model.rows" v-else-if="stacked" :x="x" :y="accessors" :color="colors" :opacity="0.35" :line="true" />
           <template v-else>
-            <VisArea :data="model.rows" v-for="(accessor, i) in accessors" :key="model.series[i].key" :x="x" :y="accessor" :color="colors[i]" :opacity="0.35" :line="true" />
+            <VisArea v-for="run in areaRuns" :key="run.key" :data="run.rows" :x="x" :y="run.accessor" :color="run.color" :opacity="0.35" :line="true" />
           </template>
           <template v-if="viz.show_values && mark !== 'bar'">
             <VisScatter v-for="(accessor, i) in labelAccessors" :key="model.series[i].key" :data="pointRows[i]" :x="x" :y="accessor" :size="0" :label="pointLabels[i]" label-color="var(--foreground)" label-position="top" />
@@ -245,7 +255,7 @@ function barLabels(svg: SVGSVGElement) {
           <span v-for="series in model.series" :key="series.key">{{ series.label }} {{ model.rows[active].values.get(series.key)?.exact ?? t('panelChart.null') }}. </span>
         </template>
       </div>
-      <p v-if="viz.show_values && plotWidthAvailable > 0 && (mark === 'bar' ? !labelsFit : labelStride > 1)" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
+      <p v-if="viz.show_values && plotWidthAvailable > 0 && (mark === 'bar' ? !labelsFit || labelsDropped : labelStride > 1)" role="status" class="text-xs text-muted-foreground">{{ t('panelChart.labelsHidden') }}</p>
       <div v-if="viz.legend !== false && model.series.length > 1" class="panel-chart__legend" :aria-label="t('panelChart.seriesLegend')"><span v-for="series in model.series" :key="series.key"><i :style="{ background: series.color }" />{{ series.label }}</span></div>
       <p v-for="notice in model.notices" :key="notice" role="status" class="text-xs text-muted-foreground">{{ notice }}</p>
     </template>

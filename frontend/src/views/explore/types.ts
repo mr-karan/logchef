@@ -13,7 +13,7 @@ export interface SaveQueryFormData {
   description: string;
   source_id: number;
   created_from_team_id?: number | null;
-  query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
+  query_language: 'logchefql' | 'clickhouse-sql' | 'logsql' | 'logql';
   editor_mode: 'builder' | 'native';
   query_content: string;
   // Optional collection to pin the query to on save (new queries only).

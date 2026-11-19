@@ -71,7 +71,7 @@ func TestConcurrentResolvePreservesNewIncident(t *testing.T) {
 	if err := s.CreateAlert(ctx, alert); err != nil {
 		t.Fatal(err)
 	}
-	entry, err := s.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true})
+	entry, err := s.InsertAlertHistory(ctx, alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestConcurrentResolvePreservesNewIncident(t *testing.T) {
 		})
 		awaitLockWaitOrDone(t, ctx, monitor, done)
 		var err error
-		newer, err = tx.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired again", nil)
+		newer, err = tx.InsertAlertHistory(ctx, alert.ID, "", nil, models.AlertStatusTriggered, nil, "fired again", nil)
 		return err
 	}); err != nil {
 		t.Fatal(err)

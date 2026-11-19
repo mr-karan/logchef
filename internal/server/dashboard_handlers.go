@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -93,6 +94,7 @@ func (s *Server) handleCreateDashboard(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create dashboard", models.GeneralErrorType)
 		}
 	}
+	auditSet(c, audit.DashboardTarget(dashboard.ID, dashboard.Name), nil, audit.DashboardFields(dashboard))
 	return s.sendDashboard(c, fiber.StatusCreated, user, client, dashboard)
 }
 
@@ -156,7 +158,7 @@ func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, updateErr := core.UpdateDashboard(c.Context(), s.store, s.log, id, user, client, &req)
+	before, updated, updateErr := core.UpdateDashboard(c.Context(), s.store, s.log, id, user, client, &req)
 	if updateErr != nil {
 		var stale *core.DashboardClientStaleError
 		switch {
@@ -177,6 +179,7 @@ func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update dashboard", models.GeneralErrorType)
 		}
 	}
+	auditSet(c, audit.DashboardTarget(updated.ID, updated.Name), audit.DashboardFields(before), audit.DashboardFields(updated))
 	return s.sendDashboard(c, fiber.StatusOK, user, client, updated)
 }
 
@@ -203,11 +206,14 @@ func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this dashboard", models.AuthorizationErrorType)
 	}
 
-	if delErr := core.DeleteDashboard(c.Context(), s.store, s.log, id); delErr != nil {
+	deleted, reports, delErr := core.DeleteDashboard(c.Context(), s.store, s.log, id)
+	if delErr != nil {
 		if errors.Is(delErr, core.ErrDashboardNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Dashboard not found", models.NotFoundErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete dashboard", models.GeneralErrorType)
 	}
+	auditSet(c, audit.DashboardTarget(deleted.ID, deleted.Name), audit.DashboardFields(deleted), nil)
+	auditDetail(c, "reports_removed", reports)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Dashboard deleted"})
 }

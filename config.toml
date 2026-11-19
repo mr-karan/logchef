@@ -202,6 +202,18 @@ max_concurrent_global = 5
 artifact_ttl = "24h"
 formats = ["csv", "ndjson"]
 
+[jobs]
+# Background job runner. Every replica polls the metadata database for due
+# jobs, and a claim with a lease makes one replica run each tick. A replica
+# with enabled = false serves HTTP and claims nothing.
+enabled = true
+poll_interval = "2s"
+
+[alerts]
+# Alert rules this replica evaluates at once. Each rule is a job with its own
+# frequency (at least 10 seconds), so any replica with jobs enabled may run it.
+max_concurrent_evaluations = 4
+
 [tail]
 # Live tail (SSE) streams. ClickHouse polls on poll_interval; VictoriaLogs
 # streams natively. Guardrails are mandatory: admission limits, a hard session
@@ -217,6 +229,27 @@ max_rows_per_sec = 100
 [shares]
 default_ttl = "720h"
 max_query_text_bytes = 1048576
+
+[audit]
+# Configuration changes, sign-ins and exports are stored in audit_events.
+# 0 disables a bound. Each event is also written as one JSON log line with
+# msg "audit", so a log shipper can keep a copy off the host.
+retention_days = 365
+max_rows = 1000000
+log_events = true
+
+[reports]
+# Scheduled reports email a saved query on demand or on a schedule. When
+# disabled, the report routes answer 503.
+enabled = true
+# Time one run may spend on its queries, from 1m to 30m. The run must finish
+# delivery within 5 minutes after it.
+query_budget = "5m"
+# Runs this replica executes at once. Later runs wait.
+max_concurrent_runs = 2
+# Largest CSV attachment in bytes, before base64 adds about a third. A larger
+# file ends at the last whole row that fits, and the email says so.
+max_attachment_bytes = 5242880
 
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access

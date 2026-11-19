@@ -1,5 +1,8 @@
 ---
 title: From Elasticsearch
+head:
+  - tag: title
+    content: "Migrate Logs from Elasticsearch | Logchef"
 description: Migrate Elasticsearch and Kibana log analytics to ClickHouse with Logchef — pipeline re-point, ECS schema mapping, KQL to LogchefQL/SQL examples.
 ---
 

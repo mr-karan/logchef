@@ -13,6 +13,7 @@ import (
 
 	"github.com/zitadel/oidc/v3/pkg/op"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
@@ -49,7 +50,13 @@ func openDB(t *testing.T, path string) *sqlite.DB {
 
 func newTestServer(t *testing.T, db *sqlite.DB) *Server {
 	t.Helper()
-	s, err := New(testConfig(), db, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return newTestServerWithConfig(t, testConfig(), db)
+}
+
+func newTestServerWithConfig(t *testing.T, cfg *config.Config, db *sqlite.DB) *Server {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s, err := New(cfg, db, audit.New(audit.Options{Store: db, Logger: log}), log)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -135,10 +142,7 @@ func TestKeysDeriveFromSecret(t *testing.T) {
 	}
 	cfg := testConfig()
 	cfg.Auth.APITokenSecret = strings.Repeat("z", 32)
-	other, err := New(cfg, openDB(t, path), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	other := newTestServerWithConfig(t, cfg, openDB(t, path))
 	if _, err := other.AuthenticateAccessToken(context.Background(), token, ResourceAPI); err == nil {
 		t.Fatal("a server with another secret accepted the token")
 	}
@@ -205,6 +209,37 @@ func TestParseScopes(t *testing.T) {
 		if got := scopeMask(scopeStrings(scopesFromMask(mask), false)); got != mask {
 			t.Fatalf("mask %d round-trips to %d", mask, got)
 		}
+	}
+}
+
+// TestScopeMaskPositions pins the bit of every read scope: access tokens
+// already issued carry these masks and must keep decoding to the same scopes.
+func TestScopeMaskPositions(t *testing.T) {
+	t.Parallel()
+	want := []models.TokenScope{
+		models.TokenScopeProfileRead,
+		models.TokenScopeTeamsRead,
+		models.TokenScopeSourcesRead,
+		models.TokenScopeLogsRead,
+		models.TokenScopeSavedQueriesRead,
+		models.TokenScopeCollectionsRead,
+		models.TokenScopeAlertsRead,
+		models.TokenScopeSavedViewsRead,
+	}
+	if len(ReadScopes) != len(want) {
+		t.Fatalf("ReadScopes has %d entries, want %d: pin the new scope's bit here", len(ReadScopes), len(want))
+	}
+	for bit, scope := range want {
+		if got := scopeMask([]string{string(scope)}); got != 1<<bit {
+			t.Errorf("%s encodes as %b, want bit %d", scope, got, bit)
+		}
+	}
+	if got := scopesFromMask(1<<3 | 1<<6); !slices.Equal(got, []models.TokenScope{models.TokenScopeLogsRead, models.TokenScopeAlertsRead}) {
+		t.Errorf("an existing logs+alerts mask decodes to %v", got)
+	}
+	scopes, _, err := parseScopes([]string{"saved_views:read"})
+	if err != nil || !slices.Equal(scopes, []models.TokenScope{models.TokenScopeSavedViewsRead}) {
+		t.Errorf("parseScopes(saved_views:read) = %v, %v", scopes, err)
 	}
 }
 

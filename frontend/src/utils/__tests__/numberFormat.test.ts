@@ -7,6 +7,12 @@ function format(value: string, options: Parameters<typeof formatNumber>[1] = {},
   return formatNumber(n, options, { locale });
 }
 describe("number format review regressions", () => {
+  it("puts the minus sign before a prefix", () => {
+    expect(format("-6900000", { scale: 1e-7, prefix: "₹", suffix: " Cr" }).text).toBe("-₹0.69 Cr");
+    expect(format("-6900000", { prefix: "₹" }).exact).toBe("-₹6,900,000");
+    expect(format("-0.001", { prefix: "₹" }).text).toBe("₹0");
+    expect(format("5", { prefix: "₹" }).text).toBe("₹5");
+  });
   it("chooses compact magnitude after rounding", () => {
     expect(format("999999", { notation: "compact" }).text).toBe("1M");
     expect(format("999999999", { notation: "compact", decimals: 0 }).text).toBe("1B");

@@ -42,6 +42,9 @@ type QueryOptions struct {
 	// max_result_rows, or 0 when Logchef bounds the result only in its reader.
 	// A bound past MaxRows lets a row beyond the cap prove a cut.
 	ResultRows int
+	// AggregationMaxMemoryBytes marks a compiled LogchefQL aggregation and
+	// bounds its memory. 0 for any other query.
+	AggregationMaxMemoryBytes int64
 }
 
 // RowStreamWriter receives rows as they are read from ClickHouse.
@@ -353,7 +356,21 @@ const (
 	chExceptionTimeoutExceeded int32 = 159 // TIMEOUT_EXCEEDED: max_execution_time exceeded server-side.
 	chExceptionSocketTimeout   int32 = 209 // SOCKET_TIMEOUT: the connection's socket timed out mid-query.
 	chExceptionTooManyBytes    int32 = 307 // TOO_MANY_BYTES: max_bytes_to_read or max_result_bytes exceeded.
+	chExceptionUnknownTable    int32 = 60  // UNKNOWN_TABLE, as system.query_log when query logging is off.
+	chExceptionMemoryLimit     int32 = 241 // MEMORY_LIMIT_EXCEEDED: max_memory_usage exceeded.
+	chExceptionAccessDenied    int32 = 497 // ACCESS_DENIED: the user lacks a grant.
 )
+
+// IsAccessDeniedError reports whether ClickHouse refused a query because the
+// user lacks a grant (ACCESS_DENIED).
+func IsAccessDeniedError(err error) bool {
+	return hasExceptionCode(err, chExceptionAccessDenied)
+}
+
+func hasExceptionCode(err error, code int32) bool {
+	exception, ok := errors.AsType[*clickhouse.Exception](err)
+	return ok && exception.Code == code
+}
 
 // IsReadLimitExceededError reports whether ClickHouse aborted a query because
 // a row or byte read/result cap was exceeded (TOO_MANY_ROWS / TOO_MANY_BYTES).

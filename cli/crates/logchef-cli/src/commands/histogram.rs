@@ -144,6 +144,7 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
                 end_time: Some(range.end.clone()),
                 timezone: Some(range.timezone.clone()),
                 limit: None,
+                interval: None,
             },
         )
         .await
@@ -155,6 +156,11 @@ pub async fn run(args: HistogramArgs, global: GlobalArgs) -> Result<()> {
             .map(|e| e.message)
             .unwrap_or_else(|| "invalid LogchefQL query".to_string());
         anyhow::bail!("{}", message);
+    }
+    if translate.aggregation.is_some() {
+        anyhow::bail!(
+            "the histogram counts log rows, and the query aggregates. Remove the pipe after the filter, or run it with `logchef query`"
+        );
     }
 
     let window = resolve_window(&args.interval, end_utc - start_utc);

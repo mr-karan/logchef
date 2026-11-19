@@ -18,6 +18,16 @@ func (db *DB) GetSetting(ctx context.Context, key string) (string, error) {
 	return setting.Value, nil
 }
 
+// GetSettingForUpdate retrieves a setting row. Inside WithTx the read runs on
+// the transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetSettingForUpdate(ctx context.Context, key string) (*models.SystemSetting, error) {
+	row, err := db.readQueries.GetSystemSetting(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get setting %s: %w", key, translateNotFound(err))
+	}
+	return mapSystemSettings([]sqlc.SystemSetting{row})[0], nil
+}
+
 // ListSettings retrieves all settings.
 func (db *DB) ListSettings(ctx context.Context) ([]*models.SystemSetting, error) {
 	settings, err := db.readQueries.ListSystemSettings(ctx)

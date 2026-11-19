@@ -162,6 +162,7 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 			errCode = "auth_error"
 		}
 		finalURL = fmt.Sprintf("%s/auth/login?error=%s", targetURL, errCode)
+		auditSignInFailure(c, "", "oidc", errCode)
 		level := slog.LevelWarn
 		if errCode == "auth_error" {
 			level = slog.LevelError
@@ -258,7 +259,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("%w: missing PKCE verifier cookie", errInvalidState))
 	}
 
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret), verifier)
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.audit, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret), verifier)
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}
@@ -269,6 +270,9 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		"name", loginUser.FullName,
 		"role", loginUser.Role,
 	)
+
+	auditSession(c, loginUser, "oidc")
+	auditSessionFields(c, nil, session)
 
 	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
 	// a transient failure here must not block login.
@@ -296,6 +300,13 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 func (s *Server) handleLogout(c fiber.Ctx) error {
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr != "" {
+		// A sign-out records its user, so read the session before revoking it.
+		if session, err := core.ValidateSession(c.Context(), s.store, s.log, models.SessionID(sessionIDStr)); err == nil {
+			if user, err := core.GetUser(c.Context(), s.store, session.UserID); err == nil {
+				auditSession(c, user, "")
+				auditSessionFields(c, session, nil)
+			}
+		}
 		// Attempt to revoke the session in the database.
 		if err := core.RevokeSession(c.Context(), s.store, s.log, models.SessionID(sessionIDStr)); err != nil {
 			// Log error but proceed with cookie deletion anyway.
@@ -378,6 +389,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 	}
 
 	invalid := func() error {
+		auditSignInFailure(c, req.Email, "local", "invalid_credentials")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
 	}
 	if len(req.Email) > models.MaxEmailLength {
@@ -401,6 +413,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 	if !auth.VerifyLocalPassword(user.PasswordHash, req.Password) {
 		return invalid()
 	}
+	auditSession(c, user, "local")
 
 	session, err := core.CreateSession(c.Context(), s.store, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
 	if err != nil {
@@ -408,6 +421,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create session")
 	}
 
+	auditSessionFields(c, nil, session)
 	s.log.Info("user.login", "email", user.Email, "user_id", user.ID, "method", "local")
 
 	if _, err := core.EnsurePersonalCollection(c.Context(), s.store, s.log, user); err != nil {

@@ -1,5 +1,8 @@
 ---
 title: Configuration
+head:
+  - tag: title
+    content: "Logchef Server Configuration | Logchef"
 description: Configure Logchef's server, authentication, and runtime settings using a TOML file and LOGCHEF_ environment variable overrides.
 ---
 
@@ -363,6 +366,9 @@ max_timeout_seconds = 120
 mcp_call_timeout_seconds = 60
 max_concurrent_per_user = 3
 max_concurrent_global = 30
+# ClickHouse max_memory_usage of a LogchefQL aggregation. Default 2 GiB. A lower
+# limit of the source or the ClickHouse user wins.
+aggregation_max_memory_bytes = 2147483648
 
 [export]
 # Stable identity unique to this replica. Empty keeps age-based cleanup only.
@@ -519,6 +525,42 @@ their address. Leave per-IP limiting off until trusted-proxy resolution is
 configured; the global auth cap and per-user query limit remain usable.
 :::
 
+### Background jobs
+
+Alert evaluation runs on the background job runner. Each alert rule is a job with
+its own frequency (at least 10 seconds), and every replica with jobs enabled
+claims due jobs, so one replica runs each tick.
+
+```toml
+[jobs]
+enabled = true        # false: this replica serves HTTP and runs no jobs
+poll_interval = "2s"  # how often the replica looks for due jobs
+
+[alerts]
+max_concurrent_evaluations = 4  # alert rules this replica evaluates at once
+```
+
+These are static settings: they live in `config.toml` or `LOGCHEF_` variables,
+not in the Admin Settings UI.
+
+### Scheduled reports
+
+[Scheduled reports](/features/scheduled-reports/) email dashboards and saved
+queries through the SMTP settings of **Alerts**, and send on the background
+job runner.
+
+```toml
+[reports]
+enabled = true                  # false: the report routes answer 503 and nothing sends
+query_budget = "5m"             # time one run may spend on queries, 1m to 30m
+max_concurrent_runs = 2         # runs this replica executes at once; later runs wait
+max_attachment_bytes = 5242880  # largest CSV attachment before encoding (5 MiB)
+```
+
+A `query_budget` outside 1 to 30 minutes stops the server at startup. A run
+then has 5 more minutes to deliver. The scheduler does not run when
+`demo.read_only` is set.
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
@@ -642,7 +684,6 @@ Configure real-time log monitoring with email and webhook notifications through 
 - **SMTP From**: From address for alert emails
 - **SMTP Reply-To**: Reply-To address (optional)
 - **SMTP Security**: `none`, `starttls`, or `tls`
-- **Evaluation Interval**: How often to check all active alerts (e.g., "1m")
 - **Default Lookback**: Default time range for alert queries (e.g., "5m")
 - **History Limit**: Number of historical events to keep per alert (default: 50)
 - **External URL**: Backend URL for API access
@@ -654,7 +695,6 @@ Configure real-time log monitoring with email and webhook notifications through 
 ```toml
 [alerts]
 enabled = false
-evaluation_interval = "1m"
 default_lookback = "5m"
 history_limit = 50
 smtp_host = ""
@@ -670,7 +710,7 @@ request_timeout = "5s"
 tls_insecure_skip_verify = false
 ```
 
-Webhook requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only. A short excerpt of the response body goes to the server log.
+Webhook, Slack and PagerDuty requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only, and the server log names the destination and the status, never the response body. `request_timeout` bounds each webhook, Slack, PagerDuty and SMTP request.
 
 To use an internal receiver, add its exact hostname or IP address to the static configuration and restart Logchef:
 
@@ -684,6 +724,17 @@ webhook_allowed_hosts = ["receiver.example.internal", "127.0.0.1"]
 **Note:** After first boot, manage all other alert settings via **Administration → System Settings → Alerts**.
 
 For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
+
+### Scheduled report recipients
+
+A scheduled report goes to Logchef users and teams. Two settings under **Administration → System Settings → Reports** decide whether it may also go to an email address that belongs to no Logchef user:
+
+- **External Recipients** (`reports.external_recipients`, default `false`): when false, no external address receives a report.
+- **Allowed Email Domains** (`reports.allowed_email_domains`, default empty): domains separated by commas, such as `example.com, partner.example`. An external address must be in one of them exactly; a subdomain does not match. `*` allows every domain. With external recipients on and this list empty, no address passes.
+
+Logchef checks both settings when a report is saved and again at every send, so turning them off stops delivery on the next run; the run history records the address as `skipped` with `external_disabled` or `domain_not_allowed`. An external address receives every panel that the report owner can reach. An address that belongs to a Logchef user, in any letter case, is that user, and receives only the panels the user can reach, whatever these settings say.
+
+Both settings decide where report data may be mailed, so they change only from a browser session, not with an API token, and every change is in the audit log.
 
 ## Environment Variables
 

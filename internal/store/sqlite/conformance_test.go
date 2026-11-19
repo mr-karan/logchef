@@ -3,6 +3,7 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -47,10 +48,61 @@ func TestOAuthConformance(t *testing.T) {
 	storetest.RunOAuth(t, opener(sqlitetest.Path(t)))
 }
 
+// TestSavedViewDefaultRace runs two default swaps from two store instances
+// on one file; the second writer waits on SQLite's lock.
+func TestSavedViewDefaultRace(t *testing.T) {
+	storetest.RunSavedViewDefaultRace(t, opener(sqlitetest.Path(t)))
+}
+
 // TestCollectionLinkRaces runs the link races with two store instances on
 // one file, so the second writer waits on SQLite's lock, not on Go.
 func TestCollectionLinkRaces(t *testing.T) {
 	storetest.RunCollectionLinkRaces(t, opener(sqlitetest.Path(t)))
+}
+
+// TestJobs runs the job claim and takeover tests with two store instances on
+// one file, so a claim waits on SQLite's write lock, not on Go.
+func TestJobs(t *testing.T) {
+	jobsPath, deliveriesPath := sqlitetest.Path(t), sqlitetest.Path(t)
+	storetest.RunJobs(t, opener(jobsPath), false, leaseHooks(t, jobsPath))
+	storetest.RunDeliveries(t, opener(deliveriesPath), leaseHooks(t, deliveriesPath))
+}
+
+// leaseHooks end leases one second ago on SQLite's clock, in the format the
+// store writes them.
+func leaseHooks(t *testing.T, path string) storetest.LeaseHooks {
+	t.Helper()
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	expire := func(query string) func(context.Context, int64) error {
+		return func(ctx context.Context, id int64) error {
+			res, err := raw.ExecContext(ctx, query, id)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return fmt.Errorf("updated %d rows, want 1", n)
+			}
+			return nil
+		}
+	}
+	return storetest.LeaseHooks{
+		ExpireJobLease:            expire(`UPDATE jobs SET lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE id = ?`),
+		ExpireDeliveryReservation: expire(`UPDATE notification_deliveries SET reserved_until = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 seconds') WHERE id = ?`),
+	}
+}
+
+// TestReports runs the report store tests with two store instances on one
+// file, so the cooldown race waits on SQLite's write lock, not on Go.
+func TestReports(t *testing.T) {
+	storetest.RunReports(t, opener(sqlitetest.Path(t)))
 }
 
 func opener(path string) storetest.Opener {

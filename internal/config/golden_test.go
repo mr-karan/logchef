@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -98,9 +99,13 @@ conn_max_lifetime = "0s"
 
 [alerts]
 enabled = false
-evaluation_interval = "0s"
+max_concurrent_evaluations = 0
 default_lookback = "0s"
 history_limit = 0
+
+[jobs]
+enabled = false
+poll_interval = "0s"
 
 [ai]
 enabled = false
@@ -158,6 +163,11 @@ max_entry_bytes = 0
 max_entries = 0
 max_concurrent_fills = 0
 
+[audit]
+retention_days = 0
+max_rows = 0
+log_events = false
+
 [oidc]
 ` + goldenOIDCKeys + `
 `
@@ -180,6 +190,10 @@ max_global = -3
 
 [rate_limit]
 auth_global_per_minute = -1
+
+[audit]
+retention_days = -1
+max_rows = -1
 
 [oidc]
 ` + goldenOIDCKeys + `scopes = []
@@ -296,4 +310,23 @@ func TestLoad_GoldenEnvOnly(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	assertGolden(t, "env_only", cfg)
+}
+
+// TestLoad_IgnoresRemovedEvaluationInterval: alerts.evaluation_interval was
+// removed when each rule got its own job schedule (RFC 0006 unit J2). A file
+// or environment that still sets it loads the same config as one without it.
+func TestLoad_IgnoresRemovedEvaluationInterval(t *testing.T) {
+	clearLogchefEnv(t)
+	want, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load without the key: %v", err)
+	}
+	t.Setenv("LOGCHEF_ALERTS__EVALUATION_INTERVAL", "30s")
+	got, err := Load(writeConfig(t, "[alerts]\nevaluation_interval = \"1m\"\n"))
+	if err != nil {
+		t.Fatalf("Load with the removed key: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("config with the removed key = %+v, want %+v", got, want)
+	}
 }

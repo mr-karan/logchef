@@ -3,7 +3,7 @@ use chrono::{Duration, Utc};
 use clap::Args;
 use inquire::{Select, Text};
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, QueryRequest, QueryStats};
+use logchef_core::api::{AggregationInfo, Client, Column, QueryRequest, QueryStats};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
@@ -24,8 +24,14 @@ use crate::ui;
   logchef query --from '2026-07-14 09:00:00' --to '2026-07-14 10:00:00' \\
     --limit 500 --output jsonl | jq 'select(.status >= 500)'
 
-  # See the ClickHouse SQL / LogsQL a query compiles to, then run it
-  logchef query 'status>=500' --since 15m --show-sql")]
+  # See the ClickHouse SQL / LogsQL / LogQL a query compiles to, then run it
+  logchef query 'status>=500' --since 15m --show-sql
+
+  # Count errors per service, the top 10
+  logchef query 'level=\"error\" | count() by service | limit 10' --since 1h
+
+  # p95 latency in 5-minute buckets (`by time` with no window needs --interval)
+  logchef query '| p95(duration_ms) by time' --since 1h --interval 5m")]
 pub struct QueryArgs {
     query: Option<String>,
 
@@ -54,6 +60,11 @@ pub struct QueryArgs {
     #[arg(long, short = 'l')]
     limit: Option<u32>,
 
+    /// Bucket size of a `by time` aggregation key that has no window of its
+    /// own, such as 1m, 5m or 1h.
+    #[arg(long)]
+    interval: Option<String>,
+
     #[arg(long, default_value = "text")]
     output: OutputFormat,
 
@@ -68,7 +79,7 @@ pub struct QueryArgs {
     #[arg(
         long,
         visible_alias = "explain",
-        help = "Show the generated backend query (SQL for ClickHouse, LogsQL for VictoriaLogs)"
+        help = "Show the generated backend query (SQL for ClickHouse, LogsQL for VictoriaLogs, LogQL for Loki)"
     )]
     show_sql: bool,
 
@@ -111,6 +122,8 @@ struct JsonOutput<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     generated_query_language: Option<&'a str>,
     columns: &'a [Column],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aggregation: Option<&'a AggregationInfo>,
 }
 
 pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
@@ -235,6 +248,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         timezone: Some(time_range.timezone),
         limit: Some(limit),
         query_timeout: Some(args.timeout),
+        interval: args.interval,
     };
 
     let spinner = ui::Spinner::start(global.quiet, "querying");
@@ -260,6 +274,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     {
         let label = match response.generated_query_language() {
             Some("logsql") => "Generated LogsQL",
+            Some("logql") => "Generated LogQL",
             Some("clickhouse-sql") => "Generated SQL",
             _ => "Generated query",
         };
@@ -284,6 +299,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                 generated_query: response.generated_query(),
                 generated_query_language: response.generated_query_language(),
                 columns: &response.columns,
+                aggregation: response.aggregation.as_ref(),
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -301,8 +317,19 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
+        // An aggregated result has no timestamp or message, so text output
+        // prints it as the table.
+        OutputFormat::Table | OutputFormat::Text if response.aggregation.is_some() => {
+            print_table(entries, &result_columns(&response));
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
+        }
         OutputFormat::Table => {
-            print_table(entries, &response.columns);
+            print_table(entries, &result_columns(&response));
             ui::print_stats(
                 global.quiet,
                 entries.len(),
@@ -348,7 +375,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     Ok(())
 }
 
-fn parse_time_range(
+pub(crate) fn parse_time_range(
     since: &str,
     from: Option<&str>,
     to: Option<&str>,
@@ -467,28 +494,40 @@ fn json_value_to_line(value: &serde_json::Value) -> String {
     }
 }
 
-fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core::api::Column]) {
+/// The columns the table prints: every result column of an aggregation in
+/// the server's order, or the first six log columns.
+pub(crate) fn result_columns(response: &logchef_core::api::QueryResponse) -> Vec<&str> {
+    match &response.aggregation {
+        Some(aggregation) => aggregation
+            .columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect(),
+        None => response
+            .columns
+            .iter()
+            .filter(|c| !c.name.starts_with('_') || c.name == "_timestamp")
+            .take(6)
+            .map(|c| c.name.as_str())
+            .collect(),
+    }
+}
+
+pub(crate) fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[&str]) {
     if entries.is_empty() {
         println!("No results");
         return;
     }
 
-    let display_cols: Vec<_> = columns
-        .iter()
-        .filter(|c| !c.name.starts_with('_') || c.name == "_timestamp")
-        .take(6)
-        .collect();
-
-    let header: Vec<_> = display_cols.iter().map(|c| c.name.as_str()).collect();
-    println!("{}", header.join(" | "));
+    println!("{}", columns.join(" | "));
     println!("{}", "-".repeat(80));
 
     for entry in entries {
-        let row: Vec<_> = display_cols
+        let row: Vec<_> = columns
             .iter()
-            .map(|c| {
+            .map(|name| {
                 entry
-                    .get(&c.name)
+                    .get(*name)
                     .map(|v| match v {
                         serde_json::Value::String(s) => s.clone(),
                         _ => v.to_string(),

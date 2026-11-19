@@ -1,4 +1,5 @@
 import type { Source } from "@/api/sources";
+import { isSchemalessSource } from "@/lib/queryMetadata";
 
 interface SourceFieldLike {
   name: string;
@@ -123,6 +124,9 @@ export function isClickToLoadField(type: string): boolean {
   const lower = unwrapFieldType(type).toLowerCase();
   return (
     lower === "string" ||
+    // A Loki stream label. Its values come from a metric query, so it loads
+    // on click like a string.
+    lower === "label" ||
     /^u?int\d/.test(lower) ||
     /^float\d/.test(lower) ||
     /^decimal/.test(lower)
@@ -138,7 +142,7 @@ export function isSystemField(
   fieldName: string,
 ): boolean {
   const normalized = normalizeFieldName(fieldName);
-  if (source?.source_type === "victorialogs") {
+  if (isSchemalessSource(source)) {
     if (VICTORIALOGS_SYSTEM_FIELDS.has(normalized)) {
       return true;
     }

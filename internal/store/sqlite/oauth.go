@@ -121,39 +121,36 @@ func (db *DB) SaveOAuthAuthCode(ctx context.Context, id models.OAuthAuthRequestI
 	return nil
 }
 
-func (db *DB) ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, error) {
+func (db *DB) ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, *models.OAuthGrant, error) {
 	if db.inTx {
-		return nil, errOAuthRootOnly
+		return nil, nil, errOAuthRootOnly
 	}
 	hash := sql.NullString{String: codeHash.Hex(), Valid: true}
 	row, err := db.writeQueries.ConsumeOAuthAuthCode(ctx, sqlc.ConsumeOAuthAuthCodeParams{Now: nullMillis(now), CodeHash: hash})
 	if err == nil {
-		return authRequestFromRow(row), nil
+		return authRequestFromRow(row), nil, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("consuming oauth auth code: %w", err)
+		return nil, nil, fmt.Errorf("consuming oauth auth code: %w", err)
 	}
 
 	state, err := db.writeQueries.GetOAuthAuthCodeState(ctx, hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, models.ErrOAuthInvalidGrant
+		return nil, nil, models.ErrOAuthInvalidGrant
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading oauth auth code state: %w", err)
+		return nil, nil, fmt.Errorf("reading oauth auth code state: %w", err)
 	}
 	if !state.CodeConsumedAt.Valid || !state.GrantID.Valid {
-		return nil, models.ErrOAuthInvalidGrant
+		return nil, nil, models.ErrOAuthInvalidGrant
 	}
 	// The consumption above already committed; this revocation commits on
 	// its own, so the caller's failure path cannot roll it back.
-	if _, err := db.writeQueries.RevokeOAuthGrant(ctx, sqlc.RevokeOAuthGrantParams{
-		Now:    nullMillis(now),
-		Reason: sql.NullString{String: string(models.OAuthRevokeCodeReplay), Valid: true},
-		ID:     state.GrantID.Int64,
-	}); err != nil {
-		return nil, fmt.Errorf("revoking oauth grant after code replay: %w", err)
+	revoked, err := revokeOAuthGrant(ctx, db.writeQueries, state.GrantID.Int64, models.OAuthRevokeCodeReplay, now)
+	if err != nil {
+		return nil, nil, fmt.Errorf("revoking oauth grant after code replay: %w", err)
 	}
-	return nil, models.ErrOAuthCodeReplay
+	return nil, revoked, models.ErrOAuthCodeReplay
 }
 
 func (db *DB) IssueOAuthTokens(ctx context.Context, grantID models.OAuthGrantID, issue models.OAuthTokenIssue, now time.Time) error {
@@ -235,32 +232,36 @@ func (db *DB) TouchOAuthGrant(ctx context.Context, id models.OAuthGrantID, now t
 	return nil
 }
 
-func (db *DB) RevokeGrant(ctx context.Context, id models.OAuthGrantID, userID models.UserID, now time.Time) error {
-	n, err := db.writeQueries.RevokeOAuthGrantForUser(ctx, sqlc.RevokeOAuthGrantForUserParams{
+func (db *DB) RevokeGrant(ctx context.Context, id models.OAuthGrantID, userID models.UserID, now time.Time) (*models.OAuthGrant, error) {
+	row, err := db.writeQueries.RevokeOAuthGrantForUser(ctx, sqlc.RevokeOAuthGrantForUserParams{
 		Now:    nullMillis(now),
 		Reason: sql.NullString{String: string(models.OAuthRevokeUser), Valid: true},
 		ID:     int64(id),
 		UserID: int64(userID),
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, models.ErrNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("revoking oauth grant: %w", err)
+		return nil, fmt.Errorf("revoking oauth grant: %w", err)
 	}
-	if n == 0 {
-		return models.ErrNotFound
-	}
-	return nil
+	return grantFromRow(row), nil
 }
 
-func (db *DB) RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) error {
-	if err := db.writeQueries.RevokeOAuthGrantByToken(ctx, sqlc.RevokeOAuthGrantByTokenParams{
+func (db *DB) RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (*models.OAuthGrant, error) {
+	row, err := db.writeQueries.RevokeOAuthGrantByToken(ctx, sqlc.RevokeOAuthGrantByTokenParams{
 		Now:       nullMillis(now),
 		Reason:    sql.NullString{String: string(models.OAuthRevokeTokenEndpoint), Valid: true},
 		ClientID:  string(clientID),
 		TokenHash: tokenHash.Hex(),
-	}); err != nil {
-		return fmt.Errorf("revoking oauth grant by token: %w", err)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	return nil
+	if err != nil {
+		return nil, fmt.Errorf("revoking oauth grant by token: %w", err)
+	}
+	return grantFromRow(row), nil
 }
 
 func (db *DB) ListGrantsForUser(ctx context.Context, userID models.UserID) ([]*models.OAuthGrant, error) {
@@ -352,19 +353,33 @@ func classifyRefreshToken(ctx context.Context, q *sqlc.Queries, tokenHash models
 		return models.RefreshOutcome{}, fmt.Errorf("reading oauth refresh token: %w", err)
 	}
 	if row.ConsumedAt.Valid {
-		if _, err := q.RevokeOAuthGrant(ctx, sqlc.RevokeOAuthGrantParams{
-			Now:    nullMillis(now),
-			Reason: sql.NullString{String: string(models.OAuthRevokeRefreshReplay), Valid: true},
-			ID:     row.OauthGrant.ID,
-		}); err != nil {
+		revoked, err := revokeOAuthGrant(ctx, q, row.OauthGrant.ID, models.OAuthRevokeRefreshReplay, now)
+		if err != nil {
 			return models.RefreshOutcome{}, fmt.Errorf("revoking oauth grant after refresh replay: %w", err)
 		}
-		return models.RefreshOutcome{Kind: models.RefreshReplay}, nil
+		return models.RefreshOutcome{Kind: models.RefreshReplay, Revoked: revoked}, nil
 	}
 	if row.ExpiresAt <= now.UnixMilli() || row.OauthGrant.RevokedAt.Valid {
 		return invalid, nil
 	}
 	return models.RefreshOutcome{Kind: models.RefreshOK, Grant: *grantFromRow(row.OauthGrant)}, nil
+}
+
+// revokeOAuthGrant revokes an active grant and returns it. It returns nil
+// when the grant was already revoked, so only one caller reports it.
+func revokeOAuthGrant(ctx context.Context, q *sqlc.Queries, id int64, reason models.OAuthRevokeReason, now time.Time) (*models.OAuthGrant, error) {
+	row, err := q.RevokeOAuthGrant(ctx, sqlc.RevokeOAuthGrantParams{
+		Now:    nullMillis(now),
+		Reason: sql.NullString{String: string(reason), Valid: true},
+		ID:     id,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return grantFromRow(row), nil
 }
 
 func grantFromRow(row sqlc.OauthGrant) *models.OAuthGrant {

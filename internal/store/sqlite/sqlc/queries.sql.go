@@ -12,6 +12,20 @@ import (
 	"time"
 )
 
+const addAlertDestination = `-- name: AddAlertDestination :exec
+INSERT INTO alert_destinations (alert_id, destination_id) VALUES (?, ?)
+`
+
+type AddAlertDestinationParams struct {
+	AlertID       int64 `json:"alert_id"`
+	DestinationID int64 `json:"destination_id"`
+}
+
+func (q *Queries) AddAlertDestination(ctx context.Context, arg AddAlertDestinationParams) error {
+	_, err := q.exec(ctx, q.addAlertDestinationStmt, addAlertDestination, arg.AlertID, arg.DestinationID)
+	return err
+}
+
 const addCollectionItem = `-- name: AddCollectionItem :execrows
 INSERT INTO collection_items (collection_id, saved_query_id, sort_order, kind, added_by)
 VALUES (?, ?, ?, ?, ?)
@@ -85,7 +99,6 @@ func (q *Queries) AddCollectionTeam(ctx context.Context, arg AddCollectionTeamPa
 }
 
 const addTeamMember = `-- name: AddTeamMember :exec
-
 INSERT INTO team_members (team_id, user_id, role)
 VALUES (?, ?, ?)
 ON CONFLICT (team_id, user_id) DO NOTHING
@@ -97,7 +110,6 @@ type AddTeamMemberParams struct {
 	Role   string `json:"role"`
 }
 
-// Team Members
 // Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.exec(ctx, q.addTeamMemberStmt, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
@@ -121,6 +133,25 @@ type AddTeamSourceParams struct {
 func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error {
 	_, err := q.exec(ctx, q.addTeamSourceStmt, addTeamSource, arg.TeamID, arg.SourceID)
 	return err
+}
+
+const advanceAlertEvalSeq = `-- name: AdvanceAlertEvalSeq :one
+UPDATE alerts
+SET eval_seq = eval_seq + 1
+WHERE id = ?1 AND eval_seq = ?2
+RETURNING id
+`
+
+type AdvanceAlertEvalSeqParams struct {
+	ID      int64 `json:"id"`
+	EvalSeq int64 `json:"eval_seq"`
+}
+
+func (q *Queries) AdvanceAlertEvalSeq(ctx context.Context, arg AdvanceAlertEvalSeqParams) (int64, error) {
+	row := q.queryRow(ctx, q.advanceAlertEvalSeqStmt, advanceAlertEvalSeq, arg.ID, arg.EvalSeq)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const authenticateOAuthAccessToken = `-- name: AuthenticateOAuthAccessToken :one
@@ -177,6 +208,108 @@ func (q *Queries) AuthenticateOAuthAccessToken(ctx context.Context, arg Authenti
 	return i, err
 }
 
+const cancelDeliveries = `-- name: CancelDeliveries :execrows
+UPDATE notification_deliveries
+SET status = 'failed',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = ?1
+WHERE producer = ?2 AND producer_ref = ?3 AND status = 'pending'
+`
+
+type CancelDeliveriesParams struct {
+	LastError   sql.NullString `json:"last_error"`
+	Producer    string         `json:"producer"`
+	ProducerRef string         `json:"producer_ref"`
+}
+
+// Ends the pending rows of one producer ref unsent. The raised token keeps a
+// drain that reserved one from sending an email or writing an outcome.
+func (q *Queries) CancelDeliveries(ctx context.Context, arg CancelDeliveriesParams) (int64, error) {
+	result, err := q.exec(ctx, q.cancelDeliveriesStmt, cancelDeliveries, arg.LastError, arg.Producer, arg.ProducerRef)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const claimJobs = `-- name: ClaimJobs :many
+UPDATE jobs
+SET lease_owner = ?1,
+    lease_token = lease_token + 1,
+    lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)),
+    last_started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+    SELECT j.id FROM jobs j
+    WHERE j.enabled = 1
+      AND j.kind = ?3
+      AND j.next_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      AND (j.lease_expires_at IS NULL OR j.lease_expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    ORDER BY j.next_run_at
+    LIMIT ?4
+)
+RETURNING id, kind, "key", schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled, next_run_at, lease_owner, lease_token, lease_expires_at, last_started_at, last_finished_at, last_status, last_error, created_at, updated_at
+`
+
+type ClaimJobsParams struct {
+	Owner         sql.NullString `json:"owner"`
+	LeaseModifier string         `json:"lease_modifier"`
+	Kind          string         `json:"kind"`
+	MaxJobs       int64          `json:"max_jobs"`
+}
+
+// SQLite has one writer, so this statement needs no row locks.
+// last_started_at is the database clock at the claim.
+func (q *Queries) ClaimJobs(ctx context.Context, arg ClaimJobsParams) ([]Job, error) {
+	rows, err := q.query(ctx, q.claimJobsStmt, claimJobs,
+		arg.Owner,
+		arg.LeaseModifier,
+		arg.Kind,
+		arg.MaxJobs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Job{}
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Key,
+			&i.ScheduleKind,
+			&i.ScheduleExpr,
+			&i.Timezone,
+			&i.Misfire,
+			&i.GraceSeconds,
+			&i.Enabled,
+			&i.NextRunAt,
+			&i.LeaseOwner,
+			&i.LeaseToken,
+			&i.LeaseExpiresAt,
+			&i.LastStartedAt,
+			&i.LastFinishedAt,
+			&i.LastStatus,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimOAuthAuthRequestDecision = `-- name: ClaimOAuthAuthRequestDecision :one
 UPDATE oauth_auth_requests
 SET decided_at = ?1, user_id = ?2, denied = ?3
@@ -221,6 +354,89 @@ func (q *Queries) ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOA
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const claimReport = `-- name: ClaimReport :execrows
+UPDATE reports
+SET owner_id = ?1,
+    state = CASE WHEN pause_reason = 'owner_inactive' THEN 'active' ELSE state END,
+    pause_reason = CASE WHEN pause_reason = 'owner_inactive' THEN '' ELSE pause_reason END,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2
+  AND (owner_id IS NULL OR pause_reason = 'owner_inactive')
+`
+
+type ClaimReportParams struct {
+	OwnerID sql.NullInt64 `json:"owner_id"`
+	ID      int64         `json:"id"`
+}
+
+// A claim lends the new owner's access, so a pause for an inactive owner
+// no longer applies. Only a report with no owner, or one paused because its
+// owner is inactive, can be claimed; the condition sits in the update so
+// two claims at once cannot both win.
+func (q *Queries) ClaimReport(ctx context.Context, arg ClaimReportParams) (int64, error) {
+	result, err := q.exec(ctx, q.claimReportStmt, claimReport, arg.OwnerID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const clearSavedViewScopeDefault = `-- name: ClearSavedViewScopeDefault :many
+UPDATE saved_views
+SET is_default = 0
+WHERE source_id = ?1
+  AND scope = ?2
+  AND COALESCE(user_id, 0) = ?3
+  AND COALESCE(team_id, 0) = ?4
+  AND is_default = 1
+  AND id != ?5
+RETURNING id, managed
+`
+
+type ClearSavedViewScopeDefaultParams struct {
+	SourceID int64         `json:"source_id"`
+	Scope    string        `json:"scope"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+	KeepID   int64         `json:"keep_id"`
+}
+
+type ClearSavedViewScopeDefaultRow struct {
+	ID      int64 `json:"id"`
+	Managed int64 `json:"managed"`
+}
+
+// Clear the default of one scope and source, except on keep_id. The partial
+// unique index leaves at most one row. A NULL owner column compares as 0.
+func (q *Queries) ClearSavedViewScopeDefault(ctx context.Context, arg ClearSavedViewScopeDefaultParams) ([]ClearSavedViewScopeDefaultRow, error) {
+	rows, err := q.query(ctx, q.clearSavedViewScopeDefaultStmt, clearSavedViewScopeDefault,
+		arg.SourceID,
+		arg.Scope,
+		arg.UserID,
+		arg.TeamID,
+		arg.KeepID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClearSavedViewScopeDefaultRow{}
+	for rows.Next() {
+		var i ClearSavedViewScopeDefaultRow
+		if err := rows.Scan(&i.ID, &i.Managed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const completeExportJob = `-- name: CompleteExportJob :one
@@ -349,6 +565,132 @@ func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams
 	return count, err
 }
 
+const countAlertInstancesByState = `-- name: CountAlertInstancesByState :many
+SELECT alert_id, state, COUNT(*) AS instances
+FROM alert_instances
+WHERE alert_id IN (/*SLICE:alert_ids*/?)
+GROUP BY alert_id, state
+`
+
+type CountAlertInstancesByStateRow struct {
+	AlertID   int64  `json:"alert_id"`
+	State     string `json:"state"`
+	Instances int64  `json:"instances"`
+}
+
+// Instance counts of the given alerts, one row per (alert, state).
+func (q *Queries) CountAlertInstancesByState(ctx context.Context, alertIds []int64) ([]CountAlertInstancesByStateRow, error) {
+	query := countAlertInstancesByState
+	var queryParams []interface{}
+	if len(alertIds) > 0 {
+		for _, v := range alertIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:alert_ids*/?", strings.Repeat(",?", len(alertIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:alert_ids*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAlertInstancesByStateRow{}
+	for rows.Next() {
+		var i CountAlertInstancesByStateRow
+		if err := rows.Scan(&i.AlertID, &i.State, &i.Instances); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countAlertSilencesBySource = `-- name: CountAlertSilencesBySource :one
+SELECT COUNT(*) FROM alert_silences WHERE source_id = ?
+`
+
+func (q *Queries) CountAlertSilencesBySource(ctx context.Context, sourceID int64) (int64, error) {
+	row := q.queryRow(ctx, q.countAlertSilencesBySourceStmt, countAlertSilencesBySource, sourceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAlertsUsingDestination = `-- name: CountAlertsUsingDestination :one
+SELECT COUNT(*) FROM alert_destinations WHERE destination_id = ?
+`
+
+func (q *Queries) CountAlertsUsingDestination(ctx context.Context, destinationID int64) (int64, error) {
+	row := q.queryRow(ctx, q.countAlertsUsingDestinationStmt, countAlertsUsingDestination, destinationID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAuditEvents = `-- name: CountAuditEvents :one
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM audit_events
+    WHERE (CAST(?1 AS TEXT) = '' OR occurred_at >= CAST(?1 AS TEXT))
+      AND (CAST(?2 AS TEXT) = '' OR occurred_at < CAST(?2 AS TEXT))
+      AND (CAST(?3 AS TEXT) = '' OR action = ?3)
+      AND (CAST(?4 AS TEXT) = '' OR substr(action, 1, length(?4)) = ?4)
+      AND (CAST(?5 AS INTEGER) IS NULL OR actor_id = CAST(?5 AS INTEGER))
+      AND (CAST(?6 AS TEXT) = '' OR auth_method = ?6)
+      AND (CAST(?7 AS TEXT) = '' OR credential_id = ?7)
+      AND (CAST(?8 AS TEXT) = '' OR target_type = ?8)
+      AND (CAST(?9 AS TEXT) = '' OR target_id = ?9)
+      AND (CAST(?10 AS INTEGER) IS NULL OR team_id = CAST(?10 AS INTEGER))
+      AND (CAST(?11 AS INTEGER) IS NULL OR source_id = CAST(?11 AS INTEGER))
+      AND (CAST(?12 AS TEXT) = '' OR outcome = ?12)
+    LIMIT ?13
+)
+`
+
+type CountAuditEventsParams struct {
+	FromAt       string        `json:"from_at"`
+	ToAt         string        `json:"to_at"`
+	Action       string        `json:"action"`
+	ActionPrefix string        `json:"action_prefix"`
+	ActorID      sql.NullInt64 `json:"actor_id"`
+	AuthMethod   string        `json:"auth_method"`
+	CredentialID string        `json:"credential_id"`
+	TargetType   string        `json:"target_type"`
+	TargetID     string        `json:"target_id"`
+	TeamID       sql.NullInt64 `json:"team_id"`
+	SourceID     sql.NullInt64 `json:"source_id"`
+	Outcome      string        `json:"outcome"`
+	MaxRows      int64         `json:"max_rows"`
+}
+
+// Counts the events that match the filters, stopping at max_rows.
+func (q *Queries) CountAuditEvents(ctx context.Context, arg CountAuditEventsParams) (int64, error) {
+	row := q.queryRow(ctx, q.countAuditEventsStmt, countAuditEvents,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.ActorID,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Outcome,
+		arg.MaxRows,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCollectionTeamAccess = `-- name: CountCollectionTeamAccess :one
 SELECT COUNT(*)
 FROM collection_teams ct
@@ -365,6 +707,70 @@ type CountCollectionTeamAccessParams struct {
 // A non-zero count grants the user the collection Member role.
 func (q *Queries) CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error) {
 	row := q.queryRow(ctx, q.countCollectionTeamAccessStmt, countCollectionTeamAccess, arg.CollectionID, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countPendingDeliveries = `-- name: CountPendingDeliveries :one
+SELECT COUNT(*) FROM notification_deliveries WHERE status = 'pending'
+`
+
+func (q *Queries) CountPendingDeliveries(ctx context.Context) (int64, error) {
+	row := q.queryRow(ctx, q.countPendingDeliveriesStmt, countPendingDeliveries)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countReportFailure = `-- name: CountReportFailure :one
+UPDATE reports
+SET consecutive_failures = CASE CAST(?1 AS TEXT)
+        WHEN 'failed' THEN consecutive_failures + 1
+        WHEN 'sent' THEN 0
+        WHEN 'partial' THEN 0
+        ELSE consecutive_failures
+    END
+WHERE id = ?2
+RETURNING consecutive_failures
+`
+
+type CountReportFailureParams struct {
+	Status string `json:"status"`
+	ID     int64  `json:"id"`
+}
+
+// A failed run adds one to the streak; a sent or partial run ends it.
+func (q *Queries) CountReportFailure(ctx context.Context, arg CountReportFailureParams) (int64, error) {
+	row := q.queryRow(ctx, q.countReportFailureStmt, countReportFailure, arg.Status, arg.ID)
+	var consecutive_failures int64
+	err := row.Scan(&consecutive_failures)
+	return consecutive_failures, err
+}
+
+const countSavedViewsInScope = `-- name: CountSavedViewsInScope :one
+SELECT COUNT(*) FROM saved_views
+WHERE source_id = ?1
+  AND scope = ?2
+  AND COALESCE(user_id, 0) = ?3
+  AND COALESCE(team_id, 0) = ?4
+`
+
+type CountSavedViewsInScopeParams struct {
+	SourceID int64         `json:"source_id"`
+	Scope    string        `json:"scope"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+}
+
+// A NULL owner column compares as 0.
+func (q *Queries) CountSavedViewsInScope(ctx context.Context, arg CountSavedViewsInScopeParams) (int64, error) {
+	row := q.queryRow(ctx, q.countSavedViewsInScopeStmt, countSavedViewsInScope,
+		arg.SourceID,
+		arg.Scope,
+		arg.UserID,
+		arg.TeamID,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -392,6 +798,17 @@ type CountSharedCollectionEditAccessParams struct {
 // user has delegated edit rights on that query. A pin grants nothing.
 func (q *Queries) CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error) {
 	row := q.queryRow(ctx, q.countSharedCollectionEditAccessStmt, countSharedCollectionEditAccess, arg.SavedQueryID, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTeamNotificationDestinations = `-- name: CountTeamNotificationDestinations :one
+SELECT COUNT(*) FROM notification_destinations WHERE team_id = ?
+`
+
+func (q *Queries) CountTeamNotificationDestinations(ctx context.Context, teamID sql.NullInt64) (int64, error) {
+	row := q.queryRow(ctx, q.countTeamNotificationDestinationsStmt, countTeamNotificationDestinations, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -463,36 +880,38 @@ INSERT INTO alerts (
     severity,
     labels_json,
     annotations_json,
-    recipient_user_ids_json,
-    webhook_urls_json,
     generator_url,
+    group_by_json,
+    no_data_policy,
+    notify_on_resolve,
     is_active,
     created_by
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq, notify_on_resolve
 `
 
 type CreateAlertParams struct {
-	SourceID             int64          `json:"source_id"`
-	Name                 string         `json:"name"`
-	Description          sql.NullString `json:"description"`
-	QueryLanguage        string         `json:"query_language"`
-	EditorMode           string         `json:"editor_mode"`
-	Query                sql.NullString `json:"query"`
-	ConditionJson        sql.NullString `json:"condition_json"`
-	LookbackSeconds      int64          `json:"lookback_seconds"`
-	ThresholdOperator    string         `json:"threshold_operator"`
-	ThresholdValue       float64        `json:"threshold_value"`
-	FrequencySeconds     int64          `json:"frequency_seconds"`
-	Severity             string         `json:"severity"`
-	LabelsJson           sql.NullString `json:"labels_json"`
-	AnnotationsJson      sql.NullString `json:"annotations_json"`
-	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
-	GeneratorUrl         sql.NullString `json:"generator_url"`
-	IsActive             int64          `json:"is_active"`
-	CreatedBy            sql.NullInt64  `json:"created_by"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryLanguage     string         `json:"query_language"`
+	EditorMode        string         `json:"editor_mode"`
+	Query             sql.NullString `json:"query"`
+	ConditionJson     sql.NullString `json:"condition_json"`
+	LookbackSeconds   int64          `json:"lookback_seconds"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	LabelsJson        sql.NullString `json:"labels_json"`
+	AnnotationsJson   sql.NullString `json:"annotations_json"`
+	GeneratorUrl      sql.NullString `json:"generator_url"`
+	GroupByJson       sql.NullString `json:"group_by_json"`
+	NoDataPolicy      string         `json:"no_data_policy"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
+	IsActive          int64          `json:"is_active"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
 }
 
 // Alerts
@@ -512,9 +931,10 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		arg.Severity,
 		arg.LabelsJson,
 		arg.AnnotationsJson,
-		arg.RecipientUserIdsJson,
-		arg.WebhookUrlsJson,
 		arg.GeneratorUrl,
+		arg.GroupByJson,
+		arg.NoDataPolicy,
+		arg.NotifyOnResolve,
 		arg.IsActive,
 		arg.CreatedBy,
 	)
@@ -540,8 +960,60 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.LastState,
 		&i.LastEvaluatedAt,
 		&i.LastTriggeredAt,
-		&i.RecipientUserIdsJson,
-		&i.WebhookUrlsJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.GroupByJson,
+		&i.NoDataPolicy,
+		&i.EvalSeq,
+		&i.NotifyOnResolve,
+	)
+	return i, err
+}
+
+const createAlertSilence = `-- name: CreateAlertSilence :one
+
+INSERT INTO alert_silences (source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at
+`
+
+type CreateAlertSilenceParams struct {
+	SourceID     int64          `json:"source_id"`
+	AlertID      sql.NullInt64  `json:"alert_id"`
+	MatchersJson string         `json:"matchers_json"`
+	Comment      string         `json:"comment"`
+	ScheduleKind string         `json:"schedule_kind"`
+	StartsAt     sql.NullTime   `json:"starts_at"`
+	EndsAt       sql.NullTime   `json:"ends_at"`
+	WeeklyJson   sql.NullString `json:"weekly_json"`
+	CreatedBy    sql.NullInt64  `json:"created_by"`
+}
+
+// Alert silences (RFC 0006 unit S1)
+func (q *Queries) CreateAlertSilence(ctx context.Context, arg CreateAlertSilenceParams) (AlertSilence, error) {
+	row := q.queryRow(ctx, q.createAlertSilenceStmt, createAlertSilence,
+		arg.SourceID,
+		arg.AlertID,
+		arg.MatchersJson,
+		arg.Comment,
+		arg.ScheduleKind,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.WeeklyJson,
+		arg.CreatedBy,
+	)
+	var i AlertSilence
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.AlertID,
+		&i.MatchersJson,
+		&i.Comment,
+		&i.ScheduleKind,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.WeeklyJson,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -685,6 +1157,60 @@ func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams
 	return err
 }
 
+const createNotificationDestination = `-- name: CreateNotificationDestination :one
+
+INSERT INTO notification_destinations (name, type, scope, team_id, config_json, secret, is_active, created_by, created_at, updated_at)
+VALUES (
+    ?1, ?2, ?3, ?4, ?5, ?6,
+    ?7, ?8,
+    strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+)
+RETURNING id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at
+`
+
+type CreateNotificationDestinationParams struct {
+	Name       string        `json:"name"`
+	Type       string        `json:"type"`
+	Scope      string        `json:"scope"`
+	TeamID     sql.NullInt64 `json:"team_id"`
+	ConfigJson string        `json:"config_json"`
+	Secret     string        `json:"secret"`
+	IsActive   int64         `json:"is_active"`
+	CreatedBy  sql.NullInt64 `json:"created_by"`
+}
+
+// Notification destinations --------------------------------------------------
+func (q *Queries) CreateNotificationDestination(ctx context.Context, arg CreateNotificationDestinationParams) (NotificationDestination, error) {
+	row := q.queryRow(ctx, q.createNotificationDestinationStmt, createNotificationDestination,
+		arg.Name,
+		arg.Type,
+		arg.Scope,
+		arg.TeamID,
+		arg.ConfigJson,
+		arg.Secret,
+		arg.IsActive,
+		arg.CreatedBy,
+	)
+	var i NotificationDestination
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Scope,
+		&i.TeamID,
+		&i.ConfigJson,
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedBy,
+		&i.LastDeliveryAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createOAuthAuthRequest = `-- name: CreateOAuthAuthRequest :exec
 
 INSERT INTO oauth_auth_requests (
@@ -800,6 +1326,62 @@ func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQuerySharePara
 	return err
 }
 
+const createReport = `-- name: CreateReport :one
+
+INSERT INTO reports (
+    name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id,
+    schedule_json, timezone, time_range, range_anchor, variables_json,
+    max_rows, skip_if_empty, attach_csv
+) VALUES (
+    ?1, ?2, ?3, ?4,
+    ?5, ?6, ?7, ?8,
+    ?9, ?10, ?11,
+    ?12, ?13, ?14
+)
+RETURNING id
+`
+
+type CreateReportParams struct {
+	Name          string         `json:"name"`
+	OwnerID       sql.NullInt64  `json:"owner_id"`
+	SourceKind    string         `json:"source_kind"`
+	DashboardID   sql.NullInt64  `json:"dashboard_id"`
+	TabID         sql.NullString `json:"tab_id"`
+	SavedQueryID  sql.NullInt64  `json:"saved_query_id"`
+	ScheduleJson  string         `json:"schedule_json"`
+	Timezone      string         `json:"timezone"`
+	TimeRange     sql.NullString `json:"time_range"`
+	RangeAnchor   string         `json:"range_anchor"`
+	VariablesJson string         `json:"variables_json"`
+	MaxRows       int64          `json:"max_rows"`
+	SkipIfEmpty   bool           `json:"skip_if_empty"`
+	AttachCsv     bool           `json:"attach_csv"`
+}
+
+// Scheduled reports (RFC 0008). Every timestamp this section writes is UTC
+// text in the '%Y-%m-%dT%H:%M:%fZ' form, so comparisons run as text.
+func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (int64, error) {
+	row := q.queryRow(ctx, q.createReportStmt, createReport,
+		arg.Name,
+		arg.OwnerID,
+		arg.SourceKind,
+		arg.DashboardID,
+		arg.TabID,
+		arg.SavedQueryID,
+		arg.ScheduleJson,
+		arg.Timezone,
+		arg.TimeRange,
+		arg.RangeAnchor,
+		arg.VariablesJson,
+		arg.MaxRows,
+		arg.SkipIfEmpty,
+		arg.AttachCsv,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createSavedQuery = `-- name: CreateSavedQuery :one
 
 INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_language, editor_mode, query_content, created_by)
@@ -836,6 +1418,61 @@ func (q *Queries) CreateSavedQuery(ctx context.Context, arg CreateSavedQueryPara
 	return id, err
 }
 
+const createSavedView = `-- name: CreateSavedView :one
+
+INSERT INTO saved_views (source_id, scope, user_id, team_id, name, description, definition, is_default, managed, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at
+`
+
+type CreateSavedViewParams struct {
+	SourceID    int64         `json:"source_id"`
+	Scope       string        `json:"scope"`
+	UserID      sql.NullInt64 `json:"user_id"`
+	TeamID      sql.NullInt64 `json:"team_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Definition  string        `json:"definition"`
+	IsDefault   int64         `json:"is_default"`
+	Managed     int64         `json:"managed"`
+	CreatedBy   sql.NullInt64 `json:"created_by"`
+}
+
+// Saved views -----------------------------------------------------------------
+// Insert a view; a name or default taken in its scope fails a unique index.
+func (q *Queries) CreateSavedView(ctx context.Context, arg CreateSavedViewParams) (SavedView, error) {
+	row := q.queryRow(ctx, q.createSavedViewStmt, createSavedView,
+		arg.SourceID,
+		arg.Scope,
+		arg.UserID,
+		arg.TeamID,
+		arg.Name,
+		arg.Description,
+		arg.Definition,
+		arg.IsDefault,
+		arg.Managed,
+		arg.CreatedBy,
+	)
+	var i SavedView
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Scope,
+		&i.UserID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Definition,
+		&i.IsDefault,
+		&i.Managed,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :exec
 
 INSERT INTO sessions (id, user_id, expires_at, created_at)
@@ -864,8 +1501,8 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createSource = `-- name: CreateSource :one
 
 INSERT INTO sources (
-    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?)
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref, header_secret_refs
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?, ?)
 RETURNING id
 `
 
@@ -881,6 +1518,7 @@ type CreateSourceParams struct {
 	TtlDays           int64          `json:"ttl_days"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
+	HeaderSecretRefs  sql.NullString `json:"header_secret_refs"`
 }
 
 // Sources
@@ -898,6 +1536,7 @@ func (q *Queries) CreateSource(ctx context.Context, arg CreateSourceParams) (int
 		arg.TtlDays,
 		arg.Managed,
 		arg.SecretRef,
+		arg.HeaderSecretRefs,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -957,7 +1596,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 	return id, err
 }
 
-const deleteAPIToken = `-- name: DeleteAPIToken :exec
+const deleteAPIToken = `-- name: DeleteAPIToken :execrows
 DELETE FROM api_tokens WHERE id = ? AND user_id = ?
 `
 
@@ -967,9 +1606,12 @@ type DeleteAPITokenParams struct {
 }
 
 // Delete an API token by ID and user ID (ensure user owns the token)
-func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) error {
-	_, err := q.exec(ctx, q.deleteAPITokenStmt, deleteAPIToken, arg.ID, arg.UserID)
-	return err
+func (q *Queries) DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteAPITokenStmt, deleteAPIToken, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteAlert = `-- name: DeleteAlert :one
@@ -982,6 +1624,67 @@ func (q *Queries) DeleteAlert(ctx context.Context, id int64) (int64, error) {
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const deleteAlertDestinations = `-- name: DeleteAlertDestinations :exec
+DELETE FROM alert_destinations WHERE alert_id = ?
+`
+
+func (q *Queries) DeleteAlertDestinations(ctx context.Context, alertID int64) error {
+	_, err := q.exec(ctx, q.deleteAlertDestinationsStmt, deleteAlertDestinations, alertID)
+	return err
+}
+
+const deleteAlertInstance = `-- name: DeleteAlertInstance :exec
+DELETE FROM alert_instances WHERE alert_id = ?1 AND group_key = ?2
+`
+
+type DeleteAlertInstanceParams struct {
+	AlertID  int64  `json:"alert_id"`
+	GroupKey string `json:"group_key"`
+}
+
+func (q *Queries) DeleteAlertInstance(ctx context.Context, arg DeleteAlertInstanceParams) error {
+	_, err := q.exec(ctx, q.deleteAlertInstanceStmt, deleteAlertInstance, arg.AlertID, arg.GroupKey)
+	return err
+}
+
+const deleteAlertInstances = `-- name: DeleteAlertInstances :exec
+DELETE FROM alert_instances WHERE alert_id = ?
+`
+
+func (q *Queries) DeleteAlertInstances(ctx context.Context, alertID int64) error {
+	_, err := q.exec(ctx, q.deleteAlertInstancesStmt, deleteAlertInstances, alertID)
+	return err
+}
+
+const deleteAlertSilence = `-- name: DeleteAlertSilence :one
+DELETE FROM alert_silences WHERE id = ?
+RETURNING id
+`
+
+func (q *Queries) DeleteAlertSilence(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.deleteAlertSilenceStmt, deleteAlertSilence, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const deleteClaimedJob = `-- name: DeleteClaimedJob :execrows
+DELETE FROM jobs WHERE id = ?1 AND lease_token = ?2
+`
+
+type DeleteClaimedJobParams struct {
+	ID         int64 `json:"id"`
+	LeaseToken int64 `json:"lease_token"`
+}
+
+func (q *Queries) DeleteClaimedJob(ctx context.Context, arg DeleteClaimedJobParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteClaimedJobStmt, deleteClaimedJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteCollection = `-- name: DeleteCollection :exec
@@ -1005,6 +1708,18 @@ func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) 
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const deleteDashboardReports = `-- name: DeleteDashboardReports :execrows
+DELETE FROM reports WHERE dashboard_id = ?1
+`
+
+func (q *Queries) DeleteDashboardReports(ctx context.Context, dashboardID sql.NullInt64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteDashboardReportsStmt, deleteDashboardReports, dashboardID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
@@ -1065,6 +1780,32 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt time.Time
 	return err
 }
 
+const deleteJob = `-- name: DeleteJob :exec
+DELETE FROM jobs WHERE kind = ?1 AND key = ?2
+`
+
+type DeleteJobParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) DeleteJob(ctx context.Context, arg DeleteJobParams) error {
+	_, err := q.exec(ctx, q.deleteJobStmt, deleteJob, arg.Kind, arg.Key)
+	return err
+}
+
+const deleteNotificationDestination = `-- name: DeleteNotificationDestination :execrows
+DELETE FROM notification_destinations WHERE id = ?
+`
+
+func (q *Queries) DeleteNotificationDestination(ctx context.Context, id int64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteNotificationDestinationStmt, deleteNotificationDestination, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteQueryShare = `-- name: DeleteQueryShare :one
 DELETE FROM query_shares
 WHERE token = ?
@@ -1079,6 +1820,50 @@ func (q *Queries) DeleteQueryShare(ctx context.Context, token string) (string, e
 	return token_2, err
 }
 
+const deleteReport = `-- name: DeleteReport :execrows
+DELETE FROM reports WHERE id = ?1
+`
+
+func (q *Queries) DeleteReport(ctx context.Context, id int64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteReportStmt, deleteReport, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteReportRecipients = `-- name: DeleteReportRecipients :exec
+DELETE FROM report_recipients WHERE report_id = ?1
+`
+
+func (q *Queries) DeleteReportRecipients(ctx context.Context, reportID int64) error {
+	_, err := q.exec(ctx, q.deleteReportRecipientsStmt, deleteReportRecipients, reportID)
+	return err
+}
+
+const deleteReportUserRecipient = `-- name: DeleteReportUserRecipient :execrows
+DELETE FROM report_recipients
+WHERE report_id = ?1
+  AND ((kind = 'user' AND user_id = ?2)
+    OR (kind = 'email' AND lower(email) = (
+        SELECT lower(u.email) FROM users u WHERE u.id = ?2)))
+`
+
+type DeleteReportUserRecipientParams struct {
+	ReportID int64         `json:"report_id"`
+	UserID   sql.NullInt64 `json:"user_id"`
+}
+
+// A direct recipient is named by a user row, or by an email row that
+// matches the user's address, ignoring case.
+func (q *Queries) DeleteReportUserRecipient(ctx context.Context, arg DeleteReportUserRecipientParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteReportUserRecipientStmt, deleteReportUserRecipient, arg.ReportID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSavedQuery = `-- name: DeleteSavedQuery :exec
 DELETE FROM saved_queries WHERE id = ?
 `
@@ -1087,6 +1872,47 @@ DELETE FROM saved_queries WHERE id = ?
 func (q *Queries) DeleteSavedQuery(ctx context.Context, id int64) error {
 	_, err := q.exec(ctx, q.deleteSavedQueryStmt, deleteSavedQuery, id)
 	return err
+}
+
+const deleteSavedQueryReports = `-- name: DeleteSavedQueryReports :execrows
+DELETE FROM reports WHERE saved_query_id = ?1
+`
+
+func (q *Queries) DeleteSavedQueryReports(ctx context.Context, savedQueryID sql.NullInt64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteSavedQueryReportsStmt, deleteSavedQueryReports, savedQueryID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteSavedView = `-- name: DeleteSavedView :one
+DELETE FROM saved_views WHERE id = ?
+RETURNING id
+`
+
+func (q *Queries) DeleteSavedView(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.deleteSavedViewStmt, deleteSavedView, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const deleteSchemaAdvisorDismissal = `-- name: DeleteSchemaAdvisorDismissal :execrows
+DELETE FROM schema_advisor_dismissals WHERE source_id = ? AND finding_id = ?
+`
+
+type DeleteSchemaAdvisorDismissalParams struct {
+	SourceID  int64  `json:"source_id"`
+	FindingID string `json:"finding_id"`
+}
+
+func (q *Queries) DeleteSchemaAdvisorDismissal(ctx context.Context, arg DeleteSchemaAdvisorDismissalParams) (int64, error) {
+	result, err := q.exec(ctx, q.deleteSchemaAdvisorDismissalStmt, deleteSchemaAdvisorDismissal, arg.SourceID, arg.FindingID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -1149,6 +1975,77 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	return err
 }
 
+const enqueueDelivery = `-- name: EnqueueDelivery :execrows
+
+INSERT INTO notification_deliveries (
+    destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json,
+    status, last_error, next_attempt_at, created_at
+) VALUES (
+    ?1, ?2, ?3, ?4,
+    ?5, ?6, ?7, ?8,
+    ?9, ?10,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+)
+ON CONFLICT (dedup_key) DO NOTHING
+`
+
+type EnqueueDeliveryParams struct {
+	DestinationID int64          `json:"destination_id"`
+	Producer      string         `json:"producer"`
+	ProducerRef   string         `json:"producer_ref"`
+	Recipient     string         `json:"recipient"`
+	SequenceKey   string         `json:"sequence_key"`
+	Event         string         `json:"event"`
+	DedupKey      string         `json:"dedup_key"`
+	MessageJson   string         `json:"message_json"`
+	Status        string         `json:"status"`
+	LastError     sql.NullString `json:"last_error"`
+}
+
+// Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
+// the database clock, in the jobs table's text form.
+// A row whose dedup_key exists is left as it is. A row may start failed, such
+// as one whose message is over the size limit.
+func (q *Queries) EnqueueDelivery(ctx context.Context, arg EnqueueDeliveryParams) (int64, error) {
+	result, err := q.exec(ctx, q.enqueueDeliveryStmt, enqueueDelivery,
+		arg.DestinationID,
+		arg.Producer,
+		arg.ProducerRef,
+		arg.Recipient,
+		arg.SequenceKey,
+		arg.Event,
+		arg.DedupKey,
+		arg.MessageJson,
+		arg.Status,
+		arg.LastError,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const expireEmailAttempts = `-- name: ExpireEmailAttempts :execrows
+UPDATE notification_deliveries
+SET status = 'unknown',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = ?1
+WHERE status = 'attempting' AND reserved_until < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+`
+
+// An email row still attempting after its reservation ended belongs to a
+// process that crashed or stalled during SMTP. The raised token keeps that
+// process from overwriting the outcome.
+func (q *Queries) ExpireEmailAttempts(ctx context.Context, lastError sql.NullString) (int64, error) {
+	result, err := q.exec(ctx, q.expireEmailAttemptsStmt, expireEmailAttempts, lastError)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const failExportJob = `-- name: FailExportJob :one
 UPDATE export_jobs
 SET
@@ -1180,6 +2077,128 @@ func (q *Queries) FailExportJob(ctx context.Context, arg FailExportJobParams) (s
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const finishDelivery = `-- name: FinishDelivery :execrows
+UPDATE notification_deliveries
+SET status = ?1,
+    next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)),
+    last_error = ?3,
+    sent_at = CASE WHEN ?1 = 'sent' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE sent_at END,
+    reserved_by = NULL,
+    reserved_until = NULL
+WHERE id = ?4 AND reserved_token = ?5 AND status IN ('pending', 'attempting')
+`
+
+type FinishDeliveryParams struct {
+	Status        string         `json:"status"`
+	RetryModifier string         `json:"retry_modifier"`
+	LastError     sql.NullString `json:"last_error"`
+	ID            int64          `json:"id"`
+	ReservedToken int64          `json:"reserved_token"`
+}
+
+// Writes one attempt's outcome while the reservation is current. A pending
+// outcome is due again after retry_modifier.
+func (q *Queries) FinishDelivery(ctx context.Context, arg FinishDeliveryParams) (int64, error) {
+	result, err := q.exec(ctx, q.finishDeliveryStmt, finishDelivery,
+		arg.Status,
+		arg.RetryModifier,
+		arg.LastError,
+		arg.ID,
+		arg.ReservedToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const finishJob = `-- name: FinishJob :execrows
+UPDATE jobs
+SET next_run_at = CASE
+        WHEN schedule_kind = ?1
+         AND schedule_expr = ?2
+         AND timezone = ?3
+        THEN CAST(?4 AS TEXT)
+        ELSE next_run_at
+    END,
+    last_status = ?5,
+    last_error = ?6,
+    last_finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?7 AND lease_token = ?8
+`
+
+type FinishJobParams struct {
+	ScheduleKind string         `json:"schedule_kind"`
+	ScheduleExpr string         `json:"schedule_expr"`
+	Timezone     string         `json:"timezone"`
+	NextRunAt    string         `json:"next_run_at"`
+	LastStatus   sql.NullString `json:"last_status"`
+	LastError    sql.NullString `json:"last_error"`
+	ID           int64          `json:"id"`
+	LeaseToken   int64          `json:"lease_token"`
+}
+
+// The next run applies only while the job keeps the schedule the run used,
+// so a schedule change made during the run is not overwritten.
+func (q *Queries) FinishJob(ctx context.Context, arg FinishJobParams) (int64, error) {
+	result, err := q.exec(ctx, q.finishJobStmt, finishJob,
+		arg.ScheduleKind,
+		arg.ScheduleExpr,
+		arg.Timezone,
+		arg.NextRunAt,
+		arg.LastStatus,
+		arg.LastError,
+		arg.ID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const finishReportRun = `-- name: FinishReportRun :one
+UPDATE report_runs
+SET status = ?1,
+    reason = ?2,
+    window_start = CAST(?3 AS TEXT),
+    window_end = CAST(?4 AS TEXT),
+    panels_json = ?5,
+    deliveries_json = ?6,
+    deadline_at = NULL,
+    finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?7 AND status = 'running'
+RETURNING report_id
+`
+
+type FinishReportRunParams struct {
+	Status         string         `json:"status"`
+	Reason         string         `json:"reason"`
+	WindowStart    sql.NullString `json:"window_start"`
+	WindowEnd      sql.NullString `json:"window_end"`
+	PanelsJson     string         `json:"panels_json"`
+	DeliveriesJson string         `json:"deliveries_json"`
+	ID             int64          `json:"id"`
+}
+
+func (q *Queries) FinishReportRun(ctx context.Context, arg FinishReportRunParams) (int64, error) {
+	row := q.queryRow(ctx, q.finishReportRunStmt, finishReportRun,
+		arg.Status,
+		arg.Reason,
+		arg.WindowStart,
+		arg.WindowEnd,
+		arg.PanelsJson,
+		arg.DeliveriesJson,
+		arg.ID,
+	)
+	var report_id int64
+	err := row.Scan(&report_id)
+	return report_id, err
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
@@ -1229,7 +2248,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts WHERE id = ?
+SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq, notify_on_resolve FROM alerts WHERE id = ?
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -1256,17 +2275,19 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.LastState,
 		&i.LastEvaluatedAt,
 		&i.LastTriggeredAt,
-		&i.RecipientUserIdsJson,
-		&i.WebhookUrlsJson,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.GroupByJson,
+		&i.NoDataPolicy,
+		&i.EvalSeq,
+		&i.NotifyOnResolve,
 	)
 	return i, err
 }
 
 const getAlertHistoryEntry = `-- name: GetAlertHistoryEntry :one
-SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
 WHERE id = ? AND alert_id = ?
 `
 
@@ -1288,7 +2309,53 @@ func (q *Queries) GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryE
 		&i.Message,
 		&i.PayloadJson,
 		&i.CreatedAt,
+		&i.GroupKey,
+		&i.GroupJson,
 	)
+	return i, err
+}
+
+const getAlertSilence = `-- name: GetAlertSilence :one
+SELECT id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at FROM alert_silences WHERE id = ?
+`
+
+func (q *Queries) GetAlertSilence(ctx context.Context, id int64) (AlertSilence, error) {
+	row := q.queryRow(ctx, q.getAlertSilenceStmt, getAlertSilence, id)
+	var i AlertSilence
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.AlertID,
+		&i.MatchersJson,
+		&i.Comment,
+		&i.ScheduleKind,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.WeeklyJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAuditPruneBoundary = `-- name: GetAuditPruneBoundary :one
+SELECT CAST(occurred_at AS TEXT) AS occurred_at_text, id
+FROM audit_events
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1 OFFSET ?1
+`
+
+type GetAuditPruneBoundaryRow struct {
+	OccurredAtText string `json:"occurred_at_text"`
+	ID             string `json:"id"`
+}
+
+// The newest event beyond the keep_rows newest ones.
+func (q *Queries) GetAuditPruneBoundary(ctx context.Context, keepRows int64) (GetAuditPruneBoundaryRow, error) {
+	row := q.queryRow(ctx, q.getAuditPruneBoundaryStmt, getAuditPruneBoundary, keepRows)
+	var i GetAuditPruneBoundaryRow
+	err := row.Scan(&i.OccurredAtText, &i.ID)
 	return i, err
 }
 
@@ -1449,6 +2516,36 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 	return i, err
 }
 
+const getDelivery = `-- name: GetDelivery :one
+SELECT id, destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, status, attempts, next_attempt_at, reserved_by, reserved_token, reserved_until, last_error, created_at, sent_at FROM notification_deliveries WHERE id = ?
+`
+
+func (q *Queries) GetDelivery(ctx context.Context, id int64) (NotificationDelivery, error) {
+	row := q.queryRow(ctx, q.getDeliveryStmt, getDelivery, id)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.DestinationID,
+		&i.Producer,
+		&i.ProducerRef,
+		&i.Recipient,
+		&i.SequenceKey,
+		&i.Event,
+		&i.DedupKey,
+		&i.MessageJson,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ReservedBy,
+		&i.ReservedToken,
+		&i.ReservedUntil,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.SentAt,
+	)
+	return i, err
+}
+
 const getExportJob = `-- name: GetExportJob :one
 SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
@@ -1481,9 +2578,45 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 	return i, err
 }
 
+const getJob = `-- name: GetJob :one
+SELECT id, kind, "key", schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled, next_run_at, lease_owner, lease_token, lease_expires_at, last_started_at, last_finished_at, last_status, last_error, created_at, updated_at FROM jobs WHERE kind = ?1 AND key = ?2
+`
+
+type GetJobParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (Job, error) {
+	row := q.queryRow(ctx, q.getJobStmt, getJob, arg.Kind, arg.Key)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.Key,
+		&i.ScheduleKind,
+		&i.ScheduleExpr,
+		&i.Timezone,
+		&i.Misfire,
+		&i.GraceSeconds,
+		&i.Enabled,
+		&i.NextRunAt,
+		&i.LeaseOwner,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.LastStartedAt,
+		&i.LastFinishedAt,
+		&i.LastStatus,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLatestUnresolvedAlertHistory = `-- name: GetLatestUnresolvedAlertHistory :one
-SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
-WHERE alert_id = ? AND status = 'triggered'
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
+WHERE alert_id = ? AND status IN ('triggered', 'no_data')
 ORDER BY triggered_at DESC, id DESC
 LIMIT 1
 `
@@ -1501,6 +2634,34 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 		&i.Message,
 		&i.PayloadJson,
 		&i.CreatedAt,
+		&i.GroupKey,
+		&i.GroupJson,
+	)
+	return i, err
+}
+
+const getNotificationDestination = `-- name: GetNotificationDestination :one
+SELECT id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at FROM notification_destinations WHERE id = ?
+`
+
+func (q *Queries) GetNotificationDestination(ctx context.Context, id int64) (NotificationDestination, error) {
+	row := q.queryRow(ctx, q.getNotificationDestinationStmt, getNotificationDestination, id)
+	var i NotificationDestination
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Scope,
+		&i.TeamID,
+		&i.ConfigJson,
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedBy,
+		&i.LastDeliveryAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1674,6 +2835,40 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 	return i, err
 }
 
+const getReport = `-- name: GetReport :one
+SELECT id, name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id, schedule_json, timezone, time_range, range_anchor, variables_json, max_rows, skip_if_empty, attach_csv, state, pause_reason, consecutive_failures, last_manual_run_at, last_preview_at, created_at, updated_at FROM reports WHERE id = ?1
+`
+
+func (q *Queries) GetReport(ctx context.Context, id int64) (Report, error) {
+	row := q.queryRow(ctx, q.getReportStmt, getReport, id)
+	var i Report
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.OwnerID,
+		&i.SourceKind,
+		&i.DashboardID,
+		&i.TabID,
+		&i.SavedQueryID,
+		&i.ScheduleJson,
+		&i.Timezone,
+		&i.TimeRange,
+		&i.RangeAnchor,
+		&i.VariablesJson,
+		&i.MaxRows,
+		&i.SkipIfEmpty,
+		&i.AttachCsv,
+		&i.State,
+		&i.PauseReason,
+		&i.ConsecutiveFailures,
+		&i.LastManualRunAt,
+		&i.LastPreviewAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSavedQuery = `-- name: GetSavedQuery :one
 SELECT id, source_id, name, description, query_language, editor_mode, query_content, created_by, created_at, updated_at, created_from_team_id FROM saved_queries WHERE id = ?
 `
@@ -1698,6 +2893,73 @@ func (q *Queries) GetSavedQuery(ctx context.Context, id int64) (SavedQuery, erro
 	return i, err
 }
 
+const getSavedView = `-- name: GetSavedView :one
+SELECT id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at FROM saved_views WHERE id = ?
+`
+
+func (q *Queries) GetSavedView(ctx context.Context, id int64) (SavedView, error) {
+	row := q.queryRow(ctx, q.getSavedViewStmt, getSavedView, id)
+	var i SavedView
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Scope,
+		&i.UserID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Definition,
+		&i.IsDefault,
+		&i.Managed,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSchemaAdvisorDismissal = `-- name: GetSchemaAdvisorDismissal :one
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = ? AND finding_id = ?
+`
+
+type GetSchemaAdvisorDismissalParams struct {
+	SourceID  int64  `json:"source_id"`
+	FindingID string `json:"finding_id"`
+}
+
+func (q *Queries) GetSchemaAdvisorDismissal(ctx context.Context, arg GetSchemaAdvisorDismissalParams) (SchemaAdvisorDismissal, error) {
+	row := q.queryRow(ctx, q.getSchemaAdvisorDismissalStmt, getSchemaAdvisorDismissal, arg.SourceID, arg.FindingID)
+	var i SchemaAdvisorDismissal
+	err := row.Scan(
+		&i.SourceID,
+		&i.FindingID,
+		&i.Reason,
+		&i.DismissedBy,
+		&i.DismissedAt,
+	)
+	return i, err
+}
+
+const getSchemaAdvisorReport = `-- name: GetSchemaAdvisorReport :one
+SELECT source_id, generated_at, generated_by, window_days, report
+FROM schema_advisor_reports WHERE source_id = ?
+`
+
+func (q *Queries) GetSchemaAdvisorReport(ctx context.Context, sourceID int64) (SchemaAdvisorReport, error) {
+	row := q.queryRow(ctx, q.getSchemaAdvisorReportStmt, getSchemaAdvisorReport, sourceID)
+	var i SchemaAdvisorReport
+	err := row.Scan(
+		&i.SourceID,
+		&i.GeneratedAt,
+		&i.GeneratedBy,
+		&i.WindowDays,
+		&i.Report,
+	)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, user_id, expires_at, created_at FROM sessions WHERE id = ?
 `
@@ -1716,7 +2978,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE id = ?
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref, header_secret_refs FROM sources WHERE id = ?
 `
 
 // Get a single source by ID
@@ -1738,12 +3000,13 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 		&i.UpdatedAt,
 		&i.Managed,
 		&i.SecretRef,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
 
 const getSourceByIdentityKey = `-- name: GetSourceByIdentityKey :one
-SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE identity_key = ?
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref, header_secret_refs FROM sources WHERE identity_key = ?
 `
 
 // Get a single source by provider-computed identity key
@@ -1765,12 +3028,13 @@ func (q *Queries) GetSourceByIdentityKey(ctx context.Context, identityKey string
 		&i.UpdatedAt,
 		&i.Managed,
 		&i.SecretRef,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
 
 const getSourceByNameForProvisioning = `-- name: GetSourceByNameForProvisioning :one
-SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE name = ?
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref, header_secret_refs FROM sources WHERE name = ?
 `
 
 // Get source by name for provisioning lookup
@@ -1792,6 +3056,7 @@ func (q *Queries) GetSourceByNameForProvisioning(ctx context.Context, name strin
 		&i.UpdatedAt,
 		&i.Managed,
 		&i.SecretRef,
+		&i.HeaderSecretRefs,
 	)
 	return i, err
 }
@@ -1881,7 +3146,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 
 const getTriggeredAlertHistoryAlertID = `-- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
-WHERE id = ? AND status = 'triggered'
+WHERE id = ? AND status IN ('triggered', 'no_data')
 `
 
 func (q *Queries) GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error) {
@@ -1980,6 +3245,69 @@ func (q *Queries) GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSo
 	return team_id, err
 }
 
+const holdJob = `-- name: HoldJob :execrows
+UPDATE jobs
+SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND lease_token = ?2
+`
+
+type HoldJobParams struct {
+	ID         int64 `json:"id"`
+	LeaseToken int64 `json:"lease_token"`
+}
+
+func (q *Queries) HoldJob(ctx context.Context, arg HoldJobParams) (int64, error) {
+	result, err := q.exec(ctx, q.holdJobStmt, holdJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const incrementQueryShapeStats = `-- name: IncrementQueryShapeStats :exec
+
+INSERT INTO query_shape_stats_daily (
+    bucket_date, source_id, query_language, shape_hash, shape,
+    query_count, total_duration_ms, total_rows, max_lookback_s
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
+DO UPDATE SET
+    query_count = query_count + excluded.query_count,
+    total_duration_ms = total_duration_ms + excluded.total_duration_ms,
+    total_rows = total_rows + excluded.total_rows,
+    max_lookback_s = COALESCE(MAX(max_lookback_s, excluded.max_lookback_s), max_lookback_s, excluded.max_lookback_s)
+`
+
+type IncrementQueryShapeStatsParams struct {
+	BucketDate      string        `json:"bucket_date"`
+	SourceID        int64         `json:"source_id"`
+	QueryLanguage   string        `json:"query_language"`
+	ShapeHash       string        `json:"shape_hash"`
+	Shape           string        `json:"shape"`
+	QueryCount      int64         `json:"query_count"`
+	TotalDurationMs int64         `json:"total_duration_ms"`
+	TotalRows       int64         `json:"total_rows"`
+	MaxLookbackS    sql.NullInt64 `json:"max_lookback_s"`
+}
+
+// Query shape stats daily rollup (RFC 0010) ------------------------------------
+// Add one increment to a shape's daily row: sum the three counters and keep
+// the larger max_lookback_s (a NULL lookback never replaces a known one).
+func (q *Queries) IncrementQueryShapeStats(ctx context.Context, arg IncrementQueryShapeStatsParams) error {
+	_, err := q.exec(ctx, q.incrementQueryShapeStatsStmt, incrementQueryShapeStats,
+		arg.BucketDate,
+		arg.SourceID,
+		arg.QueryLanguage,
+		arg.ShapeHash,
+		arg.Shape,
+		arg.QueryCount,
+		arg.TotalDurationMs,
+		arg.TotalRows,
+		arg.MaxLookbackS,
+	)
+	return err
+}
+
 const incrementQueryStats = `-- name: IncrementQueryStats :exec
 
 INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
@@ -2018,17 +3346,21 @@ const insertAlertHistory = `-- name: InsertAlertHistory :one
 
 INSERT INTO alert_history (
     alert_id,
+    group_key,
+    group_json,
     status,
     value,
     message,
     payload_json
 )
-VALUES (?, ?, ?, ?, ?)
-RETURNING id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json
 `
 
 type InsertAlertHistoryParams struct {
 	AlertID     int64           `json:"alert_id"`
+	GroupKey    string          `json:"group_key"`
+	GroupJson   sql.NullString  `json:"group_json"`
 	Status      string          `json:"status"`
 	Value       sql.NullFloat64 `json:"value"`
 	Message     sql.NullString  `json:"message"`
@@ -2039,6 +3371,8 @@ type InsertAlertHistoryParams struct {
 func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error) {
 	row := q.queryRow(ctx, q.insertAlertHistoryStmt, insertAlertHistory,
 		arg.AlertID,
+		arg.GroupKey,
+		arg.GroupJson,
 		arg.Status,
 		arg.Value,
 		arg.Message,
@@ -2055,8 +3389,82 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 		&i.Message,
 		&i.PayloadJson,
 		&i.CreatedAt,
+		&i.GroupKey,
+		&i.GroupJson,
 	)
 	return i, err
+}
+
+const insertAuditEvent = `-- name: InsertAuditEvent :exec
+
+INSERT INTO audit_events (
+    id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label,
+    auth_method, credential_id, client_id, target_type, target_id, target_label,
+    team_id, source_id, ip, user_agent, http_method, route, status, changes, detail
+) VALUES (
+    ?1, CAST(?2 AS TEXT), ?3, ?4,
+    ?5, ?6, ?7, ?8,
+    ?9, ?10, ?11, ?12,
+    ?13, ?14, ?15, ?16,
+    ?17, ?18, ?19, ?20,
+    ?21, ?22, ?23
+)
+`
+
+type InsertAuditEventParams struct {
+	ID           string        `json:"id"`
+	OccurredAt   string        `json:"occurred_at"`
+	Action       string        `json:"action"`
+	Outcome      string        `json:"outcome"`
+	Reason       string        `json:"reason"`
+	ActorType    string        `json:"actor_type"`
+	ActorID      sql.NullInt64 `json:"actor_id"`
+	ActorLabel   string        `json:"actor_label"`
+	AuthMethod   string        `json:"auth_method"`
+	CredentialID string        `json:"credential_id"`
+	ClientID     string        `json:"client_id"`
+	TargetType   string        `json:"target_type"`
+	TargetID     string        `json:"target_id"`
+	TargetLabel  string        `json:"target_label"`
+	TeamID       sql.NullInt64 `json:"team_id"`
+	SourceID     sql.NullInt64 `json:"source_id"`
+	Ip           string        `json:"ip"`
+	UserAgent    string        `json:"user_agent"`
+	HttpMethod   string        `json:"http_method"`
+	Route        string        `json:"route"`
+	Status       int64         `json:"status"`
+	Changes      string        `json:"changes"`
+	Detail       string        `json:"detail"`
+}
+
+// Audit events
+func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) error {
+	_, err := q.exec(ctx, q.insertAuditEventStmt, insertAuditEvent,
+		arg.ID,
+		arg.OccurredAt,
+		arg.Action,
+		arg.Outcome,
+		arg.Reason,
+		arg.ActorType,
+		arg.ActorID,
+		arg.ActorLabel,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.ClientID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TargetLabel,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Ip,
+		arg.UserAgent,
+		arg.HttpMethod,
+		arg.Route,
+		arg.Status,
+		arg.Changes,
+		arg.Detail,
+	)
+	return err
 }
 
 const insertOAuthAccessToken = `-- name: InsertOAuthAccessToken :execrows
@@ -2149,27 +3557,159 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 	return id, err
 }
 
-const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
-UPDATE alert_history
-SET payload_json = json_set(json_remove(payload_json, '$.delivery_deadline_at'),
-    '$.delivery_in_progress', json('false'),
-    '$.delivery_failed', json('true'),
-    '$.delivery_error', 'delivery interrupted',
-    '$.delivery_retries_exhausted', json(CASE WHEN COALESCE(json_extract(payload_json, '$.delivery_attempts'), 1) >= 3 THEN 'true' ELSE 'false' END))
-WHERE status = 'triggered'
-  AND json_extract(payload_json, '$.delivery_in_progress') = 1
-  AND (CAST(?1 AS INTEGER) = 0 OR id = ?1)
-  AND (CAST(?2 AS INTEGER) = 0 OR alert_id = ?2)
+const insertReportRecipient = `-- name: InsertReportRecipient :exec
+INSERT INTO report_recipients (report_id, kind, user_id, team_id, email, added_by)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)
 `
 
-type InterruptAlertDeliveriesParams struct {
-	HistoryID int64 `json:"history_id"`
-	AlertID   int64 `json:"alert_id"`
+type InsertReportRecipientParams struct {
+	ReportID int64         `json:"report_id"`
+	Kind     string        `json:"kind"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+	Email    string        `json:"email"`
+	AddedBy  sql.NullInt64 `json:"added_by"`
 }
 
-func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
-	_, err := q.exec(ctx, q.interruptAlertDeliveriesStmt, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
+func (q *Queries) InsertReportRecipient(ctx context.Context, arg InsertReportRecipientParams) error {
+	_, err := q.exec(ctx, q.insertReportRecipientStmt, insertReportRecipient,
+		arg.ReportID,
+		arg.Kind,
+		arg.UserID,
+		arg.TeamID,
+		arg.Email,
+		arg.AddedBy,
+	)
 	return err
+}
+
+const insertRunningReportRun = `-- name: InsertRunningReportRun :one
+INSERT INTO report_runs (report_id, trigger, scheduled_for, actor_id, status, started_at, deadline_at)
+VALUES (
+    ?1, ?2, CAST(?3 AS TEXT), ?4, 'running',
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?5 AS TEXT))
+)
+ON CONFLICT DO NOTHING
+RETURNING id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at
+`
+
+type InsertRunningReportRunParams struct {
+	ReportID         int64         `json:"report_id"`
+	Trigger          string        `json:"trigger"`
+	ScheduledFor     string        `json:"scheduled_for"`
+	ActorID          sql.NullInt64 `json:"actor_id"`
+	DeadlineModifier string        `json:"deadline_modifier"`
+}
+
+// A conflict on either partial unique index inserts nothing and returns no
+// row; the caller then tells the tick conflict from a run in flight.
+func (q *Queries) InsertRunningReportRun(ctx context.Context, arg InsertRunningReportRunParams) (ReportRun, error) {
+	row := q.queryRow(ctx, q.insertRunningReportRunStmt, insertRunningReportRun,
+		arg.ReportID,
+		arg.Trigger,
+		arg.ScheduledFor,
+		arg.ActorID,
+		arg.DeadlineModifier,
+	)
+	var i ReportRun
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.Trigger,
+		&i.ScheduledFor,
+		&i.ActorID,
+		&i.Status,
+		&i.Reason,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.PanelsJson,
+		&i.DeliveriesJson,
+		&i.StartedAt,
+		&i.DeadlineAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const insertSkippedReportTick = `-- name: InsertSkippedReportTick :one
+INSERT INTO report_runs (report_id, trigger, scheduled_for, status, reason, started_at, finished_at)
+VALUES (
+    ?1, 'schedule', CAST(?2 AS TEXT), 'skipped', ?3,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+)
+ON CONFLICT DO NOTHING
+RETURNING id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at
+`
+
+type InsertSkippedReportTickParams struct {
+	ReportID     int64  `json:"report_id"`
+	ScheduledFor string `json:"scheduled_for"`
+	Reason       string `json:"reason"`
+}
+
+func (q *Queries) InsertSkippedReportTick(ctx context.Context, arg InsertSkippedReportTickParams) (ReportRun, error) {
+	row := q.queryRow(ctx, q.insertSkippedReportTickStmt, insertSkippedReportTick, arg.ReportID, arg.ScheduledFor, arg.Reason)
+	var i ReportRun
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.Trigger,
+		&i.ScheduledFor,
+		&i.ActorID,
+		&i.Status,
+		&i.Reason,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.PanelsJson,
+		&i.DeliveriesJson,
+		&i.StartedAt,
+		&i.DeadlineAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const insertTeamMember = `-- name: InsertTeamMember :execrows
+
+INSERT INTO team_members (team_id, user_id, role)
+VALUES (?, ?, ?)
+ON CONFLICT (team_id, user_id) DO NOTHING
+`
+
+type InsertTeamMemberParams struct {
+	TeamID int64  `json:"team_id"`
+	UserID int64  `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// Team Members
+// Add a member to a team and report through the row count whether this call
+// inserted it; an existing member is left as it is.
+func (q *Queries) InsertTeamMember(ctx context.Context, arg InsertTeamMemberParams) (int64, error) {
+	result, err := q.exec(ctx, q.insertTeamMemberStmt, insertTeamMember, arg.TeamID, arg.UserID, arg.Role)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const interruptStaleReportRuns = `-- name: InterruptStaleReportRuns :execrows
+UPDATE report_runs
+SET status = 'interrupted',
+    reason = 'process_stopped',
+    deadline_at = NULL,
+    finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE status = 'running'
+  AND deadline_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?1 AS TEXT))
+`
+
+func (q *Queries) InterruptStaleReportRuns(ctx context.Context, graceModifier string) (int64, error) {
+	result, err := q.exec(ctx, q.interruptStaleReportRunsStmt, interruptStaleReportRuns, graceModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const isSourceManaged = `-- name: IsSourceManaged :one
@@ -2194,6 +3734,26 @@ func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (int64, error) {
 	var managed int64
 	err := row.Scan(&managed)
 	return managed, err
+}
+
+const kickJob = `-- name: KickJob :execrows
+UPDATE jobs
+SET next_run_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE kind = ?1 AND key = ?2
+`
+
+type KickJobParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) KickJob(ctx context.Context, arg KickJobParams) (int64, error) {
+	result, err := q.exec(ctx, q.kickJobStmt, kickJob, arg.Kind, arg.Key)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
@@ -2235,48 +3795,74 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 	return items, nil
 }
 
-const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
-SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
-WHERE is_active = 1
-  AND (
-        last_evaluated_at IS NULL
-        OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds')
-      )
+const listAlertDestinationLinks = `-- name: ListAlertDestinationLinks :many
+SELECT alert_id, destination_id FROM alert_destinations
+WHERE alert_id IN (/*SLICE:alert_ids*/?)
+ORDER BY alert_id, destination_id
 `
 
-func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
-	rows, err := q.query(ctx, q.listActiveAlertsDueStmt, listActiveAlertsDue)
+func (q *Queries) ListAlertDestinationLinks(ctx context.Context, alertIds []int64) ([]AlertDestination, error) {
+	query := listAlertDestinationLinks
+	var queryParams []interface{}
+	if len(alertIds) > 0 {
+		for _, v := range alertIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:alert_ids*/?", strings.Repeat(",?", len(alertIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:alert_ids*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Alert{}
+	items := []AlertDestination{}
 	for rows.Next() {
-		var i Alert
+		var i AlertDestination
+		if err := rows.Scan(&i.AlertID, &i.DestinationID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertDestinations = `-- name: ListAlertDestinations :many
+SELECT d.id, d.name, d.type, d.scope, d.team_id, d.config_json, d.secret, d.is_active, d.created_by, d.last_delivery_at, d.last_delivery_status, d.last_delivery_error, d.created_at, d.updated_at FROM notification_destinations d
+JOIN alert_destinations ad ON ad.destination_id = d.id
+WHERE ad.alert_id = ?
+ORDER BY d.id
+`
+
+func (q *Queries) ListAlertDestinations(ctx context.Context, alertID int64) ([]NotificationDestination, error) {
+	rows, err := q.query(ctx, q.listAlertDestinationsStmt, listAlertDestinations, alertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDestination{}
+	for rows.Next() {
+		var i NotificationDestination
 		if err := rows.Scan(
 			&i.ID,
-			&i.SourceID,
 			&i.Name,
-			&i.Description,
-			&i.QueryLanguage,
-			&i.EditorMode,
-			&i.Query,
-			&i.ConditionJson,
-			&i.LookbackSeconds,
-			&i.ThresholdOperator,
-			&i.ThresholdValue,
-			&i.FrequencySeconds,
-			&i.Severity,
-			&i.LabelsJson,
-			&i.AnnotationsJson,
-			&i.GeneratorUrl,
+			&i.Type,
+			&i.Scope,
+			&i.TeamID,
+			&i.ConfigJson,
+			&i.Secret,
 			&i.IsActive,
-			&i.LastState,
-			&i.LastEvaluatedAt,
-			&i.LastTriggeredAt,
-			&i.RecipientUserIdsJson,
-			&i.WebhookUrlsJson,
 			&i.CreatedBy,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryStatus,
+			&i.LastDeliveryError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2294,7 +3880,7 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 }
 
 const listAlertHistory = `-- name: ListAlertHistory :many
-SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
 WHERE alert_id = ?
 ORDER BY triggered_at DESC, id DESC
 LIMIT ?
@@ -2324,6 +3910,91 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 			&i.Message,
 			&i.PayloadJson,
 			&i.CreatedAt,
+			&i.GroupKey,
+			&i.GroupJson,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertInstances = `-- name: ListAlertInstances :many
+
+SELECT alert_id, group_key, group_json, state, value, state_since, last_seen_at, history_id, notified FROM alert_instances
+WHERE alert_id = ?
+ORDER BY group_key
+`
+
+// Alert instance queries
+func (q *Queries) ListAlertInstances(ctx context.Context, alertID int64) ([]AlertInstance, error) {
+	rows, err := q.query(ctx, q.listAlertInstancesStmt, listAlertInstances, alertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertInstance{}
+	for rows.Next() {
+		var i AlertInstance
+		if err := rows.Scan(
+			&i.AlertID,
+			&i.GroupKey,
+			&i.GroupJson,
+			&i.State,
+			&i.Value,
+			&i.StateSince,
+			&i.LastSeenAt,
+			&i.HistoryID,
+			&i.Notified,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertSilencesBySource = `-- name: ListAlertSilencesBySource :many
+SELECT id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at FROM alert_silences
+WHERE source_id = ?
+ORDER BY id
+`
+
+func (q *Queries) ListAlertSilencesBySource(ctx context.Context, sourceID int64) ([]AlertSilence, error) {
+	rows, err := q.query(ctx, q.listAlertSilencesBySourceStmt, listAlertSilencesBySource, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertSilence{}
+	for rows.Next() {
+		var i AlertSilence
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.AlertID,
+			&i.MatchersJson,
+			&i.Comment,
+			&i.ScheduleKind,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.WeeklyJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2339,7 +4010,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 }
 
 const listAlertsBySource = `-- name: ListAlertsBySource :many
-SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
+SELECT id, source_id, name, description, query_language, editor_mode, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, created_by, created_at, updated_at, group_by_json, no_data_policy, eval_seq, notify_on_resolve FROM alerts
 WHERE source_id = ?
 ORDER BY updated_at DESC, created_at DESC
 `
@@ -2375,11 +4046,13 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 			&i.LastState,
 			&i.LastEvaluatedAt,
 			&i.LastTriggeredAt,
-			&i.RecipientUserIdsJson,
-			&i.WebhookUrlsJson,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GroupByJson,
+			&i.NoDataPolicy,
+			&i.EvalSeq,
+			&i.NotifyOnResolve,
 		); err != nil {
 			return nil, err
 		}
@@ -2395,7 +4068,7 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 }
 
 const listAlertsForUser = `-- name: ListAlertsForUser :many
-SELECT a.id, a.source_id, a.name, a.description, a.query_language, a.editor_mode, a."query", a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.recipient_user_ids_json, a.webhook_urls_json, a.created_by, a.created_at, a.updated_at FROM alerts a
+SELECT a.id, a.source_id, a.name, a.description, a.query_language, a.editor_mode, a."query", a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.created_by, a.created_at, a.updated_at, a.group_by_json, a.no_data_policy, a.eval_seq, a.notify_on_resolve FROM alerts a
 WHERE a.source_id IN (
     SELECT DISTINCT ts.source_id
     FROM team_sources ts
@@ -2436,11 +4109,13 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 			&i.LastState,
 			&i.LastEvaluatedAt,
 			&i.LastTriggeredAt,
-			&i.RecipientUserIdsJson,
-			&i.WebhookUrlsJson,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.GroupByJson,
+			&i.NoDataPolicy,
+			&i.EvalSeq,
+			&i.NotifyOnResolve,
 		); err != nil {
 			return nil, err
 		}
@@ -2514,6 +4189,213 @@ func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQuerie
 			&i.UpdatedAt,
 			&i.CreatedBy,
 			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventsAsc = `-- name: ListAuditEventsAsc :many
+SELECT id, occurred_at, "action", outcome, reason, actor_type, actor_id, actor_label, auth_method, credential_id, client_id, target_type, target_id, target_label, team_id, source_id, ip, user_agent, http_method, route, status, changes, detail FROM audit_events
+WHERE (CAST(?1 AS TEXT) = '' OR occurred_at >= CAST(?1 AS TEXT))
+  AND (CAST(?2 AS TEXT) = '' OR occurred_at < CAST(?2 AS TEXT))
+  AND (CAST(?3 AS TEXT) = '' OR action = ?3)
+  AND (CAST(?4 AS TEXT) = '' OR substr(action, 1, length(?4)) = ?4)
+  AND (CAST(?5 AS INTEGER) IS NULL OR actor_id = CAST(?5 AS INTEGER))
+  AND (CAST(?6 AS TEXT) = '' OR auth_method = ?6)
+  AND (CAST(?7 AS TEXT) = '' OR credential_id = ?7)
+  AND (CAST(?8 AS TEXT) = '' OR target_type = ?8)
+  AND (CAST(?9 AS TEXT) = '' OR target_id = ?9)
+  AND (CAST(?10 AS INTEGER) IS NULL OR team_id = CAST(?10 AS INTEGER))
+  AND (CAST(?11 AS INTEGER) IS NULL OR source_id = CAST(?11 AS INTEGER))
+  AND (CAST(?12 AS TEXT) = '' OR outcome = ?12)
+  AND (CAST(?13 AS TEXT) = ''
+    OR occurred_at > CAST(?14 AS TEXT)
+    OR (occurred_at = CAST(?14 AS TEXT) AND id > ?13))
+ORDER BY occurred_at ASC, id ASC
+LIMIT ?15
+`
+
+type ListAuditEventsAscParams struct {
+	FromAt       string        `json:"from_at"`
+	ToAt         string        `json:"to_at"`
+	Action       string        `json:"action"`
+	ActionPrefix string        `json:"action_prefix"`
+	ActorID      sql.NullInt64 `json:"actor_id"`
+	AuthMethod   string        `json:"auth_method"`
+	CredentialID string        `json:"credential_id"`
+	TargetType   string        `json:"target_type"`
+	TargetID     string        `json:"target_id"`
+	TeamID       sql.NullInt64 `json:"team_id"`
+	SourceID     sql.NullInt64 `json:"source_id"`
+	Outcome      string        `json:"outcome"`
+	CursorID     string        `json:"cursor_id"`
+	CursorAt     string        `json:"cursor_at"`
+	RowLimit     int64         `json:"row_limit"`
+}
+
+// Oldest first, with the same filters as ListAuditEventsDesc.
+func (q *Queries) ListAuditEventsAsc(ctx context.Context, arg ListAuditEventsAscParams) ([]AuditEvent, error) {
+	rows, err := q.query(ctx, q.listAuditEventsAscStmt, listAuditEventsAsc,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.ActorID,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Outcome,
+		arg.CursorID,
+		arg.CursorAt,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditEvent{}
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.Action,
+			&i.Outcome,
+			&i.Reason,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorLabel,
+			&i.AuthMethod,
+			&i.CredentialID,
+			&i.ClientID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetLabel,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Ip,
+			&i.UserAgent,
+			&i.HttpMethod,
+			&i.Route,
+			&i.Status,
+			&i.Changes,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventsDesc = `-- name: ListAuditEventsDesc :many
+SELECT id, occurred_at, "action", outcome, reason, actor_type, actor_id, actor_label, auth_method, credential_id, client_id, target_type, target_id, target_label, team_id, source_id, ip, user_agent, http_method, route, status, changes, detail FROM audit_events
+WHERE (CAST(?1 AS TEXT) = '' OR occurred_at >= CAST(?1 AS TEXT))
+  AND (CAST(?2 AS TEXT) = '' OR occurred_at < CAST(?2 AS TEXT))
+  AND (CAST(?3 AS TEXT) = '' OR action = ?3)
+  AND (CAST(?4 AS TEXT) = '' OR substr(action, 1, length(?4)) = ?4)
+  AND (CAST(?5 AS INTEGER) IS NULL OR actor_id = CAST(?5 AS INTEGER))
+  AND (CAST(?6 AS TEXT) = '' OR auth_method = ?6)
+  AND (CAST(?7 AS TEXT) = '' OR credential_id = ?7)
+  AND (CAST(?8 AS TEXT) = '' OR target_type = ?8)
+  AND (CAST(?9 AS TEXT) = '' OR target_id = ?9)
+  AND (CAST(?10 AS INTEGER) IS NULL OR team_id = CAST(?10 AS INTEGER))
+  AND (CAST(?11 AS INTEGER) IS NULL OR source_id = CAST(?11 AS INTEGER))
+  AND (CAST(?12 AS TEXT) = '' OR outcome = ?12)
+  AND (CAST(?13 AS TEXT) = ''
+    OR occurred_at < CAST(?14 AS TEXT)
+    OR (occurred_at = CAST(?14 AS TEXT) AND id < ?13))
+ORDER BY occurred_at DESC, id DESC
+LIMIT ?15
+`
+
+type ListAuditEventsDescParams struct {
+	FromAt       string        `json:"from_at"`
+	ToAt         string        `json:"to_at"`
+	Action       string        `json:"action"`
+	ActionPrefix string        `json:"action_prefix"`
+	ActorID      sql.NullInt64 `json:"actor_id"`
+	AuthMethod   string        `json:"auth_method"`
+	CredentialID string        `json:"credential_id"`
+	TargetType   string        `json:"target_type"`
+	TargetID     string        `json:"target_id"`
+	TeamID       sql.NullInt64 `json:"team_id"`
+	SourceID     sql.NullInt64 `json:"source_id"`
+	Outcome      string        `json:"outcome"`
+	CursorID     string        `json:"cursor_id"`
+	CursorAt     string        `json:"cursor_at"`
+	RowLimit     int64         `json:"row_limit"`
+}
+
+// Newest first. An empty text argument or a NULL ID argument disables its
+// filter; cursor_id = ” starts at the newest event.
+func (q *Queries) ListAuditEventsDesc(ctx context.Context, arg ListAuditEventsDescParams) ([]AuditEvent, error) {
+	rows, err := q.query(ctx, q.listAuditEventsDescStmt, listAuditEventsDesc,
+		arg.FromAt,
+		arg.ToAt,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.ActorID,
+		arg.AuthMethod,
+		arg.CredentialID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.Outcome,
+		arg.CursorID,
+		arg.CursorAt,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditEvent{}
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.Action,
+			&i.Outcome,
+			&i.Reason,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorLabel,
+			&i.AuthMethod,
+			&i.CredentialID,
+			&i.ClientID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetLabel,
+			&i.TeamID,
+			&i.SourceID,
+			&i.Ip,
+			&i.UserAgent,
+			&i.HttpMethod,
+			&i.Route,
+			&i.Status,
+			&i.Changes,
+			&i.Detail,
 		); err != nil {
 			return nil, err
 		}
@@ -2875,7 +4757,8 @@ SELECT
     d.summary_revision,
     d.summary_version,
     u.email AS created_by_email,
-    u.full_name AS created_by_name
+    u.full_name AS created_by_name,
+    (SELECT COUNT(*) FROM reports r WHERE r.dashboard_id = d.id) AS report_count
 FROM dashboards d
 LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC
@@ -2898,11 +4781,12 @@ type ListDashboardSummariesRow struct {
 	SummaryVersion  int64          `json:"summary_version"`
 	CreatedByEmail  sql.NullString `json:"created_by_email"`
 	CreatedByName   sql.NullString `json:"created_by_name"`
+	ReportCount     int64          `json:"report_count"`
 }
 
 // List every dashboard's summary, newest-updated first, from the derived
 // columns and never from panels_json. A name or description from before the
-// bound is cut to it.
+// bound is cut to it. report_count is the number of reports a delete removes.
 func (q *Queries) ListDashboardSummaries(ctx context.Context) ([]ListDashboardSummariesRow, error) {
 	rows, err := q.query(ctx, q.listDashboardSummariesStmt, listDashboardSummaries)
 	if err != nil {
@@ -2929,6 +4813,81 @@ func (q *Queries) ListDashboardSummaries(ctx context.Context) ([]ListDashboardSu
 			&i.SummaryVersion,
 			&i.CreatedByEmail,
 			&i.CreatedByName,
+			&i.ReportCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeliverySummaries = `-- name: ListDeliverySummaries :many
+SELECT n.producer_ref, n.destination_id, d.name AS destination_name, d.type AS destination_type,
+       n.recipient, n.event, n.status, n.attempts, n.last_error, n.sent_at, n.created_at
+FROM notification_deliveries n
+JOIN notification_destinations d ON d.id = n.destination_id
+WHERE n.producer = ?1 AND n.producer_ref IN (/*SLICE:refs*/?)
+ORDER BY n.id
+`
+
+type ListDeliverySummariesParams struct {
+	Producer string   `json:"producer"`
+	Refs     []string `json:"refs"`
+}
+
+type ListDeliverySummariesRow struct {
+	ProducerRef     string         `json:"producer_ref"`
+	DestinationID   int64          `json:"destination_id"`
+	DestinationName string         `json:"destination_name"`
+	DestinationType string         `json:"destination_type"`
+	Recipient       string         `json:"recipient"`
+	Event           string         `json:"event"`
+	Status          string         `json:"status"`
+	Attempts        int64          `json:"attempts"`
+	LastError       sql.NullString `json:"last_error"`
+	SentAt          sql.NullTime   `json:"sent_at"`
+	CreatedAt       time.Time      `json:"created_at"`
+}
+
+func (q *Queries) ListDeliverySummaries(ctx context.Context, arg ListDeliverySummariesParams) ([]ListDeliverySummariesRow, error) {
+	query := listDeliverySummaries
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.Producer)
+	if len(arg.Refs) > 0 {
+		for _, v := range arg.Refs {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:refs*/?", strings.Repeat(",?", len(arg.Refs))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:refs*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeliverySummariesRow{}
+	for rows.Next() {
+		var i ListDeliverySummariesRow
+		if err := rows.Scan(
+			&i.ProducerRef,
+			&i.DestinationID,
+			&i.DestinationName,
+			&i.DestinationType,
+			&i.Recipient,
+			&i.Event,
+			&i.Status,
+			&i.Attempts,
+			&i.LastError,
+			&i.SentAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3019,8 +4978,96 @@ func (q *Queries) ListInterruptedExportJobs(ctx context.Context, arg ListInterru
 	return items, nil
 }
 
+const listLatestReportRuns = `-- name: ListLatestReportRuns :many
+SELECT id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at FROM report_runs
+WHERE id IN (SELECT MAX(latest.id) FROM report_runs latest GROUP BY latest.report_id)
+ORDER BY report_id
+`
+
+// The newest run of every report, for the report list.
+func (q *Queries) ListLatestReportRuns(ctx context.Context) ([]ReportRun, error) {
+	rows, err := q.query(ctx, q.listLatestReportRunsStmt, listLatestReportRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRun{}
+	for rows.Next() {
+		var i ReportRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Trigger,
+			&i.ScheduledFor,
+			&i.ActorID,
+			&i.Status,
+			&i.Reason,
+			&i.WindowStart,
+			&i.WindowEnd,
+			&i.PanelsJson,
+			&i.DeliveriesJson,
+			&i.StartedAt,
+			&i.DeadlineAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listManagedSavedViews = `-- name: ListManagedSavedViews :many
+SELECT id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at FROM saved_views WHERE managed = 1
+ORDER BY source_id, name, id
+`
+
+func (q *Queries) ListManagedSavedViews(ctx context.Context) ([]SavedView, error) {
+	rows, err := q.query(ctx, q.listManagedSavedViewsStmt, listManagedSavedViews)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SavedView{}
+	for rows.Next() {
+		var i SavedView
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Scope,
+			&i.UserID,
+			&i.TeamID,
+			&i.Name,
+			&i.Description,
+			&i.Definition,
+			&i.IsDefault,
+			&i.Managed,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listManagedSources = `-- name: ListManagedSources :many
-SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref, header_secret_refs FROM sources WHERE managed = 1 ORDER BY id
 `
 
 // Get all sources managed by provisioning config
@@ -3048,6 +5095,7 @@ func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.SecretRef,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -3097,6 +5145,48 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 	return items, nil
 }
 
+const listNotificationDestinations = `-- name: ListNotificationDestinations :many
+SELECT id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at FROM notification_destinations ORDER BY name, id
+`
+
+func (q *Queries) ListNotificationDestinations(ctx context.Context) ([]NotificationDestination, error) {
+	rows, err := q.query(ctx, q.listNotificationDestinationsStmt, listNotificationDestinations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDestination{}
+	for rows.Next() {
+		var i NotificationDestination
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.Scope,
+			&i.TeamID,
+			&i.ConfigJson,
+			&i.Secret,
+			&i.IsActive,
+			&i.CreatedBy,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryStatus,
+			&i.LastDeliveryError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOAuthGrantsForUser = `-- name: ListOAuthGrantsForUser :many
 SELECT id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason FROM oauth_grants
 WHERE user_id = ? AND revoked_at IS NULL
@@ -3123,6 +5213,81 @@ func (q *Queries) ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]O
 			&i.LastUsedAt,
 			&i.RevokedAt,
 			&i.RevokeReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenAlertGroupHistoryIDs = `-- name: ListOpenAlertGroupHistoryIDs :many
+SELECT id FROM alert_history
+WHERE alert_id = ?1 AND group_key = ?2 AND status IN ('triggered', 'no_data')
+`
+
+type ListOpenAlertGroupHistoryIDsParams struct {
+	AlertID  int64  `json:"alert_id"`
+	GroupKey string `json:"group_key"`
+}
+
+func (q *Queries) ListOpenAlertGroupHistoryIDs(ctx context.Context, arg ListOpenAlertGroupHistoryIDsParams) ([]int64, error) {
+	rows, err := q.query(ctx, q.listOpenAlertGroupHistoryIDsStmt, listOpenAlertGroupHistoryIDs, arg.AlertID, arg.GroupKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenAlertHistory = `-- name: ListOpenAlertHistory :many
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at, group_key, group_json FROM alert_history
+WHERE alert_id = ?1 AND status IN ('triggered', 'no_data')
+ORDER BY triggered_at DESC, id DESC
+`
+
+// Every open episode of the alert, newest first.
+func (q *Queries) ListOpenAlertHistory(ctx context.Context, alertID int64) ([]AlertHistory, error) {
+	rows, err := q.query(ctx, q.listOpenAlertHistoryStmt, listOpenAlertHistory, alertID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertHistory{}
+	for rows.Next() {
+		var i AlertHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.AlertID,
+			&i.Status,
+			&i.TriggeredAt,
+			&i.ResolvedAt,
+			&i.Value,
+			&i.Message,
+			&i.PayloadJson,
+			&i.CreatedAt,
+			&i.GroupKey,
+			&i.GroupJson,
 		); err != nil {
 			return nil, err
 		}
@@ -3245,6 +5410,339 @@ func (q *Queries) ListQueryHistory(ctx context.Context, arg ListQueryHistoryPara
 			&i.DurationMs,
 			&i.RowCount,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueryShapeStats = `-- name: ListQueryShapeStats :many
+SELECT
+    query_language,
+    shape_hash,
+    shape,
+    CAST(SUM(query_count) AS INTEGER) AS query_count,
+    CAST(SUM(total_duration_ms) AS INTEGER) AS total_duration_ms,
+    CAST(SUM(total_rows) AS INTEGER) AS total_rows,
+    CAST(COUNT(max_lookback_s) AS INTEGER) AS lookback_rows,
+    CAST(COALESCE(MAX(max_lookback_s), 0) AS INTEGER) AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = ?1
+  AND bucket_date >= ?2
+  AND bucket_date <= ?3
+  AND shape_hash NOT IN ('unanalyzed', 'overflow')
+GROUP BY query_language, shape_hash, shape
+ORDER BY query_count DESC, query_language ASC, shape_hash ASC
+LIMIT ?4
+`
+
+type ListQueryShapeStatsParams struct {
+	SourceID int64  `json:"source_id"`
+	Since    string `json:"since"`
+	Until    string `json:"until"`
+	Limit    int64  `json:"limit"`
+}
+
+type ListQueryShapeStatsRow struct {
+	QueryLanguage   string `json:"query_language"`
+	ShapeHash       string `json:"shape_hash"`
+	Shape           string `json:"shape"`
+	QueryCount      int64  `json:"query_count"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
+	TotalRows       int64  `json:"total_rows"`
+	LookbackRows    int64  `json:"lookback_rows"`
+	MaxLookbackS    int64  `json:"max_lookback_s"`
+}
+
+// A source's analyzed shapes from `since` to `until`, both inclusive, summed
+// over days, most used
+// first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
+// counts them. lookback_rows is 0 when no row has a lookback, and then
+// max_lookback_s means nothing.
+func (q *Queries) ListQueryShapeStats(ctx context.Context, arg ListQueryShapeStatsParams) ([]ListQueryShapeStatsRow, error) {
+	rows, err := q.query(ctx, q.listQueryShapeStatsStmt, listQueryShapeStats,
+		arg.SourceID,
+		arg.Since,
+		arg.Until,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueryShapeStatsRow{}
+	for rows.Next() {
+		var i ListQueryShapeStatsRow
+		if err := rows.Scan(
+			&i.QueryLanguage,
+			&i.ShapeHash,
+			&i.Shape,
+			&i.QueryCount,
+			&i.TotalDurationMs,
+			&i.TotalRows,
+			&i.LookbackRows,
+			&i.MaxLookbackS,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportRecipients = `-- name: ListReportRecipients :many
+SELECT id, report_id, kind, user_id, team_id, email, added_by, created_at FROM report_recipients WHERE report_id = ?1 ORDER BY id
+`
+
+func (q *Queries) ListReportRecipients(ctx context.Context, reportID int64) ([]ReportRecipient, error) {
+	rows, err := q.query(ctx, q.listReportRecipientsStmt, listReportRecipients, reportID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRecipient{}
+	for rows.Next() {
+		var i ReportRecipient
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Kind,
+			&i.UserID,
+			&i.TeamID,
+			&i.Email,
+			&i.AddedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportRuns = `-- name: ListReportRuns :many
+SELECT id, report_id, "trigger", scheduled_for, actor_id, status, reason, window_start, window_end, panels_json, deliveries_json, started_at, deadline_at, finished_at FROM report_runs
+WHERE report_id = ?1
+  AND (CAST(?2 AS INTEGER) = 0 OR id < CAST(?2 AS INTEGER))
+ORDER BY id DESC
+LIMIT ?3
+`
+
+type ListReportRunsParams struct {
+	ReportID int64 `json:"report_id"`
+	Before   int64 `json:"before"`
+	MaxRuns  int64 `json:"max_runs"`
+}
+
+// before = 0 starts at the newest run.
+func (q *Queries) ListReportRuns(ctx context.Context, arg ListReportRunsParams) ([]ReportRun, error) {
+	rows, err := q.query(ctx, q.listReportRunsStmt, listReportRuns, arg.ReportID, arg.Before, arg.MaxRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRun{}
+	for rows.Next() {
+		var i ReportRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.Trigger,
+			&i.ScheduledFor,
+			&i.ActorID,
+			&i.Status,
+			&i.Reason,
+			&i.WindowStart,
+			&i.WindowEnd,
+			&i.PanelsJson,
+			&i.DeliveriesJson,
+			&i.StartedAt,
+			&i.DeadlineAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReports = `-- name: ListReports :many
+SELECT id, name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id, schedule_json, timezone, time_range, range_anchor, variables_json, max_rows, skip_if_empty, attach_csv, state, pause_reason, consecutive_failures, last_manual_run_at, last_preview_at, created_at, updated_at FROM reports ORDER BY name, id
+`
+
+func (q *Queries) ListReports(ctx context.Context) ([]Report, error) {
+	rows, err := q.query(ctx, q.listReportsStmt, listReports)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Report{}
+	for rows.Next() {
+		var i Report
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OwnerID,
+			&i.SourceKind,
+			&i.DashboardID,
+			&i.TabID,
+			&i.SavedQueryID,
+			&i.ScheduleJson,
+			&i.Timezone,
+			&i.TimeRange,
+			&i.RangeAnchor,
+			&i.VariablesJson,
+			&i.MaxRows,
+			&i.SkipIfEmpty,
+			&i.AttachCsv,
+			&i.State,
+			&i.PauseReason,
+			&i.ConsecutiveFailures,
+			&i.LastManualRunAt,
+			&i.LastPreviewAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportsByOwner = `-- name: ListReportsByOwner :many
+SELECT id, name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id, schedule_json, timezone, time_range, range_anchor, variables_json, max_rows, skip_if_empty, attach_csv, state, pause_reason, consecutive_failures, last_manual_run_at, last_preview_at, created_at, updated_at FROM reports WHERE owner_id = ?1 ORDER BY name, id
+`
+
+func (q *Queries) ListReportsByOwner(ctx context.Context, ownerID sql.NullInt64) ([]Report, error) {
+	rows, err := q.query(ctx, q.listReportsByOwnerStmt, listReportsByOwner, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Report{}
+	for rows.Next() {
+		var i Report
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OwnerID,
+			&i.SourceKind,
+			&i.DashboardID,
+			&i.TabID,
+			&i.SavedQueryID,
+			&i.ScheduleJson,
+			&i.Timezone,
+			&i.TimeRange,
+			&i.RangeAnchor,
+			&i.VariablesJson,
+			&i.MaxRows,
+			&i.SkipIfEmpty,
+			&i.AttachCsv,
+			&i.State,
+			&i.PauseReason,
+			&i.ConsecutiveFailures,
+			&i.LastManualRunAt,
+			&i.LastPreviewAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReportsForRecipient = `-- name: ListReportsForRecipient :many
+SELECT r.id, r.name, r.owner_id, r.source_kind, r.dashboard_id, r.tab_id, r.saved_query_id, r.schedule_json, r.timezone, r.time_range, r.range_anchor, r.variables_json, r.max_rows, r.skip_if_empty, r.attach_csv, r.state, r.pause_reason, r.consecutive_failures, r.last_manual_run_at, r.last_preview_at, r.created_at, r.updated_at FROM reports r
+WHERE EXISTS (
+    SELECT 1 FROM report_recipients rr
+    WHERE rr.report_id = r.id
+      AND (
+        (rr.kind = 'user' AND rr.user_id = ?1)
+        OR (rr.kind = 'team' AND rr.team_id IN (
+            SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?1))
+        OR (rr.kind = 'email' AND lower(rr.email) = (
+            SELECT lower(u.email) FROM users u WHERE u.id = ?1))
+      )
+)
+ORDER BY r.name, r.id
+`
+
+// A user receives a report through a user row, a team row of a team the
+// user belongs to, or an email row that matches the user's address.
+func (q *Queries) ListReportsForRecipient(ctx context.Context, userID sql.NullInt64) ([]Report, error) {
+	rows, err := q.query(ctx, q.listReportsForRecipientStmt, listReportsForRecipient, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Report{}
+	for rows.Next() {
+		var i Report
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.OwnerID,
+			&i.SourceKind,
+			&i.DashboardID,
+			&i.TabID,
+			&i.SavedQueryID,
+			&i.ScheduleJson,
+			&i.Timezone,
+			&i.TimeRange,
+			&i.RangeAnchor,
+			&i.VariablesJson,
+			&i.MaxRows,
+			&i.SkipIfEmpty,
+			&i.AttachCsv,
+			&i.State,
+			&i.PauseReason,
+			&i.ConsecutiveFailures,
+			&i.LastManualRunAt,
+			&i.LastPreviewAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3418,6 +5916,98 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 	return items, nil
 }
 
+const listSavedViews = `-- name: ListSavedViews :many
+SELECT id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at FROM saved_views
+WHERE source_id = ?1
+  AND (
+    (scope = 'personal' AND user_id = ?2)
+    OR (scope = 'team' AND team_id = ?3)
+    OR scope = 'source'
+  )
+ORDER BY CASE scope WHEN 'personal' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, name, id
+`
+
+type ListSavedViewsParams struct {
+	SourceID int64         `json:"source_id"`
+	UserID   sql.NullInt64 `json:"user_id"`
+	TeamID   sql.NullInt64 `json:"team_id"`
+}
+
+// The caller's personal views, the team's views and the source views of one
+// source, personal first, then team, then source, each by name.
+func (q *Queries) ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error) {
+	rows, err := q.query(ctx, q.listSavedViewsStmt, listSavedViews, arg.SourceID, arg.UserID, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SavedView{}
+	for rows.Next() {
+		var i SavedView
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Scope,
+			&i.UserID,
+			&i.TeamID,
+			&i.Name,
+			&i.Description,
+			&i.Definition,
+			&i.IsDefault,
+			&i.Managed,
+			&i.Revision,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSchemaAdvisorDismissals = `-- name: ListSchemaAdvisorDismissals :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = ?
+ORDER BY dismissed_at, finding_id
+`
+
+func (q *Queries) ListSchemaAdvisorDismissals(ctx context.Context, sourceID int64) ([]SchemaAdvisorDismissal, error) {
+	rows, err := q.query(ctx, q.listSchemaAdvisorDismissalsStmt, listSchemaAdvisorDismissals, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SchemaAdvisorDismissal{}
+	for rows.Next() {
+		var i SchemaAdvisorDismissal
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.FindingID,
+			&i.Reason,
+			&i.DismissedBy,
+			&i.DismissedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServiceAccounts = `-- name: ListServiceAccounts :many
 SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE account_type = 'service' ORDER BY created_at ASC
 `
@@ -3566,7 +6156,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 }
 
 const listSources = `-- name: ListSources :many
-SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources ORDER BY created_at DESC
+SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref, header_secret_refs FROM sources ORDER BY created_at DESC
 `
 
 // Get all sources ordered by creation date
@@ -3594,6 +6184,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.SecretRef,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -3609,7 +6200,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSourcesForUser = `-- name: ListSourcesForUser :many
-SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s.source_type, s._meta_ts_field, s._meta_severity_field, s.connection_config, s.identity_key, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref FROM sources s
+SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s.source_type, s._meta_ts_field, s._meta_severity_field, s.connection_config, s.identity_key, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref, s.header_secret_refs FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 JOIN team_members tm ON ts.team_id = tm.team_id
 WHERE tm.user_id = ?
@@ -3641,6 +6232,7 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.SecretRef,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -3825,7 +6417,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s._meta_is_auto_created, s.source_type, s._meta_ts_field, s._meta_severity_field, s.connection_config, s.identity_key, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref
+SELECT s.id, s.name, s._meta_is_auto_created, s.source_type, s._meta_ts_field, s._meta_severity_field, s.connection_config, s.identity_key, s.description, s.ttl_days, s.created_at, s.updated_at, s.managed, s.secret_ref, s.header_secret_refs
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = ?
@@ -3857,6 +6449,7 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.SecretRef,
+			&i.HeaderSecretRefs,
 		); err != nil {
 			return nil, err
 		}
@@ -3968,6 +6561,54 @@ func (q *Queries) ListTeamsForUser(ctx context.Context, userID int64) ([]ListTea
 			&i.UpdatedAt,
 			&i.Role,
 			&i.MemberCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsableNotificationDestinations = `-- name: ListUsableNotificationDestinations :many
+SELECT d.id, d.name, d.type, d.scope, d.team_id, d.config_json, d.secret, d.is_active, d.created_by, d.last_delivery_at, d.last_delivery_status, d.last_delivery_error, d.created_at, d.updated_at FROM notification_destinations d
+WHERE d.scope = 'global'
+   OR (d.scope = 'private' AND d.created_by = ?1)
+   OR (d.scope = 'team' AND d.team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ?1))
+ORDER BY d.name, d.id
+`
+
+// Private destinations of the user, team destinations of the user's teams,
+// and global ones.
+func (q *Queries) ListUsableNotificationDestinations(ctx context.Context, userID sql.NullInt64) ([]NotificationDestination, error) {
+	rows, err := q.query(ctx, q.listUsableNotificationDestinationsStmt, listUsableNotificationDestinations, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDestination{}
+	for rows.Next() {
+		var i NotificationDestination
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.Scope,
+			&i.TeamID,
+			&i.ConfigJson,
+			&i.Secret,
+			&i.IsActive,
+			&i.CreatedBy,
+			&i.LastDeliveryAt,
+			&i.LastDeliveryStatus,
+			&i.LastDeliveryError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4125,21 +6766,62 @@ func (q *Queries) LockCollection(ctx context.Context, id int64) (int64, error) {
 	return id_2, err
 }
 
-const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
-UPDATE alerts
-SET last_state = 'resolved',
-    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?
+const lockReport = `-- name: LockReport :one
+SELECT id FROM reports WHERE id = ?1
 `
 
-func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, id)
+// SQLite has one writer, so inside a write transaction this read already
+// excludes other writers; it checks that the report exists.
+func (q *Queries) LockReport(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.lockReportStmt, lockReport, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
+UPDATE alerts
+SET last_triggered_at = CASE WHEN ?1 = 'firing' AND last_state <> 'firing' THEN strftime('%Y-%m-%dT%H:%M:%SZ', 'now') ELSE last_triggered_at END,
+    last_state = ?1,
+    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?2
+`
+
+type MarkAlertEvaluatedParams struct {
+	LastState string `json:"last_state"`
+	ID        int64  `json:"id"`
+}
+
+// Records an evaluation and the rule's summary state. last_triggered_at moves
+// when the rule starts firing.
+func (q *Queries) MarkAlertEvaluated(ctx context.Context, arg MarkAlertEvaluatedParams) error {
+	_, err := q.exec(ctx, q.markAlertEvaluatedStmt, markAlertEvaluated, arg.LastState, arg.ID)
 	return err
 }
 
+const markAlertInstanceNotified = `-- name: MarkAlertInstanceNotified :one
+UPDATE alert_instances
+SET notified = 1
+WHERE alert_id = ? AND group_key = ? AND history_id = ?
+RETURNING alert_id
+`
+
+type MarkAlertInstanceNotifiedParams struct {
+	AlertID   int64         `json:"alert_id"`
+	GroupKey  string        `json:"group_key"`
+	HistoryID sql.NullInt64 `json:"history_id"`
+}
+
+func (q *Queries) MarkAlertInstanceNotified(ctx context.Context, arg MarkAlertInstanceNotifiedParams) (int64, error) {
+	row := q.queryRow(ctx, q.markAlertInstanceNotifiedStmt, markAlertInstanceNotified, arg.AlertID, arg.GroupKey, arg.HistoryID)
+	var alert_id int64
+	err := row.Scan(&alert_id)
+	return alert_id, err
+}
+
 const markAlertResolved = `-- name: MarkAlertResolved :exec
-UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+UPDATE alerts SET last_state = 'resolved', eval_seq = eval_seq + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
 `
 
 func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
@@ -4147,34 +6829,67 @@ func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
 	return err
 }
 
-const markAlertTriggered = `-- name: MarkAlertTriggered :exec
-UPDATE alerts
-SET last_state = 'firing',
-    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END,
-    last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?
+const markDeliveryAttempting = `-- name: MarkDeliveryAttempting :execrows
+UPDATE notification_deliveries
+SET status = 'attempting'
+WHERE id = ?1 AND reserved_token = ?2 AND status = 'pending'
 `
 
-func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.markAlertTriggeredStmt, markAlertTriggered, id)
-	return err
+type MarkDeliveryAttemptingParams struct {
+	ID            int64 `json:"id"`
+	ReservedToken int64 `json:"reserved_token"`
+}
+
+func (q *Queries) MarkDeliveryAttempting(ctx context.Context, arg MarkDeliveryAttemptingParams) (int64, error) {
+	result, err := q.exec(ctx, q.markDeliveryAttemptingStmt, markDeliveryAttempting, arg.ID, arg.ReservedToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const markSavedViewManaged = `-- name: MarkSavedViewManaged :one
+UPDATE saved_views SET managed = 1 WHERE id = ?
+RETURNING id
+`
+
+// Provisioning adopts a view; the definition and revision stay as they are.
+func (q *Queries) MarkSavedViewManaged(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.markSavedViewManagedStmt, markSavedViewManaged, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const pauseReport = `-- name: PauseReport :execrows
+UPDATE reports
+SET state = 'paused',
+    pause_reason = ?1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?2
+`
+
+type PauseReportParams struct {
+	PauseReason string `json:"pause_reason"`
+	ID          int64  `json:"id"`
+}
+
+func (q *Queries) PauseReport(ctx context.Context, arg PauseReportParams) (int64, error) {
+	result, err := q.exec(ctx, q.pauseReportStmt, pauseReport, arg.PauseReason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const pruneAlertHistory = `-- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = ?
-  AND target.id NOT IN (
-    SELECT active.id
-    FROM alert_history AS active
-    WHERE active.alert_id = ? AND active.status = 'triggered'
-    ORDER BY active.triggered_at DESC, active.id DESC
-    LIMIT 1
-  )
+  AND target.status NOT IN ('triggered', 'no_data')
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
-    WHERE keep.alert_id = ?
+    WHERE keep.alert_id = ? AND keep.status NOT IN ('triggered', 'no_data')
     ORDER BY keep.triggered_at DESC, keep.id DESC
     LIMIT ?
  )
@@ -4183,18 +6898,62 @@ WHERE target.alert_id = ?
 type PruneAlertHistoryParams struct {
 	AlertID   int64 `json:"alert_id"`
 	AlertID_2 int64 `json:"alert_id_2"`
-	AlertID_3 int64 `json:"alert_id_3"`
 	Limit     int64 `json:"limit"`
 }
 
+// Keeps every open episode and the newest N closed rows.
 func (q *Queries) PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error {
-	_, err := q.exec(ctx, q.pruneAlertHistoryStmt, pruneAlertHistory,
-		arg.AlertID,
-		arg.AlertID_2,
-		arg.AlertID_3,
-		arg.Limit,
-	)
+	_, err := q.exec(ctx, q.pruneAlertHistoryStmt, pruneAlertHistory, arg.AlertID, arg.AlertID_2, arg.Limit)
 	return err
+}
+
+const pruneAuditEvents = `-- name: PruneAuditEvents :execrows
+DELETE FROM audit_events
+WHERE id IN (
+    SELECT id FROM audit_events
+    WHERE (CAST(?1 AS TEXT) <> '' AND occurred_at < CAST(?1 AS TEXT))
+       OR (CAST(?2 AS TEXT) <> ''
+           AND (occurred_at < CAST(?3 AS TEXT)
+             OR (occurred_at = CAST(?3 AS TEXT) AND id <= ?2)))
+    ORDER BY occurred_at ASC, id ASC
+    LIMIT ?4
+)
+`
+
+type PruneAuditEventsParams struct {
+	Before    string `json:"before"`
+	BoundID   string `json:"bound_id"`
+	BoundAt   string `json:"bound_at"`
+	BatchSize int64  `json:"batch_size"`
+}
+
+// Deletes up to batch_size of the oldest events that are older than before or
+// at or below the row-count boundary. An empty argument disables its rule.
+func (q *Queries) PruneAuditEvents(ctx context.Context, arg PruneAuditEventsParams) (int64, error) {
+	result, err := q.exec(ctx, q.pruneAuditEventsStmt, pruneAuditEvents,
+		arg.Before,
+		arg.BoundID,
+		arg.BoundAt,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const pruneDeliveries = `-- name: PruneDeliveries :execrows
+DELETE FROM notification_deliveries
+WHERE status IN ('sent', 'failed', 'unknown')
+  AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?1 AS TEXT))
+`
+
+func (q *Queries) PruneDeliveries(ctx context.Context, ageModifier string) (int64, error) {
+	result, err := q.exec(ctx, q.pruneDeliveriesStmt, pruneDeliveries, ageModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const pruneExpiredQueryShares = `-- name: PruneExpiredQueryShares :exec
@@ -4228,6 +6987,90 @@ type PruneQueryHistoryForUserParams struct {
 func (q *Queries) PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error {
 	_, err := q.exec(ctx, q.pruneQueryHistoryForUserStmt, pruneQueryHistoryForUser, arg.UserID, arg.Offset)
 	return err
+}
+
+const pruneQueryShapeStats = `-- name: PruneQueryShapeStats :exec
+DELETE FROM query_shape_stats_daily WHERE bucket_date < ?
+`
+
+func (q *Queries) PruneQueryShapeStats(ctx context.Context, bucketDate string) error {
+	_, err := q.exec(ctx, q.pruneQueryShapeStatsStmt, pruneQueryShapeStats, bucketDate)
+	return err
+}
+
+const pruneReportRuns = `-- name: PruneReportRuns :exec
+DELETE FROM report_runs
+WHERE report_runs.report_id = ?1
+  AND report_runs.status <> 'running'
+  AND report_runs.id NOT IN (
+    SELECT keep.id FROM report_runs keep
+    WHERE keep.report_id = ?1
+    ORDER BY keep.id DESC
+    LIMIT ?2
+  )
+`
+
+type PruneReportRunsParams struct {
+	ReportID int64 `json:"report_id"`
+	Keep     int64 `json:"keep"`
+}
+
+func (q *Queries) PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error {
+	_, err := q.exec(ctx, q.pruneReportRunsStmt, pruneReportRuns, arg.ReportID, arg.Keep)
+	return err
+}
+
+const queryShapeCoverage = `-- name: QueryShapeCoverage :one
+SELECT
+    CAST(COUNT(DISTINCT bucket_date) AS INTEGER) AS days,
+    CAST(COUNT(DISTINCT CASE WHEN shape <> '[]' THEN bucket_date END) AS INTEGER) AS filtered_days,
+    CAST(COALESCE(SUM(query_count), 0) AS INTEGER) AS query_count,
+    CAST(COALESCE(SUM(CASE WHEN shape_hash = 'unanalyzed' THEN query_count ELSE 0 END), 0) AS INTEGER) AS unanalyzed_count,
+    CAST(COALESCE(SUM(CASE WHEN shape_hash = 'overflow' THEN query_count ELSE 0 END), 0) AS INTEGER) AS overflow_count,
+    CAST(COALESCE(SUM(CASE WHEN max_lookback_s IS NULL THEN query_count ELSE 0 END), 0) AS INTEGER) AS null_lookback_count,
+    CAST(COUNT(max_lookback_s) AS INTEGER) AS lookback_rows,
+    CAST(COALESCE(MAX(max_lookback_s), 0) AS INTEGER) AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = ?1 AND bucket_date >= ?2 AND bucket_date <= ?3
+`
+
+type QueryShapeCoverageParams struct {
+	SourceID int64  `json:"source_id"`
+	Since    string `json:"since"`
+	Until    string `json:"until"`
+}
+
+type QueryShapeCoverageRow struct {
+	Days              int64 `json:"days"`
+	FilteredDays      int64 `json:"filtered_days"`
+	QueryCount        int64 `json:"query_count"`
+	UnanalyzedCount   int64 `json:"unanalyzed_count"`
+	OverflowCount     int64 `json:"overflow_count"`
+	NullLookbackCount int64 `json:"null_lookback_count"`
+	LookbackRows      int64 `json:"lookback_rows"`
+	MaxLookbackS      int64 `json:"max_lookback_s"`
+}
+
+// Totals over every rollup row of a source from `since` to `until`, both
+// inclusive, not only the rows
+// that ListQueryShapeStats returns. filtered_days counts the days with a
+// query that has a filter: the empty shape, also kept by the 'unanalyzed' and
+// 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
+// and then max_lookback_s means nothing.
+func (q *Queries) QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error) {
+	row := q.queryRow(ctx, q.queryShapeCoverageStmt, queryShapeCoverage, arg.SourceID, arg.Since, arg.Until)
+	var i QueryShapeCoverageRow
+	err := row.Scan(
+		&i.Days,
+		&i.FilteredDays,
+		&i.QueryCount,
+		&i.UnanalyzedCount,
+		&i.OverflowCount,
+		&i.NullLookbackCount,
+		&i.LookbackRows,
+		&i.MaxLookbackS,
+	)
+	return i, err
 }
 
 const queryVolumeByDay = `-- name: QueryVolumeByDay :many
@@ -4298,6 +7141,90 @@ func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, idsJson string)
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordDestinationDelivery = `-- name: RecordDestinationDelivery :exec
+UPDATE notification_destinations
+SET last_delivery_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    last_delivery_status = ?1,
+    last_delivery_error = ?2
+WHERE id = ?3
+`
+
+type RecordDestinationDeliveryParams struct {
+	Status    sql.NullString `json:"status"`
+	LastError sql.NullString `json:"last_error"`
+	ID        int64          `json:"id"`
+}
+
+func (q *Queries) RecordDestinationDelivery(ctx context.Context, arg RecordDestinationDeliveryParams) error {
+	_, err := q.exec(ctx, q.recordDestinationDeliveryStmt, recordDestinationDelivery, arg.Status, arg.LastError, arg.ID)
+	return err
+}
+
+const refreshAlertState = `-- name: RefreshAlertState :exec
+UPDATE alerts
+SET last_state = CASE WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'firing'
+    ) THEN 'firing' WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'no_data'
+    ) THEN 'no_data' ELSE 'resolved' END,
+    eval_seq = eval_seq + 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?1
+`
+
+// After a manual resolve of one group: the rule is firing while any group
+// fires, else no_data while any group has no data.
+func (q *Queries) RefreshAlertState(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.refreshAlertStateStmt, refreshAlertState, id)
+	return err
+}
+
+const releaseDelivery = `-- name: ReleaseDelivery :execrows
+UPDATE notification_deliveries
+SET reserved_by = NULL,
+    reserved_until = NULL,
+    attempts = attempts - 1,
+    next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?1 AS TEXT))
+WHERE id = ?2 AND reserved_token = ?3 AND status = 'pending'
+`
+
+type ReleaseDeliveryParams struct {
+	DelayModifier string `json:"delay_modifier"`
+	ID            int64  `json:"id"`
+	ReservedToken int64  `json:"reserved_token"`
+}
+
+// Hands back a reserved row that was not sent, with the attempt that its
+// reservation counted, due again after delay_modifier.
+func (q *Queries) ReleaseDelivery(ctx context.Context, arg ReleaseDeliveryParams) (int64, error) {
+	result, err := q.exec(ctx, q.releaseDeliveryStmt, releaseDelivery, arg.DelayModifier, arg.ID, arg.ReservedToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const releaseJob = `-- name: ReleaseJob :execrows
+UPDATE jobs
+SET lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1 AND lease_token = ?2
+`
+
+type ReleaseJobParams struct {
+	ID         int64 `json:"id"`
+	LeaseToken int64 `json:"lease_token"`
+}
+
+func (q *Queries) ReleaseJob(ctx context.Context, arg ReleaseJobParams) (int64, error) {
+	result, err := q.exec(ctx, q.releaseJobStmt, releaseJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const removeCollectionItem = `-- name: RemoveCollectionItem :execrows
@@ -4444,12 +7371,130 @@ func (q *Queries) RepairDashboardSummary(ctx context.Context, arg RepairDashboar
 	return result.RowsAffected()
 }
 
+const reportTickExists = `-- name: ReportTickExists :one
+SELECT EXISTS(
+    SELECT 1 FROM report_runs
+    WHERE report_id = ?1 AND trigger = 'schedule'
+      AND scheduled_for = CAST(?2 AS TEXT)
+)
+`
+
+type ReportTickExistsParams struct {
+	ReportID     int64  `json:"report_id"`
+	ScheduledFor string `json:"scheduled_for"`
+}
+
+func (q *Queries) ReportTickExists(ctx context.Context, arg ReportTickExistsParams) (bool, error) {
+	row := q.queryRow(ctx, q.reportTickExistsStmt, reportTickExists, arg.ReportID, arg.ScheduledFor)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const reserveDeliveries = `-- name: ReserveDeliveries :many
+UPDATE notification_deliveries
+SET reserved_by = ?1,
+    reserved_token = reserved_token + 1,
+    reserved_until = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)),
+    attempts = attempts + 1
+WHERE id IN (
+    SELECT c.id FROM notification_deliveries c
+    WHERE c.status = 'pending'
+      AND c.next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      AND (c.reserved_until IS NULL OR c.reserved_until < strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      AND NOT EXISTS (
+          SELECT 1 FROM notification_deliveries e
+          WHERE e.destination_id = c.destination_id AND e.recipient = c.recipient
+            AND e.sequence_key = c.sequence_key AND e.status IN ('pending', 'attempting')
+            AND e.id < c.id)
+    ORDER BY c.id
+    LIMIT ?3
+)
+RETURNING id, destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json, status, attempts, next_attempt_at, reserved_by, reserved_token, reserved_until, last_error, created_at, sent_at
+`
+
+type ReserveDeliveriesParams struct {
+	Owner         sql.NullString `json:"owner"`
+	LeaseModifier string         `json:"lease_modifier"`
+	MaxRows       int64          `json:"max_rows"`
+}
+
+// A row waits while an earlier row of its destination, recipient and
+// sequence key is pending or attempting, so a resolved never overtakes its
+// firing. SQLite has one writer, so this statement needs no row locks.
+func (q *Queries) ReserveDeliveries(ctx context.Context, arg ReserveDeliveriesParams) ([]NotificationDelivery, error) {
+	rows, err := q.query(ctx, q.reserveDeliveriesStmt, reserveDeliveries, arg.Owner, arg.LeaseModifier, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []NotificationDelivery{}
+	for rows.Next() {
+		var i NotificationDelivery
+		if err := rows.Scan(
+			&i.ID,
+			&i.DestinationID,
+			&i.Producer,
+			&i.ProducerRef,
+			&i.Recipient,
+			&i.SequenceKey,
+			&i.Event,
+			&i.DedupKey,
+			&i.MessageJson,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ReservedBy,
+			&i.ReservedToken,
+			&i.ReservedUntil,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.SentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveAlertGroupHistory = `-- name: ResolveAlertGroupHistory :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = ?1,
+    message = ?2
+WHERE alert_id = ?3 AND group_key = ?4 AND status IN ('triggered', 'no_data')
+`
+
+type ResolveAlertGroupHistoryParams struct {
+	ResolvedAt sql.NullTime   `json:"resolved_at"`
+	Message    sql.NullString `json:"message"`
+	AlertID    int64          `json:"alert_id"`
+	GroupKey   string         `json:"group_key"`
+}
+
+func (q *Queries) ResolveAlertGroupHistory(ctx context.Context, arg ResolveAlertGroupHistoryParams) error {
+	_, err := q.exec(ctx, q.resolveAlertGroupHistoryStmt, resolveAlertGroupHistory,
+		arg.ResolvedAt,
+		arg.Message,
+		arg.AlertID,
+		arg.GroupKey,
+	)
+	return err
+}
+
 const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?1
-WHERE alert_id = ?2 AND status = 'triggered'
+WHERE alert_id = ?2 AND status IN ('triggered', 'no_data')
 `
 
 type ResolveAlertHistoryForAlertParams struct {
@@ -4462,10 +7507,28 @@ func (q *Queries) ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAl
 	return err
 }
 
-const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows
+const resumeReport = `-- name: ResumeReport :execrows
+UPDATE reports
+SET state = 'active',
+    pause_reason = '',
+    consecutive_failures = 0,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+`
+
+func (q *Queries) ResumeReport(ctx context.Context, id int64) (int64, error) {
+	result, err := q.exec(ctx, q.resumeReportStmt, resumeReport, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const revokeOAuthGrant = `-- name: RevokeOAuthGrant :one
 UPDATE oauth_grants
 SET revoked_at = ?1, revoke_reason = ?2
 WHERE id = ?3 AND revoked_at IS NULL
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
 `
 
 type RevokeOAuthGrantParams struct {
@@ -4474,15 +7537,27 @@ type RevokeOAuthGrantParams struct {
 	ID     int64          `json:"id"`
 }
 
-func (q *Queries) RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error) {
-	result, err := q.exec(ctx, q.revokeOAuthGrantStmt, revokeOAuthGrant, arg.Now, arg.Reason, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+// Returns no row when the grant was already revoked, so only the call that
+// revokes it reports the revocation.
+func (q *Queries) RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.revokeOAuthGrantStmt, revokeOAuthGrant, arg.Now, arg.Reason, arg.ID)
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
-const revokeOAuthGrantByToken = `-- name: RevokeOAuthGrantByToken :exec
+const revokeOAuthGrantByToken = `-- name: RevokeOAuthGrantByToken :one
 UPDATE oauth_grants
 SET revoked_at = ?1, revoke_reason = ?2
 WHERE oauth_grants.revoked_at IS NULL
@@ -4492,6 +7567,7 @@ WHERE oauth_grants.revoked_at IS NULL
       UNION
       SELECT r.grant_id FROM oauth_refresh_tokens r WHERE r.token_hash = ?4
   )
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
 `
 
 type RevokeOAuthGrantByTokenParams struct {
@@ -4502,21 +7578,36 @@ type RevokeOAuthGrantByTokenParams struct {
 }
 
 // Revoke the grant that owns an access-token ID hash or refresh-token hash,
-// only when the grant belongs to the given client.
-func (q *Queries) RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) error {
-	_, err := q.exec(ctx, q.revokeOAuthGrantByTokenStmt, revokeOAuthGrantByToken,
+// only when the grant belongs to the given client. Returns no row when no
+// active grant matched.
+func (q *Queries) RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.revokeOAuthGrantByTokenStmt, revokeOAuthGrantByToken,
 		arg.Now,
 		arg.Reason,
 		arg.ClientID,
 		arg.TokenHash,
 	)
-	return err
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
-const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :execrows
+const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :one
 UPDATE oauth_grants
 SET revoked_at = ?1, revoke_reason = ?2
 WHERE id = ?3 AND user_id = ?4 AND revoked_at IS NULL
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
 `
 
 type RevokeOAuthGrantForUserParams struct {
@@ -4526,17 +7617,27 @@ type RevokeOAuthGrantForUserParams struct {
 	UserID int64          `json:"user_id"`
 }
 
-func (q *Queries) RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error) {
-	result, err := q.exec(ctx, q.revokeOAuthGrantForUserStmt, revokeOAuthGrantForUser,
+func (q *Queries) RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.revokeOAuthGrantForUserStmt, revokeOAuthGrantForUser,
 		arg.Now,
 		arg.Reason,
 		arg.ID,
 		arg.UserID,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
 }
 
 const saveOAuthAuthCode = `-- name: SaveOAuthAuthCode :execrows
@@ -4598,6 +7699,44 @@ func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuth
 	return err
 }
 
+const setOpenAlertHistoryStatus = `-- name: SetOpenAlertHistoryStatus :one
+UPDATE alert_history
+SET status = ?, message = ?
+WHERE id = ? AND status IN ('triggered', 'no_data')
+RETURNING id
+`
+
+type SetOpenAlertHistoryStatusParams struct {
+	Status  string         `json:"status"`
+	Message sql.NullString `json:"message"`
+	ID      int64          `json:"id"`
+}
+
+// An open episode that moves between firing and no_data.
+func (q *Queries) SetOpenAlertHistoryStatus(ctx context.Context, arg SetOpenAlertHistoryStatusParams) (int64, error) {
+	row := q.queryRow(ctx, q.setOpenAlertHistoryStatusStmt, setOpenAlertHistoryStatus, arg.Status, arg.Message, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const setSavedViewDefaultFlag = `-- name: SetSavedViewDefaultFlag :one
+UPDATE saved_views SET is_default = ? WHERE id = ?
+RETURNING id
+`
+
+type SetSavedViewDefaultFlagParams struct {
+	IsDefault int64 `json:"is_default"`
+	ID        int64 `json:"id"`
+}
+
+func (q *Queries) SetSavedViewDefaultFlag(ctx context.Context, arg SetSavedViewDefaultFlagParams) (int64, error) {
+	row := q.queryRow(ctx, q.setSavedViewDefaultFlagStmt, setSavedViewDefaultFlag, arg.IsDefault, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const setSourceManaged = `-- name: SetSourceManaged :exec
 UPDATE sources SET managed = ?, secret_ref = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
 `
@@ -4657,6 +7796,48 @@ type SetUserPasswordHashParams struct {
 func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
 	_, err := q.exec(ctx, q.setUserPasswordHashStmt, setUserPasswordHash, arg.PasswordHash, arg.ID)
 	return err
+}
+
+const takeReportManualRunCooldown = `-- name: TakeReportManualRunCooldown :execrows
+UPDATE reports
+SET last_manual_run_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+  AND (last_manual_run_at IS NULL
+       OR last_manual_run_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)))
+`
+
+type TakeReportManualRunCooldownParams struct {
+	ID             int64  `json:"id"`
+	WindowModifier string `json:"window_modifier"`
+}
+
+func (q *Queries) TakeReportManualRunCooldown(ctx context.Context, arg TakeReportManualRunCooldownParams) (int64, error) {
+	result, err := q.exec(ctx, q.takeReportManualRunCooldownStmt, takeReportManualRunCooldown, arg.ID, arg.WindowModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const takeReportPreviewCooldown = `-- name: TakeReportPreviewCooldown :execrows
+UPDATE reports
+SET last_preview_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?1
+  AND (last_preview_at IS NULL
+       OR last_preview_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', CAST(?2 AS TEXT)))
+`
+
+type TakeReportPreviewCooldownParams struct {
+	ID             int64  `json:"id"`
+	WindowModifier string `json:"window_modifier"`
+}
+
+func (q *Queries) TakeReportPreviewCooldown(ctx context.Context, arg TakeReportPreviewCooldownParams) (int64, error) {
+	result, err := q.exec(ctx, q.takeReportPreviewCooldownStmt, takeReportPreviewCooldown, arg.ID, arg.WindowModifier)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const teamHasSource = `-- name: TeamHasSource :one
@@ -4861,34 +8042,37 @@ SET name = ?,
     severity = ?,
     labels_json = ?,
     annotations_json = ?,
-    recipient_user_ids_json = ?,
-    webhook_urls_json = ?,
     generator_url = ?,
+    group_by_json = ?,
+    no_data_policy = ?,
+    notify_on_resolve = ?,
     is_active = ?,
+    eval_seq = eval_seq + 1,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 RETURNING id
 `
 
 type UpdateAlertParams struct {
-	Name                 string         `json:"name"`
-	Description          sql.NullString `json:"description"`
-	QueryLanguage        string         `json:"query_language"`
-	EditorMode           string         `json:"editor_mode"`
-	Query                sql.NullString `json:"query"`
-	ConditionJson        sql.NullString `json:"condition_json"`
-	LookbackSeconds      int64          `json:"lookback_seconds"`
-	ThresholdOperator    string         `json:"threshold_operator"`
-	ThresholdValue       float64        `json:"threshold_value"`
-	FrequencySeconds     int64          `json:"frequency_seconds"`
-	Severity             string         `json:"severity"`
-	LabelsJson           sql.NullString `json:"labels_json"`
-	AnnotationsJson      sql.NullString `json:"annotations_json"`
-	RecipientUserIdsJson sql.NullString `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      sql.NullString `json:"webhook_urls_json"`
-	GeneratorUrl         sql.NullString `json:"generator_url"`
-	IsActive             int64          `json:"is_active"`
-	ID                   int64          `json:"id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryLanguage     string         `json:"query_language"`
+	EditorMode        string         `json:"editor_mode"`
+	Query             sql.NullString `json:"query"`
+	ConditionJson     sql.NullString `json:"condition_json"`
+	LookbackSeconds   int64          `json:"lookback_seconds"`
+	ThresholdOperator string         `json:"threshold_operator"`
+	ThresholdValue    float64        `json:"threshold_value"`
+	FrequencySeconds  int64          `json:"frequency_seconds"`
+	Severity          string         `json:"severity"`
+	LabelsJson        sql.NullString `json:"labels_json"`
+	AnnotationsJson   sql.NullString `json:"annotations_json"`
+	GeneratorUrl      sql.NullString `json:"generator_url"`
+	GroupByJson       sql.NullString `json:"group_by_json"`
+	NoDataPolicy      string         `json:"no_data_policy"`
+	NotifyOnResolve   int64          `json:"notify_on_resolve"`
+	IsActive          int64          `json:"is_active"`
+	ID                int64          `json:"id"`
 }
 
 func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64, error) {
@@ -4906,9 +8090,10 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 		arg.Severity,
 		arg.LabelsJson,
 		arg.AnnotationsJson,
-		arg.RecipientUserIdsJson,
-		arg.WebhookUrlsJson,
 		arg.GeneratorUrl,
+		arg.GroupByJson,
+		arg.NoDataPolicy,
+		arg.NotifyOnResolve,
 		arg.IsActive,
 		arg.ID,
 	)
@@ -4920,7 +8105,7 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
-WHERE id = ? AND status = 'triggered'
+WHERE id = ? AND status IN ('triggered', 'no_data')
 RETURNING id
 `
 
@@ -4934,6 +8119,60 @@ func (q *Queries) UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlert
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const updateAlertSilence = `-- name: UpdateAlertSilence :one
+UPDATE alert_silences
+SET alert_id = ?,
+    matchers_json = ?,
+    comment = ?,
+    schedule_kind = ?,
+    starts_at = ?,
+    ends_at = ?,
+    weekly_json = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?
+RETURNING id, source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by, created_at, updated_at
+`
+
+type UpdateAlertSilenceParams struct {
+	AlertID      sql.NullInt64  `json:"alert_id"`
+	MatchersJson string         `json:"matchers_json"`
+	Comment      string         `json:"comment"`
+	ScheduleKind string         `json:"schedule_kind"`
+	StartsAt     sql.NullTime   `json:"starts_at"`
+	EndsAt       sql.NullTime   `json:"ends_at"`
+	WeeklyJson   sql.NullString `json:"weekly_json"`
+	ID           int64          `json:"id"`
+}
+
+func (q *Queries) UpdateAlertSilence(ctx context.Context, arg UpdateAlertSilenceParams) (AlertSilence, error) {
+	row := q.queryRow(ctx, q.updateAlertSilenceStmt, updateAlertSilence,
+		arg.AlertID,
+		arg.MatchersJson,
+		arg.Comment,
+		arg.ScheduleKind,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.WeeklyJson,
+		arg.ID,
+	)
+	var i AlertSilence
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.AlertID,
+		&i.MatchersJson,
+		&i.Comment,
+		&i.ScheduleKind,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.WeeklyJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateCollection = `-- name: UpdateCollection :exec
@@ -5033,6 +8272,118 @@ func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJo
 	return id, err
 }
 
+const updateNotificationDestination = `-- name: UpdateNotificationDestination :one
+UPDATE notification_destinations
+SET name = ?1,
+    scope = ?2,
+    team_id = ?3,
+    config_json = ?4,
+    secret = ?5,
+    is_active = ?6,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?7
+RETURNING id, name, type, scope, team_id, config_json, secret, is_active, created_by, last_delivery_at, last_delivery_status, last_delivery_error, created_at, updated_at
+`
+
+type UpdateNotificationDestinationParams struct {
+	Name       string        `json:"name"`
+	Scope      string        `json:"scope"`
+	TeamID     sql.NullInt64 `json:"team_id"`
+	ConfigJson string        `json:"config_json"`
+	Secret     string        `json:"secret"`
+	IsActive   int64         `json:"is_active"`
+	ID         int64         `json:"id"`
+}
+
+func (q *Queries) UpdateNotificationDestination(ctx context.Context, arg UpdateNotificationDestinationParams) (NotificationDestination, error) {
+	row := q.queryRow(ctx, q.updateNotificationDestinationStmt, updateNotificationDestination,
+		arg.Name,
+		arg.Scope,
+		arg.TeamID,
+		arg.ConfigJson,
+		arg.Secret,
+		arg.IsActive,
+		arg.ID,
+	)
+	var i NotificationDestination
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.Scope,
+		&i.TeamID,
+		&i.ConfigJson,
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedBy,
+		&i.LastDeliveryAt,
+		&i.LastDeliveryStatus,
+		&i.LastDeliveryError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateReport = `-- name: UpdateReport :execrows
+UPDATE reports
+SET name = ?1,
+    source_kind = ?2,
+    dashboard_id = ?3,
+    tab_id = ?4,
+    saved_query_id = ?5,
+    schedule_json = ?6,
+    timezone = ?7,
+    time_range = ?8,
+    range_anchor = ?9,
+    variables_json = ?10,
+    max_rows = ?11,
+    skip_if_empty = ?12,
+    attach_csv = ?13,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?14
+`
+
+type UpdateReportParams struct {
+	Name          string         `json:"name"`
+	SourceKind    string         `json:"source_kind"`
+	DashboardID   sql.NullInt64  `json:"dashboard_id"`
+	TabID         sql.NullString `json:"tab_id"`
+	SavedQueryID  sql.NullInt64  `json:"saved_query_id"`
+	ScheduleJson  string         `json:"schedule_json"`
+	Timezone      string         `json:"timezone"`
+	TimeRange     sql.NullString `json:"time_range"`
+	RangeAnchor   string         `json:"range_anchor"`
+	VariablesJson string         `json:"variables_json"`
+	MaxRows       int64          `json:"max_rows"`
+	SkipIfEmpty   bool           `json:"skip_if_empty"`
+	AttachCsv     bool           `json:"attach_csv"`
+	ID            int64          `json:"id"`
+}
+
+func (q *Queries) UpdateReport(ctx context.Context, arg UpdateReportParams) (int64, error) {
+	result, err := q.exec(ctx, q.updateReportStmt, updateReport,
+		arg.Name,
+		arg.SourceKind,
+		arg.DashboardID,
+		arg.TabID,
+		arg.SavedQueryID,
+		arg.ScheduleJson,
+		arg.Timezone,
+		arg.TimeRange,
+		arg.RangeAnchor,
+		arg.VariablesJson,
+		arg.MaxRows,
+		arg.SkipIfEmpty,
+		arg.AttachCsv,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateSavedQuery = `-- name: UpdateSavedQuery :exec
 UPDATE saved_queries
 SET name = ?,
@@ -5066,6 +8417,54 @@ func (q *Queries) UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryPara
 	return err
 }
 
+const updateSavedView = `-- name: UpdateSavedView :one
+UPDATE saved_views
+SET name = ?,
+    description = ?,
+    definition = ?,
+    revision = revision + 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ? AND revision = ?
+RETURNING id, source_id, scope, user_id, team_id, name, description, definition, is_default, managed, revision, created_by, created_at, updated_at
+`
+
+type UpdateSavedViewParams struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Definition  string `json:"definition"`
+	ID          int64  `json:"id"`
+	Revision    int64  `json:"revision"`
+}
+
+// Compare-and-swap on the caller's revision; no row means missing or stale.
+func (q *Queries) UpdateSavedView(ctx context.Context, arg UpdateSavedViewParams) (SavedView, error) {
+	row := q.queryRow(ctx, q.updateSavedViewStmt, updateSavedView,
+		arg.Name,
+		arg.Description,
+		arg.Definition,
+		arg.ID,
+		arg.Revision,
+	)
+	var i SavedView
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.Scope,
+		&i.UserID,
+		&i.TeamID,
+		&i.Name,
+		&i.Description,
+		&i.Definition,
+		&i.IsDefault,
+		&i.Managed,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSource = `-- name: UpdateSource :exec
 UPDATE sources
 SET name = ?,
@@ -5079,6 +8478,7 @@ SET name = ?,
     ttl_days = ?,
     managed = ?,
     secret_ref = ?,
+    header_secret_refs = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?
 `
@@ -5095,6 +8495,7 @@ type UpdateSourceParams struct {
 	TtlDays           int64          `json:"ttl_days"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
+	HeaderSecretRefs  sql.NullString `json:"header_secret_refs"`
 	ID                int64          `json:"id"`
 }
 
@@ -5112,6 +8513,7 @@ func (q *Queries) UpdateSource(ctx context.Context, arg UpdateSourceParams) erro
 		arg.TtlDays,
 		arg.Managed,
 		arg.SecretRef,
+		arg.HeaderSecretRefs,
 		arg.ID,
 	)
 	return err
@@ -5211,6 +8613,162 @@ type UpdateUserLastLoginParams struct {
 // Record a login without rewriting the rest of the user row
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
 	_, err := q.exec(ctx, q.updateUserLastLoginStmt, updateUserLastLogin, arg.LastLoginAt, arg.ID)
+	return err
+}
+
+const upsertAlertInstance = `-- name: UpsertAlertInstance :exec
+INSERT INTO alert_instances (alert_id, group_key, group_json, state, value, state_since, last_seen_at, history_id, notified)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (alert_id, group_key) DO UPDATE SET
+    group_json = excluded.group_json,
+    state = excluded.state,
+    value = excluded.value,
+    state_since = excluded.state_since,
+    last_seen_at = excluded.last_seen_at,
+    history_id = excluded.history_id,
+    notified = excluded.notified
+`
+
+type UpsertAlertInstanceParams struct {
+	AlertID    int64           `json:"alert_id"`
+	GroupKey   string          `json:"group_key"`
+	GroupJson  string          `json:"group_json"`
+	State      string          `json:"state"`
+	Value      sql.NullFloat64 `json:"value"`
+	StateSince time.Time       `json:"state_since"`
+	LastSeenAt sql.NullTime    `json:"last_seen_at"`
+	HistoryID  sql.NullInt64   `json:"history_id"`
+	Notified   int64           `json:"notified"`
+}
+
+func (q *Queries) UpsertAlertInstance(ctx context.Context, arg UpsertAlertInstanceParams) error {
+	_, err := q.exec(ctx, q.upsertAlertInstanceStmt, upsertAlertInstance,
+		arg.AlertID,
+		arg.GroupKey,
+		arg.GroupJson,
+		arg.State,
+		arg.Value,
+		arg.StateSince,
+		arg.LastSeenAt,
+		arg.HistoryID,
+		arg.Notified,
+	)
+	return err
+}
+
+const upsertJob = `-- name: UpsertJob :exec
+
+INSERT INTO jobs (
+    kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled,
+    next_run_at, created_at, updated_at
+) VALUES (
+    ?1, ?2, ?3, ?4,
+    ?5, ?6, ?7, ?8,
+    COALESCE(CAST(?9 AS TEXT), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+)
+ON CONFLICT (kind, key) DO UPDATE SET
+    next_run_at = CASE
+        WHEN jobs.schedule_kind = excluded.schedule_kind
+         AND jobs.schedule_expr = excluded.schedule_expr
+         AND jobs.timezone = excluded.timezone
+        THEN jobs.next_run_at
+        ELSE excluded.next_run_at
+    END,
+    schedule_kind = excluded.schedule_kind,
+    schedule_expr = excluded.schedule_expr,
+    timezone = excluded.timezone,
+    misfire = excluded.misfire,
+    grace_seconds = excluded.grace_seconds,
+    enabled = excluded.enabled,
+    updated_at = excluded.updated_at
+`
+
+type UpsertJobParams struct {
+	Kind         string         `json:"kind"`
+	Key          string         `json:"key"`
+	ScheduleKind string         `json:"schedule_kind"`
+	ScheduleExpr string         `json:"schedule_expr"`
+	Timezone     string         `json:"timezone"`
+	Misfire      string         `json:"misfire"`
+	GraceSeconds int64          `json:"grace_seconds"`
+	Enabled      int64          `json:"enabled"`
+	FirstRunAt   sql.NullString `json:"first_run_at"`
+}
+
+// Jobs (internal/jobs). Every time comparison uses the database clock.
+// A new job, or an existing job whose schedule changes, is due at first_run_at,
+// or now when that is null; any other update keeps its next run and lease.
+func (q *Queries) UpsertJob(ctx context.Context, arg UpsertJobParams) error {
+	_, err := q.exec(ctx, q.upsertJobStmt, upsertJob,
+		arg.Kind,
+		arg.Key,
+		arg.ScheduleKind,
+		arg.ScheduleExpr,
+		arg.Timezone,
+		arg.Misfire,
+		arg.GraceSeconds,
+		arg.Enabled,
+		arg.FirstRunAt,
+	)
+	return err
+}
+
+const upsertSchemaAdvisorDismissal = `-- name: UpsertSchemaAdvisorDismissal :exec
+INSERT INTO schema_advisor_dismissals (source_id, finding_id, reason, dismissed_by, dismissed_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (source_id, finding_id) DO UPDATE SET
+    reason = excluded.reason,
+    dismissed_by = excluded.dismissed_by,
+    dismissed_at = excluded.dismissed_at
+`
+
+type UpsertSchemaAdvisorDismissalParams struct {
+	SourceID    int64         `json:"source_id"`
+	FindingID   string        `json:"finding_id"`
+	Reason      string        `json:"reason"`
+	DismissedBy sql.NullInt64 `json:"dismissed_by"`
+	DismissedAt time.Time     `json:"dismissed_at"`
+}
+
+// Dismissing a dismissed finding again replaces its reason and author.
+func (q *Queries) UpsertSchemaAdvisorDismissal(ctx context.Context, arg UpsertSchemaAdvisorDismissalParams) error {
+	_, err := q.exec(ctx, q.upsertSchemaAdvisorDismissalStmt, upsertSchemaAdvisorDismissal,
+		arg.SourceID,
+		arg.FindingID,
+		arg.Reason,
+		arg.DismissedBy,
+		arg.DismissedAt,
+	)
+	return err
+}
+
+const upsertSchemaAdvisorReport = `-- name: UpsertSchemaAdvisorReport :exec
+INSERT INTO schema_advisor_reports (source_id, generated_at, generated_by, window_days, report)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (source_id) DO UPDATE SET
+    generated_at = excluded.generated_at,
+    generated_by = excluded.generated_by,
+    window_days = excluded.window_days,
+    report = excluded.report
+`
+
+type UpsertSchemaAdvisorReportParams struct {
+	SourceID    int64         `json:"source_id"`
+	GeneratedAt time.Time     `json:"generated_at"`
+	GeneratedBy sql.NullInt64 `json:"generated_by"`
+	WindowDays  int64         `json:"window_days"`
+	Report      string        `json:"report"`
+}
+
+// A refresh replaces the source's report.
+func (q *Queries) UpsertSchemaAdvisorReport(ctx context.Context, arg UpsertSchemaAdvisorReportParams) error {
+	_, err := q.exec(ctx, q.upsertSchemaAdvisorReportStmt, upsertSchemaAdvisorReport,
+		arg.SourceID,
+		arg.GeneratedAt,
+		arg.GeneratedBy,
+		arg.WindowDays,
+		arg.Report,
+	)
 	return err
 }
 

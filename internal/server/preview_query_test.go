@@ -65,6 +65,7 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 		body        string
 		wantData    string
 		wantHistory models.QueryHistory
+		wantStart   time.Time // the start time behind the history lookback; zero for none
 	}{
 		{
 			name:        "logs",
@@ -79,6 +80,7 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 				`"generated_sql":` + jsonString(t, generatedSQL) + `,"generated_query":` + jsonString(t, generatedSQL) +
 				`,"generated_query_language":"clickhouse-sql"}`,
 			wantHistory: models.QueryHistory{QueryText: `level="error"`, QueryLanguage: models.QueryLanguageLogchefQL, DurationMs: 7, RowCount: 1},
+			wantStart:   time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
 		},
 	}
 	for _, endpoint := range endpoints {
@@ -152,6 +154,7 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 					return queryID
 				}
 
+				lookbackFloor := int64(time.Since(endpoint.wantStart) / time.Second)
 				header, body := request(endpoint.body)
 				queryID := checkBody(body)
 				wantHeader := ""
@@ -163,6 +166,15 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 				}
 				select {
 				case entry := <-s.historyQueue:
+					if endpoint.wantStart.IsZero() {
+						if entry.LookbackSeconds != nil {
+							t.Fatalf("lookback=%d, want none", *entry.LookbackSeconds)
+						}
+					} else if lookbackCeil := int64(time.Since(endpoint.wantStart) / time.Second); entry.LookbackSeconds == nil ||
+						*entry.LookbackSeconds < lookbackFloor || *entry.LookbackSeconds > lookbackCeil {
+						t.Fatalf("lookback=%v, want between %d and %d", entry.LookbackSeconds, lookbackFloor, lookbackCeil)
+					}
+					entry.LookbackSeconds = nil
 					want := endpoint.wantHistory
 					want.UserID, want.TeamID, want.SourceID = user.ID, src.TeamID(), source.ID
 					if !reflect.DeepEqual(*entry, want) {

@@ -4,7 +4,7 @@ export interface SystemSetting {
   key: string;
   value: string;
   value_type: "string" | "number" | "boolean" | "duration";
-  category: "alerts" | "ai" | "auth" | "server";
+  category: "alerts" | "ai" | "auth" | "server" | "reports";
   description?: string;
   is_sensitive: boolean;
   masked_value?: string;
@@ -20,17 +20,13 @@ export interface SettingsByCategory {
 export interface UpdateSettingRequest {
   value: string;
   value_type: "string" | "number" | "boolean" | "duration";
-  category: "alerts" | "ai" | "auth" | "server";
+  category: "alerts" | "ai" | "auth" | "server" | "reports";
   description: string;
   is_sensitive: boolean;
 }
 
 export interface TestEmailRequest {
   recipient_email?: string;
-}
-
-export interface TestWebhookRequest {
-  webhook_url: string;
 }
 
 export interface TestNotificationResponse {
@@ -53,7 +49,4 @@ export const settingsApi = {
 
   testEmail: (data?: TestEmailRequest) =>
     apiClient.post<TestNotificationResponse>('/admin/settings/test-email', data || {}),
-
-  testWebhook: (data: TestWebhookRequest) =>
-    apiClient.post<TestNotificationResponse>('/admin/settings/test-webhook', data),
 };

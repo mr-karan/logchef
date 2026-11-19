@@ -1,6 +1,9 @@
 ---
 title: Schema Design
-description: Understand ClickHouse schema design and optimization for fast, storage-efficient log analytics with Logchef.
+head:
+  - tag: title
+    content: "ClickHouse Log Schema Design | Logchef"
+description: "Design ClickHouse tables for log analytics with Logchef. Choose columns, ordering keys, and retention settings for efficient storage and queries."
 ---
 
 Logchef works with any ClickHouse table that has a timestamp field. If you don't have an existing schema, or want to start ingesting logs quickly without worrying about the details, you can use the optimized built-in schemas Logchef provides.

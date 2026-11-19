@@ -14,8 +14,10 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -39,6 +41,8 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 	if user == nil {
 		return sendMissingUser(c)
 	}
+	auditTarget(c, audit.ExportSourceTarget(teamID, sourceID))
+	auditDetail(c, "mode", "stream")
 
 	exp, ok := s.prepareExport(c, sourceID, inferExportFormatFromAccept(c.Get("Accept")), "failed to get source for export")
 	if !ok {
@@ -75,14 +79,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source connection", models.DatabaseErrorType)
 	}
 
-	exportLimit := req.Limit
-	if exportLimit <= 0 {
-		exportLimit = s.config.Export.MaxRows
-	}
-	if exportLimit > s.config.Export.MaxRows {
-		exportLimit = s.config.Export.MaxRows
-	}
-
+	exportLimit := s.exportRowLimit(req.Limit)
 	qb := client.QueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
 	if err != nil {
@@ -107,6 +104,19 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
+	}
+
+	// No log data leaves the server without a stored event, so the event is
+	// stored before the query runs and a failed insert stops the export.
+	target := audit.ExportSourceTarget(teamID, sourceID)
+	auditSet(c, target, nil, audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, exportLimit, req.RawSQL))
+	if err := s.recordRouteEventOrFail(c, fiber.StatusOK); err != nil {
+		cancel()
+		queryTracker.RemoveQuery(queryID)
+		clearAuditFields(c)
+		auditTarget(c, target)
+		s.log.Error("export not started: audit event not stored", "error", err, "source_id", sourceID, "user_id", user.ID)
+		return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: the export did not start")
 	}
 
 	opts := buildResult.QueryOptions(*req.QueryTimeout)
@@ -238,6 +248,15 @@ func isExportFormatAllowed(format string, allowed []string) bool {
 	return false
 }
 
+// exportRowLimit is the row limit an export runs with: the requested limit,
+// capped at export.max_rows, which also applies when none is requested.
+func (s *Server) exportRowLimit(requested int) int {
+	if requested <= 0 || requested > s.config.Export.MaxRows {
+		return s.config.Export.MaxRows
+	}
+	return requested
+}
+
 func exportContentType(format string) (contentType, extension string) {
 	if format == "csv" {
 		return "text/csv; charset=utf-8", "csv"
@@ -294,7 +313,7 @@ func (w *exportRowWriter) WriteRow(row map[string]any) error {
 	if w.format == "csv" {
 		record := make([]string, len(w.columns))
 		for i, col := range w.columns {
-			record[i] = csvValue(row[col.Name])
+			record[i] = util.CSVValue(row[col.Name])
 		}
 		if err := w.csv.Write(record); err != nil {
 			return err
@@ -354,31 +373,4 @@ func (w *exportRowWriter) writeNDJSON(v any) error {
 		return err
 	}
 	return w.out.WriteByte('\n')
-}
-
-func csvValue(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case time.Time:
-		return v.Format(time.RFC3339Nano)
-	case []byte:
-		return string(v)
-	case fmt.Stringer:
-		return v.String()
-	case string:
-		return v
-	case bool:
-		return strconv.FormatBool(v)
-	case int:
-		return strconv.Itoa(v)
-	case int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		return fmt.Sprint(v)
-	default:
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprint(v)
-		}
-		return string(encoded)
-	}
 }

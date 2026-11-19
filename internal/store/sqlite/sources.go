@@ -18,6 +18,10 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 	if err := source.SyncConnectionConfig(); err != nil {
 		return fmt.Errorf("prepare source connection config: %w", err)
 	}
+	headerSecretRefs, err := models.EncodeHeaderSecretRefs(source.HeaderSecretRefs)
+	if err != nil {
+		return err
+	}
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.CreateSourceParams{
@@ -32,6 +36,7 @@ func (db *DB) CreateSource(ctx context.Context, source *models.Source) error {
 		TtlDays:           int64(source.TTLDays),
 		Managed:           boolToInt(source.Managed),
 		SecretRef:         sql.NullString{String: source.SecretRef, Valid: source.SecretRef != ""},
+		HeaderSecretRefs:  sql.NullString{String: string(headerSecretRefs), Valid: headerSecretRefs != nil},
 	}
 
 	// Execute the generated query.
@@ -79,6 +84,12 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 	return mapSourceRowToModel(&sourceRow), nil
 }
 
+// GetSourceForUpdate retrieves a source by ID. Inside WithTx the read runs on
+// the transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetSourceForUpdate(ctx context.Context, id models.SourceID) (*models.Source, error) {
+	return db.GetSource(ctx, id)
+}
+
 // GetSourceByIdentityKey retrieves a single source by its provider-computed identity key.
 // It returns models.ErrNotFound if no matching source exists.
 func (db *DB) GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error) {
@@ -118,6 +129,10 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 	if err := source.SyncConnectionConfig(); err != nil {
 		return fmt.Errorf("prepare source connection config: %w", err)
 	}
+	headerSecretRefs, err := models.EncodeHeaderSecretRefs(source.HeaderSecretRefs)
+	if err != nil {
+		return err
+	}
 
 	// Map domain model to sqlc parameters.
 	params := sqlc.UpdateSourceParams{
@@ -132,10 +147,11 @@ func (db *DB) UpdateSource(ctx context.Context, source *models.Source) error {
 		TtlDays:           int64(source.TTLDays),
 		Managed:           boolToInt(source.Managed),
 		SecretRef:         sql.NullString{String: source.SecretRef, Valid: source.SecretRef != ""},
+		HeaderSecretRefs:  sql.NullString{String: string(headerSecretRefs), Valid: headerSecretRefs != nil},
 		ID:                int64(source.ID),
 	}
 
-	err := db.writeQueries.UpdateSource(ctx, params)
+	err = db.writeQueries.UpdateSource(ctx, params)
 	if err != nil {
 		db.log.Error("failed to update source record in db", "error", err, "source_id", source.ID)
 		// TODO: Check for specific errors like not found? The sqlc exec doesn't return ErrNoRows usually.

@@ -1,25 +1,36 @@
 ---
 title: Alerting
-description: Set up scheduled log alerts on ClickHouse or VictoriaLogs sources with email and webhook notifications when thresholds are exceeded.
+head:
+  - tag: title
+    content: "Log Alerts for ClickHouse, VictoriaLogs and Loki | Logchef"
+description: Alert rules on ClickHouse, VictoriaLogs or Grafana Loki sources that fire per group, report missing data, mute with silences, backtest before saving and notify email, webhook, Slack and PagerDuty destinations.
 ---
 
-Logchef evaluates alert queries on a schedule and sends notifications when thresholds are exceeded. Alerts fire via email (SMTP) and webhooks, so you don't need a separate alerting system.
+Logchef evaluates alert queries on a schedule, keeps a state for each group of
+the result, and sends a notification when a group starts firing, reports no
+data or resolves. Notifications go to reusable destinations: email, webhook,
+Slack and PagerDuty.
 
-## Quick Start
+Upgrading from 2.7? Read [Upgrading from 2.7](#upgrading-from-27) first: the
+alert API, the webhook targets and the deployment steps changed.
 
-1. Navigate to your team/source → **Alerts** → **New Alert**
-2. Choose a query mode supported by the source
-3. Write a filter or native query
-4. Set threshold: greater than 100
-5. Set lookback: 5 minutes, frequency: 60 seconds
-6. Add recipients and/or webhook URLs
-7. Save
+## Quick start
 
-For ClickHouse and VictoriaLogs sources, Logchef can generate the executable alert query automatically from a LogchefQL condition. Native mode remains available when you want to write SQL or LogsQL directly.
+1. Open **Alerts** for your team and source, then **New Alert**.
+2. Choose a query mode supported by the source.
+3. Write a filter or a native query.
+4. Set the threshold, for example greater than 100.
+5. Set the lookback, for example 5 minutes, and the frequency, for example 60 seconds.
+6. Press **Test** to see the current value, and **Run backtest** to see how often the rule would have fired.
+7. Pick one or more destinations, or create one with **New destination**.
+8. Save.
 
-## Query Modes
+## Query modes
 
-**Condition mode**: Write a LogchefQL filter condition and pick an aggregate function (`count`, `sum`, `avg`, `min`, `max`). For anything beyond `count`, also pick the field to aggregate over: schema-backed suggestions show all fields for VictoriaLogs sources and numeric columns for ClickHouse. Logchef generates the backend-native executable query and adds the alert window automatically.
+**Condition mode**: write a LogchefQL filter and pick an aggregate function
+(`count`, `sum`, `avg`, `min`, `max`). For anything other than `count`, also
+pick the field to aggregate. On ClickHouse and VictoriaLogs, **Group by** names
+up to four fields, and each group fires on its own.
 
 ```
 severity_text = "ERROR"
@@ -27,37 +38,215 @@ status_code >= 500 and service = "api"
 body ~ "timeout"
 ```
 
-**Native mode**: Write the source's native alert query. The query must return a single numeric value.
+The rule is stored as one LogchefQL aggregation, with `query_language` set to
+`logchefql`:
 
-```sql
-SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
-FROM logs
-WHERE service = 'api-gateway'
-  AND timestamp >= now() - toIntervalSecond(600)
+```text
+status_code >= 500 | count() as value by service
 ```
 
-For VictoriaLogs sources, native mode uses LogsQL and evaluates through `stats_query`. Logchef applies the configured lookback window automatically, so the query can stay focused on the filter and stats logic.
+The server compiles it to the source's query language at every evaluation,
+for the lookback that ends at the evaluation instant, so a test, a backtest
+and the scheduled run read the same query. The form no longer previews the
+compiled query or checks the filter as you type: **Test** and save report
+errors.
+
+Through the API, the query takes exactly one aggregate, at most four `by`
+keys and no `time` key; anything else answers 400, as does `logchefql` with
+`editor_mode` set to `native`. `group_by` may be left empty, because the `by`
+keys fill it; a `group_by` that differs from them answers 400. A window where
+the aggregate had no numeric input, such as `sum` over no matching row, counts
+as no data and follows the rule's [no-data policy](#when-the-query-returns-no-rows).
+With the default `zero` policy, that is the same result as before.
+
+A condition rule saved before conditions were compiled on the server keeps the
+native query the form generated, and runs it unchanged. Saving it again from
+the form stores it as LogchefQL.
+
+**Native mode**: write the source's own query. On ClickHouse the query reads
+its window from the time macros, which expand to the rule's lookback that ends
+at the evaluation instant:
+
+| Macro | Expands to |
+|-------|------------|
+| `{{__time_filter}}` | A condition on the source's timestamp column for the window |
+| `{{__from}}`, `{{__to}}` | The start and the end of the window |
+
+```sql
+SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) AS value
+FROM logs
+WHERE service = 'api-gateway'
+  AND {{__time_filter}}
+```
+
+A query that uses `now() - toIntervalSecond(600)` still runs, but it cannot be
+backtested, and a late evaluation reads the wrong window. Other macros such as
+`{{__interval}}`, and user variables, are refused on save, because an alert has
+nobody to supply them. Save renders the macros the same way evaluation does,
+so a query that saves also runs. The test result warns when a ClickHouse SQL
+query has no time filter: no macro and no condition on the timestamp column.
+
+On VictoriaLogs, native mode takes LogsQL and evaluates through
+`stats_query`. Logchef applies the lookback window, so the query holds the
+filter and the stats only.
 
 ```text
 level:="error" | stats count() as value
 ```
 
-## Alert Configuration
+On Grafana Loki, native mode takes a LogQL metric query, evaluated as an
+instant query at the evaluation instant. The range in the query, such as
+`[5m]`, decides what is counted, and Logchef does not rewrite it. The form
+still asks for a lookback, because backtests use it, and warns without
+blocking a save when the query has no range equal to the lookback. Condition
+mode on Loki compiles the filter into `count_over_time` for `count`, and into
+`unwrap` with `sum_over_time`, `min_over_time`, `max_over_time` or
+`avg_over_time` for the other aggregates, over a range equal to the lookback.
+A Loki condition cannot group; write a native LogQL query with `sum by (...)`
+for that. A log query is refused with "A Loki alert needs a metric query".
+
+```text
+sum(count_over_time({service_name="payments-api", level="error"} [5m]))
+```
+
+## Group by
+
+A rule can group by up to four fields. Each row of the result is one group,
+and each group fires, notifies and resolves on its own. In condition mode on
+ClickHouse and VictoriaLogs, pick the fields under **Group by**; they become
+the `by` keys of the LogchefQL rule. In native mode, group in the query and
+name the result columns in **Group by**:
+
+```sql
+SELECT service, count() AS value
+FROM logs
+WHERE level = 'error' AND {{__time_filter}}
+GROUP BY service
+```
+
+```text
+level:="error" | stats by (service) count() as value
+```
+
+```text
+sum by (service) (count_over_time({app="shop"} |= "error" [5m]))
+```
+
+With **Group by** `service`, these fire for `checkout` and leave `search`
+alone. The value is the column named `value`, or else the first column that is
+not a group column.
+
+An evaluation fails, records an error in the history and changes no state,
+when:
+
+- a group column is missing from the result,
+- two rows have the same group,
+- a value is not a finite number,
+- the result has more than 100 rows, or the backend cut it. Add a `HAVING`
+  clause, or a `LIMIT` with an `ORDER BY`.
+
+The rule's page lists its groups with their state, value and how long they
+have been in it. The list of rules shows "3 firing" or "1 with no data".
+Changing **Group by** closes every open episode with the message "rule
+changed". Each old group that sent its firing notification sends a resolved
+one, with its own PagerDuty dedup key, to the destinations the rule had
+before the edit, so the incidents of the old groups close. Nothing is sent
+when **Notify when resolved** is off or a silence mutes the group.
+
+## When the query returns no rows
+
+**When the query returns no rows** decides what an empty result means:
+
+| Policy | A group without a row |
+|--------|-----------------------|
+| **Compare 0 with the threshold** (`zero`, the default) | Compares 0 with the threshold, as Logchef always did |
+| **Report no data** (`no_data`) | Opens a `no_data` episode and sends one notification |
+| **Keep the current state** (`keep`) | Keeps its state |
+
+Under `no_data` and `keep`, the rule also tracks groups that are `ok`, so it
+notices a group that stops reporting. A grouped rule whose result is empty uses
+one group with an empty key for its no-data state.
+
+Under `no_data` and `keep`, a named group with no row for 24 hours is
+forgotten. If it had an open episode, the episode closes with "group forgotten
+after 24 hours without data" and the resolved notification goes out. A job
+that reports weekly therefore resolves after a day and starts fresh at its
+next run. An ungrouped rule, and the empty-key group of a grouped rule, are
+never forgotten: their `no_data` episode stays open until rows return or
+someone resolves it. A rule tracks at most 200 groups; more is an evaluation
+error.
+
+A firing group that loses its data under `no_data` keeps its episode: the
+state moves to `no_data` and sends one notification for the change. The same
+happens back from `no_data` to firing.
+
+**Notify when resolved** (`notify_on_resolve`, on by default) decides whether
+a closed episode sends a resolved notification, including a manual resolve.
+
+## Rule settings
 
 | Field | Description |
 |-------|-------------|
 | Name | Human-readable identifier |
-| Severity | `info`, `warning`, or `critical` |
-| Query | LogchefQL condition, ClickHouse SQL, or VictoriaLogs LogsQL depending on source |
-| Threshold | Value + operator (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
-| Frequency | Evaluation interval in seconds |
-| Lookback | Time range for the query |
-| Recipients | Team members to email |
-| Webhook URLs | HTTP endpoints to POST payloads to |
+| Severity | `info`, `warning` or `critical` |
+| Query | LogchefQL condition, ClickHouse SQL, VictoriaLogs LogsQL or Loki LogQL, depending on the source |
+| Threshold | Value and operator (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
+| Frequency | Seconds between evaluations, at least 10 |
+| Lookback | The window the query reads, ending at the evaluation instant |
+| Group by | Up to four fields, in condition mode on ClickHouse and VictoriaLogs, or result columns in native mode |
+| When the query returns no rows | `zero`, `no_data` or `keep` |
+| Notify when resolved | Send a resolved notification when an episode closes |
+| Destinations | Up to 10 notification destinations |
+| Labels, annotations | Key-value pairs sent with every notification |
 
-## Notifications
+```json
+{
+  "labels": { "env": "production", "service": "payment-api" },
+  "annotations": { "runbook": "https://wiki.example.com/high-error-rate" }
+}
+```
 
-### Email (SMTP)
+## Notification destinations
+
+A destination is a reusable target: change a Slack channel once, and every
+rule that uses it follows. Manage them on the **Destinations** tab beside
+**Rules** and **Silences**, or create one from the alert form with **New
+destination**.
+
+| Type | What it sends | Secret |
+|------|---------------|--------|
+| Email | One email per group to each recipient, Logchef users and, for global admins, other addresses | None |
+| Webhook | JSON `POST` in payload version 1 or 2 | The URL |
+| Slack | A Block Kit message to an incoming webhook | The incoming webhook URL |
+| PagerDuty | Events API v2 events, one incident per group | The 32-character routing key |
+
+**Who can use it.**
+
+| Scope | Use in a rule | Create | Edit, delete |
+|-------|---------------|--------|--------------|
+| Only me (`private`) | The creator | Any user | The creator, global admins |
+| This team (`team`) | Members of the team | Team owners, admins and editors | The creator, team owners and admins, global admins |
+| Everyone (`global`) | Everyone | Global admins | Global admins |
+
+A rule edit may add only destinations the editor can use. Destinations already
+on the rule stay when someone else edits it. Only global admins can add an
+email address that does not belong to a Logchef user.
+
+**Secrets never leave the server.** The API returns `has_secret` and a
+`secret_hint`: the host of a URL, or the last four characters of a routing
+key. On update, a blank `secret` keeps the stored one. Delivery errors and log
+lines never carry a URL, a routing key or a response body.
+
+**Send test** sends a `test` message now and shows the result. A saved destination
+is tested by id, so the stored secret is used. A PagerDuty test opens a real
+incident with the key `logchef:test:<number>`, which stays open until someone
+resolves it in PagerDuty.
+
+A destination that a rule uses cannot be deleted: the request answers 409 with
+the number of rules. Turn it off instead: an inactive destination fails its
+pending deliveries at once.
+
+### Email
 
 Configure SMTP in **Administration → System Settings → Alerts**:
 
@@ -68,51 +257,322 @@ Configure SMTP in **Administration → System Settings → Alerts**:
 | SMTP Security | `starttls` |
 | SMTP From | `alerts@example.com` |
 
-### Webhooks
+An email destination holds up to 20 recipients, users and addresses together.
+A user's address is read when the email is sent. Each group of a rule sends
+its own email; the subject names the group and says `TRIGGERED`, `RESOLVED`
+or `NO DATA`.
 
-Add webhook URLs per alert. Logchef POSTs a JSON payload containing:
+### Webhook
 
-- Alert name, severity, status (`triggered` / `resolved`)
-- The query result value and threshold
-- Labels (team, source, custom key-value pairs)
-- Annotations (description, runbook URL, query text)
+Logchef `POST`s JSON to the URL. Every request carries the header
+`Logchef-Delivery-Id`, the id of the delivery. Delivery is at least once (see
+[Delivery and retries](#delivery-and-retries)), so a receiver that must not act
+twice should drop a repeated id.
 
-Works with Slack incoming webhooks, PagerDuty, or any HTTP endpoint.
-
-### Labels and Annotations
-
-Add custom labels for routing and annotations for context:
+**Payload version 2** is the default for a new webhook destination:
 
 ```json
 {
-  "labels": { "env": "production", "service": "payment-api" },
-  "annotations": { "runbook": "https://wiki.example.com/high-error-rate" }
+  "version": 2,
+  "kind": "alert",
+  "event": "firing",
+  "title": "High error rate: service=checkout firing",
+  "url": "https://logchef.example.com/logs/alerts/42?source=7",
+  "severity": "critical",
+  "sent_at": "2026-01-02T05:00:00Z",
+  "delivery_id": 5512,
+  "alert": {
+    "id": 42, "name": "High error rate", "description": "5xx above normal",
+    "source_id": 7, "source_name": "app-logs", "rule_type": "threshold",
+    "query_language": "clickhouse-sql", "query": "SELECT service, count() AS value FROM logs WHERE ...",
+    "threshold_operator": "gt", "threshold_value": 100,
+    "frequency_seconds": 60, "lookback_seconds": 300,
+    "labels": { "team": "payments" }, "annotations": { "runbook": "https://runbooks.example.com/5xx" }
+  },
+  "instances": [
+    { "group": { "service": "checkout" }, "status": "firing", "value": 412.5,
+      "triggered_at": "2026-01-02T03:04:05Z", "resolved_at": null, "history_id": 981 }
+  ],
+  "instances_omitted": 0,
+  "triage": null
 }
 ```
 
-## Reliability
+- `event` is `firing`, `resolved`, `no_data` or `test`. An instance `status`
+  is `firing`, `resolved` or `no_data`.
+- Every key is always present. A missing value is `null`: `value` on no data,
+  `resolved_at` while firing, `url` when no frontend URL is set, `delivery_id`
+  and `history_id` on a test. `triage` is always `null` in this release.
+- `alert.labels` and `alert.annotations` hold the rule's own pairs only.
+- Each group sends its own request, so `instances` holds one entry and
+  `instances_omitted` is 0.
+- `title` is at most 200 characters.
 
-- Failed deliveries retry with exponential backoff (500ms → 1s → 2s)
-- Delivery outcomes recorded in alert history
-- Resolution notifications sent when conditions clear
+**Payload version 1** is the payload of Logchef 2.7 and earlier, byte for
+byte: `alert_id`, `alert_name`, `description`, `status`, `severity`,
+`source_id`, `source_name`, `value`, `threshold_operator`, `threshold_value`,
+`frequency_seconds`, `lookback_seconds`, `query`, `condition_json`, `labels`,
+`annotations`, `triggered_at`, `resolved_at`, `generator_url` and `message`.
+Webhooks moved from a 2.7 rule stay on version 1. On a rule that uses the new
+features:
 
-## Dashboard
+- each group sends its own request, with the group values added to `labels`
+  and the whole group in `annotations.group`, such as `service=checkout`;
+- `status` is only `triggered` or `resolved`. A no-data episode is sent as
+  `triggered` with `annotations.reason = "no_data"`.
 
-The alerts list shows live status for each rule:
+The destination form has a **Payload version** selector. **Send test** with
+version 2 selected tests the stored URL at version 2 before you save, so a
+receiver can move when it is ready. An update that leaves out the version keeps
+the stored one.
 
-- Toggle alerts on/off directly from the list
-- Red pulsing dot = firing, green dot = resolved
-- Duplicate existing alerts for similar conditions
-- View full evaluation history per alert
+Webhook requests refuse private, loopback and link-local addresses unless the
+host is in [`alerts.webhook_allowed_hosts`](/getting-started/configuration/),
+and never follow redirects. Slack and PagerDuty requests use the same client.
 
-## SMTP Configuration (First Boot)
+### Slack
 
-Seed initial settings via `config.toml`. After first boot, use the Admin UI:
+The secret is a Slack incoming webhook URL. It must start with
+`https://hooks.slack.com/` or `https://hooks.slack-gov.com/`; any other host,
+port, scheme or user info is refused on save.
+
+Each message has a fallback `text` and Block Kit blocks: a header with the
+event and the rule, the severity, source, value, threshold and times as
+fields, the group and the description, and an **Open in Logchef** button. Text
+from logs and users is escaped, so a group value like `<!channel>` mentions
+nobody. Each group posts its own message, and a resolve is a new message, not
+a thread reply, because incoming webhooks cannot reply in a thread.
+
+Slack's `ok` answer is success. `429` retries after Slack's `Retry-After`.
+Errors such as `no_service`, `channel_is_archived` and `invalid_payload` fail
+at once.
+
+### PagerDuty
+
+The secret is the 32-character routing key of an Events API v2 integration.
+Logchef sends to `https://events.pagerduty.com/v2/enqueue`; EU-hosted accounts
+are not supported yet.
+
+| Logchef event | PagerDuty `event_action` |
+|---------------|--------------------------|
+| `firing`, `no_data` | `trigger` |
+| `resolved` | `resolve` |
+| `test` | `trigger`, with its own `dedup_key` |
+
+The `dedup_key` is `logchef:alert:<rule id>:<16 hex characters>`, taken from
+the group, so each group of a rule is one incident, and its resolve closes it.
+A later episode of the same group reuses the key; PagerDuty opens a new
+incident once the old one is resolved. A trigger's `summary` names the rule,
+the group, the value and the threshold, cut to 1,024 characters, and
+`custom_details` carries the event, value, threshold, query, description and
+labels.
+
+`202` is success. `400` fails at once with PagerDuty's message. `429`, `408`
+and `5xx` retry. PagerDuty drops a repeated event with the same `dedup_key`.
+
+## Delivery and retries
+
+An evaluation does not send anything itself. It writes one delivery row per
+destination, or per recipient of an email destination, in the same
+transaction as the rule's state, and a drain job sends the rows. A crash after
+the commit loses nothing, and a crash before it changes nothing.
+
+- The drain runs every 10 seconds and right after an evaluation. It sends up
+  to 50 rows at a time, four at once, each with a 60-second deadline and the
+  `alerts.request_timeout` setting (default 5 seconds) for the request.
+- Rows for the same destination, recipient and group go out in order, so a
+  resolved never overtakes its firing.
+- A network error, a timeout, `408`, `429` or `5xx` retries after 30 seconds,
+  2 minutes, 10 minutes and 30 minutes. A `Retry-After` header replaces the
+  delay, up to 10 minutes. After five attempts the delivery is `failed`.
+- Any other `4xx`, an inactive destination or a recipient who no longer
+  exists fails at once.
+- Before it sends an alert delivery, the drain checks the rule's silences.
+  A silenced delivery waits, without spending an attempt, until the silence
+  ends, and is checked again at least every minute, so deleting the silence
+  releases it. See [Silences](#silences).
+- Email is sent at most once. A delivery is marked as attempting before the
+  SMTP transaction. An error after the message data was sent, or a crash
+  during the transaction, leaves it `unknown`, and it is never sent again.
+- Webhook, Slack and PagerDuty are at least once. A crash, or a send that
+  outlives its two-minute reservation, sends the message again.
+  `Logchef-Delivery-Id` and the PagerDuty `dedup_key` let a receiver drop the
+  repeat; Slack shows it twice.
+- Finished deliveries are kept for 30 days. Each history entry lists its
+  deliveries with their state and last error.
+
+## Silences
+
+A silence mutes notifications without stopping evaluation. Manage silences on
+the **Silences** tab, or press **Silence** on a group of a rule, which fills in
+the rule and the group for one hour from now.
+
+A silence belongs to one source. It can name one rule, or **All rules** on the
+source, and up to five label matchers. Every matcher must equal a label of the
+group. The labels are the rule's labels, the group values, `alertname` and
+`severity`.
+
+| Schedule | Active |
+|----------|--------|
+| **Once** | From its start to its end, at most 30 days |
+| **Every week** | On the chosen weekdays, from a start time for up to 24 hours, in an IANA time zone, until an optional last day. A window can cross midnight. Use it for maintenance windows. |
+
+While a silence matches a group:
+
+- the group still changes state and writes history, with `silenced_by` in the
+  history payload, and queues no notification;
+- a notification queued before the silence started, including its retries,
+  waits in the queue until the silence ends, with the attempts it had left,
+  and the notifications queued behind it for the same group wait too. If the
+  group resolves inside the silence, the waiting notification is cancelled
+  and shows as `failed` with the reason;
+- when the silence ends and the group still fires or has no data, the next
+  evaluation sends the notification it owes;
+- a resolved notification goes out only for an episode that was announced. A
+  group that fired and resolved inside a silence sends nothing at all.
+
+Anyone who can see the source lists its silences, and with `alerts:write`
+creates one, so the person on call can mute a rule they did not write. Only
+the creator and global admins edit or delete a silence. A source holds at most
+100 silences. A silence whose stored time zone no longer exists mutes nothing
+and is logged.
+
+## Backtest
+
+**Run backtest**, under the test result, answers one question before you save:
+over the last hour, 6 hours, 24 hours or 7 days, when would this rule have
+fired? It runs the query at up to 120 past instants, oldest first, and feeds
+the results through the same rules as live evaluation: group by, the no-data
+policy, the 24-hour forget rule and the 200-group cap. Silences are not
+applied. A backtest writes nothing.
+
+The panel shows the episodes, the notifications the rule would have sent, how
+long it fired, a state strip, the groups with the most breaching evaluations,
+and "Evaluated 96 of 1,440 ticks, covering 33% of the range" when the step is
+longer than the lookback.
+
+| Bound | Value |
+|-------|-------|
+| Range | 1 hour to 7 days |
+| Frequency | 10 seconds up to the range |
+| Step | The frequency, or the range divided by 120 when that is longer |
+| Time | 60 seconds; the result is then `partial` and the strip ends early |
+| Running at once | 1 per user, 2 in total; another request gets 429 "A backtest is already running" |
+
+A ClickHouse query can be backtested only when it reads its window from the
+time macros. A query that reads the current time (`now()`, `today()` and
+similar) or names no macro gets 422. LogchefQL conditions, VictoriaLogs and
+Loki queries can always be backtested. A failed evaluation keeps the state, as it does live, and the
+response's `first_error` names the first failure.
+
+A backtest runs with your access: it needs `alerts:write` and the source
+visible through one of your teams. Global admins get no bypass.
+
+## Evaluation and state
+
+Each rule is a job on the background job runner, at its own frequency.
+Whichever replica claims a tick evaluates it, and the evaluation window is the
+lookback that ends at the tick's due time, not at the moment the replica
+started. After downtime, each rule evaluates once, over the lookback that ends
+at its latest due tick; older ticks are not replayed. See
+[Database Backends](/operations/database-backends/#background-jobs-run-on-any-replica)
+for several replicas.
+
+A history entry is one episode of one group, from the change into firing or
+no data until the group is ok again. Its status is `triggered`, `no_data`,
+`resolved` or `error`. History keeps every open episode and the newest
+`alerts.history_limit` closed ones (default 50).
+
+**Resolve** on a group closes its episode. **Resolve** on the rule closes every
+open episode. The group fires again at the next evaluation if the condition
+still holds. An edit or a manual resolve made while an evaluation runs wins:
+that evaluation writes nothing, and the next one uses the new rule.
+
+## Limits
+
+| Bound | Value | When it is hit |
+|-------|-------|----------------|
+| Rule frequency | At least 10 seconds | 400 on save |
+| Group columns per rule | 4 | 400 on save |
+| Rows per evaluation | 100 | Error in the history |
+| Tracked groups per rule | 200 | Error in the history |
+| Destinations per rule | 10 | 400 on save |
+| Destinations per team | 100 | 400 on create |
+| Recipients per email destination | 20 | 400 on save |
+| Silences per source | 100, with 5 matchers each | 400 on save |
+| Delivery attempts | 5 over about 43 minutes | The delivery is `failed` |
+| Notification message | 256 KiB, mostly the query, description, labels and annotations | Not sent: the delivery is `failed` and its error gives the size |
+| Silent group | Forgotten after 24 hours | Its episode resolves |
+| Closed history | `alerts.history_limit` per rule | Older entries are deleted |
+
+## API
+
+All routes are under `/api/v1`. The alert and silence routes answer 503 when
+alerting is off. The destination routes do not, because scheduled reports can
+use email destinations.
+
+| Route | Token scope | Purpose |
+|-------|-------------|---------|
+| `GET /alerts`, `GET /alerts/:alertID` | `alerts:read` | Rules, with `group_by`, `no_data_policy`, `notify_on_resolve`, `destination_ids` and `instance_counts` |
+| `POST /alerts`, `PUT /alerts/:alertID`, `DELETE /alerts/:alertID` | `alerts:write` | Change a rule |
+| `POST /alerts/test` | `alerts:write` | Run a rule's query once. Takes `source_id`, `group_by` and `no_data_policy`; returns `samples` (at most 20), `groups_total` and `no_data` |
+| `POST /alerts/backtest` | `alerts:write` | The test body plus `frequency_seconds`, `range_seconds` and `notify_on_resolve` |
+| `GET /alerts/:alertID/instances` | `alerts:read` | The rule's groups, at most 200, firing first |
+| `GET /alerts/:alertID/history` | `alerts:read` | Episodes, each with `group_key`, `group` and `deliveries` |
+| `POST /alerts/:alertID/resolve` | `alerts:write` | Resolve the rule, or one group with `group_key` |
+| `GET /alert-silences?source_id=` | `alerts:read` | A source's silences, with `active` |
+| `POST /alert-silences`, `PUT /alert-silences/:silenceID`, `DELETE /alert-silences/:silenceID` | `alerts:write` | Change a silence |
+| `GET /notification-destinations` | `destinations:read` | The destinations you can use |
+| `POST /notification-destinations`, `PUT /notification-destinations/:destinationID`, `DELETE /notification-destinations/:destinationID` | `destinations:write` | Change a destination |
+| `POST /notification-destinations/test` | `destinations:write` | Send a test to `{"id": 5}` or to an unsaved definition |
+
+A silence body:
+
+```json
+{
+  "source_id": 7,
+  "alert_id": 42,
+  "matchers": { "service": "checkout" },
+  "comment": "Deploy of checkout",
+  "schedule_kind": "weekly",
+  "weekly": { "weekdays": [0, 6], "start": "02:00", "duration_minutes": 120, "timezone": "Asia/Kolkata" },
+  "ends_at": "2027-03-31T00:00:00Z"
+}
+```
+
+A destination body:
+
+```json
+{
+  "name": "Payments on-call",
+  "type": "webhook",
+  "scope": "team",
+  "team_id": 3,
+  "config": { "payload_version": 2 },
+  "secret": "https://receiver.example.com/hooks/logchef"
+}
+```
+
+A condition rule sends `"query_language": "logchefql"`, `"editor_mode":
+"condition"` and the LogchefQL rule in `query`, such as
+`level = "error" | count() as value by service`.
+
+An email destination puts `{"user_ids": [3, 9], "addresses": ["oncall@example.com"]}`
+in `config` and no secret. Slack and PagerDuty destinations take an empty
+`config`.
+
+A create or update of a rule that contains `recipient_user_ids` or
+`webhook_urls`, even as an empty array, answers 400: create a destination and
+pass its id in `destination_ids`.
+
+## Server-wide settings
+
+Seed the SMTP settings in `config.toml` for the first boot, then use the Admin
+UI:
 
 ```toml
 [alerts]
 enabled = true
-evaluation_interval = "1m"
 smtp_host = "smtp.example.com"
 smtp_port = 587
 smtp_from = "alerts@example.com"
@@ -121,16 +581,66 @@ smtp_security = "starttls"
 
 `enabled` is the **server-wide** alerting switch. With `alerts.enabled = false`
 (or `LOGCHEF_ALERTS__ENABLED=false`) Logchef hides all alerting UI and every
-alert endpoint returns `503`. That's useful for exploration-only deployments,
-or to keep alert evaluation on a single instance when running multiple
-replicas against a shared [Postgres backend](/operations/database-backends/).
+alert endpoint returns `503`. That's useful for exploration-only deployments.
+
+Evaluation and delivery run on the job runner: at least one replica needs
+`[jobs] enabled = true`, the default. `[alerts] max_concurrent_evaluations`
+(default 4) bounds the rules one replica evaluates at once. See
+[Configuration](/getting-started/configuration/#background-jobs).
+
+## Upgrading from 2.7
+
+The full list is in the
+[changelog](https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md) under
+"Upgrade notes". In short:
+
+1. **Back up the metadata database.** The migrations rebuild the SQLite
+   `alerts` and `alert_history` tables and drop the targets that rules held.
+   The down migrations do not put the targets back.
+2. **Stop every old replica before the first new one starts.** An old binary
+   writes columns that no longer exist and evaluates without the new state.
+   A rolling upgrade is not supported for this release.
+3. **Remove `alerts.evaluation_interval`** from your configuration. Logchef
+   ignores it, and the migration deletes its stored setting. Each rule runs at
+   its own frequency, at least 10 seconds.
+4. **Keep `[jobs] enabled = true` on at least one replica.** Without the job
+   runner nothing is evaluated or sent. "Run alerts on exactly one replica" no
+   longer applies.
+5. **Update scripts that call the alert API.** `recipient_user_ids` and
+   `webhook_urls` answer 400; use `destination_ids`. A frequency below 10
+   seconds answers 400 on save. `POST /api/v1/admin/settings/test-webhook` is
+   gone; use `POST /api/v1/notification-destinations/test`. A token with an
+   explicit scope list needs `destinations:read` or `destinations:write` for
+   the destination routes.
+6. **Webhook receivers see no change.** Each rule's webhook URLs become private
+   version 1 destinations of the rule's creator, named `Webhook <host>`, and
+   its recipients become an `Email for <rule name>` destination. Move a
+   receiver to version 2 when it is ready. Requests now carry
+   `Logchef-Delivery-Id`, and a grouped or no-data rule follows the version 1
+   rules above.
+7. **Condition rules keep running as they are.** A condition rule from 2.7
+   keeps its generated native query until it is saved again from the form,
+   which stores it as LogchefQL.
+8. **Replace translation services.** A webhook that fed Slack or PagerDuty
+   through a translation service can become a Slack or PagerDuty destination.
 
 ## Troubleshooting
 
-**Alerts not firing:** Check the alert is enabled, test the query manually, verify the threshold makes sense for your data volume, and confirm the selected query language matches the source type.
+**Alerts not firing:** check that the rule is enabled, test the query, and
+check that the threshold makes sense for your data volume. Check that at least
+one replica runs jobs, and look at the history for evaluation errors such as a
+repeated group or more than 100 rows.
 
-**Alerts not delivered:** Verify SMTP settings, check that recipients or webhook URLs are configured on the alert, review delivery status in alert history.
+**Alerts not delivered:** open the history entry: each delivery shows its
+state and last error. Check the SMTP settings, that the rule has a destination,
+that the destination is active, and that no silence matches the group on the
+**Silences** tab. A `failed` webhook with a `4xx` will not retry; fix the
+receiver and test the destination.
 
-**False positives:** Increase the threshold, extend the lookback window, or use `avg()` instead of `count()` for smoother signals.
+**Duplicate webhook or Slack messages:** delivery is at least once. Drop
+repeated `Logchef-Delivery-Id` values in the receiver.
 
-For VictoriaLogs-specific guidance, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).
+**False positives:** raise the threshold, extend the lookback, use `avg()`
+instead of `count()`, or backtest the rule over 7 days before saving.
+
+For backend-specific guidance, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs) and [Using Grafana Loki with Logchef](/tutorials/loki#alerts).

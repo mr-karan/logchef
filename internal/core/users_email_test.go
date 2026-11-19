@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -20,11 +21,11 @@ func TestAccountEmailLength(t *testing.T) {
 			return err
 		}},
 		{"OIDC auto-provision", func(t *testing.T, db store.Store, email string) error {
-			_, err := GetOrCreateAutoProvisionedUser(t.Context(), db, discardLogger(), email, "Test User")
+			_, _, err := GetOrCreateAutoProvisionedUser(t.Context(), db, discardLogger(), email, "Test User")
 			return err
 		}},
 		{"bootstrap admin", func(t *testing.T, db store.Store, email string) error {
-			return InitAdminUsers(t.Context(), db, discardLogger(), []string{email})
+			return InitAdminUsers(t.Context(), db, audit.New(audit.Options{Store: db, Logger: discardLogger()}), discardLogger(), []string{email})
 		}},
 	} {
 		for _, tc := range []struct {

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -188,6 +189,80 @@ func TestGenerateQueryRepairLoop(t *testing.T) {
 		}
 		if errors.Is(err, ErrInvalidSQLGeneratedByAI) {
 			t.Fatalf("transport error should not be ErrInvalidSQLGeneratedByAI, got %v", err)
+		}
+	})
+}
+
+// requestRecorder returns resp and records every request it receives.
+type requestRecorder struct {
+	resp string
+	reqs []CompletionRequest
+}
+
+func (r *requestRecorder) Name() string { return "request-recorder" }
+
+func (r *requestRecorder) Complete(_ context.Context, req CompletionRequest) (string, error) {
+	r.reqs = append(r.reqs, req)
+	return r.resp, nil
+}
+
+func TestGenerateQueryLogQL(t *testing.T) {
+	schema := `[{"name":"_time","type":"DateTime"},{"name":"_msg","type":"String"},{"name":"service_name","type":"label"},{"name":"status","type":"int"}]`
+
+	t.Run("the prompt states the selector rule, the field classes and the parser", func(t *testing.T) {
+		p := &requestRecorder{resp: "```logql\n{service_name=~\".+\"} | json | status>=500\n```"}
+		out, err := newTestGenerator(p).GenerateQuery(context.Background(), GenerateQueryInput{
+			Target: TargetLogQL, NaturalLanguageQuery: "server errors", Schema: schema,
+			StreamSelector: `{service_name=~".+"}`, Parser: "json",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != `{service_name=~".+"} | json | status>=500` {
+			t.Fatalf("output %q", out)
+		}
+		if len(p.reqs) != 1 {
+			t.Fatalf("%d provider calls", len(p.reqs))
+		}
+		system := p.reqs[0].System
+		for _, want := range []string{
+			`Start from this source's default stream selector: {service_name=~".+"}`,
+			"Keep all of its matchers",
+			"at least one matcher that does not match the empty string",
+			`Stream labels have type "label". Only stream labels may appear inside the selector braces.`,
+			"_msg is the log line. Filter it with a line filter",
+			"Every other field is structured metadata or a field that the parser extracts",
+			"This source parses lines with | json. Put | json after the line filters",
+			"Do NOT add a time range",
+			"Provided schema:\n" + schema,
+		} {
+			if !strings.Contains(system, want) {
+				t.Errorf("system prompt lacks %q:\n%s", want, system)
+			}
+		}
+		if !strings.HasPrefix(p.reqs[0].User, "Generate a LogQL query to answer this question: server errors.") {
+			t.Errorf("user prompt %q", p.reqs[0].User)
+		}
+	})
+
+	t.Run("a source without a parser gets no parser stage", func(t *testing.T) {
+		p := &requestRecorder{resp: `{service_name="api"} | status>=500`}
+		if _, err := newTestGenerator(p).GenerateQuery(context.Background(), GenerateQueryInput{
+			Target: TargetLogQL, NaturalLanguageQuery: "server errors", Schema: schema, StreamSelector: `{service_name="api"}`,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		system := p.reqs[0].System
+		if !strings.Contains(system, "This source has no parser. Do not add a parser stage") || strings.Contains(system, "parses lines with") {
+			t.Errorf("system prompt:\n%s", system)
+		}
+	})
+
+	t.Run("an empty answer is invalid and not repaired", func(t *testing.T) {
+		p := &requestRecorder{resp: "  "}
+		_, err := newTestGenerator(p).GenerateQuery(context.Background(), GenerateQueryInput{Target: TargetLogQL, NaturalLanguageQuery: "errors", StreamSelector: `{a="b"}`})
+		if !errors.Is(err, ErrInvalidSQLGeneratedByAI) || len(p.reqs) != 1 {
+			t.Fatalf("err %v after %d calls", err, len(p.reqs))
 		}
 	})
 }

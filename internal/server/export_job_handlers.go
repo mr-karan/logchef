@@ -16,8 +16,10 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -31,6 +33,9 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	if user == nil {
 		return sendMissingUser(c)
 	}
+
+	auditTarget(c, audit.ExportSourceTarget(teamID, sourceID))
+	auditDetail(c, "mode", "job")
 
 	exp, ok := s.prepareExport(c, sourceID, "csv", "failed to get source for export job")
 	if !ok {
@@ -85,12 +90,37 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
 	}
 
-	if err := s.store.CreateExportJob(c.Context(), job); err != nil {
+	// No job exists without a stored event: the job and its event commit in
+	// one transaction.
+	ctx := c.Context()
+	var (
+		batch    *audit.Batch
+		auditErr error
+	)
+	err = s.store.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.CreateExportJob(ctx, job); err != nil {
+			return err
+		}
+		auditSet(c, audit.ExportJobTarget(job, teamID), nil,
+			audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, s.exportRowLimit(req.Limit), req.RawSQL))
+		batch = s.audit.Batch(tx)
+		auditErr = s.addRouteEvent(ctx, c, batch, fiber.StatusAccepted)
+		return auditErr
+	})
+	if err != nil {
 		queryTracker.RemoveQuery(job.ID)
 		cancel()
+		clearAuditFields(c)
+		auditTarget(c, audit.ExportSourceTarget(teamID, sourceID))
+		if auditErr != nil {
+			s.log.Error("export job not created: audit event not stored", "error", auditErr, "job_id", job.ID)
+			return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: no export job was created")
+		}
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create export job", models.GeneralErrorType)
 	}
+	batch.Publish(ctx)
+	markAuditRecorded(c)
 
 	runReq := req
 	runReq.Format = format
@@ -130,6 +160,7 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
+	auditTarget(c, audit.ExportJobTarget(job, src.TeamID()))
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
 	}
@@ -235,13 +266,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 		return
 	}
 
-	exportLimit := req.Limit
-	if exportLimit <= 0 {
-		exportLimit = s.config.Export.MaxRows
-	}
-	if exportLimit > s.config.Export.MaxRows {
-		exportLimit = s.config.Export.MaxRows
-	}
+	exportLimit := s.exportRowLimit(req.Limit)
 
 	qb := client.QueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
@@ -388,10 +413,13 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
 
+	s.interruptStaleReportRuns(ctx)
+
 	now := time.Now().UTC()
 	if err := s.store.PruneExpiredQueryShares(ctx, now); err != nil {
 		s.log.Warn("failed to prune expired query shares", "error", err)
 	}
+	s.pruneAuditEvents(ctx, now)
 
 	// Unlink files first, then delete rows. If the process dies between
 	// the two steps, the next cycle re-lists the same rows and ignores
@@ -416,6 +444,27 @@ func (s *Server) cleanupExpiredBackgroundState() {
 
 	if err := s.store.DeleteExpiredOAuthRows(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired OAuth rows", "error", err)
+	}
+}
+
+// auditPruneBatch bounds the audit rows one cleanup run deletes. A backlog
+// above it drains over the following runs.
+const auditPruneBatch = 5000
+
+// pruneAuditEvents applies audit.retention_days and audit.max_rows. It is
+// idempotent, so every replica may run it, and it records no audit event.
+func (s *Server) pruneAuditEvents(ctx context.Context, now time.Time) {
+	var before time.Time
+	if days := s.config.Audit.RetentionDays; days > 0 {
+		before = now.AddDate(0, 0, -days)
+	}
+	deleted, err := s.store.PruneAuditEvents(ctx, before, s.config.Audit.MaxRows, auditPruneBatch)
+	if err != nil {
+		s.log.Warn("failed to prune audit events", "error", err)
+		return
+	}
+	if deleted > 0 {
+		s.log.Info("pruned audit events", "deleted", deleted)
 	}
 }
 

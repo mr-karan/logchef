@@ -290,6 +290,12 @@ func ListDashboards(ctx context.Context, db store.StoreOps, log *slog.Logger, us
 		// The list reads no blob, so it cannot see a panel locked by an
 		// unlinked source; the detail and the save check that.
 		s.CanEdit = s.CanDelete || roles.editsEvery(s.PanelTeamIDs)
+		// A report is visible to its owner, admins and its recipients, so
+		// a viewer who cannot delete the dashboard does not learn how many
+		// reports it has.
+		if !s.CanDelete {
+			s.ReportCount = 0
+		}
 		visible = append(visible, s)
 	}
 	return visible, nil
@@ -494,24 +500,24 @@ func dashboardWriteContract(existing *models.Dashboard, client models.DashboardC
 // UpdateDashboard authorizes and saves against the client revision in one
 // transaction, applying the client schema contract before the
 // compare-and-swap so a stale write cannot slip in between a newer save and
-// its commit.
-func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id int, user *models.User, client models.DashboardClient, req *models.UpdateDashboardRequest) (*models.Dashboard, error) {
+// its commit. It returns the dashboard before and after the save; the
+// compare-and-swap proves that before is the row the save replaced.
+func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id int, user *models.User, client models.DashboardClient, req *models.UpdateDashboardRequest) (before, updated *models.Dashboard, err error) {
 	if req == nil || user == nil {
-		return nil, ErrInvalidDashboard
+		return nil, nil, ErrInvalidDashboard
 	}
 	if req.Revision == nil {
-		return nil, ErrDashboardRevisionRequired
+		return nil, nil, ErrDashboardRevisionRequired
 	}
 	name, description, err := dashboardText(req.Name, req.Description)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	stored, err := prepareDashboardPanels(req.Panels)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	var updated *models.Dashboard
 	err = db.WithTx(ctx, func(tx store.StoreOps) error {
 		existing, err := tx.GetDashboard(ctx, id)
 		if err != nil {
@@ -538,6 +544,8 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 			return err
 		}
 
+		prior := *existing
+		before = &prior
 		existing.Name = name
 		existing.Description = description
 		existing.PanelsJSON = stored
@@ -560,9 +568,9 @@ func UpdateDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return updated, nil
+	return before, updated, nil
 }
 
 func authorizeDashboardSave(ctx context.Context, tx store.StoreOps, user *models.User, roles teamRoles, existing *models.Dashboard, proposed json.RawMessage) error {
@@ -608,16 +616,30 @@ func authorizeDashboardSave(ctx context.Context, tx store.StoreOps, user *models
 	return nil
 }
 
-// DeleteDashboard removes a dashboard by id.
-func DeleteDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, id int) error {
-	if err := db.DeleteDashboard(ctx, id); err != nil {
+// DeleteDashboard removes a dashboard by id. It returns the row it deleted,
+// read under the row lock of the delete, and the number of reports the
+// delete removed with it.
+func DeleteDashboard(ctx context.Context, db store.Store, log *slog.Logger, id int) (*models.Dashboard, int, error) {
+	var deleted *models.Dashboard
+	var reports int
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		if deleted, err = tx.GetDashboardForUpdate(ctx, id); err != nil {
+			return err
+		}
+		if reports, err = tx.DeleteDashboardReports(ctx, id); err != nil {
+			return err
+		}
+		return tx.DeleteDashboard(ctx, id)
+	})
+	if err != nil {
 		if models.IsNotFound(err) {
-			return ErrDashboardNotFound
+			return nil, 0, ErrDashboardNotFound
 		}
 		log.Error("failed to delete dashboard", "dashboard_id", id, "error", err)
-		return fmt.Errorf("failed to delete dashboard: %w", err)
+		return nil, 0, fmt.Errorf("failed to delete dashboard: %w", err)
 	}
-	return nil
+	return deleted, reports, nil
 }
 
 // DashboardCreatorOrAdmin grants delete access and permits editing without a team role.

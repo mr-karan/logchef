@@ -118,6 +118,9 @@ function initMonacoSetup() {
   if (!monaco.languages.getLanguages().some(lang => lang.id === 'clickhouse-sql')) {
     registerClickhouseSQL();
   }
+  if (!monaco.languages.getLanguages().some(lang => lang.id === 'logql')) {
+    registerLogQL();
+  }
 }
 
 function defineMonacoTheme(theme: MonacoThemeName) {
@@ -381,9 +384,15 @@ function registerLogchefQL() {
     // Keywords (boolean operators)
     keywords: ['and', 'or'],
 
+    // Keywords of the aggregation pipe
+    pipeKeywords: ['as', 'by', 'sort', 'limit', 'asc', 'desc', 'time'],
+
     // The main tokenizer
     tokenizer: {
       root: [
+        // Everything after the first pipe selects fields or aggregates
+        [/\|/, { token: 'delimiter', next: '@pipe' }],
+
         // Identifiers - field names
         [/[a-zA-Z][\w._-]*/, {
           cases: {
@@ -414,6 +423,24 @@ function registerLogchefQL() {
         [/\s+/, '']
       ],
 
+      pipe: [
+        [/time(?=\s*\()/, 'keyword'],
+        [/[a-zA-Z_][\w]*(?=\s*\()/, 'function'],
+        [/@?[a-zA-Z_][\w.:@-]*/, {
+          cases: {
+            '@pipeKeywords': 'keyword',
+            '@default': 'logchefqlKey',
+          }
+        }],
+        [/"/, { token: 'string.quote', bracket: '@open', next: '@string_double' }],
+        [/'/, { token: 'string.quote', bracket: '@open', next: '@string_single' }],
+        [/\(/, { token: 'delimiter.parenthesis', bracket: '@open' }],
+        [/\)/, { token: 'delimiter.parenthesis', bracket: '@close' }],
+        [/[,|]/, 'delimiter'],
+        [/\d+[a-z]*/, 'number'],
+        [/\s+/, '']
+      ],
+
       string_double: [
         [/[^\\"]+/, 'string'],
         [/\\./, 'string.escape'],
@@ -429,6 +456,81 @@ function registerLogchefQL() {
   });
 
   // Enhanced autocomplete is now handled by monaco-adapter.ts and will be registered automatically
+}
+
+// LogQL keywords and functions, from the Loki 3.7 query reference.
+const LOGQL_PIPELINE_KEYWORDS = [
+  'json', 'logfmt', 'regexp', 'pattern', 'unpack', 'line_format', 'label_format', 'keep', 'drop',
+  'decolorize', 'unwrap', 'bytes', 'duration', 'duration_seconds', 'by', 'without', 'offset',
+  'and', 'or', 'unless', 'on', 'ignoring', 'group_left', 'group_right', 'bool', 'ip',
+];
+const LOGQL_FUNCTIONS = [
+  'count_over_time', 'rate', 'rate_counter', 'bytes_over_time', 'bytes_rate', 'absent_over_time',
+  'sum_over_time', 'avg_over_time', 'min_over_time', 'max_over_time', 'stdvar_over_time',
+  'stddev_over_time', 'quantile_over_time', 'first_over_time', 'last_over_time',
+  'sum', 'avg', 'min', 'max', 'stddev', 'stdvar', 'count', 'topk', 'bottomk', 'sort', 'sort_desc',
+  'label_replace', 'vector', 'approx_topk',
+];
+
+function registerLogQL() {
+  const LANGUAGE_ID = "logql";
+
+  monaco.languages.register({ id: LANGUAGE_ID });
+
+  monaco.languages.setMonarchTokensProvider(LANGUAGE_ID, {
+    defaultToken: '',
+    tokenPostfix: '.logql',
+    keywords: LOGQL_PIPELINE_KEYWORDS,
+    functions: LOGQL_FUNCTIONS,
+
+    tokenizer: {
+      root: [
+        [/#.*$/, 'comment'],
+        [/"/, { token: 'string', next: '@stringDouble' }],
+        [/`/, { token: 'string', next: '@stringRaw' }],
+        // Durations such as 5m, 1h30m or 250ms, inside a range or after offset.
+        [/\d+(ms|[smhdwy])(\d+(ms|[smhdwy]))*/, 'number'],
+        [/\d*\.\d+([eE][-+]?\d+)?/, 'number.float'],
+        [/\d+/, 'number'],
+        [/[a-zA-Z_][a-zA-Z0-9_]*/, {
+          cases: {
+            '@functions': 'function',
+            '@keywords': 'keyword',
+            '@default': 'identifier',
+          },
+        }],
+        [/\|=|\|~|!=|!~|=~|\|>|!>|==|>=|<=|[=<>|]/, 'operator'],
+        [/[{}()[\],]/, 'delimiter'],
+      ],
+
+      stringDouble: [
+        [/[^\\"]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/"/, { token: 'string', next: '@pop' }],
+      ],
+
+      stringRaw: [
+        [/[^`]+/, 'string'],
+        [/`/, { token: 'string', next: '@pop' }],
+      ],
+    },
+  });
+
+  monaco.languages.setLanguageConfiguration(LANGUAGE_ID, {
+    comments: { lineComment: '#' },
+    brackets: [
+      ['{', '}'],
+      ['[', ']'],
+      ['(', ')'],
+    ],
+    autoClosingPairs: [
+      { open: '{', close: '}' },
+      { open: '[', close: ']' },
+      { open: '(', close: ')' },
+      { open: '"', close: '"' },
+      { open: '`', close: '`' },
+    ],
+  });
 }
 
 function registerClickhouseSQL() {

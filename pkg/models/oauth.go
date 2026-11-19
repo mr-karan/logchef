@@ -126,8 +126,11 @@ const (
 )
 
 // RefreshOutcome is the result of a refresh-token check or rotation. Grant is
-// set only when Kind is RefreshOK.
+// set only when Kind is RefreshOK. Revoked is the grant that this call
+// revoked on a RefreshReplay; it is nil when the grant was already revoked,
+// so one revocation is reported once.
 type RefreshOutcome struct {
-	Kind  RefreshOutcomeKind
-	Grant OAuthGrant
+	Kind    RefreshOutcomeKind
+	Grant   OAuthGrant
+	Revoked *OAuthGrant
 }

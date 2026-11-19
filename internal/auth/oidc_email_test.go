@@ -32,7 +32,7 @@ func TestHandleCallbackEmailNormalization(t *testing.T) {
 				SessionDuration: time.Hour, MaxConcurrentSessions: 5,
 				AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}},
 			}
-			user, session, err := provider.HandleCallback(t.Context(), db, log, cfg, "code", "nonce", "test-pkce-verifier")
+			user, session, err := provider.HandleCallback(t.Context(), db, testRecorder(db), log, cfg, "code", "nonce", "test-pkce-verifier")
 			if tc.rejected {
 				if err == nil || user != nil || session != nil {
 					t.Fatalf("rejected email accepted: user=%t session=%t err=%v", user != nil, session != nil, err)
@@ -96,7 +96,7 @@ func TestHandleCallbackRejectsPaddedEmail(t *testing.T) {
 						SessionDuration: time.Hour, MaxConcurrentSessions: 5,
 						AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}},
 					}
-					user, session, err := provider.HandleCallback(t.Context(), db, log, cfg, "code", "nonce", "test-pkce-verifier")
+					user, session, err := provider.HandleCallback(t.Context(), db, testRecorder(db), log, cfg, "code", "nonce", "test-pkce-verifier")
 					if !errors.Is(err, ErrUnauthorizedUser) || user != nil || session != nil {
 						t.Fatalf("padded claim accepted: user=%t session=%t err=%v, want unauthorized", user != nil, session != nil, err)
 					}

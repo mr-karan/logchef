@@ -8,6 +8,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/victorialogs"
@@ -66,7 +67,7 @@ func TestReconcilePostgresConcurrentAdminTeamDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Teams: []config.ProvisionTeam{{Name: "team", Members: []config.ProvisionMember{{Email: "member@example.com"}}}}}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	team, err := db.GetTeamByName(ctx, "team")
@@ -80,11 +81,11 @@ func TestReconcilePostgresConcurrentAdminTeamDelete(t *testing.T) {
 	wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps {
 		return afterMemberRoleUpdate{StoreOps: tx, after: func() error {
 			started = true
-			go func() { result <- core.DeleteTeam(ctx, db, quietLogger(), team.ID) }()
+			go func() { _, err := core.DeleteTeam(ctx, db, quietLogger(), team.ID); result <- err }()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no member role changed: %v", reconcileErr)
 	}
@@ -109,7 +110,7 @@ func TestReconcilePostgresConcurrentAdminSourceDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "first", Sources: []string{"logs"}}, {Name: "second"}}}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Teams[0].Sources = nil
@@ -121,11 +122,11 @@ func TestReconcilePostgresConcurrentAdminSourceDelete(t *testing.T) {
 	wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps {
 		return afterSourceUnlink{StoreOps: tx, after: func() error {
 			started = true
-			go func() { result <- service.DeleteSource(ctx, source.ID) }()
+			go func() { _, err := service.DeleteSource(ctx, source.ID); result <- err }()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no source unlinked: %v", reconcileErr)
 	}
@@ -143,7 +144,7 @@ func TestReconcilePostgresConcurrentCollectionDelete(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "first"}, {Name: "second"}}}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	teams, err := db.ListManagedTeams(ctx)
@@ -181,12 +182,15 @@ func TestReconcilePostgresConcurrentCollectionDelete(t *testing.T) {
 				return nil
 			}
 			started = true
-			go func() { result <- core.DeleteCollection(ctx, db, quietLogger(), collection.ID, owner.ID) }()
+			go func() {
+				_, err := core.DeleteCollection(ctx, db, quietLogger(), collection.ID, owner.ID)
+				result <- err
+			}()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
 	cfg.Teams = nil
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no team pruned: %v", reconcileErr)
 	}
@@ -236,7 +240,7 @@ func TestReconcilePostgresConcurrentAdminTeamSourceWrite(t *testing.T) {
 			if operation == "remove" {
 				cfg.Teams[0].Sources = []string{"logs"}
 			}
-			if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+			if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 				t.Fatal(err)
 			}
 			team, err := db.GetTeamByName(ctx, "team")
@@ -251,9 +255,11 @@ func TestReconcilePostgresConcurrentAdminTeamSourceWrite(t *testing.T) {
 					started = true
 					go func() {
 						if operation == "add" {
-							result <- core.AddTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							_, err := core.AddTeamSource(ctx, db, quietLogger(), access.SystemPrincipal(), team.ID, source.ID)
+							result <- err
 						} else {
-							result <- core.RemoveTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							_, err := core.RemoveTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+							result <- err
 						}
 						close(progress)
 					}()
@@ -262,7 +268,7 @@ func TestReconcilePostgresConcurrentAdminTeamSourceWrite(t *testing.T) {
 			}}
 			cfg.ManageSources = true
 			cfg.Teams = nil
-			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 			if !started {
 				t.Fatalf("no source pruned: %v", reconcileErr)
 			}

@@ -1,7 +1,16 @@
-import { computed, onScopeDispose, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, toValue, watch, type MaybeRefOrGetter, type Ref } from 'vue'
 import { z } from 'zod'
-import type { ColumnSizingState, ColumnVisibilityState, Updater } from '@tanstack/vue-table'
+import type { ColumnSizingState, ColumnVisibilityState, SortingState, Updater } from '@tanstack/vue-table'
 import type { Source } from '@/api/sources'
+import {
+  layoutHasResultColumn,
+  seedColumnLayout,
+  seedSorting,
+  tableLayoutToDefinition,
+  timestampFirst as putTimestampFirst,
+  type TableColumnLayout,
+  type TableViewSeed,
+} from '@/lib/savedViewLayout'
 import type { ColumnClass, DefaultColumnOrder } from '@/views/explore/table/defaultColumnOrder'
 import type { ColumnDef } from '@/views/explore/table/tableFeatures'
 import {
@@ -28,6 +37,19 @@ const savedColumnState = z.object({
 
 type SavedColumnState = z.infer<typeof savedColumnState>
 
+// The working copy of the active view: the view it belongs to, its column
+// layout and its sort.
+const savedViewState = z.object({
+  viewId: z.number(),
+  revision: z.number(),
+  columnOrder: z.array(z.string()).default([]),
+  columnSizing: z.record(z.string(), z.number()).default({}),
+  columnVisibility: z.record(z.string(), z.boolean()).default({}),
+  sorting: z.array(z.object({ id: z.string(), desc: z.boolean() })).default([]),
+})
+
+type SavedViewState = z.infer<typeof savedViewState>
+
 interface ColumnStateOptions {
   columns: MaybeRefOrGetter<ColumnDef<Record<string, unknown>>[]>
   defaultOrder: MaybeRefOrGetter<DefaultColumnOrder | null>
@@ -36,6 +58,11 @@ interface ColumnStateOptions {
   source: MaybeRefOrGetter<Pick<Source, 'source_type'> | null | undefined>
   timestampField: MaybeRefOrGetter<string>
   severityField: MaybeRefOrGetter<string>
+  // With a seed, the state is the working copy of that view, stored under its
+  // own key; the layout with no view stays untouched.
+  seed?: MaybeRefOrGetter<TableViewSeed | null | undefined>
+  // The table's sort. Seeded and stored with the working copy only.
+  sorting?: Ref<SortingState>
 }
 
 export function useColumnState(options: ColumnStateOptions) {
@@ -49,23 +76,34 @@ export function useColumnState(options: ColumnStateOptions) {
   const columnIds = computed(() => toValue(options.columns)
     .map(column => column.id).filter((id): id is string => Boolean(id)))
   const defaultOrder = computed(() => toValue(options.defaultOrder))
-  const storageKey = computed(() => {
+  const seed = computed(() => toValue(options.seed) ?? null)
+  const seedIdentity = computed(() => seed.value ? `${seed.value.viewId}:${seed.value.revision}` : null)
+  const scopeSuffix = computed(() => {
     const teamId = toValue(options.teamId)
     const sourceId = toValue(options.sourceId)
-    return teamId == null || !sourceId ? null : `logchef-tableState-${teamId}-${sourceId}`
+    return teamId == null || !sourceId ? null : `${teamId}-${sourceId}`
   })
+  const tableStateKey = computed(() => scopeSuffix.value && `logchef-tableState-${scopeSuffix.value}`)
+  // A shared layout has no key: it reads and writes no stored state.
+  const storageKey = computed(() => {
+    if (!seed.value) return tableStateKey.value
+    return seed.value.viewId === null ? null : scopeSuffix.value && `logchef-viewState-${scopeSuffix.value}`
+  })
+  // The view's working copy while a result shows none of its columns; the
+  // table shows the automatic layout for that result meanwhile.
+  const stashedViewLayout = shallowRef<TableColumnLayout | null>(null)
 
-  function loadState(): SavedColumnState | null {
-    if (!storageKey.value) return null
+  function loadState(key = storageKey.value): SavedColumnState | null {
+    if (!key) return null
     try {
-      const stored = localStorage.getItem(storageKey.value)
+      const stored = localStorage.getItem(key)
       if (!stored) return null
       const saved = savedColumnState.parse(JSON.parse(stored))
       if (saved.sizingVersion !== COLUMN_SIZING_VERSION) {
         saved.columnSizing = {}
         saved.sizingVersion = COLUMN_SIZING_VERSION
         try {
-          localStorage.setItem(storageKey.value, JSON.stringify(saved))
+          localStorage.setItem(key, JSON.stringify(saved))
         } catch (error) {
           console.error('Error saving table state to localStorage:', error)
         }
@@ -78,10 +116,7 @@ export function useColumnState(options: ColumnStateOptions) {
   }
 
   function timestampFirst(order: string[]): string[] {
-    const timestampField = toValue(options.timestampField)
-    return order.includes(timestampField)
-      ? [timestampField, ...order.filter(id => id !== timestampField)]
-      : order
+    return putTimestampFirst(order, toValue(options.timestampField))
   }
 
   function setColumnOrder(updater: Updater<string[]>) {
@@ -89,14 +124,13 @@ export function useColumnState(options: ColumnStateOptions) {
     columnOrder.value = timestampFirst(typeof updater === 'function' ? updater(columnOrder.value) : updater)
   }
 
-  function initializeState(mode: 'restore' | 'reset' | 'reconcile') {
+  function initializeState(mode: 'restore' | 'reset' | 'reconcile', saved = mode === 'restore' ? loadState() : null) {
     const ignoreSavedState = mode === 'reset'
     const columns = toValue(options.columns)
     if (columns.length === 0 && mode === 'reconcile') return
 
     const defaults = defaultOrder.value
     const ids = defaults?.order ?? []
-    const saved = mode === 'restore' ? loadState() : null
     if (mode !== 'reconcile') visibilityVersion = saved?.visibilityVersion
     const source = toValue(options.source)
     const timestampField = toValue(options.timestampField)
@@ -137,7 +171,91 @@ export function useColumnState(options: ColumnStateOptions) {
     if (isReadyToPersist.value) visibilityVersion = COLUMN_VISIBILITY_VERSION
   }
 
-  let pendingWrite: { key: string; state: SavedColumnState } | null = null
+  function currentLayout(): TableColumnLayout {
+    return {
+      columnOrder: [...columnOrder.value],
+      columnSizing: { ...columnSizing.value },
+      columnVisibility: { ...columnVisibility.value },
+    }
+  }
+
+  function applyLayout(layout: TableColumnLayout) {
+    if (JSON.stringify(columnOrder.value) !== JSON.stringify(layout.columnOrder)) columnOrder.value = layout.columnOrder
+    if (JSON.stringify(columnSizing.value) !== JSON.stringify(layout.columnSizing)) columnSizing.value = layout.columnSizing
+    if (JSON.stringify(columnVisibility.value) !== JSON.stringify(layout.columnVisibility)) columnVisibility.value = layout.columnVisibility
+  }
+
+  function loadViewState(): SavedViewState | null {
+    if (!storageKey.value) return null
+    try {
+      const stored = localStorage.getItem(storageKey.value)
+      return stored ? savedViewState.parse(JSON.parse(stored)) : null
+    } catch (error) {
+      console.error('Error loading view state from localStorage:', error)
+      return null
+    }
+  }
+
+  // Restores the working copy when it belongs to this view and revision, and
+  // otherwise seeds from the view. A view that says nothing about columns
+  // starts from the layout with no view.
+  function restoreViewState(view: TableViewSeed, useStored: boolean) {
+    stashedViewLayout.value = null
+    const saved = useStored ? loadViewState() : null
+    if (saved && saved.viewId === view.viewId && saved.revision === view.revision) {
+      applyLayout({ columnOrder: saved.columnOrder, columnSizing: saved.columnSizing, columnVisibility: saved.columnVisibility })
+      if (options.sorting) options.sorting.value = saved.sorting
+    } else {
+      if (options.sorting && view.definition.sort) options.sorting.value = seedSorting(view.definition.sort)
+      else if (options.sorting && !options.sorting.value.length) {
+        options.sorting.value = [{ id: toValue(options.timestampField), desc: true }]
+      }
+      if (!view.definition.columns) {
+        initializeState('restore', loadState(tableStateKey.value))
+        reconcileViewState(view)
+        return
+      }
+      applyLayout(seedColumnLayout(view.definition.columns, defaultOrder.value?.order ?? columnIds.value,
+        toValue(options.timestampField)))
+    }
+    orderSource.value = 'explicit'
+    visibilityVersion = COLUMN_VISIBILITY_VERSION
+    isReadyToPersist.value = true
+    reconcileViewState(view)
+  }
+
+  // Merges a new result into the working copy. A view that sets columns hides
+  // every result column it does not name.
+  function reconcileViewState(view: TableViewSeed) {
+    if (!toValue(options.columns).length) return
+    if (!view.definition.columns) {
+      initializeState('reconcile')
+      return
+    }
+    if (stashedViewLayout.value) {
+      applyLayout(stashedViewLayout.value)
+      stashedViewLayout.value = null
+    }
+    const hidden = columnIds.value.filter(id => columnVisibility.value[id] === undefined)
+    if (hidden.length) columnVisibility.value = { ...columnVisibility.value, ...Object.fromEntries(hidden.map(id => [id, false])) }
+    initializeState('reconcile')
+    const unordered = columnIds.value.filter(id => !columnOrder.value.includes(id))
+    if (unordered.length) columnOrder.value = timestampFirst([...columnOrder.value, ...unordered])
+    if (layoutHasResultColumn(currentLayout(), columnIds.value)) return
+    stashedViewLayout.value = currentLayout()
+    applyLayout({
+      columnOrder: timestampFirst(defaultOrder.value?.order ?? columnIds.value),
+      columnSizing: {},
+      columnVisibility: resolveColumnVisibility(toValue(options.columns), toValue(options.source), {},
+        toValue(options.timestampField), toValue(options.severityField)),
+    })
+  }
+
+  // The key and view of the layout on screen. A save that Vue runs after the
+  // key or seed changed, but before the new layout is restored, still belongs
+  // to the old layout.
+  let applied: { key: string | null; view: TableViewSeed | null } = { key: null, view: null }
+  let pendingWrite: { key: string; state: SavedColumnState | SavedViewState } | null = null
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
   function flushPendingWrite() {
@@ -159,24 +277,45 @@ export function useColumnState(options: ColumnStateOptions) {
     columns: toValue(options.columns),
     defaultOrder: defaultOrder.value,
     storageKey: storageKey.value,
+    seedIdentity: seedIdentity.value,
     sourceType: toValue(options.source)?.source_type,
     timestampField: toValue(options.timestampField),
     severityField: toValue(options.severityField),
   }), (current, previous) => {
     flushPendingWrite()
-    if (current.storageKey !== previous?.storageKey) {
+    const switched = current.storageKey !== previous?.storageKey || current.seedIdentity !== previous?.seedIdentity
+    if (switched) {
       orderSource.value = 'pending'
       columnOrder.value = []
       columnClasses.value = {}
     }
-    initializeState(!previous || current.storageKey !== previous.storageKey ? 'restore' : 'reconcile')
+    const view = seed.value
+    if (view) {
+      if (switched) restoreViewState(view, true)
+      else reconcileViewState(view)
+    } else {
+      stashedViewLayout.value = null
+      initializeState(!previous || switched ? 'restore' : 'reconcile')
+    }
+    applied = { key: current.storageKey, view }
   }, { immediate: true })
 
-  watch([columnOrder, columnClasses, orderSource, columnSizing, columnVisibility], () => {
-    if (!storageKey.value || !isReadyToPersist.value || !toValue(options.columns).length) return
+  watch([columnOrder, columnClasses, orderSource, columnSizing, columnVisibility, () => seed.value && options.sorting?.value], () => {
+    const { key, view } = applied
+    if (!key || !isReadyToPersist.value || !toValue(options.columns).length) return
+    if (view && stashedViewLayout.value) return
     if (saveTimer !== null) clearTimeout(saveTimer)
-    pendingWrite = {
-      key: storageKey.value,
+    // A shared layout has no key, so a seed here always has a view id.
+    pendingWrite = view?.viewId != null ? {
+      key,
+      state: {
+        viewId: view.viewId,
+        revision: view.revision,
+        ...currentLayout(),
+        sorting: (options.sorting?.value ?? []).map(({ id, desc }) => ({ id, desc })),
+      },
+    } : {
+      key,
       state: {
         columnOrder: orderSource.value === 'pending' ? [] : [...columnOrder.value],
         orderSource: orderSource.value === 'explicit' ? 'explicit' : 'auto',
@@ -190,13 +329,28 @@ export function useColumnState(options: ColumnStateOptions) {
     saveTimer = setTimeout(flushPendingWrite, 300)
   }, { deep: true, immediate: true })
 
+  // With a view, a reset discards the working copy and seeds from the view.
   function resetTableStateToDefaults() {
     flushPendingWrite()
     if (storageKey.value) localStorage.removeItem(storageKey.value)
     if (!toValue(options.columns).length) return
+    if (seed.value) {
+      restoreViewState(seed.value, false)
+      return
+    }
     initializeState('reset')
     isReadyToPersist.value = true
   }
 
-  return { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults }
+  // The working layout of the active view as definition parts, for comparing
+  // with the view and for saving. Null with no view.
+  const workingLayout = computed(() => seed.value
+    ? tableLayoutToDefinition(stashedViewLayout.value ?? {
+      columnOrder: columnOrder.value,
+      columnSizing: columnSizing.value,
+      columnVisibility: columnVisibility.value,
+    }, options.sorting?.value ?? [])
+    : null)
+
+  return { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults, workingLayout }
 }

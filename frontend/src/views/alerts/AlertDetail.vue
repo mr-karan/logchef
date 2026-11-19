@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
+import { severityLabels, alertStateLabels, instanceStateLabels } from "@/i18n/alertLabels";
 
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
+import { ArrowLeft, Bell, BellOff, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
@@ -22,8 +23,14 @@ import { useToast } from "@/composables/useToast";
 import { alertHistoryExploreQuery } from "@/utils/alertExplore";
 import AlertDeliveryStatus from "@/components/alerts/AlertDeliveryStatus.vue";
 import AlertForm from "@/components/alerts/AlertForm.vue";
+import SilenceForm from "@/components/alerts/SilenceForm.vue";
+import { useSilencesStore } from "@/stores/silences";
+import { activeSilencesFor, groupMatchers } from "@/utils/alertSilences";
+import { useIntervalFn, useNow } from "@vueuse/core";
+import type { AlertSilenceRequest } from "@/api/silences";
 import { EmptyState, LoadingState } from "@/components/layout";
-import type { Alert, AlertHistoryEntry, UpdateAlertRequest } from "@/api/alerts";
+import type { Alert, AlertHistoryEntry, AlertInstance, UpdateAlertRequest } from "@/api/alerts";
+import { formatAlertGroup } from "@/utils/alertGroups";
 
 const { t, locale } = useI18n();
 
@@ -38,6 +45,7 @@ const askChef = useAskChefStore();
 const teamsStore = useTeamsStore();
 const { toast } = useToast();
 const preferencesStore = usePreferencesStore();
+const silencesStore = useSilencesStore();
 
 function formatEventTime(timestamp: string): string {
   const date = new Date(timestamp);
@@ -66,6 +74,11 @@ const historyEntries = computed(() => {
   // Only return entries if they belong to the current alert
   if (alertHistoryStore.currentAlertId !== alertId.value) return [];
   return alertHistoryStore.entries;
+});
+
+const instances = computed(() => {
+  if (alertHistoryStore.currentAlertId !== alertId.value) return [];
+  return alertHistoryStore.instances;
 });
 
 const isLoadingHistory = computed(() => {
@@ -144,18 +157,66 @@ async function investigate(entry: AlertHistoryEntry) {
 
 async function loadHistory() {
   if (!alertId.value) return;
-  await alertHistoryStore.loadHistory(alertId.value);
+  await Promise.all([
+    alertHistoryStore.loadHistory(alertId.value),
+    alertHistoryStore.loadInstances(alertId.value),
+  ]);
 }
 
-async function handleResolve(_historyId: number, message: string) {
+// The silenced badge needs the source's silences, and the alert can load after the tab opens.
+watch(() => (currentTab.value === "history" ? alert.value?.source_id : undefined), (sourceId) => {
+  if (sourceId) void silencesStore.fetchSilences(sourceId);
+}, { immediate: true });
+
+// Ticks so the badge drops when a silence ends while the page is open.
+const now = useNow({ scheduler: (tick) => useIntervalFn(tick, 30_000) });
+function isSilenced(instance: AlertInstance): boolean {
+  return !!alert.value && activeSilencesFor(silencesStore.silencesOf(alert.value.source_id), alert.value, instance.group, now.value.getTime()).length > 0;
+}
+
+// Silence opens the silence form for this rule and group, for one hour from now.
+const silenceOpen = ref(false);
+const silencePreset = ref<AlertSilenceRequest | null>(null);
+function openSilence(instance: AlertInstance) {
+  if (!alert.value) return;
+  const now = Date.now();
+  silencePreset.value = {
+    source_id: alert.value.source_id,
+    alert_id: alert.value.id,
+    matchers: groupMatchers(alert.value, instance.group),
+    comment: "",
+    schedule_kind: "once",
+    starts_at: new Date(now).toISOString(),
+    ends_at: new Date(now + 3_600_000).toISOString(),
+    weekly: null,
+  };
+  silenceOpen.value = true;
+}
+
+async function handleResolve(groupKey: string, message: string) {
   if (!alertId.value) return;
   const result = await alertHistoryStore.resolveAlert(
     alertId.value,
-    { message }
+    { message, group_key: groupKey }
   );
   if (result.success) {
     await loadHistory();
   }
+}
+
+// An episode stays open while its group fires or has no data.
+function isOpen(entry: AlertHistoryEntry): boolean {
+  return (entry.status === "triggered" || entry.status === "no_data") && !entry.resolved_at;
+}
+
+function instanceVariant(state: AlertInstance["state"]): "destructive" | "outline" | "secondary" {
+  if (state === "firing") return "destructive";
+  if (state === "no_data") return "outline";
+  return "secondary";
+}
+
+function groupLabel(group: AlertInstance["group"] | undefined): string {
+  return formatAlertGroup(group) || t("alerts.wholeResult");
 }
 
 watch([alertId, currentTab], ([id, tab]) => {
@@ -239,7 +300,56 @@ watch([alertId, currentTab], ([id, tab]) => {
       </TabsContent>
 
       <!-- History Tab -->
-      <TabsContent value="history">
+      <TabsContent value="history" class="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{{ t('alerts.groups') }}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p v-if="!instances.length" class="text-sm text-muted-foreground">{{ t('alerts.noGroupFiring') }}</p>
+            <Table v-else>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{{ t('alerts.group') }}</TableHead>
+                  <TableHead>{{ t('ui.status') }}</TableHead>
+                  <TableHead>{{ t('panelStyle.value') }}</TableHead>
+                  <TableHead>{{ t('alerts.since') }}</TableHead>
+                  <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="instance in instances" :key="instance.group_key">
+                  <TableCell class="font-mono text-xs">{{ groupLabel(instance.group) }}</TableCell>
+                  <TableCell>
+                    <div class="flex items-center gap-1.5">
+                      <Badge :variant="instanceVariant(instance.state)" class="text-xs">
+                        {{ t(instanceStateLabels[instance.state]) }}
+                      </Badge>
+                      <Badge v-if="isSilenced(instance)" variant="outline" class="text-xs gap-1">
+                        <BellOff class="h-3 w-3" />{{ t('silences.silenced') }}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell class="tabular-nums">{{ instance.value ?? '' }}</TableCell>
+                  <TableCell class="text-sm text-muted-foreground">{{ formatEventTime(instance.state_since) }}</TableCell>
+                  <TableCell class="text-right space-x-2">
+                    <Button variant="outline" size="sm" @click="openSilence(instance)">
+                      {{ t('silences.silence') }}
+                    </Button>
+                    <Button
+                      v-if="instance.state !== 'ok'"
+                      variant="outline"
+                      size="sm"
+                      @click="handleResolve(instance.group_key, 'Manually resolved')"
+                    >
+                      {{ t('ui.resolve') }}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle>{{ t('ui.alertHistory') }}</CardTitle>
@@ -274,6 +384,8 @@ watch([alertId, currentTab], ([id, tab]) => {
                       'flex items-center justify-center rounded-full p-1 ring-4 ring-background',
                       entry.status === 'triggered' && !entry.resolved_at
                         ? 'bg-destructive text-destructive-foreground'
+                        : entry.status === 'no_data' && !entry.resolved_at
+                        ? 'bg-amber-500 text-white'
                         : entry.status === 'resolved' || entry.resolved_at
                         ? 'bg-green-500 text-white'
                         : entry.status === 'error'
@@ -281,7 +393,7 @@ watch([alertId, currentTab], ([id, tab]) => {
                         : 'bg-muted text-muted-foreground'
                     ]"
                   >
-                    <AlertCircle v-if="entry.status === 'triggered' && !entry.resolved_at" class="h-3.5 w-3.5" />
+                    <AlertCircle v-if="isOpen(entry)" class="h-3.5 w-3.5" />
                     <CheckCircle2 v-else-if="entry.status === 'resolved' || entry.resolved_at" class="h-3.5 w-3.5" />
                     <AlertTriangle v-else-if="entry.status === 'error'" class="h-3.5 w-3.5" />
                     <Clock v-else class="h-3.5 w-3.5" />
@@ -303,6 +415,9 @@ watch([alertId, currentTab], ([id, tab]) => {
                         <span class="text-sm text-muted-foreground">
                           {{ formatEventTime(entry.triggered_at) }}
                         </span>
+                        <code v-if="entry.group_key" class="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                          {{ groupLabel(entry.group) }}
+                        </code>
                         <!-- Value Display Inline -->
                         <span v-if="entry.value != null" class="text-sm text-muted-foreground">
                           {{ t('ui.value') }} <code class='font-mono font-semibold'>{{ entry.value }}</code>
@@ -334,10 +449,10 @@ watch([alertId, currentTab], ([id, tab]) => {
                         {{ t('askChef.investigate') }}
                       </Button>
                       <Button
-                        v-if="entry.status === 'triggered' && !entry.resolved_at"
+                        v-if="isOpen(entry)"
                         variant="outline"
                         size="sm"
-                        @click="handleResolve(entry.id, 'Manually resolved')"
+                        @click="handleResolve(entry.group_key, 'Manually resolved')"
                       >
                         {{ t('ui.resolve') }}
                       </Button>
@@ -357,6 +472,15 @@ watch([alertId, currentTab], ([id, tab]) => {
         </Card>
       </TabsContent>
     </Tabs>
+
+    <SilenceForm
+      v-if="alert"
+      v-model:open="silenceOpen"
+      :source-id="alert.source_id"
+      :rules="[alert]"
+      :silence="null"
+      :preset="silencePreset"
+    />
 
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog

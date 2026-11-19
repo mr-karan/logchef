@@ -1,5 +1,8 @@
 ---
 title: Architecture
+head:
+  - tag: title
+    content: "Log Analytics Architecture | Logchef"
 description: Overview of Logchef's architecture, components, and data flow powering its ClickHouse and VictoriaLogs log analytics engine.
 ---
 
@@ -109,3 +112,7 @@ Logchef connects to remote datasource backends as sources:
 - See [Database Backends & High Availability](/operations/database-backends) for running more than one replica
 - Review [ClickHouse Schema Design](/integration/schema-design) for the log table schema Logchef expects
 - Check [Teams, Sources & Access Control](/core/user-management) for how access is scoped
+
+## Choosing a log analytics stack
+
+[Compare Logchef with other log analytics tools](/comparisons/) to understand which responsibilities belong to the storage backend and which belong to the query UI. Use [dashboards](/features/dashboards/) for shared views and the [MCP server](/integration/mcp-server/) for agent investigations.

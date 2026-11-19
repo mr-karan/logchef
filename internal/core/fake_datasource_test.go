@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
@@ -22,13 +23,14 @@ type fakeProvider struct {
 	evaluateAlertFn func(ctx context.Context, source *models.Source, req datasource.AlertQueryRequest) (*models.QueryResult, error)
 	queryLogsFn     func(ctx context.Context, source *models.Source, req datasource.QueryRequest) (*models.QueryResult, error)
 	compileFn       func(ctx context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error)
+	histogramFn     func(ctx context.Context, source *models.Source, req datasource.HistogramRequest) (*datasource.HistogramResult, error)
 	// requests counts the query, histogram, field value and compile requests
 	// that reached the provider.
-	requests int
+	requests atomic.Int64
 }
 
 func (f *fakeProvider) CompileLogchefQL(ctx context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
-	f.requests++
+	f.requests.Add(1)
 	if f.compileFn == nil {
 		return nil, datasource.ErrOperationNotSupported
 	}
@@ -60,7 +62,7 @@ func (f *fakeProvider) UpdateSource(context.Context, *models.Source, *models.Upd
 func (f *fakeProvider) PopulateSourceDetails(context.Context, *models.Source) error { return nil }
 
 func (f *fakeProvider) QueryLogs(ctx context.Context, source *models.Source, req datasource.QueryRequest) (*models.QueryResult, error) {
-	f.requests++
+	f.requests.Add(1)
 	if f.queryLogsFn != nil {
 		return f.queryLogsFn(ctx, source, req)
 	}
@@ -71,18 +73,21 @@ func (f *fakeProvider) GetSourceSchema(context.Context, *models.Source) ([]model
 	return nil, nil
 }
 
-func (f *fakeProvider) Histogram(context.Context, *models.Source, datasource.HistogramRequest) (*datasource.HistogramResult, error) {
-	f.requests++
-	return nil, nil
+func (f *fakeProvider) Histogram(ctx context.Context, source *models.Source, req datasource.HistogramRequest) (*datasource.HistogramResult, error) {
+	f.requests.Add(1)
+	if f.histogramFn == nil {
+		return nil, nil
+	}
+	return f.histogramFn(ctx, source, req)
 }
 
 func (f *fakeProvider) GetFieldValues(context.Context, *models.Source, datasource.FieldValuesRequest) (*datasource.FieldValuesResult, error) {
-	f.requests++
+	f.requests.Add(1)
 	return nil, nil
 }
 
 func (f *fakeProvider) GetAllFieldValues(context.Context, *models.Source, datasource.AllFieldValuesRequest) (datasource.AllFieldValuesResult, error) {
-	f.requests++
+	f.requests.Add(1)
 	return nil, nil
 }
 

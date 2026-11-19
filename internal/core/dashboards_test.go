@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlitetest"
@@ -168,11 +169,11 @@ func seedTeamWithSource(t *testing.T, db *sqlite.DB, name string, members ...*mo
 		t.Fatalf("CreateTeam(%s): %v", name, err)
 	}
 	src := newTestSource(t, db, name+"-src")
-	if err := AddTeamSource(ctx, db, log, team.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), team.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(%s): %v", name, err)
 	}
 	for _, m := range members {
-		if err := AddTeamMember(ctx, db, log, team.ID, m.ID, models.TeamRoleMember); err != nil {
+		if _, _, err := AddTeamMember(ctx, db, log, team.ID, m.ID, models.TeamRoleMember); err != nil {
 			t.Fatalf("AddTeamMember(%s): %v", m.Email, err)
 		}
 	}
@@ -245,7 +246,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	}
 
 	// Editing to point at team-b (a foreign team) must be forbidden.
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
+	_, _, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision})
 	if !errors.Is(err, ErrDashboardForbidden) {
 		t.Fatalf("update to foreign team: err = %v, want ErrDashboardForbidden", err)
 	}
@@ -256,7 +257,7 @@ func TestUpdateDashboardRejectsForeignTeam(t *testing.T) {
 	if err := db.UpdateUser(ctx, admin); err != nil {
 		t.Fatalf("UpdateUser(admin): %v", err)
 	}
-	if _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
+	if _, _, err := UpdateDashboard(ctx, db, log, dash.ID, admin, schema2Client(t), &models.UpdateDashboardRequest{Name: "d", Panels: panelBlob(teamB.ID, srcB.ID), Revision: &dash.Revision}); err != nil {
 		t.Fatalf("admin update to team-b: %v", err)
 	}
 }
@@ -317,6 +318,56 @@ func TestListDashboardsVisibility(t *testing.T) {
 		}
 		if can != tc.want {
 			t.Errorf("%s can view = %v, want %v", tc.user.Email, can, tc.want)
+		}
+	}
+}
+
+// TestListDashboardsReportCount checks that the list tells a caller who can
+// delete a dashboard how many reports the delete removes (RFC 0008), and
+// tells a viewer who cannot nothing.
+func TestListDashboardsReportCount(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	creator := newTestUser(t, db, "creator@test.dev", "Creator")
+	teamMember := newTestUser(t, db, "teammate@test.dev", "Teammate")
+	admin := newTestUser(t, db, "admin@test.dev", "Admin")
+	admin.Role = models.UserRoleAdmin
+	if err := db.UpdateUser(ctx, admin); err != nil {
+		t.Fatalf("UpdateUser(admin): %v", err)
+	}
+	teamA, srcA := seedTeamWithSource(t, db, "team-a", creator, teamMember)
+	dash, err := CreateDashboard(ctx, db, log, creator, &models.CreateDashboardRequest{Name: "reported", Panels: panelBlob(teamA.ID, srcA.ID)})
+	if err != nil {
+		t.Fatalf("CreateDashboard: %v", err)
+	}
+	for _, name := range []string{"daily", "weekly"} {
+		r := &models.Report{Name: name, OwnerID: &teamMember.ID, SourceKind: models.ReportSourceDashboard, DashboardID: &dash.ID,
+			Schedule: models.ReportSchedule{Frequency: models.ReportDaily, Hour: new(9)}, Timezone: "UTC", RangeAnchor: models.ReportAnchorSendTime, MaxRows: 25}
+		if err := db.CreateReport(ctx, r); err != nil {
+			t.Fatalf("CreateReport(%s): %v", name, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		user *models.User
+		want int
+	}{
+		{creator, 2},
+		{admin, 2},
+		{teamMember, 0}, // owns both reports, but cannot delete the dashboard
+	} {
+		list, err := ListDashboards(ctx, db, log, tc.user)
+		if err != nil {
+			t.Fatalf("ListDashboards(%s): %v", tc.user.Email, err)
+		}
+		i := slices.IndexFunc(list, func(s *models.DashboardSummary) bool { return s.ID == dash.ID })
+		if i < 0 {
+			t.Fatalf("%s does not see the dashboard", tc.user.Email)
+		}
+		if got := list[i].ReportCount; got != tc.want {
+			t.Errorf("%s report_count = %d, want %d", tc.user.Email, got, tc.want)
 		}
 	}
 }
@@ -567,7 +618,8 @@ func TestUpdateDashboardClientContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return UpdateDashboard(ctx, db, log, dash.ID, creator, client, &models.UpdateDashboardRequest{Name: "d", Panels: body, Revision: &current.Revision})
+		_, updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, client, &models.UpdateDashboardRequest{Name: "d", Panels: body, Revision: &current.Revision})
+		return updated, err
 	}
 	stored := func() string {
 		t.Helper()
@@ -825,7 +877,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 		t.Fatalf("new dashboard revision = %d, want 1", dash.Revision)
 	}
 
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
+	_, _, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d2", Panels: panelBlob(team.ID, src.ID),
 	})
 	if !errors.Is(err, ErrDashboardRevisionRequired) {
@@ -833,7 +885,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 	}
 
 	loaded := dash.Revision
-	updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
+	_, updated, err := UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d3", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if err != nil {
@@ -843,7 +895,7 @@ func TestUpdateDashboardRevisions(t *testing.T) {
 		t.Fatalf("update returned name %q revision %d, want d3 at revision 2", updated.Name, updated.Revision)
 	}
 
-	_, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
+	_, _, err = UpdateDashboard(ctx, db, log, dash.ID, creator, schema2Client(t), &models.UpdateDashboardRequest{
 		Name: "d4", Panels: panelBlob(team.ID, src.ID), Revision: &loaded,
 	})
 	if !errors.Is(err, ErrDashboardConflict) {

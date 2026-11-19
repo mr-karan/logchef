@@ -1,5 +1,8 @@
 ---
 title: Dashboards
+head:
+  - tag: title
+    content: "Log Dashboards for ClickHouse, VictoriaLogs and Loki | Logchef"
 description: Build multi-panel Logchef dashboards that group log-query visualizations into a shared grid with one time range and auto-refresh.
 ---
 
@@ -16,7 +19,8 @@ its panels.
 
 A dashboard holds a set of **panels** laid out on a 12-column grid. Each panel is a
 self-contained visualization: it points at a team and source, carries its own query
-(LogchefQL, ClickHouse SQL, or native LogsQL for a VictoriaLogs source), and renders as one of
+(LogchefQL, ClickHouse SQL, native LogsQL for a VictoriaLogs source, or
+native LogQL for a Loki source), and renders as one of
 the panel types below.
 Panels do not share a query, only the dashboard's time range and refresh interval.
 A panel can also [pin its own range and bucket size](#panel-time).
@@ -48,7 +52,8 @@ explorer, they can see in a panel.
 
 Charts, breakdowns, and stats support both **count** and **result** mode.
 Count mode uses the histogram endpoint. Tables use result mode. A result
-query runs as written, including SQL aggregates and LogsQL stats pipes. The default result limit is 1,000 rows, with a maximum of 10,000.
+query runs as written, including SQL aggregates and LogsQL stats pipes. A LogchefQL
+result query can [aggregate](#chart-a-logchefql-aggregation) too. The default result limit is 1,000 rows, with a maximum of 10,000.
 VictoriaLogs' histogram API counts the filter portion and ignores pipes.
 
 Grouped histograms return the top 10 series and combine any remaining series
@@ -58,15 +63,45 @@ severity over high-cardinality request and trace IDs.
 ### Multiple data sources
 
 Each panel picks its own team and source, so a single dashboard can mix panels from
-different backends: a ClickHouse time series next to a VictoriaLogs stat. LogchefQL
+different backends: a ClickHouse time series next to a VictoriaLogs stat or a
+Loki table. LogchefQL
 compiles to whatever the panel's source speaks, so the same filter works across
 backends. The panel builder offers **ClickHouse SQL** for ClickHouse sources
-and **LogsQL** for VictoriaLogs sources. Selecting ClickHouse SQL starts a
+**LogsQL** for VictoriaLogs sources and **LogQL** for
+[Loki sources](/tutorials/loki/). Selecting ClickHouse SQL starts a
 result query. Existing SQL count panels continue to work.
 
 If a viewer lacks access to a panel's source, that panel renders a locked state
 while the rest of the dashboard loads normally, the same pattern used for shared
 collection items.
+
+### Chart a LogchefQL aggregation
+
+A LogchefQL panel in result mode can chart an
+[aggregation](/guide/aggregations), on ClickHouse and VictoriaLogs sources alike
+(Loki sources do not support LogchefQL aggregations):
+
+```text
+service=api | p95(duration_ms) by time, service
+```
+
+- **Result mode only.** A count-mode panel cannot hold an aggregation, and saving
+  one fails with "an aggregation needs result mode". The builder switches the
+  panel to result mode when you type a pipe with a function.
+- **Suggested roles.** The builder reads the result columns: `time` becomes X,
+  each value becomes a Y, and a single group field becomes the series. A result
+  with two or more group fields suggests a table. You can change any of them.
+- **Bucket size.** A bare `time` key uses the panel's [bucket size](#bucket-size),
+  so the chart follows the time picker. `time(5m)` keeps its own size, and a
+  range that gives more than 1,000 buckets of that size fails.
+- **Empty buckets.** A chart fills them: 0 for `count` and `count_distinct`, a
+  gap for the other functions. A table shows the rows as they came. A result
+  that a row limit cut, or that has its own `limit`, is not filled.
+- **Column types.** The result keeps its column types on VictoriaLogs too,
+  because Logchef wrote the query. Number columns need no confirmation.
+
+The **Add to dashboard** button in the Explorer creates such a panel from the
+query you ran.
 
 ## Chart axes and colors
 
@@ -269,7 +304,8 @@ range. A fixed size is one of `1s`, `5s`, `10s`, `15s`, `30s`, `1m`, `5m`,
 
 - In count mode the bucket size is the histogram window. A count chart with
   `24h` buckets on a 7-day range draws one bar per day.
-- In result mode it feeds `{{__interval}}` in the query.
+- In result mode it feeds `{{__interval}}` in the query, and a bare `time` key of
+  a LogchefQL aggregation.
 - A fixed size that would give more than 1,000 buckets over the range is raised
   to the next size that fits, and the chip shows the size that ran.
 
@@ -427,4 +463,5 @@ alongside your teams, sources, and saved queries.
 
 - Save the queries behind your panels to a [Collection](/features/collections) so teammates can reuse them
 - Review [Search Syntax](/guide/search-syntax) to write the LogchefQL filters panels use
+- Count and group in a panel with [Aggregations](/guide/aggregations)
 - See [Alerting](/features/alerting) to get notified instead of watching a dashboard

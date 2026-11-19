@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/logchefql"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -41,6 +43,7 @@ func (p *ClickHouseProvider) Describe() Descriptor {
 			CapabilityLogContext,
 			CapabilityExports,
 			CapabilityLiveTail,
+			CapabilityLogchefQLAggregation,
 		},
 		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},
 		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
@@ -312,7 +315,16 @@ func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Sourc
 	if err != nil {
 		return nil, err
 	}
-	return client.QueryWithOptions(ctx, sql, opts)
+	result, err := client.QueryWithOptions(ctx, sql, opts)
+	return result, queryError(req, err)
+}
+
+// queryError explains the bounds of an aggregated query.
+func queryError(req QueryRequest, err error) error {
+	if err == nil || req.Aggregation == nil {
+		return err
+	}
+	return clickhouse.AggregationError(err)
 }
 
 // QueryLogsStream executes the query and streams rows into w instead of
@@ -331,7 +343,8 @@ func (p *ClickHouseProvider) QueryLogsStream(ctx context.Context, source *models
 	// Warnings are known at build time (LIMIT_APPLIED / LIMIT_CAPPED); deliver
 	// them up front so the writer can emit them alongside the streamed body.
 	w.SetWarnings(opts.Warnings)
-	return client.QueryStream(ctx, sql, opts, w)
+	stats, err := client.QueryStream(ctx, sql, opts, w)
+	return stats, queryError(req, err)
 }
 
 // buildQuery resolves the source's ClickHouse connection and builds the raw
@@ -361,13 +374,21 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 
 	opts := buildResult.QueryOptions(*req.QueryTimeout)
 	opts.MaxResponseBytes = req.MaxResponseBytes
-	opts.Warnings = queryWarningsForBuildResult(buildResult)
+	opts.Warnings = queryWarningsForBuildResult(buildResult, req.Aggregation != nil)
+	if req.Aggregation != nil {
+		opts.AggregationMaxMemoryBytes = req.AggregationMaxMemoryBytes
+		if opts.AggregationMaxMemoryBytes <= 0 {
+			opts.AggregationMaxMemoryBytes = DefaultAggregationMaxMemoryBytes
+		}
+	}
 	return client, buildResult.SQL, opts, nil
 }
 
-func queryWarningsForBuildResult(result clickhouse.QueryBuildResult) []models.QueryWarning {
+// An aggregated result gets no LIMIT_APPLIED: the row probe proves a cut, and
+// stats.truncation reports it (RFC 0005, "Limits and failure modes").
+func queryWarningsForBuildResult(result clickhouse.QueryBuildResult, aggregated bool) []models.QueryWarning {
 	warnings := make([]models.QueryWarning, 0, 2)
-	if result.LimitAdded {
+	if result.LimitAdded && !aggregated {
 		warnings = append(warnings, models.QueryWarning{
 			Code:    "LIMIT_APPLIED",
 			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", result.AppliedLimit),
@@ -665,6 +686,75 @@ func formatAlertQuery(raw string) (string, error) {
 	return query, nil
 }
 
+// alertSampleTo ends the fixed window that save-time validation renders the
+// time macros with. Any window works: validation checks the statement, not
+// its result.
+var alertSampleTo = time.Date(2000, time.January, 1, 1, 0, 0, 0, time.UTC)
+
+// renderAlertQuery is the one path from stored alert SQL to the statement
+// that runs: it expands the built-in macros for the window [from, to) and
+// then applies formatAlertQuery. Validation and evaluation both call it, so
+// a query that saves also runs. A query that names no macro skips the
+// template step, so alert SQL saved before macros, which may hold "{{" text
+// in a string, runs as it did. A user variable has no value and is refused
+// up front, because an optional block would otherwise drop its clause.
+func renderAlertQuery(source *models.Source, query string, from, to time.Time) (string, error) {
+	names := template.ReferencedNames(query)
+	if !slices.ContainsFunc(names, template.HasBuiltinPrefix) {
+		return formatAlertQuery(query)
+	}
+	for _, name := range names {
+		if !template.HasBuiltinPrefix(name) {
+			return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: fmt.Errorf("{{%s}} has no value: an alert takes no variables", name)}
+		}
+	}
+	rendered, err := template.ClickHouseSQL.Substitute(query, nil, template.Builtins{
+		From: &from, To: &to, TimestampColumn: source.MetaTSField,
+	})
+	if err != nil {
+		return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	return formatAlertQuery(rendered)
+}
+
+// ReplayError is the reason an alert query cannot be run for a past instant.
+type ReplayError struct {
+	Reason string
+}
+
+func (e *ReplayError) Error() string { return e.Reason }
+
+// alertTimeMacros are the built-ins that put the evaluation window into
+// alert SQL.
+var alertTimeMacros = []string{"__from", "__to", "__time_filter"}
+
+// CheckAlertReplayable reports whether EvaluateAlert reads the window that
+// ends at At, so that a backtest can run the query for past instants. A
+// LogsQL query always does: the provider owns the window. ClickHouse SQL
+// does only when it names a time macro and reads no current-time function
+// such as now(). It returns *ReplayError when the query cannot be replayed,
+// and the validation error of a query that would not run at all.
+func CheckAlertReplayable(source *models.Source, language models.QueryLanguage, query string) error {
+	if models.NormalizeQueryLanguage(language) != models.QueryLanguageClickHouseSQL {
+		return nil
+	}
+	rendered, err := renderAlertQuery(source, query, alertSampleTo.Add(-time.Hour), alertSampleTo)
+	if err != nil {
+		return err
+	}
+	current, err := clickhouse.ReadsCurrentTime(rendered)
+	if err != nil {
+		return &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	if current {
+		return &ReplayError{Reason: "This query reads the current time. Replace the time filter with {{__time_filter}} to backtest it."}
+	}
+	if !slices.ContainsFunc(template.ReferencedNames(query), func(name string) bool { return slices.Contains(alertTimeMacros, name) }) {
+		return &ReplayError{Reason: "This query has no time window. Add {{__time_filter}} to its WHERE clause to backtest it."}
+	}
+	return nil
+}
+
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
@@ -672,7 +762,10 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageClickHouseSQL {
 		return nil, fmt.Errorf("clickhouse alerts require %q, got %q", models.QueryLanguageClickHouseSQL, language)
 	}
-	query, err := formatAlertQuery(req.Query)
+	if req.At.IsZero() {
+		return nil, fmt.Errorf("alert evaluation needs the instant it stands for")
+	}
+	query, err := renderAlertQuery(source, req.Query, req.At.Add(-time.Duration(req.LookbackSeconds)*time.Second), req.At)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,6 +1159,34 @@ func buildLogchefQLSchema(source *models.Source) *logchefql.Schema {
 	return &logchefql.Schema{Columns: columns}
 }
 
+// CompileAlertCondition compiles a LogchefQL alert condition into aggregated
+// SQL whose time filter is {{__time_filter}}. EvaluateAlert renders it with
+// the lookback that ends at At, as it renders native alert SQL, so the window
+// is the same half-open range.
+func (p *ClickHouseProvider) CompileAlertCondition(_ context.Context, source *models.Source, query string, _ int) (*CompiledLogchefQL, error) {
+	result := logchefql.TranslateWithOptions(query, buildLogchefQLSchema(source), logchefql.TranslateOptions{AllowAggregation: true})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	compiled := &CompiledLogchefQL{
+		Language:   models.QueryLanguageClickHouseSQL,
+		Valid:      true,
+		Conditions: result.Conditions,
+		FieldsUsed: result.FieldsUsed,
+		FilterOnly: result.SQL,
+	}
+	if result.Aggregation == nil {
+		return compiled, nil
+	}
+	compiled.Aggregation = result.Aggregation.Info()
+	sql, err := logchefql.BuildAggregationQuery(result, source.GetFullTableName(), source.MetaTSField, "{{__time_filter}}")
+	if err != nil {
+		return nil, err
+	}
+	compiled.Query = sql
+	return compiled, nil
+}
+
 // CompileLogchefQL compiles a LogchefQL query into executable ClickHouse SQL.
 // When a complete time window is supplied it returns the full SELECT ... WHERE
 // ... query with the time range baked in; otherwise Query and FilterOnly both
@@ -1078,7 +1199,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 	// The service resolves cached column types before translation.
 	schema := buildLogchefQLSchema(source)
 
-	translateResult := logchefql.Translate(req.Query, schema)
+	translateResult := logchefql.TranslateWithOptions(req.Query, schema, logchefql.TranslateOptions{AllowAggregation: req.AllowAggregation, Interval: req.Interval})
 	compiled := &CompiledLogchefQL{
 		Language:   models.QueryLanguageClickHouseSQL,
 		Valid:      translateResult.Valid,
@@ -1087,6 +1208,9 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 		FieldsUsed: translateResult.FieldsUsed,
 		FilterOnly: translateResult.SQL,
 		Query:      translateResult.SQL,
+	}
+	if translateResult.Aggregation != nil {
+		compiled.Aggregation = translateResult.Aggregation.Info()
 	}
 
 	if !translateResult.Valid {

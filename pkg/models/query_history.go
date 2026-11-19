@@ -28,6 +28,13 @@ type QueryHistory struct {
 	DurationMs    int64         `json:"duration_ms" db:"duration_ms"`
 	RowCount      int64         `json:"row_count" db:"row_count"`
 	CreatedAt     time.Time     `json:"created_at" db:"created_at"`
+
+	// Not persisted to query_history; the recorder reads them to roll up the
+	// query's filter shape. SourceTable is empty for a source that is not
+	// ClickHouse, and LookbackSeconds is nil for a query with no start time.
+	LookbackSeconds *int64 `json:"-" db:"-"`
+	SourceDatabase  string `json:"-" db:"-"`
+	SourceTable     string `json:"-" db:"-"`
 }
 
 // QueryActivityRecord is one query_history row enriched with the executing

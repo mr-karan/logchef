@@ -43,6 +43,15 @@ const (
 	// preview budget makes ordinary exploration reject itself.
 	QueryClassHistogram QueryClass = "histogram"
 	QueryClassDashboard QueryClass = "dashboard"
+	// QueryClassBacktest is an alert backtest, which runs up to
+	// models.MaxBacktestEvaluations queries in a row. It has its own fixed caps.
+	QueryClassBacktest QueryClass = "backtest"
+)
+
+// Backtest admission: one per user and two in total.
+const (
+	backtestMaxPerUser = 1
+	backtestMaxGlobal  = 2
 )
 
 // admissionLimits returns the per-user and global caps for class. Dashboard
@@ -50,10 +59,14 @@ const (
 // every waiter on that panel, and a multi-panel refresh would reject its own
 // panels under the interactive preview cap.
 func (s *Server) admissionLimits(class QueryClass) (maxPerUser, maxGlobal int) {
+	if class == QueryClassBacktest {
+		return backtestMaxPerUser, backtestMaxGlobal
+	}
 	if class == QueryClassDashboard {
-		// The cache's fill semaphore already bounds concurrent fills globally,
-		// so admission only has to keep one user from taking the whole budget.
-		return s.config.DashboardCache.MaxConcurrentFills, 0
+		// The per-user cap is the cache's fill budget. Cached fills are also
+		// bounded by the fill semaphore; uncached panel queries (TTL 0, or the
+		// cache turned off) need the global query cap as well.
+		return s.config.DashboardCache.MaxConcurrentFills, s.config.Query.MaxConcurrentGlobal
 	}
 	return s.config.Query.MaxConcurrentPerUser, s.config.Query.MaxConcurrentGlobal
 }
@@ -251,6 +264,8 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error {
 		requestedLimit:  req.Limit,
 		historyQuery:    req.QueryText,
 		historyLanguage: models.QueryLanguageClickHouseSQL,
+		historyStart:    params.StartTime,
+		class:           queryClassFor(req.Cache),
 		cacheable:       cacheable,
 		cacheKey:        cacheKey,
 		cacheTTL:        effTTL,
@@ -271,9 +286,12 @@ type previewQuery struct {
 	requestedLimit       int
 	historyQuery         string
 	historyLanguage      models.QueryLanguage
-	cacheable            bool
-	cacheKey             [32]byte
-	cacheTTL             time.Duration
+	historyStart         *time.Time // the request's start time, nil when it has none
+	// class is QueryClassDashboard for a dashboard panel, cached or not.
+	class     QueryClass
+	cacheable bool
+	cacheKey  [32]byte
+	cacheTTL  time.Duration
 }
 
 // executePreviewQuery serves q from the dashboard cache when it is cacheable,
@@ -320,15 +338,16 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel()
 
+	maxPerUser, maxGlobal := s.admissionLimits(q.class)
 	queryID, err := queryTracker.StartQuery(
-		QueryClassPreview,
+		q.class,
 		user.ID,
 		sourceID,
 		teamID,
 		q.trackedQuery,
 		cancel,
-		s.config.Query.MaxConcurrentPerUser,
-		s.config.Query.MaxConcurrentGlobal,
+		maxPerUser,
+		maxGlobal,
 	)
 	if err != nil {
 		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
@@ -355,7 +374,7 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 		"limit_applied", result.Stats.LimitApplied,
 		"truncated", result.Stats.Truncated,
 	)
-	s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+	s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
 		int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
 
 	return SendSuccess(c, fiber.StatusOK, q.bufferedResponse(result, queryID))
@@ -380,6 +399,9 @@ func (q previewQuery) bufferedResponse(result *models.QueryResult, queryID strin
 		resp["generated_query_language"] = q.cfg.generatedLanguage
 		resp["conditions"] = q.cfg.conditions
 		resp["fields_used"] = q.cfg.fieldsUsed
+		if q.cfg.aggregation != nil {
+			resp["aggregation"] = q.cfg.aggregation
+		}
 	}
 	return resp
 }

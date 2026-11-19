@@ -117,6 +117,9 @@ type DashboardSummary struct {
 	// editor who can edit a shared dashboard cannot delete it.
 	CanDelete bool `json:"can_delete"`
 	Corrupt   bool `json:"corrupt"`
+	// ReportCount is the number of reports that a delete of the dashboard
+	// removes with it. Only a caller who can delete the dashboard gets it.
+	ReportCount int `json:"report_count"`
 	Timestamps
 	// Panels and PanelsCorrupt are the constant compatibility fields that a
 	// schema 1 client gets: the empty schema 1 blob and true. They go away

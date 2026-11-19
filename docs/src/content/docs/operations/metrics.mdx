@@ -1,6 +1,9 @@
 ---
 title: Prometheus Metrics
-description: Logchef's Prometheus metrics for monitoring usage and performance
+head:
+  - tag: title
+    content: "Prometheus Metrics Reference | Logchef"
+description: "Monitor Logchef with Prometheus metrics for queries, HTTP requests, and application performance. Find metric names and example monitoring queries."
 ---
 
 Logchef exposes Prometheus metrics covering instance usage, performance, and health: query patterns, authentication events, and source connectivity.
@@ -24,6 +27,11 @@ Logchef emits metrics across several categories:
 - **Authentication Metrics**: Login attempts and session management
 - **Authorization Metrics**: Access control failures and patterns
 - **ClickHouse Metrics**: Database connection and operation health
+- **Audit Metrics**: Audit events stored, failed and limited
+- **Schema Advisor Metrics**: Query shapes recorded and schema analyses run
+- **Report Metrics**: Scheduled report runs, panels and deliveries
+- **Job Runner Metrics**: Background job runs, their duration and lag
+- **Alerting Metrics**: Notification deliveries and alert backtests
 
 ## HTTP Metrics
 
@@ -110,6 +118,108 @@ Monitor database connection health and operation performance.
 **Key Use Cases:**
 - Monitor ClickHouse connection health per source
 - Set up alerts for database connectivity issues
+
+## Audit Metrics
+
+Track the [audit log](/operations/audit-log/). These counters have no
+per-user or per-source labels.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_audit_events_total` | Audit events by result: `stored` (inserted), `failed` (the insert failed; the `audit` log line has the event) or `limited` (the failed sign-in bound kept it out of the table) | Counter | `result` |
+| `logchef_audit_redactions_total` | Values the audit serializer replaced with `[redacted]` | Counter | - |
+| `logchef_audit_unstaged_total` | Events whose handler staged no target or no fields. Above zero means a route is missing its audit fields | Counter | - |
+
+**Key Use Cases:**
+- Alert on `increase(logchef_audit_events_total{result="failed"}[5m]) > 0`: events are reaching only the log line
+- A rising `limited` count is a burst of failed sign-ins, such as credential stuffing
+
+## Schema Advisor Metrics
+
+Track the [schema advisor](/features/schema-advisor/): the filter shapes it
+records and the analyses admins run. These metrics have no per-source labels.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_query_shape_records_total` | Queries offered to the shape rollup by result: `analyzed`, `unanalyzed` (a query the advisor cannot read, such as a `JOIN`), `overflow` (past the 500 shapes per source per day) or `error` (the write failed; the query still succeeded) | Counter | `result` |
+| `logchef_schema_advisor_runs_total` | Schema analyses by report status: `ok`, `partial`, `unavailable`, or `error` when no report was stored | Counter | `status` |
+| `logchef_schema_advisor_run_duration_seconds` | How long each schema analysis ran, up to its 30 s deadline | Histogram | - |
+
+**Key Use Cases:**
+- A rising `error` share of `logchef_query_shape_records_total` means the metadata database refuses rollup writes
+- A rising `overflow` share means reports will note an incomplete usage record
+- Repeated `logchef_schema_advisor_runs_total{status="error"}` means ClickHouse is unreachable or runs hit their deadline
+## Report Metrics
+
+Track [scheduled reports](/features/scheduled-reports/). No label names a
+report, a user or an address.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_report_runs_total` | Runs that reached their final update, and scheduled ticks skipped without running (paused, or another run in flight). `status` is `sent`, `partial`, `skipped` or `failed` | Counter | `trigger`, `status` |
+| `logchef_report_run_duration_seconds` | Time from the start of a run, including the wait for a run slot, to its final update | Histogram | `trigger` |
+| `logchef_report_panels_total` | Panels of finished runs, by `status`: `ok`, `empty`, `locked`, `failed` or `unsupported` | Counter | `status` |
+| `logchef_report_deliveries_total` | Recipients of finished runs. `kind` is `user` (a Logchef user) or `external` (an [external address](/features/scheduled-reports/#external-addresses)); `status` is `sent`, `failed`, `skipped` or `unknown` | Counter | `kind`, `status` |
+
+`trigger` is `schedule` or `manual`. A run that the cleanup marks
+`interrupted`, because its replica stopped, is not counted here; the run
+history shows it. The job runner also counts report jobs in
+`logchef_jobs_runs_total{kind="report"}`.
+
+**Key Use Cases:**
+- Alert on `increase(logchef_report_runs_total{status="failed"}[1h]) > 0`: a report sent nothing. The run history names the reason
+- `logchef_report_deliveries_total{status="unknown"}` rising points at a mail server that drops connections after accepting a message
+- A rising `locked` panel count means report owners lost access to sources
+- `logchef_report_deliveries_total{kind="external",status="skipped"}` rising after a settings change means reports still name addresses that the external-recipient settings now refuse
+
+## Job Runner Metrics
+
+Track the background job runner that evaluates alert rules, sends
+notifications and runs scheduled reports. `kind` is `alert.evaluate` (one job
+per alert rule), `notify.deliver` (the notification drain) or `report`.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_jobs_runs_total` | Claimed job runs by `result`: `ok`, `error` (the handler failed, or the runner could not record the run), `skipped` (the tick was older than its grace period), `lost` (another replica took the job over before this run finished) or `deferred` (the search for the due tick hit its cap, so the run waits for the next poll) | Counter | `kind`, `result` |
+| `logchef_jobs_run_duration_seconds` | How long each handler ran | Histogram | `kind` |
+| `logchef_jobs_schedule_lag_seconds` | Time from a job's due time to its claim | Histogram | `kind` |
+
+**Key Use Cases:**
+- A rising `logchef_jobs_schedule_lag_seconds{kind="alert.evaluate"}` means
+  rules start late: raise `[alerts] max_concurrent_evaluations` or add
+  replicas with `[jobs] enabled = true`
+- No `logchef_jobs_runs_total` growth at all means no replica runs jobs
+- Repeated `result="lost"` means a replica stalls past its lease, for example
+  under CPU starvation
+- A rising `logchef_jobs_runs_total{kind="alert.evaluate",result="error"}`
+  means rules fail to evaluate. Each rule's history names the error
+
+## Alerting Metrics
+
+Track [alert](/features/alerting/) notifications and backtests. No label names
+a rule, a group or a destination.
+
+| Metric | Description | Type | Labels |
+|--------|-------------|------|--------|
+| `logchef_notification_deliveries_total` | Delivery attempts by destination `type` (`email`, `webhook`, `slack`, `pagerduty`) and `result`: `sent`, `retry` (a transient failure, tried again later), `failed` (permanent, or out of attempts), `unknown` (an email whose outcome is unknown, never retried) or `reservation_lost` (a newer drain owns the row, so this outcome was dropped) | Counter | `type`, `result` |
+| `logchef_notification_deliveries_pending` | Delivery rows waiting to be sent, including retries and rows held back by a silence. Each replica reads the count from the metadata database when scraped, so every replica reports the same queue | Gauge | |
+| `logchef_alert_backtests_total` | Backtests by `result`: `ok`, `partial` (stopped at the 60-second limit), `not_replayable` (a ClickHouse query without the time macros), `invalid`, `busy` (refused with 429) or `error` | Counter | `result` |
+
+Evaluations are counted in `logchef_jobs_runs_total{kind="alert.evaluate"}`. A
+failed evaluation, such as a query error or a repeated group, counts as
+`error` there and writes an error entry in the rule's history.
+
+**Key Use Cases:**
+- Alert on `increase(logchef_notification_deliveries_total{result="failed"}[15m]) > 0`:
+  a destination refused a notification or ran out of retries. The rule's
+  history names the error
+- A rising `retry` share for one `type` means that service is down or rate
+  limiting
+- `logchef_notification_deliveries_pending` that keeps growing means the drain
+  is not keeping up or not running. Scrape-time counts are equal across
+  replicas, so aggregate with `max`, not `sum`
+- `logchef_notification_deliveries_total{type="email",result="unknown"}` rising
+  points at a mail server that drops connections after accepting a message
 
 ## Example Queries
 

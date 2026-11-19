@@ -8,6 +8,8 @@ import type {
   UpdateSourcePayload,
   SourceInspection,
   SourceActivity,
+  SchemaAdvice,
+  SchemaAdvisorDismissal,
   ValidateConnectionRequestInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
@@ -42,6 +44,7 @@ interface SourcesState {
   sourceInspections: Record<string, SourceInspection>;
   sourceActivities: Record<string, SourceActivity>;
   sourceActivityErrors: Record<string, SourceActivityError>;
+  schemaAdvice: Record<string, SchemaAdvice>;
   // The context's team sources and source details only. Keyed, so a value
   // never shows under another team or source while the context switches.
   sourcesByTeam: Record<number, Source[]>;
@@ -57,6 +60,7 @@ export const useSourcesStore = defineStore("sources", () => {
     sourceInspections: {},
     sourceActivities: {},
     sourceActivityErrors: {},
+    schemaAdvice: {},
     sourcesByTeam: {},
     sourceDetails: {},
   });
@@ -107,6 +111,7 @@ export const useSourcesStore = defineStore("sources", () => {
   const getSourceInspectionById = computed(() => (id: number) => sourceInspections.value[id.toString()]);
   const getSourceActivityById = computed(() => (id: number) => sourceActivities.value[id.toString()]);
   const getSourceActivityErrorById = computed(() => (id: number) => sourceActivityErrors.value[id.toString()] ?? null);
+  const getSchemaAdviceById = computed(() => (id: number) => state.data.value.schemaAdvice[id.toString()] ?? null);
 
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
@@ -378,6 +383,63 @@ export const useSourcesStore = defineStore("sources", () => {
     }
   }
 
+  function storeSchemaAdvice(sourceId: number, data: SchemaAdvice | null) {
+    if (data) state.data.value.schemaAdvice = { ...state.data.value.schemaAdvice, [sourceId.toString()]: data };
+  }
+
+  async function getSchemaAdvice(sourceId: number) {
+    return await state.callApi<SchemaAdvice>({
+      apiCall: () => sourcesApi.getSchemaAdvice(sourceId),
+      operationKey: `getSchemaAdvice-${sourceId}`,
+      showToast: false,
+      onSuccess: (data) => storeSchemaAdvice(sourceId, data),
+    });
+  }
+
+  // A failed analysis keeps the stored report on the server, so the cached one stays.
+  async function refreshSchemaAdvice(sourceId: number) {
+    return await state.callApi<SchemaAdvice>({
+      apiCall: () => sourcesApi.refreshSchemaAdvice(sourceId),
+      operationKey: `refreshSchemaAdvice-${sourceId}`,
+      showToast: false,
+      onSuccess: (data) => storeSchemaAdvice(sourceId, data),
+    });
+  }
+
+  async function setSchemaAdviceSchedule(sourceId: number, enabled: boolean) {
+    return await state.callApi<{ enabled: boolean }>({
+      apiCall: () => sourcesApi.setSchemaAdviceSchedule(sourceId, enabled),
+      operationKey: `setSchemaAdviceSchedule-${sourceId}`,
+      onSuccess: (data) => {
+        const advice = state.data.value.schemaAdvice[sourceId.toString()];
+        if (advice && data) storeSchemaAdvice(sourceId, { ...advice, scheduled_refresh: data.enabled });
+      },
+    });
+  }
+
+  function setSchemaDismissals(sourceId: number, update: (dismissals: SchemaAdvisorDismissal[]) => SchemaAdvisorDismissal[]) {
+    const advice = state.data.value.schemaAdvice[sourceId.toString()];
+    if (advice) storeSchemaAdvice(sourceId, { ...advice, dismissals: update(advice.dismissals) });
+  }
+
+  async function dismissSchemaFinding(sourceId: number, findingId: string, reason: string) {
+    return await state.callApi<SchemaAdvisorDismissal>({
+      apiCall: () => sourcesApi.dismissSchemaFinding(sourceId, findingId, reason),
+      operationKey: `dismissSchemaFinding-${sourceId}-${findingId}`,
+      onSuccess: (dismissal) => {
+        if (dismissal) setSchemaDismissals(sourceId, list => [...list.filter(d => d.finding_id !== findingId), dismissal]);
+      },
+    });
+  }
+
+  async function restoreSchemaFinding(sourceId: number, findingId: string) {
+    return await state.callApi<null>({
+      apiCall: () => sourcesApi.restoreSchemaFinding(sourceId, findingId),
+      operationKey: `restoreSchemaFinding-${sourceId}-${findingId}`,
+      onSuccess: () => setSchemaDismissals(sourceId, list => list.filter(d => d.finding_id !== findingId)),
+    });
+  }
+
   // Get team-scoped inspection data for a source
   async function getTeamSourceInspection(teamId: number, sourceId: number) {
     return await state.withLoading(`getTeamSourceInspection-${teamId}-${sourceId}`, async () => {
@@ -471,6 +533,7 @@ export const useSourcesStore = defineStore("sources", () => {
     delete state.data.value.sourceInspections[sourceId.toString()];
     delete state.data.value.sourceActivities[sourceId.toString()];
     delete state.data.value.sourceActivityErrors[sourceId.toString()];
+    delete state.data.value.schemaAdvice[sourceId.toString()];
   }
 
   // Use the centralized error handler from base store
@@ -542,6 +605,7 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourceInspectionById: (id: number) => getSourceInspectionById.value(id),
     getSourceActivityById: (id: number) => getSourceActivityById.value(id),
     getSourceActivityErrorById: (id: number) => getSourceActivityErrorById.value(id),
+    getSchemaAdviceById: (id: number) => getSchemaAdviceById.value(id),
     isConnectionValidated,
 
     // Actions
@@ -554,6 +618,11 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourcesNotInTeam,
     getSourceInspection,
     getSourceActivity,
+    getSchemaAdvice,
+    refreshSchemaAdvice,
+    setSchemaAdviceSchedule,
+    dismissSchemaFinding,
+    restoreSchemaFinding,
     getTeamSourceInspection,
     validateSourceConnection,
     invalidateSourceCache,

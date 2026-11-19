@@ -8,14 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
-	"github.com/mr-karan/logchef/internal/util"
+	"github.com/mr-karan/logchef/internal/datasource/providertest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -68,10 +68,9 @@ func newTestRunID(t *testing.T) string {
 func ingestFixtures(t *testing.T, baseURL, runID string, base time.Time, rows []fixtureRow) {
 	t.Helper()
 
-	var body bytes.Buffer
-	encoder := json.NewEncoder(&body) // Encode writes a trailing newline: exactly the stream+json framing.
-	for _, row := range rows {
-		record := map[string]any{
+	records := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		records[i] = map[string]any{
 			"_time":       base.Add(row.offset).Format(time.RFC3339),
 			"_msg":        row.msg,
 			"level":       row.level,
@@ -79,12 +78,27 @@ func ingestFixtures(t *testing.T, baseURL, runID string, base time.Time, rows []
 			"duration_ms": row.durationMs,
 			"test_run":    runID,
 		}
+	}
+	ingestRecords(t, baseURL, records, "")
+}
+
+// ingestRecords pushes records via the jsonline insert API. Each record needs
+// _time and _msg. streamFields, when set, is the _stream_fields list.
+func ingestRecords(t *testing.T, baseURL string, records []map[string]any, streamFields string) {
+	t.Helper()
+
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body) // Encode writes a trailing newline: exactly the stream+json framing.
+	for _, record := range records {
 		if err := encoder.Encode(record); err != nil {
 			t.Fatalf("encode fixture: %v", err)
 		}
 	}
 
 	endpoint := strings.TrimRight(baseURL, "/") + "/insert/jsonline?_time_field=_time&_msg_field=_msg"
+	if streamFields != "" {
+		endpoint += "&_stream_fields=" + url.QueryEscape(streamFields)
+	}
 	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
 	if err != nil {
 		t.Fatalf("create ingest request: %v", err)
@@ -129,19 +143,6 @@ func waitForFixtures(t *testing.T, provider *Provider, source *models.Source, wi
 type queryWindow struct {
 	start time.Time
 	end   time.Time
-}
-
-// sortedMessages extracts and sorts the _msg values from a result set so two
-// result sets can be compared regardless of row order.
-func sortedMessages(logs []map[string]any) []string {
-	msgs := make([]string, 0, len(logs))
-	for _, row := range logs {
-		if msg, ok := row["_msg"].(string); ok {
-			msgs = append(msgs, msg)
-		}
-	}
-	sort.Strings(msgs)
-	return msgs
 }
 
 func TestIntegrationVictoriaLogs(t *testing.T) {
@@ -250,77 +251,7 @@ func TestIntegrationVictoriaLogs(t *testing.T) {
 		}
 	})
 
-	// ---- Subtest 3: LogchefQL compiles to LogsQL and yields the same rows. ----
-	t.Run("LogchefQLMatchesNative", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		compiled, err := provider.CompileLogchefQL(ctx, source, datasource.LogchefQLCompileRequest{
-			Query: fmt.Sprintf("test_run = %q", runID),
-		})
-		if err != nil {
-			t.Fatalf("CompileLogchefQL: %v", err)
-		}
-		if !compiled.Valid || strings.TrimSpace(compiled.Query) == "" {
-			t.Fatalf("unexpected compile result: %#v", compiled)
-		}
-
-		compiledResult, err := provider.QueryLogs(ctx, source, datasource.QueryRequest{
-			RawQuery:  compiled.Query,
-			StartTime: &window.start,
-			EndTime:   &window.end,
-			Limit:     100,
-			MaxLimit:  1000,
-		})
-		if err != nil {
-			t.Fatalf("QueryLogs (compiled): %v", err)
-		}
-
-		nativeResult, err := provider.QueryLogs(ctx, source, datasource.QueryRequest{
-			RawQuery:  scopeFilter,
-			StartTime: &window.start,
-			EndTime:   &window.end,
-			Limit:     100,
-			MaxLimit:  1000,
-		})
-		if err != nil {
-			t.Fatalf("QueryLogs (native): %v", err)
-		}
-
-		gotMsgs := sortedMessages(compiledResult.Logs)
-		wantMsgs := sortedMessages(nativeResult.Logs)
-		if len(gotMsgs) != len(rows) {
-			t.Fatalf("expected %d compiled rows, got %d", len(rows), len(gotMsgs))
-		}
-		if strings.Join(gotMsgs, "|") != strings.Join(wantMsgs, "|") {
-			t.Fatalf("compiled rows %v != native rows %v", gotMsgs, wantMsgs)
-		}
-	})
-
-	// ---- Subtest 4: histogram bucket counts sum to the fixture row count. ----
-	t.Run("Histogram", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		histogram, err := provider.Histogram(ctx, source, datasource.HistogramRequest{
-			StartTime: &window.start,
-			EndTime:   &window.end,
-			Window:    "1m",
-			Query:     scopeFilter,
-		})
-		if err != nil {
-			t.Fatalf("Histogram: %v", err)
-		}
-		total := 0
-		for _, bucket := range histogram.Data {
-			total += bucket.LogCount
-		}
-		if total != len(rows) {
-			t.Fatalf("expected histogram counts to sum to %d, got %d", len(rows), total)
-		}
-	})
-
-	// ---- Subtest 5: schema discovery includes the fixture field names. ----
+	// ---- Subtest 3: schema discovery includes the fixture field names. ----
 	t.Run("GetSourceSchema", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -339,118 +270,28 @@ func TestIntegrationVictoriaLogs(t *testing.T) {
 			}
 		}
 	})
+}
 
-	// ---- Subtest 6: field values for level, scoped, with correct counts. ----
-	t.Run("GetFieldValues", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		result, err := provider.GetFieldValues(ctx, source, datasource.FieldValuesRequest{
-			FieldName: "level",
-			Language:  models.QueryLanguageLogsQL,
-			StartTime: window.start,
-			EndTime:   window.end,
-			Limit:     100,
-		})
-		if err != nil {
-			t.Fatalf("GetFieldValues: %v", err)
-		}
-
-		// Expected distinct level counts derived from the fixtures.
-		wantCounts := map[string]int64{}
-		for _, row := range rows {
-			wantCounts[row.level]++
-		}
-		gotCounts := map[string]int64{}
-		for _, value := range result.Values {
-			gotCounts[value.Value] = value.Count
-		}
-		if len(gotCounts) != len(wantCounts) {
-			t.Fatalf("expected %d distinct levels, got %d (%v)", len(wantCounts), len(gotCounts), gotCounts)
-		}
-		for level, want := range wantCounts {
-			if gotCounts[level] != want {
-				t.Fatalf("level %q: expected count %d, got %d", level, want, gotCounts[level])
+func TestIntegrationProviderConformance(t *testing.T) {
+	baseURL := integrationBaseURL(t)
+	runID := newTestRunID(t)
+	scope := fmt.Sprintf(`test_run:=%q`, runID)
+	provider := newTestProvider(nil)
+	providertest.Run(t, providertest.Harness{
+		Provider: provider,
+		Source:   mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: baseURL, Scope: models.VictoriaLogsScope{Query: scope}}),
+		Language: models.QueryLanguageLogsQL,
+		Ingest: func(t *testing.T, rows []providertest.Row) {
+			records := make([]map[string]any, len(rows))
+			for i, row := range rows {
+				records[i] = map[string]any{"_time": row.Time.Format(time.RFC3339Nano), "_msg": row.Message, "level": row.Level, "test_run": runID}
 			}
-		}
-	})
-
-	// ---- Subtest 7: EvaluateAlert stats count() equals the fixture count. ----
-	t.Run("EvaluateAlert", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		result, err := provider.EvaluateAlert(ctx, source, datasource.AlertQueryRequest{
-			Language:        models.QueryLanguageLogsQL,
-			Query:           fmt.Sprintf(`%s | stats count() as value`, scopeFilter),
-			LookbackSeconds: 3600,
-		})
-		if err != nil {
-			t.Fatalf("EvaluateAlert: %v", err)
-		}
-		if len(result.Logs) != 1 {
-			t.Fatalf("expected 1 alert row, got %d (%#v)", len(result.Logs), result.Logs)
-		}
-		if got := fmt.Sprint(result.Logs[0]["value"]); got != fmt.Sprint(len(rows)) {
-			t.Fatalf("expected alert value %d, got %q", len(rows), got)
-		}
-		value, err := util.ExtractFirstNumeric(result)
-		if err != nil || value != float64(len(rows)) {
-			t.Fatalf("alert evaluator got (%v, %v), want (%d, nil)", value, err, len(rows))
-		}
-	})
-
-	// ---- Subtest 8: live tail streams a newly-ingested row and honors cancel. ----
-	t.Run("TailLogsStreamsNewRows", func(t *testing.T) {
-		tailCtx, cancelTail := context.WithCancel(context.Background())
-		defer cancelTail()
-
-		rowCh := make(chan map[string]any, 64)
-		tailErr := make(chan error, 1)
-		go func() {
-			emit := func(batch []map[string]any) error {
-				for _, row := range batch {
-					select {
-					case rowCh <- row:
-					default:
-					}
-				}
-				return nil
-			}
-			tailErr <- provider.TailLogs(tailCtx, source, datasource.TailRequest{
-				Query:    scopeFilter, // native LogsQL, scoped to this run.
-				Language: models.QueryLanguageLogsQL,
-			}, emit)
-		}()
-
-		// Let the upstream tail stream establish before ingesting, so the probe
-		// row lands after the tail's live cutoff.
-		time.Sleep(time.Second)
-
-		marker := "tail probe " + runID
-		ingestFixtures(t, baseURL, runID, time.Now().UTC(), []fixtureRow{
-			{msg: marker, level: "info", service: "tail", durationMs: 1, offset: 0},
-		})
-
-		deadline := time.After(20 * time.Second)
-		found := false
-		for !found {
-			select {
-			case row := <-rowCh:
-				if row["_msg"] == marker {
-					found = true
-				}
-			case <-deadline:
-				t.Fatalf("tail did not deliver the probe row within the window")
-			}
-		}
-
-		// Cancelling the context must terminate the provider tail promptly.
-		cancelTail()
-		select {
-		case <-tailErr:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("tail did not terminate after context cancel")
-		}
+			ingestRecords(t, baseURL, records, "")
+		},
+		Queries: providertest.Queries{
+			All:        scope,
+			Count:      scope + ` | stats count() as value`,
+			LevelError: scope + ` level:="error"`,
+		},
 	})
 }

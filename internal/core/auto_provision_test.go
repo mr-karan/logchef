@@ -16,9 +16,12 @@ func TestGetOrCreateAutoProvisionedUser_Creates(t *testing.T) {
 	log := discardLogger()
 	ctx := context.Background()
 
-	user, err := GetOrCreateAutoProvisionedUser(ctx, db, log, "new-hire@example.com", "New Hire")
+	user, created, err := GetOrCreateAutoProvisionedUser(ctx, db, log, "new-hire@example.com", "New Hire")
 	if err != nil {
 		t.Fatalf("GetOrCreateAutoProvisionedUser: %v", err)
+	}
+	if !created {
+		t.Error("created = false for a new user")
 	}
 	if user.Role != models.UserRoleMember {
 		t.Errorf("role = %q, want %q", user.Role, models.UserRoleMember)
@@ -50,9 +53,12 @@ func TestGetOrCreateAutoProvisionedUser_ConflictRefetches(t *testing.T) {
 
 	existing := newTestUser(t, db, "already-here@example.com", "Already Here")
 
-	got, err := GetOrCreateAutoProvisionedUser(ctx, db, log, "already-here@example.com", "Different Name From Claims")
+	got, created, err := GetOrCreateAutoProvisionedUser(ctx, db, log, "already-here@example.com", "Different Name From Claims")
 	if err != nil {
 		t.Fatalf("GetOrCreateAutoProvisionedUser: %v", err)
+	}
+	if created {
+		t.Error("created = true for a user that already existed")
 	}
 	if got.ID != existing.ID {
 		t.Errorf("expected the pre-existing user (id=%d), got id=%d", existing.ID, got.ID)
@@ -75,19 +81,24 @@ func TestGetOrCreateAutoProvisionedUser_ConcurrentLoginsBothSucceed(t *testing.T
 	const n = 8
 	var wg sync.WaitGroup
 	users := make([]*models.User, n)
+	created := make([]bool, n)
 	errs := make([]error, n)
 
 	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			users[i], errs[i] = GetOrCreateAutoProvisionedUser(ctx, db, log, "racer@example.com", "Racer")
+			users[i], created[i], errs[i] = GetOrCreateAutoProvisionedUser(ctx, db, log, "racer@example.com", "Racer")
 		}(i)
 	}
 	wg.Wait()
 
 	var firstID models.UserID
+	creates := 0
 	for i := range n {
+		if created[i] {
+			creates++
+		}
 		if errs[i] != nil {
 			t.Fatalf("goroutine %d: GetOrCreateAutoProvisionedUser: %v", i, errs[i])
 		}
@@ -98,5 +109,8 @@ func TestGetOrCreateAutoProvisionedUser_ConcurrentLoginsBothSucceed(t *testing.T
 		if users[i].ID != firstID {
 			t.Errorf("goroutine %d resolved to user id %d, want %d (all concurrent logins must resolve to the same user)", i, users[i].ID, firstID)
 		}
+	}
+	if creates != 1 {
+		t.Errorf("%d concurrent logins reported creating the user, want exactly 1", creates)
 	}
 }

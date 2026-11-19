@@ -20,6 +20,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -83,7 +84,7 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = replicaDB.Close() })
 			}
-			replicaB := New(ServerOptions{Config: testOAuthConfig(), SQLite: replicaDB, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+			replicaB := New(ServerOptions{Config: testOAuthConfig(), SQLite: replicaDB, Audit: testAuditRecorder(t, replicaDB), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 			t.Cleanup(func() { _ = replicaB.Shutdown(ctx) })
 			fresh := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: time.Now().Add(time.Hour), CreatedAt: time.Now(), UpdatedAt: time.Now()}
 			if err := replicaDB.CreateExportJob(ctx, fresh); err != nil {
@@ -96,7 +97,7 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 			_ = partial.Close()
 			t.Cleanup(func() { _ = os.Remove(partial.Name()) })
 			for range 2 {
-				srv := New(ServerOptions{Config: testOAuthConfig(), SQLite: db, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+				srv := New(ServerOptions{Config: testOAuthConfig(), SQLite: db, Audit: testAuditRecorder(t, db), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 				stale := *fresh
 				stale.ID = uuid.NewString()
 				stale.UpdatedAt = time.Now().UTC().Add(-2 * time.Hour)
@@ -164,7 +165,7 @@ func TestStartupReapsOnlyPreviousInstanceProcess(t *testing.T) {
 			newReplica := func(instance string) *Server {
 				cfg := testOAuthConfig()
 				cfg.Export.InstanceID = instance
-				srv := New(ServerOptions{Config: cfg, SQLite: db, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+				srv := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 				t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
 				return srv
 			}
@@ -318,7 +319,7 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	ds.Register(datasource.NewClickHouseProvider(manager, log))
 	cfg := testOAuthConfig()
 	cfg.Export = config.ExportConfig{MaxRows: 10000000, DefaultTimeoutSeconds: 60, MaxTimeoutSeconds: 60, MaxConcurrentPerUser: 1, MaxConcurrentGlobal: 1, ArtifactTTL: time.Hour, Formats: []string{"csv"}}
-	srv := New(ServerOptions{Config: cfg, SQLite: db, ClickHouse: manager, Datasources: ds, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+	srv := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), ClickHouse: manager, Datasources: ds, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 	t.Cleanup(func() {
 		select {
 		case <-srv.stop:
@@ -330,7 +331,7 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	app := fiber.New()
 	app.Use(requestContext(context.Background()))
 	path := fmt.Sprintf("/teams/%d/sources/%d/exports", team.ID, source.ID)
-	withAuthorizedSource(app, srv, "/teams/:teamID/sources/:sourceID/exports", user, srv.handleCreateExportJob)
+	withAuthorizedSource(app, srv, "/teams/:teamID/sources/:sourceID/exports", user, srv.handleCreateExportJob).Name(string(audit.LogExportCreate))
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"raw_sql":"SELECT number, sleepEachRow(0.00001) FROM system.numbers LIMIT 10000000","format":"csv","limit":10000000,"query_timeout":60}`))
 	req.Header.Set("Content-Type", "application/json")
 	response := testRequest(t, app, req)
@@ -407,7 +408,7 @@ func TestQueryHistoryBackpressure(t *testing.T) {
 	before := runtime.NumGoroutine()
 	start := time.Now()
 	for range 512 {
-		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("history submission blocked for %s", elapsed)
@@ -429,7 +430,7 @@ func TestHistoryDrainsOnShutdown(t *testing.T) {
 	}()
 	<-ready
 	for range 64 {
-		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
 	}
 	go func() { <-srv.baseCtx.Done(); close(release) }()
 	if err := srv.Shutdown(context.Background()); err != nil {
@@ -480,7 +481,7 @@ func TestHistoryShutdownCountsUndrainedEntries(t *testing.T) {
 	}()
 	<-ready
 	for range 64 {
-		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
 	}
 	deadline := time.Now().Add(time.Second)
 	for len(srv.historyQueue) == 64 && time.Now().Before(deadline) {

@@ -2,6 +2,8 @@ package clickhouse
 
 import (
 	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -44,6 +46,37 @@ func publicQueryError(err error) error {
 	default:
 		return err
 	}
+}
+
+// Error codes of the two bounds of a LogchefQL aggregation, from
+// ClickHouse's src/Common/ErrorCodes.cpp.
+const (
+	codeTooManyRows         = 158
+	codeMemoryLimitExceeded = 241
+)
+
+// groupLimitPattern reads the limit that applied from ClickHouse's message,
+// since a source or a settings profile can set a lower one.
+var groupLimitPattern = regexp.MustCompile(`maximum: (\d+)`)
+
+// AggregationError explains a LogchefQL aggregation that passed its group
+// count or its memory limit. Any other error returns as it is.
+func AggregationError(err error) error {
+	exception, ok := errors.AsType[*clickhouse.Exception](err)
+	if !ok {
+		return err
+	}
+	switch {
+	case exception.Code == codeTooManyRows && strings.Contains(exception.Message, "Limit for rows to GROUP BY"):
+		limit := strconv.Itoa(AggregationMaxGroups)
+		if match := groupLimitPattern.FindStringSubmatch(exception.Message); match != nil {
+			limit = match[1]
+		}
+		return &QueryError{Message: "the query produced more than " + limit + " groups. Add a filter or group by fewer fields", Err: err}
+	case exception.Code == codeMemoryLimitExceeded:
+		return &QueryError{Message: "the query needs more memory than the limit allows. Add a filter or shorten the range", Err: err}
+	}
+	return err
 }
 
 // limitSettings name the settings behind each ClickHouse limit message.

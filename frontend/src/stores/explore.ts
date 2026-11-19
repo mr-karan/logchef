@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
-import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
+import { exploreApi, buildTailUrl, subscribeToTail, type TailQueryLanguage } from "@/api/explore";
 import type {
   QuerySharePayload,
   QueryShareResponse,
@@ -9,17 +9,20 @@ import type {
 } from "@/api/explore";
 import type { ResolvedSavedQuery, SavedQuery, SavedQueryContent } from "@/api/savedQueries";
 import type { ExploreTarget } from "@/lib/exploreLocation";
+import type { SavedViewDefinition } from "@/lib/savedViewLayout";
 import { useSourcesStore } from "./sources";
 import { useTeamsStore } from "@/stores/teams";
+import { useActiveSavedViewStore } from "@/stores/activeSavedView";
 import { useContextStore } from "@/stores/context";
 import { useBaseStore } from "./base";
 import { useExploreAIStore } from "./exploreAI";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
-import { epochMs, resolveWindow, sameWindow, type ResolvedWindow, type TimeWindow } from '@/utils/timeWindow';
+import { epochMs, relativeWindow, resolveWindow, sameWindow, type ResolvedWindow, type TimeWindow } from '@/utils/timeWindow';
 import { decodeDraftWindow, decodeStoredRange, encodeStoredRange, encodeWindowForUrl, type DraftTime } from '@/utils/timeWindowCodec';
 import type { Source } from '@/api/sources';
+import { isAggregation } from '@/utils/logchefql/aggregation';
 import {
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
@@ -62,6 +65,9 @@ type ExploreDraft = DraftTime & {
 type StoredDraftFields = Partial<Omit<ExploreDraft, "version" | "window">> & { version?: unknown };
 
 const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
+
+/** A saved view's query defaults (RFC 0007). They fill what a location leaves open and never overwrite it. */
+export type ViewQueryDefaults = Pick<SavedViewDefinition, "filter" | "time_range">;
 
 /** Everything needed to show an Explorer location: every id checked, every fetch done. */
 export interface OpenedLocation {
@@ -182,14 +188,16 @@ export const useExploreStore = defineStore("explore", () => {
     ? "logchefql" : getCurrentSource() ? getNativeQueryLanguageForSource(getCurrentSource()) : null);
 
   // Live tail: the current source must advertise the capability, and the tail
-  // endpoint only accepts LogchefQL (either backend) or native logsql
-  // (VictoriaLogs). Native clickhouse-sql is rejected 400 server-side, so the
+  // endpoint accepts LogchefQL or a native language other than ClickHouse SQL
+  // (LogsQL, LogQL). Native clickhouse-sql is rejected 400 server-side, so the
   // toggle stays disabled there.
   const supportsLiveTail = computed(() => hasSourceCapability(getCurrentSource(), "live_tail"));
+  // Live tail streams log rows, so an aggregation cannot run there.
+  const liveTailNeedsLogRows = computed(() => state.data.value.activeMode === "logchefql" && isAggregation(state.data.value.logchefqlCode));
   const canArmLiveTail = computed(() => {
-    if (!supportsLiveTail.value || !hasValidSource.value) return false;
+    if (!supportsLiveTail.value || !hasValidSource.value || liveTailNeedsLogRows.value) return false;
     if (state.data.value.activeMode === "logchefql") return true;
-    return getNativeQueryLanguageForSource(getCurrentSource()) === "logsql";
+    return getNativeQueryLanguageForSource(getCurrentSource()) !== "clickhouse-sql";
   });
 
   const variableStore = useVariableStore();
@@ -343,6 +351,11 @@ export const useExploreStore = defineStore("explore", () => {
       params.source = sourceId.value.toString();
     }
 
+    const viewId = useActiveSavedViewStore().viewParameter(teamsStore.currentTeamId, sourceId.value || null);
+    if (viewId !== null) {
+      params.view = viewId.toString();
+    }
+
     const isEditorQuery = query.mode === editorQuery.value.mode && query.text === editorQuery.value.text;
     if (isEditorQuery && selectedQueryId && !hasDivergedFromSavedQuery.value) {
       params.id = selectedQueryId;
@@ -435,16 +448,18 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.activeMode = normalizeModeForSource(state.data.value.activeMode, source);
   }
 
-  function openDraft() {
+  // Each opener takes `viewWindow`, the active view's range, for a location
+  // that names no range. A stored draft keeps its own.
+  function openDraft(viewWindow: TimeWindow | null) {
     if (!state.data.value.window) assignWindow(DEFAULT_WINDOW);
     state.data.value.logchefqlCode = '';
     state.data.value.nativeQuery = '';
     state.data.value.activeMode = getDefaultModeForSource();
-    restoreDraftForCurrentContext();
+    if (!restoreDraftForCurrentContext() && viewWindow) assignWindow(viewWindow);
   }
 
-  function openQuery({ mode, text, window, limit }: Extract<ExploreTarget, { kind: 'query' }>) {
-    assignWindow(window ?? DEFAULT_WINDOW);
+  function openQuery({ mode, text, window, limit }: Extract<ExploreTarget, { kind: 'query' }>, viewWindow: TimeWindow | null) {
+    assignWindow(window ?? viewWindow ?? DEFAULT_WINDOW);
     if (limit && limit > 0) state.data.value.limit = limit;
     if (mode) state.data.value.activeMode = mode;
     state.data.value.logchefqlCode = state.data.value.activeMode === 'logchefql' ? text : '';
@@ -452,7 +467,7 @@ export const useExploreStore = defineStore("explore", () => {
     if (text && templateDialect.value) useVariables().ensureVariablesFromSql(text, templateDialect.value);
   }
 
-  function openSavedQuery(saved: ResolvedSavedQuery, content: SavedQueryContent) {
+  function openSavedQuery(saved: ResolvedSavedQuery, content: SavedQueryContent, viewWindow: TimeWindow | null) {
     const metadata = resolveSavedQueryMetadata({
       query_language: saved.query_language,
       editor_mode: saved.editor_mode,
@@ -489,7 +504,7 @@ export const useExploreStore = defineStore("explore", () => {
       format: "saved-query",
       version: typeof content.version === "number" ? content.version : 1,
       prefZone: preferencesStore.zone,
-    }) ?? timeWindow.value;
+    }) ?? viewWindow ?? timeWindow.value;
     assignWindow(window);
 
     state.data.value.savedQuerySnapshot = { mode: resolvedMode, queryContent, limit, window };
@@ -510,7 +525,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
-  function openShare(share: QueryShareResponse) {
+  function openShare(share: QueryShareResponse, viewWindow: TimeWindow | null) {
     const payload = share.payload;
 
     state.data.value.activeShareToken = share.token;
@@ -528,7 +543,7 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.limit = payload.limit;
     }
     assignWindow(
-      decodeStoredRange(payload.time_range, { format: "share", version: payload.version, timezone: payload.timezone }) ?? timeWindow.value,
+      decodeStoredRange(payload.time_range, { format: "share", version: payload.version, timezone: payload.timezone }) ?? viewWindow ?? timeWindow.value,
     );
 
     suppressSharedVariableTracking = true;
@@ -546,11 +561,53 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
+  // Default SQL that a run generated is not the user's text.
+  const editorIsEmpty = () => {
+    const { logchefqlCode, nativeQuery, showsDefaultSql } = state.data.value;
+    return !logchefqlCode.trim() && (showsDefaultSql || !nativeQuery.trim());
+  };
+
+  function setViewFilter(filter: string) {
+    state.data.value.activeMode = "logchefql";
+    state.data.value.logchefqlCode = filter;
+    state.data.value.nativeQuery = "";
+    state.data.value.showsDefaultSql = false;
+  }
+
   /**
-   * Shows one location's team, source and content. Returns whether it has
+   * Fills an empty editor with a view's filter in LogchefQL mode. Returns
+   * whether it did, so the caller runs it.
+   */
+  function fillViewFilter(filter: string): boolean {
+    if (!editorIsEmpty() || !supportsLogchefQLForSource()) return false;
+    setViewFilter(filter);
+    clearShareSelectionIfDirty();
+    persistDraft();
+    return true;
+  }
+
+  /**
+   * Reset to view: the view's filter replaces the editor text and its range
+   * replaces the window. A part the view does not set stays. Returns whether
+   * the query changed, so the caller runs it.
+   */
+  function resetToViewQuery({ filter, time_range }: ViewQueryDefaults): boolean {
+    const window = time_range === undefined ? null : relativeWindow(time_range);
+    const fillsFilter = filter !== undefined && supportsLogchefQLForSource();
+    if (!window && !fillsFilter) return false;
+    if (window) assignWindow(window);
+    if (fillsFilter) setViewFilter(filter);
+    clearShareSelectionIfDirty();
+    persistDraft();
+    return true;
+  }
+
+  /**
+   * Shows one location's team, source and content, with the active view's
+   * query defaults filling what it leaves open. Returns whether it has
    * something to run.
    */
-  function open(location: OpenedLocation): boolean {
+  function open(location: OpenedLocation, viewDefaults: ViewQueryDefaults = {}): boolean {
     // Stream filters name another source's streams.
     if (location.sourceId !== contextStore.sourceId) selectedStreams.value = {};
     contextStore.selectTeam(location.teamId);
@@ -562,11 +619,18 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.showsDefaultSql = false;
 
     const { content } = location;
-    if (content.kind === 'draft') openDraft();
-    else if (content.kind === 'query') openQuery(content);
-    else if (content.kind === 'saved') openSavedQuery(content.saved, content.queryContent);
-    else openShare(content.share);
+    // The Explorer has no seconds unit, so a seconds range keeps the window in
+    // use, as a saved query's does.
+    const viewWindow = viewDefaults.time_range === undefined ? null : relativeWindow(viewDefaults.time_range);
+    if (content.kind === 'draft') openDraft(viewWindow);
+    else if (content.kind === 'query') openQuery(content, viewWindow);
+    else if (content.kind === 'saved') openSavedQuery(content.saved, content.queryContent, viewWindow);
+    else openShare(content.share, viewWindow);
     fitModeToSource(getCurrentSource());
+
+    // A URL with q or sql names a query, even an empty one.
+    const namesQuery = content.kind !== 'draft' && !(content.kind === 'query' && content.mode === null);
+    if (location.sourceId !== null && !namesQuery && viewDefaults.filter !== undefined) fillViewFilter(viewDefaults.filter);
 
     clearError();
     // A link that names an empty SQL query opens it without running default SQL.
@@ -625,15 +689,17 @@ export const useExploreStore = defineStore("explore", () => {
     const sid = sourceId.value;
     if (!currentTeamId || !sid) return;
 
-    let queryLanguage: "logchefql" | "logsql";
+    let queryLanguage: TailQueryLanguage;
     let queryText: string;
+    const nativeLanguage = getNativeQueryLanguageForSource(source);
     if (state.data.value.activeMode === "logchefql") {
       queryLanguage = "logchefql";
       queryText = state.data.value.logchefqlCode || "";
-    } else {
-      // canArmLiveTail already guaranteed native === logsql here.
-      queryLanguage = "logsql";
+    } else if (nativeLanguage !== "clickhouse-sql") {
+      queryLanguage = nativeLanguage;
       queryText = state.data.value.nativeQuery || "";
+    } else {
+      return;
     }
 
     // Abort any prior stream and reset the buffer for a fresh session.
@@ -749,7 +815,7 @@ export const useExploreStore = defineStore("explore", () => {
     });
   }
 
-  function buildQuerySharePayload(): QuerySharePayload {
+  function buildQuerySharePayload(layout: SavedViewDefinition | null): QuerySharePayload {
     const { activeMode, nativeQuery, logchefqlCode, limit, window } = state.data.value;
     const stored = window ? encodeStoredRange(window) : null;
     return {
@@ -760,17 +826,22 @@ export const useExploreStore = defineStore("explore", () => {
       timezone: preferencesStore.zone,
       variables: variableStore.allVariables as unknown as QuerySharePayload["variables"],
       ...(stored ? { time_range: stored.timeRange } : {}),
+      ...(layout ? { layout } : {}),
     };
   }
 
-  /** Creates a share link for the editor's query. markShare selects it while the editor still holds what was shared. */
-  async function createQueryShare() {
+  /**
+   * Creates a share link for the editor's query, with a copy of the table
+   * layout when given one. markShare selects it while the editor still holds
+   * what was shared.
+   */
+  async function createQueryShare(layout: SavedViewDefinition | null = null) {
     const currentTeamId = useTeamsStore().currentTeamId;
     if (!currentTeamId || !sourceId.value) {
       throw new Error("Team and source are required to share a query");
     }
 
-    const payload = buildQuerySharePayload();
+    const payload = buildQuerySharePayload(layout);
     if (payload.mode === "sql" && !payload.query.trim()) {
       throw new Error("Query is required to create a share link");
     }
@@ -892,6 +963,8 @@ export const useExploreStore = defineStore("explore", () => {
     clearActiveSavedQuerySelection,
     markSavedQuery,
     resetQueryToDefaults,
+    fillViewFilter,
+    resetToViewQuery,
     persistDraft,
     getLogContext,
     createQueryShare,
@@ -912,6 +985,7 @@ export const useExploreStore = defineStore("explore", () => {
     liveDroppedCount: computed(() => state.data.value.liveDroppedCount),
     supportsLiveTail,
     canArmLiveTail,
+    liveTailNeedsLogRows,
 
     // Live tail actions
     startLiveTail,

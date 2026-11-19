@@ -115,7 +115,7 @@ func TestGeneratorsRejectMalformedAST(t *testing.T) {
 		{"known scalar nested path", &ExpressionNode{Key: NestedField{Base: "count", Path: []string{"value"}}, Operator: OpEquals, Value: NumericLiteral("1")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := translateAST(tc.node, &Schema{Columns: []ColumnInfo{{Name: "count", Type: "UInt64"}}})
+			result := translateAST(tc.node, &Schema{Columns: []ColumnInfo{{Name: "count", Type: "UInt64"}}}, "")
 			if result.Valid || result.Error == nil {
 				t.Fatalf("result = %+v, want a translation error", result)
 			}

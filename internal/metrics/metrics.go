@@ -104,6 +104,94 @@ func SetDashboardCacheEntries(n int) {
 	metrics.GetOrCreateGauge("logchef_dashboard_cache_entries", nil).Set(float64(n))
 }
 
+// RecordJobRun counts one claimed job run. result is "ok", "error",
+// "skipped", "lost" or "deferred".
+func RecordJobRun(kind, result string) {
+	labels := fmt.Sprintf(`logchef_jobs_runs_total{kind=%q,result=%q}`, kind, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// RecordNotificationDelivery counts one delivery attempt. result is "sent",
+// "retry", "failed", "unknown" or "reservation_lost".
+func RecordNotificationDelivery(destinationType, result string) {
+	labels := fmt.Sprintf(`logchef_notification_deliveries_total{type=%q,result=%q}`, destinationType, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// RegisterNotificationDeliveriesPending reports the delivery rows waiting to
+// be sent, read through pending each time the metric is read.
+func RegisterNotificationDeliveriesPending(pending func() float64) {
+	metrics.GetOrCreateGauge("logchef_notification_deliveries_pending", pending)
+}
+
+// RecordQueryShape counts one query offered to the schema advisor's shape
+// rollup. result is "analyzed", "unanalyzed", "overflow" or "error".
+func RecordQueryShape(result string) {
+	labels := fmt.Sprintf(`logchef_query_shape_records_total{result=%q}`, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// RecordSchemaAdvisorRun counts one schema analysis. status is the report's
+// "ok", "partial" or "unavailable", or "error" when no report came out.
+func RecordSchemaAdvisorRun(status string) {
+	labels := fmt.Sprintf(`logchef_schema_advisor_runs_total{status=%q}`, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// ObserveSchemaAdvisorRunDuration records how long a schema analysis ran.
+func ObserveSchemaAdvisorRunDuration(d time.Duration) {
+	metrics.GetOrCreateHistogram("logchef_schema_advisor_run_duration_seconds").Update(d.Seconds())
+}
+
+// RecordAlertBacktest counts alert backtests by result: ok, partial,
+// not_replayable, invalid, busy or error.
+func RecordAlertBacktest(result string) {
+	labels := fmt.Sprintf(`logchef_alert_backtests_total{result=%q}`, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// ObserveJobRunDuration records how long a job handler ran.
+func ObserveJobRunDuration(kind string, d time.Duration) {
+	labels := fmt.Sprintf(`logchef_jobs_run_duration_seconds{kind=%q}`, kind)
+	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
+}
+
+// ObserveJobScheduleLag records how long after its due time a job was claimed.
+func ObserveJobScheduleLag(kind string, d time.Duration) {
+	labels := fmt.Sprintf(`logchef_jobs_schedule_lag_seconds{kind=%q}`, kind)
+	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
+}
+
+// RecordReportRun counts one report run that reached its final update, or a
+// scheduled tick that was skipped without running. trigger is "schedule"
+// or "manual"; status is "sent", "partial", "skipped" or "failed".
+func RecordReportRun(trigger, status string) {
+	labels := fmt.Sprintf(`logchef_report_runs_total{trigger=%q,status=%q}`, trigger, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// ObserveReportRunDuration records how long a report run took, from the
+// start of its execution to its final update.
+func ObserveReportRunDuration(trigger string, d time.Duration) {
+	labels := fmt.Sprintf(`logchef_report_run_duration_seconds{trigger=%q}`, trigger)
+	metrics.GetOrCreateHistogram(labels).Update(d.Seconds())
+}
+
+// RecordReportPanel counts one panel of a finished report run. status is
+// "ok", "empty", "locked", "failed" or "unsupported".
+func RecordReportPanel(status string) {
+	labels := fmt.Sprintf(`logchef_report_panels_total{status=%q}`, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// RecordReportDelivery counts one recipient of a finished report run. kind
+// is "user" or "external"; status is "sent", "failed", "skipped" or
+// "unknown".
+func RecordReportDelivery(kind, status string) {
+	labels := fmt.Sprintf(`logchef_report_deliveries_total{kind=%q,status=%q}`, kind, status)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
 func IncrementActiveRequests() {
 	metrics.GetOrCreateGauge("logchef_http_active_requests", nil).Inc()
 }
@@ -171,4 +259,24 @@ func DetermineErrorType(err error) string {
 	}
 
 	return "other"
+}
+
+// RecordAuditEvent counts one audit event by result: "stored" when the insert
+// succeeded, "failed" when it did not, and "limited" when a rate bound kept
+// it out of the table.
+func RecordAuditEvent(result string) {
+	metrics.GetOrCreateCounter(fmt.Sprintf(`logchef_audit_events_total{result=%q}`, result)).Inc()
+}
+
+// RecordAuditRedactions counts values that the audit serializer replaced.
+func RecordAuditRedactions(n int) {
+	if n > 0 {
+		metrics.GetOrCreateCounter("logchef_audit_redactions_total").Add(n)
+	}
+}
+
+// RecordAuditUnstaged counts an audit event whose handler staged no target or
+// no fields.
+func RecordAuditUnstaged() {
+	metrics.GetOrCreateCounter("logchef_audit_unstaged_total").Inc()
 }

@@ -1,5 +1,5 @@
 //! Shared human-output helpers: TTY/`--quiet` gating, number formatting, a
-//! small SQL/LogsQL syntax highlighter, an elapsed spinner, and the top-level
+//! small SQL/LogsQL/LogQL syntax highlighter, an elapsed spinner, and the top-level
 //! error reporter with actionable hints.
 //!
 //! Everything here is for human `text` output only. Machine output
@@ -124,9 +124,57 @@ const LOGSQL_KEYWORDS: &[&str] = &[
     "not",
 ];
 
+const LOGQL_KEYWORDS: &[&str] = &[
+    "by",
+    "without",
+    "and",
+    "or",
+    "unless",
+    "on",
+    "ignoring",
+    "group_left",
+    "group_right",
+    "bool",
+    "offset",
+    "json",
+    "logfmt",
+    "regexp",
+    "pattern",
+    "unpack",
+    "line_format",
+    "label_format",
+    "keep",
+    "drop",
+    "decolorize",
+    "unwrap",
+    "rate",
+    "count_over_time",
+    "bytes_over_time",
+    "bytes_rate",
+    "sum_over_time",
+    "avg_over_time",
+    "min_over_time",
+    "max_over_time",
+    "quantile_over_time",
+    "first_over_time",
+    "last_over_time",
+    "absent_over_time",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "count",
+    "stddev",
+    "stdvar",
+    "topk",
+    "bottomk",
+    "sort",
+    "sort_desc",
+];
+
 /// Syntax-highlights a generated backend query for human display. `language`
 /// is the server's `generated_query_language` (`"clickhouse-sql"`, `"logsql"`,
-/// or `None`). Returns the input unchanged when `enabled` is false so piped /
+/// `"logql"`, or `None`). Returns the input unchanged when `enabled` is false so piped /
 /// `--quiet` output stays plain.
 pub fn highlight_query(query: &str, language: Option<&str>, enabled: bool) -> String {
     if !enabled {
@@ -134,6 +182,7 @@ pub fn highlight_query(query: &str, language: Option<&str>, enabled: bool) -> St
     }
     match language {
         Some("logsql") => highlight_tokens(query, LOGSQL_KEYWORDS),
+        Some("logql") => highlight_tokens(query, LOGQL_KEYWORDS),
         _ => highlight_tokens(query, SQL_KEYWORDS),
     }
 }
@@ -385,6 +434,15 @@ fn hint_for_core(err: &logchef_core::Error) -> Option<String> {
             status: Some(401), ..
         } => Some("token invalid or expired — run `logchef auth`".into()),
         Error::Api {
+            status: Some(403),
+            message,
+            ..
+        } if message.contains("required scope") => Some(
+            "the credential lacks a scope this command needs — run `logchef auth` again (a \
+             sign-in from an older CLI lacks saved_views:read), or use an API token with the scope"
+                .into(),
+        ),
+        Error::Api {
             status: Some(403), ..
         } => Some("no access to that team/source — check `logchef whoami`".into()),
         Error::Api {
@@ -414,6 +472,20 @@ fn hint_for_error_type(kind: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_scope_says_to_sign_in_again() {
+        let err = anyhow::Error::new(logchef_core::Error::api_with_type(
+            Some(403),
+            "API token does not have the required scope",
+            Some("AuthorizationError".into()),
+        ));
+        assert!(
+            hint_for_error(&err)
+                .unwrap()
+                .contains("run `logchef auth` again")
+        );
+    }
 
     #[test]
     fn thousands_groups_digits() {
@@ -446,5 +518,29 @@ mod tests {
         // The plain text must survive untouched between the escapes.
         assert!(out.contains("SELECT"));
         assert!(out.contains("'z'"));
+    }
+
+    #[test]
+    fn highlight_logql_uses_logql_keywords() {
+        let query = r#"sum by (level) (count_over_time({service_name="api"} |= "error" [5m]))"#;
+        let out = highlight_query(query, Some("logql"), true);
+        for keyword in ["sum", "by", "count_over_time"] {
+            assert!(
+                out.contains(&format!("{KW}{keyword}{RESET}")),
+                "{keyword} is not highlighted in {out:?}"
+            );
+        }
+        assert!(out.contains(&format!("{STR}\"api\"{RESET}")));
+        assert!(out.contains(&format!("{DIM}|{RESET}")));
+        // A label name is not a keyword.
+        assert!(!out.contains(&format!("{KW}service_name")));
+        // SQL keywords mean nothing in LogQL.
+        let select = highlight_query(
+            "{app=\"x\"} |= \"SELECT\" | json | where",
+            Some("logql"),
+            true,
+        );
+        assert!(!select.contains(&format!("{KW}where")));
+        assert!(select.contains(&format!("{KW}json{RESET}")));
     }
 }

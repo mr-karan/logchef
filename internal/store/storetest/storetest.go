@@ -27,6 +27,8 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("TeamMapping", func(t *testing.T) { testTeamMapping(t, ctx, s) })
 	t.Run("GetNotFound", func(t *testing.T) { testGetNotFound(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
+	t.Run("LokiSource", func(t *testing.T) { testLokiSource(t, ctx, s) })
+	t.Run("SourceHeaderSecretRefs", func(t *testing.T) { testSourceHeaderSecretRefs(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
 	t.Run("SettingFallbackLogs", func(t *testing.T) { testSettingFallbackLogs(t, s) })
@@ -35,13 +37,22 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("CollectionLinks", func(t *testing.T) { testCollectionLinks(t, ctx, s) })
+	t.Run("SavedViews", func(t *testing.T) { testSavedViews(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
 	t.Run("DashboardPresentation", func(t *testing.T) { testDashboardPresentation(t, ctx, s) })
 	t.Run("DashboardStatCompare", func(t *testing.T) { testDashboardStatCompare(t, ctx, s) })
 	t.Run("DashboardRevisions", func(t *testing.T) { testDashboardRevisions(t, ctx, s) })
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
+	t.Run("QueryShapeStats", func(t *testing.T) { testQueryShapeStats(t, ctx, s) })
+	t.Run("SchemaAdvisorReports", func(t *testing.T) { testSchemaAdvisorReports(t, ctx, s) })
+	t.Run("SchemaAdvisorDismissals", func(t *testing.T) { testSchemaAdvisorDismissals(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
+	t.Run("AlertInstances", func(t *testing.T) { testAlertInstances(t, ctx, s) })
+	t.Run("AlertGroups", func(t *testing.T) { testAlertGroups(t, ctx, s) })
+	t.Run("AlertNoData", func(t *testing.T) { testAlertNoData(t, ctx, s) })
+	t.Run("AlertSilences", func(t *testing.T) { testAlertSilences(t, ctx, s) })
+	t.Run("Destinations", func(t *testing.T) { testDestinations(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
 	t.Run("Provisioning", func(t *testing.T) { testProvisioning(t, ctx, s) })
@@ -50,6 +61,11 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("LockMembershipWrites", func(t *testing.T) { testLockMembershipWrites(t, ctx, s) })
 	t.Run("WithTxNoNesting", func(t *testing.T) { testWithTxNoNesting(t, ctx, s) })
 	t.Run("ConcurrentAdminRemovals", func(t *testing.T) { testConcurrentAdminRemovals(t, s) })
+	t.Run("Audit", func(t *testing.T) { testAudit(t, ctx, s) })
+	t.Run("ForUpdateReads", func(t *testing.T) { testForUpdateReads(t, ctx, s) })
+	t.Run("TeamForUpdate", func(t *testing.T) { testTeamForUpdate(t, ctx, s) })
+	t.Run("IdentityWriteCounts", func(t *testing.T) { testIdentityWriteCounts(t, ctx, s) })
+	t.Run("ContentForUpdate", func(t *testing.T) { testContentForUpdate(t, ctx, s) })
 }
 
 // --- helpers ---
@@ -900,27 +916,11 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListAlertsBySource: %v / %d", err, len(bySrc))
 	}
 
-	// A never-evaluated active alert is due (LastEvaluatedAt IS NULL). This is
-	// the path whose dialect-specific time math differs between backends.
-	due, err := s.ListActiveAlertsDue(ctx)
-	if err != nil {
-		t.Fatalf("ListActiveAlertsDue: %v", err)
-	}
-	found := false
-	for _, d := range due {
-		if d.ID == a.ID {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("fresh active alert %d not returned by ListActiveAlertsDue", a.ID)
-	}
-
 	testAlertEvaluationState(t, ctx, s, a.ID)
 
 	// History round-trip.
 	val := 12.0
-	if _, err := s.InsertAlertHistory(ctx, a.ID, models.AlertStatusTriggered, &val, "fired", map[string]any{"k": "v"}); err != nil {
+	if _, err := s.InsertAlertHistory(ctx, a.ID, "", nil, models.AlertStatusTriggered, &val, "fired", map[string]any{"k": "v"}); err != nil {
 		t.Fatalf("InsertAlertHistory: %v", err)
 	}
 	hist, err := s.ListAlertHistory(ctx, a.ID, 10)
@@ -951,7 +951,7 @@ func testAlertEvaluationState(t *testing.T, ctx context.Context, s store.Store, 
 	for _, state := range []models.AlertState{models.AlertStateResolved, models.AlertStateFiring} {
 		t.Run("TouchAlertEvaluated/"+string(state), func(t *testing.T) {
 			if state == models.AlertStateFiring {
-				if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+				if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateFiring); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -984,7 +984,7 @@ func testAlertEvaluationState(t *testing.T, ctx context.Context, s store.Store, 
 			}
 		})
 	}
-	if err := s.MarkAlertEvaluated(ctx, alertID); err != nil {
+	if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateResolved); err != nil {
 		t.Fatal(err)
 	}
 	if resolved, err := s.GetAlert(ctx, alertID); err != nil || resolved.LastState != models.AlertStateResolved {
@@ -1119,13 +1119,13 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	alertID := alert.ID
 	var legacyIDs []int64
 	for range 3 {
-		legacy, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		legacy, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "legacy firing", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		legacyIDs = append(legacyIDs, legacy.ID)
 	}
-	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+	entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{
 		"delivery_attempts": 3, "delivery_failed": true,
 	})
 	if err != nil {
@@ -1133,7 +1133,7 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	}
 	const keep = 2
 	for range keep + 1 {
-		if _, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusError, nil, "evaluation failed", nil); err != nil {
+		if _, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusError, nil, "evaluation failed", nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
@@ -1144,13 +1144,14 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	if err != nil || latest.ID != entry.ID || latest.Payload["delivery_attempts"] != float64(3) {
 		t.Fatalf("unresolved history after pruning = %+v, %v; want firing entry %d with 3 attempts", latest, err, entry.ID)
 	}
+	// Every open episode survives pruning; only closed rows count toward keep.
 	history, err := s.ListAlertHistory(ctx, alertID, 10)
-	if err != nil || len(history) != keep+1 {
-		t.Fatalf("history after pruning = %d entries, %v; want the firing entry and %d recent entries", len(history), err, keep)
+	if err != nil || len(history) != len(legacyIDs)+1+keep {
+		t.Fatalf("history after pruning = %d entries, %v; want %d open episodes and %d closed entries", len(history), err, len(legacyIDs)+1, keep)
 	}
 	for _, id := range legacyIDs {
-		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); !models.IsNotFound(err) {
-			t.Errorf("legacy duplicate %d after pruning error = %v, want not found", id, err)
+		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); err != nil {
+			t.Errorf("open episode %d after pruning error = %v, want kept", id, err)
 		}
 	}
 	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved"); err != nil {
@@ -1165,14 +1166,14 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	if latest, err := s.GetLatestUnresolvedAlertHistory(ctx, alertID); !models.IsNotFound(err) {
 		t.Errorf("unresolved history after resolution = %+v, %v; want not found", latest, err)
 	}
-	t.Run("RecentDuplicates", func(t *testing.T) { testRecentDuplicatePruning(t, ctx, s, alertID) })
+	t.Run("OpenEpisodesOutliveLimit", func(t *testing.T) { testOpenEpisodePruning(t, ctx, s, alertID) })
 }
 
-func testRecentDuplicatePruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+func testOpenEpisodePruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
 	t.Helper()
 	var ids []int64
 	for range 3 {
-		entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "legacy firing", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1182,18 +1183,20 @@ func testRecentDuplicatePruning(t *testing.T, ctx context.Context, s store.Store
 	if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
 		t.Fatal(err)
 	}
-	recent, err := s.ListAlertHistory(ctx, alertID, 10)
-	if err != nil || len(recent) != keep || recent[0].ID != ids[2] || recent[1].ID != ids[1] {
-		t.Fatalf("recent duplicate history = %+v, %v; want the newest %d entries", recent, err, keep)
+	// Three open episodes outlive a limit of two.
+	for _, id := range ids {
+		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); err != nil {
+			t.Errorf("open episode %d after pruning to %d error = %v, want kept", id, keep, err)
+		}
 	}
 }
 
 func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
 	t.Helper()
-	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+	if err := s.MarkAlertEvaluated(ctx, alertID, models.AlertStateFiring); err != nil {
 		t.Fatal(err)
 	}
-	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+	entry, err := s.InsertAlertHistory(ctx, alertID, "", nil, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
 	if err != nil {
 		t.Fatal(err)
 	}

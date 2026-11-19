@@ -41,6 +41,14 @@ var intervals = []Interval{
 	{"24h", 86400, "INTERVAL 1 DAY", "1d"},
 }
 
+// ClickHouse is the interval as a ClickHouse INTERVAL literal, such as
+// "INTERVAL 5 MINUTE".
+func (i Interval) ClickHouse() string { return i.clickhouse }
+
+// LogsQL is the interval as a LogsQL duration, such as "5m". LogQL reads the
+// same form.
+func (i Interval) LogsQL() string { return i.logsql }
+
 // ParseInterval returns the interval for a histogram window such as "24h".
 func ParseInterval(window string) (Interval, bool) {
 	for _, interval := range intervals {
@@ -76,12 +84,21 @@ type Builtins struct {
 // one dialect, or reports why that dialect or request cannot use it.
 var macros = map[string]func(Builtins, Dialect) (string, error){
 	"__from": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__from")
+		}
 		return renderInstant("__from", b.From, dialect)
 	},
 	"__to": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__to")
+		}
 		return renderInstant("__to", b.To, dialect)
 	},
 	"__time_filter": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__time_filter")
+		}
 		if dialect == LogsQL {
 			return "", fmt.Errorf("macro {{__time_filter}} is not available in LogsQL: the request's time range already applies")
 		}
@@ -103,7 +120,7 @@ var macros = map[string]func(Builtins, Dialect) (string, error){
 		if err := requireInterval("__interval", b); err != nil {
 			return "", err
 		}
-		if dialect == LogsQL {
+		if dialect == LogsQL || dialect == LogQL {
 			return b.Interval.logsql, nil
 		}
 		return b.Interval.clickhouse, nil
@@ -115,12 +132,18 @@ var macros = map[string]func(Builtins, Dialect) (string, error){
 		return strconv.Itoa(b.Interval.Seconds), nil
 	},
 	"__timezone": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__timezone")
+		}
 		if dialect == LogsQL {
 			return "", fmt.Errorf("macro {{__timezone}} is not available in LogsQL: use {{__tz_offset}}")
 		}
 		return formatString(location(b).String(), dialect)
 	},
 	"__tz_offset": func(b Builtins, dialect Dialect) (string, error) {
+		if dialect == LogQL {
+			return "", logQLTimeMacroError("__tz_offset")
+		}
 		if dialect != LogsQL {
 			return "", fmt.Errorf("macro {{__tz_offset}} is not available in ClickHouse SQL: use {{__timezone}}")
 		}
@@ -137,6 +160,17 @@ var macros = map[string]func(Builtins, Dialect) (string, error){
 func IsBuiltin(name string) bool {
 	_, ok := macros[name]
 	return ok
+}
+
+// ReferencedNames lists the {{name}} tokens of query in order, quoted
+// text and comments included.
+func ReferencedNames(query string) []string {
+	matches := variablePattern.FindAllStringSubmatch(query, -1)
+	names := make([]string, len(matches))
+	for i, match := range matches {
+		names[i] = match[1]
+	}
+	return names
 }
 
 // HasBuiltinPrefix reports whether name starts with the reserved prefix.
@@ -186,6 +220,33 @@ func expandMacro(name string, quote byte, builtins Builtins, dialect Dialect) (s
 	return macros[name](builtins, dialect)
 }
 
+func logQLTimeMacroError(name string) error {
+	return fmt.Errorf("macro {{%s}} is not available in LogQL: LogQL has no time literal, and the request's time range already applies", name)
+}
+
 func reservedNameError(name string) error {
 	return fmt.Errorf("variable name %s is reserved for a built-in macro", name)
+}
+
+// UsesTimeRange reports whether a ClickHouse SQL query takes the dashboard
+// range: through {{__time_filter}}, or {{__from}} with {{__to}}, outside
+// comments, strings, quoted identifiers and heredocs. It is the rule of the
+// dashboard's "fixed window" chip (panelTimeBound in the frontend).
+func UsesTimeRange(query string) bool {
+	used := map[string]bool{}
+	for i := 0; i < len(query); {
+		if end := quotedOrCommentEnd(query, i, ClickHouseSQL); end > i {
+			i = end
+			continue
+		}
+		if strings.HasPrefix(query[i:], "{{") {
+			if loc := variablePattern.FindStringSubmatchIndex(query[i:]); len(loc) >= 4 && loc[0] == 0 {
+				used[query[i+loc[2]:i+loc[3]]] = true
+				i += loc[1]
+				continue
+			}
+		}
+		i++
+	}
+	return used["__time_filter"] || used["__from"] && used["__to"]
 }

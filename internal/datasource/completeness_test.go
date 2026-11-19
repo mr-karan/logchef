@@ -48,7 +48,7 @@ func TestEvaluateAlertCompletenessClickHouse(t *testing.T) {
 	provider := NewClickHouseProvider(manager, log)
 	const count = "SELECT count() AS value FROM numbers(100000)"
 
-	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: count + " SETTINGS max_rows_to_read = 1000000, read_overflow_mode = 'throw'"})
+	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: count + " SETTINGS max_rows_to_read = 1000000, read_overflow_mode = 'throw'"})
 	if err != nil || result.Logs[0]["value"] != uint64(100000) {
 		t.Fatalf("EvaluateAlert() = %v, %v; want value 100000", result, err)
 	}
@@ -59,7 +59,7 @@ func TestEvaluateAlertCompletenessClickHouse(t *testing.T) {
 		"\"offset\" = 1",
 		"skip_unavailable_shards = 1",
 	} {
-		result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: count + " SETTINGS " + settings})
+		result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: count + " SETTINGS " + settings})
 		if _, ok := errors.AsType[*ValidationError](err); !ok {
 			t.Fatalf("EvaluateAlert() under SETTINGS %s = %v, %v; want a validation error", settings, result, err)
 		}
@@ -74,7 +74,7 @@ func TestEvaluateAlertCompletenessClickHouse(t *testing.T) {
 	if err := manager.AddSource(ctx, profiled); err != nil {
 		t.Fatal(err)
 	}
-	result, err = provider.EvaluateAlert(ctx, profiled, AlertQueryRequest{Query: count})
+	result, err = provider.EvaluateAlert(ctx, profiled, AlertQueryRequest{At: time.Now(), Query: count})
 	if err == nil {
 		t.Fatalf("EvaluateAlert() under a profile read cap in break mode = %v, want an error", result.Logs)
 	}

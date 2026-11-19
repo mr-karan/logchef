@@ -323,7 +323,10 @@ func TestClickHouseQueryFailureResponses(t *testing.T) {
 		}
 	})
 	t.Run("admin authentication", func(t *testing.T) {
-		body, err := json.Marshal(map[string]any{"name": "auth-check", "meta_ts_field": "timestamp", "source_type": "clickhouse", "connection": models.ConnectionInfo{Host: addr, Username: "logchef_nonexistent_query_error_test_user", Database: "system", TableName: "numbers"}})
+		// The password is explicit because an update with a blank password and a
+		// new username is refused before ClickHouse is reached.
+		const password = "logchef_wrong_query_error_test_password"
+		body, err := json.Marshal(map[string]any{"name": "auth-check", "meta_ts_field": "timestamp", "source_type": "clickhouse", "connection": models.ConnectionInfo{Host: addr, Username: "logchef_nonexistent_query_error_test_user", Password: password, Database: "system", TableName: "numbers"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -333,7 +336,7 @@ func TestClickHouseQueryFailureResponses(t *testing.T) {
 			{http.MethodPut, fmt.Sprintf("/api/v1/admin/sources/%d", env.chSource)},
 		} {
 			got := doAuthzRequest(t, env.s, endpoint.method, endpoint.path, string(body), withSession(env.cookie))
-			if got.status != 400 || !strings.Contains(got.message, "authentication failed") || strings.Contains(got.message, addr) || strings.Contains(got.message, "nonexistent_query_error") {
+			if got.status != 400 || !strings.Contains(got.message, "authentication failed") || strings.Contains(got.message, addr) || strings.Contains(got.message, "nonexistent_query_error") || strings.Contains(got.message, password) {
 				t.Fatalf("%s status=%d message=%q, want safe authentication cause", endpoint.path, got.status, got.message)
 			}
 		}
@@ -414,7 +417,10 @@ func TestClickHouseResourceFailureResponses(t *testing.T) {
 	if addr == "" {
 		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR for read-only ClickHouse checks")
 	}
-	env := newErrorResponseServer(t, vlUpstream)
+	// The logger goes in before New: replacing s.log afterwards races with
+	// the server's background goroutines. Each case resets the buffer.
+	var logs syncLogBuffer
+	env := newErrorResponseServer(t, vlUpstream, slog.New(slog.NewTextHandler(&logs, nil)))
 	configureErrorResponseClickHouse(t, env, addr)
 	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.chSource)
 	for _, tc := range []struct {
@@ -433,8 +439,7 @@ func TestClickHouseResourceFailureResponses(t *testing.T) {
 		{"remote cast 70", "SELECT accurateCast(number, 'UInt8') FROM remote('127.0.0.2', system.numbers) LIMIT 1000 SETTINGS prefer_localhost_replica=0", 400, "accurateCast"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var logs bytes.Buffer
-			env.s.log = slog.New(slog.NewTextHandler(&logs, nil))
+			logs.Reset()
 			body, err := json.Marshal(map[string]string{"query_text": tc.query})
 			if err != nil {
 				t.Fatal(err)

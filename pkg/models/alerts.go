@@ -30,6 +30,9 @@ const (
 	AlertStatusTriggered AlertStatus = "triggered"
 	AlertStatusResolved  AlertStatus = "resolved"
 	AlertStatusError     AlertStatus = "error"
+	// AlertStatusNoData is an open episode of a group whose query returned no
+	// row, under the no_data policy.
+	AlertStatusNoData AlertStatus = "no_data"
 )
 
 // AlertEditorMode captures which alert authoring workflow created the alert.
@@ -73,22 +76,25 @@ func ResolveAlertMetadata(language QueryLanguage, mode AlertEditorMode) (QueryLa
 		}
 	}
 
-	if normalizedLanguage != QueryLanguageClickHouseSQL && normalizedLanguage != QueryLanguageLogsQL {
+	switch normalizedLanguage {
+	case QueryLanguageClickHouseSQL, QueryLanguageLogsQL, QueryLanguageLogQL:
+		if normalizedMode == "" {
+			normalizedMode = AlertEditorModeNative
+		}
+	case QueryLanguageLogchefQL:
+		// The server compiles a LogchefQL condition at each evaluation.
+		if normalizedMode == "" {
+			normalizedMode = AlertEditorModeCondition
+		}
+		if normalizedMode != AlertEditorModeCondition {
+			return "", "", ErrInvalidAlertQueryConfiguration{Value: "query_language logchefql needs editor_mode condition"}
+		}
+	default:
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(normalizedLanguage)}
-	}
-
-	if normalizedMode == "" {
-		normalizedMode = AlertEditorModeNative
 	}
 
 	if !normalizedMode.Valid() {
 		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(mode)}
-	}
-
-	if normalizedMode == AlertEditorModeCondition &&
-		normalizedLanguage != QueryLanguageClickHouseSQL &&
-		normalizedLanguage != QueryLanguageLogsQL {
-		return "", "", ErrInvalidAlertQueryConfiguration{Value: string(normalizedLanguage)}
 	}
 
 	return normalizedLanguage, normalizedMode, nil
@@ -108,7 +114,40 @@ type AlertState string
 const (
 	AlertStateFiring   AlertState = "firing"
 	AlertStateResolved AlertState = "resolved"
+	AlertStateNoData   AlertState = "no_data"
 )
+
+// AlertNoDataPolicy decides what a group without a row in the result means.
+type AlertNoDataPolicy string
+
+const (
+	// AlertNoDataZero compares 0 with the threshold, the behavior before
+	// policies existed.
+	AlertNoDataZero AlertNoDataPolicy = "zero"
+	// AlertNoDataNoData moves the group to the no_data state.
+	AlertNoDataNoData AlertNoDataPolicy = "no_data"
+	// AlertNoDataKeep leaves the group in its state.
+	AlertNoDataKeep AlertNoDataPolicy = "keep"
+)
+
+// OrZero returns p, or the zero policy when p is unset, as the column default
+// does for a rule written without one.
+func (p AlertNoDataPolicy) OrZero() AlertNoDataPolicy {
+	if p == "" {
+		return AlertNoDataZero
+	}
+	return p
+}
+
+// Valid reports whether p is one of the three policies.
+func (p AlertNoDataPolicy) Valid() bool {
+	switch p {
+	case AlertNoDataZero, AlertNoDataNoData, AlertNoDataKeep:
+		return true
+	default:
+		return false
+	}
+}
 
 // Alert encapsulates a rule that is continuously evaluated against log data.
 // Alerts are scoped to a single source. Visibility (read access) is granted to
@@ -130,29 +169,92 @@ type Alert struct {
 	Severity          AlertSeverity          `json:"severity"`
 	Labels            map[string]string      `json:"labels,omitempty"`
 	Annotations       map[string]string      `json:"annotations,omitempty"`
-	RecipientUserIDs  []UserID               `json:"recipient_user_ids,omitempty"`
-	WebhookURLs       []string               `json:"webhook_urls,omitempty"`
+	DestinationIDs    []DestinationID        `json:"destination_ids"`
 	GeneratorURL      string                 `json:"generator_url,omitempty"`
-	IsActive          bool                   `json:"is_active"`
-	LastState         AlertState             `json:"last_state"`
-	LastEvaluatedAt   *time.Time             `json:"last_evaluated_at,omitempty"`
-	LastTriggeredAt   *time.Time             `json:"last_triggered_at,omitempty"`
-	CreatedBy         *UserID                `json:"created_by,omitempty"`
-	CreatedAt         time.Time              `json:"created_at"`
-	UpdatedAt         time.Time              `json:"updated_at"`
+	// GroupBy names the result columns that split the rule into one state per
+	// group. Empty means ungrouped.
+	GroupBy      []string          `json:"group_by"`
+	NoDataPolicy AlertNoDataPolicy `json:"no_data_policy"`
+	// NotifyOnResolve sends a resolved notification when an episode closes.
+	NotifyOnResolve bool       `json:"notify_on_resolve"`
+	IsActive        bool       `json:"is_active"`
+	LastState       AlertState `json:"last_state"`
+	LastEvaluatedAt *time.Time `json:"last_evaluated_at,omitempty"`
+	LastTriggeredAt *time.Time `json:"last_triggered_at,omitempty"`
+	CreatedBy       *UserID    `json:"created_by,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	// InstanceCounts is filled by the list and get routes.
+	InstanceCounts *AlertInstanceCounts `json:"instance_counts,omitempty"`
+	// EvalSeq is read with the rest of the rule. An evaluation commits only
+	// while the stored value still equals it.
+	EvalSeq int64 `json:"-"`
+}
+
+// MaxAlertGroupBy bounds the group columns of one rule.
+const MaxAlertGroupBy = 4
+
+// AlertInstanceCounts summarises a rule's instances by state.
+type AlertInstanceCounts struct {
+	Firing int `json:"firing"`
+	NoData int `json:"no_data"`
+	OK     int `json:"ok"`
+}
+
+// Add counts n instances in state.
+func (c *AlertInstanceCounts) Add(state AlertInstanceState, n int) {
+	switch state {
+	case AlertInstanceStateFiring:
+		c.Firing += n
+	case AlertInstanceStateNoData:
+		c.NoData += n
+	case AlertInstanceStateOK:
+		c.OK += n
+	}
+}
+
+// AlertInstanceState is the state of one group of a rule.
+type AlertInstanceState string
+
+const (
+	AlertInstanceStateOK     AlertInstanceState = "ok"
+	AlertInstanceStateFiring AlertInstanceState = "firing"
+	AlertInstanceStateNoData AlertInstanceState = "no_data"
+)
+
+// AlertInstance holds the state of one group of a rule. An ungrouped rule has
+// one instance with an empty GroupKey.
+type AlertInstance struct {
+	AlertID    AlertID            `json:"alert_id"`
+	GroupKey   string             `json:"group_key"`
+	Group      map[string]string  `json:"group"`
+	State      AlertInstanceState `json:"state"`
+	Value      *float64           `json:"value,omitempty"`
+	StateSince time.Time          `json:"state_since"`
+	LastSeenAt *time.Time         `json:"last_seen_at,omitempty"`
+	HistoryID  *int64             `json:"history_id,omitempty"`
+	// Notified reports that the notification of the open episode's state is
+	// settled: delivered, or out of delivery attempts.
+	Notified bool `json:"-"`
 }
 
 // AlertHistoryEntry captures individual trigger or resolution events for an alert.
 type AlertHistoryEntry struct {
-	ID          int64          `json:"id"`
-	AlertID     AlertID        `json:"alert_id"`
-	Status      AlertStatus    `json:"status"`
-	TriggeredAt time.Time      `json:"triggered_at"`
-	ResolvedAt  *time.Time     `json:"resolved_at,omitempty"`
-	Value       *float64       `json:"value,omitempty"`
-	Message     string         `json:"message,omitempty"`
-	Payload     map[string]any `json:"payload,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID      int64   `json:"id"`
+	AlertID AlertID `json:"alert_id"`
+	// GroupKey and Group name the group of the episode. Both are empty for an
+	// ungrouped rule and for evaluation errors.
+	GroupKey    string            `json:"group_key"`
+	Group       map[string]string `json:"group,omitempty"`
+	Status      AlertStatus       `json:"status"`
+	TriggeredAt time.Time         `json:"triggered_at"`
+	ResolvedAt  *time.Time        `json:"resolved_at,omitempty"`
+	Value       *float64          `json:"value,omitempty"`
+	Message     string            `json:"message,omitempty"`
+	Payload     map[string]any    `json:"payload,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	// Deliveries are the queued notifications of the entry, in send order.
+	Deliveries []DeliverySummary `json:"deliveries,omitempty"`
 }
 
 // CreateAlertRequest defines the payload required to create a new alert rule.
@@ -171,10 +273,13 @@ type CreateAlertRequest struct {
 	Severity          AlertSeverity          `json:"severity"`
 	Labels            map[string]string      `json:"labels"`
 	Annotations       map[string]string      `json:"annotations"`
-	RecipientUserIDs  []UserID               `json:"recipient_user_ids"`
-	WebhookURLs       []string               `json:"webhook_urls"`
+	DestinationIDs    []DestinationID        `json:"destination_ids"`
 	GeneratorURL      string                 `json:"generator_url"`
-	IsActive          bool                   `json:"is_active"`
+	GroupBy           []string               `json:"group_by"`
+	NoDataPolicy      AlertNoDataPolicy      `json:"no_data_policy"`
+	// NotifyOnResolve defaults to true when absent.
+	NotifyOnResolve *bool `json:"notify_on_resolve"`
+	IsActive        bool  `json:"is_active"`
 }
 
 // UpdateAlertRequest defines updatable fields for an alert rule.
@@ -192,15 +297,19 @@ type UpdateAlertRequest struct {
 	Severity          *AlertSeverity          `json:"severity"`
 	Labels            *map[string]string      `json:"labels"`
 	Annotations       *map[string]string      `json:"annotations"`
-	RecipientUserIDs  *[]UserID               `json:"recipient_user_ids"`
-	WebhookURLs       *[]string               `json:"webhook_urls"`
+	DestinationIDs    *[]DestinationID        `json:"destination_ids"`
 	GeneratorURL      *string                 `json:"generator_url"`
+	GroupBy           *[]string               `json:"group_by"`
+	NoDataPolicy      *AlertNoDataPolicy      `json:"no_data_policy"`
+	NotifyOnResolve   *bool                   `json:"notify_on_resolve"`
 	IsActive          *bool                   `json:"is_active"`
 }
 
 // ResolveAlertRequest allows callers to provide context when manually resolving an alert.
 type ResolveAlertRequest struct {
 	Message string `json:"message"`
+	// GroupKey resolves one group. Nil resolves every group of the rule.
+	GroupKey *string `json:"group_key"`
 }
 
 // TestAlertQueryRequest allows testing an alert query before saving.
@@ -212,15 +321,113 @@ type TestAlertQueryRequest struct {
 	LookbackSeconds   int                    `json:"lookback_seconds"`
 	ThresholdOperator AlertThresholdOperator `json:"threshold_operator"`
 	ThresholdValue    float64                `json:"threshold_value"`
+	GroupBy           []string               `json:"group_by"`
+	NoDataPolicy      AlertNoDataPolicy      `json:"no_data_policy"`
+}
+
+// MaxTestAlertSamples bounds the samples a test response lists.
+const MaxTestAlertSamples = 20
+
+// AlertSample is the value one group read in a test evaluation.
+type AlertSample struct {
+	Group        map[string]string `json:"group"`
+	Value        float64           `json:"value"`
+	ThresholdMet bool              `json:"threshold_met"`
 }
 
 // TestAlertQueryResponse returns the result of a test query execution with performance metrics.
+// For a grouped rule, Value is the first sample's and ThresholdMet reports
+// that at least one group meets the threshold. NoData reports that the result
+// had no row, which the rule's no-data policy then decides.
 type TestAlertQueryResponse struct {
-	Value           float64  `json:"value"`
-	ThresholdMet    bool     `json:"threshold_met"`
-	ExecutionTimeMs int64    `json:"execution_time_ms"`
-	RowsReturned    int      `json:"rows_returned"`
-	Warnings        []string `json:"warnings"`
+	Value           float64       `json:"value"`
+	ThresholdMet    bool          `json:"threshold_met"`
+	ExecutionTimeMs int64         `json:"execution_time_ms"`
+	RowsReturned    int           `json:"rows_returned"`
+	Warnings        []string      `json:"warnings"`
+	Samples         []AlertSample `json:"samples"`
+	GroupsTotal     int           `json:"groups_total"`
+	NoData          bool          `json:"no_data"`
+}
+
+// Backtest bounds: the range a backtest replays, and the evaluations it runs.
+const (
+	MinBacktestRangeSeconds = 3600
+	MaxBacktestRangeSeconds = 7 * 24 * 3600
+	MaxBacktestEvaluations  = 120
+	// MaxBacktestGroups bounds the groups a backtest response lists.
+	MaxBacktestGroups = 20
+)
+
+// BacktestAlertRequest replays an unsaved rule over the past range_seconds.
+type BacktestAlertRequest struct {
+	TestAlertQueryRequest
+	FrequencySeconds int `json:"frequency_seconds"`
+	RangeSeconds     int `json:"range_seconds"`
+	// NotifyOnResolve defaults to true when absent, as on a new rule.
+	NotifyOnResolve *bool `json:"notify_on_resolve"`
+}
+
+// BacktestStatus is a rule's state after one replayed evaluation.
+type BacktestStatus string
+
+const (
+	BacktestStatusOK     BacktestStatus = "ok"
+	BacktestStatusFiring BacktestStatus = "firing"
+	BacktestStatusNoData BacktestStatus = "no_data"
+	BacktestStatusError  BacktestStatus = "error"
+)
+
+// BacktestResult is what a rule would have done over a past range.
+// Coverage is the share of the range that the evaluated lookback windows
+// read. Partial reports that the deadline ended the replay, so Series ends
+// early.
+type BacktestResult struct {
+	Start         time.Time       `json:"start"`
+	End           time.Time       `json:"end"`
+	StepSeconds   int             `json:"step_seconds"`
+	Evaluations   int             `json:"evaluations"`
+	Coverage      float64         `json:"coverage"`
+	Partial       bool            `json:"partial"`
+	Summary       BacktestSummary `json:"summary"`
+	Series        []BacktestPoint `json:"series"`
+	Groups        []BacktestGroup `json:"groups"`
+	GroupsOmitted int             `json:"groups_omitted"`
+	// FirstError is the message of the first evaluation that failed, made
+	// from FirstErr by the caller, which knows what a user may read.
+	FirstError string `json:"first_error,omitempty"`
+	FirstErr   error  `json:"-"`
+}
+
+// BacktestSummary counts what the replay saw. FiringSeconds is the time at
+// least one group was firing. BreachingEvaluations counts group samples that
+// met the threshold. Notifications counts the messages the rule would have
+// sent: one per episode and per move between firing and no data, plus one
+// per resolve when notify_on_resolve is set.
+type BacktestSummary struct {
+	Episodes             int `json:"episodes"`
+	FiringSeconds        int `json:"firing_seconds"`
+	BreachingEvaluations int `json:"breaching_evaluations"`
+	Notifications        int `json:"notifications"`
+	NoDataEvaluations    int `json:"no_data_evaluations"`
+	Errors               int `json:"errors"`
+}
+
+// BacktestPoint is the rule after one evaluation. Value is the sample of an
+// ungrouped rule, nil for a grouped rule or an evaluation without one.
+type BacktestPoint struct {
+	T            time.Time      `json:"t"`
+	Status       BacktestStatus `json:"status"`
+	Value        *float64       `json:"value"`
+	FiringGroups int            `json:"firing_groups"`
+}
+
+// BacktestGroup is one group of a grouped rule over the replay.
+type BacktestGroup struct {
+	Group                map[string]string `json:"group"`
+	Episodes             int               `json:"episodes"`
+	BreachingEvaluations int               `json:"breaching_evaluations"`
+	MaxValue             *float64          `json:"max_value"`
 }
 
 // DefaultAlertHistoryLimit controls the number of history entries returned when unspecified.

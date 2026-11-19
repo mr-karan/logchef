@@ -63,7 +63,7 @@ func newLinkRouteEnvWithStore(t *testing.T, wrap func(store.Store) store.Store) 
 	if err != nil {
 		t.Fatalf("CreateCollection: %v", err)
 	}
-	if err := core.AddCollectionMember(ctx, db, e.s.log, e.coll.ID, e.creator.ID, e.member.ID, models.CollectionRoleMember); err != nil {
+	if _, err := core.AddCollectionMember(ctx, db, e.s.log, e.coll.ID, e.creator.ID, e.member.ID, models.CollectionRoleMember); err != nil {
 		t.Fatalf("AddCollectionMember: %v", err)
 	}
 	e.personal, err = core.EnsurePersonalCollection(ctx, db, e.s.log, e.creator)
@@ -300,6 +300,7 @@ func TestCollectionItemRoutesBusy(t *testing.T) {
 	s := New(ServerOptions{
 		Config: cfg,
 		SQLite: busyStore{Store: db},
+		Audit:  testAuditRecorder(t, db),
 		FS:     http.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/" />`)}}),
 		Logger: logger,
 	})
@@ -375,7 +376,7 @@ func testCollectionLinkCallerChanged(t *testing.T, change func(*models.User)) {
 				return demoting
 			})
 			ctx := context.Background()
-			if err := core.AddCollectionMember(ctx, e.s.store, e.s.log, e.coll.ID, e.creator.ID, e.admin.ID, models.CollectionRoleMember); err != nil {
+			if _, err := core.AddCollectionMember(ctx, e.s.store, e.s.log, e.coll.ID, e.creator.ID, e.admin.ID, models.CollectionRoleMember); err != nil {
 				t.Fatal(err)
 			}
 			wantKind := models.CollectionLinkPin

@@ -7,7 +7,9 @@ import {
   buildValueInsertText,
   buildValueCompletionEdit,
   buildBooleanInsertText,
+  buildCommaEdit,
   getLogchefQLOperators,
+  groupKeyInsertText,
   filterValuesByPartial,
   formatFieldDetail,
 } from '../logchefql-autocomplete'
@@ -350,6 +352,59 @@ describe('parseLogchefQLContext', () => {
 })
 
 // --- isValueSuggestableField ---
+
+describe('parseLogchefQLContext after a pipe', () => {
+  it.each([
+    ['level=error | ', { suggest: 'functions', partial: '', fields: true }],
+    ['level=error |', { suggest: 'functions', partial: '', fields: true }],
+    ['level=error | co', { suggest: 'functions', partial: 'co', fields: true }],
+    ['| count(), ', { suggest: 'functions', partial: '', fields: false }],
+    ['| count(), s', { suggest: 'functions', partial: 's', fields: false }],
+    ['| sum(', { suggest: 'functionArgument', func: 'sum', partial: '' }],
+    ['| P95(dur', { suggest: 'functionArgument', func: 'p95', partial: 'dur' }],
+    ['| count()', { suggest: 'aggregationKeywords', keywords: ['as', 'by', ','], partial: '' }],
+    ['| count() b', { suggest: 'aggregationKeywords', keywords: ['as', 'by', ','], partial: 'b' }],
+    ['| count() as errors ', { suggest: 'aggregationKeywords', keywords: ['by', ','], partial: '' }],
+    ['| count() by ', { suggest: 'groupKeys', partial: '' }],
+    ['| count() by serv', { suggest: 'groupKeys', partial: 'serv' }],
+    ['| count() by time, ', { suggest: 'groupKeys', partial: '' }],
+    ['| count() by service ', { suggest: 'aggregationKeywords', keywords: ['as', ','], partial: '' }],
+    ['| count() by time(5m) as t ', { suggest: 'aggregationKeywords', keywords: [','], partial: '' }],
+    ['| count() as ', { suggest: 'none' }],
+    ['| count() as err', { suggest: 'none' }],
+    ['| count() by time(', { suggest: 'none' }],
+    ['| count() by service | ', { suggest: 'none' }],
+    ['| sum("by', { suggest: 'none' }],
+    ['| host ', { suggest: 'fields', partial: '' }],
+    ['| host met', { suggest: 'fields', partial: 'met' }],
+  ])('%j', (text, expected) => {
+    expect(parseLogchefQLContext(text, FIELDS)).toEqual(expected)
+  })
+
+  it('keeps filter contexts when the pipe is inside a value', () => {
+    expect(parseLogchefQLContext('method="a|b" and ', FIELDS)).toEqual({ suggest: 'fields', partial: '' })
+    expect(parseLogchefQLContext('method="a|', FIELDS)).toMatchObject({ suggest: 'values', key: 'method', partial: 'a|' })
+  })
+})
+
+describe('aggregation insert text', () => {
+  it('joins a comma to the item before it', () => {
+    expect(buildCommaEdit('| count() ', '')).toEqual({ insertText: ', ', deleteBefore: 1 })
+    expect(buildCommaEdit('| count()  b', 'b')).toEqual({ insertText: ', ', deleteBefore: 2 })
+    expect(buildCommaEdit('| count()', '')).toEqual({ insertText: ', ', deleteBefore: 0 })
+  })
+
+  it('spaces keywords like the boolean operators', () => {
+    expect(buildBooleanInsertText('by', '| count()', '')).toBe(' by ')
+    expect(buildBooleanInsertText('as', '| count() ', '')).toBe('as ')
+  })
+
+  it('quotes a field named time so it is not the time bucket', () => {
+    expect(groupKeyInsertText('time')).toBe('"time"')
+    expect(groupKeyInsertText('Time')).toBe('"Time"')
+    expect(groupKeyInsertText('timestamp')).toBe('timestamp')
+  })
+})
 
 describe('isValueSuggestableField', () => {
   it.each([

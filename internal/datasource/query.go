@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -20,7 +21,21 @@ type QueryRequest struct {
 	MaxLimit           int
 	MaxResponseBytes   int
 	QueryTimeout       *int
+	// Step is the request interval. Loki sends it as the step of a metric
+	// range query; the other providers ignore it. Zero means none was sent.
+	Step time.Duration
+	// Aggregation describes the result of a compiled LogchefQL aggregation:
+	// the column names, order and types, and the query's own limit. Nil for
+	// a query that returns log rows.
+	Aggregation *logchefql.AggregationInfo
+	// AggregationMaxMemoryBytes bounds the memory of an aggregated query on
+	// ClickHouse. 0 means DefaultAggregationMaxMemoryBytes.
+	AggregationMaxMemoryBytes int64
 }
+
+// DefaultAggregationMaxMemoryBytes is the memory limit of an aggregated query
+// when the caller sets none: 2 GiB.
+const DefaultAggregationMaxMemoryBytes int64 = 2 << 30
 
 type HistogramRequest struct {
 	ExtraStreamFilters []string
@@ -53,8 +68,11 @@ type HistogramResult struct {
 }
 
 type AlertQueryRequest struct {
-	Language        models.QueryLanguage
-	Query           string
+	Language models.QueryLanguage
+	Query    string
+	// At is the instant the evaluation stands for. The window is the
+	// lookback that ends at At. Required.
+	At              time.Time
 	LookbackSeconds int
 	QueryTimeout    *int
 }
@@ -69,4 +87,7 @@ type LogContextRequest struct {
 	AfterOffset     int
 	ExcludeBoundary bool
 	QueryTimeout    *int
+	// StreamLabels are the target row's stream labels. Loki reads context
+	// from that one stream; ClickHouse ignores them.
+	StreamLabels map[string]string
 }

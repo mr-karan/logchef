@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	core "github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -167,6 +168,7 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create saved query", models.GeneralErrorType)
 	}
+	auditSet(c, audit.SavedQueryTarget(created), nil, audit.SavedQueryFields(created))
 	return SendSuccess(c, fiber.StatusCreated, created)
 }
 
@@ -228,7 +230,7 @@ func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
 		queryContent = *req.QueryContent
 	}
 
-	updated, updateErr := core.UpdateSavedQuery(c.Context(), s.store, s.datasources, s.log, query.ID, name, description, queryContent, queryLanguage, editorMode)
+	before, updated, updateErr := core.UpdateSavedQuery(c.Context(), s.store, s.datasources, s.log, query.ID, name, description, queryContent, queryLanguage, editorMode)
 	if updateErr != nil {
 		if errors.Is(updateErr, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
@@ -238,6 +240,7 @@ func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update saved query", models.GeneralErrorType)
 	}
+	auditSet(c, audit.SavedQueryTarget(updated), audit.SavedQueryFields(before), audit.SavedQueryFields(updated))
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
@@ -251,9 +254,15 @@ func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this query", models.AuthorizationErrorType)
 	}
 
-	if delErr := core.DeleteSavedQuery(c.Context(), s.store, s.log, query.ID); delErr != nil {
+	deleted, reports, delErr := core.DeleteSavedQuery(c.Context(), s.store, s.log, query.ID)
+	if errors.Is(delErr, core.ErrQueryNotFound) {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
+	}
+	if delErr != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete saved query", models.GeneralErrorType)
 	}
+	auditSet(c, audit.SavedQueryTarget(deleted), audit.SavedQueryFields(deleted), nil)
+	auditDetail(c, "reports_removed", reports)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Saved query deleted successfully"})
 }
 

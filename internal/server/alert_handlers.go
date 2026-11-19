@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v3"
@@ -110,6 +113,9 @@ func (s *Server) handleListAlerts(c fiber.Ctx) error {
 func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 	user := currentUser(c)
 
+	if key := legacyAlertTargetKey(c.Body()); key != "" {
+		return sendLegacyAlertTargetError(c, key)
+	}
 	var req models.CreateAlertRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -130,14 +136,18 @@ func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
-	alert, err := core.CreateAlert(c.Context(), s.store, s.datasources, s.log, req.SourceID, user.ID, &req)
+	alert, err := core.CreateAlert(c.Context(), s.store, s.datasources, s.log, req.SourceID, user, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
+		if errors.Is(err, core.ErrDestinationForbidden) {
+			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+		}
 		s.log.Error("failed to create alert", "source_id", req.SourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create alert", models.GeneralErrorType)
 	}
+	auditSet(c, audit.AlertTarget(alert), nil, audit.AlertFields(alert))
 	return SendSuccess(c, fiber.StatusCreated, alert)
 }
 
@@ -147,7 +157,25 @@ func (s *Server) handleGetAlert(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
+	if err := core.AttachAlertInstanceCounts(c.Context(), s.store, []*models.Alert{alert}); err != nil {
+		s.log.Error("failed to count alert instances", "alert_id", alert.ID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load alert", models.GeneralErrorType)
+	}
 	return SendSuccess(c, fiber.StatusOK, alert)
+}
+
+// handleListAlertInstances returns the alert's groups, firing first.
+func (s *Server) handleListAlertInstances(c fiber.Ctx) error {
+	alert, _, ok := s.loadAlertWithVisibility(c)
+	if !ok {
+		return nil
+	}
+	instances, err := core.ListAlertInstances(c.Context(), s.store, alert.ID)
+	if err != nil {
+		s.log.Error("failed to list alert instances", "alert_id", alert.ID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alert instances", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusOK, instances)
 }
 
 // handleUpdateAlert updates an alert. Allowed only for the creator or a global admin.
@@ -160,16 +188,21 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can edit this alert", models.AuthorizationErrorType)
 	}
 
+	if key := legacyAlertTargetKey(c.Body()); key != "" {
+		return sendLegacyAlertTargetError(c, key)
+	}
 	var req models.UpdateAlertRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, updateErr := core.UpdateAlert(c.Context(), s.store, s.datasources, s.log, alert.ID, &req)
+	before, updated, updateErr := core.UpdateAlert(c.Context(), s.store, s.datasources, s.log, user, alert.ID, &req)
 	if updateErr != nil {
 		switch {
 		case errors.Is(updateErr, core.ErrInvalidAlertConfiguration):
 			return SendErrorWithType(c, fiber.StatusBadRequest, updateErr.Error(), models.ValidationErrorType)
+		case errors.Is(updateErr, core.ErrDestinationForbidden):
+			return SendErrorWithType(c, fiber.StatusForbidden, updateErr.Error(), models.AuthorizationErrorType)
 		case errors.Is(updateErr, core.ErrAlertNotFound):
 			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		default:
@@ -177,6 +210,7 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update alert", models.GeneralErrorType)
 		}
 	}
+	auditSet(c, audit.AlertTarget(updated), audit.AlertFields(before), audit.AlertFields(updated))
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
@@ -190,16 +224,19 @@ func (s *Server) handleDeleteAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this alert", models.AuthorizationErrorType)
 	}
 
-	if delErr := core.DeleteAlert(c.Context(), s.store, s.log, alert.ID); delErr != nil {
+	deleted, delErr := core.DeleteAlert(c.Context(), s.store, s.log, alert.ID)
+	if delErr != nil {
 		if errors.Is(delErr, core.ErrAlertNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete alert", models.GeneralErrorType)
 	}
+	auditSet(c, audit.AlertTarget(deleted), audit.AlertFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert deleted"})
 }
 
-// handleResolveAlert manually resolves the most recent triggered history entry.
+// handleResolveAlert manually resolves one group, named by group_key, or every
+// group of the alert.
 func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 	alert, user, ok := s.loadAlertWithVisibility(c)
 	if !ok {
@@ -215,7 +252,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 	}
 
 	if s.alertsManager != nil {
-		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, strings.TrimSpace(req.Message)); err != nil {
+		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, req.GroupKey, strings.TrimSpace(req.Message)); err != nil {
 			if models.IsNotFound(err) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
@@ -223,12 +260,16 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 		}
 	} else {
-		if err := core.ResolveAlert(c.Context(), s.store, s.log, alert.ID, strings.TrimSpace(req.Message)); err != nil {
+		if err := core.ResolveAlert(c.Context(), s.store, s.log, alert.ID, req.GroupKey, strings.TrimSpace(req.Message)); err != nil {
 			if errors.Is(err, core.ErrAlertNotFound) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 		}
+	}
+	auditTarget(c, audit.AlertTarget(alert))
+	if req.GroupKey != nil {
+		auditDetail(c, "group_key", *req.GroupKey)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Alert resolved"})
 }
@@ -302,4 +343,89 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+// BacktestTimeout bounds one backtest. A replay that reaches it returns what
+// it evaluated so far, marked partial.
+const BacktestTimeout = 60 * time.Second
+
+// handleBacktestAlert replays an unsaved rule over a past range. It writes no
+// alert state and sends nothing.
+func (s *Server) handleBacktestAlert(c fiber.Ctx) error {
+	user := currentUser(c)
+	if user == nil {
+		return sendMissingUser(c)
+	}
+	var req struct {
+		SourceID models.SourceID `json:"source_id"`
+		models.BacktestAlertRequest
+	}
+	if err := c.Bind().Body(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+	if req.SourceID == 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "source_id is required", models.ValidationErrorType)
+	}
+	if req.LookbackSeconds <= 0 {
+		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
+	}
+
+	ctx, cancel := context.WithTimeout(c.Context(), BacktestTimeout)
+	defer cancel()
+	maxPerUser, maxGlobal := s.admissionLimits(QueryClassBacktest)
+	queryID, err := queryTracker.StartQuery(QueryClassBacktest, user.ID, req.SourceID, 0, req.Query, cancel, maxPerUser, maxGlobal)
+	if err != nil {
+		if _, ok := errors.AsType[*QueryAdmissionError](err); ok {
+			metrics.RecordAlertBacktest("busy")
+			return SendErrorWithType(c, fiber.StatusTooManyRequests, "A backtest is already running", models.ValidationErrorType)
+		}
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
+	}
+	defer queryTracker.RemoveQuery(queryID)
+
+	p := principalFromLocals(c)
+	result, err := core.BacktestAlertForPrincipal(ctx, s.store, s.datasources, p, req.SourceID, &req.BacktestAlertRequest)
+	if err != nil {
+		return s.sendBacktestError(c, p, req.SourceID, err)
+	}
+	if result.FirstErr != nil {
+		result.FirstError = s.backtestErrorMessage(req.SourceID, result.FirstErr)
+	}
+	if result.Partial {
+		metrics.RecordAlertBacktest("partial")
+	} else {
+		metrics.RecordAlertBacktest("ok")
+	}
+	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+func (s *Server) sendBacktestError(c fiber.Ctx, p access.Principal, sourceID models.SourceID, err error) error {
+	if replayErr, ok := errors.AsType[*datasource.ReplayError](err); ok {
+		metrics.RecordAlertBacktest("not_replayable")
+		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, replayErr.Reason, models.ValidationErrorType)
+	}
+	switch {
+	case errors.Is(err, core.ErrSourceAccessDenied):
+		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
+	case errors.Is(err, core.ErrAccessCheck):
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	case errors.Is(err, access.ErrInsufficientScope):
+		return sendInsufficientScope(c, p.User)
+	case errors.Is(err, core.ErrInvalidAlertConfiguration):
+		metrics.RecordAlertBacktest("invalid")
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	metrics.RecordAlertBacktest("error")
+	return s.sendQueryError(c, sourceID, err, "Failed to backtest alert", "Alert evaluation")
+}
+
+// backtestErrorMessage is the message a user may read for a failed replayed
+// evaluation, as the query routes report it. A failure those routes hide is
+// logged here instead.
+func (s *Server) backtestErrorMessage(sourceID models.SourceID, err error) string {
+	response := classifyQueryError(err, "The alert query failed", "Alert evaluation")
+	if response.status >= fiber.StatusInternalServerError {
+		s.log.Error("alert backtest evaluation failed", "error", err, "source_id", sourceID)
+	}
+	return response.message
 }

@@ -294,6 +294,7 @@ func TestToolsListFiltersByScope(t *testing.T) {
 		{"saved queries and alerts", token(w.member, models.TokenScopeSavedQueriesRead, models.TokenScopeAlertsRead), []string{
 			"get_alert_history", "get_meta", "get_saved_query", "list_alerts", "list_saved_queries",
 		}},
+		{"saved views only", token(w.member, models.TokenScopeSavedViewsRead), []string{"get_meta", "list_saved_views"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := listToolNames(t, s, tc.p)
@@ -451,6 +452,66 @@ func TestSavedQueriesAndAlertsFollowSourceAccess(t *testing.T) {
 	w.cfg.Alerts.Enabled = false
 	if result := callTool(t, s, session(w.member), "list_alerts", map[string]any{}); !result.IsError || !strings.Contains(result.text(), "disabled") {
 		t.Fatalf("alerts while disabled: %s", result.text())
+	}
+}
+
+// list_saved_views returns the caller's personal views, the team's views
+// and the source's views of one source, never another user's personal view
+// or another team's view, and only through a team that reaches the source.
+func TestListSavedViewsFollowsViewVisibility(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	s := w.server()
+	ctx := context.Background()
+	// otherTeam reaches the source too, so its team view is in the same
+	// source and must still stay hidden from member.
+	w.link(t, w.otherTeam, w.source.ID)
+
+	view := func(name string, scope models.SavedViewScope, user *models.UserID, team *models.TeamID, isDefault bool) models.SavedViewID {
+		t.Helper()
+		v := &models.SavedView{
+			SourceID: w.source.ID, Scope: scope, UserID: user, TeamID: team, Name: name,
+			Definition: models.SavedViewDefinition{Version: models.SavedViewDefinitionVersion, Columns: []models.SavedViewColumn{{Name: "msg"}}},
+			IsDefault:  isDefault,
+		}
+		if err := w.db.CreateSavedView(ctx, v); err != nil {
+			t.Fatalf("CreateSavedView(%s): %v", name, err)
+		}
+		return v.ID
+	}
+	mine := view("mine", models.SavedViewScopePersonal, &w.member.ID, nil, false)
+	view("theirs", models.SavedViewScopePersonal, &w.admin.ID, nil, false)
+	teamView := view("team", models.SavedViewScopeTeam, nil, &w.team, true)
+	view("other team", models.SavedViewScopeTeam, nil, &w.otherTeam, false)
+	sourceView := view("source", models.SavedViewScopeSource, nil, nil, true)
+
+	for _, p := range []*access.Principal{
+		session(w.member),
+		token(w.member, models.TokenScopeSavedViewsRead),
+	} {
+		result := callTool(t, s, p, "list_saved_views", map[string]any{"team_id": w.team, "source_id": w.source.ID})
+		var list models.SavedViewList
+		if err := json.Unmarshal(result.StructuredContent, &list); err != nil {
+			t.Fatalf("%v: %s", err, result.text())
+		}
+		got := make([]models.SavedViewID, len(list.Views))
+		for i, v := range list.Views {
+			got[i] = v.ID
+		}
+		if want := []models.SavedViewID{mine, teamView, sourceView}; !slices.Equal(got, want) {
+			t.Fatalf("views = %v, want %v (personal, team, source)", got, want)
+		}
+		// The team default outranks the source default.
+		if list.DefaultViewID == nil || *list.DefaultViewID != teamView {
+			t.Fatalf("default_view_id = %v, want %d", list.DefaultViewID, teamView)
+		}
+	}
+
+	// A team that does not reach the source, and a team member is not in.
+	for _, team := range []models.TeamID{w.bareTeam, w.otherTeam} {
+		if result := callTool(t, s, session(w.member), "list_saved_views", map[string]any{"team_id": team, "source_id": w.source.ID}); !result.IsError {
+			t.Fatalf("team %d listed views: %s", team, result.StructuredContent)
+		}
 	}
 }
 

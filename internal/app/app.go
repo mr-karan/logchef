@@ -10,12 +10,17 @@ import (
 
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
+	"github.com/mr-karan/logchef/internal/loki"
+	"github.com/mr-karan/logchef/internal/metrics"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
@@ -33,6 +38,7 @@ type App struct {
 	SQLite       store.Store
 	ClickHouse   *clickhouse.Manager
 	VictoriaLogs *victorialogs.Provider
+	Loki         *loki.Provider
 	Datasources  *datasource.Service
 	Logger       *slog.Logger
 	server       *server.Server
@@ -40,6 +46,11 @@ type App struct {
 	BuildInfo    string
 	Version      string
 	Alerts       *alerts.Manager
+	Audit        *audit.Recorder
+	// Jobs is nil on a replica with jobs.enabled = false.
+	Jobs *jobs.Runner
+
+	senders map[models.DestinationType]notify.Sender
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -97,8 +108,15 @@ func (a *App) Initialize(ctx context.Context) error {
 		}
 	}
 
+	a.Audit = audit.New(audit.Options{
+		Store:        a.SQLite,
+		Logger:       a.Logger,
+		LogEvents:    a.Config.Audit.LogEvents,
+		DemoReadOnly: a.Config.Demo.ReadOnly,
+	})
+
 	// Initialize admin users based on configuration.
-	if err := core.InitAdminUsers(ctx, a.SQLite, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+	if err := core.InitAdminUsers(ctx, a.SQLite, a.Audit, a.Logger, a.Config.Auth.AdminEmails); err != nil {
 		a.Logger.Error("failed to initialize admin users", "error", err)
 		return fmt.Errorf("failed to initialize admin users: %w", err)
 	}
@@ -120,6 +138,8 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
 	a.VictoriaLogs = victorialogs.NewProvider(a.Logger)
 	a.Datasources.Register(a.VictoriaLogs)
+	a.Loki = loki.NewProvider(a.Logger)
+	a.Datasources.Register(a.Loki)
 
 	// OIDC is optional only with local auth and no provider_url (enforced by
 	// config validation). Once configured, a failed discovery aborts startup so
@@ -137,7 +157,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	// The OAuth authorization server exists only when enabled; nil otherwise.
 	var oauthServer *oauth.Server
 	if a.Config.Auth.OAuth.Enabled {
-		oauthServer, err = oauth.New(a.Config, a.SQLite, a.Logger)
+		oauthServer, err = oauth.New(a.Config, a.SQLite, a.Audit, a.Logger)
 		if err != nil {
 			return fmt.Errorf("failed to initialize OAuth server: %w", err)
 		}
@@ -145,7 +165,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 
 	// Bootstrap the local-auth admin when configured (idempotent).
-	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Logger); err != nil {
+	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Audit, a.Logger); err != nil {
 		return fmt.Errorf("failed to bootstrap local auth admin: %w", err)
 	}
 
@@ -168,7 +188,7 @@ func (a *App) Initialize(ctx context.Context) error {
 			"prune", a.Config.Provisioning.Prune,
 			"dry_run", a.Config.Provisioning.DryRun,
 		)
-		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.Datasources, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.Datasources, a.Audit, a.Logger, a.Config.Auth.AdminEmails); err != nil {
 			return fmt.Errorf("provisioning reconciliation failed: %w", err)
 		}
 	}
@@ -181,19 +201,9 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	a.ClickHouse.StartBackgroundHealthChecks(0)
 	a.VictoriaLogs.StartBackgroundHealthChecks(0)
+	a.Loki.StartBackgroundHealthChecks(0)
 
-	// Initialize alerts manager with dynamic senders that read config from DB
-	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
-	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, alerts.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
-	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
-
-	a.Alerts = alerts.NewManager(alerts.Options{
-		Config:      a.Config.Alerts,
-		DB:          a.SQLite,
-		Datasources: a.Datasources,
-		Logger:      a.Logger,
-		Sender:      alertSender,
-	})
+	a.initAlerts()
 
 	// Initialize HTTP server with alerts manager for manual resolution.
 	serverOpts := server.ServerOptions{
@@ -202,13 +212,13 @@ func (a *App) Initialize(ctx context.Context) error {
 		ClickHouse:    a.ClickHouse,
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
-		WebhookSender: webhookSender,
 		OIDCProvider:  oidcProvider,
 		OAuth:         oauthServer,
 		FS:            a.WebFS,
 		Logger:        a.Logger,
 		BuildInfo:     a.BuildInfo,
 		Version:       a.Version,
+		Audit:         a.Audit,
 	}
 	if a.Config.AI.AskChefEnabled() {
 		if a.Config.AI.Provider == ai.ProviderBedrock {
@@ -228,9 +238,60 @@ func (a *App) Initialize(ctx context.Context) error {
 	}
 	a.server = server.New(serverOpts) //nolint:contextcheck // starts an app-lifetime cleanup janitor with its own timeout context; no request ctx to propagate
 
-	// Start the alerts evaluation loop.
-	a.Alerts.Start(ctx)
+	return a.startJobs(ctx)
+}
 
+// initAlerts builds the notification senders, the job runner when this
+// replica runs jobs, and the alerts manager, which kicks the delivery drain
+// through that runner.
+func (a *App) initAlerts() {
+	// The senders read their settings from the database at each send.
+	web := notify.NewDynamicWebhookSender(a.SQLite, notify.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
+	a.senders = map[models.DestinationType]notify.Sender{
+		models.DestinationTypeEmail:     notify.NewEmailSender(a.SQLite),
+		models.DestinationTypeWebhook:   web,
+		models.DestinationTypeSlack:     notify.NewSlackSender(web, a.Logger),
+		models.DestinationTypePagerDuty: notify.NewPagerDutySender(web, a.Logger),
+	}
+	alertOpts := alerts.Options{
+		Config:      a.Config.Alerts,
+		DB:          a.SQLite,
+		Datasources: a.Datasources,
+		Logger:      a.Logger,
+		Senders:     a.senders,
+	}
+	if a.Config.Jobs.Enabled {
+		a.Jobs = jobs.New(jobs.Options{Store: a.SQLite, Logger: a.Logger, PollInterval: a.Config.Jobs.PollInterval})
+		alertOpts.Jobs = a.Jobs
+	}
+	a.Alerts = alerts.NewManager(alertOpts)
+}
+
+// startJobs starts the job runner. Every replica with jobs enabled claims due
+// jobs; a claim makes one replica run each tick. A demo instance sends no
+// scheduled reports.
+func (a *App) startJobs(ctx context.Context) error {
+	if a.Jobs == nil {
+		a.Logger.Info("job runner disabled; this replica runs no background jobs")
+		return nil
+	}
+	if a.Config.Alerts.Enabled {
+		if err := a.SQLite.WithTx(ctx, func(tx store.StoreOps) error { return jobs.Upsert(ctx, tx, notify.DrainJob()) }); err != nil {
+			return fmt.Errorf("failed to store the delivery drain job: %w", err)
+		}
+		a.Jobs.Register(a.Alerts.EvaluationKind())
+		drainer := notify.NewDrainer(notify.DrainerOptions{Store: a.SQLite, Senders: a.senders, Hold: a.Alerts.HoldDelivery, Logger: a.Logger})
+		metrics.RegisterNotificationDeliveriesPending(drainer.Pending)
+		a.Jobs.Register(drainer.Kind())
+	}
+	if a.Config.Reports.Enabled && !a.Config.Demo.ReadOnly {
+		if err := core.SyncReportJobs(ctx, a.SQLite); err != nil {
+			return fmt.Errorf("failed to schedule reports: %w", err)
+		}
+		a.Jobs.Register(a.server.ReportJobKind())
+	}
+	a.Jobs.Register(core.SchemaAdviceJobKind(a.SQLite, a.Datasources))
+	a.Jobs.Start(ctx)
 	return nil
 }
 
@@ -255,6 +316,13 @@ func (a *App) Shutdown(ctx context.Context) error {
 			}
 		}()
 	}
+	if a.Loki != nil {
+		defer func() {
+			if err := a.Loki.Close(); err != nil {
+				a.Logger.Error("error closing loki provider", "error", err)
+			}
+		}()
+	}
 
 	// Ensure a shutdown context with timeout exists.
 	if ctx == nil {
@@ -270,11 +338,11 @@ func (a *App) Shutdown(ctx context.Context) error {
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
 
-	alertDone := make(chan error, 1)
-	if a.Alerts != nil {
-		go func() { alertDone <- a.Alerts.StopWithContext(serverCtx) }()
+	jobsDone := make(chan error, 1)
+	if a.Jobs != nil {
+		go func() { jobsDone <- a.Jobs.Stop(serverCtx) }()
 	} else {
-		alertDone <- nil
+		jobsDone <- nil
 	}
 
 	var shutdownErr error
@@ -283,8 +351,8 @@ func (a *App) Shutdown(ctx context.Context) error {
 			shutdownErr = fmt.Errorf("error shutting down server: %w", err)
 		}
 	}
-	if err := <-alertDone; err != nil {
-		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("error stopping alerts: %w", err))
+	if err := <-jobsDone; err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("error stopping jobs: %w", err))
 	}
 	if shutdownErr != nil {
 		return shutdownErr
@@ -356,12 +424,6 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 			value:       fmt.Sprintf("%t", a.Config.Alerts.Enabled),
 			valueType:   "boolean",
 			description: "Enable or disable alert evaluation",
-			isSensitive: false,
-		},
-		"alerts.evaluation_interval": {
-			value:       a.Config.Alerts.EvaluationInterval.String(),
-			valueType:   "duration",
-			description: "How often to evaluate alert rules",
 			isSensitive: false,
 		},
 		"alerts.default_lookback": {
@@ -549,13 +611,24 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 		a.Logger.Debug("seeded server.frontend_url", "value", a.Config.Server.FrontendURL)
 	}
 
+	// Seed the report external-recipient settings: off, with no domain.
+	for _, setting := range []struct{ key, value, valueType, description string }{
+		{core.SettingReportsExternalRecipients, "false", "boolean", "Send reports to email addresses that belong to no Logchef user"},
+		{core.SettingReportsAllowedEmailDomains, "", "string", "Domains, separated by commas, that external report recipients may use; * allows every domain"},
+	} {
+		if err := a.SQLite.UpsertSetting(ctx, setting.key, setting.value, setting.valueType, "reports", setting.description, false); err != nil {
+			a.Logger.Warn("failed to seed report setting", "key", setting.key, "error", err)
+		}
+	}
+
 	a.Logger.Info("system settings seeded from config.toml successfully")
 	return nil
 }
 
 // ensureLocalAdmin creates or updates the bootstrap admin for local
-// email+password auth. Idempotent: safe to run on every startup.
-func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, log *slog.Logger) error {
+// email+password auth. Idempotent: safe to run on every startup. A created
+// admin is recorded as an audit event by the system actor.
+func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, rec *audit.Recorder, log *slog.Logger) error {
 	local := cfg.Auth.Local
 	if !local.Enabled || local.AdminEmail == "" {
 		return nil
@@ -570,6 +643,17 @@ func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, l
 		if err != nil {
 			return fmt.Errorf("creating local admin: %w", err)
 		}
+		rec.Record(ctx, audit.Event{
+			Action:  audit.UserCreate,
+			Outcome: models.AuditOutcomeSuccess,
+			Actor: audit.Actor{
+				Type:       models.AuditActorSystem,
+				Label:      "auth.local",
+				AuthMethod: models.AuditAuthStartup,
+			},
+			Target: audit.UserTarget(user),
+			After:  audit.UserFields(user),
+		})
 	}
 
 	// Only re-hash when the stored hash doesn't already match the configured

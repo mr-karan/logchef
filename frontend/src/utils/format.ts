@@ -44,7 +44,7 @@ export function formatSourceName(source: Source): string {
   if (source.name?.trim()) {
     return source.name;
   }
-  if (source.source_type === "victorialogs" && baseURL) {
+  if ((source.source_type === "victorialogs" || source.source_type === "loki") && baseURL) {
     return baseURL;
   }
   return `Source ${source.id}`;
@@ -96,6 +96,23 @@ export function getSourceConnectionDetails(source: Source): SourceConnectionDeta
       details.push({ label: "Scope", value: scopeQuery, monospace: true });
     }
 
+    return details;
+  }
+
+  if (source.source_type === "loki") {
+    const details: SourceConnectionDetail[] = [];
+    if (typeof connection.base_url === "string" && connection.base_url) {
+      details.push({ label: "Base URL", value: connection.base_url, monospace: true });
+    }
+    if (typeof connection.tenant_id === "string" && connection.tenant_id) {
+      details.push({ label: "Tenant", value: connection.tenant_id, monospace: true });
+    }
+    if (typeof connection.selector === "string" && connection.selector) {
+      details.push({ label: "Selector", value: connection.selector, monospace: true });
+    }
+    if (typeof connection.principal === "string" && connection.principal) {
+      details.push({ label: "Principal", value: connection.principal, monospace: true });
+    }
     return details;
   }
 

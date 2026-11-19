@@ -28,7 +28,7 @@ describe("panelExploreQuery", () => {
     });
   });
 
-  it.each(["clickhouse-sql", "logsql"] as const)("opens a %s panel in native mode", (language) => {
+  it.each(["clickhouse-sql", "logsql", "logql"] as const)("opens a %s panel in native mode", (language) => {
     const query = panelExploreQuery({ team_id: 3, source_id: 7, query: count("SELECT 1", language) }, range);
 
     expect(query.mode).toBe("native");
@@ -53,6 +53,8 @@ describe("panelExploreQuery", () => {
     ],
     ["opens a pipes-only filter as match-all", count("| stats count()", "logsql"), "*"],
     ["keeps the full query for a result panel", result("error | sort by (_time)", "logsql"), "error | sort by (_time)"],
+    // The Loki histogram counts the whole log query, pipeline included.
+    ["keeps the pipeline of a LogQL count panel", count('{app="api"} | json | status>=500', "logql"), '{app="api"} | json | status>=500'],
   ] as const)("%s", (_name, query, want) => {
     const explore = panelExploreQuery({ team_id: 3, source_id: 7, query }, range);
 

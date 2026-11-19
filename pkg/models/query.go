@@ -51,6 +51,7 @@ const (
 	QueryLanguageLogchefQL     QueryLanguage = "logchefql"
 	QueryLanguageClickHouseSQL QueryLanguage = "clickhouse-sql"
 	QueryLanguageLogsQL        QueryLanguage = "logsql"
+	QueryLanguageLogQL         QueryLanguage = "logql"
 )
 
 func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
@@ -63,6 +64,8 @@ func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
 		return QueryLanguageClickHouseSQL
 	case QueryLanguageLogsQL:
 		return QueryLanguageLogsQL
+	case QueryLanguageLogQL:
+		return QueryLanguageLogQL
 	default:
 		return language
 	}
@@ -70,7 +73,7 @@ func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
 
 func (l QueryLanguage) Valid() bool {
 	switch NormalizeQueryLanguage(l) {
-	case QueryLanguageLogchefQL, QueryLanguageClickHouseSQL, QueryLanguageLogsQL:
+	case QueryLanguageLogchefQL, QueryLanguageClickHouseSQL, QueryLanguageLogsQL, QueryLanguageLogQL:
 		return true
 	default:
 		return false
@@ -161,6 +164,9 @@ type LogContextRequest struct {
 	BeforeOffset     int      `json:"before_offset"`               // Offset for before query (for pagination)
 	AfterOffset      int      `json:"after_offset"`                // Offset for after query (for pagination)
 	ExcludeBoundary  bool     `json:"exclude_boundary"`            // When true, excludes logs at exact timestamp (for pagination)
+	// StreamLabels are the target row's stream labels, which a Loki source
+	// needs to find the row's stream.
+	StreamLabels map[string]string `json:"stream_labels,omitempty"`
 }
 
 // LogContextResponse represents temporal context query results
@@ -410,6 +416,9 @@ type QuerySharePayload struct {
 	TimeRange SavedQueryTimeRange  `json:"time_range"`
 	Timezone  string               `json:"timezone,omitempty"`
 	Variables []SavedQueryVariable `json:"variables,omitempty"`
+	// Layout is a copy of the sender's table layout (RFC 0007). It holds no
+	// view id, so the share opens for any recipient and outlives the view.
+	Layout *SavedViewDefinition `json:"layout,omitempty"`
 }
 
 // CreateQueryShareRequest creates a short share token for a query payload.

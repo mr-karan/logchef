@@ -1,6 +1,9 @@
 ---
 title: Reverse Proxy
-description: Run Logchef behind nginx, Caddy, or Traefik, on its own domain or under a subpath such as /logchef
+head:
+  - tag: title
+    content: "Reverse Proxy and Subpath Setup | Logchef"
+description: "Deploy Logchef behind nginx, Caddy, or Traefik. Configure proxy headers and serve the log analytics UI on its own domain or under a subpath."
 ---
 
 Logchef serves the web UI and the API from one HTTP port (`8125` by default).

@@ -52,7 +52,8 @@ func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 	demoted := make(chan error, 1)
 	demoteDone := make(chan struct{})
 	go func() {
-		demoted <- core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), a.ID, models.User{Role: models.UserRoleMember})
+		_, _, err := core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), a.ID, models.User{Role: models.UserRoleMember})
+		demoted <- err
 		close(demoteDone)
 	}()
 	awaitLockWaitOrDone(t, ctx, monitor, demoteDone)
@@ -72,7 +73,8 @@ func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 func TestConcurrentEditCannotReactivateUser(t *testing.T) {
 	edits := map[string]func(ctx context.Context, s store.Store, id models.UserID) error{
 		"name edit": func(ctx context.Context, s store.Store, id models.UserID) error {
-			return core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), id, models.User{FullName: "Renamed User"})
+			_, _, err := core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), id, models.User{FullName: "Renamed User"})
+			return err
 		},
 		"last login": func(ctx context.Context, s store.Store, id models.UserID) error {
 			return s.UpdateUserLastLogin(ctx, id, time.Now().UTC())
@@ -187,7 +189,8 @@ func TestAdminTransitionUsesLockedState(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		principal := access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}})
-		result <- core.UpdateUser(ctx, s, discardLogger(), principal, user.ID, models.User{Status: models.UserStatusActive})
+		_, _, err := core.UpdateUser(ctx, s, discardLogger(), principal, user.ID, models.User{Status: models.UserStatusActive})
+		result <- err
 		close(done)
 	}()
 	awaitLockWaitOrDone(t, ctx, monitor, done)

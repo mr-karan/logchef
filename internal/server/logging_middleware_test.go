@@ -35,7 +35,7 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 		Auth:   config.AuthConfig{APITokenSecret: authzTestTokenSecret},
 		Shares: config.SharesConfig{DefaultTTL: time.Hour, MaxQueryTextBytes: 4096},
 	}
-	s := New(ServerOptions{Config: cfg, SQLite: db, Logger: logger, FS: http.Dir(t.TempDir())})
+	s := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), Logger: logger, FS: http.Dir(t.TempDir())})
 	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 	s.app.Post("/logging-errors/:token", func(fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "test handler failure")
@@ -226,7 +226,8 @@ func TestRequestLogsRetainRedactedRoutes(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			s := New(ServerOptions{Config: &config.Config{}, SQLite: newServerTestDB(t), Logger: logger, FS: http.Dir(t.TempDir())})
+			db := newServerTestDB(t)
+			s := New(ServerOptions{Config: &config.Config{}, SQLite: db, Audit: testAuditRecorder(t, db), Logger: logger, FS: http.Dir(t.TempDir())})
 			t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 			resp, err := s.app.Test(httptest.NewRequest(http.MethodGet, tt.path, http.NoBody))
 			if err != nil {
@@ -287,7 +288,7 @@ func TestAuthMiddlewareRedactsSessionCookies(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			s := New(ServerOptions{Config: &config.Config{}, SQLite: db, Logger: logger, FS: http.Dir(t.TempDir())})
+			s := New(ServerOptions{Config: &config.Config{}, SQLite: db, Audit: testAuditRecorder(t, db), Logger: logger, FS: http.Dir(t.TempDir())})
 			t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 			if state == "database_error" {
 				if err := db.Close(); err != nil {
@@ -322,7 +323,8 @@ func TestAuthMiddlewareRedactsSessionCookies(t *testing.T) {
 func TestUnmatchedErrorHandlerLogsRetainRedactedRoute(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	s := New(ServerOptions{Config: &config.Config{}, SQLite: newServerTestDB(t), Logger: logger, FS: http.Dir(t.TempDir())})
+	db := newServerTestDB(t)
+	s := New(ServerOptions{Config: &config.Config{}, SQLite: db, Audit: testAuditRecorder(t, db), Logger: logger, FS: http.Dir(t.TempDir())})
 	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
 	const secret = "unmatched-secret-path-segment"
 	resp, err := s.app.Test(httptest.NewRequest(http.MethodPost, "/unknown/"+secret, http.NoBody))

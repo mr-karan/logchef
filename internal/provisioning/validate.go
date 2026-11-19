@@ -1,12 +1,16 @@
 package provisioning
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -17,11 +21,12 @@ import (
 var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ValidateConfig checks resolved provisioning config for internal consistency.
-func ValidateConfig(cfg *config.ProvisioningConfig) error {
+// ds supplies the provider descriptors that source views are checked against.
+func ValidateConfig(cfg *config.ProvisioningConfig, ds *datasource.Service) error {
 	var errs []string
 
 	if cfg.ManageSources {
-		errs = append(errs, validateSources(cfg)...)
+		errs = append(errs, validateSources(cfg, ds)...)
 	}
 	if cfg.ManageTeams {
 		errs = append(errs, validateTeams(cfg)...)
@@ -33,12 +38,15 @@ func ValidateConfig(cfg *config.ProvisioningConfig) error {
 	return nil
 }
 
-func validateSources(cfg *config.ProvisioningConfig) []string {
+func validateSources(cfg *config.ProvisioningConfig, ds *datasource.Service) []string {
 	var errs []string
 	seen := make(map[string]bool)
 
 	for i := range cfg.Sources {
 		errs = append(errs, validateOneSource(i, cfg.Sources[i], seen)...)
+		if cfg.Sources[i].Name != "" {
+			errs = append(errs, validateSourceViews(fmt.Sprintf("sources[%d] (%q)", i, cfg.Sources[i].Name), cfg.Sources[i], ds)...)
+		}
 	}
 	return errs
 }
@@ -85,6 +93,10 @@ func validateOneSource(i int, src config.ProvisionSource, seen map[string]bool) 
 	case models.SourceTypeVictoriaLogs:
 		var connErrs []string
 		connErrs, connOK = validateVictoriaLogsSource(prefix, src)
+		errs = append(errs, connErrs...)
+	case models.SourceTypeLoki:
+		var connErrs []string
+		connErrs, connOK = validateLokiSource(prefix, src)
 		errs = append(errs, connErrs...)
 	}
 	if !connOK {
@@ -134,6 +146,9 @@ func validateClickHouseSource(prefix string, src config.ProvisionSource) (errs [
 	if err := conn.Activity.Validate(); err != nil {
 		errs = append(errs, fmt.Sprintf("%s: connection.activity: %v", prefix, err))
 	}
+	if len(src.HeaderSecretRefs) > 0 {
+		errs = append(errs, fmt.Sprintf("%s: header_secret_refs applies to victorialogs and loki sources only", prefix))
+	}
 	return errs, true
 }
 
@@ -169,7 +184,74 @@ func validateVictoriaLogsSource(prefix string, src config.ProvisionSource) (errs
 	default:
 		errs = append(errs, fmt.Sprintf("%s: unsupported victorialogs auth mode %q", prefix, conn.Auth.Mode))
 	}
+	errs = append(errs, validateHeaderSecretRefs(prefix, src.HeaderSecretRefs, conn.Headers)...)
 	return errs, true
+}
+
+// validateLokiSource validates a Loki source's connection block with the same
+// rules the API applies. ok is false when the connection block itself failed
+// to parse.
+func validateLokiSource(prefix string, src config.ProvisionSource) (errs []string, ok bool) {
+	conn, err := src.LokiConnection()
+	if err != nil {
+		return []string{fmt.Sprintf("%s: %v", prefix, err)}, false
+	}
+	// An unset secret_ref variable is reported by the shared secret_ref check,
+	// so stand in a value here to keep the auth error from repeating it.
+	if secret := lokiSecretField(&conn); secret != nil && *secret == "" && src.SecretRef != "" {
+		*secret = "from secret_ref"
+	}
+	if err := conn.Validate(); err != nil {
+		msg := err.Error()
+		if connErr, isConnErr := errors.AsType[*models.LokiConnectionError](err); isConnErr {
+			msg = connErr.Message
+			if connErr.Field == "auth.token" || connErr.Field == "auth.password" {
+				msg += "; set it or secret_ref"
+			}
+			msg = fmt.Sprintf("loki connection.%s: %s", connErr.Field, msg)
+		}
+		errs = append(errs, fmt.Sprintf("%s: %s", prefix, msg))
+	}
+	errs = append(errs, validateHeaderSecretRefs(prefix, src.HeaderSecretRefs, conn.Headers)...)
+	return errs, true
+}
+
+// validateHeaderSecretRefs reports each header_secret_refs entry that
+// resolution left without a value, so a missing variable fails startup
+// instead of saving an empty header.
+func validateHeaderSecretRefs(prefix string, refs, headers map[string]string) []string {
+	var errs []string
+	seen := make(map[string]string, len(refs))
+	for _, name := range slices.Sorted(maps.Keys(refs)) {
+		envVar := refs[name]
+		folded := strings.ToLower(strings.TrimSpace(name))
+		first, dup := seen[folded]
+		seen[folded] = name
+		switch {
+		case folded == "":
+			errs = append(errs, fmt.Sprintf("%s: header_secret_refs has an empty header name", prefix))
+		case dup:
+			errs = append(errs, fmt.Sprintf("%s: header_secret_refs names header %q twice, as %q and %q; keep one", prefix, folded, first, name))
+		case strings.TrimSpace(envVar) == "":
+			errs = append(errs, fmt.Sprintf("%s: header %q: header_secret_refs names no env var", prefix, name))
+		case headers[headerKey(headers, name)] == "":
+			errs = append(errs, fmt.Sprintf("%s: header %q: header_secret_refs env var %q is empty or not set", prefix, name, envVar))
+		}
+	}
+	return errs
+}
+
+// lokiSecretField returns the connection field that secret_ref fills: the
+// token in bearer mode, the password in basic mode, and nil otherwise.
+func lokiSecretField(conn *models.LokiConnectionInfo) *string {
+	switch normalizedAuthMode(conn.Auth.Mode) {
+	case "bearer":
+		return &conn.Auth.Token
+	case "basic":
+		return &conn.Auth.Password
+	default:
+		return nil
+	}
 }
 
 func validateTeams(cfg *config.ProvisioningConfig) []string {
@@ -239,40 +321,7 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 // ResolveConfig applies defaults, normalizes members, and resolves environment secrets.
 func ResolveConfig(cfg *config.ProvisioningConfig) {
 	for i := range cfg.Sources {
-		source := &cfg.Sources[i]
-		source.SourceType = source.NormalizedSourceType()
-
-		switch source.SourceType {
-		case models.SourceTypeClickHouse:
-			conn, err := source.ClickHouseConnection()
-			if err == nil {
-				if conn.Password == "" && source.SecretRef != "" {
-					conn.Password = os.Getenv(source.SecretRef)
-				}
-				_ = source.SetConnectionConfig(conn)
-			}
-			if source.MetaTSField == "" {
-				source.MetaTSField = "timestamp"
-			}
-		case models.SourceTypeVictoriaLogs:
-			conn, err := source.VictoriaLogsConnection()
-			if err == nil {
-				switch normalizedAuthMode(conn.Auth.Mode) {
-				case "bearer":
-					if conn.Auth.Token == "" && source.SecretRef != "" {
-						conn.Auth.Token = os.Getenv(source.SecretRef)
-					}
-				case "basic":
-					if conn.Auth.Password == "" && source.SecretRef != "" {
-						conn.Auth.Password = os.Getenv(source.SecretRef)
-					}
-				}
-				_ = source.SetConnectionConfig(conn)
-			}
-			if source.MetaTSField == "" {
-				source.MetaTSField = "_time"
-			}
-		}
+		resolveSource(&cfg.Sources[i])
 	}
 
 	// Default member roles
@@ -286,6 +335,108 @@ func ResolveConfig(cfg *config.ProvisioningConfig) {
 			}
 		}
 	}
+}
+
+// resolveSource normalizes the source type, fills the secret that secret_ref
+// names, and applies the per-type field defaults.
+func resolveSource(source *config.ProvisionSource) {
+	source.SourceType = source.NormalizedSourceType()
+	// The API trims a view's name and description; views match by name.
+	for i := range source.Views {
+		source.Views[i].Name = strings.TrimSpace(source.Views[i].Name)
+		source.Views[i].Description = strings.TrimSpace(source.Views[i].Description)
+	}
+
+	switch source.SourceType {
+	case models.SourceTypeClickHouse:
+		resolveClickHouseSource(source)
+	case models.SourceTypeVictoriaLogs:
+		resolveVictoriaLogsSource(source)
+	case models.SourceTypeLoki:
+		resolveLokiSource(source)
+	}
+}
+
+func resolveClickHouseSource(source *config.ProvisionSource) {
+	conn, err := source.ClickHouseConnection()
+	if err == nil {
+		if conn.Password == "" && source.SecretRef != "" {
+			conn.Password = os.Getenv(source.SecretRef)
+		}
+		_ = source.SetConnectionConfig(conn)
+	}
+	if source.MetaTSField == "" {
+		source.MetaTSField = "timestamp"
+	}
+}
+
+func resolveVictoriaLogsSource(source *config.ProvisionSource) {
+	conn, err := source.VictoriaLogsConnection()
+	if err == nil {
+		switch normalizedAuthMode(conn.Auth.Mode) {
+		case "bearer":
+			if conn.Auth.Token == "" && source.SecretRef != "" {
+				conn.Auth.Token = os.Getenv(source.SecretRef)
+			}
+		case "basic":
+			if conn.Auth.Password == "" && source.SecretRef != "" {
+				conn.Auth.Password = os.Getenv(source.SecretRef)
+			}
+		}
+		conn.Headers = resolveHeaderSecretRefs(conn.Headers, source.HeaderSecretRefs)
+		_ = source.SetConnectionConfig(conn)
+	}
+	if source.MetaTSField == "" {
+		source.MetaTSField = "_time"
+	}
+}
+
+func resolveLokiSource(source *config.ProvisionSource) {
+	conn, err := source.LokiConnection()
+	if err == nil {
+		if secret := lokiSecretField(&conn); secret != nil && *secret == "" && source.SecretRef != "" {
+			*secret = os.Getenv(source.SecretRef)
+		}
+		conn.Headers = resolveHeaderSecretRefs(conn.Headers, source.HeaderSecretRefs)
+		_ = source.SetConnectionConfig(conn)
+	}
+	if source.MetaTSField == "" {
+		source.MetaTSField = "_time"
+	}
+	// Loki adds detected_level as structured metadata by default.
+	if source.MetaSeverityField == "" {
+		source.MetaSeverityField = "detected_level"
+	}
+}
+
+// resolveHeaderSecretRefs fills each header that header_secret_refs names from
+// its environment variable. Like secret_ref, a value set in the connection
+// wins. Header names match without regard to case, as HTTP does, so a
+// reference fills a blank entry rather than adding a second one.
+func resolveHeaderSecretRefs(headers, refs map[string]string) map[string]string {
+	if len(refs) == 0 {
+		return headers
+	}
+	if headers == nil {
+		headers = make(map[string]string, len(refs))
+	}
+	for name, envVar := range refs {
+		if key := headerKey(headers, name); headers[key] == "" {
+			headers[key] = os.Getenv(envVar)
+		}
+	}
+	return headers
+}
+
+// headerKey returns the key under which headers holds the header name, or
+// name itself when it is absent.
+func headerKey(headers map[string]string, name string) string {
+	for key := range headers {
+		if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(name)) {
+			return key
+		}
+	}
+	return name
 }
 
 func normalizedAuthMode(mode string) string {
@@ -313,6 +464,13 @@ func sourceSecretValueMissing(src config.ProvisionSource, sourceType models.Sour
 		default:
 			return false
 		}
+	case models.SourceTypeLoki:
+		conn, err := src.LokiConnection()
+		if err != nil {
+			return false
+		}
+		secret := lokiSecretField(&conn)
+		return secret != nil && strings.TrimSpace(*secret) == ""
 	default:
 		return false
 	}

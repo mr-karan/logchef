@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/jobs"
+	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -55,79 +60,30 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func sanitizeUserIDs(in []models.UserID) []models.UserID {
+// normalizeGroupBy trims the group column names and rejects a blank, a
+// repeated or a fifth name.
+func normalizeGroupBy(in []string) ([]string, error) {
 	if len(in) == 0 {
-		return nil
+		return nil, nil
 	}
-	seen := make(map[models.UserID]struct{}, len(in))
-	out := make([]models.UserID, 0, len(in))
-	for _, id := range in {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
+	if len(in) > models.MaxAlertGroupBy {
+		return nil, fmt.Errorf("group_by takes at most %d columns", models.MaxAlertGroupBy)
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func sanitizeWebhookURLs(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
 	for _, raw := range in {
-		urlValue := strings.TrimSpace(raw)
-		if urlValue == "" {
-			continue
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return nil, fmt.Errorf("group_by has a blank column name")
 		}
-		if _, ok := seen[urlValue]; ok {
-			continue
+		if slices.Contains(out, name) {
+			return nil, fmt.Errorf("group_by names column %q twice", name)
 		}
-		seen[urlValue] = struct{}{}
-		out = append(out, urlValue)
+		out = append(out, name)
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return out, nil
 }
 
-func validateRecipientUserIDs(ctx context.Context, db store.StoreOps, recipientIDs []models.UserID) error {
-	if len(recipientIDs) == 0 {
-		return nil
-	}
-	// Recipients are users, not team members. Make sure each id resolves.
-	for _, id := range recipientIDs {
-		user, err := db.GetUser(ctx, id)
-		if err != nil || user == nil {
-			return fmt.Errorf("user %d not found", id)
-		}
-	}
-	return nil
-}
-
-func validateWebhookURLs(urls []string) error {
-	for _, raw := range urls {
-		parsed, err := url.Parse(raw)
-		if err != nil || parsed.Host == "" {
-			return fmt.Errorf("invalid webhook URL %q", raw)
-		}
-		if parsed.Scheme != "http" && parsed.Scheme != "https" {
-			return fmt.Errorf("webhook URL %q must use http or https", raw)
-		}
-	}
-	return nil
-}
-
-func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert, checkQuery bool) error {
+func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert, checkQuery bool) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
@@ -152,6 +108,9 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	alert.Description = strings.TrimSpace(alert.Description)
 	alert.Query = strings.TrimSpace(alert.Query)
 	alert.ConditionJSON = strings.TrimSpace(alert.ConditionJSON)
+	if err := normalizeGroupingAndPolicy(alert); err != nil {
+		return err
+	}
 
 	switch alert.EditorMode {
 	case models.AlertEditorModeNative:
@@ -178,26 +137,63 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	if _, ok := validSeverities[alert.Severity]; !ok {
 		return fmt.Errorf("invalid severity %q", alert.Severity)
 	}
-	if checkQuery {
-		return datasource.ValidateAlertQuery(alert.QueryLanguage, alert.Query)
+	if !checkQuery {
+		return nil
+	}
+	return validateAlertQuery(ctx, db, ds, sourceID, alert)
+}
+
+// validateAlertQuery rejects a query that evaluation would refuse to run. A
+// LogchefQL condition is compiled for the source, and its by keys become the
+// rule's group_by.
+func validateAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert) error {
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
+		return fmt.Errorf("failed to load source: %w", err)
+	}
+	if alert.QueryLanguage != models.QueryLanguageLogchefQL {
+		return datasource.ValidateAlertQuery(source, alert.QueryLanguage, alert.Query)
+	}
+	condition, err := ds.CompileAlertCondition(ctx, sourceID, alert.Query, alert.LookbackSeconds)
+	if err != nil {
+		return err
+	}
+	// The by keys of the condition are its groups. A group_by in the request
+	// may repeat them, never differ.
+	if len(alert.GroupBy) > 0 && !slices.Equal(alert.GroupBy, condition.GroupBy) {
+		return fmt.Errorf("group_by %q differs from the by keys %q of the LogchefQL condition. Leave group_by empty", alert.GroupBy, condition.GroupBy)
+	}
+	alert.GroupBy = condition.GroupBy
+	return datasource.ValidateAlertQuery(source, condition.Language, condition.Query)
+}
+
+// normalizeGroupingAndPolicy checks group_by against the editor mode and
+// defaults an absent no_data_policy to zero.
+func normalizeGroupingAndPolicy(alert *models.Alert) error {
+	var err error
+	if alert.GroupBy, err = normalizeGroupBy(alert.GroupBy); err != nil {
+		return err
+	}
+	// A condition saved before the server compiled conditions holds the
+	// native query the form generated, which is ungrouped.
+	if len(alert.GroupBy) > 0 && alert.EditorMode == models.AlertEditorModeCondition && alert.QueryLanguage != models.QueryLanguageLogchefQL {
+		return fmt.Errorf("group_by on a condition needs query_language logchefql")
+	}
+	alert.NoDataPolicy = alert.NoDataPolicy.OrZero()
+	if !alert.NoDataPolicy.Valid() {
+		return fmt.Errorf("invalid no_data_policy %q: use zero, no_data or keep", alert.NoDataPolicy)
 	}
 	return nil
 }
 
-// CreateAlert creates a new alert rule for the specified source, owned by createdBy.
-func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
+// CreateAlert creates a new alert rule for the specified source, owned by the
+// user, with the destinations the user may use, together with the job that
+// evaluates it.
+func CreateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, user *models.User, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
-	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
-	if err := validateRecipientUserIDs(ctx, db, recipientUserIDs); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-	}
-	webhookURLs := sanitizeWebhookURLs(req.WebhookURLs)
-	if err := validateWebhookURLs(webhookURLs); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-	}
-	owner := createdBy
+	owner := user.ID
 	alert := &models.Alert{
 		SourceID:          sourceID,
 		Name:              req.Name,
@@ -213,21 +209,42 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		Severity:          req.Severity,
 		Labels:            sanitizeStringMap(req.Labels),
 		Annotations:       sanitizeStringMap(req.Annotations),
-		RecipientUserIDs:  recipientUserIDs,
-		WebhookURLs:       webhookURLs,
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
+		GroupBy:           req.GroupBy,
+		NoDataPolicy:      req.NoDataPolicy,
+		NotifyOnResolve:   req.NotifyOnResolve == nil || *req.NotifyOnResolve,
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
 	}
-	if err := validateAlertModel(ctx, ds, sourceID, alert, true); err != nil {
+	if err := validateFrequency(alert.FrequencySeconds); err != nil {
+		return nil, err
+	}
+	if err := validateAlertModel(ctx, db, ds, sourceID, alert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
-	if err := db.CreateAlert(ctx, alert); err != nil {
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		ids, err := resolveAlertDestinations(ctx, tx, user, req.DestinationIDs, nil)
+		if err != nil {
+			return err
+		}
+		if err := tx.CreateAlert(ctx, alert); err != nil {
+			return err
+		}
+		if err := tx.SetAlertDestinations(ctx, alert.ID, ids); err != nil {
+			return err
+		}
+		alert.DestinationIDs = ids
+		return jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert))
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidAlertConfiguration) || errors.Is(err, ErrDestinationForbidden) {
+			return nil, err
+		}
 		log.Error("failed to create alert", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("failed to create alert: %w", err)
 	}
-	log.Info("alert created", "alert_id", alert.ID, "source_id", sourceID, "created_by", createdBy)
+	log.Info("alert created", "alert_id", alert.ID, "source_id", sourceID, "created_by", user.ID)
 	return alert, nil
 }
 
@@ -244,57 +261,70 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 	return alert, nil
 }
 
-// UpdateAlert updates an existing alert rule.
-func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+// UpdateAlert updates an existing alert rule and its job. A change of group_by closes every
+// open episode with "rule changed", because the old group keys no longer
+// name any group of the new result, and sends their resolved notifications
+// (alerts.CloseForRuleChange). Destinations the editor adds must be
+// usable by the editor; the ones the rule has stay. It returns the rule before
+// and after the write, both read in the write's transaction under the row
+// lock.
+func UpdateAlert(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, user *models.User, alertID models.AlertID, req *models.UpdateAlertRequest) (before, after *models.Alert, err error) {
 	if req == nil {
-		return nil, ErrInvalidAlertConfiguration
+		return nil, nil, ErrInvalidAlertConfiguration
 	}
 
 	existing, err := db.GetAlert(ctx, alertID)
 	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, ErrAlertNotFound
+			return nil, nil, ErrAlertNotFound
 		}
 		log.Error("failed to load alert for update", "alert_id", alertID, "error", err)
-		return nil, fmt.Errorf("failed to load alert: %w", err)
+		return nil, nil, fmt.Errorf("failed to load alert: %w", err)
 	}
 
 	previous := *existing
 	if err := applyAlertUpdates(existing, req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// An unchanged query skips the SQL check so owners can still pause, rename
 	// or delete an alert whose stored query the parser rejects. Evaluation
 	// still refuses to run it.
-	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode
-	if req.RecipientUserIDs != nil {
-		if err := validateRecipientUserIDs(ctx, db, existing.RecipientUserIDs); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-		}
-	}
-	if req.WebhookURLs != nil {
-		if err := validateWebhookURLs(existing.WebhookURLs); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
-		}
-	}
-	if err := validateAlertModel(ctx, ds, existing.SourceID, existing, queryChanged); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	// A LogchefQL condition's groups come from its compile, so a group_by
+	// change is checked against the query too.
+	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode ||
+		!slices.Equal(existing.GroupBy, previous.GroupBy)
+	if err := validateAlertModel(ctx, db, ds, existing.SourceID, existing, queryChanged); err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
-	if err := db.UpdateAlert(ctx, existing); err != nil {
+	groupByChanged := !slices.Equal(existing.GroupBy, previous.GroupBy)
+	enqueued := 0
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		if before, enqueued, err = writeAlertUpdate(ctx, tx, log, user, existing, previous.DestinationIDs, req.DestinationIDs, groupByChanged); err != nil {
+			return err
+		}
+		after, err = tx.GetAlert(ctx, alertID)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidAlertConfiguration) || errors.Is(err, ErrDestinationForbidden) {
+			return nil, nil, err
+		}
 		if models.IsNotFound(err) {
-			return nil, ErrAlertNotFound
+			return nil, nil, ErrAlertNotFound
 		}
 		log.Error("failed to update alert", "alert_id", alertID, "error", err)
-		return nil, fmt.Errorf("failed to update alert: %w", err)
+		return nil, nil, fmt.Errorf("failed to update alert: %w", err)
 	}
-
-	updated, err := db.GetAlert(ctx, alertID)
-	if err != nil {
-		log.Warn("alert updated but fetching updated record failed", "alert_id", alertID, "error", err)
-		return existing, nil
+	if enqueued > 0 {
+		// The runner polls the store, so the drain sends the resolves now
+		// instead of at its interval. A failure only delays them.
+		if err := db.KickJob(ctx, string(notify.DeliverKind), notify.DrainKey); err != nil {
+			log.Warn("failed to kick the delivery drain; it runs at its interval", "error", err)
+		}
 	}
-	return updated, nil
+	return before, after, nil
 }
 
 func applyAlertUpdates(alert *models.Alert, req *models.UpdateAlertRequest) error {
@@ -349,8 +379,8 @@ func applyThresholdUpdates(alert *models.Alert, req *models.UpdateAlertRequest) 
 		alert.ThresholdValue = *req.ThresholdValue
 	}
 	if req.FrequencySeconds != nil {
-		if *req.FrequencySeconds <= 0 {
-			return fmt.Errorf("%w: frequency_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+		if err := validateFrequency(*req.FrequencySeconds); err != nil {
+			return err
 		}
 		alert.FrequencySeconds = *req.FrequencySeconds
 	}
@@ -370,49 +400,159 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 	if req.Annotations != nil {
 		alert.Annotations = sanitizeStringMap(*req.Annotations)
 	}
-	if req.RecipientUserIDs != nil {
-		alert.RecipientUserIDs = sanitizeUserIDs(*req.RecipientUserIDs)
-	}
-	if req.WebhookURLs != nil {
-		alert.WebhookURLs = sanitizeWebhookURLs(*req.WebhookURLs)
-	}
 	if req.GeneratorURL != nil {
 		alert.GeneratorURL = strings.TrimSpace(*req.GeneratorURL)
+	}
+	if req.GroupBy != nil {
+		alert.GroupBy = *req.GroupBy
+	}
+	if req.NoDataPolicy != nil {
+		alert.NoDataPolicy = *req.NoDataPolicy
+	}
+	if req.NotifyOnResolve != nil {
+		alert.NotifyOnResolve = *req.NotifyOnResolve
 	}
 	if req.IsActive != nil {
 		alert.IsActive = *req.IsActive
 	}
 }
 
-// DeleteAlert removes an alert rule.
-func DeleteAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) error {
-	if err := db.DeleteAlert(ctx, alertID); err != nil {
+// writeAlertUpdate writes an edited rule in the caller's transaction and
+// returns the rule it replaced, read under the row lock, and the number of
+// notifications it enqueued. The job row is written before the alert row, the
+// order in which an evaluation's commit locks them, so an edit cannot
+// deadlock with it. A group_by change closes the open episodes, enqueues
+// their resolved notifications and drops every instance; it runs before
+// requested destinations replace the rule's, so a resolve reaches the
+// destinations that its firing reached.
+func writeAlertUpdate(ctx context.Context, tx store.StoreOps, log *slog.Logger, user *models.User, alert *models.Alert, current []models.DestinationID, requested *[]models.DestinationID, groupByChanged bool) (*models.Alert, int, error) {
+	if err := jobs.Upsert(ctx, tx, alerts.EvaluationJob(alert)); err != nil {
+		return nil, 0, err
+	}
+	before, err := tx.GetAlertForUpdate(ctx, alert.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := tx.UpdateAlert(ctx, alert); err != nil {
+		return nil, 0, err
+	}
+	enqueued := 0
+	if groupByChanged {
+		if enqueued, err = alerts.CloseForRuleChange(ctx, tx, log, alert); err != nil {
+			return nil, 0, err
+		}
+	}
+	if requested != nil {
+		ids, err := resolveAlertDestinations(ctx, tx, user, *requested, current)
+		if err != nil {
+			return nil, 0, err
+		}
+		if err := tx.SetAlertDestinations(ctx, alert.ID, ids); err != nil {
+			return nil, 0, err
+		}
+	}
+	return before, enqueued, nil
+}
+
+// validateFrequency applies the floor of the rule's job schedule. A stored rule
+// below the floor keeps its value until an edit sets a new one.
+func validateFrequency(seconds int) error {
+	if seconds < alerts.MinFrequencySeconds {
+		return fmt.Errorf("%w: frequency_seconds must be at least %d", ErrInvalidAlertConfiguration, alerts.MinFrequencySeconds)
+	}
+	return nil
+}
+
+// DeleteAlert removes an alert rule and its job, and returns the rule it
+// deleted, read under the row lock of the delete.
+func DeleteAlert(ctx context.Context, db store.Store, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
+	var deleted *models.Alert
+	// Job row first, as in UpdateAlert.
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := alerts.DeleteEvaluationJob(ctx, tx, alertID); err != nil {
+			return err
+		}
+		var err error
+		if deleted, err = tx.GetAlertForUpdate(ctx, alertID); err != nil {
+			return err
+		}
+		return tx.DeleteAlert(ctx, alertID)
+	})
+	if err != nil {
 		if models.IsNotFound(err) {
-			return ErrAlertNotFound
+			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to delete alert", "alert_id", alertID, "error", err)
-		return fmt.Errorf("failed to delete alert: %w", err)
+		return nil, fmt.Errorf("failed to delete alert: %w", err)
 	}
 	log.Info("alert deleted", "alert_id", alertID)
-	return nil
+	return deleted, nil
 }
 
 // ListAlertsBySource returns all alerts for a source.
 func ListAlertsBySource(ctx context.Context, db store.StoreOps, sourceID models.SourceID) ([]*models.Alert, error) {
-	alerts, err := db.ListAlertsBySource(ctx, sourceID)
+	list, err := db.ListAlertsBySource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	return alerts, nil
+	return list, AttachAlertInstanceCounts(ctx, db, list)
 }
 
 // ListAlertsForUser returns alerts the user can see (cross-source).
 func ListAlertsForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.Alert, error) {
-	alerts, err := db.ListAlertsForUser(ctx, userID)
+	list, err := db.ListAlertsForUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	return alerts, nil
+	return list, AttachAlertInstanceCounts(ctx, db, list)
+}
+
+// AttachAlertInstanceCounts sets InstanceCounts on every alert, zero counts
+// included, with one query for the whole list.
+func AttachAlertInstanceCounts(ctx context.Context, db store.StoreOps, list []*models.Alert) error {
+	ids := make([]models.AlertID, len(list))
+	for i, alert := range list {
+		ids[i] = alert.ID
+	}
+	counts, err := db.CountAlertInstances(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("failed to count alert instances: %w", err)
+	}
+	for _, alert := range list {
+		alertCounts := counts[alert.ID]
+		alert.InstanceCounts = &alertCounts
+	}
+	return nil
+}
+
+// MaxAlertInstancesListed bounds GET /alerts/:alertID/instances.
+const MaxAlertInstancesListed = 200
+
+// ListAlertInstances returns the alert's instances, firing first, at most
+// MaxAlertInstancesListed.
+func ListAlertInstances(ctx context.Context, db store.StoreOps, alertID models.AlertID) ([]*models.AlertInstance, error) {
+	instances, err := db.ListAlertInstances(ctx, alertID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert instances: %w", err)
+	}
+	slices.SortStableFunc(instances, func(a, b *models.AlertInstance) int {
+		return instanceStateRank(a.State) - instanceStateRank(b.State)
+	})
+	if len(instances) > MaxAlertInstancesListed {
+		instances = instances[:MaxAlertInstancesListed]
+	}
+	return instances, nil
+}
+
+func instanceStateRank(state models.AlertInstanceState) int {
+	switch state {
+	case models.AlertInstanceStateFiring:
+		return 0
+	case models.AlertInstanceStateNoData:
+		return 1
+	default:
+		return 2
+	}
 }
 
 // UserCanEditAlert returns true if the user is the creator or a global admin.
@@ -436,25 +576,40 @@ func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.Ale
 		}
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
 	}
+	refs := make([]string, len(history))
+	for i, entry := range history {
+		refs[i] = alerts.DeliveryRef(alertID, entry.ID)
+	}
+	deliveries, err := db.ListDeliverySummaries(ctx, alerts.DeliveryProducer, refs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert deliveries: %w", err)
+	}
+	for i, entry := range history {
+		entry.Deliveries = deliveries[refs[i]]
+	}
 	return history, nil
 }
 
-// ResolveAlert manually resolves every unresolved firing entry of the alert.
-func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, message string) error {
-	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alertID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrAlertNotFound
+// ResolveAlert manually resolves the open episode of one group, or of every
+// group when groupKey is nil. It sends nothing; the alerts manager does that
+// when it runs.
+func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, groupKey *string, message string) error {
+	var err error
+	if groupKey != nil {
+		err = db.ResolveAlertGroup(ctx, alertID, *groupKey, message, time.Now().UTC())
+	} else {
+		var entry *models.AlertHistoryEntry
+		if entry, err = db.GetLatestUnresolvedAlertHistory(ctx, alertID); err == nil {
+			err = db.ResolveAlertHistory(ctx, entry.ID, message)
 		}
-		return fmt.Errorf("failed to find unresolved alert history: %w", err)
 	}
-	if err := db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
+	if err != nil {
 		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
-	log.Info("alert history resolved", "alert_id", alertID, "history_id", entry.ID)
+	log.Info("alert history resolved", "alert_id", alertID)
 	return nil
 }
 
@@ -477,27 +632,16 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}
 
 	// Load source to verify access
-	if _, err := db.GetSource(ctx, sourceID); err != nil {
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
 		if models.IsNotFound(err) {
 			return nil, fmt.Errorf("source not found")
 		}
 		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
 
-	tempAlert := &models.Alert{
-		SourceID:          sourceID,
-		Name:              "test-alert",
-		QueryLanguage:     req.QueryLanguage,
-		EditorMode:        req.EditorMode,
-		Query:             req.Query,
-		ConditionJSON:     req.ConditionJSON,
-		LookbackSeconds:   req.LookbackSeconds,
-		ThresholdOperator: req.ThresholdOperator,
-		ThresholdValue:    req.ThresholdValue,
-		FrequencySeconds:  60,
-		Severity:          models.AlertSeverityWarning,
-	}
-	if err := validateAlertModel(ctx, ds, sourceID, tempAlert, true); err != nil {
+	tempAlert := unsavedAlert(sourceID, req, 60)
+	if err := validateAlertModel(ctx, db, ds, sourceID, tempAlert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -505,6 +649,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	timeout := models.DefaultQueryTimeoutSeconds
 	startTime := time.Now()
 	result, err := ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
+		At:              time.Now().UTC(),
 		Language:        tempAlert.QueryLanguage,
 		Query:           tempAlert.Query,
 		LookbackSeconds: tempAlert.LookbackSeconds,
@@ -516,25 +661,31 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
-	// Extract numeric value from result. No matching rows is not an error —
-	// ExtractFirstNumeric returns (0, nil) for an empty result — so check the
-	// row count independently and surface a warning, otherwise the user can't
-	// tell "waiting for data" from a real zero. An extraction failure on a
-	// non-empty result is still a genuine error.
-	value, err := util.ExtractFirstNumeric(result)
-	var warnings []string
-	if len(result.Logs) == 0 {
-		warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
-		value = 0
-	} else if err != nil {
-		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
+	if len(tempAlert.GroupBy) > 0 {
+		return groupedTestResponse(tempAlert, source.MetaTSField, result, executionTime)
 	}
 
-	// Check if threshold would be met
-	thresholdMet := util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
+	// No sample is not an error, so surface a warning, otherwise the user
+	// can't tell "waiting for data" from a real zero. An extraction failure on
+	// a non-empty result is still a genuine error.
+	samples, err := alerts.SamplesFromResult(result, nil, tempAlert.QueryLanguage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
+	}
+	var value float64
+	var warnings []string
+	var thresholdMet bool
+	noData := len(samples) == 0
+	if noData {
+		thresholdMet = noRowsThresholdMet(tempAlert)
+		warnings = append(warnings, noRowsWarning(tempAlert.NoDataPolicy))
+	} else {
+		value = samples[0].Value
+		thresholdMet = util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
+	}
 
 	// Generate additional warnings
-	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result)...)
+	warnings = append(warnings, generateQueryWarnings(tempAlert, source.MetaTSField, executionTime, result, false)...)
 
 	return &models.TestAlertQueryResponse{
 		Value:           value,
@@ -542,12 +693,141 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		ExecutionTimeMs: executionTime.Milliseconds(),
 		RowsReturned:    len(result.Logs),
 		Warnings:        warnings,
+		NoData:          noData,
 	}, nil
 }
 
-func generateQueryWarnings(query string, executionTime time.Duration, result *models.QueryResult) []string {
+// unsavedAlert is the rule that the test and backtest routes run.
+func unsavedAlert(sourceID models.SourceID, req *models.TestAlertQueryRequest, frequencySeconds int) *models.Alert {
+	return &models.Alert{
+		SourceID:          sourceID,
+		Name:              "test-alert",
+		QueryLanguage:     req.QueryLanguage,
+		EditorMode:        req.EditorMode,
+		Query:             req.Query,
+		ConditionJSON:     req.ConditionJSON,
+		LookbackSeconds:   req.LookbackSeconds,
+		ThresholdOperator: req.ThresholdOperator,
+		ThresholdValue:    req.ThresholdValue,
+		FrequencySeconds:  frequencySeconds,
+		Severity:          models.AlertSeverityWarning,
+		GroupBy:           req.GroupBy,
+		NoDataPolicy:      req.NoDataPolicy,
+	}
+}
+
+// backtestAlert replays an unsaved rule over the range_seconds that end now.
+// It does not authorize; callers use BacktestAlertForPrincipal. A query that
+// cannot be run for a past instant returns *datasource.ReplayError.
+func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, req *models.BacktestAlertRequest) (*models.BacktestResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("%w: backtest request is required", ErrInvalidAlertConfiguration)
+	}
+	if req.RangeSeconds < models.MinBacktestRangeSeconds || req.RangeSeconds > models.MaxBacktestRangeSeconds {
+		return nil, fmt.Errorf("%w: range_seconds must be between %d and %d", ErrInvalidAlertConfiguration, models.MinBacktestRangeSeconds, models.MaxBacktestRangeSeconds)
+	}
+	if err := validateFrequency(req.FrequencySeconds); err != nil {
+		return nil, err
+	}
+	if req.FrequencySeconds > req.RangeSeconds {
+		return nil, fmt.Errorf("%w: frequency_seconds must not exceed range_seconds", ErrInvalidAlertConfiguration)
+	}
+	if req.LookbackSeconds <= 0 {
+		return nil, fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
+	}
+	alert := unsavedAlert(sourceID, &req.TestAlertQueryRequest, req.FrequencySeconds)
+	if err := validateAlertModel(ctx, db, ds, sourceID, alert, true); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+	source, err := db.GetSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load source: %w", err)
+	}
+	if err := datasource.CheckAlertReplayable(source, alert.QueryLanguage, alert.Query); err != nil {
+		if _, ok := errors.AsType[*datasource.ReplayError](err); ok {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+
+	rule := alerts.BacktestRule{
+		Rule: alerts.Rule{
+			Operator:  alert.ThresholdOperator,
+			Threshold: alert.ThresholdValue,
+			NoData:    alert.NoDataPolicy,
+		},
+		GroupBy:          alert.GroupBy,
+		Language:         alert.QueryLanguage,
+		FrequencySeconds: alert.FrequencySeconds,
+		LookbackSeconds:  alert.LookbackSeconds,
+		NotifyOnResolve:  req.NotifyOnResolve == nil || *req.NotifyOnResolve,
+	}
+	timeout := models.DefaultQueryTimeoutSeconds
+	query := func(ctx context.Context, at time.Time) (*models.QueryResult, error) {
+		return ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
+			At:              at,
+			Language:        alert.QueryLanguage,
+			Query:           alert.Query,
+			LookbackSeconds: alert.LookbackSeconds,
+			QueryTimeout:    &timeout,
+		})
+	}
+	return alerts.Backtest(ctx, rule, time.Now().UTC().Truncate(time.Second), req.RangeSeconds, query)
+}
+
+// groupedTestResponse reads the samples the scheduler would read. A result
+// the scheduler rejects, such as a duplicate group, is a 400 here.
+func groupedTestResponse(alert *models.Alert, timestampColumn string, result *models.QueryResult, executionTime time.Duration) (*models.TestAlertQueryResponse, error) {
+	samples, err := alerts.SamplesFromResult(result, alert.GroupBy, alert.QueryLanguage)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+	resp := &models.TestAlertQueryResponse{
+		ExecutionTimeMs: executionTime.Milliseconds(),
+		RowsReturned:    len(result.Logs),
+		Samples:         make([]models.AlertSample, 0, min(len(samples), models.MaxTestAlertSamples)),
+		GroupsTotal:     len(samples),
+	}
+	for i, sample := range samples {
+		met := util.CompareAlertThreshold(sample.Value, alert.ThresholdValue, alert.ThresholdOperator)
+		resp.ThresholdMet = resp.ThresholdMet || met
+		if i == 0 {
+			resp.Value = sample.Value
+		}
+		if i < models.MaxTestAlertSamples {
+			resp.Samples = append(resp.Samples, models.AlertSample{Group: sample.Group, Value: sample.Value, ThresholdMet: met})
+		}
+	}
+	if len(samples) == 0 {
+		resp.NoData = true
+		resp.ThresholdMet = noRowsThresholdMet(alert)
+		resp.Warnings = append(resp.Warnings, noRowsWarning(alert.NoDataPolicy))
+	}
+	resp.Warnings = append(resp.Warnings, generateQueryWarnings(alert, timestampColumn, executionTime, result, true)...)
+	return resp, nil
+}
+
+// noRowsThresholdMet reports whether a result without rows meets the
+// threshold: only the zero policy compares 0, the others never fire on it.
+func noRowsThresholdMet(alert *models.Alert) bool {
+	return alert.NoDataPolicy == models.AlertNoDataZero && util.CompareAlertThreshold(0, alert.ThresholdValue, alert.ThresholdOperator)
+}
+
+func noRowsWarning(policy models.AlertNoDataPolicy) string {
+	switch policy {
+	case models.AlertNoDataNoData:
+		return "Query returned no rows. The alert will report no data."
+	case models.AlertNoDataKeep:
+		return "Query returned no rows. The alert will keep its current state."
+	default:
+		return "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison."
+	}
+}
+
+// generateQueryWarnings flags slow or unbounded queries. A grouped rule reads
+// every row, so only an ungrouped one is warned about returning several.
+func generateQueryWarnings(alert *models.Alert, timestampColumn string, executionTime time.Duration, result *models.QueryResult, grouped bool) []string {
 	var warnings []string
-	queryLower := strings.ToLower(query)
 
 	// Warn if query took more than 5 seconds
 	if executionTime > 5*time.Second {
@@ -556,9 +836,12 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 		warnings = append(warnings, fmt.Sprintf("Query took %v. This is acceptable but consider optimization if possible.", executionTime.Round(time.Millisecond)))
 	}
 
-	// Warn if query doesn't have a time filter (for SQL queries)
-	if !strings.Contains(queryLower, "where") && !strings.Contains(queryLower, "interval") && !strings.Contains(queryLower, "now()") {
-		warnings = append(warnings, "Query appears to lack a time-based filter. Consider adding a time window (e.g., WHERE timestamp >= now() - INTERVAL 5 MINUTE) to improve performance and relevance.")
+	if lacksTimeFilter(alert, timestampColumn) {
+		warnings = append(warnings, "Query appears to lack a time-based filter. Consider adding a time window (e.g., WHERE {{__time_filter}}) to improve performance and relevance.")
+	}
+
+	if grouped {
+		return warnings
 	}
 
 	// Warn if result set is unexpectedly large
@@ -572,4 +855,28 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 	}
 
 	return warnings
+}
+
+// lacksTimeFilter reports whether a ClickHouse SQL alert query appears to read
+// every row: it uses no time macro, and its WHERE clause does not name the
+// source's timestamp column. LogsQL and LogQL need no check, because their
+// providers bound the query to the lookback that ends at the evaluation instant.
+func lacksTimeFilter(alert *models.Alert, timestampColumn string) bool {
+	if alert.QueryLanguage != models.QueryLanguageClickHouseSQL {
+		return false
+	}
+	if slices.ContainsFunc(template.ReferencedNames(alert.Query), isTimeMacro) {
+		return false
+	}
+	// strings.Cut on "where" also finds PREWHERE.
+	_, where, found := strings.Cut(strings.ToLower(alert.Query), "where")
+	if !found || timestampColumn == "" {
+		return true
+	}
+	column := regexp.MustCompile(`(^|[^a-z0-9_])` + regexp.QuoteMeta(strings.ToLower(timestampColumn)) + `($|[^a-z0-9_])`)
+	return !column.MatchString(where)
+}
+
+func isTimeMacro(name string) bool {
+	return name == "__time_filter" || name == "__from" || name == "__to"
 }

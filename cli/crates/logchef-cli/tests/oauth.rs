@@ -72,7 +72,7 @@ fn login_uses_logchef_oauth_and_saves_a_private_context() {
     assert_eq!(oauth["client_id"], "logchef-cli");
     assert_eq!(oauth["access_token"], "access-1");
     assert_eq!(oauth["refresh_token"], "refresh-1");
-    assert_eq!(oauth["scopes"].as_array().unwrap().len(), 7);
+    assert_eq!(oauth["scopes"].as_array().unwrap().len(), 8);
     assert!(config["contexts"]["127.0.0.1"].get("token").is_none());
     assert_eq!(mode(&home.config_path()), 0o600);
     assert_eq!(mode(&home.config_dir()), 0o700);
@@ -93,6 +93,26 @@ fn login_uses_logchef_oauth_and_saves_a_private_context() {
         text.contains(&format!("Instance: {}", server.url)),
         "{text}"
     );
+}
+
+/// A server from before saved views rejects `saved_views:read`, so the CLI
+/// asks only for the scopes the server advertises.
+#[test]
+fn login_requests_only_the_scopes_the_server_advertises() {
+    let server = FakeServer::start(true);
+    let older = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read";
+    server.state().scopes_supported = Some(
+        format!("{older} offline_access")
+            .split(' ')
+            .map(String::from)
+            .collect(),
+    );
+    let home = TestHome::new("login-older-server");
+    let mut cmd = home.logchef();
+    cmd.args(["auth", "--server", &server.url]);
+    let (out, _, request) = complete_login(&server, cmd);
+    assert_success(&out);
+    assert_eq!(request.get("scope"), format!("{older} offline_access"));
 }
 
 #[test]

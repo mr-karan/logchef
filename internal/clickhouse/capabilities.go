@@ -146,6 +146,30 @@ func (c *Client) readFlattenedJSON(ctx context.Context) (bool, error) {
 	return supported > 0, err
 }
 
+// readMemoryCap returns the user's max_memory_usage, or the maximum its
+// settings constraint allows when that is lower. A query that sends a value
+// above the constraint fails, and ClickHouse does not lower it.
+func (c *Client) readMemoryCap(ctx context.Context) (int64, error) {
+	var value, constraint int64
+	err := c.conn.QueryRow(ownQuery(ctx, neutralSettings()),
+		"SELECT toInt64OrZero(value), toInt64OrZero(ifNull(max, '')) FROM system.settings WHERE name = 'max_memory_usage'").Scan(&value, &constraint)
+	if err != nil {
+		return 0, fmt.Errorf("reading the ClickHouse memory limit: %w", err)
+	}
+	return lowestLimit(value, constraint), nil
+}
+
+// lowestLimit returns the lowest positive limit, or 0 when none is set.
+func lowestLimit(limits ...int64) int64 {
+	lowest := int64(0)
+	for _, limit := range limits {
+		if limit > 0 && (lowest == 0 || limit < lowest) {
+			lowest = limit
+		}
+	}
+	return lowest
+}
+
 // flattensJSON reports whether the server takes the flattened native JSON
 // format; older servers must never receive the setting. A failed probe reads
 // as false, and the next query probes again.

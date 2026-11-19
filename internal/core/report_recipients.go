@@ -1,0 +1,487 @@
+package core
+
+// Report recipients (RFC 0008 units R8 and R9): the user, team and email
+// rows of a report, who may add them, how a run resolves them into people
+// and external addresses at send time, and which panels each one can reach.
+
+import (
+	"bytes"
+	"cmp"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/mail"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/reports"
+	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/pkg/models"
+)
+
+// maxReportRecipientRows bounds the recipient rows of one report. A team
+// counts once; it expands at send time.
+const maxReportRecipientRows = 50
+
+// The settings that gate external addresses. Only a global admin changes
+// them, and a missing row means the default: off, with no domain allowed.
+const (
+	SettingReportsExternalRecipients  = "reports.external_recipients"
+	SettingReportsAllowedEmailDomains = "reports.allowed_email_domains"
+)
+
+// LoadExternalPolicy reads both external-recipient settings. A value that
+// does not parse is an error, so a bad row never opens the gate.
+func LoadExternalPolicy(ctx context.Context, db store.SettingGetter) (reports.ExternalPolicy, error) {
+	read := func(key string) (string, error) {
+		v, err := db.GetSetting(ctx, key)
+		if models.IsNotFound(err) {
+			return "", nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("reading setting %s: %w", key, err)
+		}
+		return v, nil
+	}
+	var policy reports.ExternalPolicy
+	enabled, err := read(SettingReportsExternalRecipients)
+	if err != nil {
+		return policy, err
+	}
+	if enabled != "" {
+		if policy.Enabled, err = strconv.ParseBool(enabled); err != nil {
+			return policy, fmt.Errorf("setting %s: %w", SettingReportsExternalRecipients, err)
+		}
+	}
+	domains, err := read(SettingReportsAllowedEmailDomains)
+	if err != nil {
+		return policy, err
+	}
+	if policy.Domains, err = reports.ParseAllowedDomains(domains); err != nil {
+		return policy, fmt.Errorf("setting %s: %w", SettingReportsAllowedEmailDomains, err)
+	}
+	return policy, nil
+}
+
+// externalRefusal is the 400 for an address the settings refuse.
+func externalRefusal(addr, reason string) error {
+	if reason == reports.SkipExternalDisabled {
+		return invalidReport("recipients: %s: external email recipients are off on this server; a global admin turns them on in the settings", addr)
+	}
+	return invalidReport("recipients: %s: the domain is not one that external recipients allow", addr)
+}
+
+// reportRecipientInput is one entry of the recipients array of POST and
+// PUT /reports.
+type reportRecipientInput struct {
+	Kind   models.ReportRecipientKind `json:"kind"`
+	UserID *models.UserID             `json:"user_id"`
+	TeamID *models.TeamID             `json:"team_id"`
+	Email  *string                    `json:"email"`
+}
+
+// recipientKey identifies a row by its target, as the unique index does.
+func recipientKey(r models.ReportRecipient) string {
+	switch {
+	case r.Kind == models.ReportRecipientUser && r.UserID != nil:
+		return "user:" + strconv.FormatInt(int64(*r.UserID), 10)
+	case r.Kind == models.ReportRecipientTeam && r.TeamID != nil:
+		return "team:" + strconv.FormatInt(int64(*r.TeamID), 10)
+	}
+	return string(r.Kind) + ":" + strings.ToLower(r.Email)
+}
+
+// parseReportRecipients reads the recipients array. An empty array means
+// the owner alone, stored as a user row so the editor shows it.
+func parseReportRecipients(raw []json.RawMessage, owner *models.User) ([]models.ReportRecipient, error) {
+	if len(raw) > maxReportRecipientRows {
+		return nil, invalidReport("recipients: at most %d entries; add a team to reach more people", maxReportRecipientRows)
+	}
+	if len(raw) == 0 {
+		if owner == nil {
+			return nil, invalidReport("recipients: a report without an owner needs at least one recipient")
+		}
+		return []models.ReportRecipient{{Kind: models.ReportRecipientUser, UserID: &owner.ID}}, nil
+	}
+	out := make([]models.ReportRecipient, 0, len(raw))
+	seen := map[string]bool{}
+	for i, item := range raw {
+		var in reportRecipientInput
+		dec := json.NewDecoder(bytes.NewReader(item))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			return nil, invalidReport("recipients[%d]: %v", i, err)
+		}
+		var r models.ReportRecipient
+		switch {
+		case in.Kind == models.ReportRecipientUser && in.UserID != nil && in.TeamID == nil && in.Email == nil:
+			r = models.ReportRecipient{Kind: in.Kind, UserID: in.UserID}
+		case in.Kind == models.ReportRecipientTeam && in.TeamID != nil && in.UserID == nil && in.Email == nil:
+			r = models.ReportRecipient{Kind: in.Kind, TeamID: in.TeamID}
+		case in.Kind == models.ReportRecipientEmail && in.Email != nil && in.UserID == nil && in.TeamID == nil:
+			addr, err := reports.ParseExternalAddress(*in.Email)
+			if err != nil {
+				return nil, invalidReport("recipients[%d]: %v", i, err)
+			}
+			r = models.ReportRecipient{Kind: in.Kind, Email: addr}
+		default:
+			return nil, invalidReport("recipients[%d]: a user entry needs user_id only, a team entry team_id only and an email entry email only", i)
+		}
+		key := recipientKey(r)
+		if seen[key] {
+			return nil, invalidReport("recipients[%d]: %s is listed twice", i, key)
+		}
+		seen[key] = true
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// checkNewRecipients checks the rows that a save adds. A row the report
+// already holds stays, whoever added it. A global admin may add any user
+// or team; anyone else may add themself, a user who shares a team with
+// them, or a team they belong to. An added email row whose address belongs
+// to a user, ignoring case, is stored as that user's row; the caller may
+// add it when they may add the user, or when the external-recipient
+// settings allow the address. Any other email row is external and needs
+// both settings. Every added row records who added it.
+func checkNewRecipients(ctx context.Context, db store.StoreOps, p access.Principal, existing, next []models.ReportRecipient) error {
+	held := make(map[string]models.ReportRecipient, len(existing))
+	for _, r := range existing {
+		held[recipientKey(r)] = r
+	}
+	options, err := ListReportRecipientOptions(ctx, db, p)
+	if err != nil {
+		return err
+	}
+	var byAddress map[string]*models.User
+	keys := make(map[string]bool, len(next))
+	for i := range next {
+		r := &next[i]
+		named := recipientKey(*r)
+		if old, ok := held[named]; ok {
+			r.AddedBy = old.AddedBy
+		} else {
+			r.AddedBy = &p.User.ID
+			switch r.Kind {
+			case models.ReportRecipientUser:
+				if !options.hasUser(*r.UserID) {
+					return invalidReport("recipients: user %d is not one you can add; pick a member of one of your teams", *r.UserID)
+				}
+			case models.ReportRecipientTeam:
+				if !options.hasTeam(*r.TeamID) {
+					return invalidReport("recipients: team %d is not one you can add; pick a team you belong to", *r.TeamID)
+				}
+			case models.ReportRecipientEmail:
+				if byAddress == nil {
+					users, err := db.ListUsers(ctx)
+					if err != nil {
+						return fmt.Errorf("listing users: %w", err)
+					}
+					byAddress = reports.UsersByAddress(slices.Values(users))
+				}
+				u := byAddress[strings.ToLower(r.Email)]
+				if u == nil || !options.hasUser(u.ID) {
+					if reason := options.policy.Allows(r.Email); reason != "" {
+						return externalRefusal(r.Email, reason)
+					}
+				}
+				if u != nil {
+					*r = models.ReportRecipient{Kind: models.ReportRecipientUser, UserID: &u.ID, AddedBy: r.AddedBy}
+				}
+			}
+		}
+		if keys[recipientKey(*r)] {
+			return invalidReport("recipients: %s names a recipient listed already", named)
+		}
+		keys[recipientKey(*r)] = true
+	}
+	return nil
+}
+
+// ReportRecipientOption is a user or team the caller may add.
+type ReportRecipientOption struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+}
+
+// ReportRecipientOptions lists what the recipient picker offers, and
+// whether it offers an address field.
+type ReportRecipientOptions struct {
+	Users    []ReportRecipientOption  `json:"users"`
+	Teams    []ReportRecipientOption  `json:"teams"`
+	External ExternalRecipientOptions `json:"external"`
+	policy   reports.ExternalPolicy
+}
+
+// ExternalRecipientOptions shows the external-recipient settings to the
+// editor: whether external addresses are on, and the domains they may use.
+type ExternalRecipientOptions struct {
+	Enabled bool     `json:"enabled"`
+	Domains []string `json:"domains"`
+}
+
+func (o *ReportRecipientOptions) hasUser(id models.UserID) bool {
+	return slices.ContainsFunc(o.Users, func(u ReportRecipientOption) bool { return u.ID == int64(id) })
+}
+
+func (o *ReportRecipientOptions) hasTeam(id models.TeamID) bool {
+	return slices.ContainsFunc(o.Teams, func(t ReportRecipientOption) bool { return t.ID == int64(id) })
+}
+
+// ListReportRecipientOptions returns the users and teams the caller may add
+// as recipients, by name, and the external-recipient settings. Service
+// accounts receive no email and are left out.
+func ListReportRecipientOptions(ctx context.Context, db store.StoreOps, p access.Principal) (*ReportRecipientOptions, error) {
+	policy, err := LoadExternalPolicy(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	out := &ReportRecipientOptions{
+		Users: []ReportRecipientOption{}, Teams: []ReportRecipientOption{},
+		External: ExternalRecipientOptions{Enabled: policy.Enabled, Domains: append([]string{}, policy.Domains...)},
+		policy:   policy,
+	}
+	seen := map[int64]bool{}
+	addUser := func(id models.UserID, name, email string, accountType models.UserAccountType) {
+		if !seen[int64(id)] && accountType != models.UserAccountTypeService {
+			seen[int64(id)] = true
+			out.Users = append(out.Users, ReportRecipientOption{ID: int64(id), Name: name, Email: email})
+		}
+	}
+	var teams []*models.Team
+	if p.RequireGlobalAdmin() == nil {
+		if teams, err = db.ListTeams(ctx); err != nil {
+			return nil, fmt.Errorf("listing teams: %w", err)
+		}
+		users, err := db.ListUsers(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("listing users: %w", err)
+		}
+		for _, u := range users {
+			addUser(u.ID, u.FullName, u.Email, u.AccountType)
+		}
+	} else {
+		if teams, err = db.ListUserTeams(ctx, p.User.ID); err != nil {
+			return nil, fmt.Errorf("listing the caller's teams: %w", err)
+		}
+		addUser(p.User.ID, p.User.FullName, p.User.Email, p.User.AccountType)
+		for _, t := range teams {
+			members, err := db.ListTeamMembersWithDetails(ctx, t.ID)
+			if err != nil {
+				return nil, fmt.Errorf("listing members of team %d: %w", t.ID, err)
+			}
+			for _, m := range members {
+				addUser(m.UserID, m.FullName, m.Email, m.AccountType)
+			}
+		}
+	}
+	for _, t := range teams {
+		out.Teams = append(out.Teams, ReportRecipientOption{ID: int64(t.ID), Name: t.Name})
+	}
+	byName := func(a, b ReportRecipientOption) int {
+		return cmp.Or(cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), cmp.Compare(a.Email, b.Email), cmp.Compare(a.ID, b.ID))
+	}
+	slices.SortFunc(out.Users, byName)
+	slices.SortFunc(out.Teams, byName)
+	return out, nil
+}
+
+// ReportRecipientResponse is a recipient row with the name it shows as.
+type ReportRecipientResponse struct {
+	Kind   models.ReportRecipientKind `json:"kind"`
+	UserID *models.UserID             `json:"user_id,omitempty"`
+	TeamID *models.TeamID             `json:"team_id,omitempty"`
+	Email  string                     `json:"email,omitempty"`
+	Name   string                     `json:"name"`
+}
+
+func recipientResponses(rows []models.ReportRecipient, users map[models.UserID]*models.User, teams map[models.TeamID]string) []ReportRecipientResponse {
+	out := make([]ReportRecipientResponse, len(rows))
+	for i, r := range rows {
+		out[i] = ReportRecipientResponse{Kind: r.Kind, UserID: r.UserID, TeamID: r.TeamID, Email: r.Email}
+		switch {
+		case r.UserID != nil && users[*r.UserID] != nil:
+			u := users[*r.UserID]
+			out[i].Name, out[i].Email = cmp.Or(u.FullName, u.Email), u.Email
+		case r.TeamID != nil:
+			out[i].Name = teams[*r.TeamID]
+		}
+	}
+	return out
+}
+
+// RemoveMyReportRecipient deletes the caller's direct rows: their user row,
+// and an email row with their address. Only a direct recipient removes
+// themself: a caller who receives the report
+// through a team alone gets ErrInvalidReport saying so, and anyone else
+// ErrReportNotFound.
+func RemoveMyReportRecipient(ctx context.Context, db store.StoreOps, p access.Principal, id models.ReportID) (*models.Report, error) {
+	r, err := reloadReport(ctx, db, id)
+	if err != nil {
+		return nil, err
+	}
+	err = db.RemoveReportUserRecipient(ctx, id, p.User.ID)
+	if err == nil {
+		return r, nil
+	}
+	if !models.IsNotFound(err) {
+		return nil, fmt.Errorf("removing the caller from report %d: %w", id, err)
+	}
+	received, err := db.ListReportsForRecipient(ctx, p.User.ID)
+	if err != nil {
+		return nil, fmt.Errorf("listing reports sent to user %d: %w", p.User.ID, err)
+	}
+	if slices.ContainsFunc(received, func(x *models.Report) bool { return x.ID == id }) {
+		return nil, invalidReport("recipients: you receive this report through a team; leave the team or ask the report owner to remove it")
+	}
+	return nil, ErrReportNotFound
+}
+
+// resolveRunRecipients turns the report's rows into people now: users by
+// their row, teams by their members at send time.
+func (rr *ReportRunner) resolveRunRecipients(ctx context.Context, id models.ReportID) ([]reports.Resolved, error) {
+	rows, err := rr.DB.ListReportRecipients(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("listing recipients of report %d: %w", id, err)
+	}
+	all, err := rr.DB.ListUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing users: %w", err)
+	}
+	users := make(map[models.UserID]*models.User, len(all))
+	for _, u := range all {
+		users[u.ID] = u
+	}
+	members := map[models.TeamID][]models.UserID{}
+	for _, row := range rows {
+		if row.Kind != models.ReportRecipientTeam || row.TeamID == nil {
+			continue
+		}
+		list, err := rr.DB.ListTeamMembersWithDetails(ctx, *row.TeamID)
+		if err != nil {
+			return nil, fmt.Errorf("listing members of team %d: %w", *row.TeamID, err)
+		}
+		for _, m := range list {
+			members[*row.TeamID] = append(members[*row.TeamID], m.UserID)
+		}
+	}
+	return reports.ResolveRecipients(rows, users, members)
+}
+
+// recipientReach tells which panels of a plan a user can reach, with the
+// test the dashboard applies to a viewer and no exemption for the creator
+// or for admins: a dashboard panel through the panel's team, a saved query
+// through any team of the user's own that has its source.
+type recipientReach struct {
+	plan *reportPlan
+	// sourceTeams holds the teams that have a saved query's source.
+	sourceTeams map[models.SourceID]map[models.TeamID]bool
+}
+
+func (rr *ReportRunner) newRecipientReach(ctx context.Context, plan *reportPlan) (*recipientReach, error) {
+	reach := &recipientReach{plan: plan, sourceTeams: map[models.SourceID]map[models.TeamID]bool{}}
+	for _, p := range plan.panels {
+		if p.teamID != 0 || reach.sourceTeams[p.sourceID] != nil {
+			continue
+		}
+		teams, err := rr.DB.ListSourceTeams(ctx, p.sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("listing teams of source %d: %w", p.sourceID, err)
+		}
+		set := map[models.TeamID]bool{}
+		for _, t := range teams {
+			set[t.ID] = true
+		}
+		reach.sourceTeams[p.sourceID] = set
+	}
+	return reach, nil
+}
+
+// lockedFor marks the panels u cannot reach and counts the panels with
+// data that u can. A panel locked for the owner is locked for everyone
+// already and stays as it is.
+func (r *recipientReach) lockedFor(ctx context.Context, db store.StoreOps, u *models.User) (locked []bool, reachable int, err error) {
+	teams, err := db.ListUserTeams(ctx, u.ID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing teams of user %d: %w", u.ID, err)
+	}
+	mine := make(map[models.TeamID]bool, len(teams))
+	for _, t := range teams {
+		mine[t.ID] = true
+	}
+	locked = make([]bool, len(r.plan.panels))
+	for i, p := range r.plan.panels {
+		if p.status == models.ReportPanelLocked {
+			continue
+		}
+		ok := mine[p.teamID]
+		if p.teamID == 0 {
+			ok = false
+			for id := range mine {
+				if r.sourceTeams[p.sourceID][id] {
+					ok = true
+					break
+				}
+			}
+		}
+		locked[i] = !ok
+		if ok && p.job != nil {
+			reachable++
+		}
+	}
+	return locked, reachable, nil
+}
+
+// recipientFor addresses a resolved person, or an external address, as the
+// run history records it.
+func recipientFor(person reports.Resolved) reports.Recipient {
+	if u := person.User; u != nil {
+		return reports.Recipient{
+			Address: mail.Address{Name: u.FullName, Address: u.Email},
+			Class:   models.ReportDeliveryUser,
+			Target:  strconv.FormatInt(int64(u.ID), 10),
+			Via:     person.Via,
+		}
+	}
+	return reports.Recipient{
+		Address: mail.Address{Address: person.Address},
+		Class:   models.ReportDeliveryExternal,
+		Target:  person.Address,
+		Via:     person.Via,
+	}
+}
+
+// admit decides what one recipient receives: the panels locked for it, or
+// the reason it receives nothing. A Logchef user must be an active human
+// with an address and reach at least one panel. An external address must
+// pass policy, and then receives every panel the owner can reach: a panel
+// locked for the owner stays locked, with no data, as it is for everyone.
+func (r *recipientReach) admit(ctx context.Context, db store.StoreOps, person reports.Resolved, policy reports.ExternalPolicy) (locked []bool, skip string, err error) {
+	reachable := 0
+	if person.User == nil {
+		if skip := policy.Allows(person.Address); skip != "" {
+			return nil, skip, nil
+		}
+		locked = make([]bool, len(r.plan.panels))
+		for _, p := range r.plan.panels {
+			if p.status != models.ReportPanelLocked && p.job != nil {
+				reachable++
+			}
+		}
+	} else {
+		if skip := reports.CanReceive(person.User); skip != "" {
+			return nil, skip, nil
+		}
+		if locked, reachable, err = r.lockedFor(ctx, db, person.User); err != nil {
+			return nil, "", err
+		}
+	}
+	if reachable == 0 {
+		return locked, string(models.ReportReasonNoAccess), nil
+	}
+	return locked, "", nil
+}

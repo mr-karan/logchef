@@ -47,3 +47,20 @@ describe("built-in macros", () => {
     expect(templateMacros(query, dialect).size).toBe(0);
   });
 });
+
+describe("LogQL dialect", () => {
+  it("leaves LogQL's own templates inside strings alone", () => {
+    expect(extractTemplateVariables('{app="api"} | line_format "{{.msg}} {{__line__}} {{ __timestamp__ }}"', "logql")).toEqual([]);
+    expect(extractTemplateVariables('{app="api"} | line_format "{{now}} {{ToUpper .msg}}" | label_format t=`{{__timestamp__}}`', "logql")).toEqual([]);
+    expect(extractTemplateVariables('{app={{service}}} | line_format "{{service}} {{__line__}}"', "logql")).toEqual([{ name: "service", isOptional: false }]);
+  });
+
+  it("lists variables and skips macros outside strings", () => {
+    expect(extractTemplateVariables('sum(count_over_time({app={{app}}}[{{__interval}}])) # {{ignored}}', "logql")).toEqual([{ name: "app", isOptional: false }]);
+    expect(templateMacros('count_over_time({app="api"}[{{__interval}}])', "logql")).toEqual(new Set(["__interval"]));
+  });
+
+  it("does not read a single quote as a string", () => {
+    expect(extractTemplateVariables("{app='{{app}}'}", "logql")).toEqual([{ name: "app", isOptional: false }]);
+  });
+});

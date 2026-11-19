@@ -105,6 +105,56 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
   }
 
   /**
+   * Load the values of Loki stream labels without a state with one preload
+   * request. The server reads the first 30 labels from the index, without
+   * counts; a label it skips loads on click.
+   */
+  const preloadLabels = async (fields: FieldInfo[]): Promise<void> => {
+    const opts = options.value
+    const { teamId, sourceId } = opts
+    const timeRange = opts.getTimeRange()
+    const labels = fields.filter(field => field.type === 'label' && !fieldStates.value.has(field.name))
+    if (!timeRange || !teamId || !sourceId || labels.length === 0) return
+
+    const controller = new AbortController()
+    for (const label of labels) {
+      setFieldState(label.name, { status: 'loading' })
+      abortControllers.set(label.name, controller)
+    }
+    // A label whose controller changed was cancelled or reloaded on its own.
+    const settle = (state: (name: string) => FieldLoadingState) => {
+      for (const label of labels) {
+        if (abortControllers.get(label.name) !== controller) continue
+        abortControllers.delete(label.name)
+        const next = state(label.name)
+        setFieldState(label.name, next)
+        if (next.values) useFieldValuesStore().populateFromFetch(sourceId, label.name, next.values)
+      }
+    }
+
+    await runFieldLoad(async () => {
+      if (controller.signal.aborted) return settle(() => ({ status: 'click-to-load' }))
+      let response: Awaited<ReturnType<typeof sourcesApi.getAllFieldValues>>
+      try {
+        response = await sourcesApi.getAllFieldValues(
+          teamId, sourceId,
+          timeRange.startTime, timeRange.endTime,
+          opts.timezone, opts.limit || 10,
+          opts.getFilterQueryLanguage(), opts.getFilterQuery(), opts.getFilterVariables(),
+          controller.signal,
+        )
+      } catch {
+        return settle(() => controller.signal.aborted
+          ? { status: 'click-to-load' }
+          : { status: 'error', error: 'Failed to load' })
+      }
+      const all = response.data
+      if (!all) return settle(() => ({ status: 'error', error: 'Failed to load' }))
+      settle(name => all[name] ? { status: 'loaded', values: all[name] } : { status: 'click-to-load' })
+    })
+  }
+
+  /**
    * Initialize states for fields without one and auto-load the priority ones.
    * Fields that already have a state keep it, so callers can pass a growing
    * list without refetching. Call clearCache() first to start over.
@@ -176,6 +226,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
     getFieldState,
     loadField,
     loadPriorityFields,
+    preloadLabels,
     cancelAll,
     clearCache,
 
