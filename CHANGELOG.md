@@ -362,8 +362,9 @@ procedure, and changes to alert APIs, configuration, and token scopes in the
   (default `5m`; the server refuses to start outside 1 to 30 minutes),
   `max_concurrent_runs` (default `2`) and `max_attachment_bytes` (default
   5 MiB). Enable both `jobs.enabled` and `reports.enabled` on at least one
-  replica. Configure SMTP in **Administration → System Settings → Alerts**.
-  Reports can send with `alerts.enabled = false`. A token issued with
+  replica. While alerting is enabled, configure SMTP in **Administration →
+  System Settings → Alerts**. Reports continue to send if you then disable
+  alerting. A token issued with
   the Read-only preset before this release lacks `reports:read`; reissue it to
   read reports. OAuth sign-ins, including `logchef auth`, cannot reach
   reports: use an API token.
@@ -451,9 +452,10 @@ procedure, and changes to alert APIs, configuration, and token scopes in the
   `true`), `[jobs] poll_interval` (default `2s`) and
   `[alerts] max_concurrent_evaluations` (default `4`). At least one replica
   needs both `jobs.enabled = true` and `alerts.enabled = true` to evaluate
-  rules and deliver notifications. Replicas with both enabled share the
-  jobs. If you send email, verify SMTP in **Administration → System Settings
-  → Alerts**.
+  rules and deliver notifications. Replicas with both enabled share the jobs.
+  At startup, a stored `alerts.enabled` setting takes precedence over the
+  configuration file and environment. If you send email, verify SMTP in
+  **Administration → System Settings → Alerts**.
 - Retryable webhook, Slack, and PagerDuty failures retry after 30 seconds,
   2 minutes, 10 minutes, and 30 minutes, up to five attempts. Permanent
   failures end immediately. The queue marks messages over 256 KiB as

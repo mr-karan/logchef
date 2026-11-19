@@ -703,7 +703,9 @@ history_limit = 50
 
 Set SMTP, the frontend URL, and the notification timeout in System Settings.
 Enable both `alerts.enabled` and `jobs.enabled` on at least one replica to
-evaluate rules and deliver notifications.
+evaluate rules and deliver notifications. At startup, a stored
+`alerts.enabled` setting takes precedence over the configuration file and
+environment.
 
 Webhook, Slack and PagerDuty requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only, and the server log names the destination and the status, never the response body. `request_timeout` bounds each webhook, Slack, PagerDuty and SMTP request.
 
