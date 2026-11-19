@@ -7,12 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Back up the metadata database and stop all old replicas before starting a
+new one.** Alerting v2 requires downtime. Review the migrations, rollback
+procedure, and changes to alert APIs, configuration, and token scopes in the
+[Upgrade notes](#upgrade-notes).
+
+### Highlights
+
+- **Grafana Loki.** Search and tail Loki logs with LogchefQL or native LogQL,
+  inspect stream labels and surrounding logs, and use Loki in dashboards and
+  alerts. Grant Loki source access only to teams trusted with the whole tenant.
+- **LogchefQL aggregations.** Count, group, and summarize ClickHouse and
+  VictoriaLogs logs. See the results in a table or, where supported, a chart.
+  Use **Add to dashboard** to start a panel from the query.
+- **Alerting v2.** Alert on each group independently, choose what happens
+  when data is missing, mute notifications with silences, and backtest rules
+  before saving. Reuse email, webhook, Slack, and PagerDuty destinations.
+  The delivery queue tracks attempts and retries eligible failures.
+- **Scheduled reports.** Email a dashboard, dashboard tab, or saved query on
+  a schedule. Logchef checks the owner's access at each run and locks panels
+  each Logchef recipient cannot see. External recipients require admin opt-in.
+- **Saved Explorer views.** Save columns, sort order, display mode, and
+  optional query defaults. Set personal, team, or source defaults and share
+  links that carry your layout.
+- **Shared dashboard editing.** Team owners, admins, and editors can edit
+  shared dashboards when they have edit rights on every team the panels use.
+  The dashboard creator and global admins retain delete access.
+- **Audit log.** Global admins can inspect configuration changes, sign-ins,
+  and log exports in the UI, API, or CLI. Audit records redact credentials.
+- **ClickHouse schema advisor.** Review recommendations for indexes,
+  columns, codecs, table keys, and retention. Logchef shows the evidence and
+  any suggested DDL for review without applying it.
+- **Source access and secrets.** Team admins need access to a source before
+  linking it to their team. Provisioning exports reference custom header
+  secrets by environment variable.
+
 ### Added
 
 - Team owners, admins, and editors can edit shared dashboards when they have
-  edit rights on every team the dashboard uses. Dashboard summaries return
-  `can_delete` separately. Reload an open Logchef tab after upgrading to get
-  the new edit and delete controls.
+  edit rights on every team that the current and proposed query panels use
+  and can access their sources. To save using team permissions, keep at least
+  one query panel. Only the dashboard creator and global admins can delete a
+  dashboard. Dashboard summaries return `can_delete` separately. Reload an
+  open Logchef tab after upgrading to get the new edit and delete controls.
 - Grafana Loki sources. A global admin adds one in the UI, the API or the
   provisioning TOML with a base URL, an optional tenant (sent as
   `X-Scope-OrgID`), a default stream selector, a parser (none, JSON or
@@ -28,27 +65,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not available. A Loki source gives the teams it is linked to the whole
   tenant: the selector does not restrict native LogQL. The CLI now reads a
   fractional `execution_time_ms` and prints it rounded to whole milliseconds.
-  Known gaps: the field sidebar loads values one field at a time instead of
-  using the stream label preload, and MCP `get_log_context` does not work on
-  Loki sources.
+  When the field sidebar opens, one request preloads indexed values for up to
+  30 stream labels under the query's selector. Preloaded values have no row
+  counts. Other fields load on demand. To use MCP `get_log_context` on Loki,
+  pass the target row's complete label map as `stream_labels`. Logchef
+  verifies the labels against Loki's series index and reads that stream.
   The new Grafana Loki tutorial and LogQL Queries guide cover setup, the
   LogchefQL mapping and every difference.
 - LogchefQL aggregations. A pipe after the filter counts and summarizes the
   matching logs: `level=error | count() by service`. The functions are
-  `count`, `count_distinct`, `sum`, `avg`, `min`, `max` and `p50` to `p99`,
+  `count`, `count_distinct`, `sum`, `avg`, `min`, `max` and the approximate
+  percentiles `p50`, `p75`, `p90`, `p95` and `p99`,
   with up to 5 `by` keys, a `time` or `time(5m)` bucket, and optional
   `| sort` and `| limit` stages. The same text runs on ClickHouse and
-  VictoriaLogs. The Explorer shows the result as a chart or a table,
-  dashboard panels in result mode chart it, `logchef query` prints it as a
-  table (with `--interval` for a bare `time` key), and MCP `query_logchefql`
-  returns it. Live tail, the histogram and other features that need log rows
-  refuse an aggregation. On ClickHouse an aggregation is bounded to 100,000
-  groups and `query.aggregation_max_memory_bytes` (default 2 GiB). The new
-  Aggregations docs page covers the syntax, limits and backend differences.
+  VictoriaLogs. Explorer and dashboard result panels can show the results.
+  **Add to dashboard** opens the panel builder on an editable dashboard with
+  a new result panel prefilled from the query and current view. The CLI
+  prints direct aggregations and aggregations run from saved queries or
+  collections as tables. Use `--interval` with `logchef query` for a bare
+  `time` key. MCP `query_logchefql` returns aggregation results. Ask Chef can
+  cite aggregation results and preserve the bucket interval when you reopen
+  a citation. Live tail,
+  the histogram and other features that need log rows refuse an aggregation.
+  On ClickHouse an aggregation is bounded to 100,000 groups and
+  `query.aggregation_max_memory_bytes` (default 2 GiB). The new Aggregations
+  docs page covers the syntax, limits and backend differences.
 - Alert rules can group by result columns in native mode. A ClickHouse query
-  with `GROUP BY service` or a LogsQL `stats by (service)` and **Group by**
-  `service` fire and resolve each service on its own, with one notification
-  per group and the group values in the labels. The alert page lists the
+  with `GROUP BY service`, a LogsQL `stats by (service)`, or a LogQL metric
+  query with `sum by (service)` can fire and resolve each service on its own.
+  Set **Group by** to `service` to get one notification per group with the
+  group values in the labels. The alert page lists the
   groups and resolves one at a time; the alert list shows "N firing".
   Changing **Group by** closes the open episodes and sends each announced
   group's resolved notification, so its PagerDuty incident closes. A
@@ -56,11 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   100 rows is an evaluation error, never a partial update.
 - ClickHouse alert queries accept the dashboard time macros `{{__from}}`,
   `{{__to}}` and `{{__time_filter}}`, which expand to the rule's lookback
-  window ending at the evaluation instant. The condition editor and the SQL
-  templates now generate `{{__time_filter}}` instead of
-  `now() - toIntervalSecond(...)`. Save-time validation renders the macros
-  through the same path as evaluation, so a query that saves also runs. A
-  query without macros runs unchanged.
+  window ending at the evaluation instant. The SQL templates now use
+  `{{__time_filter}}`. Save-time validation and evaluation render the macros
+  the same way. A query without macros runs unchanged.
 - Alert conditions are LogchefQL rules compiled on the server. The condition
   editor stores one aggregation, such as
   `status >= 500 | count() as value by service`, with `query_language`
@@ -119,10 +163,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Retry-After` up to 10 minutes, and fails after five attempts. Email is sent
   at most once, and an email whose outcome is unknown is marked `unknown`.
   Webhook requests carry the header `Logchef-Delivery-Id`. Each history entry
-  lists its deliveries with their state and last error.
+  lists its deliveries with their state and last error. Messages over 256 KiB
+  are recorded as failed without a send attempt.
 - Metrics for the job runner (`logchef_jobs_runs_total`,
   `logchef_jobs_run_duration_seconds`, `logchef_jobs_schedule_lag_seconds`),
-  notification deliveries (`logchef_notification_deliveries_total`) and
+  notification deliveries (`logchef_notification_deliveries_total`,
+  `logchef_notification_deliveries_pending`) and
   backtests (`logchef_alert_backtests_total`). The Alerting docs page is
   rewritten for all of the above.
 
@@ -136,7 +182,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer has. The Explorer URL names the active view as `view=<id>`, and a
   share link carries a copy of the sender's layout. `logchef open --view` and
   `logchef views list` use views from the CLI, and the MCP tool
-  `list_saved_views` lists them. The new Saved Views docs page covers it.
+  `list_saved_views` lists them. Declare managed source views in provisioning
+  TOML with `[[sources.views]]`. The UI and API treat those views as read-only.
+  The new Saved Views docs page covers it.
 - Audit log. Logchef records configuration changes, sign-ins (including
   failed ones), OAuth consent and grant revocations, and log exports as audit
   events, each with the actor, how they authenticated, the target and the
@@ -145,8 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   auto-provisioning and the report scheduler record their changes too. Global
   admins browse and download events in Administration → Audit Log, and read
   them through `GET /api/v1/admin/audit-events` and its NDJSON `/export` with
-  a session or an API token that has the new `audit:read` scope. Each event is
-  also written as a JSON log line with `msg` `audit` for shipping off the host.
+  a session or an API token that has the new `audit:read` scope. Use that API
+  token with `logchef audit list` to filter events from the CLI. By default,
+  Logchef also writes each event as a JSON log line with `msg` `audit` for
+  shipping off the host.
   API token creation and log exports fail closed: if the event cannot be
   stored, the request answers 503 and no token or data leaves the server. The
   new Audit Log docs page covers the event format, every action, retention and
@@ -155,15 +205,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Explorer query on a ClickHouse source (columns, Map keys, JSON paths and
   match kinds, never values) and joins it with the table's metadata. A global
   admin presses **Run analysis** on Source Inspection and gets findings, each
-  with evidence, gain, cost and the DDL to review: a bloom filter index, a
-  text index (ClickHouse 26.8 or later), a materialized column for a hot Map
-  key or JSON path, `LowCardinality`, a codec, and, with no DDL, a sorting
-  key, a partition key and a retention review. Logchef never runs the DDL.
+  with evidence, expected benefits and costs. Suggested DDL covers bloom
+  filter indexes, text indexes (ClickHouse 26.8 or later), materialized
+  columns for frequently queried Map keys or JSON paths, `LowCardinality`,
+  and codecs. The advisor also suggests reviews of sorting keys, partition
+  keys and retention. Logchef never runs the DDL.
   Every ClickHouse read has a budget, and the report shows what each read.
-  Findings can be dismissed and restored, with audit events. Every finding
-  also shows how often all clients read the table in the last 7 days, from
-  `system.query_log`. A per-source **Refresh weekly** switch, off by default,
-  runs the analysis every Monday at 03:00 UTC on the job runner. The report is
+  Findings can be dismissed and restored, with audit events. If the advisor
+  can read `system.query_log`, each finding shows the last seven days of table
+  reads by all clients on the ClickHouse server that answered. A per-source
+  **Refresh weekly** switch, off by default, runs the analysis every Monday
+  at 03:00 UTC on the job runner. The report is
   also served at `GET /api/v1/admin/sources/:id/advisor` and its `/refresh`,
   and printed by `logchef advisor <source>` with `--refresh`, `--ddl` and
   `--output json`. The new Schema Advisor docs page covers the rules,
@@ -185,14 +237,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reports page lists your reports with their next and last run, the reports
   sent to you, and every report for global admins; it has an editor with a
   preview and a test send, and a run history. **Schedule report** opens the
-  editor from a dashboard or a saved query. `logchef reports list`, `runs` and
-  `run` list reports, read the history and send one now. The routes live
-  under `/api/v1/reports` with the new `reports:read` and `reports:write`
+  editor from a dashboard or a saved query. Deleting either also deletes its
+  reports. The dashboard delete dialog shows the number of affected reports.
+  `logchef reports list`, `runs` and `run` list reports, read the history and
+  send one now. The routes live under `/api/v1/reports` with the new
+  `reports:read` and `reports:write`
   token scopes, and four `logchef_report_*` metrics count runs, panels and
   deliveries. The new Scheduled Reports docs page covers it.
 
 ### Changed
 
+- Explorer table header filters now add conditions to the LogchefQL query and
+  rerun it against the source. The loaded-rows search still searches the
+  current results.
 - Alert rules run on the background job runner. Each rule is a job at its own
   frequency, and one replica evaluates each tick, so several replicas on
   Postgres no longer each evaluate every rule. The window ends at the tick's
@@ -214,6 +271,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Live tail releases its slot when the client disconnects on any backend.
+- If a saved view changed since you loaded it, the picker can reload the
+  latest version or save your edits as a new view.
 - Provisioning export keeps the variable a header was declared with in
   `header_secret_refs`, instead of always writing the generated
   `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`. A reference to the generated
@@ -262,6 +322,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   000047, Postgres 000021). Back up the metadata database first: the SQLite
   migration rebuilds `sources` and keeps every row, link and ID. Rolling back
   needs every Loki source deleted first.
+- Saved Explorer views add the `saved_views` table (SQLite 000044,
+  Postgres 000018).
 - Scheduled reports add the `reports`, `report_recipients` and `report_runs`
   tables (SQLite migrations 000046 and 000056, Postgres 000020 and 000030), a
   `reports` settings category with the two external-recipient settings
@@ -269,13 +331,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `[reports]` config section: `enabled` (default `true`), `query_budget`
   (default `5m`; the server refuses to start outside 1 to 30 minutes),
   `max_concurrent_runs` (default `2`) and `max_attachment_bytes` (default
-  5 MiB). Reports send through the alert SMTP settings and on the job runner,
-  so set `[jobs] enabled = true` on at least one replica. A token issued with
+  5 MiB). Enable both `jobs.enabled` and `reports.enabled` on at least one
+  replica. Configure SMTP in **Administration → System Settings → Alerts**.
+  Reports can send with `alerts.enabled = false`. A token issued with
   the Read-only preset before this release lacks `reports:read`; reissue it to
   read reports. OAuth sign-ins, including `logchef auth`, cannot reach
   reports: use an API token.
 
-- A new `[audit]` config section bounds the `audit_events` table:
+- A new `[audit]` config section bounds the `audit_events` table (SQLite
+  000045, Postgres 000019):
   `retention_days` (default 365) and `max_rows` (default 1,000,000), pruned
   every five minutes, 5,000 rows at a time. `log_events` (default `true`)
   writes each event as an `audit` log line; set it to `false` to turn the line
@@ -321,9 +385,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delivery detail.
 - Each rule's targets become destinations. Every distinct webhook URL of one
   creator becomes one private webhook destination of that creator, named
-  `Webhook <host>`, on **payload version 1**, so receivers see the same body
-  as before. Each rule with recipients gets a private `Email for <rule name>`
-  destination with the same users. A rule without a creator gets
+  `Webhook <host>`, on **payload version 1**, which preserves the payload
+  format for deliveries that are sent. Each rule with recipients gets a
+  private `Email for <rule name>` destination with the same users. A rule without a creator gets
   destinations without a creator, which only global admins can edit. Move a
   receiver to version 2 in the destination form when it is ready. Webhook
   requests now carry `Logchef-Delivery-Id`, and delivery is at least once, so
@@ -335,7 +399,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields. A `frequency_seconds` below 10 answers 400 on create and update; an
   existing rule below 10 seconds keeps its stored value and runs every 10
   seconds. `POST /api/v1/admin/settings/test-webhook` is removed: use
-  `POST /api/v1/notification-destinations/test`.
+  `POST /api/v1/notification-destinations/test` with a saved destination
+  `id` or an unsaved webhook destination definition. An API token needs
+  `destinations:write`. Check `data.ok` and `data.results`. An HTTP 200 can
+  include a failed delivery.
 - Condition rules saved before this release keep the native query the form
   generated and run it unchanged. Saving one from the form stores it as a
   LogchefQL rule. No migration changes them.
@@ -348,12 +415,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration deletes its stored setting. New: `[jobs] enabled` (default
   `true`), `[jobs] poll_interval` (default `2s`) and
   `[alerts] max_concurrent_evaluations` (default `4`). At least one replica
-  needs `[jobs] enabled = true`, or no rule is evaluated and no notification
-  is sent. Drop any "run alerts on exactly one replica" setup: every replica
-  with jobs enabled shares the rules.
-- Retries changed: a failed notification retries after 30 seconds, 2, 10 and
-  30 minutes and fails after five attempts, instead of retrying at the rule's
-  next ticks.
+  needs both `jobs.enabled = true` and `alerts.enabled = true` to evaluate
+  rules and deliver notifications. Replicas with both enabled share the
+  jobs. If you send email, verify SMTP in **Administration → System Settings
+  → Alerts**.
+- Retryable webhook, Slack, and PagerDuty failures retry after 30 seconds,
+  2 minutes, 10 minutes, and 30 minutes, up to five attempts. Permanent
+  failures end immediately. The queue marks messages over 256 KiB as
+  failed before sending.
 
 ## [2.7.0] - 2026-11-15
 

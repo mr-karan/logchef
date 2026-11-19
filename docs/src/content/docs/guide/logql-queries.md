@@ -159,9 +159,14 @@ max(max_over_time({service_name="payments-api"} | json | unwrap duration_ms | __
 |---|---|
 | Search | Log or metric |
 | Histogram, dashboard count panels | Log query. Logchef wraps it in `count_over_time` |
-| Live tail, log context | Log query. Context also needs a LogchefQL query |
-| Field values filter | Log query |
+| Live tail | Log query |
+| Explorer log context | LogchefQL query. The context lookup uses the row's complete stream labels |
+| Field value counts | Log query |
 | Alerts | Metric query |
+
+The [field sidebar](/features/field-sidebar#loki) preloads stream label values
+from the index using the query's leading selector. If there is no leading
+selector, as with a metric query, it uses the source's default selector.
 
 ## How LogchefQL compiles to LogQL
 

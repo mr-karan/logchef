@@ -673,7 +673,9 @@ parameter fails every Ask Chef answer with an error.
 
 ### Alerting
 
-Configure real-time log monitoring with email and webhook notifications through the Admin Settings UI. Per-alert recipients and webhook URLs are managed in the alert form.
+Configure delivery and SMTP in **Administration → System Settings → Alerts**.
+Create reusable notification destinations and select them in each alert rule.
+See [Alerting](/features/alerting/#notification-destinations).
 
 **Settings available:**
 - **Enabled**: Enable/disable alert evaluation and delivery
@@ -691,24 +693,17 @@ Configure real-time log monitoring with email and webhook notifications through 
 - **Request Timeout**: Alert notification request timeout (default: "5s")
 - **TLS Insecure Skip Verify**: Skip TLS cert verification (dev only)
 
-**Optional `config.toml` seeding (first boot only):**
+**Optional `config.toml` settings for first boot:**
 ```toml
 [alerts]
 enabled = false
 default_lookback = "5m"
 history_limit = 50
-smtp_host = ""
-smtp_port = 587
-smtp_username = ""
-smtp_password = ""
-smtp_from = "alerts@example.com"
-smtp_reply_to = ""
-smtp_security = "starttls"
-external_url = ""
-frontend_url = ""
-request_timeout = "5s"
-tls_insecure_skip_verify = false
 ```
+
+Set SMTP, the frontend URL, and the notification timeout in System Settings.
+Enable both `alerts.enabled` and `jobs.enabled` on at least one replica to
+evaluate rules and deliver notifications.
 
 Webhook, Slack and PagerDuty requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only, and the server log names the destination and the status, never the response body. `request_timeout` bounds each webhook, Slack, PagerDuty and SMTP request.
 
@@ -770,10 +765,7 @@ Environment variables are prefixed with `LOGCHEF_`. For nested keys in the TOML 
 - Configure alerting:
   ```bash
   export LOGCHEF_ALERTS__ENABLED=true
-  export LOGCHEF_ALERTS__SMTP_HOST="smtp.example.com"
-  export LOGCHEF_ALERTS__SMTP_PORT=587
-  export LOGCHEF_ALERTS__SMTP_FROM="alerts@example.com"
-  export LOGCHEF_ALERTS__FRONTEND_URL="https://logchef.example.com"
+  export LOGCHEF_JOBS__ENABLED=true
   ```
 
 Environment variables take precedence over values defined in the TOML configuration file.
@@ -789,8 +781,8 @@ For production deployments, ensure you:
 5. Adjust session duration based on your security requirements
 6. Set logging level to "info" or "warn"
 7. If using AI features, ensure `LOGCHEF_AI__API_KEY` is set securely
-8. If using alerting, configure SMTP settings and set `frontend_url` for correct generator links
-9. Use `smtp_security` set to `tls` or `starttls` in production
+8. If using alerting, set **Frontend URL** in the **Alerts** settings for links in notifications
+9. If sending email, configure SMTP and set **SMTP Security** to `tls` or `starttls`
 
 ## Minimal Production Configuration
 

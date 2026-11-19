@@ -1,6 +1,6 @@
 ---
 title: Field Values Sidebar
-description: "Explore log field values and counts in the Logchef sidebar. Add filters from your results to narrow ClickHouse and VictoriaLogs searches."
+description: "Explore field values in the Logchef sidebar and use them to filter ClickHouse, VictoriaLogs, and Grafana Loki searches."
 ---
 
 The Field Values Sidebar is a Kibana-inspired field exploration panel for discovering and filtering log data quickly. It shows available fields and their top distinct values, so you can see what's in your data and build queries from it.
@@ -10,7 +10,7 @@ The Field Values Sidebar is a Kibana-inspired field exploration panel for discov
 The sidebar appears on the left side of the query interface and shows:
 
 - Queryable fields discovered from your current source
-- Top 10 unique values for each field with occurrence counts
+- Up to 10 values per filterable field, with occurrence counts when available
 - Quick-filter buttons to add or exclude values from your query
 
 ## Using the Sidebar
@@ -20,7 +20,7 @@ The sidebar appears on the left side of the query interface and shows:
 Click on any field name to expand it and see its top values. Each value shows:
 
 - The actual value
-- How many times it appears in the current time range
+- How many times it appears in the lookup's time range, when counts are available
 
 ### Filtering by Value
 
@@ -57,11 +57,11 @@ The sidebar is context-aware and integrates with your current view:
 
 ### Time Range
 
-Values and counts reflect only the selected time range. If you're looking at the last 15 minutes, you'll see values that appeared in that window, not historical data.
+Values and counts use the selected time range. Loki can cap the lookup window.
 
 ### Active Query Filtering
 
-When you have an active LogchefQL query, the sidebar shows only values that match your current filters. For example, if your query is `level="error"`, the sidebar values for other fields show only what appears in error logs.
+When you have an active LogchefQL query, field value counts reflect the matching logs. For example, with `level="error"`, the counts for other fields cover error logs. Loki's preloaded label values use only stream selector matchers.
 
 ### Auto-Refresh
 
@@ -94,6 +94,18 @@ Complex types like Map, Array, Tuple, and JSON are excluded since they don't hav
 - Fields are discovered dynamically rather than read from a fixed SQL schema
 - Value lookups are time-range-aware
 - Internal fields such as `_stream` and `_stream_id` may exist, but Logchef hides noisy defaults in the main table view
+
+### Loki
+
+When you open the sidebar, it requests values for up to 30 stream labels in one
+call to Logchef. The preload reads the Loki index using the query's leading
+stream selector, or the source's default selector if the query has none.
+Preloaded values come without counts.
+
+Expand a label that was not preloaded or a detected string field to see values
+and counts for the full log query. The source's `sidebar_lookback_seconds`
+caps the time range for both lookups. See the
+[Loki tutorial](/tutorials/loki#field-sidebar) for field types and query limits.
 
 ## Tips
 

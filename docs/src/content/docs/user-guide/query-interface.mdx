@@ -136,11 +136,10 @@ same row. A stream also ends automatically after a fixed session lifetime; reope
 - Double-click a column header divider to auto-fit width
 - Expand rows with the chevron to see full log details
 - Best when you want explicit columns and field-level scanning
-- **Column filters**: click the filter icon in a column header to narrow the
-  currently-loaded rows by that column. Type text for a contains match, or a
-  comparison like `>500`, `>=500`, `<500`, or `=500` on numeric columns.
-  Filtering is client-side only (no new query is sent) and resets whenever you
-  run a new query. The toolbar shows how many rows match out of the total.
+- **Column filters** in LogchefQL mode update the query. Click the filter
+  icon in a column header, choose a comparison, and enter a value. Apply or
+  clear the filter to rerun the query on the source. To search only the
+  loaded rows, use the search field above the table.
 
 ### Compact View
 
