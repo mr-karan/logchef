@@ -3,6 +3,7 @@ package server
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -14,11 +15,12 @@ import (
 // (query_history is already capped per user, so this is recent activity, not
 // all-time analytics).
 const (
-	queryActivityDefaultLimit = 100
-	queryActivityMinLimit     = 1
-	queryActivityMaxLimit     = 500
-	queryActivityWindow       = 2000
-	queryActivitySlowestCount = 10
+	queryActivityDefaultLimit    = 100
+	queryActivityMinLimit        = 1
+	queryActivityMaxLimit        = 500
+	queryActivityWindow          = 2000
+	queryActivitySlowestCount    = 10
+	queryActivityMaxSearchLength = 256
 )
 
 // queryActivityLanguageCount is one entry in the by_language breakdown.
@@ -35,14 +37,16 @@ type queryActivitySourceCount struct {
 }
 
 // queryActivityResponse is the admin recent-activity payload. total is the size
-// of the fetched window (not an all-time count); by_language/by_source are
-// sorted by count desc; slowest is the top rows by duration within the window.
+// of the matching window (not an all-time count); by_language/by_source are
+// sorted by count desc; slowest is the top matching rows by duration.
 type queryActivityResponse struct {
-	Total      int                          `json:"total"`
-	Recent     []models.QueryActivityRecord `json:"recent"`
-	ByLanguage []queryActivityLanguageCount `json:"by_language"`
-	BySource   []queryActivitySourceCount   `json:"by_source"`
-	Slowest    []models.QueryActivityRecord `json:"slowest"`
+	WindowSize  int                          `json:"window_size"`
+	WindowLimit int                          `json:"window_limit"`
+	Total       int                          `json:"total"`
+	Recent      []models.QueryActivityRecord `json:"recent"`
+	ByLanguage  []queryActivityLanguageCount `json:"by_language"`
+	BySource    []queryActivitySourceCount   `json:"by_source"`
+	Slowest     []models.QueryActivityRecord `json:"slowest"`
 }
 
 // handleAdminQueryActivity returns a recent-activity snapshot over the shared
@@ -50,7 +54,7 @@ type queryActivityResponse struct {
 // breakdowns and the slowest queries, all computed over a bounded recent
 // window. Because query_history is capped per user, this is deliberately RECENT
 // activity, not authoritative all-time analytics.
-// URL: GET /api/v1/admin/query-activity?limit=<N>
+// URL: GET /api/v1/admin/query-activity?limit=<N>&q=<text>&source_id=<id>&user_id=<id>&language=<dialect>
 // Requires: admin (requireAuth + requireAdmin) and logs:read token scope.
 func (s *Server) handleAdminQueryActivity(c fiber.Ctx) error {
 	limit := queryActivityDefaultLimit
@@ -68,15 +72,44 @@ func (s *Server) handleAdminQueryActivity(c fiber.Ctx) error {
 		limit = queryActivityMaxLimit
 	}
 
+	filter := queryActivityFilter{
+		query:    strings.TrimSpace(c.Query("q")),
+		language: models.QueryLanguage(c.Query("language")),
+	}
+	if len(filter.query) > queryActivityMaxSearchLength {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Search query exceeds 256 bytes", models.ValidationErrorType)
+	}
+	filter.query = strings.ToLower(filter.query)
+	if raw := c.Query("source_id"); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id <= 0 {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id", models.ValidationErrorType)
+		}
+		filter.sourceID = models.SourceID(id)
+	}
+	if raw := c.Query("user_id"); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id <= 0 {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user_id", models.ValidationErrorType)
+		}
+		filter.userID = models.UserID(id)
+	}
+	switch filter.language {
+	case "", models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL, models.QueryLanguageLogsQL, models.QueryLanguageLogQL:
+	default:
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid language", models.ValidationErrorType)
+	}
+
 	// The public demo uses a shared identity. Detailed history would disclose
 	// one visitor's query text to another, so only the separate aggregate stats
 	// endpoint is populated in demo mode.
 	if s.config != nil && s.config.Demo.ReadOnly {
 		return SendSuccess(c, fiber.StatusOK, queryActivityResponse{
-			Recent:     []models.QueryActivityRecord{},
-			ByLanguage: []queryActivityLanguageCount{},
-			BySource:   []queryActivitySourceCount{},
-			Slowest:    []models.QueryActivityRecord{},
+			WindowLimit: queryActivityWindow,
+			Recent:      []models.QueryActivityRecord{},
+			ByLanguage:  []queryActivityLanguageCount{},
+			BySource:    []queryActivitySourceCount{},
+			Slowest:     []models.QueryActivityRecord{},
 		})
 	}
 
@@ -86,15 +119,46 @@ func (s *Server) handleAdminQueryActivity(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error listing query activity")
 	}
 
+	matches := window[:0]
+	for i := range window {
+		if filter.matches(&window[i]) {
+			matches = append(matches, window[i])
+		}
+	}
 	resp := queryActivityResponse{
-		Total:      len(window),
-		Recent:     recentActivity(window, limit),
-		ByLanguage: languageBreakdown(window),
-		BySource:   sourceBreakdown(window),
-		Slowest:    slowestActivity(window, queryActivitySlowestCount),
+		WindowSize:  len(window),
+		WindowLimit: queryActivityWindow,
+		Total:       len(matches),
+		Recent:      recentActivity(matches, limit),
+		ByLanguage:  languageBreakdown(matches),
+		BySource:    sourceBreakdown(matches),
+		Slowest:     slowestActivity(matches, queryActivitySlowestCount),
 	}
 
 	return SendSuccess(c, fiber.StatusOK, resp)
+}
+
+type queryActivityFilter struct {
+	query    string
+	sourceID models.SourceID
+	userID   models.UserID
+	language models.QueryLanguage
+}
+
+func (f queryActivityFilter) matches(row *models.QueryActivityRecord) bool {
+	if f.sourceID != 0 && row.SourceID != f.sourceID {
+		return false
+	}
+	if f.userID != 0 && row.UserID != f.userID {
+		return false
+	}
+	if f.language != "" && row.QueryLanguage != f.language {
+		return false
+	}
+	return f.query == "" || strings.Contains(strings.ToLower(row.QueryText), f.query) ||
+		strings.Contains(strings.ToLower(row.UserEmail), f.query) ||
+		strings.Contains(strings.ToLower(row.SourceName), f.query) ||
+		strings.Contains(strings.ToLower(string(row.QueryLanguage)), f.query)
 }
 
 // recentActivity returns the first `limit` rows of the already newest-first
