@@ -324,11 +324,12 @@ skipped with `deadline`.
 
 ## Configuration
 
-Reports send through the SMTP settings in **Administration → System Settings
-→ Alerts**: host, port and from address are required. Reports send even when
-alerting is disabled. `server.frontend_url`, else `server.browser_url` or
-`server.public_url`, sets the links in the email. With none of them set, the
-email carries no links.
+While alerting is enabled, set **SMTP Host**, **SMTP Port**, and **SMTP
+From** in **Administration → System Settings → Alerts**. Reports continue
+to use those settings if you disable alerting.
+
+Set `server.frontend_url`, `server.browser_url`, or `server.public_url` to
+include links in email. Logchef uses the first value set in that order.
 
 ```toml
 [reports]

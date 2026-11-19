@@ -572,8 +572,10 @@ pass its id in `destination_ids`.
 alert endpoint returns `503`. That's useful for exploration-only deployments.
 
 Enable both `jobs.enabled` and `alerts.enabled` on at least one replica to
-evaluate rules and deliver notifications. For email, [configure SMTP](#email)
-in Administration. `[alerts] max_concurrent_evaluations`
+evaluate rules and deliver notifications. At startup, a stored
+`alerts.enabled` setting takes precedence over the configuration file and
+environment. For email, [configure SMTP](#email) in Administration.
+`[alerts] max_concurrent_evaluations`
 (default 4) bounds the rules one replica evaluates at once. See
 [Configuration](/getting-started/configuration/#background-jobs).
 
