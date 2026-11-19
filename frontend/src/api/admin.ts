@@ -13,6 +13,7 @@ import { apiClient, type RequestOptions } from "./apiUtils";
 
 export interface QueryActivityRecent {
   id: number;
+  user_id: number;
   user_email: string;
   team_id: number;
   source_id: number;
@@ -21,17 +22,6 @@ export interface QueryActivityRecent {
   query_language: string;
   duration_ms: number;
   row_count: number;
-  created_at: string;
-}
-
-export interface QueryActivitySlowest {
-  id: number;
-  user_email: string;
-  source_id: number;
-  source_name: string;
-  query_text: string;
-  query_language: string;
-  duration_ms: number;
   created_at: string;
 }
 
@@ -48,10 +38,12 @@ export interface QueryActivityBySource {
 
 export interface QueryActivityResponse {
   total: number;
+  window_size: number;
+  window_limit: number;
   recent: QueryActivityRecent[];
   by_language: QueryActivityByLanguage[];
   by_source: QueryActivityBySource[];
-  slowest: QueryActivitySlowest[];
+  slowest: QueryActivityRecent[];
 }
 
 // ---------------------------------------------------------------------------
@@ -87,25 +79,41 @@ export interface QueryStatsResponse {
   // Inclusive start of the window, "YYYY-MM-DD" (UTC).
   since: string;
   days: number;
+  summary: {
+    query_count: number;
+    active_users: number;
+    active_sources: number;
+    avg_duration_ms: number;
+  };
   top_sources: TopSourceStat[];
   top_users: TopUserStat[];
   // Ascending by date.
   volume_by_day: DailyQueryVolume[];
 }
 
+export interface QueryActivityFilters {
+  q?: string;
+  user_id?: number;
+  source_id?: number;
+  language?: string;
+}
+
 export const adminApi = {
   // Fetch recent query activity across all users. `limit` controls the
   // recent-feed length; it is clamped server-side (default 100, max 500).
-  getQueryActivity: (limit?: number) => {
-    const search = typeof limit === "number" ? `?limit=${limit}` : "";
-    return apiClient.get<QueryActivityResponse>(`/admin/query-activity${search}`);
+  getQueryActivity: (limit = 100, filters: QueryActivityFilters = {}, options?: RequestOptions) => {
+    const search = new URLSearchParams({ limit: String(limit) });
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== "") search.set(key, String(value));
+    }
+    return apiClient.get<QueryActivityResponse>(`/admin/query-activity?${search}`, options);
   },
 
   // Fetch authoritative all-time usage stats over the last `days` (default 30,
   // clamped 1..365 server-side).
-  getQueryStats: (days?: number) => {
+  getQueryStats: (days?: number, options?: RequestOptions) => {
     const search = typeof days === "number" ? `?days=${days}` : "";
-    return apiClient.get<QueryStatsResponse>(`/admin/query-stats${search}`);
+    return apiClient.get<QueryStatsResponse>(`/admin/query-stats${search}`, options);
   },
 };
 
