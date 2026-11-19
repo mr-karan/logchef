@@ -6959,6 +6959,37 @@ func (q *Queries) QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverage
 	return i, err
 }
 
+const queryStatsSummary = `-- name: QueryStatsSummary :one
+SELECT
+    COALESCE(SUM(query_count), 0)::bigint AS query_count,
+    COUNT(DISTINCT user_id)::bigint AS active_users,
+    COUNT(DISTINCT source_id)::bigint AS active_sources,
+    (CASE WHEN SUM(query_count) > 0
+        THEN TRUNC(SUM(total_duration_ms)::numeric / SUM(query_count))
+        ELSE 0 END)::bigint AS avg_duration_ms
+FROM query_stats_daily
+WHERE bucket_date >= $1
+`
+
+type QueryStatsSummaryRow struct {
+	QueryCount    int64 `json:"query_count"`
+	ActiveUsers   int64 `json:"active_users"`
+	ActiveSources int64 `json:"active_sources"`
+	AvgDurationMs int64 `json:"avg_duration_ms"`
+}
+
+func (q *Queries) QueryStatsSummary(ctx context.Context, bucketDate pgtype.Date) (QueryStatsSummaryRow, error) {
+	row := q.db.QueryRow(ctx, queryStatsSummary, bucketDate)
+	var i QueryStatsSummaryRow
+	err := row.Scan(
+		&i.QueryCount,
+		&i.ActiveUsers,
+		&i.ActiveSources,
+		&i.AvgDurationMs,
+	)
+	return i, err
+}
+
 const queryVolumeByDay = `-- name: QueryVolumeByDay :many
 SELECT
     qsd.bucket_date AS bucket_date,

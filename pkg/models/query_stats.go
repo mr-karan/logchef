@@ -29,3 +29,13 @@ type DailyQueryVolume struct {
 	Date       string `json:"date"`
 	QueryCount int64  `json:"query_count"`
 }
+
+// QueryStatsSummary aggregates all recorded queries in the selected UTC window.
+// AvgDurationMs is the total duration divided by the query count, truncated to
+// integer milliseconds. An empty window has zero values for every field.
+type QueryStatsSummary struct {
+	QueryCount    int64 `json:"query_count"`
+	ActiveUsers   int64 `json:"active_users"`
+	ActiveSources int64 `json:"active_sources"`
+	AvgDurationMs int64 `json:"avg_duration_ms"`
+}

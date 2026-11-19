@@ -432,6 +432,7 @@ type Querier interface {
 	// 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
 	// and then max_lookback_s means nothing.
 	QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error)
+	QueryStatsSummary(ctx context.Context, bucketDate string) (QueryStatsSummaryRow, error)
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error)

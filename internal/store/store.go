@@ -421,6 +421,9 @@ type QueryHistoryStore interface {
 	// key. bucketDate is 'YYYY-MM-DD' (UTC). Called at record time (best-effort)
 	// so all-time usage analytics stay correct despite query_history pruning.
 	IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error
+	// QueryStatsSummary aggregates all rollup rows with bucket_date >= since,
+	// including recorded users and sources whose metadata rows no longer exist.
+	QueryStatsSummary(ctx context.Context, since string) (models.QueryStatsSummary, error)
 	// TopSourcesByQueries returns sources ordered by total query count desc
 	// (capped at limit) over rollup rows with bucket_date >= since. source_name
 	// is "" when the source row is gone (LEFT JOIN); avg_duration_ms is
