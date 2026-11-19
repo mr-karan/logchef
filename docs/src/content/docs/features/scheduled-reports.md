@@ -1,5 +1,8 @@
 ---
 title: Scheduled Reports
+head:
+  - tag: title
+    content: "Scheduled Log Reports by Email | Logchef"
 description: Email a dashboard, one dashboard tab or a saved query to people, teams and allowed external addresses on an hourly, daily, weekly or monthly schedule.
 ---
 

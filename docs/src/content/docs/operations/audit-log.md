@@ -1,6 +1,9 @@
 ---
 title: Audit Log
-description: Who changed configuration, who signed in, and who exported data. The event format, the actions, how to read and export events, retention, and what happens when an audit write fails.
+head:
+  - tag: title
+    content: "Audit Log for Log Access and Changes | Logchef"
+description: "Record who changed Logchef configuration, who signed in and who exported logs. Event format, actions, export, retention and failure handling."
 ---
 
 Logchef records configuration changes, sign-ins, OAuth decisions and data
