@@ -567,24 +567,13 @@ pass its id in `destination_ids`.
 
 ## Server-wide settings
 
-Seed the SMTP settings in `config.toml` for the first boot, then use the Admin
-UI:
-
-```toml
-[alerts]
-enabled = true
-smtp_host = "smtp.example.com"
-smtp_port = 587
-smtp_from = "alerts@example.com"
-smtp_security = "starttls"
-```
-
 `enabled` is the **server-wide** alerting switch. With `alerts.enabled = false`
 (or `LOGCHEF_ALERTS__ENABLED=false`) Logchef hides all alerting UI and every
 alert endpoint returns `503`. That's useful for exploration-only deployments.
 
-Evaluation and delivery run on the job runner: at least one replica needs
-`[jobs] enabled = true`, the default. `[alerts] max_concurrent_evaluations`
+Enable both `jobs.enabled` and `alerts.enabled` on at least one replica to
+evaluate rules and deliver notifications. For email, [configure SMTP](#email)
+in Administration. `[alerts] max_concurrent_evaluations`
 (default 4) bounds the rules one replica evaluates at once. See
 [Configuration](/getting-started/configuration/#background-jobs).
 
@@ -603,17 +592,18 @@ The full list is in the
 3. **Remove `alerts.evaluation_interval`** from your configuration. Logchef
    ignores it, and the migration deletes its stored setting. Each rule runs at
    its own frequency, at least 10 seconds.
-4. **Keep `[jobs] enabled = true` on at least one replica.** Without the job
-   runner nothing is evaluated or sent. "Run alerts on exactly one replica" no
-   longer applies.
+4. **Enable `jobs.enabled` and `alerts.enabled` on at least one replica.**
+   Replicas with both enabled share the work.
 5. **Update scripts that call the alert API.** `recipient_user_ids` and
    `webhook_urls` answer 400; use `destination_ids`. A frequency below 10
    seconds answers 400 on save. `POST /api/v1/admin/settings/test-webhook` is
-   gone; use `POST /api/v1/notification-destinations/test`. A token with an
-   explicit scope list needs `destinations:read` or `destinations:write` for
-   the destination routes.
-6. **Webhook receivers see no change.** Each rule's webhook URLs become private
-   version 1 destinations of the rule's creator, named `Webhook <host>`, and
+   gone; use `POST /api/v1/notification-destinations/test` with a saved
+   destination `id` or an unsaved definition. An API token needs
+   `destinations:write` to test a destination. Check `data.ok` and
+   `data.results` because an HTTP 200 can include a failed delivery.
+6. **Webhook sends keep the version 1 payload format.** Each rule's webhook
+   URLs become private version 1 destinations of the rule's creator, named
+   `Webhook <host>`, and
    its recipients become an `Email for <rule name>` destination. Move a
    receiver to version 2 when it is ready. Requests now carry
    `Logchef-Delivery-Id`, and a grouped or no-data rule follows the version 1
@@ -628,8 +618,8 @@ The full list is in the
 
 **Alerts not firing:** check that the rule is enabled, test the query, and
 check that the threshold makes sense for your data volume. Check that at least
-one replica runs jobs, and look at the history for evaluation errors such as a
-repeated group or more than 100 rows.
+one replica has both jobs and alerting enabled. Look in the history for
+evaluation errors such as a repeated group or more than 100 rows.
 
 **Alerts not delivered:** open the history entry: each delivery shows its
 state and last error. Check the SMTP settings, that the rule has a destination,

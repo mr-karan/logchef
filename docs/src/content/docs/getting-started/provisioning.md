@@ -207,9 +207,11 @@ Provisioning refuses to change them on an existing Loki source, including one
 it adopts by name, because that would repoint the source's team links and
 saved queries at other data. Create a new source instead.
 
-An export writes a Loki source with its token and password blanked and a
-`secret_ref` in their place, and keeps the principal. Custom header values
-become `header_secret_refs` entries, as for VictoriaLogs.
+An export keeps the Loki source's principal and uses `secret_ref` for its
+password or token. For each non-empty custom header, the export writes a
+`header_secret_refs` entry with the declared or generated environment
+variable name. See
+[Export Current State](#export-current-state) for the naming rules.
 
 
 ### Source Views
@@ -304,7 +306,12 @@ headers = { X-Team = "payments" }
 X-Api-Key = "LOGCHEF_SOURCE_PAYMENTS_LOGS_HEADER_X_API_KEY"
 ```
 
-Each entry sets the header to the variable's value. As with `secret_ref`, a non-empty value for the same header in `connection.headers` wins. Header names match without regard to case, so naming one header twice in `header_secret_refs` in different case is an error. Logchef refuses to start when a referenced variable is empty or not set, and the error names the source, the header and the variable, so a missing secret never saves an empty header. A plain value in `connection.headers` still works for a header that holds no secret.
+Each entry sets the header to the variable's value unless
+`connection.headers` already supplies a non-empty value for that header.
+Header names match without regard to case. Declaring the same header twice in
+`header_secret_refs` is an error. If a header needs a value from a variable
+and the variable is empty or unset, Logchef refuses to start. The error
+names the source, header, and variable.
 
 For **Nomad** deployments, use Nomad variables with template blocks:
 ```toml
@@ -361,7 +368,27 @@ curl -s https://logchef.example.com/api/v1/admin/provisioning/export \
 
 This returns a JSON representation of all sources with their source views, teams, and memberships, useful as a starting point for writing your `provisioning.toml`. Exported views import unchanged: no revision moves and no default changes.
 
-The export never holds a secret. A source's password or token becomes a `secret_ref`: the stored one, or `LOGCHEF_SOURCE_<SOURCE>_PASSWORD` (or `_TOKEN` for bearer auth). Each custom header with a value becomes a `header_secret_refs` entry naming `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>`, where `<SOURCE>` and `<HEADER>` are the names in upper case with every character other than a letter, digit or underscore replaced by `_`. A header provisioned through `header_secret_refs` keeps the variable it was declared with. Several sources may declare the same variable. When a generated name comes out the same as another generated or declared name, for example for sources named `prod-eu` and `prod_eu`, the export answers 409 and names both, because one variable cannot hold two secrets; rename a source, or declare a variable of its own in `secret_ref` or `header_secret_refs`. Before you apply an export, set each of these variables to the secret or header value; with them set, importing the export changes nothing.
+The export replaces source passwords, tokens, and non-empty custom header
+values with environment variable references. It keeps the declared
+environment variable name when one exists.
+
+- A password without a declared reference uses
+  `LOGCHEF_SOURCE_<SOURCE>_PASSWORD` in `secret_ref`. A bearer token uses
+  `LOGCHEF_SOURCE_<SOURCE>_TOKEN`.
+- A non-empty custom header without a declared reference uses
+  `LOGCHEF_SOURCE_<SOURCE>_HEADER_<HEADER>` in `header_secret_refs`. Empty
+  headers stay in `connection.headers`.
+
+Logchef uppercases the source and header names in generated references and
+replaces each byte outside `A-Z`, `0-9`, and `_` with `_`. Several sources
+can share a declared variable. If a generated name matches another generated
+or declared name, the export returns HTTP 409 and identifies both uses.
+Rename a source or declare a distinct name in `secret_ref` or
+`header_secret_refs` to resolve the conflict.
+
+Set each referenced variable to its password, token, or header value before
+applying the export. Supplying the original values preserves the source
+configuration on import.
 
 ## Inline vs Separate File
 
