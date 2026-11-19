@@ -941,6 +941,27 @@ func TestCanonicalDashboardPanels(t *testing.T) {
 	}
 }
 
+func TestSchema1DashboardPanelAccess(t *testing.T) {
+	const blob = `{"version":1,"layout":[` + v2Layout + `],"panels":[{"id":"p1","type":"stat","team_id":3,"source_id":4,"query":"x","query_language":"logchefql",%s}]}`
+	t.Run("legacy metadata does not change the panel reference", func(t *testing.T) {
+		raw := json.RawMessage(fmt.Sprintf(blob, `"kind":"legacy-metadata"`))
+		refs, err := DashboardPanelRefs(raw)
+		want := []DashboardPanelRef{{PanelID: "p1", TeamID: 3, SourceID: 4}}
+		if err != nil || !slices.Equal(refs, want) {
+			t.Fatalf("refs = %v, err = %v, want %v", refs, err, want)
+		}
+	})
+	t.Run("stored locked panels can upgrade but cannot be saved", func(t *testing.T) {
+		raw := json.RawMessage(fmt.Sprintf(blob, `"locked":true`))
+		if _, err := UpgradeDashboardPanels(raw); err != nil {
+			t.Fatalf("upgrade stored schema 1 dashboard: %v", err)
+		}
+		if _, err := CanonicalDashboardPanels(raw); err == nil {
+			t.Fatal("locked panel accepted on save")
+		}
+	})
+}
+
 func TestDashboardPanelsStoredFeatures(t *testing.T) {
 	if got := DashboardPanelsStoredFeatures(json.RawMessage(`{"version":2,"features":["tabs","x"],"unknown":1}`)); !slices.Equal(got, []string{"tabs", "x"}) {
 		t.Fatalf("stored features = %v", got)

@@ -771,6 +771,7 @@
   "dashboards.duplicateTitle": "ダッシュボードを複製",
   "dashboards.duplicateDescription": "同じパネルとレイアウトで、あなたが所有するコピーを作成します。",
   "dashboards.duplicateSkipsLockedPanels": "{count} 個のパネルはアクセスできないソースを使用しているため、コピーされません。",
+  "dashboards.cannotAddPanel": "このダッシュボードは読み取り専用のため、パネルを追加できません。",
   "alerts.searchAlerts": "アラートを検索…",
   "alerts.noMatches": "「{search}」に一致するアラートはありません",
   "alerts.viewLogs": "ログを表示",

@@ -619,7 +619,11 @@ async function load() {
 // A panel that the Explorer's "Add to dashboard" sent opens in the builder as a new panel.
 async function addSeededPanel() {
   const seed = takePanelSeed();
-  if (!seed || !canEdit.value) return;
+  if (!seed) return;
+  if (!canEdit.value) {
+    toast({ title: t("dashboards.cannotAddPanel"), variant: "destructive", duration: TOAST_DURATION.ERROR });
+    return;
+  }
   await store.enterEdit();
   const id = store.isEditing ? store.createDraftShell() : null;
   if (!id) return;

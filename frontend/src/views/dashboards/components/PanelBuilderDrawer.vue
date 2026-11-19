@@ -62,8 +62,6 @@ const PANEL_TYPES: { value: PanelBuilderKind; label: string }[] = [
   { value: "table", get label() { return t('ui.table'); } },
 ];
 
-// A draft never holds a locked panel: only a creator or an admin edits, and
-// they see every panel. The filter keeps the type honest.
 const panel = computed<DashboardQueryPanel | null>(() => {
   const draft = store.editDraft;
   if (!draft || !props.panelId) return null;

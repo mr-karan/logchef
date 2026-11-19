@@ -771,6 +771,7 @@
   "dashboards.duplicateTitle": "대시보드 복제",
   "dashboards.duplicateDescription": "동일한 패널과 레이아웃으로 내가 소유한 사본을 만듭니다.",
   "dashboards.duplicateSkipsLockedPanels": "패널 {count}개가 접근할 수 없는 소스를 사용하므로 복사되지 않습니다.",
+  "dashboards.cannotAddPanel": "이 대시보드는 읽기 전용이므로 패널을 추가할 수 없습니다.",
   "alerts.searchAlerts": "알림 검색…",
   "alerts.noMatches": "\"{search}\"와 일치하는 알림이 없습니다",
   "alerts.viewLogs": "로그 보기",

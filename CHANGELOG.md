@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Team owners, admins, and editors can edit shared dashboards when they have
+  edit rights on every team the dashboard uses. Dashboard summaries return
+  `can_delete` separately. Reload an open Logchef tab after upgrading to get
+  the new edit and delete controls.
 - Grafana Loki sources. A global admin adds one in the UI, the API or the
   provisioning TOML with a base URL, an optional tenant (sent as
   `X-Scope-OrgID`), a default stream selector, a parser (none, JSON or

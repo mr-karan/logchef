@@ -771,6 +771,7 @@
   "dashboards.duplicateTitle": "Duplica dashboard",
   "dashboards.duplicateDescription": "Crea una copia di tua proprietà, con gli stessi pannelli e lo stesso layout.",
   "dashboards.duplicateSkipsLockedPanels": "{count} pannello usa una sorgente a cui non hai accesso. Non verrà copiato. | {count} pannelli usano sorgenti a cui non hai accesso. Non verranno copiati.",
+  "dashboards.cannotAddPanel": "Non puoi aggiungere un pannello a questa dashboard perché è di sola lettura.",
   "alerts.searchAlerts": "Cerca alert…",
   "alerts.noMatches": "Nessun alert corrisponde a \"{search}\"",
   "alerts.viewLogs": "Vedi log",
