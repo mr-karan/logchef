@@ -44,10 +44,9 @@ credential and tenant can read. Two rules follow from that.
 - **The default stream selector is not a boundary.** Native LogQL runs as
   written and can name any stream in the tenant. The selector only seeds
   LogchefQL queries, the empty editor, the schema and the field sidebar.
-- **Use a Loki source only for teams that may read the whole tenant.** Today a
-  team admin can link any existing source to their team, so a second source
-  with a narrower tenant does not keep a team away from a broader one. Logchef
-  does not yet present a Loki source as restricted.
+- **Link a Loki source only to teams that may read its full tenant scope.**
+  A team admin can link a source they can already query through one of their
+  teams. A global admin can link any source.
 
 The tenant is fixed when the source is created. Users cannot set or change
 `X-Scope-OrgID`: the header is reserved in custom headers, and no request field
@@ -139,7 +138,7 @@ The source's optional `limits` bound what Logchef asks of Loki:
 | Limit | Default | Range | Bounds |
 |---|---|---|---|
 | `max_entries_per_query` | 5000 | 100 to 50000 | Entries per request. Keep it at or below the tenant's `max_entries_limit_per_query` |
-| `sidebar_lookback_seconds` | 900 | 60 to 86400 | The range of a field-values count |
+| `sidebar_lookback_seconds` | 900 | 60 to 86400 | The range of a field value lookup |
 | `schema_lookback_seconds` | 3600 | 60 to 86400 | The range that detected fields are read from |
 
 ### Parser
@@ -214,21 +213,25 @@ The sidebar lists `_time`, `_msg`, the stream labels, then the detected fields
 of the last `schema_lookback_seconds` that have no parser or the source's
 parser.
 
-Stream label values load when the sidebar opens, in one request that reads
-the index under the query's stream selector: the first 30 labels, without
-counts. A label past the first 30, and any other field, loads its values with
-counts on click. Logchef runs one instant query,
-`topk(<limit>, sum by (<field>) (count_over_time(<query> | <field>!="" [<range>])))`,
-over the selected range capped at `sidebar_lookback_seconds`, so the counts
-cover at most the last 15 minutes by default.
+When the sidebar opens, it sends one request to Logchef for values for up to
+30 stream labels. Logchef reads Loki's index using the query's leading stream
+selector, or the source's default selector if the query has none. These
+values come without counts.
+
+Expand a label that was not preloaded or another filterable field to load
+its values with counts. Logchef calculates the counts with an instant query
+based on the full log query,
+`topk(<limit>, sum by (<field>) (count_over_time(<query> | <field>!="" [<range>])))`.
+Both lookups use the selected range, capped at `sidebar_lookback_seconds`
+(15 minutes by default).
 
 - Stream labels and string fields can be filtered from the sidebar. Detected
   fields of type `int`, `float`, `boolean`, `duration` and `bytes` are listed
   but cannot be filtered from the sidebar yet.
-- A field with more than 500 distinct values in the range fails with Loki's
-  `max_query_series` message. Narrow the query or the range.
-- Preloaded label values ignore the filters after the stream selector, such
-  as a condition on a detected field.
+- An on-demand count that exceeds Loki's `max_query_series` limit (500 by
+  default) fails with Loki's message. Narrow the query or the range.
+- The preload uses only the selector. It can include values from streams
+  whose entries the pipeline filters out.
 
 ## Live tail
 
@@ -259,9 +262,9 @@ stream, or the request fails with "This row does not identify one stream".
 Paging asks Loki for `offset + limit` entries and drops the first `offset`, so
 a page that would read past `max_entries_per_query` is refused.
 
-The MCP tool `get_log_context` takes the same labels as `stream_labels`: the
-row's value for every schema field of type `label`. Without them it fails with
-"Context on Loki needs the row's stream labels".
+The MCP tool `get_log_context` requires the row's complete stream label set in
+`stream_labels`. See the [MCP tool reference](/integration/mcp-server#log-context-on-loki)
+for how to build the request.
 
 ## Dashboards
 
@@ -325,9 +328,11 @@ The MCP server's `query_logs`, `query_logchefql`, `get_field_values`,
 
 ## Provisioning
 
-A Loki source can be declared in the provisioning TOML. See
-[Provisioning](/getting-started/provisioning#loki-sources) for the fields and
-`secret_ref`.
+Declare a Loki source in the [provisioning TOML](/getting-started/provisioning#loki-sources).
+Provisioning export writes each non-empty custom header as a
+`header_secret_refs` entry. It keeps any declared environment variable name
+and generates a name for headers without one. Set the referenced variables
+before applying the [exported configuration](/getting-started/provisioning#export-current-state).
 
 ## Errors
 
@@ -353,11 +358,6 @@ gets Loki's 400 naming both numbers.
   instead.
 - **Extra stream filters** stay VictoriaLogs-only. A LogchefQL condition on a
   stream label already joins the stream selector.
-- **The field sidebar does not use the label preload.** Values load one field
-  at a time on click.
-- **MCP log context does not work** on Loki sources.
-- **Provisioning export writes custom header values in plain text**, as it does
-  for VictoriaLogs. Provisioning has no `secret_ref` for header values yet.
 - **Restricted sources** are not offered yet. See [Who can read what](#who-can-read-what).
 
 ## Next steps
