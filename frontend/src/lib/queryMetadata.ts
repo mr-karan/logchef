@@ -1,4 +1,4 @@
-export type QueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type QueryLanguage = "logchefql" | "clickhouse-sql" | "logsql" | "logql";
 export type NativeQueryLanguage = Exclude<QueryLanguage, "logchefql">;
 export type SavedQueryEditorMode = "builder" | "native";
 export type AlertEditorMode = "condition" | "native";
@@ -19,18 +19,24 @@ function getSourceType(source: SourceDescriptor): string | null {
   return typeof source === "string" ? source : source?.source_type ?? null;
 }
 
+function isQueryLanguage(language: string | null | undefined): language is QueryLanguage {
+  return language === "logchefql" || language === "clickhouse-sql" || language === "logsql" || language === "logql";
+}
+
 function getSupportedQueryLanguages(source: SourceDescriptor): QueryLanguage[] {
   const explicit = typeof source === "string" ? null : source?.query_languages;
   if (explicit && explicit.length > 0) {
-    return explicit.filter(
-      (language): language is QueryLanguage =>
-        language === "logchefql" || language === "clickhouse-sql" || language === "logsql"
-    );
+    return explicit.filter(isQueryLanguage);
   }
 
-  return getSourceType(source) === "victorialogs"
-    ? ["logchefql", "logsql"]
-    : ["logchefql", "clickhouse-sql"];
+  switch (getSourceType(source)) {
+    case "victorialogs":
+      return ["logchefql", "logsql"];
+    case "loki":
+      return ["logchefql", "logql"];
+    default:
+      return ["logchefql", "clickhouse-sql"];
+  }
 }
 
 function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode[] {
@@ -85,8 +91,18 @@ export function isVictoriaLogsSource(source: SourceDescriptor): boolean {
   return getNativeQueryLanguageForSource(source) === "logsql";
 }
 
+// VictoriaLogs and Loki have no fixed columns: every query can return new fields.
+export function isSchemalessSource(source: SourceDescriptor): boolean {
+  const sourceType = getSourceType(source);
+  return sourceType === "victorialogs" || sourceType === "loki";
+}
+
+// The native language is the first one the source lists that is not LogchefQL.
 export function getNativeQueryLanguageForSource(source: SourceDescriptor): NativeQueryLanguage {
-  return supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
+  const native = getSupportedQueryLanguages(source).find(
+    (language): language is NativeQueryLanguage => language !== "logchefql"
+  );
+  return native ?? "clickhouse-sql";
 }
 
 export function resolveSavedQueryMetadata(input: {
@@ -110,7 +126,7 @@ export function resolveSavedQueryMetadata(input: {
     : input.editor_mode;
 
   let queryLanguage: QueryLanguage;
-  if (explicitLanguage === "logchefql" || explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
+  if (isQueryLanguage(explicitLanguage)) {
     queryLanguage = explicitLanguage;
   } else if (explicitEditorMode === "builder") {
     queryLanguage = "logchefql";
@@ -133,54 +149,14 @@ export function resolveSavedQueryMetadata(input: {
   return { queryLanguage, editorMode };
 }
 
-export function resolveAlertMetadata(input: {
-  query_language?: string | null;
-  editor_mode?: string | null;
-  source_type?: string | null;
-  query_languages?: string[] | null;
-  alert_editor_modes?: string[] | null;
-}): { queryLanguage: QueryLanguage; editorMode: AlertEditorMode } {
-  const source = {
-    source_type: input.source_type ?? null,
-    query_languages: input.query_languages ?? null,
-    alert_editor_modes: input.alert_editor_modes ?? null,
-  };
-  const explicitLanguage = input.query_language;
-  const explicitEditorMode = input.editor_mode;
-
-  let queryLanguage: QueryLanguage;
-  if (explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
-    queryLanguage = explicitLanguage;
-  } else if (explicitEditorMode === "condition") {
-    queryLanguage = getNativeQueryLanguageForSource(source);
-  } else {
-    queryLanguage = getNativeQueryLanguageForSource(source);
-  }
-
-  if (!supportsQueryLanguage(source, queryLanguage)) {
-    queryLanguage = getNativeQueryLanguageForSource(source);
-  }
-
-  let editorMode: AlertEditorMode;
-  if (explicitEditorMode === "condition" || explicitEditorMode === "native") {
-    editorMode = explicitEditorMode;
-  } else {
-    editorMode = supportsAlertEditorMode(source, "condition") ? "condition" : "native";
-  }
-
-  if (!supportsAlertEditorMode(source, editorMode)) {
-    editorMode = "native";
-  }
-
-  return { queryLanguage, editorMode };
-}
-
 export function getQueryLanguageLabel(language: string | null | undefined): string {
   switch (language) {
     case "logchefql":
       return "LogchefQL";
     case "logsql":
       return "LogsQL";
+    case "logql":
+      return "LogQL";
     case "clickhouse-sql":
     default:
       return "SQL";
@@ -191,6 +167,8 @@ export function getSourceTypeLabel(source: SourceDescriptor): string {
   switch (getSourceType(source)) {
     case "victorialogs":
       return "VictoriaLogs";
+    case "loki":
+      return "Loki";
     case "clickhouse":
     default:
       return "ClickHouse";

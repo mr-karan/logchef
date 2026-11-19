@@ -34,6 +34,7 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 	validationErr, isValidationError := errors.AsType[*datasource.ValidationError](err)
 	clickhouseErr, isClickhouseError := errors.AsType[*clickhouse.ValidationError](err)
 	queryErr, isQueryError := errors.AsType[*clickhouse.QueryError](err)
+	upstreamErr, isUpstreamError := errors.AsType[*datasource.UpstreamError](err)
 	switch {
 	case isRequestError:
 		return queryErrorResponse{fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType}
@@ -57,6 +58,10 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 		return queryErrorResponse{fiber.StatusBadRequest, clickhouseErr.Message, models.ValidationErrorType}
 	case isQueryError:
 		return queryErrorResponse{fiber.StatusBadRequest, queryErr.Message, models.ValidationErrorType}
+	case isUpstreamError && upstreamErr.Kind == datasource.UpstreamBusy:
+		return queryErrorResponse{fiber.StatusTooManyRequests, upstreamErr.Message, models.ExternalServiceErrorType}
+	case isUpstreamError:
+		return queryErrorResponse{fiber.StatusBadGateway, upstreamErr.Message, models.ExternalServiceErrorType}
 	default:
 		return queryErrorResponse{fiber.StatusInternalServerError, failure, models.DatabaseErrorType}
 	}

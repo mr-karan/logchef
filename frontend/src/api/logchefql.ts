@@ -9,6 +9,7 @@
 
 import { apiClient, type RequestOptions } from './apiUtils';
 import type { QueryLanguage } from '@/lib/queryMetadata';
+import type { AggregationInfo, QueryStats } from './explore';
 
 // Types matching backend response structures
 
@@ -67,6 +68,8 @@ export interface QueryRequest {
   end_time: string;    // Explore time picker format ("YYYY-MM-DD HH:mm:ss"); server also accepts ISO8601
   timezone?: string;
   limit?: number;
+  // The bucket window of a `by time` key that names none, such as "5m".
+  interval?: string;
   query_timeout?: number;
   variables?: TemplateVariable[];  // Template variables for backend substitution
 }
@@ -76,15 +79,13 @@ export interface QueryResponse {
   fields_used?: string[] | null;
   logs: Record<string, unknown>[];
   columns: { name: string; type: string }[];
-  stats: {
-    execution_time_ms: number;
-    rows_read: number;
-    bytes_read: number;
-  };
+  stats: QueryStats;
   query_id?: string;
   generated_sql?: string;  // Deprecated compatibility field for generated_query
   generated_query?: string;
   generated_query_language?: QueryLanguage;
+  // Present when the query aggregates: `logs` then holds the result rows.
+  aggregation?: AggregationInfo;
 }
 
 /**

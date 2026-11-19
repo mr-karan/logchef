@@ -23,10 +23,10 @@ func TestRuntimeConfigRejectsNonPositiveDurations(t *testing.T) {
 		for _, value := range []string{"0s", "-1h", "3h"} {
 			t.Run(staticDuration.String()+"/"+value, func(t *testing.T) {
 				static := &config.Config{
-					Alerts: config.AlertsConfig{EvaluationInterval: staticDuration, DefaultLookback: staticDuration},
+					Alerts: config.AlertsConfig{DefaultLookback: staticDuration},
 					Auth:   config.AuthConfig{SessionDuration: staticDuration, DefaultTokenExpiry: staticDuration},
 				}
-				for _, key := range []string{"alerts.evaluation_interval", "alerts.default_lookback", "auth.session_duration", "auth.default_token_expiry"} {
+				for _, key := range []string{"alerts.default_lookback", "auth.session_duration", "auth.default_token_expiry"} {
 					if err := db.UpsertSetting(ctx, key, value, "duration", "auth", "", false); err != nil {
 						t.Fatal(err)
 					}
@@ -36,7 +36,6 @@ func TestRuntimeConfigRejectsNonPositiveDurations(t *testing.T) {
 					key           string
 					got, fallback time.Duration
 				}{
-					{"alerts.evaluation_interval", cfg.Alerts.EvaluationInterval, time.Minute},
 					{"alerts.default_lookback", cfg.Alerts.DefaultLookback, 5 * time.Minute},
 					{"auth.session_duration", cfg.Auth.SessionDuration, 8 * time.Hour},
 					{"auth.default_token_expiry", cfg.Auth.DefaultTokenExpiry, 2160 * time.Hour},

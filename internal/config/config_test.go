@@ -807,3 +807,47 @@ X-Api-Key = "example-key"
 		t.Errorf("inline ConnectionPayload() = %s, separate = %s", inlinePayload, separatePayload)
 	}
 }
+
+func TestLoad_AuditDefaultsAndBounds(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Audit; got.RetentionDays != 365 || got.MaxRows != 1_000_000 || !got.LogEvents {
+		t.Errorf("audit defaults = %+v, want 365 days, 1000000 rows, log_events on", got)
+	}
+
+	cfg, err = Load(writeConfig(t, "\n[audit]\nretention_days = 0\nmax_rows = 0\nlog_events = false\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Audit; got.RetentionDays != 0 || got.MaxRows != 0 || got.LogEvents {
+		t.Errorf("audit zeros = %+v, want both bounds off and no log line", got)
+	}
+
+	cfg, err = Load(writeConfig(t, "\n[audit]\nretention_days = -1\nmax_rows = -5\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Audit; got.RetentionDays != 365 || got.MaxRows != 1_000_000 {
+		t.Errorf("negative audit bounds = %+v, want the defaults", got)
+	}
+}
+
+func TestLoad_ReportsQueryBudgetBounds(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Reports.Enabled || cfg.Reports.QueryBudget != 5*time.Minute {
+		t.Errorf("reports = %+v, want enabled with a 5m budget", cfg.Reports)
+	}
+	for _, budget := range []string{"31m", "59s"} {
+		if _, err := Load(writeConfig(t, "\n[reports]\nquery_budget = \""+budget+"\"\n")); err == nil || !strings.Contains(err.Error(), "reports.query_budget") {
+			t.Errorf("query_budget %s: err = %v, want a reports.query_budget error", budget, err)
+		}
+	}
+	if _, err := Load(writeConfig(t, "\n[reports]\nquery_budget = \"30m\"\n")); err != nil {
+		t.Errorf("query_budget 30m: %v", err)
+	}
+}

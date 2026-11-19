@@ -3,6 +3,15 @@ import type { AlertEditorMode, QueryLanguage } from "@/lib/queryMetadata";
 
 export type AlertThresholdOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
 export type AlertSeverity = "info" | "warning" | "critical";
+/** What a group without a row in the result means. */
+export type AlertNoDataPolicy = "zero" | "no_data" | "keep";
+
+export interface AlertInstanceCounts {
+  firing: number;
+  no_data: number;
+  ok: number;
+}
+
 export interface Alert {
   id: number;
   source_id: number;
@@ -20,10 +29,13 @@ export interface Alert {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
-  recipient_user_ids: number[];
-  webhook_urls: string[];
+  destination_ids: number[];
+  group_by?: string[] | null;
+  no_data_policy: AlertNoDataPolicy;
+  notify_on_resolve: boolean;
+  instance_counts?: AlertInstanceCounts;
   is_active: boolean;
-  last_state: "firing" | "resolved";
+  last_state: "firing" | "resolved" | "no_data";
   last_evaluated_at?: string | null;
   last_triggered_at?: string | null;
   created_by?: number | null;
@@ -31,16 +43,44 @@ export interface Alert {
   updated_at: string;
 }
 
+export interface AlertInstance {
+  alert_id: number;
+  group_key: string;
+  group: Record<string, string>;
+  state: "ok" | "firing" | "no_data";
+  value?: number | null;
+  state_since: string;
+  last_seen_at?: string | null;
+  history_id?: number | null;
+}
+
+/** One queued notification of a history entry. */
+export interface AlertDelivery {
+  destination_id: number;
+  destination_name: string;
+  destination_type: string;
+  recipient?: string;
+  event: "firing" | "resolved" | "no_data" | "test";
+  status: "pending" | "attempting" | "sent" | "failed" | "unknown";
+  attempts: number;
+  last_error?: string;
+  sent_at?: string;
+  created_at: string;
+}
+
 export interface AlertHistoryEntry {
   id: number;
   alert_id: number;
-  status: "triggered" | "resolved" | "error";
+  group_key: string;
+  group?: Record<string, string>;
+  status: "triggered" | "resolved" | "error" | "no_data";
   triggered_at: string;
   resolved_at?: string | null;
   value?: number | null;
   payload?: Record<string, unknown>;
   message?: string | null;
   created_at: string;
+  deliveries?: AlertDelivery[];
 }
 
 export interface CreateAlertRequest {
@@ -59,8 +99,10 @@ export interface CreateAlertRequest {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
-  recipient_user_ids?: number[];
-  webhook_urls?: string[];
+  destination_ids?: number[];
+  group_by?: string[];
+  no_data_policy?: AlertNoDataPolicy;
+  notify_on_resolve?: boolean;
   is_active: boolean;
 }
 
@@ -79,13 +121,17 @@ export interface UpdateAlertRequest {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   generator_url?: string;
-  recipient_user_ids?: number[];
-  webhook_urls?: string[];
+  destination_ids?: number[];
+  group_by?: string[];
+  no_data_policy?: AlertNoDataPolicy;
+  notify_on_resolve?: boolean;
   is_active?: boolean;
 }
 
 export interface ResolveAlertRequest {
   message?: string;
+  /** Resolves one group; omitted resolves every group. */
+  group_key?: string;
 }
 
 export interface TestAlertQueryRequest {
@@ -97,6 +143,14 @@ export interface TestAlertQueryRequest {
   lookback_seconds?: number;
   threshold_operator: AlertThresholdOperator;
   threshold_value: number;
+  group_by?: string[];
+  no_data_policy?: AlertNoDataPolicy;
+}
+
+export interface AlertSample {
+  group: Record<string, string>;
+  value: number;
+  threshold_met: boolean;
 }
 
 export interface TestAlertQueryResponse {
@@ -105,6 +159,59 @@ export interface TestAlertQueryResponse {
   execution_time_ms: number;
   rows_returned: number;
   warnings: string[];
+  /** Grouped rules only: at most 20 samples, out of groups_total. */
+  samples: AlertSample[];
+  groups_total: number;
+  /** The result had no row; the rule's no-data policy decides what that means. */
+  no_data: boolean;
+}
+
+export interface BacktestAlertRequest extends TestAlertQueryRequest {
+  frequency_seconds: number;
+  /** 3,600 to 604,800 seconds. */
+  range_seconds: number;
+  notify_on_resolve?: boolean;
+}
+
+export type BacktestStatus = "ok" | "firing" | "no_data" | "error";
+
+export interface BacktestPoint {
+  t: string;
+  status: BacktestStatus;
+  /** The sample of an ungrouped rule; null for a grouped rule or no row. */
+  value: number | null;
+  firing_groups: number;
+}
+
+export interface BacktestGroup {
+  group: Record<string, string>;
+  episodes: number;
+  breaching_evaluations: number;
+  max_value: number | null;
+}
+
+export interface BacktestResult {
+  start: string;
+  end: string;
+  step_seconds: number;
+  evaluations: number;
+  /** Share of the range that the evaluated lookback windows read, 0 to 1. */
+  coverage: number;
+  /** The server's deadline ended the replay, so series ends early. */
+  partial: boolean;
+  summary: {
+    episodes: number;
+    firing_seconds: number;
+    breaching_evaluations: number;
+    notifications: number;
+    no_data_evaluations: number;
+    errors: number;
+  };
+  series: BacktestPoint[];
+  /** The 20 groups with the most breaching evaluations. */
+  groups: BacktestGroup[];
+  groups_omitted: number;
+  first_error?: string;
 }
 
 export const alertsApi = {
@@ -129,6 +236,10 @@ export const alertsApi = {
     const search = limit ? `?limit=${encodeURIComponent(limit)}` : "";
     return apiClient.get<AlertHistoryEntry[]>(`/alerts/${alertId}/history${search}`, options);
   },
+  instances: (alertId: number, options?: RequestOptions) =>
+    apiClient.get<AlertInstance[]>(`/alerts/${alertId}/instances`, options),
   testQuery: (payload: TestAlertQueryRequest) =>
     apiClient.post<TestAlertQueryResponse>("/alerts/test", payload),
+  backtest: (payload: BacktestAlertRequest, options?: RequestOptions) =>
+    apiClient.post<BacktestResult>("/alerts/backtest", payload, options),
 };

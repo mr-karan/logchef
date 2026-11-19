@@ -79,7 +79,8 @@ func toolUse(id, name string, input map[string]any) ai.ToolUseBlock {
 
 // logsBackend is a VictoriaLogs stand-in. Field values succeed, except for
 // the field "broken". It has no facets. Log queries fail unless
-// serveQueries is set, and then return two rows.
+// serveQueries is set, and then return two rows: two log rows, or two
+// groups for a stats query.
 type logsBackend struct {
 	fieldQueries atomic.Int32
 	serveQueries atomic.Bool
@@ -116,6 +117,11 @@ func newLogsBackend(t *testing.T) *logsBackend {
 		case "/select/logsql/query":
 			if !b.serveQueries.Load() {
 				http.Error(rw, "backend unavailable", http.StatusBadGateway)
+				return
+			}
+			_ = r.ParseForm()
+			if strings.Contains(r.Form.Get("query"), "| stats ") {
+				_, _ = rw.Write([]byte(`{"level":"error","__lc_v0":"2"}` + "\n" + `{"level":"warn","__lc_v0":"1"}` + "\n"))
 				return
 			}
 			_, _ = rw.Write([]byte(`{"_time":"2026-10-19T04:10:00Z","_msg":"boom","level":"error"}` + "\n" +
@@ -342,6 +348,34 @@ func TestTurnEvidenceIsWhatRan(t *testing.T) {
 			want: func(w *world) []askchef.Evidence {
 				return []askchef.Evidence{{ID: 1, Tool: "query_logchefql", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
 					Query: `level="error"`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "2 rows"}}
+			},
+		},
+		{
+			name: "query_logchefql with an aggregation",
+			tool: "query_logchefql",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "query": `level!="debug" | count() by level`,
+					"start_time": "2026-10-19T04:00:00Z", "end_time": "2026-10-19T05:00:00Z"}
+			},
+			summary: "grouped aggregation, 2 rows",
+			marker:  "[evidence E1 = grouped aggregation, 2 rows]\n",
+			want: func(w *world) []askchef.Evidence {
+				return []askchef.Evidence{{ID: 1, Tool: "query_logchefql", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
+					Query: `level!="debug" | count() by level`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "grouped aggregation, 2 rows"}}
+			},
+		},
+		{
+			name: "query_logchefql pins the interval into the evidence query",
+			tool: "query_logchefql",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "query": `| count() by time, level`, "interval": "5m",
+					"start_time": "2026-10-19T04:00:00Z", "end_time": "2026-10-19T05:00:00Z"}
+			},
+			summary: "grouped_timeseries aggregation, 2 rows",
+			marker:  "[evidence E1 = grouped_timeseries aggregation, 2 rows]\n",
+			want: func(w *world) []askchef.Evidence {
+				return []askchef.Evidence{{ID: 1, Tool: "query_logchefql", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
+					Query: `| count() by time(5m), level`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "grouped_timeseries aggregation, 2 rows"}}
 			},
 		},
 		{

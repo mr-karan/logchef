@@ -246,7 +246,7 @@ func (c *Client) getSortKeys(ctx context.Context, database, table string) ([]str
 	}
 
 	// Parse the potentially complex sorting_key string into individual column names.
-	return parseSortKeys(sortKeys), nil
+	return ParseSortKeys(sortKeys), nil
 }
 
 // queryMetadata keeps consumption and closing inside the query metrics lifecycle.
@@ -409,8 +409,9 @@ func stripQuotes(s string) string {
 	return s
 }
 
-// Preserve sort expressions so a function name is not mistaken for a column.
-func parseSortKeys(sortingKey string) []string {
+// ParseSortKeys splits a sorting key into its elements: a column name, or
+// the expression text, so a function name is not mistaken for a column.
+func ParseSortKeys(sortingKey string) []string {
 	if sortingKey == "" {
 		return nil
 	}

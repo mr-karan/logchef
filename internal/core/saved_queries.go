@@ -125,8 +125,8 @@ func ValidateContentMatchesLanguage(content string, language models.QueryLanguag
 			}
 			return fmt.Errorf("%w: content is not valid logchefql: %s", ErrInvalidQueryContent, detail)
 		}
-	case models.QueryLanguageClickHouseSQL, models.QueryLanguageLogsQL:
-		// Deliberately NOT strict-parsed. ClickHouse SQL and LogsQL are large,
+	case models.QueryLanguageClickHouseSQL, models.QueryLanguageLogsQL, models.QueryLanguageLogQL:
+		// Deliberately NOT strict-parsed. ClickHouse SQL, LogsQL and LogQL are large,
 		// evolving dialects; validating them here with a third-party/absent
 		// parser would reject valid-but-exotic user queries at save time — a
 		// worse regression than the one-off mislabel this guard was added for
@@ -243,14 +243,16 @@ func GetSavedQuery(ctx context.Context, db savedQueryGetter, log *slog.Logger, q
 	return q, nil
 }
 
-// UpdateSavedQuery applies new field values to an existing saved query.
-func UpdateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, queryID int, name, description, queryContentJSON string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (*models.SavedQuery, error) {
+// UpdateSavedQuery applies new field values to an existing saved query and
+// returns the query before and after the write, both read under the row lock
+// of the write.
+func UpdateSavedQuery(ctx context.Context, db store.Store, ds *datasource.Service, log *slog.Logger, queryID int, name, description, queryContentJSON string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (before, after *models.SavedQuery, err error) {
 	existing, err := db.GetSavedQuery(ctx, queryID)
 	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, ErrQueryNotFound
+			return nil, nil, ErrQueryNotFound
 		}
-		return nil, fmt.Errorf("error loading saved query: %w", err)
+		return nil, nil, fmt.Errorf("error loading saved query: %w", err)
 	}
 	if queryLanguage == "" {
 		queryLanguage = existing.QueryLanguage
@@ -260,35 +262,58 @@ func UpdateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Ser
 	}
 	queryLanguage, editorMode, err = resolveSavedQueryMetadata(ctx, ds, existing.SourceID, queryLanguage, editorMode)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateSavedQueryFields(queryContentJSON, queryLanguage, existing.QueryContent); err != nil {
 		log.Warn("invalid saved query update payload", "error", err, "query_id", queryID)
-		return nil, err
+		return nil, nil, err
 	}
 
-	if err := db.UpdateSavedQuery(ctx, queryID, name, description, queryLanguage, editorMode, queryContentJSON); err != nil {
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		if before, err = tx.GetSavedQueryForUpdate(ctx, queryID); err != nil {
+			return err
+		}
+		if err := tx.UpdateSavedQuery(ctx, queryID, name, description, queryLanguage, editorMode, queryContentJSON); err != nil {
+			return err
+		}
+		after, err = tx.GetSavedQuery(ctx, queryID)
+		return err
+	})
+	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, ErrQueryNotFound
+			return nil, nil, ErrQueryNotFound
 		}
 		log.Error("failed to update saved query", "error", err, "query_id", queryID)
-		return nil, fmt.Errorf("error updating saved query: %w", err)
+		return nil, nil, fmt.Errorf("error updating saved query: %w", err)
 	}
-
-	updated, err := GetSavedQuery(ctx, db, log, queryID)
-	if err != nil {
-		return nil, fmt.Errorf("query updated but failed to fetch result: %w", err)
-	}
-	return updated, nil
+	return before, after, nil
 }
 
-// DeleteSavedQuery removes a saved query.
-func DeleteSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int) error {
-	if err := db.DeleteSavedQuery(ctx, queryID); err != nil {
+// DeleteSavedQuery removes a saved query. It returns the row it deleted, read
+// under the row lock of the delete, and the number of reports the delete
+// removed with it.
+func DeleteSavedQuery(ctx context.Context, db store.Store, log *slog.Logger, queryID int) (*models.SavedQuery, int, error) {
+	var deleted *models.SavedQuery
+	var reports int
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		if deleted, err = tx.GetSavedQueryForUpdate(ctx, queryID); err != nil {
+			return err
+		}
+		if reports, err = tx.DeleteSavedQueryReports(ctx, queryID); err != nil {
+			return err
+		}
+		return tx.DeleteSavedQuery(ctx, queryID)
+	})
+	if err != nil {
+		if models.IsNotFound(err) {
+			return nil, 0, ErrQueryNotFound
+		}
 		log.Error("failed to delete saved query", "error", err, "query_id", queryID)
-		return fmt.Errorf("error deleting saved query: %w", err)
+		return nil, 0, fmt.Errorf("error deleting saved query: %w", err)
 	}
-	return nil
+	return deleted, reports, nil
 }
 
 // ListSavedQueriesForUser returns every saved query the user can see (cross-team, source-mediated).

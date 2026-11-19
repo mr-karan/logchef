@@ -8,6 +8,7 @@ import { useExploreRuns } from '@/stores/exploreRuns'
 import { truncationMessage } from '@/utils/truncation'
 import GroupBySelector from './GroupBySelector.vue'
 import StreamPicker from './StreamPicker.vue'
+import ViewPicker from './ViewPicker.vue'
 import {
   Tooltip,
   TooltipContent,
@@ -35,15 +36,19 @@ interface Props {
   canExport?: boolean
   fastFilterFields?: string[]
   canAddFastFilter?: boolean
+  // The rows are an aggregated result, which has its own chart and table toggle.
+  aggregated?: boolean
 }
 
-withDefaults(defineProps<Props>(), { fastFilterFields: () => [], canAddFastFilter: false })
+withDefaults(defineProps<Props>(), { fastFilterFields: () => [], canAddFastFilter: false, aggregated: false })
 
 const emit = defineEmits<{
   (e: 'toggle-histogram'): void
   (e: 'update:displayMode', mode: 'table' | 'compact' | 'json'): void
   (e: 'export'): void
   (e: 'add-fast-filter', field: string): void
+  (e: 'select-view', viewId: number | null): void
+  (e: 'reset-view'): void
 }>()
 
 const runs = useExploreRuns()
@@ -92,8 +97,11 @@ const warningText = computed(() => {
       <div class="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-muted-foreground">
         <span v-if="isLoading" class='animate-pulse'>{{ t('ui.loading') }}</span>
         <template v-else>
-          <span class="font-medium text-foreground">{{ logsCount.toLocaleString() }}</span>
-          <span>{{ t('ui.logs') }}</span>
+          <span v-if="aggregated" class="font-medium text-foreground">{{ t('explore.rowCount', { count: logsCount.toLocaleString() }, logsCount) }}</span>
+          <template v-else>
+            <span class="font-medium text-foreground">{{ logsCount.toLocaleString() }}</span>
+            <span>{{ t('ui.logs') }}</span>
+          </template>
           <template v-if="formattedQueryTime">
             <span class="text-muted-foreground/50">•</span>
             <span :title="t('pages.queryTimeTooltip', { duration: formattedQueryTime })">{{ formattedQueryTime }}</span>
@@ -157,10 +165,12 @@ const warningText = computed(() => {
         </Tooltip>
       </TooltipProvider>
 
-      <div class="h-4 w-px bg-border mx-1" />
+      <div v-if="!aggregated" class="h-4 w-px bg-border mx-1" />
+
+      <ViewPicker :display-mode="displayMode" @select="emit('select-view', $event)" @reset="emit('reset-view')" />
 
       <!-- View Mode Toggles -->
-      <div class="flex items-center bg-muted rounded-md p-0.5">
+      <div v-if="!aggregated" class="flex items-center bg-muted rounded-md p-0.5">
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>

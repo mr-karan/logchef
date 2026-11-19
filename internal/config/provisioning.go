@@ -63,10 +63,19 @@ type ProvisionSource struct {
 	// If set and Password is empty, the value is resolved from the environment at startup.
 	SecretRef string `koanf:"secret_ref" json:"secret_ref,omitempty"`
 
+	// HeaderSecretRefs maps a custom header of a VictoriaLogs or Loki source
+	// to the environment variable that holds its value, resolved like
+	// SecretRef. Export writes header values only as these references.
+	HeaderSecretRefs map[string]string `koanf:"header_secret_refs" json:"header_secret_refs,omitempty"`
+
 	Description       string `koanf:"description" json:"description,omitempty"`
 	TTLDays           int    `koanf:"ttl_days" json:"ttl_days,omitempty"`
 	MetaTSField       string `koanf:"meta_ts_field" json:"meta_ts_field,omitempty"`
 	MetaSeverityField string `koanf:"meta_severity_field" json:"meta_severity_field,omitempty"`
+
+	// Views declares the source's saved Explorer views (RFC 0007). They are
+	// managed: read-only in the UI and owned by this file.
+	Views []ProvisionView `koanf:"views" json:"views,omitempty"`
 
 	// Legacy detection fields (pre-v2.0 flat schema). These mirror the old
 	// top-level connection keys that v2.0 moved under [sources.connection].
@@ -148,8 +157,8 @@ func (s *ProvisionSource) ConnectionPayload() (json.RawMessage, error) {
 			return nil, fmt.Errorf("marshal clickhouse connection config: %w", err)
 		}
 		return payload, nil
-	case models.SourceTypeVictoriaLogs:
-		return nil, fmt.Errorf("victorialogs source %q requires a connection block", s.Name)
+	case models.SourceTypeVictoriaLogs, models.SourceTypeLoki:
+		return nil, fmt.Errorf("%s source %q requires a connection block", s.NormalizedSourceType(), s.Name)
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", s.SourceType)
 	}
@@ -164,6 +173,19 @@ func (s *ProvisionSource) VictoriaLogsConnection() (models.VictoriaLogsConnectio
 
 	if err := json.Unmarshal(payload, &conn); err != nil {
 		return conn, fmt.Errorf("unmarshal victorialogs connection config: %w", err)
+	}
+	return conn, nil
+}
+
+func (s *ProvisionSource) LokiConnection() (models.LokiConnectionInfo, error) {
+	var conn models.LokiConnectionInfo
+	payload, err := s.ConnectionPayload()
+	if err != nil {
+		return conn, err
+	}
+
+	if err := json.Unmarshal(payload, &conn); err != nil {
+		return conn, fmt.Errorf("unmarshal loki connection config: %w", err)
 	}
 	return conn, nil
 }
@@ -186,4 +208,46 @@ type ProvisionMember struct {
 	Email string `koanf:"email" json:"email"`
 	// Role is the team-level role: "admin", "editor", or "member".
 	Role string `koanf:"role" json:"role,omitempty"`
+}
+
+// ProvisionView declares a source view, matched to a stored view by source and
+// name. The fields after Default are the parts of the view definition; an
+// absent part says nothing about that part of the Explorer.
+type ProvisionView struct {
+	Name        string `koanf:"name" json:"name"`
+	Description string `koanf:"description" json:"description,omitempty"`
+	// Default makes the view the source default. At most one per source.
+	Default bool `koanf:"default" json:"default,omitempty"`
+
+	Columns     []models.SavedViewColumn      `koanf:"columns" json:"columns,omitempty"`
+	Sort        []models.SavedViewSort        `koanf:"sort" json:"sort,omitempty"`
+	DisplayMode *models.DisplayModePreference `koanf:"display_mode" json:"display_mode,omitempty"`
+	Filter      *string                       `koanf:"filter" json:"filter,omitempty"`
+	TimeRange   *string                       `koanf:"time_range" json:"time_range,omitempty"`
+}
+
+// Definition returns the view definition the declaration describes.
+func (v *ProvisionView) Definition() models.SavedViewDefinition {
+	return models.SavedViewDefinition{
+		Version:     models.SavedViewDefinitionVersion,
+		Columns:     v.Columns,
+		Sort:        v.Sort,
+		DisplayMode: v.DisplayMode,
+		Filter:      v.Filter,
+		TimeRange:   v.TimeRange,
+	}
+}
+
+// ProvisionViewFromSaved is the declaration of a stored view.
+func ProvisionViewFromSaved(v *models.SavedView) ProvisionView {
+	return ProvisionView{
+		Name:        v.Name,
+		Description: v.Description,
+		Default:     v.IsDefault,
+		Columns:     v.Definition.Columns,
+		Sort:        v.Definition.Sort,
+		DisplayMode: v.Definition.DisplayMode,
+		Filter:      v.Definition.Filter,
+		TimeRange:   v.Definition.TimeRange,
+	}
 }

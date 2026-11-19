@@ -204,6 +204,8 @@ func TestDashboardStaleClientMatrix(t *testing.T) {
 	blob = strings.Replace(blob, `"type":"stat","value":"n"`, `"type":"stat","thresholds":[{"value":null,"color":"green"},{"value":"9007199254740993.01","color":"red"}],"value":"n"`, 1)
 	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p3","kind":"query","title":"Table","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"clickhouse-sql","text":"SELECT ts,details FROM events"},"viz":{"type":"table","rules":[{"columns":["details"],"op":"contains","value":"retry","scope":"row","color":"red"}],"column_formats":{"ts":{"kind":"time","time":"seconds"}}}},`, team.ID, src.ID), 1)
 	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p3","x":0,"y":2,"w":12,"h":2},`, 1)
+	blob = strings.Replace(blob, `"panels":[`, fmt.Sprintf(`"panels":[{"id":"p4","kind":"query","title":"Loki","team_id":%d,"source_id":%d,"query":{"mode":"result","language":"logql","text":"sum(count_over_time({app=\"api\"}[5m]))"},"viz":{"type":"table"}},`, team.ID, src.ID), 1)
+	blob = strings.Replace(blob, `"layout":[`, `"layout":[{"id":"p4","x":0,"y":4,"w":12,"h":2},`, 1)
 	blob = strings.Replace(blob, `"w":6,"h":2}]}]`, `"w":5,"h":2}]},{"id":"week","title":"Last 7 days","layout":[]}]`, 1)
 	status, resp, _ := call(t, app, http.MethodPost, "/dashboards", `{"name":"matrix","panels":`+blob+`}`, dashboardHeaders{schema: new("2"), features: new(strings.Join(models.KnownDashboardFeatures(), ","))})
 	if status != http.StatusCreated {

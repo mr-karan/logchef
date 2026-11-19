@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
@@ -118,14 +119,14 @@ func TestTimezoneValidatedOnEveryEntryPoint(t *testing.T) {
 	}
 	for name, call := range entryPoints {
 		for _, timezone := range []string{"Asia/Kolkata'", "Asia Kolkata"} {
-			provider.requests = 0
+			provider.requests.Store(0)
 			err := call(timezone)
 			reqErr, ok := errors.AsType[*QueryRequestError](err)
 			if !ok || !strings.Contains(reqErr.Message, "invalid timezone") {
 				t.Errorf("%s with %q: error = %v, want an invalid timezone request error", name, timezone, err)
 			}
-			if provider.requests != 0 {
-				t.Errorf("%s with %q: %d requests reached the provider", name, timezone, provider.requests)
+			if provider.requests.Load() != 0 {
+				t.Errorf("%s with %q: %d requests reached the provider", name, timezone, provider.requests.Load())
 			}
 		}
 		if err := call("Asia/Kolkata"); err != nil {
@@ -326,5 +327,76 @@ func TestMacrosRenderForTheStoredSource(t *testing.T) {
 	_, err = PrepareSourceSQLQuery(ctx, ds, macroQueryConfig, victoriaLogs, models.APIQueryRequest{QueryText: "{{__time_filter}}", StartTime: start, EndTime: end})
 	if !isQueryRequestError(err) || !strings.Contains(err.Error(), "not available in LogsQL") {
 		t.Fatalf("error = %v, want the LogsQL rejection", err)
+	}
+	loki := authorize(&models.Source{
+		Name: "macro_loki", SourceType: models.SourceTypeLoki, MetaTSField: "_time",
+		ConnectionConfig: json.RawMessage(`{"base_url":"http://loki:3100","selector":"{app=~\".+\"}"}`),
+	})
+	const logql = `sum(count_over_time({app="api"} | line_format "{{.msg}} {{__line__}}" [{{__interval}}]))`
+	query, err = PrepareSourceSQLQuery(ctx, ds, macroQueryConfig, loki, models.APIQueryRequest{QueryText: logql, StartTime: start, EndTime: end, Interval: "5m"})
+	if want := `sum(count_over_time({app="api"} | line_format "{{.msg}} {{__line__}}" [5m]))`; err != nil || query.RawQuery != want {
+		t.Fatalf("Loki query %q error %v, want %q", query.RawQuery, err, want)
+	}
+	if query.Step != 5*time.Minute {
+		t.Fatalf("Loki step = %v, want the 5m interval", query.Step)
+	}
+	_, err = PrepareSourceSQLQuery(ctx, ds, macroQueryConfig, loki, models.APIQueryRequest{QueryText: `{app="api"} | ts > {{__from}}`, StartTime: start, EndTime: end})
+	if !isQueryRequestError(err) || !strings.Contains(err.Error(), "not available in LogQL") {
+		t.Fatalf("error = %v, want the LogQL rejection", err)
+	}
+}
+
+// A compiled query in a language that carries no time range gets the request
+// window as parameters; ClickHouse SQL has the range in its text.
+func TestLogchefQLTimeRangeFollowsTheCompiledLanguage(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	admin := &models.User{Email: "range-admin@example.com", FullName: "Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	if err := db.CreateUser(ctx, admin); err != nil {
+		t.Fatal(err)
+	}
+	source := newTestSource(t, db, "range_src")
+	team, err := CreateTeam(ctx, db, log, "range-team", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AddTeamSource(ctx, team.ID, source.ID); err != nil {
+		t.Fatal(err)
+	}
+	src, err := access.AuthorizeTeamSource(ctx, db, access.SessionPrincipal(admin), team.ID, source.ID, models.TokenScopeLogsRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		language  models.QueryLanguage
+		wantRange bool
+	}{
+		{models.QueryLanguageClickHouseSQL, false},
+		{models.QueryLanguageLogsQL, true},
+		{models.QueryLanguageLogQL, true},
+	} {
+		t.Run(string(tc.language), func(t *testing.T) {
+			provider := &fakeProvider{
+				compileFn: func(context.Context, *models.Source, datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+					return &datasource.CompiledLogchefQL{Language: tc.language, Query: "compiled", Valid: true}, nil
+				},
+			}
+			ds := newFakeDatasourceService(db, log, provider)
+			prepared, err := PrepareLogchefQLQuery(ctx, ds, macroQueryConfig, src, LogchefQLQueryRequest{
+				Query: `level="error"`, StartTime: "2026-11-05T18:30:00Z", EndTime: "2026-11-05T19:30:00Z", Timezone: "UTC",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasRange := prepared.Params.StartTime != nil && prepared.Params.EndTime != nil
+			if hasRange != tc.wantRange {
+				t.Fatalf("range set = %v, want %v", hasRange, tc.wantRange)
+			}
+			if hasRange && !prepared.Params.StartTime.Equal(time.Date(2026, 11, 5, 18, 30, 0, 0, time.UTC)) {
+				t.Fatalf("start = %v", prepared.Params.StartTime)
+			}
+		})
 	}
 }

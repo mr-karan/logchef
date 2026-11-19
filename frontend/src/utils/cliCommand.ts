@@ -28,7 +28,7 @@ export function generateCliCommand(options: CliCommandOptions): string {
     return cmd
   }
 
-  if (language === 'logsql') {
+  if (language === 'logsql' || language === 'logql') {
     let cmd = `logchef sql ${escapedQuery} -t ${teamId} -S ${sourceId}${timeFlags(window, resolved)}`
     if (timeout) cmd += ` --timeout ${timeout}`
     return cmd

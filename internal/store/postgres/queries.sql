@@ -3,13 +3,17 @@
 -- name: CreateSource :one
 -- Create a new source entry
 INSERT INTO sources (
-    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, header_secret_refs, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id;
 
 -- name: GetSource :one
 -- Get a single source by ID
 SELECT * FROM sources WHERE id = $1;
+
+-- name: GetSourceForUpdate :one
+-- Get a source by ID and lock the row until the transaction ends
+SELECT * FROM sources WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: GetSourceByIdentityKey :one
 -- Get a single source by provider-computed identity key
@@ -33,8 +37,9 @@ SET name = $1,
     ttl_days = $9,
     managed = $10,
     secret_ref = $11,
+    header_secret_refs = $12,
     updated_at = now()
-WHERE id = $12;
+WHERE id = $13;
 
 -- name: DeleteSource :exec
 -- Delete a source by ID
@@ -153,6 +158,10 @@ RETURNING id;
 -- Get a team by ID
 SELECT * FROM teams WHERE id = $1;
 
+-- name: GetTeamForUpdate :one
+-- Get a team by ID and lock the row until the transaction ends
+SELECT * FROM teams WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: UpdateTeam :exec
 -- Update a team
 UPDATE teams
@@ -175,6 +184,13 @@ ORDER BY t.created_at DESC;
 
 -- Team Members
 
+-- name: InsertTeamMember :execrows
+-- Add a member to a team and report through the row count whether this call
+-- inserted it; an existing member is left as it is.
+INSERT INTO team_members (team_id, user_id, role)
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING;
+
 -- name: AddTeamMember :exec
 -- Add a member to a team; adding an existing member is a no-op and keeps their role.
 INSERT INTO team_members (team_id, user_id, role)
@@ -184,6 +200,10 @@ ON CONFLICT (team_id, user_id) DO NOTHING;
 -- name: GetTeamMember :one
 -- Get a team member
 SELECT * FROM team_members WHERE team_id = $1 AND user_id = $2;
+
+-- name: GetTeamMemberForUpdate :one
+-- Get a team member and lock the row until the transaction ends
+SELECT * FROM team_members WHERE team_id = $1 AND user_id = $2 FOR UPDATE;
 
 -- name: UpdateTeamMemberRole :exec
 -- Update a team member's role
@@ -251,6 +271,10 @@ RETURNING id;
 -- name: GetSavedQuery :one
 -- Look up one saved query by id
 SELECT * FROM saved_queries WHERE id = $1;
+
+-- name: LockSavedQuery :one
+-- Lock a saved query row until the transaction ends
+SELECT id FROM saved_queries WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: UpdateSavedQuery :exec
 -- Update a saved query's mutable fields
@@ -543,7 +567,7 @@ SET last_used_at = now(),
 WHERE id = $1
   AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds');
 
--- name: DeleteAPIToken :exec
+-- name: DeleteAPIToken :execrows
 -- Delete an API token by ID and user ID (ensure user owns the token)
 DELETE FROM api_tokens WHERE id = $1 AND user_id = $2;
 
@@ -565,17 +589,22 @@ INSERT INTO alerts (
     severity,
     labels_json,
     annotations_json,
-    recipient_user_ids_json,
-    webhook_urls_json,
     generator_url,
+    group_by_json,
+    no_data_policy,
+    notify_on_resolve,
     is_active,
     created_by
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 RETURNING *;
 
 -- name: GetAlert :one
 SELECT * FROM alerts WHERE id = $1;
+
+-- name: LockAlert :one
+-- Lock an alert row until the transaction ends
+SELECT id FROM alerts WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: ListAlertsBySource :many
 -- List alerts for one source
@@ -609,12 +638,14 @@ SET name = $1,
     severity = $11,
     labels_json = $12,
     annotations_json = $13,
-    recipient_user_ids_json = $14,
-    webhook_urls_json = $15,
-    generator_url = $16,
-    is_active = $17,
+    generator_url = $14,
+    group_by_json = $15,
+    no_data_policy = $16,
+    notify_on_resolve = $17,
+    is_active = $18,
+    eval_seq = eval_seq + 1,
     updated_at = now()
-WHERE id = $18
+WHERE id = $19
 RETURNING id;
 
 -- name: DeleteAlert :one
@@ -622,11 +653,14 @@ DELETE FROM alerts WHERE id = $1
 RETURNING id;
 
 -- name: MarkAlertEvaluated :exec
+-- Records an evaluation and the rule's summary state. last_triggered_at moves
+-- when the rule starts firing.
 UPDATE alerts
-SET last_state = 'resolved',
+SET last_triggered_at = CASE WHEN sqlc.arg(last_state)::text = 'firing' AND last_state <> 'firing' THEN now() ELSE last_triggered_at END,
+    last_state = sqlc.arg(last_state),
     last_evaluated_at = now(),
     updated_at = now()
-WHERE id = $1;
+WHERE id = sqlc.arg(id);
 
 -- name: TouchAlertEvaluated :exec
 UPDATE alerts
@@ -634,50 +668,81 @@ SET last_evaluated_at = now(),
     updated_at = now()
 WHERE id = $1;
 
--- name: MarkAlertTriggered :exec
+-- name: AdvanceAlertEvalSeq :one
 UPDATE alerts
-SET last_state = 'firing',
-    last_triggered_at = CASE WHEN last_state = 'firing' THEN last_triggered_at ELSE now() END,
-    last_evaluated_at = now(),
-    updated_at = now()
-WHERE id = $1;
+SET eval_seq = eval_seq + 1
+WHERE id = sqlc.arg(id) AND eval_seq = sqlc.arg(eval_seq)
+RETURNING id;
 
--- name: ListActiveAlertsDue :many
-SELECT * FROM alerts
-WHERE is_active = true
-  AND (
-        last_evaluated_at IS NULL
-        OR last_evaluated_at <= now() - frequency_seconds * interval '1 second'
-      );
+-- Alert instance queries
+
+-- name: ListAlertInstances :many
+SELECT * FROM alert_instances
+WHERE alert_id = $1
+ORDER BY group_key;
+
+-- name: UpsertAlertInstance :exec
+INSERT INTO alert_instances (alert_id, group_key, group_json, state, value, state_since, last_seen_at, history_id, notified)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (alert_id, group_key) DO UPDATE SET
+    group_json = excluded.group_json,
+    state = excluded.state,
+    value = excluded.value,
+    state_since = excluded.state_since,
+    last_seen_at = excluded.last_seen_at,
+    history_id = excluded.history_id,
+    notified = excluded.notified;
+
+-- name: MarkAlertInstanceNotified :one
+UPDATE alert_instances
+SET notified = TRUE
+WHERE alert_id = $1 AND group_key = $2 AND history_id = $3
+RETURNING alert_id;
+
+-- name: DeleteAlertInstances :exec
+DELETE FROM alert_instances WHERE alert_id = $1;
+
+-- name: DeleteAlertInstance :exec
+DELETE FROM alert_instances WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key);
+
+-- name: CountAlertInstancesByState :many
+-- Instance counts of the given alerts, one row per (alert, state).
+SELECT alert_id, state, COUNT(*) AS instances
+FROM alert_instances
+WHERE alert_id = ANY(sqlc.arg(alert_ids)::bigint[])
+GROUP BY alert_id, state;
+
+-- name: RefreshAlertState :exec
+-- After a manual resolve of one group: the rule is firing while any group
+-- fires, else no_data while any group has no data.
+UPDATE alerts
+SET last_state = CASE WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'firing'
+    ) THEN 'firing' WHEN EXISTS (
+        SELECT 1 FROM alert_instances WHERE alert_instances.alert_id = alerts.id AND alert_instances.state = 'no_data'
+    ) THEN 'no_data' ELSE 'resolved' END,
+    eval_seq = eval_seq + 1,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
 
 -- Alert history queries
 
 -- name: InsertAlertHistory :one
 INSERT INTO alert_history (
     alert_id,
+    group_key,
+    group_json,
     status,
     value,
     message,
     payload_json
 )
-VALUES ($1, $2, $3, $4, $5)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
-
--- name: InterruptAlertDeliveries :exec
-UPDATE alert_history
-SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
-    'delivery_in_progress', false,
-    'delivery_failed', true,
-    'delivery_error', 'delivery interrupted',
-    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
-WHERE status = 'triggered'
-  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
-  AND (sqlc.arg(history_id)::bigint = 0 OR id = sqlc.arg(history_id))
-  AND (sqlc.arg(alert_id)::bigint = 0 OR alert_id = sqlc.arg(alert_id));
 
 -- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
-WHERE id = $1 AND status = 'triggered'
+WHERE id = $1 AND status IN ('triggered', 'no_data')
 FOR UPDATE;
 
 -- name: ResolveAlertHistoryForAlert :exec
@@ -685,19 +750,44 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
     message = sqlc.arg(message)
-WHERE alert_id = sqlc.arg(alert_id) AND status = 'triggered';
+WHERE alert_id = sqlc.arg(alert_id) AND status IN ('triggered', 'no_data');
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
-WHERE id = $2 AND status = 'triggered'
+WHERE id = $2 AND status IN ('triggered', 'no_data')
+RETURNING id;
+
+-- name: SetOpenAlertHistoryStatus :one
+-- An open episode that moves between firing and no_data.
+UPDATE alert_history
+SET status = $1, message = $2
+WHERE id = $3 AND status IN ('triggered', 'no_data')
 RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one
 SELECT * FROM alert_history
-WHERE alert_id = $1 AND status = 'triggered'
+WHERE alert_id = $1 AND status IN ('triggered', 'no_data')
 ORDER BY triggered_at DESC, id DESC
 LIMIT 1;
+
+-- name: ListOpenAlertHistory :many
+-- Every open episode of the alert, newest first.
+SELECT * FROM alert_history
+WHERE alert_id = sqlc.arg(alert_id) AND status IN ('triggered', 'no_data')
+ORDER BY triggered_at DESC, id DESC;
+
+-- name: ListOpenAlertGroupHistoryIDs :many
+SELECT id FROM alert_history
+WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status IN ('triggered', 'no_data')
+FOR UPDATE;
+
+-- name: ResolveAlertGroupHistory :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = sqlc.arg(resolved_at),
+    message = sqlc.arg(message)
+WHERE alert_id = sqlc.arg(alert_id) AND group_key = sqlc.arg(group_key) AND status IN ('triggered', 'no_data');
 
 -- name: GetAlertHistoryEntry :one
 SELECT * FROM alert_history
@@ -710,19 +800,14 @@ ORDER BY triggered_at DESC, id DESC
 LIMIT $2;
 
 -- name: PruneAlertHistory :exec
+-- Keeps every open episode and the newest N closed rows.
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
-  AND target.id NOT IN (
-    SELECT active.id
-    FROM alert_history AS active
-    WHERE active.alert_id = $1 AND active.status = 'triggered'
-    ORDER BY active.triggered_at DESC, active.id DESC
-    LIMIT 1
-  )
+  AND target.status NOT IN ('triggered', 'no_data')
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
-    WHERE keep.alert_id = $2
+    WHERE keep.alert_id = $2 AND keep.status NOT IN ('triggered', 'no_data')
     ORDER BY keep.triggered_at DESC, keep.id DESC
     LIMIT $3
  );
@@ -732,6 +817,10 @@ WHERE target.alert_id = $1
 -- name: GetSystemSetting :one
 SELECT * FROM system_settings
 WHERE key = $1;
+
+-- name: LockSettingWrites :exec
+-- Hold a transaction-scoped advisory lock, which also covers a key with no row
+SELECT pg_advisory_xact_lock($1);
 
 -- name: ListSystemSettings :many
 SELECT * FROM system_settings
@@ -1022,6 +1111,10 @@ INSERT INTO dashboards (name, description, panels_json, created_by, panel_count,
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10)
 RETURNING id;
 
+-- name: LockDashboard :one
+-- Lock a dashboard row until the transaction ends
+SELECT id FROM dashboards WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: GetDashboard :one
 -- Look up one dashboard by id, with creator identity like ListDashboardSummaries.
 SELECT
@@ -1042,7 +1135,7 @@ WHERE d.id = $1;
 -- name: ListDashboardSummaries :many
 -- List every dashboard's summary, newest-updated first, from the derived
 -- columns and never from panels_json. A name or description from before the
--- bound is cut to it.
+-- bound is cut to it. report_count is the number of reports a delete removes.
 SELECT
     d.id,
     left(d.name, 200)::text AS name,
@@ -1059,7 +1152,8 @@ SELECT
     d.summary_revision,
     d.summary_version,
     u.email AS created_by_email,
-    u.full_name AS created_by_name
+    u.full_name AS created_by_name,
+    (SELECT COUNT(*) FROM reports r WHERE r.dashboard_id = d.id) AS report_count
 FROM dashboards d
 LEFT JOIN users u ON u.id = d.created_by
 ORDER BY d.updated_at DESC, d.id DESC;
@@ -1215,6 +1309,104 @@ WHERE qsd.bucket_date >= $1
 GROUP BY qsd.bucket_date
 ORDER BY qsd.bucket_date ASC;
 
+-- Query shape stats daily rollup (RFC 0010) ------------------------------------
+
+-- name: IncrementQueryShapeStats :exec
+-- Add one increment to a shape's daily row: sum the three counters and keep
+-- the larger max_lookback_s (GREATEST ignores NULL, so a NULL lookback never
+-- replaces a known one).
+INSERT INTO query_shape_stats_daily (
+    bucket_date, source_id, query_language, shape_hash, shape,
+    query_count, total_duration_ms, total_rows, max_lookback_s
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
+DO UPDATE SET
+    query_count = query_shape_stats_daily.query_count + EXCLUDED.query_count,
+    total_duration_ms = query_shape_stats_daily.total_duration_ms + EXCLUDED.total_duration_ms,
+    total_rows = query_shape_stats_daily.total_rows + EXCLUDED.total_rows,
+    max_lookback_s = GREATEST(query_shape_stats_daily.max_lookback_s, EXCLUDED.max_lookback_s);
+
+-- name: ListQueryShapeStats :many
+-- A source's analyzed shapes from `since` to `until`, both inclusive, summed
+-- over days, most used
+-- first. The 'unanalyzed' and 'overflow' rows are left out; QueryShapeCoverage
+-- counts them. lookback_rows is 0 when no row has a lookback, and then
+-- max_lookback_s means nothing.
+SELECT
+    query_language,
+    shape_hash,
+    shape,
+    SUM(query_count)::bigint AS query_count,
+    SUM(total_duration_ms)::bigint AS total_duration_ms,
+    SUM(total_rows)::bigint AS total_rows,
+    COUNT(max_lookback_s)::bigint AS lookback_rows,
+    COALESCE(MAX(max_lookback_s), 0)::bigint AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = sqlc.arg(source_id)
+  AND bucket_date >= sqlc.arg(since)
+  AND bucket_date <= sqlc.arg(until)
+  AND shape_hash NOT IN ('unanalyzed', 'overflow')
+GROUP BY query_language, shape_hash, shape
+ORDER BY query_count DESC, query_language ASC, shape_hash ASC
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: QueryShapeCoverage :one
+-- Totals over every rollup row of a source from `since` to `until`, both
+-- inclusive, not only the rows
+-- that ListQueryShapeStats returns. filtered_days counts the days with a
+-- query that has a filter: the empty shape, also kept by the 'unanalyzed' and
+-- 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
+-- and then max_lookback_s means nothing.
+SELECT
+    COUNT(DISTINCT bucket_date)::bigint AS days,
+    (COUNT(DISTINCT bucket_date) FILTER (WHERE shape <> '[]'))::bigint AS filtered_days,
+    COALESCE(SUM(query_count), 0)::bigint AS query_count,
+    COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'unanalyzed'), 0)::bigint AS unanalyzed_count,
+    COALESCE(SUM(query_count) FILTER (WHERE shape_hash = 'overflow'), 0)::bigint AS overflow_count,
+    COALESCE(SUM(query_count) FILTER (WHERE max_lookback_s IS NULL), 0)::bigint AS null_lookback_count,
+    COUNT(max_lookback_s)::bigint AS lookback_rows,
+    COALESCE(MAX(max_lookback_s), 0)::bigint AS max_lookback_s
+FROM query_shape_stats_daily
+WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since) AND bucket_date <= sqlc.arg(until);
+
+-- name: PruneQueryShapeStats :exec
+DELETE FROM query_shape_stats_daily WHERE bucket_date < $1;
+
+-- name: GetSchemaAdvisorReport :one
+SELECT source_id, generated_at, generated_by, window_days, report
+FROM schema_advisor_reports WHERE source_id = $1;
+
+-- name: UpsertSchemaAdvisorReport :exec
+-- A refresh replaces the source's report.
+INSERT INTO schema_advisor_reports (source_id, generated_at, generated_by, window_days, report)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (source_id) DO UPDATE SET
+    generated_at = excluded.generated_at,
+    generated_by = excluded.generated_by,
+    window_days = excluded.window_days,
+    report = excluded.report;
+
+-- name: ListSchemaAdvisorDismissals :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = $1
+ORDER BY dismissed_at, finding_id;
+
+-- name: GetSchemaAdvisorDismissal :one
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id = $1 AND finding_id = $2;
+
+-- name: UpsertSchemaAdvisorDismissal :exec
+-- Dismissing a dismissed finding again replaces its reason and author.
+INSERT INTO schema_advisor_dismissals (source_id, finding_id, reason, dismissed_by, dismissed_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (source_id, finding_id) DO UPDATE SET
+    reason = excluded.reason,
+    dismissed_by = excluded.dismissed_by,
+    dismissed_at = excluded.dismissed_at;
+
+-- name: DeleteSchemaAdvisorDismissal :execrows
+DELETE FROM schema_advisor_dismissals WHERE source_id = $1 AND finding_id = $2;
+
 -- OAuth authorization server ------------------------------------------------
 -- Every *_hash argument is an HMAC hex digest, never a plaintext code or
 -- token. Postgres runs at READ COMMITTED: a conditional UPDATE waits on the
@@ -1267,19 +1459,24 @@ RETURNING *;
 -- name: GetOAuthGrant :one
 SELECT * FROM oauth_grants WHERE id = $1;
 
--- name: RevokeOAuthGrant :execrows
+-- name: RevokeOAuthGrant :one
+-- Returns no row when the grant was already revoked, so only the call that
+-- revokes it reports the revocation.
 UPDATE oauth_grants
 SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
-WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL
+RETURNING *;
 
--- name: RevokeOAuthGrantForUser :execrows
+-- name: RevokeOAuthGrantForUser :one
 UPDATE oauth_grants
 SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
-WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
+WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL
+RETURNING *;
 
--- name: RevokeOAuthGrantByToken :exec
+-- name: RevokeOAuthGrantByToken :one
 -- Revoke the grant that owns an access-token ID hash or refresh-token hash,
--- only when the grant belongs to the given client.
+-- only when the grant belongs to the given client. Returns no row when no
+-- active grant matched.
 UPDATE oauth_grants
 SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
 WHERE oauth_grants.revoked_at IS NULL
@@ -1288,7 +1485,8 @@ WHERE oauth_grants.revoked_at IS NULL
       SELECT a.grant_id FROM oauth_access_tokens a WHERE a.id_hash = sqlc.arg(token_hash)
       UNION
       SELECT r.grant_id FROM oauth_refresh_tokens r WHERE r.token_hash = sqlc.arg(token_hash)
-  );
+  )
+RETURNING *;
 
 -- name: TouchOAuthGrant :exec
 UPDATE oauth_grants SET last_used_at = $1 WHERE id = $2;
@@ -1375,4 +1573,714 @@ WHERE e.id = interrupted.id
 RETURNING e.id, e.file_path, interrupted.updated_at AS previous_updated_at;
 
 -- name: MarkAlertResolved :exec
-UPDATE alerts SET last_state = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = $1;
+UPDATE alerts SET last_state = 'resolved', eval_seq = eval_seq + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1;
+
+-- Jobs (internal/jobs). Every time comparison uses the database clock.
+
+-- name: UpsertJob :exec
+-- A new job, or an existing job whose schedule changes, is due at first_run_at,
+-- or now when that is null; any other update keeps its next run and lease.
+INSERT INTO jobs (
+    kind, key, schedule_kind, schedule_expr, timezone, misfire, grace_seconds, enabled,
+    next_run_at, created_at, updated_at
+) VALUES (
+    sqlc.arg(kind), sqlc.arg(key), sqlc.arg(schedule_kind), sqlc.arg(schedule_expr),
+    sqlc.arg(timezone), sqlc.arg(misfire), sqlc.arg(grace_seconds), sqlc.arg(enabled),
+    COALESCE(sqlc.narg(first_run_at)::timestamptz, now()), now(), now()
+)
+ON CONFLICT (kind, key) DO UPDATE SET
+    next_run_at = CASE
+        WHEN jobs.schedule_kind = excluded.schedule_kind
+         AND jobs.schedule_expr = excluded.schedule_expr
+         AND jobs.timezone = excluded.timezone
+        THEN jobs.next_run_at
+        ELSE excluded.next_run_at
+    END,
+    schedule_kind = excluded.schedule_kind,
+    schedule_expr = excluded.schedule_expr,
+    timezone = excluded.timezone,
+    misfire = excluded.misfire,
+    grace_seconds = excluded.grace_seconds,
+    enabled = excluded.enabled,
+    updated_at = excluded.updated_at;
+
+-- name: DeleteJob :exec
+DELETE FROM jobs WHERE kind = sqlc.arg(kind) AND key = sqlc.arg(key);
+
+-- name: GetJob :one
+SELECT * FROM jobs WHERE kind = sqlc.arg(kind) AND key = sqlc.arg(key);
+
+-- name: KickJob :execrows
+UPDATE jobs SET next_run_at = now(), updated_at = now()
+WHERE kind = sqlc.arg(kind) AND key = sqlc.arg(key);
+
+-- name: ClaimJobs :many
+-- Concurrent claims from several replicas receive disjoint rows. SKIP LOCKED
+-- also passes over a job whose handler holds its row through jobs.Hold, so
+-- the token cannot rise before that handler commits.
+-- last_started_at is the database clock at the claim.
+UPDATE jobs
+SET lease_owner = sqlc.arg(owner),
+    lease_token = lease_token + 1,
+    lease_expires_at = now() + make_interval(secs => sqlc.arg(lease_seconds)::double precision),
+    last_started_at = now(),
+    updated_at = now()
+WHERE id IN (
+    SELECT j.id FROM jobs j
+    WHERE j.enabled
+      AND j.kind = sqlc.arg(kind)
+      AND j.next_run_at <= now()
+      AND (j.lease_expires_at IS NULL OR j.lease_expires_at < now())
+    ORDER BY j.next_run_at
+    LIMIT sqlc.arg(max_jobs)
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
+-- name: HoldJob :execrows
+UPDATE jobs SET updated_at = now()
+WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- name: FinishJob :execrows
+-- The next run applies only while the job keeps the schedule the run used,
+-- so a schedule change made during the run is not overwritten.
+UPDATE jobs
+SET next_run_at = CASE
+        WHEN schedule_kind = sqlc.arg(schedule_kind)
+         AND schedule_expr = sqlc.arg(schedule_expr)
+         AND timezone = sqlc.arg(timezone)
+        THEN sqlc.arg(next_run_at)
+        ELSE next_run_at
+    END,
+    last_status = sqlc.arg(last_status),
+    last_error = sqlc.narg(last_error),
+    last_finished_at = now(),
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- name: ReleaseJob :execrows
+UPDATE jobs SET lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- name: DeleteClaimedJob :execrows
+DELETE FROM jobs WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token);
+
+-- Saved views -----------------------------------------------------------------
+
+-- name: CreateSavedView :one
+-- Insert a view; a name or default taken in its scope fails a unique index.
+INSERT INTO saved_views (source_id, scope, user_id, team_id, name, description, definition, is_default, managed, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING *;
+
+-- name: GetSavedView :one
+SELECT * FROM saved_views WHERE id = $1;
+
+-- name: ListSavedViews :many
+-- The caller's personal views, the team's views and the source views of one
+-- source, personal first, then team, then source, each by name. COLLATE "C"
+-- orders names by bytes, as SQLite does.
+SELECT * FROM saved_views
+WHERE source_id = sqlc.arg(source_id)
+  AND (
+    (scope = 'personal' AND user_id = sqlc.arg(user_id))
+    OR (scope = 'team' AND team_id = sqlc.arg(team_id))
+    OR scope = 'source'
+  )
+ORDER BY CASE scope WHEN 'personal' THEN 0 WHEN 'team' THEN 1 ELSE 2 END, name COLLATE "C", id;
+
+-- name: UpdateSavedView :one
+-- Compare-and-swap on the caller's revision; no row means missing or stale.
+UPDATE saved_views
+SET name = $1,
+    description = $2,
+    definition = $3,
+    revision = revision + 1,
+    updated_at = now()
+WHERE id = $4 AND revision = $5
+RETURNING *;
+
+-- name: DeleteSavedView :one
+DELETE FROM saved_views WHERE id = $1
+RETURNING id;
+
+-- name: ClearSavedViewScopeDefault :many
+-- Clear the default of one scope and source, except on keep_id. The partial
+-- unique index leaves at most one row. A NULL owner column compares as 0.
+UPDATE saved_views
+SET is_default = FALSE
+WHERE source_id = sqlc.arg(source_id)
+  AND scope = sqlc.arg(scope)
+  AND COALESCE(user_id, 0) = sqlc.arg(user_id)::BIGINT
+  AND COALESCE(team_id, 0) = sqlc.arg(team_id)::BIGINT
+  AND is_default
+  AND id <> sqlc.arg(keep_id)
+RETURNING id, managed;
+
+-- name: SetSavedViewDefaultFlag :one
+UPDATE saved_views SET is_default = $1 WHERE id = $2
+RETURNING id;
+
+-- name: CountSavedViewsInScope :one
+-- A NULL owner column compares as 0.
+SELECT COUNT(*) FROM saved_views
+WHERE source_id = sqlc.arg(source_id)
+  AND scope = sqlc.arg(scope)
+  AND COALESCE(user_id, 0) = sqlc.arg(user_id)::BIGINT
+  AND COALESCE(team_id, 0) = sqlc.arg(team_id)::BIGINT;
+
+-- name: MarkSavedViewManaged :one
+-- Provisioning adopts a view; the definition and revision stay as they are.
+UPDATE saved_views SET managed = TRUE WHERE id = $1
+RETURNING id;
+
+-- name: ListManagedSavedViews :many
+SELECT * FROM saved_views WHERE managed
+ORDER BY source_id, name COLLATE "C", id;
+
+-- Audit events
+
+-- name: InsertAuditEvent :exec
+INSERT INTO audit_events (
+    id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label,
+    auth_method, credential_id, client_id, target_type, target_id, target_label,
+    team_id, source_id, ip, user_agent, http_method, route, status, changes, detail
+) VALUES (
+    sqlc.arg(id), sqlc.arg(occurred_at), sqlc.arg(action), sqlc.arg(outcome),
+    sqlc.arg(reason), sqlc.arg(actor_type), sqlc.narg(actor_id), sqlc.arg(actor_label),
+    sqlc.arg(auth_method), sqlc.arg(credential_id), sqlc.arg(client_id), sqlc.arg(target_type),
+    sqlc.arg(target_id), sqlc.arg(target_label), sqlc.narg(team_id), sqlc.narg(source_id),
+    sqlc.arg(ip), sqlc.arg(user_agent), sqlc.arg(http_method), sqlc.arg(route),
+    sqlc.arg(status), sqlc.arg(changes), sqlc.arg(detail)
+);
+
+-- name: ListAuditEventsDesc :many
+-- Newest first. An empty text argument or a NULL argument disables its
+-- filter; a NULL cursor_at starts at the newest event.
+SELECT * FROM audit_events
+WHERE (sqlc.narg(from_at)::timestamptz IS NULL OR occurred_at >= sqlc.narg(from_at))
+  AND (sqlc.narg(to_at)::timestamptz IS NULL OR occurred_at < sqlc.narg(to_at))
+  AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action))
+  AND (sqlc.arg(action_prefix)::text = '' OR left(action, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+  AND (sqlc.narg(actor_id)::bigint IS NULL OR actor_id = sqlc.narg(actor_id))
+  AND (sqlc.arg(auth_method)::text = '' OR auth_method = sqlc.arg(auth_method))
+  AND (sqlc.arg(credential_id)::text = '' OR credential_id = sqlc.arg(credential_id))
+  AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type))
+  AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id))
+  AND (sqlc.narg(team_id)::bigint IS NULL OR team_id = sqlc.narg(team_id))
+  AND (sqlc.narg(source_id)::bigint IS NULL OR source_id = sqlc.narg(source_id))
+  AND (sqlc.arg(outcome)::text = '' OR outcome = sqlc.arg(outcome))
+  AND (sqlc.narg(cursor_at)::timestamptz IS NULL
+    OR occurred_at < sqlc.narg(cursor_at)
+    OR (occurred_at = sqlc.narg(cursor_at) AND id < sqlc.arg(cursor_id)::text))
+ORDER BY occurred_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: ListAuditEventsAsc :many
+-- Oldest first, with the same filters as ListAuditEventsDesc.
+SELECT * FROM audit_events
+WHERE (sqlc.narg(from_at)::timestamptz IS NULL OR occurred_at >= sqlc.narg(from_at))
+  AND (sqlc.narg(to_at)::timestamptz IS NULL OR occurred_at < sqlc.narg(to_at))
+  AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action))
+  AND (sqlc.arg(action_prefix)::text = '' OR left(action, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+  AND (sqlc.narg(actor_id)::bigint IS NULL OR actor_id = sqlc.narg(actor_id))
+  AND (sqlc.arg(auth_method)::text = '' OR auth_method = sqlc.arg(auth_method))
+  AND (sqlc.arg(credential_id)::text = '' OR credential_id = sqlc.arg(credential_id))
+  AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type))
+  AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id))
+  AND (sqlc.narg(team_id)::bigint IS NULL OR team_id = sqlc.narg(team_id))
+  AND (sqlc.narg(source_id)::bigint IS NULL OR source_id = sqlc.narg(source_id))
+  AND (sqlc.arg(outcome)::text = '' OR outcome = sqlc.arg(outcome))
+  AND (sqlc.narg(cursor_at)::timestamptz IS NULL
+    OR occurred_at > sqlc.narg(cursor_at)
+    OR (occurred_at = sqlc.narg(cursor_at) AND id > sqlc.arg(cursor_id)::text))
+ORDER BY occurred_at ASC, id ASC
+LIMIT sqlc.arg(row_limit)::bigint;
+
+-- name: CountAuditEvents :one
+-- Counts the events that match the filters, stopping at max_rows.
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM audit_events
+    WHERE (sqlc.narg(from_at)::timestamptz IS NULL OR occurred_at >= sqlc.narg(from_at))
+      AND (sqlc.narg(to_at)::timestamptz IS NULL OR occurred_at < sqlc.narg(to_at))
+      AND (sqlc.arg(action)::text = '' OR action = sqlc.arg(action))
+      AND (sqlc.arg(action_prefix)::text = '' OR left(action, length(sqlc.arg(action_prefix))) = sqlc.arg(action_prefix))
+      AND (sqlc.narg(actor_id)::bigint IS NULL OR actor_id = sqlc.narg(actor_id))
+      AND (sqlc.arg(auth_method)::text = '' OR auth_method = sqlc.arg(auth_method))
+      AND (sqlc.arg(credential_id)::text = '' OR credential_id = sqlc.arg(credential_id))
+      AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type))
+      AND (sqlc.arg(target_id)::text = '' OR target_id = sqlc.arg(target_id))
+      AND (sqlc.narg(team_id)::bigint IS NULL OR team_id = sqlc.narg(team_id))
+      AND (sqlc.narg(source_id)::bigint IS NULL OR source_id = sqlc.narg(source_id))
+      AND (sqlc.arg(outcome)::text = '' OR outcome = sqlc.arg(outcome))
+    LIMIT sqlc.arg(max_rows)::bigint
+) AS matched;
+
+-- name: GetAuditPruneBoundary :one
+-- The newest event beyond the keep_rows newest ones.
+SELECT occurred_at, id
+FROM audit_events
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1 OFFSET sqlc.arg(keep_rows)::bigint;
+
+-- name: PruneAuditEvents :execrows
+-- Deletes up to batch_size of the oldest events that are older than before or
+-- at or below the row-count boundary. A NULL argument disables its rule.
+DELETE FROM audit_events
+WHERE id IN (
+    SELECT id FROM audit_events
+    WHERE (sqlc.narg(before)::timestamptz IS NOT NULL AND occurred_at < sqlc.narg(before))
+       OR (sqlc.narg(bound_at)::timestamptz IS NOT NULL
+           AND (occurred_at < sqlc.narg(bound_at)
+             OR (occurred_at = sqlc.narg(bound_at) AND id <= sqlc.arg(bound_id)::text)))
+    ORDER BY occurred_at ASC, id ASC
+    LIMIT sqlc.arg(batch_size)::bigint
+);
+
+-- Scheduled reports (RFC 0008).
+
+-- name: CreateReport :one
+INSERT INTO reports (
+    name, owner_id, source_kind, dashboard_id, tab_id, saved_query_id,
+    schedule_json, timezone, time_range, range_anchor, variables_json,
+    max_rows, skip_if_empty, attach_csv
+) VALUES (
+    sqlc.arg(name), sqlc.narg(owner_id), sqlc.arg(source_kind), sqlc.narg(dashboard_id),
+    sqlc.narg(tab_id), sqlc.narg(saved_query_id), sqlc.arg(schedule_json), sqlc.arg(timezone),
+    sqlc.narg(time_range), sqlc.arg(range_anchor), sqlc.arg(variables_json),
+    sqlc.arg(max_rows), sqlc.arg(skip_if_empty), sqlc.arg(attach_csv)
+)
+RETURNING id;
+
+-- name: GetReport :one
+SELECT * FROM reports WHERE id = sqlc.arg(id);
+
+-- name: ListReports :many
+SELECT * FROM reports ORDER BY name, id;
+
+-- name: LockDashboardKey :one
+-- FOR UPDATE, unlike LockDashboard, conflicts with the key share lock of a
+-- foreign key check, so no report can be added to the dashboard until the
+-- transaction ends.
+SELECT id FROM dashboards WHERE id = sqlc.arg(id) FOR UPDATE;
+
+-- name: LockSavedQueryKey :one
+SELECT id FROM saved_queries WHERE id = sqlc.arg(id) FOR UPDATE;
+
+-- name: DeleteDashboardReports :execrows
+DELETE FROM reports WHERE dashboard_id = sqlc.arg(dashboard_id);
+
+-- name: DeleteSavedQueryReports :execrows
+DELETE FROM reports WHERE saved_query_id = sqlc.arg(saved_query_id);
+
+-- name: ListReportsByOwner :many
+SELECT * FROM reports WHERE owner_id = sqlc.arg(owner_id) ORDER BY name, id;
+
+-- name: ListReportsForRecipient :many
+-- A user receives a report through a user row, a team row of a team the
+-- user belongs to, or an email row that matches the user's address.
+SELECT r.* FROM reports r
+WHERE EXISTS (
+    SELECT 1 FROM report_recipients rr
+    WHERE rr.report_id = r.id
+      AND (
+        (rr.kind = 'user' AND rr.user_id = sqlc.arg(user_id))
+        OR (rr.kind = 'team' AND rr.team_id IN (
+            SELECT tm.team_id FROM team_members tm WHERE tm.user_id = sqlc.arg(user_id)))
+        OR (rr.kind = 'email' AND lower(rr.email) = (
+            SELECT lower(u.email) FROM users u WHERE u.id = sqlc.arg(user_id)))
+      )
+)
+ORDER BY r.name, r.id;
+
+-- name: UpdateReport :execrows
+UPDATE reports
+SET name = sqlc.arg(name),
+    source_kind = sqlc.arg(source_kind),
+    dashboard_id = sqlc.narg(dashboard_id),
+    tab_id = sqlc.narg(tab_id),
+    saved_query_id = sqlc.narg(saved_query_id),
+    schedule_json = sqlc.arg(schedule_json),
+    timezone = sqlc.arg(timezone),
+    time_range = sqlc.narg(time_range),
+    range_anchor = sqlc.arg(range_anchor),
+    variables_json = sqlc.arg(variables_json),
+    max_rows = sqlc.arg(max_rows),
+    skip_if_empty = sqlc.arg(skip_if_empty),
+    attach_csv = sqlc.arg(attach_csv),
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: DeleteReport :execrows
+DELETE FROM reports WHERE id = sqlc.arg(id);
+
+-- name: PauseReport :execrows
+UPDATE reports
+SET state = 'paused',
+    pause_reason = sqlc.arg(pause_reason),
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: ResumeReport :execrows
+UPDATE reports
+SET state = 'active',
+    pause_reason = '',
+    consecutive_failures = 0,
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: ClaimReport :execrows
+-- A claim lends the new owner's access, so a pause for an inactive owner
+-- no longer applies. Only a report with no owner, or one paused because its
+-- owner is inactive, can be claimed; the condition sits in the update so
+-- two claims at once cannot both win.
+UPDATE reports
+SET owner_id = sqlc.arg(owner_id),
+    state = CASE WHEN pause_reason = 'owner_inactive' THEN 'active' ELSE state END,
+    pause_reason = CASE WHEN pause_reason = 'owner_inactive' THEN '' ELSE pause_reason END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND (owner_id IS NULL OR pause_reason = 'owner_inactive');
+
+-- name: TakeReportManualRunCooldown :execrows
+-- clock_timestamp(), not now(): inside a transaction now() is the start of
+-- the transaction, and the cooldown must use the time of this statement.
+UPDATE reports
+SET last_manual_run_at = clock_timestamp()
+WHERE id = sqlc.arg(id)
+  AND (last_manual_run_at IS NULL
+       OR last_manual_run_at <= clock_timestamp() - make_interval(secs => sqlc.arg(window_seconds)::double precision));
+
+-- name: TakeReportPreviewCooldown :execrows
+UPDATE reports
+SET last_preview_at = clock_timestamp()
+WHERE id = sqlc.arg(id)
+  AND (last_preview_at IS NULL
+       OR last_preview_at <= clock_timestamp() - make_interval(secs => sqlc.arg(window_seconds)::double precision));
+
+-- name: ListReportRecipients :many
+SELECT * FROM report_recipients WHERE report_id = sqlc.arg(report_id) ORDER BY id;
+
+-- name: LockReport :one
+-- Holds the report row until the transaction ends, so two replacements of
+-- its recipients run one after the other instead of merging.
+SELECT id FROM reports WHERE id = sqlc.arg(id) FOR UPDATE;
+
+-- name: DeleteReportRecipients :exec
+DELETE FROM report_recipients WHERE report_id = sqlc.arg(report_id);
+
+-- name: InsertReportRecipient :exec
+INSERT INTO report_recipients (report_id, kind, user_id, team_id, email, added_by)
+VALUES (sqlc.arg(report_id), sqlc.arg(kind), sqlc.narg(user_id), sqlc.narg(team_id), sqlc.arg(email), sqlc.narg(added_by));
+
+-- name: DeleteReportUserRecipient :execrows
+-- A direct recipient is named by a user row, or by an email row that
+-- matches the user's address, ignoring case.
+DELETE FROM report_recipients
+WHERE report_id = sqlc.arg(report_id)
+  AND ((kind = 'user' AND user_id = sqlc.arg(user_id))
+    OR (kind = 'email' AND lower(email) = (
+        SELECT lower(u.email) FROM users u WHERE u.id = sqlc.arg(user_id))));
+
+-- name: InsertRunningReportRun :one
+-- A conflict on either partial unique index inserts nothing and returns no
+-- row; the caller then tells the tick conflict from a run in flight.
+INSERT INTO report_runs (report_id, trigger, scheduled_for, actor_id, status, started_at, deadline_at)
+VALUES (
+    sqlc.arg(report_id), sqlc.arg(trigger), sqlc.arg(scheduled_for), sqlc.narg(actor_id), 'running',
+    clock_timestamp(),
+    clock_timestamp() + make_interval(secs => sqlc.arg(deadline_seconds)::double precision)
+)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: InsertSkippedReportTick :one
+INSERT INTO report_runs (report_id, trigger, scheduled_for, status, reason, started_at, finished_at)
+VALUES (
+    sqlc.arg(report_id), 'schedule', sqlc.arg(scheduled_for), 'skipped', sqlc.arg(reason),
+    clock_timestamp(), clock_timestamp()
+)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: ReportTickExists :one
+SELECT EXISTS(
+    SELECT 1 FROM report_runs
+    WHERE report_id = sqlc.arg(report_id) AND trigger = 'schedule'
+      AND scheduled_for = sqlc.arg(scheduled_for)
+);
+
+-- name: FinishReportRun :one
+UPDATE report_runs
+SET status = sqlc.arg(status),
+    reason = sqlc.arg(reason),
+    window_start = sqlc.narg(window_start),
+    window_end = sqlc.narg(window_end),
+    panels_json = sqlc.arg(panels_json),
+    deliveries_json = sqlc.arg(deliveries_json),
+    deadline_at = NULL,
+    finished_at = clock_timestamp()
+WHERE id = sqlc.arg(id) AND status = 'running'
+RETURNING report_id;
+
+-- name: CountReportFailure :one
+-- A failed run adds one to the streak; a sent or partial run ends it.
+UPDATE reports
+SET consecutive_failures = CASE sqlc.arg(status)::text
+        WHEN 'failed' THEN consecutive_failures + 1
+        WHEN 'sent' THEN 0
+        WHEN 'partial' THEN 0
+        ELSE consecutive_failures
+    END
+WHERE id = sqlc.arg(id)
+RETURNING consecutive_failures;
+
+-- name: PruneReportRuns :exec
+DELETE FROM report_runs
+WHERE report_runs.report_id = sqlc.arg(report_id)
+  AND report_runs.status <> 'running'
+  AND report_runs.id NOT IN (
+    SELECT keep.id FROM report_runs keep
+    WHERE keep.report_id = sqlc.arg(report_id)
+    ORDER BY keep.id DESC
+    LIMIT sqlc.arg(keep)
+  );
+
+-- name: ListReportRuns :many
+-- before = 0 starts at the newest run.
+SELECT * FROM report_runs
+WHERE report_id = sqlc.arg(report_id)
+  AND (sqlc.arg(before)::bigint = 0 OR id < sqlc.arg(before)::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg(max_runs)::bigint;
+
+-- name: ListLatestReportRuns :many
+-- The newest run of every report, for the report list.
+SELECT * FROM report_runs
+WHERE id IN (SELECT MAX(latest.id) FROM report_runs latest GROUP BY latest.report_id)
+ORDER BY report_id;
+
+-- name: InterruptStaleReportRuns :execrows
+UPDATE report_runs
+SET status = 'interrupted',
+    reason = 'process_stopped',
+    deadline_at = NULL,
+    finished_at = clock_timestamp()
+WHERE status = 'running'
+  AND deadline_at < clock_timestamp() - make_interval(secs => sqlc.arg(grace_seconds)::double precision);
+-- Notification destinations --------------------------------------------------
+
+-- name: CreateNotificationDestination :one
+INSERT INTO notification_destinations (name, type, scope, team_id, config_json, secret, is_active, created_by)
+VALUES (
+    sqlc.arg(name), sqlc.arg(type), sqlc.arg(scope), sqlc.narg(team_id), sqlc.arg(config_json), sqlc.arg(secret),
+    sqlc.arg(is_active), sqlc.narg(created_by)
+)
+RETURNING *;
+
+-- name: UpdateNotificationDestination :one
+UPDATE notification_destinations
+SET name = sqlc.arg(name),
+    scope = sqlc.arg(scope),
+    team_id = sqlc.narg(team_id),
+    config_json = sqlc.arg(config_json),
+    secret = sqlc.arg(secret),
+    is_active = sqlc.arg(is_active),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: DeleteNotificationDestination :execrows
+DELETE FROM notification_destinations WHERE id = $1;
+
+-- name: GetNotificationDestination :one
+SELECT * FROM notification_destinations WHERE id = $1;
+
+-- name: ListNotificationDestinations :many
+SELECT * FROM notification_destinations ORDER BY name, id;
+
+-- name: ListUsableNotificationDestinations :many
+-- Private destinations of the user, team destinations of the user's teams,
+-- and global ones.
+SELECT d.* FROM notification_destinations d
+WHERE d.scope = 'global'
+   OR (d.scope = 'private' AND d.created_by = sqlc.arg(user_id))
+   OR (d.scope = 'team' AND d.team_id IN (SELECT tm.team_id FROM team_members tm WHERE tm.user_id = sqlc.arg(user_id)))
+ORDER BY d.name, d.id;
+
+-- name: CountTeamNotificationDestinations :one
+SELECT COUNT(*) FROM notification_destinations WHERE team_id = $1;
+
+-- name: CountAlertsUsingDestination :one
+SELECT COUNT(*) FROM alert_destinations WHERE destination_id = $1;
+
+-- name: DeleteAlertDestinations :exec
+DELETE FROM alert_destinations WHERE alert_id = $1;
+
+-- name: AddAlertDestination :exec
+INSERT INTO alert_destinations (alert_id, destination_id) VALUES ($1, $2);
+
+-- name: ListAlertDestinationLinks :many
+SELECT alert_id, destination_id FROM alert_destinations
+WHERE alert_id = ANY(sqlc.arg(alert_ids)::bigint[])
+ORDER BY alert_id, destination_id;
+
+-- name: ListAlertDestinations :many
+SELECT d.* FROM notification_destinations d
+JOIN alert_destinations ad ON ad.destination_id = d.id
+WHERE ad.alert_id = $1
+ORDER BY d.id;
+
+-- Alert silences (RFC 0006 unit S1)
+
+-- name: CreateAlertSilence :one
+INSERT INTO alert_silences (source_id, alert_id, matchers_json, comment, schedule_kind, starts_at, ends_at, weekly_json, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: GetAlertSilence :one
+SELECT * FROM alert_silences WHERE id = $1;
+
+-- name: ListAlertSilencesBySource :many
+SELECT * FROM alert_silences
+WHERE source_id = $1
+ORDER BY id;
+
+-- name: CountAlertSilencesBySource :one
+SELECT COUNT(*) FROM alert_silences WHERE source_id = $1;
+
+-- name: UpdateAlertSilence :one
+UPDATE alert_silences
+SET alert_id = $1,
+    matchers_json = $2,
+    comment = $3,
+    schedule_kind = $4,
+    starts_at = $5,
+    ends_at = $6,
+    weekly_json = $7,
+    updated_at = now()
+WHERE id = $8
+RETURNING *;
+
+-- name: DeleteAlertSilence :one
+DELETE FROM alert_silences WHERE id = $1
+RETURNING id;
+
+-- Notification delivery queue (RFC 0006 unit D2). Every time comparison uses
+-- the database clock.
+
+-- name: EnqueueDelivery :execrows
+-- A row whose dedup_key exists is left as it is. A row may start failed, such
+-- as one whose message is over the size limit.
+INSERT INTO notification_deliveries (
+    destination_id, producer, producer_ref, recipient, sequence_key, event, dedup_key, message_json,
+    status, last_error, next_attempt_at
+) VALUES (
+    sqlc.arg(destination_id), sqlc.arg(producer), sqlc.arg(producer_ref), sqlc.arg(recipient),
+    sqlc.arg(sequence_key), sqlc.arg(event), sqlc.arg(dedup_key), sqlc.arg(message_json),
+    sqlc.arg(status), sqlc.narg(last_error), now()
+)
+ON CONFLICT (dedup_key) DO NOTHING;
+
+-- name: CountPendingDeliveries :one
+SELECT COUNT(*) FROM notification_deliveries WHERE status = 'pending';
+
+-- name: ExpireEmailAttempts :execrows
+-- An email row still attempting after its reservation ended belongs to a
+-- process that crashed or stalled during SMTP. The raised token keeps that
+-- process from overwriting the outcome.
+UPDATE notification_deliveries
+SET status = 'unknown',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = sqlc.arg(last_error)
+WHERE status = 'attempting' AND reserved_until < now();
+
+-- name: ReserveDeliveries :many
+-- A row waits while an earlier row of its destination, recipient and
+-- sequence key is pending or attempting, so a resolved never overtakes its
+-- firing. Concurrent drains receive disjoint rows.
+UPDATE notification_deliveries
+SET reserved_by = sqlc.arg(owner),
+    reserved_token = reserved_token + 1,
+    reserved_until = now() + make_interval(secs => sqlc.arg(lease_seconds)::double precision),
+    attempts = attempts + 1
+WHERE id IN (
+    SELECT c.id FROM notification_deliveries c
+    WHERE c.status = 'pending'
+      AND c.next_attempt_at <= now()
+      AND (c.reserved_until IS NULL OR c.reserved_until < now())
+      AND NOT EXISTS (
+          SELECT 1 FROM notification_deliveries e
+          WHERE e.destination_id = c.destination_id AND e.recipient = c.recipient
+            AND e.sequence_key = c.sequence_key AND e.status IN ('pending', 'attempting')
+            AND e.id < c.id)
+    ORDER BY c.id
+    LIMIT sqlc.arg(max_rows)
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
+-- name: MarkDeliveryAttempting :execrows
+UPDATE notification_deliveries
+SET status = 'attempting'
+WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status = 'pending';
+
+-- name: ReleaseDelivery :execrows
+-- Hands back a reserved row that was not sent, with the attempt that its
+-- reservation counted, due again after delay_seconds.
+UPDATE notification_deliveries
+SET reserved_by = NULL,
+    reserved_until = NULL,
+    attempts = attempts - 1,
+    next_attempt_at = now() + make_interval(secs => sqlc.arg(delay_seconds)::double precision)
+WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status = 'pending';
+
+-- name: CancelDeliveries :execrows
+-- Ends the pending rows of one producer ref unsent. The raised token keeps a
+-- drain that reserved one from sending an email or writing an outcome.
+UPDATE notification_deliveries
+SET status = 'failed',
+    reserved_token = reserved_token + 1,
+    reserved_by = NULL,
+    reserved_until = NULL,
+    last_error = sqlc.arg(last_error)
+WHERE producer = sqlc.arg(producer) AND producer_ref = sqlc.arg(producer_ref) AND status = 'pending';
+
+-- name: FinishDelivery :execrows
+-- Writes one attempt's outcome while the reservation is current. A pending
+-- outcome is due again after retry_seconds.
+UPDATE notification_deliveries
+SET status = sqlc.arg(status),
+    next_attempt_at = now() + make_interval(secs => sqlc.arg(retry_seconds)::double precision),
+    last_error = sqlc.narg(last_error),
+    sent_at = CASE WHEN sqlc.arg(status)::text = 'sent' THEN now() ELSE sent_at END,
+    reserved_by = NULL,
+    reserved_until = NULL
+WHERE id = sqlc.arg(id) AND reserved_token = sqlc.arg(reserved_token) AND status IN ('pending', 'attempting');
+
+-- name: PruneDeliveries :execrows
+DELETE FROM notification_deliveries
+WHERE status IN ('sent', 'failed', 'unknown')
+  AND created_at < now() - make_interval(secs => sqlc.arg(age_seconds)::double precision);
+
+-- name: RecordDestinationDelivery :exec
+UPDATE notification_destinations
+SET last_delivery_at = now(),
+    last_delivery_status = sqlc.arg(status),
+    last_delivery_error = sqlc.narg(last_error)
+WHERE id = sqlc.arg(id);
+
+-- name: GetDelivery :one
+SELECT * FROM notification_deliveries WHERE id = $1;
+
+-- name: ListDeliverySummaries :many
+SELECT n.producer_ref, n.destination_id, d.name AS destination_name, d.type AS destination_type,
+       n.recipient, n.event, n.status, n.attempts, n.last_error, n.sent_at, n.created_at
+FROM notification_deliveries n
+JOIN notification_destinations d ON d.id = n.destination_id
+WHERE n.producer = sqlc.arg(producer) AND n.producer_ref = ANY(sqlc.arg(refs)::text[])
+ORDER BY n.id;

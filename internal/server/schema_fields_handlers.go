@@ -155,6 +155,9 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 		if datasource.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 		}
+		if _, ok := errors.AsType[*datasource.UpstreamError](err); ok {
+			return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
+		}
 		s.log.Error("failed to get field values", "error", err, "source_id", sourceID, "field", fieldName)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 	}
@@ -254,6 +257,9 @@ func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 		}
 		if datasource.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
+		}
+		if _, ok := errors.AsType[*datasource.UpstreamError](err); ok {
+			return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
 		}
 		s.log.Error("failed to get field values", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)

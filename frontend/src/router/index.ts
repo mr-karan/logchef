@@ -103,6 +103,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "routes.createAlert", palette: { icon: "newAlert" } },
       },
       {
+        path: "alerts/silences",
+        name: "AlertSilences",
+        component: lazy("AlertSilences", () => import("@/views/alerts/AlertSilences.vue")),
+        meta: { title: "routes.alertSilences", palette: { icon: "silences", contextual: true } },
+      },
+      {
+        path: "alerts/destinations",
+        name: "NotificationDestinations",
+        component: lazy("NotificationDestinations", () => import("@/views/alerts/NotificationDestinations.vue")),
+        meta: { title: "routes.alertDestinations", palette: { icon: "destinations" } },
+      },
+      {
         path: "alerts/:alertID",
         name: "AlertDetail",
         component: lazy("AlertDetail", () => import("@/views/alerts/AlertDetail.vue")),
@@ -137,6 +149,23 @@ const routes: RouteRecordRaw[] = [
         name: "DashboardView",
         component: lazy("DashboardView", () => import("@/views/dashboards/DashboardView.vue")),
         meta: { title: "routes.dashboard" },
+      },
+    ],
+  },
+
+  // Scheduled reports (RFC 0008). /reports/:id opens a report from the link
+  // in its email.
+  {
+    path: "/reports",
+    meta: {
+      requiresAuth: true,
+    },
+    children: [
+      {
+        path: ":id?",
+        name: "Reports",
+        component: lazy("ReportsList", () => import("@/views/reports/ReportsList.vue")),
+        meta: { title: "routes.reports" },
       },
     ],
   },
@@ -214,6 +243,12 @@ const routes: RouteRecordRaw[] = [
         name: "AdminQueryActivity",
         component: lazy("AdminQueryActivity", () => import("@/views/admin/QueryActivity.vue")),
         meta: { title: "routes.queryActivity", requiresAdmin: true, palette: { icon: "queryActivity" } },
+      },
+      {
+        path: "audit-log",
+        name: "AdminAuditLog",
+        component: lazy("AdminAuditLog", () => import("@/views/admin/AuditLog.vue")),
+        meta: { title: "routes.auditLog", requiresAdmin: true, palette: { icon: "auditLog" } },
       },
     ],
   },

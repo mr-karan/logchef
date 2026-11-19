@@ -5,7 +5,7 @@ import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { PageHeader, LoadingState } from '@/components/layout'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { Pencil, Eye, EyeOff, Save, X, Mail, Webhook, Loader2 } from 'lucide-vue-next'
+import { Pencil, Eye, EyeOff, Save, X, Mail, Loader2 } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -32,13 +32,12 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
-import { useToast } from '@/composables/useToast'
 
-const { toast } = useToast()
 const { t } = useI18n()
 
 const authStore = useAuthStore()
@@ -50,7 +49,6 @@ const { isLoading } = storeToRefs(settingsStore)
 const showEditDialog = ref(false)
 const showDeleteDialog = ref(false)
 const showTestEmailDialog = ref(false)
-const showTestWebhookDialog = ref(false)
 const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
@@ -58,9 +56,7 @@ const showSensitiveValues = ref<Record<string, boolean>>({})
 // fall back to AI so an admin isn't landed on a hidden tab.
 const currentTab = ref(metaStore.alertsEnabled ? 'alerts' : 'ai')
 const testEmailRecipient = ref('')
-const testWebhookUrl = ref('')
 const isTestingEmail = ref(false)
-const isTestingWebhook = ref(false)
 
 const editForm = ref<UpdateSettingRequest>({
   value: '',
@@ -71,9 +67,16 @@ const editForm = ref<UpdateSettingRequest>({
 })
 
 const alertsSettings = computed(() => settingsStore.getSettingsByCategory('alerts'))
-const aiSettings = computed(() => settingsStore.getSettingsByCategory('ai'))
-const authSettings = computed(() => settingsStore.getSettingsByCategory('auth'))
-const serverSettings = computed(() => settingsStore.getSettingsByCategory('server'))
+// Alerts has its own tab, with the test email action.
+const tableCategories = ['ai', 'auth', 'server', 'reports'] as const
+
+// With external recipients on and no domain listed, no address passes.
+const externalWithoutDomains = computed(() => {
+  const reports = settingsStore.getSettingsByCategory('reports')
+  const value = (key: string) => reports.find((s) => s.key === key)?.value ?? ''
+  // The server reads the flag with Go's ParseBool.
+  return ['1', 't', 'true'].includes(value('reports.external_recipients').trim().toLowerCase()) && value('reports.allowed_email_domains').trim() === ''
+})
 
 const loadSettings = async () => {
   await settingsStore.loadSettings()
@@ -136,6 +139,8 @@ const getCategoryDescription = (category: string) => {
       return t('admin.categoryAuth')
     case 'server':
       return t('admin.categoryServer')
+    case 'reports':
+      return t('admin.categoryReports')
     default:
       return ''
   }
@@ -158,11 +163,6 @@ const openTestEmailDialog = () => {
   showTestEmailDialog.value = true
 }
 
-const openTestWebhookDialog = () => {
-  testWebhookUrl.value = ''
-  showTestWebhookDialog.value = true
-}
-
 const handleTestEmail = async () => {
   isTestingEmail.value = true
   try {
@@ -172,22 +172,6 @@ const handleTestEmail = async () => {
     }
   } finally {
     isTestingEmail.value = false
-  }
-}
-
-const handleTestWebhook = async () => {
-  if (!testWebhookUrl.value.trim()) {
-    toast({ title: t('admin.webhookURLRequired'), variant: 'destructive' })
-    return
-  }
-  isTestingWebhook.value = true
-  try {
-    const result = await settingsStore.testWebhook(testWebhookUrl.value)
-    if (result?.success) {
-      showTestWebhookDialog.value = false
-    }
-  } finally {
-    isTestingWebhook.value = false
   }
 }
 
@@ -207,6 +191,7 @@ onMounted(() => {
             <TabsTrigger value="ai">{{ t('admin.ai') }}</TabsTrigger>
             <TabsTrigger value="auth">{{ t('sources.authentication') }}</TabsTrigger>
             <TabsTrigger value="server">{{ t('admin.server') }}</TabsTrigger>
+            <TabsTrigger value="reports">{{ t('routes.reports') }}</TabsTrigger>
           </TabsList>
 
           <!-- Alerts Tab -->
@@ -219,10 +204,6 @@ onMounted(() => {
                 <Button variant="outline" size="sm" @click="openTestEmailDialog">
                   <Mail class="mr-2 h-4 w-4" />
                   {{ t('admin.testEmail') }}
-                </Button>
-                <Button variant="outline" size="sm" @click="openTestWebhookDialog">
-                  <Webhook class="mr-2 h-4 w-4" />
-                  {{ t('admin.testWebhook') }}
                 </Button>
               </div>
             </div>
@@ -273,11 +254,13 @@ onMounted(() => {
             </div>
           </TabsContent>
 
-          <!-- AI Tab -->
-          <TabsContent value="ai" class="space-y-4">
+          <TabsContent v-for="category in tableCategories" :key="category" :value="category" class="space-y-4">
             <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('ai') }}
+              {{ getCategoryDescription(category) }}
             </div>
+            <Alert v-if="category === 'reports' && externalWithoutDomains" data-testid="external-no-domains">
+              <AlertDescription>{{ t('admin.externalRecipientsNoDomains') }}</AlertDescription>
+            </Alert>
             <div class="rounded-md border">
               <Table>
                 <TableHeader>
@@ -290,111 +273,7 @@ onMounted(() => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow v-for="setting in aiSettings" :key="setting.key">
-                    <TableCell class="font-medium">{{ formatKey(setting.key) }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2">
-                        <span class="font-mono text-sm">{{ getDisplayValue(setting) }}</span>
-                        <Button
-                          v-if="setting.is_sensitive"
-                          variant="ghost"
-                          size="icon"
-                          class="h-6 w-6"
-                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
-                          @click="toggleShowValue(setting.key)"
-                        >
-                          <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
-                          <EyeOff v-else class="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <code class="text-xs bg-muted px-1 py-0.5 rounded">{{ setting.value_type }}</code>
-                    </TableCell>
-                    <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2 justify-end">
-                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
-                          <Pencil class="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-
-          <!-- Auth Tab -->
-          <TabsContent value="auth" class="space-y-4">
-            <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('auth') }}
-            </div>
-            <div class="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{{ t('admin.setting') }}</TableHead>
-                    <TableHead>{{ t('ui.value2') }}</TableHead>
-                    <TableHead>{{ t('admin.type') }}</TableHead>
-                    <TableHead>{{ t('ui.description') }}</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="setting in authSettings" :key="setting.key">
-                    <TableCell class="font-medium">{{ formatKey(setting.key) }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2">
-                        <span class="font-mono text-sm">{{ getDisplayValue(setting) }}</span>
-                        <Button
-                          v-if="setting.is_sensitive"
-                          variant="ghost"
-                          size="icon"
-                          class="h-6 w-6"
-                          :aria-label="t(showSensitiveValues[setting.key] ? 'ui.hideSettingValue' : 'ui.showSettingValue', { key: setting.key })"
-                          @click="toggleShowValue(setting.key)"
-                        >
-                          <Eye v-if="!showSensitiveValues[setting.key]" class="h-3 w-3" />
-                          <EyeOff v-else class="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <code class="text-xs bg-muted px-1 py-0.5 rounded">{{ setting.value_type }}</code>
-                    </TableCell>
-                    <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
-                    <TableCell>
-                      <div class="flex items-center gap-2 justify-end">
-                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
-                          <Pencil class="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-
-          <!-- Server Tab -->
-          <TabsContent value="server" class="space-y-4">
-            <div class="text-sm text-muted-foreground">
-              {{ getCategoryDescription('server') }}
-            </div>
-            <div class="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{{ t('admin.setting') }}</TableHead>
-                    <TableHead>{{ t('ui.value2') }}</TableHead>
-                    <TableHead>{{ t('admin.type') }}</TableHead>
-                    <TableHead>{{ t('ui.description') }}</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="setting in serverSettings" :key="setting.key">
+                  <TableRow v-for="setting in settingsStore.getSettingsByCategory(category)" :key="setting.key">
                     <TableCell class="font-medium">{{ formatKey(setting.key) }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2">
@@ -544,40 +423,5 @@ onMounted(() => {
       </DialogContent>
     </Dialog>
 
-    <!-- Test Webhook Dialog -->
-    <Dialog :open="showTestWebhookDialog" @update:open="showTestWebhookDialog = false">
-      <DialogContent class="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>{{ t('admin.testWebhookConfiguration') }}</DialogTitle>
-          <DialogDescription>
-            {{ t('admin.testWebhookDescription') }}
-          </DialogDescription>
-        </DialogHeader>
-        <div class="grid gap-4 py-4">
-          <div class="grid gap-2">
-            <Label for="test-webhook">{{ t('admin.webhookURL') }}</Label>
-            <Input
-              id="test-webhook"
-              v-model="testWebhookUrl"
-              type="url"
-              placeholder="https://example.com/webhook"
-            />
-            <p class="text-xs text-muted-foreground">
-              {{ t('admin.webhookURLHint') }}
-            </p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showTestWebhookDialog = false" :disabled="isTestingWebhook">
-            {{ t('ui.cancel') }}
-          </Button>
-          <Button @click="handleTestWebhook" :disabled="isTestingWebhook || !testWebhookUrl.trim()">
-            <Loader2 v-if="isTestingWebhook" class="mr-2 h-4 w-4 animate-spin" />
-            <Webhook v-else class="mr-2 h-4 w-4" />
-            {{ t('admin.sendTestWebhook') }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>

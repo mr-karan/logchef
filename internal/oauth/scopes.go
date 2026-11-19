@@ -9,7 +9,8 @@ import (
 
 // ReadScopes are the only resource scopes an OAuth client can obtain, in the
 // order the consent screen shows them. OAuth never grants write, admin or
-// token scopes.
+// token scopes. Access tokens encode scopes by position (scopeMask), so a new
+// scope goes at the end and no entry moves.
 var ReadScopes = []models.TokenScope{
 	models.TokenScopeProfileRead,
 	models.TokenScopeTeamsRead,
@@ -18,6 +19,7 @@ var ReadScopes = []models.TokenScope{
 	models.TokenScopeSavedQueriesRead,
 	models.TokenScopeCollectionsRead,
 	models.TokenScopeAlertsRead,
+	models.TokenScopeSavedViewsRead,
 }
 
 // scopeOfflineAccess requests a refresh token. It is not a resource scope.
@@ -31,6 +33,7 @@ var scopeDescriptions = map[models.TokenScope]string{
 	models.TokenScopeSavedQueriesRead: "Read saved queries in sources you can access",
 	models.TokenScopeCollectionsRead:  "Read your collections",
 	models.TokenScopeAlertsRead:       "Read alerts and alert history in sources you can access",
+	models.TokenScopeSavedViewsRead:   "Read saved Explorer views in sources you can access",
 }
 
 var errInvalidScope = errors.New("scope must name only Logchef read scopes and offline_access")

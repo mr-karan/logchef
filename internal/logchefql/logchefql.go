@@ -13,8 +13,24 @@ import (
 	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
-// Translate parses a LogchefQL query and returns the SQL translation with metadata.
+// TranslateOptions opts a caller into query shapes that the default denies.
+type TranslateOptions struct {
+	// AllowAggregation accepts an aggregation pipe. Leave it false on a path
+	// that needs log rows, and the query fails with AGGREGATION_NOT_ALLOWED.
+	AllowAggregation bool
+	// Interval is the request interval, the window of a `by time` key that
+	// has none of its own.
+	Interval string
+}
+
+// Translate parses a LogchefQL query and returns the SQL translation with
+// metadata. It rejects an aggregation.
 func Translate(query string, schema *Schema) *TranslateResult {
+	return TranslateWithOptions(query, schema, TranslateOptions{})
+}
+
+// TranslateWithOptions is Translate with the opt-ins of opts.
+func TranslateWithOptions(query string, schema *Schema, opts TranslateOptions) *TranslateResult {
 	result := &TranslateResult{
 		Valid:      false,
 		Conditions: []FilterCondition{},
@@ -27,16 +43,19 @@ func Translate(query string, schema *Schema) *TranslateResult {
 		return result
 	}
 
-	pq, err := ParseLogchefQL(query)
-	if err != nil {
-		result.Error = convertParticipleError(query, err)
+	ast, perr := parseQuery(query)
+	if perr == nil {
+		perr = checkAggregationAllowed(ast, opts.AllowAggregation)
+	}
+	if perr != nil {
+		result.Error = perr
 		return result
 	}
 
-	return translateAST(ConvertToAST(pq), schema)
+	return translateAST(ast, schema, opts.Interval)
 }
 
-func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
+func translateAST(ast ASTNode, schema *Schema, interval string) *TranslateResult {
 	result := &TranslateResult{
 		Valid:      false,
 		Conditions: []FilterCondition{},
@@ -47,6 +66,14 @@ func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
 	if genErr != nil {
 		result.Error = genErr
 		return result
+	}
+	if node := AggregationOf(ast); node != nil {
+		agg, aggErr := generator.GenerateAggregation(node, interval)
+		if aggErr != nil {
+			result.Error = aggErr
+			return result
+		}
+		result.Aggregation = agg
 	}
 	selectClause := ""
 	if queryNode, ok := ast.(*QueryNode); ok && len(queryNode.Select) > 0 {
@@ -64,7 +91,8 @@ func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
 	return result
 }
 
-// Validate checks if a LogchefQL query is syntactically valid.
+// Validate checks the syntax of a LogchefQL query and the rules of its
+// aggregation. It knows no source and applies no deny rule.
 func Validate(query string) *ValidateResult {
 	result := &ValidateResult{Valid: false}
 
@@ -73,9 +101,8 @@ func Validate(query string) *ValidateResult {
 		return result
 	}
 
-	_, err := ParseLogchefQL(query)
-	if err != nil {
-		result.Error = convertParticipleError(query, err)
+	if _, perr := parseQuery(query); perr != nil {
+		result.Error = perr
 		return result
 	}
 
@@ -143,6 +170,14 @@ var expectedDescriptions = map[string]string{
 	"<rparen>":     "a closing )",
 	"<lparen>":     "an opening (",
 	"<ident>":      "a field name",
+	"PAggregate":   "a field name",
+	"PAggItem":     "a function such as count()",
+	"PAlias":       "a name",
+	"PGroupKey":    "a field name or time",
+	"PWindow":      "a window such as 5m",
+	"PWindowUnit":  "a window such as 5m",
+	"PSort":        "a column name",
+	"PLimit":       "a number",
 }
 
 var expectedPattern = regexp.MustCompile(`\(expected (.+)\)$`)
@@ -180,8 +215,27 @@ func describeUnexpectedToken(query string, u *participle.UnexpectedTokenError) s
 	return "expected " + expected + after + found
 }
 
+// describeExpected names what the grammar expected. Participle reports the
+// rest of a sequence too, as in "PGroupKey (<comma> PGroupKey)*", so when the
+// whole text does not map, only its first element is named: a single node,
+// or the alternatives of a leading group.
 func describeExpected(names string) string {
-	parts := strings.Fields(names)
+	if words := describeExpectedNames(strings.Fields(names)); words != "" {
+		return words
+	}
+	names = strings.TrimSpace(names)
+	if rest, ok := strings.CutPrefix(names, "("); ok {
+		group, _, found := strings.Cut(rest, ")")
+		if !found {
+			return ""
+		}
+		return describeExpectedNames(strings.FieldsFunc(group, func(r rune) bool { return r == '|' || r == ' ' }))
+	}
+	first, _, _ := strings.Cut(names, " ")
+	return describeExpectedNames([]string{first})
+}
+
+func describeExpectedNames(parts []string) string {
 	words := make([]string, 0, len(parts))
 	for _, part := range parts {
 		word, ok := expectedDescriptions[part]
@@ -267,6 +321,62 @@ func extractConditionsFromAST(node ASTNode) []FilterCondition {
 
 	walk(node)
 	return conditions
+}
+
+// FilterItem is one comparison of a query's filter, without its value. Base
+// and Path keep a nested field's column and path segments apart.
+type FilterItem struct {
+	Base     string
+	Path     []string
+	Operator Operator
+	// Null is true when the value is the bare NULL.
+	Null bool
+	// Disjunct is true when the comparison sits under an OR whose branches
+	// compare more than one field, so no single field narrows the result.
+	Disjunct bool
+}
+
+// FilterItems returns the comparisons of a parsed query's filter. It reads
+// the WHERE part only and ignores any pipe.
+func FilterItems(ast ASTNode) []FilterItem {
+	switch v := ast.(type) {
+	case *ExpressionNode:
+		item := FilterItem{Base: getFieldName(v.Key), Operator: v.Operator, Null: v.Value == nil}
+		if nested, ok := v.Key.(NestedField); ok && len(nested.Path) > 0 {
+			item.Base, item.Path = nested.Base, nested.Path
+		}
+		return []FilterItem{item}
+	case *LogicalNode:
+		items := filterItemsOf(v.Children)
+		if v.Operator == BoolOr && !sameField(items) {
+			for i := range items {
+				items[i].Disjunct = true
+			}
+		}
+		return items
+	case *GroupNode:
+		return filterItemsOf(v.Children)
+	case *QueryNode:
+		return FilterItems(v.Where)
+	}
+	return nil
+}
+
+func filterItemsOf(nodes []ASTNode) []FilterItem {
+	var items []FilterItem
+	for _, node := range nodes {
+		items = append(items, FilterItems(node)...)
+	}
+	return items
+}
+
+func sameField(items []FilterItem) bool {
+	for _, item := range items {
+		if item.Base != items[0].Base || !slices.Equal(item.Path, items[0].Path) {
+			return false
+		}
+	}
+	return true
 }
 
 func getFieldName(key any) string {
@@ -389,11 +499,50 @@ func BuildFullQueryFromTranslation(params QueryBuildParams, translateResult *Tra
 	return buildFullQueryFromTranslation(params, start, end, translateResult)
 }
 
+// BuildAggregationQuery writes the aggregated SELECT of a translated query
+// with timeCondition as its time filter. An alert passes the
+// {{__time_filter}} macro, which its renderer expands for each evaluation
+// window. A time key needs a range to check its buckets, so it is rejected.
+func BuildAggregationQuery(translateResult *TranslateResult, tableName, timestampField, timeCondition string) (string, error) {
+	agg := translateResult.Aggregation
+	if agg == nil {
+		return "", &ParseError{Code: ErrInvalidAggregation, Message: "the query has no aggregation, such as | count()"}
+	}
+	if slices.ContainsFunc(agg.node.By, func(key GroupKey) bool { return key.Time }) {
+		return "", &ParseError{Code: ErrInvalidAggregation, Message: "a time key needs a time range. Remove time from by"}
+	}
+	if err := validateTableName(tableName); err != nil {
+		return "", err
+	}
+	if err := validateIdentifier(timestampField, "timestamp field"); err != nil {
+		return "", err
+	}
+	var query strings.Builder
+	params := QueryBuildParams{TableName: tableName, TimestampField: timestampField}
+	if err := agg.writeQuery(&query, params, timeCondition, translateResult.SQL); err != nil {
+		return "", err
+	}
+	return query.String(), nil
+}
+
 // timeBound is one end of the query time range: a SQL timestamp and the
 // timezone ClickHouse reads it in.
 type timeBound struct {
 	value string
 	zone  string
+}
+
+// time is the instant of the bound.
+func (b timeBound) time() (time.Time, *ParseError) {
+	location, err := time.LoadLocation(b.zone)
+	if err != nil {
+		return time.Time{}, validateTimezone(b.zone)
+	}
+	parsed, err := time.ParseInLocation("2006-01-02 15:04:05.999999999", b.value, location)
+	if err != nil {
+		return time.Time{}, validateTimeFormat(b.value)
+	}
+	return parsed, nil
 }
 
 // prepareTimeRange validates params and returns the start and end bounds.
@@ -442,6 +591,16 @@ func parseTimeBound(value, timezone string) (timeBound, *ParseError) {
 func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound, translateResult *TranslateResult) (string, error) {
 	var query strings.Builder
 
+	if agg := translateResult.Aggregation; agg != nil {
+		if err := agg.checkBuckets(start, end); err != nil {
+			return "", err
+		}
+		if err := agg.writeQuery(&query, params, timeFilter(params, start, end), translateResult.SQL); err != nil {
+			return "", err
+		}
+		return query.String(), nil
+	}
+
 	query.WriteString("SELECT ")
 	if translateResult.SelectClause != "" {
 		timestampInSelect := strings.Contains(translateResult.SelectClause, queryescape.ClickHouseIdentifier(params.TimestampField))
@@ -461,12 +620,7 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 
 	// WHERE clause with time range
 	query.WriteString("WHERE ")
-	query.WriteString(queryescape.ClickHouseIdentifier(params.TimestampField))
-	if strings.Contains(start.value, ".") || strings.Contains(end.value, ".") {
-		fmt.Fprintf(&query, " BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", start.value, start.zone, end.value, end.zone)
-	} else {
-		fmt.Fprintf(&query, " BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", start.value, start.zone, end.value, end.zone)
-	}
+	query.WriteString(timeFilter(params, start, end))
 
 	// Add LogchefQL conditions if present
 	if translateResult.SQL != "" {
@@ -487,6 +641,15 @@ func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound
 	}
 
 	return query.String(), nil
+}
+
+// timeFilter is the condition that keeps the rows of the time range.
+func timeFilter(params QueryBuildParams, start, end timeBound) string {
+	column := queryescape.ClickHouseIdentifier(params.TimestampField)
+	if strings.Contains(start.value, ".") || strings.Contains(end.value, ".") {
+		return fmt.Sprintf("%s BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", column, start.value, start.zone, end.value, end.zone)
+	}
+	return fmt.Sprintf("%s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", column, start.value, start.zone, end.value, end.zone)
 }
 
 // QueryBuildParams contains parameters for building a full SQL query

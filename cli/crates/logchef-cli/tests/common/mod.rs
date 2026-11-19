@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PAT: &str = "logchef_test_pat";
 pub const CODE: &str = "test-code";
-pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read";
+pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read";
 
 /// An isolated HOME with a fake browser launcher on PATH. Any attempt to open
 /// a browser writes to `browser_log`.
@@ -238,6 +238,10 @@ pub struct ServerState {
     pub bearer_seen: Vec<String>,
     /// Advertised as `ui_url` in /api/v1/meta when set.
     pub ui_url: Option<String>,
+    /// Replaces the advertised `scopes_supported`, to act as an older server.
+    pub scopes_supported: Option<Vec<String>>,
+    /// The response of the saved views list on source 2 of team 1.
+    pub saved_views: Option<serde_json::Value>,
     pub saved_query: serde_json::Value,
     pub native_requests: Vec<serde_json::Value>,
     pub translate_requests: Vec<serde_json::Value>,
@@ -246,6 +250,13 @@ pub struct ServerState {
     pub source_type: Option<String>,
     /// The `stats` of a logs/query response on source 2 of team 1.
     pub query_stats: serde_json::Value,
+    /// Replaces the status and body of the next query responses on source 2.
+    pub query_response: Option<(u16, serde_json::Value)>,
+    /// The `data` of each translate response in turn. When empty, a valid
+    /// translation with `full_sql`.
+    pub translate_responses: std::collections::VecDeque<serde_json::Value>,
+    /// The status and body of the live-tail endpoint on source 2.
+    pub tail_response: Option<(u16, serde_json::Value)>,
 }
 
 pub struct FakeServer {
@@ -416,6 +427,10 @@ fn route(
             )
         }
 
+        ("GET", "/api/v1/teams/1/sources/2/views") => (
+            200,
+            serde_json::json!({"status": "success", "data": state.lock().unwrap().saved_views.clone()}),
+        ),
         ("GET", "/api/v1/saved-queries") => (
             200,
             serde_json::json!({"status": "success", "data": [state.lock().unwrap().saved_query.clone()]}),
@@ -427,11 +442,22 @@ fn route(
         }
         ("POST", "/api/v1/teams/1/sources/2/logchefql/translate") => {
             let body: serde_json::Value = serde_json::from_str(&req.body).unwrap();
-            state.lock().unwrap().translate_requests.push(body);
-            (
-                200,
-                serde_json::json!({"status":"success","data":{"valid":true,"full_sql":"SELECT translated"}}),
-            )
+            let mut s = state.lock().unwrap();
+            s.translate_requests.push(body);
+            let data = s.translate_responses.pop_front().unwrap_or_else(
+                || serde_json::json!({"valid":true,"full_sql":"SELECT translated"}),
+            );
+            (200, serde_json::json!({"status":"success","data":data}))
+        }
+        ("POST", "/api/v1/teams/1/sources/2/logchefql/validate") => (
+            200,
+            serde_json::json!({"status":"success","data":{"valid":true}}),
+        ),
+        ("GET", "/api/v1/teams/1/sources/2/logs/tail") => {
+            state.lock().unwrap().tail_response.clone().unwrap_or((
+                404,
+                serde_json::json!({"status": "error", "message": "not found"}),
+            ))
         }
         (
             "POST",
@@ -440,6 +466,9 @@ fn route(
             let mut s = state.lock().unwrap();
             s.native_requests
                 .push(serde_json::from_str(&req.body).unwrap());
+            if let Some(response) = &s.query_response {
+                return response.clone();
+            }
             (
                 200,
                 serde_json::json!({"status": "success", "data": {
@@ -462,6 +491,9 @@ fn route(
         ("GET", "/.well-known/oauth-authorization-server") => (
             200,
             serde_json::json!({
+                "scopes_supported": state.lock().unwrap().scopes_supported.clone().unwrap_or_else(
+                    || format!("{READ_SCOPES} offline_access").split(' ').map(String::from).collect()
+                ),
                 "issuer": base,
                 "authorization_endpoint": format!("{base}/oauth/authorize"),
                 "token_endpoint": format!("{base}/oauth/token"),

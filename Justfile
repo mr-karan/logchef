@@ -180,6 +180,14 @@ dev-setup:
       fi
       sleep 1
     done
+    echo "Waiting for Loki..."
+    for i in {1..60}; do
+      if curl -fsS http://localhost:3100/ready > /dev/null 2>&1; then
+        echo "Loki ready"
+        break
+      fi
+      sleep 1
+    done
     cd ..
     just dev-init-tables
     echo ""
@@ -210,6 +218,19 @@ dev-reset:
       fi
       sleep 1
     done
+    echo "Resetting Loki data..."
+    # The Loki image has no shell either, so recreate its data volume.
+    (cd dev && docker compose rm --stop --force loki-local > /dev/null)
+    docker volume rm dev_loki-data > /dev/null
+    (cd dev && docker compose up -d loki-local > /dev/null)
+    echo "Waiting for Loki to come back..."
+    for i in {1..60}; do
+      if curl -fsS http://localhost:3100/ready > /dev/null 2>&1; then
+        echo "Loki ready"
+        break
+      fi
+      sleep 1
+    done
     echo "Resetting SQLite data..."
     rm -f local.db local.db-shm local.db-wal
     echo "Re-seeding requires backend to create DB first."
@@ -226,12 +247,13 @@ dev-ingest-logs duration="60":
     #!/usr/bin/env bash
     echo "Ingesting logs for {{duration}}s..."
     cd dev
-    mkdir -p /tmp/logchef-vector-http /tmp/logchef-vector-syslog /tmp/logchef-vector-victorialogs
+    mkdir -p /tmp/logchef-vector-http /tmp/logchef-vector-syslog /tmp/logchef-vector-victorialogs /tmp/logchef-vector-loki
     vector -c victorialogs.toml & pid0=$!
     vector -c http.toml & pid1=$!
     vector -c syslog.toml & pid2=$!
+    vector -c loki.toml & pid3=$!
     sleep {{duration}}
-    kill $pid0 $pid1 $pid2 2>/dev/null
+    kill $pid0 $pid1 $pid2 $pid3 2>/dev/null
     echo "Done."
 
 # Wide-schema VictoriaLogs fixtures for Explorer performance work

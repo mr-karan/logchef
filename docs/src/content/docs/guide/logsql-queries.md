@@ -1,5 +1,8 @@
 ---
 title: LogsQL Queries
+head:
+  - tag: title
+    content: "VictoriaLogs LogsQL Queries | Logchef"
 description: Use native LogsQL in Logchef against VictoriaLogs — common query patterns, how LogchefQL compiles to LogsQL, and tenancy/scope behavior.
 ---
 
@@ -95,11 +98,13 @@ For a VictoriaLogs source, every LogchefQL query is translated into LogsQL befor
 | `path !~ "internal"` | `NOT path:~"(?i)internal"` |
 | `service = "api" and env = "prod"` | `(service:="api") AND (env:="prod")` |
 | `service = "api" and status_code >= 500 \| _msg service` | `(service:="api") AND (status_code:>=500) \| fields _time, _msg, service` |
+| `level=error \| count() by service` | `level:="error" \| stats by (service) count() as __lc_v0 \| sort by (__lc_v0 desc, service)` |
 
 A few details worth knowing:
 
 - **`~` and `!~` are literal, case-insensitive substring matches, not arbitrary regex.** LogchefQL escapes any regex-special characters in your search text and wraps it in `(?i)`, so `body ~ "user[1]"` looks for the literal text `user[1]`, not a regex character class. If you need a real regex, write it directly in native LogsQL.
 - **The pipe operator (`field1 field2 ...`) becomes a LogsQL `fields` pipe**, and the source's configured timestamp field is always included first even if you didn't ask for it, so timestamps never silently disappear from projected results.
+- **An [aggregation pipe](/guide/aggregations) becomes a `stats` pipe.** Values get internal names such as `__lc_v0`, and Logchef writes the result under the names of the LogchefQL query.
 - **`null` comparisons aren't supported** for VictoriaLogs — LogchefQL's translator rejects them rather than guessing at LogsQL's handling of missing fields.
 
 ## Tenancy and scope behavior

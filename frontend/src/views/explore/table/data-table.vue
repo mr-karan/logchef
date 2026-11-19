@@ -10,12 +10,12 @@ import {
     type ExpandedState,
     type PaginationState,
     type ColumnResizeMode,
-    type ColumnFiltersState,
 } from '@tanstack/vue-table'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useLocalStorage } from '@vueuse/core'
 import { useColumnState } from '@/composables/useColumnState'
+import { sortingForResult, tableLayoutToDefinition, type SavedViewLayout, type TableViewSeed } from '@/lib/savedViewLayout'
 import { Button } from '@/components/ui/button'
 import { GripVertical, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -28,14 +28,14 @@ import { getDefaultColumnOrder } from './defaultColumnOrder'
 import { createContentMeasurer, waitForContentFonts } from './contentSizing'
 import type { ColumnSizingState } from '@tanstack/vue-table'
 import { getVisibleColumnRange } from './columnVirtualization'
-import type { Source } from '@/api/sources'
-import { hasSourceCapability } from '@/lib/queryMetadata'
+import { logContextState, rowStreamLabels, type LogContextSource } from '@/lib/logContext'
 import TableControls from './TableControls.vue'
 import ColumnFilterButton from './ColumnFilterButton.vue'
 import CellContextMenu, { type CellMenuTarget } from './CellContextMenu.vue'
 import ExpandedRowFields from './ExpandedRowFields.vue'
 import { copyText } from '@/utils/clipboard'
 import type { FilterOperator } from '@/utils/logchefql/filters'
+import { isNumericFieldType } from '@/utils/logchefql-autocomplete'
 import { usePreferencesStore } from '@/stores/preferences'
 import { isPrimaryMessageField } from './fieldSemantics'
 
@@ -46,13 +46,16 @@ interface Props {
     data: Record<string, any>[]
     sourceId: string
     teamId: number | null
-    source?: Pick<Source, 'source_type' | 'capabilities'> | null
+    viewSeed?: TableViewSeed | null // The saved view the layout and sort start from
+    layoutResetToken?: number // A change discards the view's working copy and seeds from the view again
+    source?: LogContextSource | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
     activeMode?: 'logchefql' | 'clickhouse-sql' | 'native' // Current query mode
+    filteredColumns?: string[] // Columns with a top-level condition in the LogchefQL query
     isLoading?: boolean // Prop to indicate loading state
 }
 
@@ -62,6 +65,7 @@ const props = withDefaults(defineProps<Props>(), {
     queryFields: () => [],
     regexHighlights: () => ({}),
     activeMode: 'logchefql',
+    filteredColumns: () => [],
     isLoading: false // Default isLoading to false
 })
 
@@ -75,9 +79,7 @@ const severityFieldName = computed(() => props.severityField || 'severity_text')
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
-// Context modal state (only for sources advertising the log_context capability;
-// the backend 400s otherwise, e.g. VictoriaLogs)
-const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
+const logContext = computed(() => logContextState(props.source, props.activeMode))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 
@@ -92,10 +94,6 @@ const pagination = ref<PaginationState>({
     pageSize: 50,
 })
 const globalFilter = ref('')
-// Column filters are local to this table (client-side filtering of the
-// currently loaded result page only) and reset whenever a new query runs -
-// see the watch on props.data below. They are intentionally not persisted.
-const columnFilters = ref<ColumnFiltersState>([])
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const preferencesStore = usePreferencesStore()
@@ -119,7 +117,7 @@ const tableColumns = computed<CustomColumnDef[]>(() => props.columns.length ? cr
     props.regexHighlights,
 ) : [])
 
-const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults } = useColumnState({
+const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults, workingLayout } = useColumnState({
     columns: tableColumns,
     defaultOrder: () => props.data.length ? getDefaultColumnOrder(tableColumns.value, props.data) : null,
     teamId: () => props.teamId,
@@ -127,16 +125,9 @@ const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableS
     source: () => props.source,
     timestampField: timestampFieldName,
     severityField: severityFieldName,
+    seed: () => props.viewSeed,
+    sorting,
 })
-
-// Reset column filters whenever a new query runs. A new query replaces
-// props.data with a fresh array reference, so any change here means the
-// previously loaded result page is gone and stale filters no longer apply.
-watch(() => props.data, () => {
-    if (columnFilters.value.length > 0) {
-        columnFilters.value = [];
-    }
-});
 
 function cellTitle(value: unknown): string {
     const text = value === null || value === undefined ? '' : String(value)
@@ -251,6 +242,12 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
     window.addEventListener('touchcancel', onEnd, { once: true });
 }
 
+// With a view, the sort skips entries on columns this result lacks; the
+// working copy keeps them.
+const effectiveSorting = computed(() => props.viewSeed
+    ? sortingForResult(sorting.value, tableColumns.value.map(column => column.id).filter((id): id is string => Boolean(id)), timestampFieldName.value)
+    : sorting.value)
+
 // Initialize table
 const table = useTable({
     features: logTableFeatures,
@@ -263,7 +260,7 @@ const table = useTable({
     },
     state: {
         get sorting() {
-            return sorting.value
+            return effectiveSorting.value
         },
         get expanded() {
             return expanded.value
@@ -277,9 +274,6 @@ const table = useTable({
         get globalFilter() {
             return globalFilter.value
         },
-        get columnFilters() {
-            return columnFilters.value
-        },
         get columnSizing() {
             return effectiveColumnSizing.value
         },
@@ -290,12 +284,13 @@ const table = useTable({
     },
     // Keep columnOrder handling separate using onColumnOrderChange
     // Do NOT set initialState.columnOrder here as it might conflict with the reactive ref
-    onSortingChange: updaterOrValue => valueUpdater(updaterOrValue, sorting),
+    onSortingChange: updaterOrValue => {
+        sorting.value = typeof updaterOrValue === 'function' ? updaterOrValue(effectiveSorting.value) : updaterOrValue
+    },
     onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-    onColumnFiltersChange: updaterOrValue => valueUpdater(updaterOrValue, columnFilters),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
     onColumnOrderChange: setColumnOrder,
     getRowCanExpand: () => true,
@@ -479,8 +474,10 @@ const copyValue = (value: unknown) => {
 
 // Initialize default sorting on mount
 onMounted(() => {
-    // Initialize default sort by timestamp if available
-    if (timestampFieldName.value) {
+    // Initialize default sort by timestamp if available. With a view, the
+    // column state already restored or seeded the sort, and an empty one is
+    // the user's choice.
+    if (timestampFieldName.value && !props.viewSeed) {
         // Check if the column exists in the initial order derived from state/defaults
         if (columnOrder.value.includes(timestampFieldName.value)) {
             if (!sorting.value || sorting.value.length === 0) {
@@ -574,13 +571,42 @@ const onDragEnd = () => { // No event parameter
 const emit = defineEmits<{
     (e: 'drill-down', value: { column: string, value: unknown, operator: FilterOperator }): void
     (e: 'add-column', value: { field: string, shownColumns: string[] }): void
+    (e: 'apply-column-filter', value: { column: string, operator: FilterOperator, value: string | number }): void
+    (e: 'clear-column-filter', column: string): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
+    (e: 'working-layout', value: SavedViewLayout): void
+    (e: 'table-layout', value: SavedViewLayout): void
 }>();
+
+watch(workingLayout, layout => {
+    if (layout) emit('working-layout', layout)
+}, { deep: true, immediate: true })
+
+// With no view, the layout on screen is what Save as new view takes.
+const tableLayout = computed(() => props.viewSeed ? null : tableLayoutToDefinition({
+    columnOrder: columnOrder.value,
+    columnSizing: columnSizing.value,
+    columnVisibility: columnVisibility.value,
+}, sorting.value))
+
+watch(tableLayout, layout => {
+    if (layout) emit('table-layout', layout)
+}, { deep: true, immediate: true })
+
+watch(() => props.layoutResetToken, () => resetTableStateToDefaults())
 
 const handleDrillDown = (value: { column: string, value: unknown, operator: FilterOperator }) => {
     if (props.activeMode !== 'logchefql') return;
     emit('drill-down', value);
 };
+
+// Timestamps are filtered by the time picker, so they get no header filter.
+const columnFilterKind = (column: { id: string }): 'text' | 'number' | null => {
+    const info = props.columns.find(col => col.name === column.id)
+    const type = getColumnType(column)
+    if (!info || type === 'timestamp' || type === 'date') return null
+    return isNumericFieldType(info.type) ? 'number' : 'text'
+}
 
 const shownColumns = computed(() => visibleLeafColumns.value.map(column => column.id))
 
@@ -683,10 +709,15 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
-                                        <!-- Column Filter (client-side, filters the currently loaded page only) -->
-                                        <span v-if="header.column.getCanFilter()"
-                                            :class="header.column.getIsFiltered() ? 'ml-1 flex-shrink-0' : 'absolute right-5 top-1/2 -translate-y-1/2'">
-                                            <ColumnFilterButton :column="header.column" />
+                                        <!-- Column filter: adds a condition to the LogchefQL query -->
+                                        <span v-if="columnFilterKind(header.column)"
+                                            :class="filteredColumns.includes(header.column.id) ? 'ml-1 flex-shrink-0' : 'absolute right-5 top-1/2 -translate-y-1/2'">
+                                            <ColumnFilterButton :column="header.column.id"
+                                                :kind="columnFilterKind(header.column)!"
+                                                :active="filteredColumns.includes(header.column.id)"
+                                                :disabled="activeMode !== 'logchefql'"
+                                                @apply="emit('apply-column-filter', $event)"
+                                                @clear="emit('clear-column-filter', $event)" />
                                         </span>
 
                                         <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
@@ -774,11 +805,13 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                         {{ view === 'fields' ? t('explore.detailFields') : t('explore.detailJson') }}
                                                     </button>
                                                 </div>
-                                                <Button 
-                                                    v-if="supportsLogContext"
-                                                    variant="outline" 
-                                                    size="sm" 
+                                                <Button
+                                                    v-if="logContext !== 'none'"
+                                                    variant="outline"
+                                                    size="sm"
                                                     class="h-7 text-xs"
+                                                    :disabled="logContext === 'native-loki'"
+                                                    :title="logContext === 'native-loki' ? t('ui.contextNeedsLogchefQL') : undefined"
                                                     @click.stop="openContextModal(row.original)"
                                                 >
                                                     <Clock class="h-3 w-3 mr-1" />
@@ -817,6 +850,7 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
         :team-id="props.teamId ?? 0"
         :log="contextLog"
         :timestamp-field="timestampFieldName"
+        :stream-labels="rowStreamLabels(props.source, contextLog)"
         @update:is-open="showContextModal = $event"
     />
 </template>

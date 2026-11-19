@@ -1,0 +1,44 @@
+# Single-binary Loki for local development (RFC 0011). Filesystem storage,
+# TSDB index with schema v13. auth_enabled requires an X-Scope-OrgID header on
+# every request, so the dev source exercises the tenant field. The seed data
+# uses the tenant "dev".
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  allow_structured_metadata: true
+  # The histogram and alert units test metric queries through the query
+  # frontend's splitter, so keep Loki's default split explicit.
+  split_queries_by_interval: 1h
+
+pattern_ingester:
+  enabled: false
+
+analytics:
+  reporting_enabled: false

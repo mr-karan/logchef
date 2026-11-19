@@ -21,6 +21,7 @@ type TranslateRequest struct {
 	EndTime   string                    `json:"end_time"`   // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
 	Timezone  string                    `json:"timezone"`   // Optional. e.g., "UTC", "Asia/Kolkata" - required for full_sql
 	Limit     int                       `json:"limit"`      // Optional. e.g., 100 - defaults to 100
+	Interval  string                    `json:"interval"`   // Optional. The window of a `by time` key with none of its own
 	Variables []models.TemplateVariable `json:"variables,omitempty"`
 }
 
@@ -34,6 +35,7 @@ type TranslateResponse struct {
 	Error                  *logchefql.ParseError       `json:"error,omitempty"`
 	Conditions             []logchefql.FilterCondition `json:"conditions"`
 	FieldsUsed             []string                    `json:"fields_used"`
+	Aggregation            *logchefql.AggregationInfo  `json:"aggregation,omitempty"`
 }
 
 // ValidateRequest represents the request body for LogchefQL validation
@@ -70,6 +72,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		EndTime:   req.EndTime,
 		Timezone:  req.Timezone,
 		Limit:     req.Limit,
+		Interval:  req.Interval,
 	})
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, "Failed to translate query", "Query translation")
@@ -84,6 +87,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		Error:                  translation.Error,
 		Conditions:             translation.Conditions,
 		FieldsUsed:             translation.FieldsUsed,
+		Aggregation:            translation.Aggregation,
 	}
 
 	// Ensure conditions is never nil
@@ -184,12 +188,19 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
+	req.AllowAggregation = true
 
 	prepared, err := core.PrepareLogchefQLQuery(c.Context(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
 		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 	}
 	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
+	// ClickHouse bakes the time range into the SQL, so the start time for
+	// query history comes from the request.
+	historyStart, _, err := core.ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
+	if err != nil {
+		return s.sendQueryError(c, sourceID, &core.QueryRequestError{Message: err.Error()}, logchefQLQueryFailure, logchefQLQueryOperation)
+	}
 	executableQuery := compiled.Query
 	executableQueryLanguage := compiled.Language
 
@@ -202,7 +213,9 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
 	// key uses the finalized executable query (post-substitution + compilation);
 	// for VictoriaLogs the time range is passed separately and folded into the
-	// key, for ClickHouse it is already baked into the compiled SQL.
+	// key, for ClickHouse it is already baked into the compiled SQL. The result
+	// column names join the key, since two aggregations that differ only in an
+	// alias compile to one LogsQL text.
 	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
 	cacheable = cacheable && len(req.ExtraStreamFilters) == 0
 	var cacheKey [32]byte
@@ -215,6 +228,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 			EffTTLSeconds:    int64(effTTL / time.Second),
 			Language:         string(executableQueryLanguage),
 			FinalizedQuery:   executableQuery,
+			ResultColumns:    aggregationColumnNames(compiled.Aggregation),
 			CanonicalStart:   canonCacheTime(queryParams.StartTime),
 			CanonicalEnd:     canonCacheTime(queryParams.EndTime),
 			Timezone:         queryParams.Timezone,
@@ -237,6 +251,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 			generatedLanguage: executableQueryLanguage,
 			conditions:        compiled.Conditions,
 			fieldsUsed:        compiled.FieldsUsed,
+			aggregation:       compiled.Aggregation,
 		},
 		orderColumnsBySchema: true,
 		mode:                 "logchefql",
@@ -244,8 +259,23 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		requestedLimit:       queryParams.Limit,
 		historyQuery:         req.Query,
 		historyLanguage:      models.QueryLanguageLogchefQL,
+		historyStart:         historyStart,
+		class:                queryClassFor(req.Cache),
 		cacheable:            cacheable,
 		cacheKey:             cacheKey,
 		cacheTTL:             effTTL,
 	})
+}
+
+// aggregationColumnNames lists the output column names of an aggregated
+// query in result order, or nil for a query that returns log rows.
+func aggregationColumnNames(info *logchefql.AggregationInfo) []string {
+	if info == nil {
+		return nil
+	}
+	names := make([]string, len(info.Columns))
+	for i, col := range info.Columns {
+		names[i] = col.Name
+	}
+	return names
 }

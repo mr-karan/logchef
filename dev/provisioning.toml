@@ -43,10 +43,23 @@ description = "Local VictoriaLogs datasource for LogsQL and datasource UI testin
 [sources.connection]
 base_url = "http://127.0.0.1:9428"
 
+[[sources]]
+name = "Loki Demo"
+source_type = "loki"
+meta_ts_field = "_time"
+meta_severity_field = "level"
+description = "Local Loki datasource for LogQL testing (dev/ingest-loki.sh)"
+
+[sources.connection]
+base_url = "http://127.0.0.1:3100"
+tenant_id = "dev"
+selector = '{service_name=~".+"}'
+parser = "json"
+
 [[teams]]
 name = "Dev Team"
 description = "Local development team"
-sources = ["HTTP Access Logs", "Syslog Logs", "VictoriaLogs Demo"]
+sources = ["HTTP Access Logs", "Syslog Logs", "VictoriaLogs Demo", "Loki Demo"]
 members = [
   { email = "admin@logchef.internal", role = "admin" },
   { email = "demo@logchef.internal", role = "member" },

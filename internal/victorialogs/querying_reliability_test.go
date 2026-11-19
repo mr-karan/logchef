@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -199,6 +201,22 @@ func TestQueryLogsDefaultLimitAndWarnings(t *testing.T) {
 	}
 	if !hasWarning(result.Warnings, "LIMIT_APPLIED") {
 		t.Fatalf("expected LIMIT_APPLIED warning, got %+v", result.Warnings)
+	}
+
+	// An aggregated result reports a cut through stats.truncation only.
+	result, err = provider.QueryLogs(context.Background(), source, datasource.QueryRequest{
+		RawQuery:     "* | stats count() as __lc_v0",
+		DefaultLimit: 500,
+		MaxLimit:     100000,
+		Aggregation: &logchefql.AggregationInfo{Shape: logchefql.ShapeScalar, Columns: []logchefql.ResultColumn{
+			{Name: "count", Role: logchefql.RoleValue, Type: "UInt64", Source: "__lc_v0"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("QueryLogs (aggregated) returned error: %v", err)
+	}
+	if hasWarning(result.Warnings, "LIMIT_APPLIED") {
+		t.Fatalf("aggregated result has LIMIT_APPLIED: %+v", result.Warnings)
 	}
 
 	// Explicit limit above max -> capped.
@@ -457,6 +475,7 @@ func TestEvaluateAlertColumnsIncludeLabels(t *testing.T) {
 	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
 
 	result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+		At:    time.Now(),
 		Query: "* | stats count() as value",
 	})
 	if err != nil {
@@ -493,6 +512,7 @@ func TestEvaluateAlertExtractsSampleBeforeLabels(t *testing.T) {
 			provider := newTestProvider(server)
 			source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
 			result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+				At:    time.Now(),
 				Query: `level:="error" | stats count() as value`,
 			})
 			if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -95,7 +96,9 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	c.Status(fiber.StatusOK)
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
-	c.Set("Connection", "keep-alive")
+	// The disconnect watcher reads the connection, so no later request may
+	// use it.
+	c.RequestCtx().Response.SetConnectionClose()
 	c.Set("X-Accel-Buffering", "no") // disable proxy buffering so frames flush promptly
 	c.Set("X-LogChef-Query-ID", queryID)
 
@@ -109,10 +112,12 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	maxRowsPerSec := s.config.Tail.MaxRowsPerSec
 	log := s.log
 	email := user.Email
+	conn := c.RequestCtx().Conn()
 
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
+		defer watchDisconnect(conn, cancel)()
 
 		writeFrame := func(event string, data []byte) bool {
 			if event != "" {
@@ -234,6 +239,34 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	})
 
 	return nil
+}
+
+// watchDisconnect cancels a tail when its client closes the connection, so
+// the tail frees its slot at once and not at the next failed heartbeat write.
+// fasthttp has no per-request disconnect signal. An SSE client sends nothing
+// after its request, so a read on the connection returns only when the
+// connection closes. The returned stop ends the read and waits for it.
+func watchDisconnect(conn net.Conn, cancel context.CancelFunc) (stop func()) {
+	// fasthttp leaves the request's read deadline on the connection.
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		cancel()
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var buf [1]byte
+		for {
+			if _, err := conn.Read(buf[:]); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+	return func() {
+		_ = conn.SetReadDeadline(time.Now())
+		<-done
+	}
 }
 
 // resolveTailQuery turns the request's query/query_language into the provider's

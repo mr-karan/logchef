@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -30,19 +29,8 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// Process request
 		chainErr := c.Next()
 
-		// Capture after response is finalized (including error handler)
 		duration := time.Since(start)
-		status := c.Response().StatusCode()
-
-		// If the handler returned an error that Fiber's error handler processed,
-		// the status code is already set correctly on the response.
-		if chainErr != nil {
-			if e, ok := errors.AsType[*fiber.Error](chainErr); ok {
-				status = e.Code
-			} else if status == 200 {
-				status = 500 // raw error with no status set
-			}
-		}
+		status := responseStatus(c, chainErr)
 
 		// Build canonical log line — one line per request with all useful context
 		attrs := []slog.Attr{

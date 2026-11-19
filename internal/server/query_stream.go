@@ -30,6 +30,9 @@ type queryStreamConfig struct {
 	generatedLanguage models.QueryLanguage
 	conditions        []logchefql.FilterCondition
 	fieldsUsed        []string
+	// aggregation describes an aggregated LogchefQL result. Nil for log rows,
+	// and then the response has no aggregation key.
+	aggregation *logchefql.AggregationInfo
 }
 
 // queryStreamWriter incrementally writes a success envelope
@@ -200,6 +203,11 @@ func (w *queryStreamWriter) closeEnvelope(stats models.QueryStats, streamErr err
 		if err := w.writeJSONField("generated_query_language", w.cfg.generatedLanguage); err != nil {
 			return err
 		}
+		if w.cfg.aggregation != nil {
+			if err := w.writeJSONField("aggregation", w.cfg.aggregation); err != nil {
+				return err
+			}
+		}
 	}
 
 	if streamErr != nil {
@@ -247,16 +255,17 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 	sourceID, teamID, cfg := q.src.SourceID(), q.src.TeamID(), q.cfg
 	queryID := uuid.New().String()
 	streamCtx, cancel := context.WithCancel(c.Context())
+	maxPerUser, maxGlobal := s.admissionLimits(q.class)
 	if err := queryTracker.StartQueryWithID(
 		queryID,
-		QueryClassPreview,
+		q.class,
 		user.ID,
 		sourceID,
 		teamID,
 		q.trackedQuery,
 		cancel,
-		s.config.Query.MaxConcurrentPerUser,
-		s.config.Query.MaxConcurrentGlobal,
+		maxPerUser,
+		maxGlobal,
 	); err != nil {
 		cancel()
 		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
@@ -278,7 +287,7 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, q.params, writer)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+				s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
 					time.Since(start).Milliseconds(), int64(writer.rows))
 			} else if writer.begun {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", q.mode)
@@ -303,7 +312,7 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
-		s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+		s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
 			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
 	}()
 

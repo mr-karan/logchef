@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -356,7 +355,8 @@ func TestUserAdminTransitionHTTP(t *testing.T) {
 func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 	for _, update := range []bool{false, true} {
 		t.Run(fmt.Sprintf("update=%t", update), func(t *testing.T) {
-			s := newAuthzTestServer(t)
+			var logs syncLogBuffer
+			s := newAuthzTestServer(t, slog.New(slog.NewJSONHandler(&logs, nil)))
 			admin := mkTestUser(t, s.store, "audit-admin@example.com", models.UserRoleAdmin)
 			token := apiToken(t, s, admin, models.TokenScopeUsersWrite)
 			method, path, endpoint := http.MethodPost, "/api/v1/admin/users", "/api/v1/admin/users"
@@ -371,8 +371,7 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 			}
 			counter := vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_authorization_failures_total{endpoint=%q,reason="admin_grant_scope",user_role="admin"}`, endpoint))
 			before := counter.Get()
-			var logs bytes.Buffer
-			s.log = slog.New(slog.NewJSONHandler(&logs, nil))
+			logs.Reset()
 			resp := doAuthzRequest(t, s, method, path, body, withBearer(token))
 			if resp.status != fiber.StatusForbidden {
 				t.Fatalf("status = %d, want 403", resp.status)
@@ -389,7 +388,8 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 				if err := json.Unmarshal([]byte(line), &entry); err != nil {
 					t.Fatal(err)
 				}
-				if string(entry["level"]) != `"WARN"` {
+				// The request logger writes its own "http" line for the 403.
+				if string(entry["level"]) != `"WARN"` || string(entry["msg"]) == `"http"` {
 					continue
 				}
 				warnings++

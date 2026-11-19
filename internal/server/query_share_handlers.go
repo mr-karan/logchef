@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -38,27 +39,8 @@ func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 			fmt.Sprintf("Shared query payload cannot exceed %d bytes", s.config.Shares.MaxQueryTextBytes),
 			models.ValidationErrorType)
 	}
-	if !json.Valid(payloadBytes) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "payload must be valid JSON", models.ValidationErrorType)
-	}
-
-	var payload models.QuerySharePayload
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid share payload", models.ValidationErrorType)
-	}
-	if payload.Mode != "logchefql" && payload.Mode != "sql" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "payload.mode must be logchefql or sql", models.ValidationErrorType)
-	}
-	if payload.Mode == "sql" && strings.TrimSpace(payload.Query) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "payload.query is required", models.ValidationErrorType)
-	}
-	if len(payload.Query) > s.config.Shares.MaxQueryTextBytes {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Shared query text cannot exceed %d bytes", s.config.Shares.MaxQueryTextBytes),
-			models.ValidationErrorType)
-	}
-	if payload.Limit < 0 {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "payload.limit cannot be negative", models.ValidationErrorType)
+	if problem := querySharePayloadProblem(payloadBytes, s.config.Shares.MaxQueryTextBytes); problem != "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, problem, models.ValidationErrorType)
 	}
 
 	ttl := s.config.Shares.DefaultTTL
@@ -93,6 +75,7 @@ func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create share link", models.GeneralErrorType)
 	}
 
+	auditSet(c, audit.QueryShareTarget(share), nil, audit.QueryShareFields(share))
 	return SendSuccess(c, fiber.StatusCreated, queryShareResponse(share, buildQueryShareURL(c, s.config.Server.FrontendURL, token)))
 }
 
@@ -180,7 +163,48 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete share link", models.GeneralErrorType)
 	}
+	// A share has no update, so the row read before the delete is the row
+	// that the delete removed.
+	auditSet(c, audit.QueryShareTarget(share), audit.QueryShareFields(share), nil)
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// querySharePayloadProblem checks a share payload and returns the message for
+// a 400 response, or "" when the payload is valid.
+func querySharePayloadProblem(payloadBytes []byte, maxQueryBytes int) string {
+	if !json.Valid(payloadBytes) {
+		return "payload must be valid JSON"
+	}
+	var payload models.QuerySharePayload
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return "Invalid share payload"
+	}
+	if payload.Mode != "logchefql" && payload.Mode != "sql" {
+		return "payload.mode must be logchefql or sql"
+	}
+	if payload.Mode == "sql" && strings.TrimSpace(payload.Query) == "" {
+		return "payload.query is required"
+	}
+	if len(payload.Query) > maxQueryBytes {
+		return fmt.Sprintf("Shared query text cannot exceed %d bytes", maxQueryBytes)
+	}
+	if payload.Limit < 0 {
+		return "payload.limit cannot be negative"
+	}
+	// The layout parses strictly, so a stored share never holds a layout key
+	// that the server did not validate.
+	var rawLayout struct {
+		Layout json.RawMessage `json:"layout"`
+	}
+	if err := json.Unmarshal(payloadBytes, &rawLayout); err != nil {
+		return "Invalid share payload"
+	}
+	if len(rawLayout.Layout) > 0 && string(rawLayout.Layout) != "null" {
+		if _, err := models.ParseQueryShareLayout(rawLayout.Layout); err != nil {
+			return "payload.layout: " + err.Error()
+		}
+	}
+	return ""
 }
 
 func newShareToken() (string, error) {

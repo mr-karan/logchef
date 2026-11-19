@@ -83,7 +83,11 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), core.HistogramTimeout)
 	defer cancel()
 
-	result, err := s.executeHistogram(ctx, QueryClassHistogram, src, params)
+	class := QueryClassHistogram
+	if queryClassFor(req.Cache) == QueryClassDashboard {
+		class = QueryClassDashboard
+	}
+	result, err := s.executeHistogram(ctx, class, src, params)
 	if err != nil {
 		if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)

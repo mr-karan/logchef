@@ -49,7 +49,9 @@ import {
   FolderOpen,
   KeyRound,
   LayoutDashboard,
+  CalendarClock,
   Activity,
+  ScrollText,
   ExternalLink,
   LockKeyhole,
 } from "lucide-vue-next";
@@ -167,6 +169,11 @@ const allMainNavItems: NavItem[] = [
     icon: LayoutDashboard,
     url: "/dashboards",
   },
+  {
+    get title() { return t('reports.title'); },
+    icon: CalendarClock,
+    url: "/reports",
+  },
 ];
 
 const mainNavItems = computed(() =>
@@ -208,6 +215,12 @@ const adminNavItems: NavItem[] = [
     get title() { return t('ui.queryActivity'); },
     icon: Activity,
     url: "/admin/query-activity",
+    adminOnly: true,
+  },
+  {
+    get title() { return t('ui.auditLog'); },
+    icon: ScrollText,
+    url: "/admin/audit-log",
     adminOnly: true,
   },
 ];

@@ -90,15 +90,17 @@ func TestReconcilePostgresSourcePruneConcurrentDelete(t *testing.T) {
 					started = true
 					go func() {
 						if accountType == models.UserAccountTypeService {
-							result <- core.DeleteServiceAccount(ctx, db, quietLogger(), creator.ID)
+							_, err := core.DeleteServiceAccount(ctx, db, quietLogger(), creator.ID)
+							result <- err
 						} else {
-							result <- core.DeleteUser(ctx, db, quietLogger(), creator.ID)
+							_, err := core.DeleteUser(ctx, db, quietLogger(), creator.ID)
+							result <- err
 						}
 					}()
 					return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 				}}
 			}}
-			reconcileErr := Reconcile(ctx, &config.ProvisioningConfig{ManageSources: true, Prune: true}, wrapped, nil, quietLogger(), nil)
+			reconcileErr := Reconcile(ctx, &config.ProvisioningConfig{ManageSources: true, Prune: true}, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 			if !started {
 				t.Fatalf("no source pruned: %v", reconcileErr)
 			}
@@ -127,7 +129,7 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "first"}, {Name: "second"}}}
-	if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	user := &models.User{Email: "inserted@example.com", FullName: "Late member", Role: models.UserRoleMember, Status: models.UserStatusActive}
@@ -143,7 +145,7 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if err := core.AddTeamMember(ctx, db, quietLogger(), team.ID, user.ID, models.TeamRoleMember); err != nil {
+				if _, _, err := core.AddTeamMember(ctx, db, quietLogger(), team.ID, user.ID, models.TeamRoleMember); err != nil {
 					return err
 				}
 			}
@@ -154,11 +156,11 @@ func TestReconcilePostgresLateMemberConcurrentDelete(t *testing.T) {
 				return nil
 			}
 			started = true
-			go func() { result <- core.DeleteUser(ctx, db, quietLogger(), user.ID) }()
+			go func() { _, err := core.DeleteUser(ctx, db, quietLogger(), user.ID); result <- err }()
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no membership removed: %v", reconcileErr)
 	}
@@ -206,17 +208,17 @@ func TestReconcilePostgresConcurrentLoginAndMembershipWrites(t *testing.T) {
 		return afterUserManaged{StoreOps: tx, after: func() error {
 			started = true
 			go func() { result <- db.UpdateUserLastLogin(ctx, user.ID, stamp) }()
-			if err := core.AddTeamMember(ctx, db, quietLogger(), addedTeam.ID, user.ID, models.TeamRoleEditor); err != nil {
+			if _, _, err := core.AddTeamMember(ctx, db, quietLogger(), addedTeam.ID, user.ID, models.TeamRoleEditor); err != nil {
 				return err
 			}
-			if err := core.RemoveTeamMember(ctx, db, quietLogger(), removedTeam.ID, user.ID); err != nil {
+			if _, err := core.RemoveTeamMember(ctx, db, quietLogger(), removedTeam.ID, user.ID); err != nil {
 				return err
 			}
 			return waitForProvisioningContention(ctx, observer, applicationName(dsn), nil)
 		}}
 	}}
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "managed", Members: []config.ProvisionMember{{Email: user.Email}}}}}
-	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+	reconcileErr := Reconcile(ctx, cfg, wrapped, nil, testRecorder(wrapped), quietLogger(), nil)
 	if !started {
 		t.Fatalf("no user adopted: %v", reconcileErr)
 	}

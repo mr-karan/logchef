@@ -84,24 +84,43 @@ func isSafeLogsQLFieldName(name string) bool {
 
 type LogsQLTranslateOptions struct {
 	DefaultTimestampField string
+	// AllowAggregation accepts an aggregation pipe. Leave it false on a path
+	// that needs log rows, and the query fails with AGGREGATION_NOT_ALLOWED.
+	AllowAggregation bool
+	// Interval is the request interval, the bucket window of a `by time` key
+	// that has no window of its own.
+	Interval string
+	// BucketOffset aligns time buckets to the request timezone, as a LogsQL
+	// duration such as "19800s". "" means UTC.
+	BucketOffset string
 }
 
 type LogsQLTranslateResult struct {
-	Query      string            `json:"query"`
+	Query string `json:"query"`
+	// Filter is Query without its aggregation pipes.
+	Filter     string            `json:"filter"`
 	Valid      bool              `json:"valid"`
 	Error      *ParseError       `json:"error,omitempty"`
 	Conditions []FilterCondition `json:"conditions"`
 	FieldsUsed []string          `json:"fields_used"`
+	// Aggregation describes the result of an aggregated query, with each
+	// column's Source set to the field VictoriaLogs returns it under. Nil for
+	// a query that returns log rows.
+	Aggregation *AggregationInfo `json:"aggregation,omitempty"`
 }
 
 type LogsQLGenerator struct {
 	defaultTimestampField string
+	interval              string
+	bucketOffset          string
 }
 
 func NewLogsQLGenerator(options *LogsQLTranslateOptions) *LogsQLGenerator {
 	generator := &LogsQLGenerator{}
 	if options != nil {
 		generator.defaultTimestampField = options.DefaultTimestampField
+		generator.interval = options.Interval
+		generator.bucketOffset = options.BucketOffset
 	}
 	return generator
 }
@@ -116,25 +135,37 @@ func TranslateToLogsQL(query string, options *LogsQLTranslateOptions) *LogsQLTra
 	if strings.TrimSpace(query) == "" {
 		result.Valid = true
 		result.Query = "*"
+		result.Filter = "*"
 		return result
 	}
 
-	pq, err := ParseLogchefQL(query)
-	if err != nil {
-		result.Error = convertParticipleError(query, err)
+	ast, perr := parseQuery(query)
+	if perr == nil {
+		perr = checkAggregationAllowed(ast, options != nil && options.AllowAggregation)
+	}
+	if perr != nil {
+		result.Error = perr
 		return result
 	}
 
-	ast := ConvertToAST(pq)
 	generator := NewLogsQLGenerator(options)
-	logsql, genErr := generator.Generate(ast)
-	if genErr != nil {
-		result.Error = genErr
-		return result
+	if queryNode, ok := ast.(*QueryNode); ok && queryNode.Aggregate != nil {
+		compiled, genErr := generator.generateAggregation(queryNode)
+		if genErr != nil {
+			result.Error = genErr
+			return result
+		}
+		result.Query, result.Filter, result.Aggregation = compiled.query, compiled.filter, compiled.info
+	} else {
+		logsql, genErr := generator.Generate(ast)
+		if genErr != nil {
+			result.Error = genErr
+			return result
+		}
+		result.Query, result.Filter = logsql, logsql
 	}
 
 	result.Valid = true
-	result.Query = logsql
 	result.FieldsUsed = extractFieldsFromAST(ast)
 	result.Conditions = extractConditionsFromAST(ast)
 	return result
@@ -175,15 +206,17 @@ func (g *LogsQLGenerator) visit(node ASTNode) (string, *ParseError) {
 }
 
 func (g *LogsQLGenerator) visitQuery(node *QueryNode) (string, *ParseError) {
-	whereQuery := "*"
-	if node.Where != nil {
-		query, err := g.visit(node.Where)
+	if node.Aggregate != nil {
+		compiled, err := g.generateAggregation(node)
 		if err != nil {
 			return "", err
 		}
-		if strings.TrimSpace(query) != "" {
-			whereQuery = query
-		}
+		return compiled.query, nil
+	}
+
+	whereQuery, err := g.filter(node.Where)
+	if err != nil {
+		return "", err
 	}
 
 	if len(node.Select) == 0 {
@@ -199,6 +232,21 @@ func (g *LogsQLGenerator) visitQuery(node *QueryNode) (string, *ParseError) {
 	}
 
 	return fmt.Sprintf("%s | fields %s", whereQuery, fields), nil
+}
+
+// filter compiles the filter of a query. A query without one matches every row.
+func (g *LogsQLGenerator) filter(where ASTNode) (string, *ParseError) {
+	if where == nil {
+		return "*", nil
+	}
+	query, err := g.visit(where)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(query) == "" {
+		return "*", nil
+	}
+	return query, nil
 }
 
 func (g *LogsQLGenerator) visitLogical(node *LogicalNode) (string, *ParseError) {
@@ -393,4 +441,174 @@ func (g *LogsQLGenerator) formatSubstringAsRegex(value any) (string, *ParseError
 		return "", &ParseError{Code: ErrUnsupportedFeature, Message: "substring matches require string values"}
 	}
 	return strconv.Quote("(?i)" + regexp.QuoteMeta(text)), nil
+}
+
+// logsQLAggregation is a compiled aggregation: the whole query, its filter,
+// and the description of its result.
+type logsQLAggregation struct {
+	query  string
+	filter string
+	info   *AggregationInfo
+}
+
+// logsQLFuncs maps each function to its LogsQL form. %s is the formatted
+// field. A number function counts only rows that have the field, so a row
+// without it is skipped and not read as an empty value. The filter is
+// `NOT f:""` and not the any value filter `f:*`: on VictoriaLogs v1.52.0
+// `if (f:*)` matches no row of a block that stores f as an integer column,
+// so every number function over an integer field returned null.
+var logsQLFuncs = map[AggFunc]string{
+	AggCountDistinct: "count_uniq(%s)",
+	AggSum:           `sum(%[1]s) if (NOT %[1]s:"")`,
+	AggAvg:           `avg(%[1]s) if (NOT %[1]s:"")`,
+	AggMin:           `min(%[1]s) if (NOT %[1]s:"")`,
+	AggMax:           `max(%[1]s) if (NOT %[1]s:"")`,
+	AggP50:           `quantile(0.5, %[1]s) if (NOT %[1]s:"")`,
+	AggP75:           `quantile(0.75, %[1]s) if (NOT %[1]s:"")`,
+	AggP90:           `quantile(0.9, %[1]s) if (NOT %[1]s:"")`,
+	AggP95:           `quantile(0.95, %[1]s) if (NOT %[1]s:"")`,
+	AggP99:           `quantile(0.99, %[1]s) if (NOT %[1]s:"")`,
+}
+
+// generateAggregation compiles a query with an aggregation pipe into a
+// `stats` pipe and its `sort` and `limit` stages. The query never renames: a
+// value takes the internal name __lc_v<i>, a key keeps its field name and the
+// bucket is _time. VictoriaLogs rejects a value name that equals a `by`
+// field, so an alias in the query could collide where an internal name
+// cannot. The provider writes each row under the output names.
+func (g *LogsQLGenerator) generateAggregation(node *QueryNode) (*logsQLAggregation, *ParseError) {
+	agg := node.Aggregate
+	filter, err := g.filter(node.Where)
+	if err != nil {
+		return nil, err
+	}
+	info, err := g.aggregationInfo(agg)
+	if err != nil {
+		return nil, err
+	}
+
+	var by, keys, values []string
+	for _, col := range info.Columns {
+		switch col.Role {
+		case RoleTime:
+			bucket := "_time:" + info.Interval
+			if g.bucketOffset != "" {
+				bucket += " offset " + g.bucketOffset
+			}
+			by = append(by, bucket)
+			keys = append(keys, g.statsFieldName(col.Source))
+		case RoleGroup:
+			by = append(by, g.statsFieldName(col.Source))
+			keys = append(keys, g.statsFieldName(col.Source))
+		case RoleValue:
+			a := agg.Aggregates[len(values)]
+			expr := "count()"
+			if a.Func != AggCount {
+				expr = fmt.Sprintf(logsQLFuncs[a.Func], g.statsFieldName(getFieldName(a.Field)))
+			}
+			values = append(values, expr+" as "+col.Source)
+		}
+	}
+
+	stats := "stats "
+	if len(by) > 0 {
+		stats += "by (" + strings.Join(by, ", ") + ") "
+	}
+	pipes := []string{filter, stats + strings.Join(values, ", ")}
+	if order := g.aggregationOrder(agg, info, keys); len(order) > 0 {
+		pipes = append(pipes, "sort by ("+strings.Join(order, ", ")+")")
+	}
+	if agg.Limit > 0 {
+		pipes = append(pipes, "limit "+strconv.Itoa(agg.Limit))
+	}
+	return &logsQLAggregation{query: strings.Join(pipes, " | "), filter: filter, info: info}, nil
+}
+
+// statsFieldName formats a field for the stats, sort and if clauses. A bare
+// name with a colon is a bucket there, so `by (latency:10)` would group the
+// field latency in buckets of 10: such a name is quoted.
+func (g *LogsQLGenerator) statsFieldName(name string) string {
+	if strings.Contains(name, ":") {
+		return strconv.Quote(name)
+	}
+	return g.formatFieldName(name)
+}
+
+func logsQLValueName(i int) string {
+	return reservedPrefix + "v" + strconv.Itoa(i)
+}
+
+// aggregationInfo describes the result and records the field that
+// VictoriaLogs returns each column under.
+func (g *LogsQLGenerator) aggregationInfo(agg *AggregationNode) (*AggregationInfo, *ParseError) {
+	info := agg.Info(g.interval)
+	fieldKeys := make([]GroupKey, 0, len(agg.By))
+	for _, key := range agg.By {
+		if key.Time && info.Interval == "" {
+			return nil, aggregationError(key.pos, "this query buckets by time, so the request needs an interval")
+		}
+		if !key.Time {
+			fieldKeys = append(fieldKeys, key)
+		}
+	}
+	hasTime := len(fieldKeys) < len(agg.By)
+	value := 0
+	for i := range info.Columns {
+		col := &info.Columns[i]
+		switch col.Role {
+		case RoleTime:
+			col.Source = "_time"
+		case RoleGroup:
+			key := fieldKeys[0]
+			fieldKeys = fieldKeys[1:]
+			col.Source = getFieldName(key.Field)
+			if hasTime && col.Source == "_time" {
+				pos := key.pos
+				return nil, &ParseError{
+					Code:     ErrAggregationNotSupported,
+					Message:  "cannot group by the field _time and by time together on this source, because the time bucket is the _time field",
+					Position: &pos,
+				}
+			}
+		case RoleValue:
+			col.Source = logsQLValueName(value)
+			value++
+		}
+	}
+	return info, nil
+}
+
+// aggregationOrder lists the `sort by` entries. keys are the formatted key
+// fields in result order, the time bucket first. The order is total, so a
+// capped result keeps the same rows from run to run: a `sort` stage, or the
+// first value descending for a grouped shape, then every key ascending.
+func (g *LogsQLGenerator) aggregationOrder(agg *AggregationNode, info *AggregationInfo, keys []string) []string {
+	var first string
+	desc := false
+	switch {
+	case agg.Sort != nil:
+		for _, col := range info.Columns {
+			if col.Name == agg.Sort.Name {
+				first, desc = g.statsFieldName(col.Source), agg.Sort.Desc
+				break
+			}
+		}
+	case info.Shape == ShapeGrouped:
+		first, desc = logsQLValueName(0), true
+	}
+
+	order := make([]string, 0, len(keys)+1)
+	if first != "" {
+		entry := first
+		if desc {
+			entry += " desc"
+		}
+		order = append(order, entry)
+	}
+	for _, key := range keys {
+		if key != first {
+			order = append(order, key)
+		}
+	}
+	return order
 }

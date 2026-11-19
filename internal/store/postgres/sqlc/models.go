@@ -9,31 +9,38 @@ import (
 )
 
 type Alert struct {
-	ID                   int64              `json:"id"`
-	SourceID             int64              `json:"source_id"`
-	Name                 string             `json:"name"`
-	Description          pgtype.Text        `json:"description"`
-	Query                pgtype.Text        `json:"query"`
-	ConditionJson        pgtype.Text        `json:"condition_json"`
-	LookbackSeconds      int64              `json:"lookback_seconds"`
-	ThresholdOperator    string             `json:"threshold_operator"`
-	ThresholdValue       float64            `json:"threshold_value"`
-	FrequencySeconds     int64              `json:"frequency_seconds"`
-	Severity             string             `json:"severity"`
-	LabelsJson           pgtype.Text        `json:"labels_json"`
-	AnnotationsJson      pgtype.Text        `json:"annotations_json"`
-	GeneratorUrl         pgtype.Text        `json:"generator_url"`
-	IsActive             bool               `json:"is_active"`
-	LastState            string             `json:"last_state"`
-	LastEvaluatedAt      pgtype.Timestamptz `json:"last_evaluated_at"`
-	LastTriggeredAt      pgtype.Timestamptz `json:"last_triggered_at"`
-	RecipientUserIdsJson pgtype.Text        `json:"recipient_user_ids_json"`
-	WebhookUrlsJson      pgtype.Text        `json:"webhook_urls_json"`
-	CreatedBy            pgtype.Int8        `json:"created_by"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	QueryLanguage        string             `json:"query_language"`
-	EditorMode           string             `json:"editor_mode"`
+	ID                int64              `json:"id"`
+	SourceID          int64              `json:"source_id"`
+	Name              string             `json:"name"`
+	Description       pgtype.Text        `json:"description"`
+	Query             pgtype.Text        `json:"query"`
+	ConditionJson     pgtype.Text        `json:"condition_json"`
+	LookbackSeconds   int64              `json:"lookback_seconds"`
+	ThresholdOperator string             `json:"threshold_operator"`
+	ThresholdValue    float64            `json:"threshold_value"`
+	FrequencySeconds  int64              `json:"frequency_seconds"`
+	Severity          string             `json:"severity"`
+	LabelsJson        pgtype.Text        `json:"labels_json"`
+	AnnotationsJson   pgtype.Text        `json:"annotations_json"`
+	GeneratorUrl      pgtype.Text        `json:"generator_url"`
+	IsActive          bool               `json:"is_active"`
+	LastState         string             `json:"last_state"`
+	LastEvaluatedAt   pgtype.Timestamptz `json:"last_evaluated_at"`
+	LastTriggeredAt   pgtype.Timestamptz `json:"last_triggered_at"`
+	CreatedBy         pgtype.Int8        `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	QueryLanguage     string             `json:"query_language"`
+	EditorMode        string             `json:"editor_mode"`
+	GroupByJson       pgtype.Text        `json:"group_by_json"`
+	NoDataPolicy      string             `json:"no_data_policy"`
+	EvalSeq           int64              `json:"eval_seq"`
+	NotifyOnResolve   bool               `json:"notify_on_resolve"`
+}
+
+type AlertDestination struct {
+	AlertID       int64 `json:"alert_id"`
+	DestinationID int64 `json:"destination_id"`
 }
 
 type AlertHistory struct {
@@ -46,6 +53,35 @@ type AlertHistory struct {
 	Message     pgtype.Text        `json:"message"`
 	PayloadJson pgtype.Text        `json:"payload_json"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	GroupKey    string             `json:"group_key"`
+	GroupJson   pgtype.Text        `json:"group_json"`
+}
+
+type AlertInstance struct {
+	AlertID    int64              `json:"alert_id"`
+	GroupKey   string             `json:"group_key"`
+	GroupJson  string             `json:"group_json"`
+	State      string             `json:"state"`
+	Value      pgtype.Float8      `json:"value"`
+	StateSince pgtype.Timestamptz `json:"state_since"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	HistoryID  pgtype.Int8        `json:"history_id"`
+	Notified   bool               `json:"notified"`
+}
+
+type AlertSilence struct {
+	ID           int64              `json:"id"`
+	SourceID     int64              `json:"source_id"`
+	AlertID      pgtype.Int8        `json:"alert_id"`
+	MatchersJson string             `json:"matchers_json"`
+	Comment      string             `json:"comment"`
+	ScheduleKind string             `json:"schedule_kind"`
+	StartsAt     pgtype.Timestamptz `json:"starts_at"`
+	EndsAt       pgtype.Timestamptz `json:"ends_at"`
+	WeeklyJson   pgtype.Text        `json:"weekly_json"`
+	CreatedBy    pgtype.Int8        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ApiToken struct {
@@ -59,6 +95,32 @@ type ApiToken struct {
 	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AuditEvent struct {
+	ID           string             `json:"id"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+	Action       string             `json:"action"`
+	Outcome      string             `json:"outcome"`
+	Reason       string             `json:"reason"`
+	ActorType    string             `json:"actor_type"`
+	ActorID      pgtype.Int8        `json:"actor_id"`
+	ActorLabel   string             `json:"actor_label"`
+	AuthMethod   string             `json:"auth_method"`
+	CredentialID string             `json:"credential_id"`
+	ClientID     string             `json:"client_id"`
+	TargetType   string             `json:"target_type"`
+	TargetID     string             `json:"target_id"`
+	TargetLabel  string             `json:"target_label"`
+	TeamID       pgtype.Int8        `json:"team_id"`
+	SourceID     pgtype.Int8        `json:"source_id"`
+	Ip           string             `json:"ip"`
+	UserAgent    string             `json:"user_agent"`
+	HttpMethod   string             `json:"http_method"`
+	Route        string             `json:"route"`
+	Status       int32              `json:"status"`
+	Changes      []byte             `json:"changes"`
+	Detail       []byte             `json:"detail"`
 }
 
 type Collection struct {
@@ -133,6 +195,66 @@ type ExportJob struct {
 	OwnerProcessID  string             `json:"owner_process_id"`
 }
 
+type Job struct {
+	ID             int64              `json:"id"`
+	Kind           string             `json:"kind"`
+	Key            string             `json:"key"`
+	ScheduleKind   string             `json:"schedule_kind"`
+	ScheduleExpr   string             `json:"schedule_expr"`
+	Timezone       string             `json:"timezone"`
+	Misfire        string             `json:"misfire"`
+	GraceSeconds   int64              `json:"grace_seconds"`
+	Enabled        bool               `json:"enabled"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	LeaseOwner     pgtype.Text        `json:"lease_owner"`
+	LeaseToken     int64              `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	LastStartedAt  pgtype.Timestamptz `json:"last_started_at"`
+	LastFinishedAt pgtype.Timestamptz `json:"last_finished_at"`
+	LastStatus     pgtype.Text        `json:"last_status"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NotificationDelivery struct {
+	ID            int64              `json:"id"`
+	DestinationID int64              `json:"destination_id"`
+	Producer      string             `json:"producer"`
+	ProducerRef   string             `json:"producer_ref"`
+	Recipient     string             `json:"recipient"`
+	SequenceKey   string             `json:"sequence_key"`
+	Event         string             `json:"event"`
+	DedupKey      string             `json:"dedup_key"`
+	MessageJson   string             `json:"message_json"`
+	Status        string             `json:"status"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	ReservedBy    pgtype.Text        `json:"reserved_by"`
+	ReservedToken int64              `json:"reserved_token"`
+	ReservedUntil pgtype.Timestamptz `json:"reserved_until"`
+	LastError     pgtype.Text        `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+}
+
+type NotificationDestination struct {
+	ID                 int64              `json:"id"`
+	Name               string             `json:"name"`
+	Type               string             `json:"type"`
+	Scope              string             `json:"scope"`
+	TeamID             pgtype.Int8        `json:"team_id"`
+	ConfigJson         string             `json:"config_json"`
+	Secret             string             `json:"secret"`
+	IsActive           bool               `json:"is_active"`
+	CreatedBy          pgtype.Int8        `json:"created_by"`
+	LastDeliveryAt     pgtype.Timestamptz `json:"last_delivery_at"`
+	LastDeliveryStatus pgtype.Text        `json:"last_delivery_status"`
+	LastDeliveryError  pgtype.Text        `json:"last_delivery_error"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OauthAccessToken struct {
 	IDHash    string             `json:"id_hash"`
 	GrantID   int64              `json:"grant_id"`
@@ -194,6 +316,18 @@ type QueryHistory struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type QueryShapeStatsDaily struct {
+	BucketDate      string      `json:"bucket_date"`
+	SourceID        int64       `json:"source_id"`
+	QueryLanguage   string      `json:"query_language"`
+	ShapeHash       string      `json:"shape_hash"`
+	Shape           string      `json:"shape"`
+	QueryCount      int64       `json:"query_count"`
+	TotalDurationMs int64       `json:"total_duration_ms"`
+	TotalRows       int64       `json:"total_rows"`
+	MaxLookbackS    pgtype.Int8 `json:"max_lookback_s"`
+}
+
 type QueryShare struct {
 	Token          string             `json:"token"`
 	SourceID       int64              `json:"source_id"`
@@ -215,6 +349,59 @@ type QueryStatsDaily struct {
 	TotalDurationMs int64       `json:"total_duration_ms"`
 }
 
+type Report struct {
+	ID                  int64              `json:"id"`
+	Name                string             `json:"name"`
+	OwnerID             pgtype.Int8        `json:"owner_id"`
+	SourceKind          string             `json:"source_kind"`
+	DashboardID         pgtype.Int8        `json:"dashboard_id"`
+	TabID               pgtype.Text        `json:"tab_id"`
+	SavedQueryID        pgtype.Int8        `json:"saved_query_id"`
+	ScheduleJson        string             `json:"schedule_json"`
+	Timezone            string             `json:"timezone"`
+	TimeRange           pgtype.Text        `json:"time_range"`
+	RangeAnchor         string             `json:"range_anchor"`
+	VariablesJson       string             `json:"variables_json"`
+	MaxRows             int64              `json:"max_rows"`
+	SkipIfEmpty         bool               `json:"skip_if_empty"`
+	AttachCsv           bool               `json:"attach_csv"`
+	State               string             `json:"state"`
+	PauseReason         string             `json:"pause_reason"`
+	ConsecutiveFailures int64              `json:"consecutive_failures"`
+	LastManualRunAt     pgtype.Timestamptz `json:"last_manual_run_at"`
+	LastPreviewAt       pgtype.Timestamptz `json:"last_preview_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ReportRecipient struct {
+	ID        int64              `json:"id"`
+	ReportID  int64              `json:"report_id"`
+	Kind      string             `json:"kind"`
+	UserID    pgtype.Int8        `json:"user_id"`
+	TeamID    pgtype.Int8        `json:"team_id"`
+	Email     string             `json:"email"`
+	AddedBy   pgtype.Int8        `json:"added_by"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ReportRun struct {
+	ID             int64              `json:"id"`
+	ReportID       int64              `json:"report_id"`
+	Trigger        string             `json:"trigger"`
+	ScheduledFor   pgtype.Timestamptz `json:"scheduled_for"`
+	ActorID        pgtype.Int8        `json:"actor_id"`
+	Status         string             `json:"status"`
+	Reason         string             `json:"reason"`
+	WindowStart    pgtype.Timestamptz `json:"window_start"`
+	WindowEnd      pgtype.Timestamptz `json:"window_end"`
+	PanelsJson     string             `json:"panels_json"`
+	DeliveriesJson string             `json:"deliveries_json"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	DeadlineAt     pgtype.Timestamptz `json:"deadline_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+}
+
 type SavedQuery struct {
 	ID                int64              `json:"id"`
 	SourceID          int64              `json:"source_id"`
@@ -227,6 +414,39 @@ type SavedQuery struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	QueryLanguage     string             `json:"query_language"`
 	EditorMode        string             `json:"editor_mode"`
+}
+
+type SavedView struct {
+	ID          int64              `json:"id"`
+	SourceID    int64              `json:"source_id"`
+	Scope       string             `json:"scope"`
+	UserID      pgtype.Int8        `json:"user_id"`
+	TeamID      pgtype.Int8        `json:"team_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Definition  string             `json:"definition"`
+	IsDefault   bool               `json:"is_default"`
+	Managed     bool               `json:"managed"`
+	Revision    int64              `json:"revision"`
+	CreatedBy   pgtype.Int8        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SchemaAdvisorDismissal struct {
+	SourceID    int64              `json:"source_id"`
+	FindingID   string             `json:"finding_id"`
+	Reason      string             `json:"reason"`
+	DismissedBy pgtype.Int8        `json:"dismissed_by"`
+	DismissedAt pgtype.Timestamptz `json:"dismissed_at"`
+}
+
+type SchemaAdvisorReport struct {
+	SourceID    int64              `json:"source_id"`
+	GeneratedAt pgtype.Timestamptz `json:"generated_at"`
+	GeneratedBy pgtype.Int8        `json:"generated_by"`
+	WindowDays  int64              `json:"window_days"`
+	Report      string             `json:"report"`
 }
 
 type Session struct {
@@ -251,6 +471,7 @@ type Source struct {
 	SourceType        string             `json:"source_type"`
 	ConnectionConfig  []byte             `json:"connection_config"`
 	IdentityKey       string             `json:"identity_key"`
+	HeaderSecretRefs  []byte             `json:"header_secret_refs"`
 }
 
 type SystemSetting struct {

@@ -53,8 +53,9 @@ func handleInvestigateErrorSpike(ctx context.Context, request mcp.GetPromptReque
 
 1. **Discover Schema**: Use the get_source_schema tool (team_id=%s, source_id=%s) to understand available columns and their types.
 
-2. **Assess Error Volume**: Use query_logchefql to count errors over the time range. Start broad:
-   - Query: severity_text=ERROR
+2. **Assess Error Volume**: Use query_logchefql with an aggregation pipe to count errors over the time range. Start broad:
+   - Query: severity_text=ERROR | count()
+   - Then split the count: severity_text=ERROR | count() by service_name | sort count desc | limit 10
    - Then narrow with get_log_histogram to visualize the spike pattern, grouping by severity_text.
 
 3. **Identify Error Patterns**: Use get_field_values to explore key dimensions:
@@ -108,16 +109,19 @@ func handleInvestigateAlert(ctx context.Context, request mcp.GetPromptRequest) (
 
 **Investigation Steps:**
 
-1. **Review Alert Configuration**: Use list_alerts (optionally filtered by source_id=%s) to find the alert details — its name, severity, query, threshold, and current state.
+1. **Review Alert Configuration**: Use list_alerts (optionally filtered by source_id=%s) to find the alert details — its name, severity, query, threshold, group_by, no_data_policy, last_state and instance_counts.
 
-2. **Check Alert History**: Use get_alert_history (alert_id=%s) to see recent evaluation results:
-   - When did it last fire?
+2. **Check Alert History**: Use get_alert_history (alert_id=%s) to see recent episodes. A grouped rule has one episode per group: read group to see which groups fired.
+   - When did it last fire, and for which groups?
    - How frequently has it been triggering?
    - Has it been flapping (firing/resolving repeatedly)?
+   - A no_data status means the query returned no rows for the group, which can be a stopped pipeline rather than a quiet service.
+   - silenced_by in an entry's payload means a silence muted its notifications.
+   - Failed deliveries mean nobody may have been notified.
 
 3. **Understand the Schema**: Use get_source_schema (team_id=%s, source_id=%s) to understand available columns for deeper investigation.
 
-4. **Reproduce the Alert Query**: Run the alert's query using query_logchefql or query_logs to see the actual matching logs. Examine:
+4. **Reproduce the Alert Query**: Run the alert's query using query_logchefql or query_logs to see the actual matching logs. For a grouped rule, add a filter for the group's values. Examine:
    - Are the logs genuine errors or false positives?
    - Has the volume changed significantly?
 
@@ -132,7 +136,7 @@ func handleInvestigateAlert(ctx context.Context, request mcp.GetPromptRequest) (
    - Alert details and current state
    - Whether the alert is firing correctly or is a false positive
    - The underlying log pattern causing the alert
-   - Recommended actions (acknowledge, tune threshold, fix root cause, etc.)`, alertID, teamID, sourceID, sourceID, alertID, teamID, sourceID, sourceID)
+   - Recommended actions (silence, tune threshold, fix root cause, etc.)`, alertID, teamID, sourceID, sourceID, alertID, teamID, sourceID, sourceID)
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Investigate alert %s", alertID),

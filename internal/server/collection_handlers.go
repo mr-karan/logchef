@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -79,6 +80,7 @@ func (s *Server) handleCreateCollection(c fiber.Ctx) error {
 		s.log.Error("failed to create collection", "error", err, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create collection", models.GeneralErrorType)
 	}
+	auditSet(c, audit.CollectionTarget(collection.ID, collection.Name), nil, audit.CollectionFields(collection))
 	return SendSuccess(c, fiber.StatusCreated, collection)
 }
 
@@ -113,7 +115,7 @@ func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, err := core.UpdateCollection(c.Context(), s.store, s.log, id, user.ID, req.Name, req.Description)
+	before, updated, err := core.UpdateCollection(c.Context(), s.store, s.log, id, user.ID, req.Name, req.Description)
 	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
@@ -121,6 +123,7 @@ func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 		s.log.Error("failed to update collection", "error", err, "collection_id", id)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update collection", models.GeneralErrorType)
 	}
+	auditSet(c, audit.CollectionTarget(updated.ID, updated.Name), audit.CollectionFields(before), audit.CollectionFields(updated))
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
@@ -132,13 +135,15 @@ func (s *Server) handleDeleteCollection(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	if err := core.DeleteCollection(c.Context(), s.store, s.log, id, user.ID); err != nil {
+	deleted, err := core.DeleteCollection(c.Context(), s.store, s.log, id, user.ID)
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		s.log.Error("failed to delete collection", "error", err, "collection_id", id)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete collection", models.GeneralErrorType)
 	}
+	auditSet(c, audit.CollectionTarget(deleted.ID, deleted.Name), audit.CollectionFields(deleted), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Collection deleted"})
 }
 
@@ -169,11 +174,17 @@ func (s *Server) handleAddCollectionMember(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	if err := core.AddCollectionMember(c.Context(), s.store, s.log, id, user.ID, req.UserID, req.Role); err != nil {
+	added, err := core.AddCollectionMember(c.Context(), s.store, s.log, id, user.ID, req.UserID, req.Role)
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	if added == nil {
+		auditNoChange(c)
+	} else {
+		auditSet(c, audit.CollectionMemberTarget(id, req.UserID), nil, audit.CollectionMemberFields(added))
 	}
 	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Member added"})
 }
@@ -190,11 +201,17 @@ func (s *Server) handleRemoveCollectionMember(c fiber.Ctx) error {
 	if err != nil || userIDNum <= 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user id", models.ValidationErrorType)
 	}
-	if err := core.RemoveCollectionMember(c.Context(), s.store, s.log, id, user.ID, models.UserID(userIDNum)); err != nil {
+	removed, err := core.RemoveCollectionMember(c.Context(), s.store, s.log, id, user.ID, models.UserID(userIDNum))
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	if removed == nil {
+		auditNoChange(c)
+	} else {
+		auditSet(c, audit.CollectionMemberTarget(id, removed.UserID), audit.CollectionMemberFields(removed), nil)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Member removed"})
 }
@@ -228,12 +245,18 @@ func (s *Server) handleAddCollectionTeam(c fiber.Ctx) error {
 	if req.TeamID <= 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team id", models.ValidationErrorType)
 	}
-	if err := core.AddCollectionTeam(c.Context(), s.store, s.log, id, principalFromLocals(c), req.TeamID); err != nil {
+	added, err := core.AddCollectionTeam(c.Context(), s.store, s.log, id, principalFromLocals(c), req.TeamID)
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		s.log.Error("failed to add collection team", "error", err, "collection_id", id, "team_id", req.TeamID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to share collection with team", models.GeneralErrorType)
+	}
+	if added {
+		auditSet(c, audit.CollectionTeamTarget(id, req.TeamID), nil, audit.CollectionTeamFields(id, req.TeamID))
+	} else {
+		auditNoChange(c)
 	}
 	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Team added"})
 }
@@ -249,12 +272,18 @@ func (s *Server) handleRemoveCollectionTeam(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team id", models.ValidationErrorType)
 	}
-	if err := core.RemoveCollectionTeam(c.Context(), s.store, s.log, id, user.ID, models.TeamID(teamID)); err != nil {
+	removed, err := core.RemoveCollectionTeam(c.Context(), s.store, s.log, id, user.ID, models.TeamID(teamID))
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		s.log.Error("failed to remove collection team", "error", err, "collection_id", id, "team_id", teamID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to remove team", models.GeneralErrorType)
+	}
+	if removed {
+		auditSet(c, audit.CollectionTeamTarget(id, models.TeamID(teamID)), audit.CollectionTeamFields(id, models.TeamID(teamID)), nil)
+	} else {
+		auditNoChange(c)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team removed"})
 }
@@ -314,6 +343,11 @@ func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
 	if created {
 		status = fiber.StatusCreated
 	}
+	if created {
+		auditSet(c, audit.CollectionItemTarget(id, req.SavedQueryID), nil, audit.CollectionItemFields(link))
+	} else {
+		auditNoChange(c)
+	}
 	return SendSuccess(c, status, link)
 }
 
@@ -333,13 +367,18 @@ func (s *Server) handleUpdateCollectionItem(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	link, err := core.UpdateCollectionItem(c.Context(), s.store, s.log, id, user, queryID, req.Kind)
+	before, link, err := core.UpdateCollectionItem(c.Context(), s.store, s.log, id, user, queryID, req.Kind)
 	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		s.log.Error("failed to update collection item", "error", err, "collection_id", id, "saved_query_id", queryID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update item", models.GeneralErrorType)
+	}
+	if before == nil {
+		auditNoChange(c)
+	} else {
+		auditSet(c, audit.CollectionItemTarget(id, queryID), audit.CollectionItemFields(before), audit.CollectionItemFields(link))
 	}
 	return SendSuccess(c, fiber.StatusOK, link)
 }
@@ -356,13 +395,15 @@ func (s *Server) handleRemoveCollectionItem(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid query id", models.ValidationErrorType)
 	}
-	if err := core.RemoveCollectionItem(c.Context(), s.store, s.log, id, user, queryID); err != nil {
+	removed, err := core.RemoveCollectionItem(c.Context(), s.store, s.log, id, user, queryID)
+	if err != nil {
 		if handled, sendErr := mapCollectionError(c, err); handled {
 			return sendErr
 		}
 		s.log.Error("failed to remove collection item", "error", err, "collection_id", id, "saved_query_id", queryID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to remove item", models.GeneralErrorType)
 	}
+	auditSet(c, audit.CollectionItemTarget(id, queryID), audit.CollectionItemFields(removed), nil)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Item removed"})
 }
 

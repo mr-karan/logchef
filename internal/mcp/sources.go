@@ -25,7 +25,7 @@ type GetSourcesParams struct{}
 
 type SourceResult struct {
 	ID             int              `json:"id" jsonschema:"Source ID"`
-	SourceType     string           `json:"source_type" jsonschema:"Backend type: clickhouse or victorialogs"`
+	SourceType     string           `json:"source_type" jsonschema:"Backend type: clickhouse, victorialogs or loki"`
 	QueryLanguages []string         `json:"query_languages" jsonschema:"Supported query languages"`
 	Capabilities   []string         `json:"capabilities" jsonschema:"Supported backend operations"`
 	Name           string           `json:"name" jsonschema:"Source name"`

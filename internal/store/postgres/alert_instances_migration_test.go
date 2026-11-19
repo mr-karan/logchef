@@ -1,0 +1,256 @@
+package postgres_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/mr-karan/logchef/internal/store/postgres/postgrestest"
+	"github.com/mr-karan/logchef/internal/store/storetest"
+)
+
+// TestAlertInstancesUpgrade applies every migration before add_alert_instances
+// and records them as applied, seeds alert history, then lets postgres.New run
+// the remaining migrations through the production runner.
+func TestAlertInstancesUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const alertInstancesVersion = 17
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, alertInstancesVersion) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, alertInstancesVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.AlertInstancesUpgradeSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+
+	storetest.CheckAlertInstancesUpgrade(t, opener(dsn)(t))
+}
+
+// TestAlertJobsUpgrade applies every migration before add_alert_evaluate_jobs
+// and records them as applied, seeds alerts, then lets postgres.New run the
+// remaining migrations through the production runner.
+func TestAlertJobsUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const alertJobsVersion = 22
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, alertJobsVersion) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, alertJobsVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.AlertJobsUpgradeSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+
+	storetest.CheckAlertJobsUpgrade(t, opener(dsn)(t))
+}
+
+// TestAlertDestinationsUpgrade applies every migration before
+// add_notification_destinations and records them as applied, seeds rule
+// targets, then lets postgres.New run the remaining migrations.
+func TestAlertDestinationsUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const alertDestinationsVersion = 24
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, alertDestinationsVersion) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, alertDestinationsVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.AlertDestinationsUpgradeSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+
+	storetest.CheckAlertDestinationsUpgrade(t, opener(dsn)(t))
+}
+
+// TestAlertDeliveriesUpgrade applies every migration before
+// add_notification_deliveries and records them as applied, seeds open
+// episodes with delivery bookkeeping, then lets postgres.New run the
+// remaining migrations.
+func TestAlertDeliveriesUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const alertDeliveriesVersion = 29
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, alertDeliveriesVersion) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, alertDeliveriesVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.AlertDeliveriesUpgradeSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+
+	storetest.CheckAlertDeliveriesUpgrade(t, opener(dsn)(t))
+}
+
+// TestReportOwnerRecipientsUpgrade applies every migration before
+// add_report_owner_recipients and records them as applied, seeds reports,
+// then lets postgres.New run the rest (RFC 0008 unit R8).
+func TestReportOwnerRecipientsUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const version = 30
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, version) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, version-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.ReportOwnerRecipientsSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+	storetest.CheckReportOwnerRecipients(t, opener(dsn)(t))
+
+	// The statement adds nothing when it runs again.
+	if _, err := conn.Exec(ctx, readMigration(t, "000030_add_report_owner_recipients.up.sql")); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM report_recipients`).Scan(&n); err != nil || n != 2 {
+		t.Errorf("recipient rows after a second run = %d, %v; want 2", n, err)
+	}
+}
+
+// TestReportExternalSettingsUpgrade applies every migration before
+// add_report_external_settings and records them as applied, seeds a
+// setting, then lets postgres.New run the rest (RFC 0008 unit R9).
+func TestReportExternalSettingsUpgrade(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	const version = 31
+	if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+		version BIGINT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range upMigrationsBefore(t, version) {
+		if _, err := conn.Exec(ctx, readMigration(t, name)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO schema_migrations (version) SELECT generate_series(1, $1::bigint)`, version-1); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range storetest.ReportExternalSettingsSeed {
+		if _, err := conn.Exec(ctx, query); err != nil {
+			t.Fatalf("seed: %v\n%s", err, query)
+		}
+	}
+	storetest.CheckReportExternalSettings(t, opener(dsn)(t))
+
+	// The statement adds nothing when it runs again.
+	if _, err := conn.Exec(ctx, readMigration(t, "000031_add_report_external_settings.up.sql")); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM system_settings`).Scan(&n); err != nil || n != 3 {
+		t.Errorf("settings after a second run = %d, %v; want 3", n, err)
+	}
+}
+
+// TestReportExternalSettingsLeaveAnEmptyTable: a fresh database is seeded
+// at first boot, which skips a table that has rows, so the migration adds
+// no rows to an empty table.
+func TestReportExternalSettingsLeaveAnEmptyTable(t *testing.T) {
+	dsn := postgrestest.DSN(t)
+	s := opener(dsn)(t)
+	settings, err := s.ListSettings(context.Background())
+	if err != nil || len(settings) != 0 {
+		t.Errorf("settings after migrating a fresh database = %+v, %v; want none", settings, err)
+	}
+}

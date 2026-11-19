@@ -52,6 +52,7 @@ func newCollectionRouteEnvWithStore(t *testing.T, wrap func(store.Store) store.S
 	s := New(ServerOptions{
 		Config: cfg,
 		SQLite: wrap(db),
+		Audit:  testAuditRecorder(t, db),
 		FS:     http.FS(fstest.MapFS{"index.html": {Data: []byte(`<base href="/" />`)}}),
 		Logger: logger,
 	})

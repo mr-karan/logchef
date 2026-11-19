@@ -1,0 +1,151 @@
+package core
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/pkg/models"
+)
+
+// The usage of a source whose rollup holds more shapes than one run reads
+// is truncated, while its totals still count every row.
+func TestSchemaAdviceUsageTruncated(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	const source = models.SourceID(7)
+	const day = "2026-11-10"
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		for i := range schemaAdviceShapeLimit + 1 {
+			shape := models.FilterShape{{Column: fmt.Sprintf("c%d", i), Kind: models.MatchEq}}
+			if err := tx.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: day, SourceID: source, Usage: models.QueryShapeUsage{
+				QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: fmt.Sprintf("%016x", i), Shape: shape, QueryCount: 1, TotalDurationMs: 5,
+			}}); err != nil {
+				return err
+			}
+		}
+		return tx.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: day, SourceID: source, Usage: models.QueryShapeUsage{
+			QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: models.ShapeHashOverflow, Shape: models.FilterShape{}, QueryCount: 9,
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	usage, err := schemaAdviceUsage(ctx, db, source, day, day, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// R2 notes LogchefQL ~ searches only, so the language must reach it.
+	if len(usage.Shapes) == 0 || usage.Shapes[0].Language != models.QueryLanguageLogchefQL {
+		t.Fatalf("shapes = %+v, want each with its query language", usage.Shapes[:min(1, len(usage.Shapes))])
+	}
+	if !usage.Truncated || len(usage.Shapes) != schemaAdviceShapeLimit || usage.Queries != schemaAdviceShapeLimit+1+9 || usage.Overflow != 9 {
+		t.Fatalf("usage: truncated %v, %d shapes, %d queries, %d overflow; want truncated, %d shapes, %d queries, 9 overflow",
+			usage.Truncated, len(usage.Shapes), usage.Queries, usage.Overflow, schemaAdviceShapeLimit, schemaAdviceShapeLimit+10)
+	}
+
+	usage, err = schemaAdviceUsage(ctx, db, source+1, day, day, day)
+	if err != nil || usage.Truncated || len(usage.Shapes) != 0 || usage.Queries != 0 {
+		t.Fatalf("usage of a source with no rollup = %+v / %v, want empty", usage, err)
+	}
+}
+
+// The window's coverage counts its own days with a filtered query, while the
+// retention coverage also counts the rows before the window. Neither counts
+// a row after the window's last day.
+func TestSchemaAdviceUsageRetention(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	const source = models.SourceID(7)
+	lookback := int64(3600)
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		for i, day := range []string{"2026-08-20", "2026-11-09", "2026-11-10"} {
+			if err := tx.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: day, SourceID: source, Usage: models.QueryShapeUsage{
+				QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: "0000000000000001", Shape: models.FilterShape{{Column: "c", Kind: models.MatchEq}},
+				QueryCount: int64(i + 1), MaxLookbackSeconds: &lookback,
+			}}); err != nil {
+				return err
+			}
+		}
+		// A day with only unfiltered queries is no day of filtered usage.
+		return tx.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: "2026-11-11", SourceID: source, Usage: models.QueryShapeUsage{
+			QueryLanguage: models.QueryLanguageLogchefQL, ShapeHash: "0000000000000002", Shape: models.FilterShape{}, QueryCount: 4, MaxLookbackSeconds: &lookback,
+		}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := schemaAdviceUsage(ctx, db, source, "2026-11-09", "2026-08-13", "2026-11-11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Days != 2 || usage.Queries != 9 {
+		t.Errorf("window: %d filtered days, %d queries; want 2 and 9", usage.Days, usage.Queries)
+	}
+	if r := usage.Retention; r.Days != 4 || r.QueryCount != 10 || r.MaxLookbackSeconds == nil || *r.MaxLookbackSeconds != lookback {
+		t.Errorf("retention = %+v, want 4 days, 10 queries, lookback %d", r, lookback)
+	}
+
+	usage, err = schemaAdviceUsage(ctx, db, source, "2026-11-09", "2026-08-13", "2026-11-09")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Days != 1 || usage.Queries != 2 || len(usage.Shapes) != 1 || usage.Shapes[0].Queries != 2 {
+		t.Errorf("window ending 2026-11-09: %d filtered days, %d queries, shapes %+v; want 1 day and 2 queries", usage.Days, usage.Queries, usage.Shapes)
+	}
+	if r := usage.Retention; r.Days != 2 || r.QueryCount != 3 {
+		t.Errorf("retention ending 2026-11-09 = %+v, want 2 days and 3 queries", r)
+	}
+}
+
+func TestFitSchemaReport(t *testing.T) {
+	finding := func(id string, evidence int) models.SchemaFinding {
+		f := models.SchemaFinding{ID: id, Rule: "skip_index_bloom", Impact: models.ImpactLow, Title: id, DDL: []string{}, Evidence: []models.AdvisorEvidence{}}
+		for range evidence {
+			f.Evidence = append(f.Evidence, models.AdvisorEvidence{Label: "label", Value: strings.Repeat("v", 1000), Source: "logchef"})
+		}
+		return f
+	}
+	report := func(findings ...models.SchemaFinding) *models.SchemaAdvisorReport {
+		return &models.SchemaAdvisorReport{Status: models.AdvisorStatusOK, Inputs: []models.AdvisorInput{}, Findings: findings}
+	}
+
+	small := report(finding("a", 3))
+	if err := fitSchemaReport(small); err != nil || len(small.Findings[0].Evidence) != 3 || len(small.Notes) != 0 {
+		t.Fatalf("a small report changed: %+v / %v", small, err)
+	}
+
+	// 4 findings of about 100 KiB each: the lowest-ranked two lose their
+	// evidence, the first two keep it.
+	big := report(finding("first", 100), finding("second", 100), finding("third", 100), finding("fourth", 100))
+	if err := fitSchemaReport(big); err != nil {
+		t.Fatal(err)
+	}
+	var kept []int
+	for _, f := range big.Findings {
+		kept = append(kept, len(f.Evidence))
+	}
+	if fmt.Sprint(kept) != "[100 100 0 0]" {
+		t.Fatalf("evidence kept per finding = %v, want [100 100 0 0]", kept)
+	}
+	if len(big.Notes) != 1 {
+		t.Fatalf("notes = %q, want one note on the removed evidence", big.Notes)
+	}
+	encoded, err := json.Marshal(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxSchemaAdviceReportBytes {
+		t.Fatalf("fitted report is %d bytes", len(encoded))
+	}
+
+	huge := report(finding("ddl", 0))
+	huge.Findings[0].DDL = []string{strings.Repeat("x", maxSchemaAdviceReportBytes)}
+	if err := fitSchemaReport(huge); err == nil {
+		t.Fatal("a report over the limit without evidence was accepted")
+	}
+}

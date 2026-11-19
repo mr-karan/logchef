@@ -3,22 +3,25 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    agent, auth, collections, completions, config, doctor, explain, fields, find, histogram,
-    history, open, query, saved_queries, schema, skills, sources, sql, tail, teams, whoami,
+    advisor, agent, audit, auth, collections, completions, config, doctor, explain, fields, find,
+    histogram, history, open, query, reports, saved_queries, schema, skills, sources, sql, tail,
+    teams, views, whoami,
 };
 
 const LONG_ABOUT: &str = "\
 Logchef CLI — search and investigate logs from your terminal.
 
-Logchef sources are backed by either ClickHouse or VictoriaLogs. Pick a command
-by what you want to do:
+Logchef sources are backed by ClickHouse, VictoriaLogs or Grafana Loki. Pick a
+command by what you want to do:
 
   query      Search with LogchefQL — the portable filter language that works on
-             BOTH engines. Start here. e.g. `level=\"error\" and service=\"api\"`.
+             every engine. Start here. e.g. `level=\"error\" and service=\"api\"`.
+             Aggregate with a pipe: `level=\"error\" | count() by service`.
   sql        Run a raw native query when LogchefQL isn't enough: ClickHouse SQL
-             for ClickHouse sources, LogsQL for VictoriaLogs sources.
-  explain    Show the ClickHouse SQL / LogsQL a LogchefQL query compiles to,
-             without running it. Great for learning and debugging filters.
+             for ClickHouse sources, LogsQL for VictoriaLogs sources, LogQL for
+             Loki sources.
+  explain    Show the ClickHouse SQL / LogsQL / LogQL a LogchefQL query compiles
+             to, without running it. Great for learning and debugging filters.
   histogram  Plot log counts over time (trends, spikes, error rates).
   fields     Discover a source's fields, or the observed values of one field.
   find       Locate which source holds a given service, host, or message.
@@ -85,12 +88,12 @@ enum Commands {
 
     #[command(
         visible_alias = "native",
-        about = "Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs)"
+        about = "Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs, LogQL for Loki)"
     )]
     Sql(sql::SqlArgs),
 
     #[command(
-        about = "Translate and validate a LogchefQL query without executing it (shows the generated ClickHouse SQL or LogsQL)"
+        about = "Translate and validate a LogchefQL query without executing it (shows the generated ClickHouse SQL, LogsQL or LogQL)"
     )]
     Explain(explain::ExplainArgs),
 
@@ -112,6 +115,15 @@ enum Commands {
     #[command(name = "saved-queries", about = "List and run saved queries")]
     SavedQueries(saved_queries::SavedQueriesArgs),
 
+    #[command(about = "List saved Explorer views")]
+    Views(views::ViewsArgs),
+
+    #[command(about = "List audit events (global admins, API token with audit:read)")]
+    Audit(audit::AuditArgs),
+
+    #[command(about = "List scheduled reports and their runs, and send one now")]
+    Reports(reports::ReportsArgs),
+
     #[command(about = "Find sources that contain a service, job, host, or message pattern")]
     Find(find::FindArgs),
 
@@ -126,6 +138,11 @@ enum Commands {
 
     #[command(about = "List sources for a team")]
     Sources(sources::SourcesArgs),
+
+    #[command(
+        about = "Show schema advice for a ClickHouse source (global admins, API token with sources:read)"
+    )]
+    Advisor(advisor::AdvisorArgs),
 
     #[command(about = "Show schema for a source")]
     Schema(schema::SchemaArgs),
@@ -193,11 +210,15 @@ impl Cli {
             Some(Commands::Open(args)) => open::run(args, global).await,
             Some(Commands::Collections(args)) => collections::run(args, global).await,
             Some(Commands::SavedQueries(args)) => saved_queries::run(args, global).await,
+            Some(Commands::Views(args)) => views::run(args, global).await,
+            Some(Commands::Audit(args)) => audit::run(args, global).await,
+            Some(Commands::Reports(args)) => reports::run(args, global).await,
             Some(Commands::Find(args)) => find::run(args, global).await,
             Some(Commands::Tail(args)) => tail::run(args, global).await,
             Some(Commands::Teams(args)) => teams::run(args, global).await,
             Some(Commands::Whoami(args)) => whoami::run(args, global).await,
             Some(Commands::Sources(args)) => sources::run(args, global).await,
+            Some(Commands::Advisor(args)) => advisor::run(args, global).await,
             Some(Commands::Schema(args)) => schema::run(args, global).await,
             Some(Commands::Doctor(args)) => doctor::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,

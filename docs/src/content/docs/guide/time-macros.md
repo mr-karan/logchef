@@ -1,5 +1,8 @@
 ---
 title: Time Macros
+head:
+  - tag: title
+    content: "Time Macros for Log Queries | Logchef"
 description: Built-in macros that put the request's time range, bucket size and timezone into ClickHouse SQL and LogsQL queries in Logchef.
 ---
 

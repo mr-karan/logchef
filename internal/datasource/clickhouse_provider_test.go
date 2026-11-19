@@ -16,12 +16,13 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestEvaluateAlertRejectsNonSelectQueries(t *testing.T) {
 	provider := &ClickHouseProvider{manager: &clickhouse.Manager{}}
-	result, err := provider.EvaluateAlert(context.Background(), &models.Source{ID: 1}, AlertQueryRequest{Query: "DROP TABLE x"})
+	result, err := provider.EvaluateAlert(context.Background(), &models.Source{ID: 1}, AlertQueryRequest{At: time.Now(), Query: "DROP TABLE x"})
 	var validationErr *ValidationError
 	if !errors.As(err, &validationErr) || validationErr.Field != "query" {
 		t.Fatalf("EvaluateAlert() = %v, %v; want query validation error before connection lookup", result, err)
@@ -54,7 +55,7 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		{query: "/* /* */ SELECT '*/ SELECT 42 AS value -- '", want: "*/ SELECT 42 AS value -- "},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
-			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: tc.query})
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: tc.query})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +70,7 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		})
 	}
 
-	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(1000000)"})
+	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: "SELECT number AS value FROM numbers(1000000)"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,12 +78,12 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		t.Fatalf("EvaluateAlert() buffered %d rows (truncated=%v), want %d truncated", len(result.Logs), result.Stats.Truncated, alertMaxRows)
 	}
 
-	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(10) WHERE number > 100"})
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: "SELECT number AS value FROM numbers(10) WHERE number > 100"})
 	if err != nil || len(result.Logs) != 0 || result.Stats.Truncated {
 		t.Fatalf("EvaluateAlert(empty) = %v, %v; want zero rows without error", result, err)
 	}
 
-	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)"})
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: "SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)"})
 	if err == nil {
 		t.Fatalf("EvaluateAlert(first row over byte limit) = %v, want error instead of an empty result", result.Logs)
 	}
@@ -95,7 +96,7 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 		"SELECT $$ AS a, '$$, 42 AS value -- '",
 	} {
 		t.Run(query, func(t *testing.T) {
-			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: query})
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{At: time.Now(), Query: query})
 			if _, ok := errors.AsType[*ValidationError](err); !ok {
 				t.Fatalf("EvaluateAlert() = %v, %v; want query validation error", result, err)
 			}
@@ -526,7 +527,7 @@ func TestClickHouseProviderSourceMetadata(t *testing.T) {
 		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL}},
 		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
 		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
-		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "ai_sql_generation", "log_context", "exports", "live_tail"}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "ai_sql_generation", "log_context", "exports", "live_tail", "logchefql_aggregation"}},
 		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, true},
 	}
 	for _, tt := range tests {
@@ -590,5 +591,56 @@ func TestUpdateSourceNeverSendsStoredPasswordToNewHost(t *testing.T) {
 				t.Fatalf("err = %v, want a connection.password validation error", err)
 			}
 		})
+	}
+}
+
+// Live tail compiles with no opt-in and must reject an aggregation; the query
+// endpoint opts in and reads the aggregated SQL and its description.
+func TestCompileLogchefQLAggregationOptIn(t *testing.T) {
+	provider := &ClickHouseProvider{}
+	source := &models.Source{
+		MetaTSField: "timestamp",
+		Columns:     []models.ColumnInfo{{Name: "timestamp", Type: "DateTime"}, {Name: "x", Type: "UInt8"}, {Name: "service", Type: "String"}},
+	}
+	source.Connection.Database, source.Connection.TableName = "default", "logs"
+	req := LogchefQLCompileRequest{Query: "x=1 | count() by service", StartTime: "2026-11-15 00:00:00", EndTime: "2026-11-16 00:00:00", Timezone: "UTC"}
+
+	compiled, err := provider.CompileLogchefQL(context.Background(), source, req)
+	if err == nil || compiled == nil || compiled.Valid || compiled.Error == nil || compiled.Error.Code != logchefql.ErrAggregationNotAllowed {
+		t.Fatalf("default: compiled=%+v err=%v, want %s", compiled, err, logchefql.ErrAggregationNotAllowed)
+	}
+
+	req.AllowAggregation = true
+	compiled, err = provider.CompileLogchefQL(context.Background(), source, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "SELECT `service` AS `service`, count() AS `count`\n" +
+		"FROM default.logs\n" +
+		"WHERE `timestamp` BETWEEN toDateTime('2026-11-15 00:00:00', 'UTC') AND toDateTime('2026-11-16 00:00:00', 'UTC')\n" +
+		"  AND (`x` = 1)\n" +
+		"GROUP BY `service`\n" +
+		"ORDER BY `count` DESC, `service` ASC"
+	if compiled.Query != want || compiled.FilterOnly != "`x` = 1" {
+		t.Fatalf("query=\n%s\nfilter=%s", compiled.Query, compiled.FilterOnly)
+	}
+	if compiled.Aggregation == nil || compiled.Aggregation.Shape != logchefql.ShapeGrouped {
+		t.Fatalf("aggregation=%+v, want a grouped shape", compiled.Aggregation)
+	}
+}
+
+// A limit the server added warns on log rows. An aggregated result reports a
+// cut through stats.truncation only, so one row never reads "first 1000 rows".
+func TestQueryWarningsForBuildResult(t *testing.T) {
+	added := clickhouse.QueryBuildResult{LimitAdded: true, AppliedLimit: 1000}
+	if got := queryWarningsForBuildResult(added, false); len(got) != 1 || got[0].Code != "LIMIT_APPLIED" {
+		t.Fatalf("log rows warnings=%+v, want LIMIT_APPLIED", got)
+	}
+	if got := queryWarningsForBuildResult(added, true); len(got) != 0 {
+		t.Fatalf("aggregated warnings=%+v, want none", got)
+	}
+	capped := clickhouse.QueryBuildResult{LimitCapped: true, AppliedLimit: 100}
+	if got := queryWarningsForBuildResult(capped, true); len(got) != 1 || got[0].Code != "LIMIT_CAPPED" {
+		t.Fatalf("aggregated capped warnings=%+v, want LIMIT_CAPPED", got)
 	}
 }

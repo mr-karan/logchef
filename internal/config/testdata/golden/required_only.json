@@ -85,11 +85,15 @@
   },
   "Alerts": {
     "Enabled": true,
-    "EvaluationInterval": 60000000000,
+    "MaxConcurrentEvaluations": 4,
     "DefaultLookback": 300000000000,
     "HistoryLimit": 50,
     "WebhookAllowedHosts": null,
     "WebhookAllowlist": {}
+  },
+  "Jobs": {
+    "Enabled": true,
+    "PollInterval": 2000000000
   },
   "Query": {
     "MaxLimit": 100000,
@@ -100,7 +104,8 @@
     "MaxTimeoutSeconds": 300,
     "MCPCallTimeoutSeconds": 60,
     "MaxConcurrentPerUser": 3,
-    "MaxConcurrentGlobal": 30
+    "MaxConcurrentGlobal": 30,
+    "AggregationMaxMemoryBytes": 2147483648
   },
   "Export": {
     "InstanceID": "",
@@ -153,5 +158,16 @@
     "ReadOnly": false,
     "ShowLoginCredentials": false,
     "ProvisioningToken": ""
+  },
+  "Audit": {
+    "RetentionDays": 365,
+    "MaxRows": 1000000,
+    "LogEvents": true
+  },
+  "Reports": {
+    "Enabled": true,
+    "QueryBudget": 300000000000,
+    "MaxConcurrentRuns": 2,
+    "MaxAttachmentBytes": 5242880
   }
 }

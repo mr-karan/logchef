@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
@@ -20,14 +21,6 @@ func marshalStringMap(m map[string]string) (string, error) {
 
 func unmarshalStringMap(raw sql.NullString) (map[string]string, error) {
 	return alertjson.Decode[map[string]string](raw.String)
-}
-
-func marshalUserIDs(ids []models.UserID) (string, error) {
-	return alertjson.Encode(ids, len(ids) == 0)
-}
-
-func unmarshalUserIDs(raw sql.NullString) ([]models.UserID, error) {
-	return alertjson.Decode[[]models.UserID](raw.String)
 }
 
 func marshalStringSlice(values []string) (string, error) {
@@ -71,10 +64,6 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
-	if !alert.IsActive && !db.inTx {
-		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.UpdateAlert(ctx, alert) })
-	}
-
 	params, err := alertUpdateParams(alert)
 	if err != nil {
 		return err
@@ -84,11 +73,6 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert: %w", err)
-	}
-	if !alert.IsActive {
-		if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: int64(alert.ID)}); err != nil {
-			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
-		}
 	}
 	return nil
 }
@@ -113,7 +97,11 @@ func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Ale
 		}
 		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
-	return alertFromSQLC(row)
+	alert, err := alertFromSQLC(row)
+	if err != nil {
+		return nil, err
+	}
+	return alert, db.attachDestinationIDs(ctx, alert)
 }
 
 // ListAlertsBySource returns alerts for one source.
@@ -122,7 +110,7 @@ func (db *DB) ListAlertsBySource(ctx context.Context, sourceID models.SourceID) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
-	return alertsFromSQLC(rows)
+	return db.alertsWithDestinations(ctx, rows)
 }
 
 // ListAlertsForUser returns alerts the user can see (cross-source via team membership).
@@ -131,21 +119,20 @@ func (db *DB) ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*m
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts for user: %w", err)
 	}
-	return alertsFromSQLC(rows)
+	return db.alertsWithDestinations(ctx, rows)
 }
 
-// ListActiveAlertsDue returns alerts that need evaluation.
-func (db *DB) ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error) {
-	rows, err := db.readQueries.ListActiveAlertsDue(ctx)
+func (db *DB) alertsWithDestinations(ctx context.Context, rows []sqlc.Alert) ([]*models.Alert, error) {
+	alerts, err := alertsFromSQLC(rows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list active alerts: %w", err)
+		return nil, err
 	}
-	return alertsFromSQLC(rows)
+	return alerts, db.attachDestinationIDs(ctx, alerts...)
 }
 
-// MarkAlertEvaluated updates state after evaluation finishes without triggering.
-func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
-	if err := db.writeQueries.MarkAlertEvaluated(ctx, int64(alertID)); err != nil {
+// MarkAlertEvaluated records an evaluation that left the rule in state.
+func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID, state models.AlertState) error {
+	if err := db.writeQueries.MarkAlertEvaluated(ctx, sqlc.MarkAlertEvaluatedParams{LastState: string(state), ID: int64(alertID)}); err != nil {
 		return fmt.Errorf("failed to mark alert evaluated: %w", err)
 	}
 	return nil
@@ -159,23 +146,21 @@ func (db *DB) TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) e
 	return nil
 }
 
-// MarkAlertTriggered updates state when an alert fires.
-func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
-	if err := db.writeQueries.MarkAlertTriggered(ctx, int64(alertID)); err != nil {
-		return fmt.Errorf("failed to mark alert triggered: %w", err)
-	}
-	return nil
-}
-
 // InsertAlertHistory records a history entry and returns the hydrated entry.
-func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
+func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, groupKey string, group map[string]string, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
 	payloadJSON, err := marshalPayload(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal history payload: %w", err)
 	}
+	groupJSON, err := marshalStringMap(group)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal history group: %w", err)
+	}
 
 	row, err := db.writeQueries.InsertAlertHistory(ctx, sqlc.InsertAlertHistoryParams{
 		AlertID:     int64(alertID),
+		GroupKey:    groupKey,
+		GroupJson:   nullString(groupJSON),
 		Status:      string(status),
 		Value:       nullFloat64(value),
 		Message:     nullString(message),
@@ -197,6 +182,15 @@ func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID model
 		return nil, fmt.Errorf("failed to get alert history: %w", err)
 	}
 	return alertHistoryFromSQLC(row)
+}
+
+// ListOpenAlertHistory returns every open episode of the alert, newest first.
+func (db *DB) ListOpenAlertHistory(ctx context.Context, alertID models.AlertID) ([]*models.AlertHistoryEntry, error) {
+	rows, err := db.readQueries.ListOpenAlertHistory(ctx, int64(alertID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list open alert history: %w", err)
+	}
+	return alertHistoryEntriesFromSQLC(rows)
 }
 
 // GetAlertHistoryEntry fetches one history entry of an alert.
@@ -223,14 +217,60 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
-	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: alertID}); err != nil {
-		return fmt.Errorf("failed to interrupt legacy alert deliveries: %w", err)
-	}
 	if err := db.writeQueries.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: nullString(message)}); err != nil {
 		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
 	}
+	if err := db.writeQueries.DeleteAlertInstances(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to delete alert instances: %w", err)
+	}
 	if err := db.writeQueries.MarkAlertResolved(ctx, alertID); err != nil {
 		return fmt.Errorf("failed to mark alert resolved: %w", err)
+	}
+	return nil
+}
+
+// ResolveAlertGroup resolves the open episode of one group of the alert.
+func (db *DB) ResolveAlertGroup(ctx context.Context, alertID models.AlertID, groupKey, message string, resolvedAt time.Time) error {
+	if !db.inTx {
+		return db.WithTx(ctx, func(tx store.StoreOps) error {
+			return tx.ResolveAlertGroup(ctx, alertID, groupKey, message, resolvedAt)
+		})
+	}
+	ids, err := db.writeQueries.ListOpenAlertGroupHistoryIDs(ctx, sqlc.ListOpenAlertGroupHistoryIDsParams{AlertID: int64(alertID), GroupKey: groupKey})
+	if err != nil {
+		return fmt.Errorf("failed to find open alert episode: %w", err)
+	}
+	if len(ids) == 0 {
+		return models.ErrNotFound
+	}
+	if err := db.writeQueries.ResolveAlertGroupHistory(ctx, sqlc.ResolveAlertGroupHistoryParams{
+		AlertID:    int64(alertID),
+		GroupKey:   groupKey,
+		Message:    nullString(message),
+		ResolvedAt: sql.NullTime{Time: resolvedAt.UTC(), Valid: true},
+	}); err != nil {
+		return fmt.Errorf("failed to resolve alert episode: %w", err)
+	}
+	if err := db.writeQueries.DeleteAlertInstance(ctx, sqlc.DeleteAlertInstanceParams{AlertID: int64(alertID), GroupKey: groupKey}); err != nil {
+		return fmt.Errorf("failed to delete alert instance: %w", err)
+	}
+	if err := db.writeQueries.RefreshAlertState(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to refresh alert state: %w", err)
+	}
+	return nil
+}
+
+// SetOpenAlertHistoryStatus moves an open episode between triggered and no_data.
+func (db *DB) SetOpenAlertHistoryStatus(ctx context.Context, historyID int64, status models.AlertStatus, message string) error {
+	if _, err := db.writeQueries.SetOpenAlertHistoryStatus(ctx, sqlc.SetOpenAlertHistoryStatusParams{
+		Status:  string(status),
+		Message: nullString(message),
+		ID:      historyID,
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
+		}
+		return fmt.Errorf("failed to set alert history status: %w", err)
 	}
 	return nil
 }
@@ -264,10 +304,13 @@ func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limi
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
 	}
 
+	return alertHistoryEntriesFromSQLC(rows)
+}
+
+func alertHistoryEntriesFromSQLC(rows []sqlc.AlertHistory) ([]*models.AlertHistoryEntry, error) {
 	history := make([]*models.AlertHistoryEntry, 0, len(rows))
 	for i := range rows {
-		row := rows[i]
-		entry, err := alertHistoryFromSQLC(row)
+		entry, err := alertHistoryFromSQLC(rows[i])
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode alert history: %w", err)
 		}
@@ -276,7 +319,7 @@ func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limi
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries and the newest unresolved firing.
+// PruneAlertHistory keeps every open episode and the newest keep closed entries.
 func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -284,7 +327,6 @@ func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, kee
 	if err := db.writeQueries.PruneAlertHistory(ctx, sqlc.PruneAlertHistoryParams{
 		AlertID:   int64(alertID),
 		AlertID_2: int64(alertID),
-		AlertID_3: int64(alertID),
 		Limit:     int64(keep),
 	}); err != nil {
 		return fmt.Errorf("failed to prune alert history: %w", err)
@@ -301,34 +343,31 @@ func alertCreateParams(alert *models.Alert) (sqlc.CreateAlertParams, error) {
 	if err != nil {
 		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal annotations: %w", err)
 	}
-	recipientUserIDsJSON, err := marshalUserIDs(alert.RecipientUserIDs)
+	groupByJSON, err := marshalStringSlice(alert.GroupBy)
 	if err != nil {
-		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal recipient user IDs: %w", err)
-	}
-	webhookURLsJSON, err := marshalStringSlice(alert.WebhookURLs)
-	if err != nil {
-		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal webhook URLs: %w", err)
+		return sqlc.CreateAlertParams{}, fmt.Errorf("failed to marshal group_by: %w", err)
 	}
 
 	params := sqlc.CreateAlertParams{
-		SourceID:             int64(alert.SourceID),
-		Name:                 alert.Name,
-		Description:          nullString(alert.Description),
-		QueryLanguage:        string(alert.QueryLanguage),
-		EditorMode:           string(alert.EditorMode),
-		Query:                nullString(alert.Query),
-		ConditionJson:        nullString(alert.ConditionJSON),
-		LookbackSeconds:      int64(alert.LookbackSeconds),
-		ThresholdOperator:    string(alert.ThresholdOperator),
-		ThresholdValue:       alert.ThresholdValue,
-		FrequencySeconds:     int64(alert.FrequencySeconds),
-		Severity:             string(alert.Severity),
-		LabelsJson:           nullString(labelsJSON),
-		AnnotationsJson:      nullString(annotationsJSON),
-		RecipientUserIdsJson: nullString(recipientUserIDsJSON),
-		WebhookUrlsJson:      nullString(webhookURLsJSON),
-		GeneratorUrl:         nullString(alert.GeneratorURL),
-		IsActive:             boolToInt(alert.IsActive),
+		SourceID:          int64(alert.SourceID),
+		Name:              alert.Name,
+		Description:       nullString(alert.Description),
+		QueryLanguage:     string(alert.QueryLanguage),
+		EditorMode:        string(alert.EditorMode),
+		Query:             nullString(alert.Query),
+		ConditionJson:     nullString(alert.ConditionJSON),
+		LookbackSeconds:   int64(alert.LookbackSeconds),
+		ThresholdOperator: string(alert.ThresholdOperator),
+		ThresholdValue:    alert.ThresholdValue,
+		FrequencySeconds:  int64(alert.FrequencySeconds),
+		Severity:          string(alert.Severity),
+		LabelsJson:        nullString(labelsJSON),
+		AnnotationsJson:   nullString(annotationsJSON),
+		GeneratorUrl:      nullString(alert.GeneratorURL),
+		GroupByJson:       nullString(groupByJSON),
+		NoDataPolicy:      string(alert.NoDataPolicy.OrZero()),
+		NotifyOnResolve:   boolToInt(alert.NotifyOnResolve),
+		IsActive:          boolToInt(alert.IsActive),
 	}
 	if alert.CreatedBy != nil {
 		params.CreatedBy = sql.NullInt64{Int64: int64(*alert.CreatedBy), Valid: true}
@@ -342,24 +381,25 @@ func alertUpdateParams(alert *models.Alert) (sqlc.UpdateAlertParams, error) {
 		return sqlc.UpdateAlertParams{}, err
 	}
 	return sqlc.UpdateAlertParams{
-		Name:                 createParams.Name,
-		Description:          createParams.Description,
-		QueryLanguage:        createParams.QueryLanguage,
-		EditorMode:           createParams.EditorMode,
-		Query:                createParams.Query,
-		ConditionJson:        createParams.ConditionJson,
-		LookbackSeconds:      createParams.LookbackSeconds,
-		ThresholdOperator:    createParams.ThresholdOperator,
-		ThresholdValue:       createParams.ThresholdValue,
-		FrequencySeconds:     createParams.FrequencySeconds,
-		Severity:             createParams.Severity,
-		LabelsJson:           createParams.LabelsJson,
-		AnnotationsJson:      createParams.AnnotationsJson,
-		RecipientUserIdsJson: createParams.RecipientUserIdsJson,
-		WebhookUrlsJson:      createParams.WebhookUrlsJson,
-		GeneratorUrl:         createParams.GeneratorUrl,
-		IsActive:             createParams.IsActive,
-		ID:                   int64(alert.ID),
+		Name:              createParams.Name,
+		Description:       createParams.Description,
+		QueryLanguage:     createParams.QueryLanguage,
+		EditorMode:        createParams.EditorMode,
+		Query:             createParams.Query,
+		ConditionJson:     createParams.ConditionJson,
+		LookbackSeconds:   createParams.LookbackSeconds,
+		ThresholdOperator: createParams.ThresholdOperator,
+		ThresholdValue:    createParams.ThresholdValue,
+		FrequencySeconds:  createParams.FrequencySeconds,
+		Severity:          createParams.Severity,
+		LabelsJson:        createParams.LabelsJson,
+		AnnotationsJson:   createParams.AnnotationsJson,
+		GeneratorUrl:      createParams.GeneratorUrl,
+		GroupByJson:       createParams.GroupByJson,
+		NoDataPolicy:      createParams.NoDataPolicy,
+		NotifyOnResolve:   createParams.NotifyOnResolve,
+		IsActive:          createParams.IsActive,
+		ID:                int64(alert.ID),
 	}, nil
 }
 
@@ -385,13 +425,9 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode annotations: %w", err)
 	}
-	recipientUserIDs, err := unmarshalUserIDs(row.RecipientUserIdsJson)
+	groupBy, err := unmarshalStringSlice(row.GroupByJson)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode recipient user IDs: %w", err)
-	}
-	webhookURLs, err := unmarshalStringSlice(row.WebhookUrlsJson)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode webhook URLs: %w", err)
+		return nil, fmt.Errorf("failed to decode group_by: %w", err)
 	}
 
 	alert := &models.Alert{
@@ -410,11 +446,13 @@ func alertFromSQLC(row sqlc.Alert) (*models.Alert, error) {
 		Severity:          models.AlertSeverity(row.Severity),
 		Labels:            labels,
 		Annotations:       annotations,
-		RecipientUserIDs:  recipientUserIDs,
-		WebhookURLs:       webhookURLs,
 		GeneratorURL:      row.GeneratorUrl.String,
+		GroupBy:           groupBy,
+		NoDataPolicy:      models.AlertNoDataPolicy(row.NoDataPolicy),
+		NotifyOnResolve:   row.NotifyOnResolve == 1,
 		IsActive:          row.IsActive == 1,
 		LastState:         models.AlertState(row.LastState),
+		EvalSeq:           row.EvalSeq,
 		CreatedAt:         row.CreatedAt,
 		UpdatedAt:         row.UpdatedAt,
 	}
@@ -437,9 +475,16 @@ func alertHistoryFromSQLC(row sqlc.AlertHistory) (*models.AlertHistoryEntry, err
 		return nil, fmt.Errorf("failed to decode history payload: %w", err)
 	}
 
+	group, err := unmarshalStringMap(row.GroupJson)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode history group: %w", err)
+	}
+
 	entry := &models.AlertHistoryEntry{
 		ID:          row.ID,
 		AlertID:     models.AlertID(row.AlertID),
+		GroupKey:    row.GroupKey,
+		Group:       group,
 		Status:      models.AlertStatus(row.Status),
 		TriggeredAt: row.TriggeredAt,
 		Message:     row.Message.String,
@@ -467,10 +512,137 @@ func nullFloat64(value *float64) sql.NullFloat64 {
 	return sql.NullFloat64{Float64: *value, Valid: true}
 }
 
-// RecoverAlertDeliveries finalizes delivery reservations left by a stopped manager.
-func (db *DB) RecoverAlertDeliveries(ctx context.Context) error {
-	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
-		return fmt.Errorf("failed to recover alert deliveries: %w", err)
+// AdvanceAlertEvalSeq increments eval_seq when it still equals seq.
+func (db *DB) AdvanceAlertEvalSeq(ctx context.Context, alertID models.AlertID, seq int64) error {
+	if _, err := db.writeQueries.AdvanceAlertEvalSeq(ctx, sqlc.AdvanceAlertEvalSeqParams{ID: int64(alertID), EvalSeq: seq}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrConflict
+		}
+		return fmt.Errorf("failed to advance alert eval_seq: %w", err)
 	}
 	return nil
+}
+
+// ListAlertInstances returns the alert's instances ordered by group key.
+func (db *DB) ListAlertInstances(ctx context.Context, alertID models.AlertID) ([]*models.AlertInstance, error) {
+	rows, err := db.readQueries.ListAlertInstances(ctx, int64(alertID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alert instances: %w", err)
+	}
+	instances := make([]*models.AlertInstance, 0, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		group, err := alertjson.Decode[map[string]string](row.GroupJson)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode alert instance group: %w", err)
+		}
+		instance := &models.AlertInstance{
+			AlertID:    models.AlertID(row.AlertID),
+			GroupKey:   row.GroupKey,
+			Group:      group,
+			State:      models.AlertInstanceState(row.State),
+			StateSince: row.StateSince,
+			Notified:   row.Notified == 1,
+		}
+		if row.Value.Valid {
+			value := row.Value.Float64
+			instance.Value = &value
+		}
+		if row.LastSeenAt.Valid {
+			seen := row.LastSeenAt.Time
+			instance.LastSeenAt = &seen
+		}
+		if row.HistoryID.Valid {
+			historyID := row.HistoryID.Int64
+			instance.HistoryID = &historyID
+		}
+		instances = append(instances, instance)
+	}
+	return instances, nil
+}
+
+// CountAlertInstances returns the instance counts of each given alert that has instances.
+func (db *DB) CountAlertInstances(ctx context.Context, alertIDs []models.AlertID) (map[models.AlertID]models.AlertInstanceCounts, error) {
+	counts := make(map[models.AlertID]models.AlertInstanceCounts)
+	if len(alertIDs) == 0 {
+		return counts, nil
+	}
+	ids := make([]int64, len(alertIDs))
+	for i, id := range alertIDs {
+		ids[i] = int64(id)
+	}
+	rows, err := db.readQueries.CountAlertInstancesByState(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count alert instances: %w", err)
+	}
+	for _, row := range rows {
+		alertCounts := counts[models.AlertID(row.AlertID)]
+		alertCounts.Add(models.AlertInstanceState(row.State), int(row.Instances))
+		counts[models.AlertID(row.AlertID)] = alertCounts
+	}
+	return counts, nil
+}
+
+// UpsertAlertInstance inserts or replaces the instance of (alert, group).
+func (db *DB) UpsertAlertInstance(ctx context.Context, instance *models.AlertInstance) error {
+	groupJSON, err := alertjson.EncodeGroup(instance.Group)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert instance group: %w", err)
+	}
+	params := sqlc.UpsertAlertInstanceParams{
+		AlertID:    int64(instance.AlertID),
+		GroupKey:   instance.GroupKey,
+		GroupJson:  groupJSON,
+		State:      string(instance.State),
+		Value:      nullFloat64(instance.Value),
+		StateSince: instance.StateSince.UTC(),
+		Notified:   boolToInt(instance.Notified),
+	}
+	if instance.LastSeenAt != nil {
+		params.LastSeenAt = sql.NullTime{Time: instance.LastSeenAt.UTC(), Valid: true}
+	}
+	if instance.HistoryID != nil {
+		params.HistoryID = sql.NullInt64{Int64: *instance.HistoryID, Valid: true}
+	}
+	if err := db.writeQueries.UpsertAlertInstance(ctx, params); err != nil {
+		return fmt.Errorf("failed to upsert alert instance: %w", err)
+	}
+	return nil
+}
+
+// DeleteAlertInstance removes the instance of (alert, group), if any.
+func (db *DB) DeleteAlertInstance(ctx context.Context, alertID models.AlertID, groupKey string) error {
+	if err := db.writeQueries.DeleteAlertInstance(ctx, sqlc.DeleteAlertInstanceParams{AlertID: int64(alertID), GroupKey: groupKey}); err != nil {
+		return fmt.Errorf("failed to delete alert instance: %w", err)
+	}
+	return nil
+}
+
+// DeleteAlertInstances removes every instance of the alert.
+func (db *DB) DeleteAlertInstances(ctx context.Context, alertID models.AlertID) error {
+	if err := db.writeQueries.DeleteAlertInstances(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to delete alert instances: %w", err)
+	}
+	return nil
+}
+
+// MarkAlertInstanceNotified sets notified on the instance whose open episode is historyID.
+func (db *DB) MarkAlertInstanceNotified(ctx context.Context, alertID models.AlertID, groupKey string, historyID int64) error {
+	if _, err := db.writeQueries.MarkAlertInstanceNotified(ctx, sqlc.MarkAlertInstanceNotifiedParams{
+		AlertID:   int64(alertID),
+		GroupKey:  groupKey,
+		HistoryID: sql.NullInt64{Int64: historyID, Valid: true},
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
+		}
+		return fmt.Errorf("failed to mark alert instance notified: %w", err)
+	}
+	return nil
+}
+
+// GetAlertForUpdate retrieves the row with GetAlert. Inside WithTx the read runs on
+// the transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetAlertForUpdate(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
+	return db.GetAlert(ctx, alertID)
 }

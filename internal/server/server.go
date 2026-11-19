@@ -15,10 +15,12 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/askchef"
+	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/auth"
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/internal/oauth"
@@ -45,7 +47,6 @@ type ServerOptions struct {
 	SQLite        store.Store
 	ClickHouse    *clickhouse.Manager
 	Datasources   *datasource.Service
-	WebhookSender *alerts.DynamicWebhookSender
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	OAuth         *oauth.Server      // OAuth authorization server; nil when auth.oauth is disabled.
@@ -56,6 +57,9 @@ type ServerOptions struct {
 
 	// AskChefChat is the model of Ask Chef; nil disables Ask Chef.
 	AskChefChat askchef.ChatModel
+
+	// Audit records the event of every route named after an audit action.
+	Audit *audit.Recorder
 }
 
 // Server represents the core HTTP server, encapsulating the Fiber app instance
@@ -66,7 +70,6 @@ type Server struct {
 	store         store.Store
 	clickhouse    *clickhouse.Manager
 	datasources   *datasource.Service
-	webhookSender *alerts.DynamicWebhookSender
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	oauth         *oauth.Server      // nil when auth.oauth is disabled
@@ -78,8 +81,13 @@ type Server struct {
 	dashCache     *dashcache.Cache // per-dashboard TTL result cache
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
 	askChefTurns  askChefTurns
+	audit         *audit.Recorder
+	reports       *core.ReportRunner
 
 	localLoginLimiter *auth.LoginRateLimiter
+	// signInFailureAudit bounds the failed sign-in events that reach the
+	// audit table, the only events an unauthenticated caller can cause.
+	signInFailureAudit *auth.WindowLimiter
 
 	listener        net.Listener
 	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
@@ -91,6 +99,7 @@ type Server struct {
 	historyQueue    chan *models.QueryHistory
 	historyDropped  atomic.Uint64
 	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
+	shapes          shapeRecorder
 	tokenQueue      chan int
 	tokenLastQueued map[int]time.Time
 	tokenDropped    atomic.Uint64
@@ -121,6 +130,9 @@ type Server struct {
 // It initializes the Fiber application, sets up middleware, injects dependencies,
 // and registers all application routes.
 func New(opts ServerOptions) *Server {
+	if opts.Audit == nil {
+		panic("server: ServerOptions.Audit is required")
+	}
 	log := opts.Logger.With("component", "server")
 
 	// Initialize Fiber app with custom error handler.
@@ -184,13 +196,13 @@ func New(opts ServerOptions) *Server {
 
 	// Create the Server instance, injecting dependencies.
 	s := &Server{
+		audit:         opts.Audit,
 		app:           app,
 		config:        opts.Config,
 		store:         opts.SQLite,
 		clickhouse:    opts.ClickHouse,
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
-		webhookSender: opts.WebhookSender,
 		oidcProvider:  opts.OIDCProvider,
 		oauth:         opts.OAuth,
 		fs:            opts.FS,
@@ -216,6 +228,7 @@ func New(opts ServerOptions) *Server {
 		cancelRequests:  cancelRequests,
 	}
 
+	s.signInFailureAudit = auth.NewGlobalWindowLimiter(time.Minute, failedSignInEventsPerMinute)
 	if opts.Config.Auth.Local.Enabled {
 		s.localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 	}
@@ -225,7 +238,12 @@ func New(opts ServerOptions) *Server {
 		log.Warn("web UI unavailable", "error", err)
 	}
 	s.indexHTML = indexHTML
+
+	// After recoverMiddleware, so a panicking handler unwinds through it
+	// first and still records its failure.
+	app.Use(s.auditMiddleware)
 	s.askChef = s.newAskChef(opts.AskChefChat)
+	s.reports = s.newReportRunner(opts)
 
 	s.reapInterruptedExportJobs(s.exportOwner)
 	s.setupRoutes()
@@ -297,7 +315,7 @@ func (s *Server) setupRoutes() {
 	// limiting is enabled. The query limiter runs after the group-level
 	// requireAuth, so the user context is populated when it computes its
 	// per-user key. Fiber v3 takes the first handler as its own argument.
-	registerLimited := func(router fiber.Router, method, path string, limiter fiber.Handler, handlers ...fiber.Handler) {
+	registerLimited := func(router fiber.Router, method, path string, limiter fiber.Handler, handlers ...fiber.Handler) fiber.Router {
 		chain := make([]any, 0, len(handlers)+1)
 		if limiter != nil {
 			chain = append(chain, limiter)
@@ -305,7 +323,7 @@ func (s *Server) setupRoutes() {
 		for _, handler := range handlers {
 			chain = append(chain, handler)
 		}
-		router.Add([]string{method}, path, chain[0], chain[1:]...)
+		return router.Add([]string{method}, path, chain[0], chain[1:]...)
 	}
 
 	// --- Public Routes ---
@@ -317,9 +335,9 @@ func (s *Server) setupRoutes() {
 	// The unauthenticated auth/token endpoints are rate-limited per client IP
 	// (plus an optional global cap) to blunt credential-stuffing / brute force.
 	registerLimited(api, fiber.MethodGet, "/auth/login", authLimiter, s.handleLogin)
-	registerLimited(api, fiber.MethodPost, "/auth/local/login", authLimiter, s.handleLocalLogin)
-	registerLimited(api, fiber.MethodGet, "/auth/callback", authLimiter, s.handleCallback)
-	api.Post("/auth/logout", s.handleLogout)
+	registerLimited(api, fiber.MethodPost, "/auth/local/login", authLimiter, s.handleLocalLogin).Name(string(audit.SessionLogin))
+	registerLimited(api, fiber.MethodGet, "/auth/callback", authLimiter, s.handleCallback).Name(string(audit.SessionLogin))
+	api.Post("/auth/logout", s.handleLogout).Name(string(audit.SessionLogout))
 
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetCurrentUser)
@@ -331,12 +349,12 @@ func (s *Server) setupRoutes() {
 	// Share links for ad hoc queries. Share payload access is still scoped by
 	// team membership and source linkage in the handler.
 	api.Get("/query-shares/:token", s.requireAuth, s.requireTokenScope(models.TokenScopeQuerySharesRead), s.handleGetQueryShare)
-	api.Delete("/query-shares/:token", s.requireAuth, s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleDeleteQueryShare)
+	api.Delete("/query-shares/:token", s.requireAuth, s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleDeleteQueryShare).Name(string(audit.QueryShareDelete))
 
 	// API Token Management for current user
 	api.Get("/me/tokens", s.requireAuth, s.requireTokenScope(models.TokenScopeTokensRead), s.handleListAPITokens)
-	api.Post("/me/tokens", s.requireAuth, s.requireTokenScope(models.TokenScopeTokensWrite), s.handleCreateAPIToken)
-	api.Delete("/me/tokens/:tokenID", s.requireAuth, s.requireTokenScope(models.TokenScopeTokensWrite), s.handleDeleteAPIToken)
+	api.Post("/me/tokens", s.requireAuth, s.requireTokenScope(models.TokenScopeTokensWrite), s.handleCreateAPIToken).Name(string(audit.APITokenCreate))
+	api.Delete("/me/tokens/:tokenID", s.requireAuth, s.requireTokenScope(models.TokenScopeTokensWrite), s.handleDeleteAPIToken).Name(string(audit.APITokenDelete))
 
 	// --- User Listing (for team admins to add members) ---
 	// This endpoint is accessible to team admins (users who are admin of at least one team)
@@ -348,19 +366,19 @@ func (s *Server) setupRoutes() {
 	admin := api.Group("/admin", s.requireAuth, s.requireAdmin)
 	// User Management
 	admin.Get("/users", s.requireTokenScope(models.TokenScopeUsersRead), s.handleListUsers)
-	admin.Post("/users", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleCreateUser)
+	admin.Post("/users", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleCreateUser).Name(string(audit.UserCreate))
 	admin.Get("/users/:userID", s.requireTokenScope(models.TokenScopeUsersRead), s.handleGetUser)
-	admin.Put("/users/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleUpdateUser)
-	admin.Delete("/users/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleDeleteUser)
+	admin.Put("/users/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleUpdateUser).Name(string(audit.UserUpdate))
+	admin.Delete("/users/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleDeleteUser).Name(string(audit.UserDelete))
 	admin.Get("/service-accounts", s.requireTokenScope(models.TokenScopeUsersRead), s.handleListServiceAccounts)
-	admin.Post("/service-accounts", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleCreateServiceAccount)
-	admin.Delete("/service-accounts/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleDeleteServiceAccount)
+	admin.Post("/service-accounts", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleCreateServiceAccount).Name(string(audit.ServiceAccountCreate))
+	admin.Delete("/service-accounts/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleDeleteServiceAccount).Name(string(audit.ServiceAccountDelete))
 	admin.Get("/service-accounts/:userID/tokens", s.requireTokenScope(models.TokenScopeTokensRead), s.handleListServiceAccountTokens)
-	admin.Post("/service-accounts/:userID/tokens", s.requireTokenScope(models.TokenScopeTokensWrite), s.handleCreateServiceAccountToken)
-	admin.Delete("/service-accounts/:userID/tokens/:tokenID", s.requireTokenScope(models.TokenScopeTokensWrite), s.handleDeleteServiceAccountToken)
+	admin.Post("/service-accounts/:userID/tokens", s.requireTokenScope(models.TokenScopeTokensWrite), s.handleCreateServiceAccountToken).Name(string(audit.APITokenCreate))
+	admin.Delete("/service-accounts/:userID/tokens/:tokenID", s.requireTokenScope(models.TokenScopeTokensWrite), s.handleDeleteServiceAccountToken).Name(string(audit.APITokenDelete))
 	admin.Get("/service-accounts/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListServiceAccountTeams)
-	admin.Post("/service-accounts/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleAddServiceAccountToTeam)
-	admin.Delete("/service-accounts/:userID/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleRemoveServiceAccountFromTeam)
+	admin.Post("/service-accounts/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleAddServiceAccountToTeam).Name(string(audit.TeamMemberAdd))
+	admin.Delete("/service-accounts/:userID/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleRemoveServiceAccountFromTeam).Name(string(audit.TeamMemberRemove))
 
 	// Saved Queries (admin browse): every saved query across all sources, each
 	// marked runnable for the caller. The user-facing /saved-queries stays
@@ -374,23 +392,34 @@ func (s *Server) setupRoutes() {
 
 	// Global Team Management
 	admin.Get("/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeams)
-	admin.Post("/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleCreateTeam)
-	admin.Delete("/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamNotManaged, s.handleDeleteTeam)
+	admin.Post("/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleCreateTeam).Name(string(audit.TeamCreate))
+	admin.Delete("/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamNotManaged, s.handleDeleteTeam).Name(string(audit.TeamDelete))
 
 	// Global Source Management
 	admin.Get("/sources", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleListSources) // Admin endpoint for listing all sources
-	admin.Post("/sources", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleCreateSource)
+	admin.Post("/sources", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleCreateSource).Name(string(audit.SourceCreate))
 	admin.Post("/sources/validate", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleValidateSourceConnection)
-	admin.Put("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleUpdateSource)
-	admin.Delete("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleDeleteSource)
+	admin.Put("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleUpdateSource).Name(string(audit.SourceUpdate))
+	admin.Delete("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleDeleteSource).Name(string(audit.SourceDelete))
 	admin.Get("/sources/:sourceID/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceStats)
 	admin.Get("/sources/:sourceID/activity", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceActivity) // Admin-only recent activity
+	// Schema advisor (RFC 0010). Refresh reads ClickHouse under sources:read,
+	// as the stats route does.
+	admin.Get("/sources/:sourceID/advisor", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSchemaAdvice)
+	admin.Post("/sources/:sourceID/advisor/refresh", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleRefreshSchemaAdvice)
+	admin.Put("/sources/:sourceID/advisor/schedule", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleSetSchemaAdviceSchedule).Name(string(audit.SchemaAdvisorScheduleUpdate))
+	admin.Put("/sources/:sourceID/advisor/findings/:findingID/dismissal", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleDismissSchemaFinding).Name(string(audit.SchemaAdvisorDismissalCreate))
+	admin.Delete("/sources/:sourceID/advisor/findings/:findingID/dismissal", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleRestoreSchemaFinding).Name(string(audit.SchemaAdvisorDismissalDelete))
 
 	// Recent query activity (admin recent-activity view over query_history).
 	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)
 
 	// Authoritative all-time usage analytics over the non-pruned query_stats_daily rollup.
 	admin.Get("/query-stats", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryStats)
+
+	// Audit log (RFC 0009). The export records audit_event.export.
+	admin.Get("/audit-events", s.requireTokenScope(models.TokenScopeAuditRead), s.handleListAuditEvents)
+	admin.Get("/audit-events/export", s.requireTokenScope(models.TokenScopeAuditRead), s.handleExportAuditEvents).Name(string(audit.AuditEventExport))
 
 	// Provisioning Export
 	admin.Get("/provisioning/export", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleExportProvisioning)
@@ -399,10 +428,9 @@ func (s *Server) setupRoutes() {
 	admin.Get("/settings", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleListSettings)
 	admin.Get("/settings/category/:category", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleListSettingsByCategory)
 	admin.Get("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleGetSetting)
-	admin.Put("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleUpdateSetting)
-	admin.Delete("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleDeleteSetting)
-	admin.Post("/settings/test-email", s.requireSession, s.requireAlertsEnabled, s.handleTestEmail)
-	admin.Post("/settings/test-webhook", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestWebhook)
+	admin.Put("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleUpdateSetting).Name(string(audit.SettingUpdate))
+	admin.Delete("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleDeleteSetting).Name(string(audit.SettingDelete))
+	admin.Post("/settings/test-email", s.requireSession, s.requireAlertsEnabled, s.handleTestEmail).Name(string(audit.SettingTest))
 
 	// --- Team Routes (Access controlled by team membership) ---
 	// Regular users can view teams they belong to, team admins can manage membership and linked sources
@@ -414,11 +442,11 @@ func (s *Server) setupRoutes() {
 	teamMembers := api.Group("/teams/:teamID/members", s.requireAuth, s.requireTeamMember)
 	teamMembers.Get("/", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeamMembers) // Any team member can view
 	// Team admins can add/remove members even on managed teams (day-to-day operations)
-	teamMembers.Post("/", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember)
-	teamMembers.Delete("/:userID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember)
+	teamMembers.Post("/", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember).Name(string(audit.TeamMemberAdd))
+	teamMembers.Delete("/:userID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember).Name(string(audit.TeamMemberRemove))
 
 	// Team settings — managed guard only on structural changes (rename/description)
-	api.Put("/teams/:teamID", s.requireAuth, s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
+	api.Put("/teams/:teamID", s.requireAuth, s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam).Name(string(audit.TeamUpdate))
 
 	// Collections (cross-team curation lists). Each user gets an auto-created
 	// personal collection on first GET /api/v1/collections. Other collections
@@ -434,26 +462,26 @@ func (s *Server) setupRoutes() {
 	// per-collection mutations are gated on the caller's collection role inside
 	// core/collections.go (owner manages members/items + delete; editor curates).
 	// Collection membership never grants source access — that stays the hard gate.
-	collections.Post("/", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleCreateCollection)
-	collections.Put("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollection)
-	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleDeleteCollection)
-	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionMember)
-	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionMember)
-	collections.Post("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionTeam)
-	collections.Delete("/:collectionID/teams/:teamID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionTeam)
-	collections.Post("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionItem)
-	collections.Put("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollectionItem)
-	collections.Delete("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionItem)
+	collections.Post("/", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleCreateCollection).Name(string(audit.CollectionCreate))
+	collections.Put("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollection).Name(string(audit.CollectionUpdate))
+	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleDeleteCollection).Name(string(audit.CollectionDelete))
+	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionMember).Name(string(audit.CollectionMemberAdd))
+	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionMember).Name(string(audit.CollectionMemberRemove))
+	collections.Post("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionTeam).Name(string(audit.CollectionTeamAdd))
+	collections.Delete("/:collectionID/teams/:teamID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionTeam).Name(string(audit.CollectionTeamRemove))
+	collections.Post("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionItem).Name(string(audit.CollectionItemAdd))
+	collections.Put("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollectionItem).Name(string(audit.CollectionItemUpdate))
+	collections.Delete("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionItem).Name(string(audit.CollectionItemRemove))
 
 	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete: creator + global admin (legacy queries
 	// without created_by are global-admin-only).
 	savedQueries := api.Group("/saved-queries", s.requireAuth)
 	savedQueries.Get("/", s.requireTokenScope(models.TokenScopeSavedQueriesRead), s.handleListSavedQueries)
-	savedQueries.Post("/", s.requireTokenScope(models.TokenScopeSavedQueriesWrite), s.handleCreateSavedQuery)
+	savedQueries.Post("/", s.requireTokenScope(models.TokenScopeSavedQueriesWrite), s.handleCreateSavedQuery).Name(string(audit.SavedQueryCreate))
 	savedQueries.Get("/:queryID", s.requireTokenScope(models.TokenScopeSavedQueriesRead), s.handleGetSavedQuery)
-	savedQueries.Put("/:queryID", s.requireTokenScope(models.TokenScopeSavedQueriesWrite), s.handleUpdateSavedQuery)
-	savedQueries.Delete("/:queryID", s.requireTokenScope(models.TokenScopeSavedQueriesWrite), s.handleDeleteSavedQuery)
+	savedQueries.Put("/:queryID", s.requireTokenScope(models.TokenScopeSavedQueriesWrite), s.handleUpdateSavedQuery).Name(string(audit.SavedQueryUpdate))
+	savedQueries.Delete("/:queryID", s.requireTokenScope(models.TokenScopeSavedQueriesWrite), s.handleDeleteSavedQuery).Name(string(audit.SavedQueryDelete))
 	savedQueries.Get("/:queryID/resolve", s.requireTokenScope(models.TokenScopeSavedQueriesRead), s.handleResolveSavedQuery)
 
 	// Team Source Management (linking/unlinking)
@@ -461,8 +489,8 @@ func (s *Server) setupRoutes() {
 	teamSources.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleListTeamSources)
 
 	// Only team admins can link/unlink sources
-	teamSources.Post("/", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleLinkSourceToTeam)
-	teamSources.Delete("/:sourceID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleUnlinkSourceFromTeam)
+	teamSources.Post("/", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleLinkSourceToTeam).Name(string(audit.TeamSourceLink))
+	teamSources.Delete("/:sourceID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleUnlinkSourceFromTeam).Name(string(audit.TeamSourceUnlink))
 
 	// --- Team Source Operations (requires team membership) ---
 	// These endpoints allow team members to interact with a specific source linked to their team
@@ -479,16 +507,25 @@ func (s *Server) setupRoutes() {
 	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/windowed", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleWindowedQuery)
 	registerLimited(teamSourceOps, fiber.MethodGet, "/logs/stream-fields", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleStreamFields)
 	teamSourceOps.Get("/logs/tail", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleTailLogs)
-	teamSourceOps.Post("/logs/export", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleExportLogs)
+	teamSourceOps.Post("/logs/export", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleExportLogs).Name(string(audit.LogExportCreate))
 	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCancelQuery)
-	teamSourceOps.Post("/exports", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCreateExportJob)
+	teamSourceOps.Post("/exports", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCreateExportJob).Name(string(audit.LogExportCreate))
 	teamSourceOps.Get("/exports/:exportID", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetExportJob)
-	teamSourceOps.Get("/exports/:exportID/download", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleDownloadExportJob)
+	teamSourceOps.Get("/exports/:exportID/download", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleDownloadExportJob).Name(string(audit.LogExportDownload))
 	teamSourceOps.Get("/schema", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
 	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/histogram", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetHistogram)
 	teamSourceOps.Post("/logs/context", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetLogContext)
 	teamSourceOps.Post("/generate-sql", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGenerateAISQL)
-	teamSourceOps.Post("/query-shares", s.requireTeamHasSource(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
+	teamSourceOps.Post("/query-shares", s.requireTeamHasSource(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare).Name(string(audit.QueryShareCreate))
+
+	// Saved Explorer views (RFC 0007). Core decides the scope rules.
+	teamSourceOps.Get("/views", s.requireTeamHasSource(models.TokenScopeSavedViewsRead), s.handleListSavedViews)
+	teamSourceOps.Post("/views", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleCreateSavedView).Name(string(audit.SavedViewCreate))
+	teamSourceOps.Get("/views/:viewID", s.requireTeamHasSource(models.TokenScopeSavedViewsRead), s.handleGetSavedView)
+	teamSourceOps.Put("/views/:viewID", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleUpdateSavedView).Name(string(audit.SavedViewUpdate))
+	teamSourceOps.Delete("/views/:viewID", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleDeleteSavedView).Name(string(audit.SavedViewDelete))
+	teamSourceOps.Put("/views/:viewID/default", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleSetSavedViewDefault).Name(string(audit.SavedViewSetDefault))
+	teamSourceOps.Delete("/views/:viewID/default", s.requireTeamHasSource(models.TokenScopeSavedViewsWrite), s.handleClearSavedViewDefault).Name(string(audit.SavedViewClearDefault))
 
 	// LogchefQL endpoints - query language parsing and translation
 	teamSourceOps.Post("/logchefql/translate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
@@ -510,26 +547,62 @@ func (s *Server) setupRoutes() {
 	// (legacy alerts without created_by are global-admin-only).
 	alertRoutes := api.Group("/alerts", s.requireAuth, s.requireAlertsEnabled)
 	alertRoutes.Get("/", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlerts)
-	alertRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateAlert)
+	alertRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateAlert).Name(string(audit.AlertCreate))
 	alertRoutes.Post("/test", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleTestAlertQuery)
+	alertRoutes.Post("/backtest", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleBacktestAlert)
 	alertRoutes.Get("/:alertID", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleGetAlert)
-	alertRoutes.Put("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateAlert)
-	alertRoutes.Delete("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteAlert)
+	alertRoutes.Put("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateAlert).Name(string(audit.AlertUpdate))
+	alertRoutes.Delete("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteAlert).Name(string(audit.AlertDelete))
 	alertRoutes.Get("/:alertID/history", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertHistory)
-	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert)
+	alertRoutes.Get("/:alertID/instances", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertInstances)
+	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert).Name(string(audit.AlertResolve))
+
+	// Alert silences. Anyone who sees the source lists them and, with
+	// alerts:write, creates one; the creator and global admins change them.
+	silenceRoutes := api.Group("/alert-silences", s.requireAuth, s.requireAlertsEnabled)
+	silenceRoutes.Get("/", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListSilences)
+	silenceRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateSilence).Name(string(audit.AlertSilenceCreate))
+	silenceRoutes.Put("/:silenceID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateSilence).Name(string(audit.AlertSilenceUpdate))
+	silenceRoutes.Delete("/:silenceID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteSilence).Name(string(audit.AlertSilenceDelete))
+
+	// Notification destinations. Not behind requireAlertsEnabled: scheduled
+	// reports send to email destinations when alerting is off.
+	destinationRoutes := api.Group("/notification-destinations", s.requireAuth)
+	destinationRoutes.Get("/", s.requireTokenScope(models.TokenScopeDestinationsRead), s.handleListDestinations)
+	destinationRoutes.Post("/", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleCreateDestination).Name(string(audit.NotificationDestinationCreate))
+	destinationRoutes.Post("/test", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleTestDestination).Name(string(audit.NotificationDestinationTest))
+	destinationRoutes.Put("/:destinationID", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleUpdateDestination).Name(string(audit.NotificationDestinationUpdate))
+	destinationRoutes.Delete("/:destinationID", s.requireTokenScope(models.TokenScopeDestinationsWrite), s.handleDeleteDestination).Name(string(audit.NotificationDestinationDelete))
 
 	// Dashboard handlers authorize access to the stored panels. Panel queries
 	// run through the team-scoped log endpoints.
 	dashboardRoutes := api.Group("/dashboards", s.requireAuth)
 	dashboardRoutes.Get("/", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleListDashboards)
-	dashboardRoutes.Post("/", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleCreateDashboard)
+	dashboardRoutes.Post("/", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleCreateDashboard).Name(string(audit.DashboardCreate))
 	dashboardRoutes.Get("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleGetDashboard)
-	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard)
-	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard)
+	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard).Name(string(audit.DashboardUpdate))
+	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard).Name(string(audit.DashboardDelete))
+
+	// Scheduled reports (RFC 0008). A report runs as its owner; who may see
+	// and change one is decided in core.
+	reportRoutes := api.Group("/reports", s.requireAuth, s.requireReportsEnabled)
+	reportRoutes.Get("/", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReports)
+	reportRoutes.Post("/", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleCreateReport).Name(string(audit.ReportCreate))
+	reportRoutes.Get("/recipient-options", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReportRecipientOptions)
+	reportRoutes.Get("/:reportID", s.requireTokenScope(models.TokenScopeReportsRead), s.handleGetReport)
+	reportRoutes.Put("/:reportID", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleUpdateReport).Name(string(audit.ReportUpdate))
+	reportRoutes.Delete("/:reportID", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleDeleteReport).Name(string(audit.ReportDelete))
+	reportRoutes.Post("/:reportID/pause", s.requireTokenScope(models.TokenScopeReportsWrite), s.handlePauseReport).Name(string(audit.ReportPause))
+	reportRoutes.Post("/:reportID/resume", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleResumeReport).Name(string(audit.ReportResume))
+	reportRoutes.Post("/:reportID/claim", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleClaimReport).Name(string(audit.ReportClaim))
+	reportRoutes.Post("/:reportID/run", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleRunReport)
+	registerLimited(reportRoutes, fiber.MethodPost, "/:reportID/preview", queryLimiter, s.requireTokenScope(models.TokenScopeReportsRead), s.requireTokenScope(models.TokenScopeLogsRead), s.handlePreviewReport)
+	reportRoutes.Get("/:reportID/runs", s.requireTokenScope(models.TokenScopeReportsRead), s.handleListReportRuns)
+	reportRoutes.Delete("/:reportID/recipients/me", s.requireTokenScope(models.TokenScopeReportsWrite), s.handleRemoveMyReportRecipient).Name(string(audit.ReportRecipientRemove))
 
 	// --- OAuth authorization server (only when auth.oauth.enabled) ---
 	if s.oauth != nil {
-		oauthEndpoints := httpHandlerWithRequestContext(s.oauth.Handler())
+		oauthEndpoints := withAuditRequest(httpHandlerWithRequestContext(s.oauth.Handler()))
 		registerLimited(s.app, fiber.MethodGet, oauth.AuthorizePath, authLimiter, oauthEndpoints)
 		registerLimited(s.app, fiber.MethodPost, oauth.AuthorizePath, authLimiter, oauthEndpoints)
 		registerLimited(s.app, fiber.MethodPost, oauth.TokenPath, authLimiter, oauthEndpoints)
@@ -542,9 +615,9 @@ func (s *Server) setupRoutes() {
 		// Consent and Connected apps: browser session only. Changes also
 		// require the browser_url Origin.
 		api.Get("/oauth/requests/:requestID", s.requireSession, s.handleGetOAuthRequest)
-		api.Post("/oauth/requests/:requestID/decision", s.requireSession, s.requireSameOrigin, s.handleOAuthDecision)
+		api.Post("/oauth/requests/:requestID/decision", s.requireSession, s.requireSameOrigin, s.handleOAuthDecision).Name(string(audit.OAuthConsentApprove))
 		api.Get("/me/connected-apps", s.requireSession, s.handleListConnectedApps)
-		api.Delete("/me/connected-apps/:grantID", s.requireSession, s.requireSameOrigin, s.handleRevokeConnectedApp)
+		api.Delete("/me/connected-apps/:grantID", s.requireSession, s.requireSameOrigin, s.handleRevokeConnectedApp).Name(string(audit.OAuthGrantRevoke))
 
 		s.registerMCPRoutes()
 	}

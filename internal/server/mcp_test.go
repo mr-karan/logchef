@@ -154,7 +154,7 @@ func TestMCPUnauthorizedChallenge(t *testing.T) {
 	e := newOAuthEnv(t)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
 	wantPRM := `resource_metadata="` + testIssuer + `/.well-known/oauth-protected-resource/mcp"`
-	wantScope := `scope="profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read"`
+	wantScope := `scope="profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read"`
 
 	resp := e.mcpPost("", body, nil)
 	challenge := resp.Header.Get("WWW-Authenticate")
@@ -301,6 +301,37 @@ func TestMCPScopesAndAdmission(t *testing.T) {
 	}
 	if result["isError"] != true || !strings.Contains(string(text), "Too many active preview queries for this user") {
 		t.Fatalf("admission not enforced through /mcp: %v", result)
+	}
+}
+
+// RFC 0007 V9: an MCP client whose OAuth token holds saved_views:read sees
+// list_saved_views and calls it.
+func TestMCPListSavedViewsWithOAuthScope(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	team, src := mkTestTeam(t, e.db, "views", e.user)
+	view := &models.SavedView{
+		SourceID: src.ID, Scope: models.SavedViewScopeTeam, TeamID: &team.ID, Name: "errors",
+		Definition: models.SavedViewDefinition{Version: models.SavedViewDefinitionVersion, Columns: []models.SavedViewColumn{{Name: "msg"}}},
+	}
+	if err := e.db.CreateSavedView(context.Background(), view); err != nil {
+		t.Fatal(err)
+	}
+
+	p := newPKCE()
+	params := mcpNativeAuthorizeParams(p, "http://localhost:8787/callback")
+	params.Set("scope", "saved_views:read")
+	token := e.tokens(params, p).AccessToken
+	names := toolNames(t, e.mcpCall(token, protocolLegacy, "tools/list", "", map[string]any{}))
+	if !slices.Equal(names, []string{"get_meta", "list_saved_views"}) {
+		t.Fatalf("saved_views:read tools %v", names)
+	}
+	got := structured(t, e.mcpCall(token, protocolLegacy, "tools/call", "", map[string]any{
+		"name": "list_saved_views", "arguments": map[string]any{"team_id": team.ID, "source_id": src.ID},
+	})).(map[string]any)
+	views := got["views"].([]any)
+	if len(views) != 1 || views[0].(map[string]any)["name"] != "errors" {
+		t.Fatalf("list_saved_views = %v", got)
 	}
 }
 

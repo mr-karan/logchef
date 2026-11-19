@@ -29,17 +29,21 @@ import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
+import { useSavedViewsStore } from "@/stores/savedViews";
+import type { SavedViewDefinition, SavedViewLayout } from "@/lib/savedViewLayout";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useQuery } from "@/composables/useQuery";
-import { supportsQueryLanguage, hasSourceCapability } from "@/lib/queryMetadata";
+import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
+import { getLokiSelector } from "@/api/sources";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
-import { addSelectField, appendCondition, buildCondition, type FilterOperator } from "@/utils/logchefql/filters";
+import { addSelectField, appendCondition, buildCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
@@ -56,6 +60,7 @@ import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
 import WindowedSearchPanel from "./components/WindowedSearchPanel.vue";
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
+import AggregationResult from "./components/AggregationResult.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
 import AskChefDrawer from "@/components/ask-chef/AskChefDrawer.vue";
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -91,6 +96,7 @@ const canExecuteQuery = computed(() => exploreStore.canExecuteQuery);
 const rows = computed(() => runs.results?.rows ?? []);
 
 const nav = useExplorerNavigator();
+const savedViews = useSavedViewsStore();
 const isInitializing = computed(() => nav.status.value === 'loading' || nav.status.value === 'error');
 const initializationError = nav.error;
 
@@ -168,10 +174,13 @@ const sortKeysInfoOpen = ref(false); // State for sort keys info expandable sect
 const isHistogramVisible = ref(true);
 
 // Display mode for table vs compact view (table is default)
+// A view that sets the display mode owns it; a change updates the view's
+// working copy, not the preference.
 const displayMode = computed({
-  get: () => preferences.value.display_mode,
+  get: () => savedViews.displayMode ?? preferences.value.display_mode,
   set: (value: 'table' | 'compact' | 'json') => {
-    preferencesStore.updatePreferences({ display_mode: value });
+    if (savedViews.displayMode !== null) savedViews.setDisplayMode(value);
+    else preferencesStore.updatePreferences({ display_mode: value });
   },
 });
 
@@ -289,6 +298,26 @@ const handleDrillDown = (data: { column: string; value: unknown; operator: Filte
   nextTick(() => {
     queryEditorRef.value?.focus(true);
   });
+};
+
+// An aggregated result shows its own view in place of the log rows.
+const aggregation = computed(() => runs.results?.aggregation ?? null);
+
+const handleAddGroupCondition = (field: string, value: unknown) => handleDrillDown({ column: field, value, operator: "=" });
+
+// Header filters edit the query like the cell menu, then rerun it.
+const columnFilters = computed(() => activeMode.value === "logchefql" ? filteredColumns(logchefQuery.value ?? "") : []);
+
+const handleApplyColumnFilter = (data: { column: string; operator: FilterOperator; value: string | number }) => {
+  if (activeMode.value !== "logchefql") return;
+  logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(fieldPath([data.column]), data.operator, data.value));
+  nav.run();
+};
+
+const handleClearColumnFilter = (column: string) => {
+  if (activeMode.value !== "logchefql") return;
+  logchefQuery.value = removeColumnConditions(logchefQuery.value ?? "", column);
+  nav.run();
 };
 
 // Projects a nested field as an extra column; top-level columns are shown by the table itself.
@@ -524,9 +553,15 @@ onBeforeRouteLeave(() => {
   exploreStore.stopLiveTail();
 });
 
-const handleShare = async () => {
+// The query and the table layout share the server's payload limit. When the
+// server refuses a share with a layout, the user can share the query alone.
+const shareRefusal = ref<string | null>(null);
+
+const handleShare = () => shareQuery(savedViews.shareLayout(displayMode.value));
+
+const shareQuery = async (layout: SavedViewDefinition | null) => {
   try {
-    const share = await nav.recordAfter(() => exploreStore.createQueryShare(), exploreStore.markShare);
+    const share = await nav.recordAfter(() => exploreStore.createQueryShare(layout), exploreStore.markShare);
     if (!share?.share_url) return;
 
     await copyText(share.share_url);
@@ -539,6 +574,10 @@ const handleShare = async () => {
       duration: TOAST_DURATION.SUCCESS,
     });
   } catch (error: any) {
+    if (layout && error?.error_type === "ValidationError") {
+      shareRefusal.value = error.message || getErrorMessage(error);
+      return;
+    }
     toast({
       get title() { return t('ui.shareFailed'); },
       description: error?.message || getErrorMessage(error),
@@ -951,6 +990,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery"
                     :tsField="sourceDetails?._meta_ts_field || 'timestamp'"
                     :tableName="sourcesStore.getCurrentSourceTableName || ''" 
+                    :streamSelector="getLokiSelector(sourceDetails) || ''"
                     :showFieldsPanel="showFieldsPanel"
                     :isExecuting="isExecutingQuery"
                     :canExecute="canExecuteQuery"
@@ -1051,12 +1091,15 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 :logsCount="rows.length"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
                 :isExporting="isExporting"
-                :canExport="supportsExports"
+                :canExport="supportsExports && !aggregation"
+                :aggregated="!!aggregation"
                 :fastFilterFields="missingSortKeyFilters"
                 :canAddFastFilter="activeMode === 'logchefql'"
                 @add-fast-filter="addSortKeyFilter"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
+                @select-view="nav.selectView"
+                @reset-view="nav.resetView"
                 @export="handleExport"
               />
 
@@ -1090,6 +1133,24 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                   @resume="exploreStore.startLiveTail()"
                 />
 
+                <template v-else-if="aggregation && runs.shown?.results">
+                  <AggregationResult
+                    :aggregation="aggregation"
+                    :columns="runs.shown.results.columns"
+                    :rows="runs.shown.results.rows"
+                    :stats="runs.shown.results.stats"
+                    :query="runs.shown.query.text"
+                    :team-id="runs.shown.teamId"
+                    :source-id="runs.shown.source.id"
+                    :range="runs.shown.resolved"
+                    :alignment="getNativeQueryLanguageForSource(runs.shown.source) === 'logsql' ? 'fixed-offset' : 'calendar'"
+                    @add-condition="handleAddGroupCondition"
+                  />
+                  <div v-if="runs.showsLoading" class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
+                    <p class="text-muted-foreground animate-pulse">{{ t('ui.loadingResults') }}</p>
+                  </div>
+                </template>
+
                 <!-- Results Table -->
                 <template v-else-if="rows.length > 0 || isExecutingQuery || isInitialQueryPending">
                   <ExploreJsonResults
@@ -1115,8 +1176,17 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :regex-highlights="regexHighlights"
                     :active-mode="activeMode"
                     :display-mode="displayMode"
+                    v-bind="displayMode === 'table' ? {
+                      filteredColumns: columnFilters,
+                      viewSeed: savedViews.activeSeed,
+                      layoutResetToken: savedViews.layoutResetToken,
+                      onWorkingLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(savedViews.activeViewId, layout),
+                      onTableLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(null, layout),
+                    } : {}"
                     @drill-down="handleDrillDown"
                     @add-column="handleAddColumn"
+                    @apply-column-filter="handleApplyColumnFilter"
+                    @clear-column-filter="handleClearColumnFilter"
                     @update:display-mode="displayMode = $event"
                   />
 
@@ -1145,6 +1215,11 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
           :edit-data="editQueryData" :query-content="currentQueryContentJson"
           @close="closeSaveQueryModal" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
+
+        <ConfirmDialog :open="shareRefusal !== null" :title="t('explore.shareWithoutLayoutTitle')"
+          :description="t('explore.shareWithoutLayoutDescription', { reason: shareRefusal ?? '' })"
+          :confirm-text="t('explore.shareWithoutLayout')"
+          @update:open="open => { if (!open) shareRefusal = null }" @confirm="shareQuery(null)" />
 
 
       </div>

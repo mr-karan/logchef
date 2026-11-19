@@ -74,6 +74,8 @@ func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 		SecretRef: row.SecretRef.String,
 	}
 
+	// Only EncodeHeaderSecretRefs writes the column, so it always decodes.
+	source.HeaderSecretRefs, _ = models.DecodeHeaderSecretRefs([]byte(row.HeaderSecretRefs.String))
 	_ = source.HydrateConnection()
 
 	return source

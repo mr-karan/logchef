@@ -16,8 +16,7 @@ import {
 } from '@tanstack/vue-table'
 import { logTableFeatures, type ColumnDef } from './tableFeatures'
 import { valueUpdater } from '@/lib/utils'
-import type { Source } from '@/api/sources'
-import { hasSourceCapability } from '@/lib/queryMetadata'
+import { logContextState, rowStreamLabels, type LogContextSource } from '@/lib/logContext'
 import { isPrimaryMessageField } from './fieldSemantics'
 import { usePreferencesStore } from '@/stores/preferences'
 import { epochMs, formatInZone } from '@/utils/timeWindow'
@@ -31,7 +30,7 @@ interface Props {
   isLoading?: boolean
   sourceId?: string | number
   teamId?: string | number
-  source?: Pick<Source, 'source_type' | 'capabilities'> | null
+  source?: LogContextSource | null
   timestampField?: string
   severityField?: string
   queryFields?: any[]
@@ -411,9 +410,7 @@ const renderedRows = computed(() => {
 // Handle row click interactions
 const expandedRowId = ref<string | null>(null)
 
-// Context modal state (only for sources advertising the log_context capability;
-// the backend 400s otherwise, e.g. VictoriaLogs)
-const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
+const logContext = computed(() => logContextState(props.source, props.activeMode))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 
@@ -514,11 +511,13 @@ const handleClick = (event: MouseEvent, rowId: string) => {
               ></span>
             </div>
             <!-- Show Context button when expanded -->
-            <div v-if="expandedRowId === row.id && supportsLogContext" class="flex items-center gap-2 mt-1">
-              <Button 
-                variant="outline" 
-                size="sm" 
+            <div v-if="expandedRowId === row.id && logContext !== 'none'" class="flex items-center gap-2 mt-1">
+              <Button
+                variant="outline"
+                size="sm"
                 class="h-6 text-xs px-2"
+                :disabled="logContext === 'native-loki'"
+                :title="logContext === 'native-loki' ? t('ui.contextNeedsLogchefQL') : undefined"
                 @click="openContextModal(row.raw, $event)"
               >
                 <Clock class="h-3 w-3 mr-1" />
@@ -548,6 +547,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       :team-id="Number(props.teamId) || 0"
       :log="contextLog"
       :timestamp-field="props.timestampField"
+      :stream-labels="rowStreamLabels(props.source, contextLog)"
       @update:is-open="showContextModal = $event"
     />
   </div>

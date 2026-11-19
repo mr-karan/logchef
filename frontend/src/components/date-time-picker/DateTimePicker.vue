@@ -23,6 +23,7 @@ import {
   type TimeWindow,
 } from "@/utils/timeWindow";
 import { useI18n } from "vue-i18n";
+import { relativeRangeLabel } from "@/utils/rangeLabel";
 
 const { t, locale } = useI18n();
 
@@ -232,7 +233,7 @@ function clearRecentRanges() {
 
 // Display text for trigger button
 const triggerDisplayText = computed(() => {
-  const label = windowLabel(props.modelValue);
+  const label = props.modelValue.kind === "relative" ? relativeRangeLabel(props.modelValue.spec) : null;
   if (label) return t(label.key, { count: label.count }, label.count);
   const { start, end, zone } = props.resolved;
   return `${formatWallClock(start, zone)} - ${formatWallClock(end, zone)}`;

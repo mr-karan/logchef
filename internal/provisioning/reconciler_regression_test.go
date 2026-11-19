@@ -93,7 +93,7 @@ func TestReconcileLookupErrors(t *testing.T) {
 				observed = &lookupFailure{StoreOps: tx, target: target}
 				return observed
 			}}
-			err := Reconcile(context.Background(), cfg, wrapped, newTestDatasourceService(db), quietLogger(), nil)
+			err := Reconcile(context.Background(), cfg, wrapped, newTestDatasourceService(db), testRecorder(wrapped), quietLogger(), nil)
 			if !errors.Is(err, context.Canceled) {
 				t.Errorf("lookup error = %v, want context.Canceled", err)
 			}
@@ -110,7 +110,7 @@ func TestReconcileNormalizedEmailDoesNotFlap(t *testing.T) {
 	ctx := context.Background()
 	var first *models.TeamMember
 	for run := 1; run <= 2; run++ {
-		if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), []string{" ALICE@EXAMPLE.COM "}); err != nil {
+		if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), []string{" ALICE@EXAMPLE.COM "}); err != nil {
 			t.Fatal(err)
 		}
 		user, err := db.GetUserByEmail(ctx, "alice@example.com")
@@ -148,12 +148,12 @@ func TestReconcilePrunesUsingMemberDetails(t *testing.T) {
 	db := newReconcileTestDB(t)
 	ctx := context.Background()
 	cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "team", Members: []config.ProvisionMember{{Email: "former@example.com"}}}}}
-	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Teams[0].Members = nil
 	wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps { return unavailableUserLookup{tx} }}
-	if err := Reconcile(ctx, cfg, wrapped, newTestDatasourceService(db), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, wrapped, newTestDatasourceService(db), testRecorder(wrapped), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	team, err := db.GetTeamByName(ctx, "team")
@@ -187,7 +187,7 @@ func TestReconcileValidationDoesNotHoldWriteConnection(t *testing.T) {
 	cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{{Name: "remote", SourceType: models.SourceTypeVictoriaLogs, Connection: map[string]any{"base_url": server.URL}}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := Reconcile(ctx, cfg, db, ds, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, ds, testRecorder(db), quietLogger(), nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -208,7 +208,7 @@ func TestReconcileRejectsNormalizedMemberEmails(t *testing.T) {
 				cfg.Teams[0].Members = append(cfg.Teams[0].Members, config.ProvisionMember{Email: email})
 			}
 			db := newReconcileTestDB(t)
-			err := Reconcile(context.Background(), cfg, db, nil, quietLogger(), nil)
+			err := Reconcile(context.Background(), cfg, db, nil, testRecorder(db), quietLogger(), nil)
 			if err == nil || (!strings.Contains(err.Error(), "duplicate email") && !strings.Contains(err.Error(), "email is required")) {
 				t.Fatalf("validation = %v", err)
 			}
@@ -224,7 +224,7 @@ func TestReconcileSharedMember(t *testing.T) {
 		{Name: "second", Members: []config.ProvisionMember{{Email: "shared@EXAMPLE.com", Role: "editor"}}},
 	}}
 	for range 2 {
-		if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+		if err := Reconcile(ctx, cfg, db, nil, testRecorder(db), quietLogger(), nil); err != nil {
 			t.Fatal(err)
 		}
 		users, err := db.ListUsers(ctx)

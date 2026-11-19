@@ -1,0 +1,417 @@
+---
+title: Schema Advisor
+head:
+  - tag: title
+    content: "ClickHouse Log Schema Advisor | Logchef"
+description: "Schema advice for a ClickHouse log table from real Explorer filters: each finding shows its evidence, expected gain, cost and the DDL to review."
+---
+
+The schema advisor reads two things Logchef already has: the filters that
+Explorer queries use on a ClickHouse source, and the metadata of the table
+behind that source. It joins them into a report of findings, such as "412 of
+1,900 queries filter on `request_id` with `=`, and no index covers it". Each
+finding shows its evidence, the expected gain and the cost. A finding that an
+in-place `ALTER` can apply also shows the statements to copy.
+
+**Logchef never runs the DDL.** You review the statements and run them with a
+ClickHouse user that may alter the table. Logchef's own connection can stay
+read-only.
+
+The advisor is for global admins and ClickHouse sources only. VictoriaLogs and
+Loki sources have no section, and the API answers 400 for them.
+
+## Open the report
+
+1. Open **Sources** and click a ClickHouse source's name, or pick
+   **Inspect &lt;source&gt;** in the command palette. This opens **Source
+   Inspection**.
+2. The **Schema advisor** section sits under the schema table. Before the
+   first run it shows **No analysis yet**.
+3. Press **Run analysis**. A run takes at most 30 seconds.
+
+The section header shows when the report was made, a **Stale** badge when it
+is older than 7 days, and a chip for every input that did not read cleanly
+(hover for the detail). Each finding is a card with its impact, title,
+evidence, the DDL with a **Copy DDL** button, the gain, the cost and a query
+to verify the gain. **Needs a table rebuild** marks a finding with no in-place
+`ALTER`. **Validate first** marks a finding whose evidence comes from a sample.
+
+Logchef keeps one report per source. A new run replaces it.
+
+## Weekly refresh
+
+**Refresh weekly** in the section header runs the analysis every Monday at
+03:00 UTC with a 30-day window. It is off for every source until a global
+admin turns it on, and needs `sources:write`. A scheduled run reads ClickHouse
+exactly as **Run analysis** does, and its report has no author
+(`generated_by` is `null`). The run is a job on the [job
+runner](/operations/database-backends/), so one replica runs each week's
+analysis, and a replica with `[jobs] enabled = false` runs none. After
+downtime the runner runs the latest missed week once. The report is stamped
+with that week's time, not the time the run started, and its window ends on
+that day.
+
+## What Logchef records
+
+After each successful Explorer query on a ClickHouse source, Logchef records
+the query's **filter shape**: which columns, Map keys and JSON paths it
+filters on and how (`=`, `IN`, range, `LIKE`, `hasToken` and so on). It
+records no value, no query text and no user. Shapes are counted per source
+per day in the `query_shape_stats_daily` table of the metadata database.
+
+- LogchefQL and ClickHouse SQL queries are recorded. LogsQL queries are not.
+- A SQL query is analyzed only when it reads the source's own table, with no
+  `JOIN`, set operation or subquery in `FROM`. Other queries count as
+  unanalyzed.
+- Recording runs in demo mode too, because a shape holds no user data.
+- Each Logchef process records at most 500 distinct shapes per source per UTC
+  day. Queries with a new shape past that count under `overflow`. With N
+  replicas the bound is 500 × N rows per source per day.
+- Rows older than 90 days are deleted once a day.
+
+Alerts, dashboard panels, exports, MCP and other ClickHouse clients are not
+recorded. A finding never knows about their queries.
+
+## What an analysis reads
+
+A run reads the window's usage from the metadata database, then reads
+ClickHouse on the source's own connection. Every ClickHouse read has a budget,
+sent as server settings (`max_execution_time`, `max_rows_to_read`,
+`max_bytes_to_read`, `max_memory_usage`, and `max_threads = 2`). A source's
+own lower limits still apply.
+
+| Input | What it reads | Budget: time, rows, bytes, memory |
+|---|---|---|
+| `system.tables` | Engine, keys, create statement and size of the table | 5 s, 1M, 256 MiB, 256 MiB |
+| `system.columns` | Types, codecs, key membership and sizes, up to 500 columns | 5 s, 1M, 256 MiB, 256 MiB |
+| `system.data_skipping_indices` | Existing skip indexes, up to 200 | 5 s, 1M, 256 MiB, 256 MiB |
+| `system.parts` | Active parts per partition, up to 2,000 partitions | 5 s, 5M, 1 GiB, 512 MiB |
+| `system.query_log` | 7 days of finished `SELECT`s on the table, on the server that answers | 5 s, 20M, 4 GiB, 512 MiB |
+| `sample` | Distinct counts of up to 20 candidate columns | 10 s, 50M, 4 GiB, 1 GiB |
+
+The sample reads 7 slices, one per day of the last 7 days, each 10 minutes
+long and at most 150,000 rows. It runs only when the timestamp column is in
+the sorting or partition key, so each slice prunes by time. Otherwise the
+input is `skipped`. ClickHouse checks read limits per block, so a read can
+pass its budget a little: in testing the sample read 1.4M to 1.7M rows for its
+7 × 150,000-row slices.
+
+Each input in the report has a state and the rows and bytes ClickHouse
+reported for it:
+
+| State | Meaning |
+|---|---|
+| `ok` | Read in full |
+| `denied` | ClickHouse refused access (code 497) |
+| `missing` | The table does not exist (code 60), such as `system.query_log` with query logging off |
+| `limited` | A budget stopped the read. No rule uses its partial answer |
+| `error` | Any other failure |
+| `skipped` | Not run, such as the sample on a table whose key holds no timestamp |
+
+The report's status is `ok`, `partial` when an input other than a skipped one
+did not read cleanly, or `unavailable` when no rule could run.
+When `system.query_log` reads cleanly, every finding ends with one evidence
+line, **Reads of the source in 7 days, all clients**: the number of finished
+`SELECT`s on the source's table, their median and p95 duration, and their
+median rows and bytes read. It counts every client, not only Logchef, but only
+on the server that answered, because `system.query_log` is local to each
+server. When the read is denied, missing or limited, the line is left out.
+
+### Views and Distributed tables
+
+Usage always comes from the source. Metadata, sizes and DDL refer to the
+table that holds the data.
+
+| Source engine | Analyzed table |
+|---|---|
+| `*MergeTree` | The source table |
+| `Distributed` | The local table it names. Every `ALTER` gets `ON CLUSTER '<cluster>'`, and sizes cover the connected replica only |
+| `View` | The base table, when the view reads one table with no `JOIN`, set operation or subquery, following up to 3 views. Findings cover only columns the view passes through under the same name |
+| Any other engine | None. The report is `unavailable` |
+
+The `unavailable` reasons are `view_not_resolvable`, `unsupported_engine`
+(including a view over a `Distributed` table and the other way round) and
+`target_not_readable` (the connection user cannot see the base table). A
+`system.tables` or `system.columns` read that is denied, limited or missing
+also makes the report `unavailable`, and its reason names the input.
+
+## Usage rules and thresholds
+
+The window is the last 30 days by default (7 to 90). **Q** is the number of
+analyzed queries in the window with at least one filter. A column's share is
+its query count divided by Q.
+
+- Rules that read usage need Q of at least 100. Below that, the report notes
+  "too few recorded queries for usage rules". Storage rules still run.
+- They also need unanalyzed plus overflow queries under 20% of all recorded
+  queries. Otherwise the report notes "usage record is incomplete".
+- Impact is **High** at a share of 50% or more, **Medium** from 20% and
+  **Low** below. Storage rules use the column's share of the table's
+  compressed bytes with the same cut points.
+- A run reads the 5,000 most common shapes. Past that the report notes "usage
+  truncated to the 5,000 most common shapes". Q comes from totals over every
+  shape, so truncation cannot inflate a share.
+- A report holds at most 50 findings, by impact and then share, and at most
+  256 KiB. When the report is too large, evidence is dropped from the
+  lowest-impact findings first and a note says so.
+
+## Findings
+
+| Rule | Suggests | DDL | Marks |
+|---|---|---|---|
+| `skip_index_bloom` | A bloom filter index for `=` and `IN` on a column with many values | `ADD INDEX`, `MATERIALIZE INDEX` | |
+| `text_index` | A text index for token search | `ADD INDEX`, `MATERIALIZE INDEX` | |
+| `materialized_column` | A column for a hot Map key or JSON path | `ADD COLUMN`, optional `MATERIALIZE COLUMN` | |
+| `low_cardinality` | `LowCardinality` for a large, repetitive String column | `MODIFY COLUMN` | Validate first |
+| `codec` | An explicit codec for a large column on the default codec | `MODIFY COLUMN` | |
+| `sort_key` | A sorting key led by the common equality filter | None | Rebuild, validate first |
+| `partitioning` | A partition key for a large unpartitioned table, or a coarser one | None | Rebuild |
+| `retention_review` | A review of old data that recorded queries never read | None | Info only |
+
+A finding's ID is a hash of its rule, the analyzed table and its subject, so
+it stays the same across runs.
+
+### Bloom filter index (`skip_index_bloom`)
+
+Fires when `=` or `IN` filters on a plain column reach 5% of Q and at least 20
+queries, the column is not the first sorting key column, no skip index reads
+exactly that column, and the sample shows at least 10,000 distinct values.
+
+```sql
+ALTER TABLE `logs`.`app` ADD INDEX IF NOT EXISTS `idx_request_id_bloom` `request_id` TYPE bloom_filter GRANULARITY 1;
+ALTER TABLE `logs`.`app` MATERIALIZE INDEX `idx_request_id_bloom`;
+```
+
+`ADD INDEX` changes metadata only. `MATERIALIZE INDEX` is a mutation over every
+part. The finding's verify query is an `EXPLAIN indexes = 1` with the column.
+
+### Text index (`text_index`)
+
+Fires when `hasToken`, `hasAllTokens`, `hasAnyTokens` and `LIKE` patterns that
+hold a complete token (such as `'% timeout %'`) on a plain `String` column
+reach 10% of Q and at least 20 queries, and no `text`, `tokenbf_v1` or
+`ngrambf_v1` index reads the column.
+
+```sql
+ALTER TABLE `logs`.`app` ADD INDEX IF NOT EXISTS `idx_message_text` `message` TYPE text(tokenizer = splitByNonAlpha);
+ALTER TABLE `logs`.`app` MATERIALIZE INDEX `idx_message_text`;
+```
+
+- **Needs ClickHouse 26.8 or later.** On an older server the report notes
+  "text index advice needs ClickHouse 26.8" instead of a finding.
+- `LIKE '%x%'`, `ILIKE`, regular expressions and `position` searches do not
+  count. ClickHouse 26.8 can serve `LIKE '%token%'` and `ILIKE` from a text
+  index by scanning its dictionary, but its docs promise no index for them,
+  so the rule leaves them out and fires less often.
+- The index has no preprocessor, so case-sensitive token searches stay
+  case-sensitive.
+- LogchefQL `~` compiles to `positionCaseInsensitive`, which no index serves.
+  When `~` searches on a column would pass the trigger on their own, the
+  report adds a note such as "120 LogchefQL queries search `message` with
+  `~`, which compiles to `positionCaseInsensitive`. No index serves it."
+
+### Materialized column (`materialized_column`)
+
+Fires when filters on one Map key or JSON path reach 10% of Q and at least 20
+queries. The column must be `Map(String, String)` or
+`Map(LowCardinality(String), String)`, or a `String` read with
+`JSONExtractString` or a LogchefQL dotted field.
+
+```sql
+ALTER TABLE `logs`.`app` ADD COLUMN IF NOT EXISTS `attrs_user_id` String MATERIALIZED `attrs`['user_id'];
+ALTER TABLE `logs`.`app` MATERIALIZE COLUMN `attrs_user_id`;
+```
+
+The second statement is optional and rewrites the column in every part. New
+parts store the value twice. Queries gain only when they name the new column:
+Logchef does not rewrite `attrs.user_id` for you. A LogchefQL dotted field on
+a Map joins its segments into one key, so `attrs.user.id` reads
+`attrs['user.id']`. The rule skips a subject when a column of the generated
+name exists, or a column already materializes the same expression. When two subjects map to one generated name, such as the
+JSON paths `'a.b'` and `'a', 'b'`, only the more used one gets a finding. The
+same holds for the index names of the two index rules.
+
+### LowCardinality (`low_cardinality`)
+
+Fires for a `String` or `Nullable(String)` column in no sorting, primary or
+partition key, of at least 1 GiB or 1% of the table uncompressed, that the
+sample shows with under 1,000 distinct values. The sample must be complete for
+the column: no slice hit its 150,000-row limit, and at least 5 slices hold
+20,000 rows or more. A table that writes more than 150,000 rows in 10 minutes
+gets no finding from this rule.
+
+```sql
+ALTER TABLE `logs`.`app` MODIFY COLUMN `level` LowCardinality(String);
+```
+
+The change is a mutation that rewrites the column. The finding is marked
+**Validate first**: run its verify query, `SELECT uniq(col) FROM db.table`,
+when a full scan is acceptable. The rule skips a column that a skip index
+expression or a projection reads, because some ClickHouse versions refuse the
+type change then. It does not run when the skip index list was not read in
+full.
+
+### Codec (`codec`)
+
+Fires only on a column with no codec of its own.
+
+- The source's `DateTime` or `DateTime64` timestamp column at 1 GiB
+  compressed: `CODEC(Delta, ZSTD(1))`.
+- A `String` column of at least 10 GiB compressed and 20% of the table, with
+  an uncompressed to compressed ratio under 3: `CODEC(ZSTD(1))`.
+
+The `ALTER` changes metadata only. Existing parts keep the old codec until a
+merge rewrites them. Where the server default is already ZSTD, as in
+ClickHouse Cloud, the String finding gains nothing, and Logchef cannot tell.
+
+### Sorting key (`sort_key`)
+
+Fires on a `MergeTree` or `ReplicatedMergeTree` table whose primary key equals
+its sorting key, when Q is at least 200 over at least 14 days with a filtered
+query, and plain columns that 50% of queries match with `=` or `IN` are not
+already ahead of the timestamp in the key (or anywhere in a key without the
+timestamp) and show under 10,000 distinct
+values in a complete sample. It proposes up to 3 of them, fewest values first,
+ahead of the current key, such as `(service, timestamp)`.
+
+There is no DDL. Changing a sorting key this way needs a new table and a
+planned cutover, which depends on ingestion, replication and dependent views
+that Logchef cannot see.
+
+### Partitioning (`partitioning`)
+
+Fires on a `MergeTree` or `ReplicatedMergeTree` table that is unpartitioned and
+holds at least 100 GiB, or that has more than 1,000 active partitions. It
+proposes `toYYYYMM(ts)`, or `toDate(ts)` when the table's TTL is under 90
+days. It needs a `Date` or `DateTime` timestamp column, and does not fire
+when the proposed key is the current one. Impact is always **Medium**. There
+is no DDL: a new partition key needs a new table.
+
+### Retention review (`retention_review`)
+
+An **Info** finding with no DDL. It fires on a table with no TTL whose data is
+more than 90 days old, when the last 90 days of recorded usage show at least
+60 days with queries, at least 200 queries, under 5% of them with no start
+time, and a largest lookback under half the data's age. The age is known only
+when the timestamp column is in the partition key.
+
+Logchef sees only Explorer queries. Alerts, dashboards, exports and other
+clients may read older data, so choose a retention period from your own
+policy. The share of queries with no start time is a lower bound, and the
+evidence says so.
+
+## Dismiss a finding
+
+A finding you do not want to act on can be dismissed. Open its card's menu,
+pick **Dismiss** and give an optional reason of up to 500 bytes. The
+dismissal outlives later runs, because finding IDs are stable. **Show
+dismissed** lists dismissed findings, with their reason and time, and
+**Restore** brings one back. A dismissal whose finding is no longer in the
+report is still listed and can be restored.
+
+Dismissing and restoring need `sources:write` and are recorded in the [audit
+log](/operations/audit-log/) as `schema_advisor_dismissal.create` and
+`schema_advisor_dismissal.delete`. Turning the weekly refresh on or off is
+recorded as `schema_advisor_schedule.update`. Running an analysis records no
+audit event; the report keeps who ran it and when.
+
+## API
+
+All routes are admin routes. A session or an API token of a global admin
+works. OAuth access tokens, such as a `logchef auth` sign-in or an MCP client,
+get 403, as on every admin route.
+
+| Route | Scope | Result |
+|---|---|---|
+| `GET /api/v1/admin/sources/:sourceID/advisor` | `sources:read` | 200 with the stored report |
+| `POST /api/v1/admin/sources/:sourceID/advisor/refresh` | `sources:read` | 200 with the new report |
+| `PUT /api/v1/admin/sources/:sourceID/advisor/findings/:findingID/dismissal` | `sources:write` | 200 with the dismissal |
+| `DELETE /api/v1/admin/sources/:sourceID/advisor/findings/:findingID/dismissal` | `sources:write` | 204 |
+| `PUT /api/v1/admin/sources/:sourceID/advisor/schedule` | `sources:write` | 200 with `{"enabled": true}` or `false` |
+
+`GET` and refresh return `source_id`, `generated_at`, `generated_by`,
+`window_days`, `stale`, `report`, `dismissals` and `scheduled_refresh`. Before the first run,
+`generated_at`, `generated_by`, `window_days` and `report` are `null`. The
+refresh body is optional: `{"window_days": 30}`. The dismissal body is
+optional: `{"reason": "..."}`. The schedule body is required:
+`{"enabled": true}` or `{"enabled": false}`.
+
+| Case | Status |
+|---|---|
+| Source not found, a dismissal of a finding not in the stored report, or a restore of a finding that is not dismissed | 404 |
+| Source is not ClickHouse | 400 |
+| `window_days` outside 7 to 90, a reason over 500 bytes, or a finding ID that is not 16 lowercase hex characters | 400 |
+| Two analyses already running in this process | 429 |
+| ClickHouse unreachable, or the run passed its 30 s deadline | 502, and the stored report is kept |
+| Not a global admin, or the token lacks the scope | 403 |
+
+A process runs one analysis per source at a time and two in all. A request
+that arrives while the same source is being analyzed waits for that run and
+gets its report. With several replicas, each replica has its own limits, and
+the later of two runs on one source wins.
+
+## CLI
+
+`logchef advisor <source>` prints a source's report. `<source>` is an ID, a
+source name or `database.table`. It needs a global admin's API token with
+`sources:read`, passed with `--token` or `LOGCHEF_AUTH_TOKEN`: a `logchef auth`
+sign-in is an OAuth session and cannot reach admin routes.
+
+```bash
+# Show the stored report
+logchef advisor 7
+
+# Analyze again over the last 14 days, then show the report
+logchef advisor app-logs --refresh --window-days 14
+
+# Print only the DDL of findings that are not dismissed, one statement per line
+logchef advisor 7 --ddl
+
+# The server's response unchanged, dismissed findings included
+logchef advisor 7 --output json
+```
+
+Text output hides dismissed findings and says how many it hid. There is no
+CLI command to dismiss or restore a finding; use the web UI or the API.
+
+## Metrics
+
+| Metric | Meaning |
+|---|---|
+| `logchef_query_shape_records_total{result}` | Queries offered to the shape rollup: `analyzed`, `unanalyzed`, `overflow` or `error` (the write failed; the query still succeeded) |
+| `logchef_schema_advisor_runs_total{status}` | Analyses by report status: `ok`, `partial`, `unavailable`, or `error` when no report was stored |
+| `logchef_schema_advisor_run_duration_seconds` | How long each analysis ran |
+
+See [Prometheus Metrics](/operations/metrics/#schema-advisor-metrics).
+
+## Limits
+
+| Bound | Value | What you see |
+|---|---|---|
+| Filter items per query | 16 | The query counts as unanalyzed |
+| Distinct shapes per source per day per process | 500 | Counted under `overflow`, with a note |
+| Rollup retention | 90 days | Windows are capped at 90 days |
+| Shapes read per run | 5,000 | Note "usage truncated to the 5,000 most common shapes" |
+| Findings per report | 50 | Note "N more findings not shown" |
+| Report size | 256 KiB | Evidence trimmed from the lowest-impact findings first |
+| Run deadline | 30 s | 502, the stored report is kept |
+| Concurrent runs per process | 2 | 429 |
+
+## Security
+
+- Only global admins read, run and dismiss. Table sizes, index names and
+  other teams' usage are admin data.
+- The shape rollup holds no literal, no query text and no user ID.
+- DDL is built from identifiers ClickHouse returned and from path segments,
+  each escaped. Logchef never sends it.
+- With `select_from_system_db_requires_grant` on, a restricted connection user
+  cannot read the system tables, so the report is `unavailable` and leaks no
+  base-table metadata. The sample of a view reads the base table only when the
+  user may.
+- The only outbound requests are queries on the source's own connection.
+
+## See also
+
+- [Schema Design](/integration/schema-design/) for choosing types, codecs and
+  indexes when you create a table.
+- [Audit Log](/operations/audit-log/) for the dismissal events.

@@ -124,15 +124,21 @@ const authzTestTokenSecret = "authz-test-secret-0123456789abcdef"
 
 // newAuthzTestServer builds the full server (all middleware and routes) on a
 // fresh SQLite store.
-func newAuthzTestServer(t *testing.T) *Server {
+// newAuthzTestServer builds a server; logs, if given, is its logger. The
+// logger goes in before New, whose goroutines read it.
+func newAuthzTestServer(t *testing.T, logs ...*slog.Logger) *Server {
 	t.Helper()
 	db := newServerTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if len(logs) > 0 {
+		logger = logs[0]
+	}
 	cfg := &config.Config{}
 	cfg.Auth.APITokenSecret = authzTestTokenSecret
 	s := New(ServerOptions{
 		Config:      cfg,
 		SQLite:      db,
+		Audit:       testAuditRecorder(t, db),
 		Datasources: datasource.NewService(db, logger),
 		Logger:      logger,
 		FS:          http.Dir(t.TempDir()),
@@ -356,8 +362,8 @@ func authorizeTestSource(t *testing.T, db store.Store, sourceID models.SourceID)
 
 // withAuthorizedSource mounts POST h behind requireTeamHasSource, with a session
 // for user standing in for requireAuth.
-func withAuthorizedSource(app *fiber.App, s *Server, path string, user *models.User, h fiber.Handler) {
-	app.Post(path, func(c fiber.Ctx) error {
+func withAuthorizedSource(app *fiber.App, s *Server, path string, user *models.User, h fiber.Handler) fiber.Router {
+	return app.Post(path, func(c fiber.Ctx) error {
 		c.Locals("user", user)
 		c.Locals("auth_method", "session")
 		return c.Next()

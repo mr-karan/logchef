@@ -25,6 +25,11 @@ func ExtractFirstNumeric(result *models.QueryResult) (float64, error) {
 	if !ok {
 		return 0, fmt.Errorf("query result is missing first column %q", column)
 	}
+	return NumericValue(raw)
+}
+
+// NumericValue converts one result cell to a finite float64.
+func NumericValue(raw any) (float64, error) {
 	value, err := convertToFloat64(raw)
 	if err != nil {
 		return 0, err

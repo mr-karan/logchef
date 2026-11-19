@@ -31,7 +31,8 @@ import { buildSQLValueInsertText, getSQLCompletionCursor } from "@/utils/sql-val
 import { useFieldValuesStore } from "@/stores/exploreFieldValues";
 import { logchefqlApi } from "@/api/logchefql";
 import { prepareLogchefQLTemplate } from "@/utils/logchefql/template";
-import { escapeHoverText, getLogchefQLErrorRange, getLogchefQLFields, getSchemaFieldType, getUnknownLogchefQLFields } from "@/utils/logchefql/diagnostics";
+import { escapeHoverText, getLogchefQLErrorRange, getLogchefQLFields, getNumberFunctionWarnings, getSchemaFieldType, getUnknownLogchefQLFields } from "@/utils/logchefql/diagnostics";
+import { AGGREGATE_FUNCTIONS, functionArgument, numberColumnKind } from "@/utils/logchefql/aggregation";
 import { useCompletionFieldValues, type CompletionValuesWindowGetter } from "@/composables/useCompletionFieldValues";
 import { unwrapFieldType } from "@/lib/sourceFields";
 import {
@@ -42,7 +43,9 @@ import {
   formatCountShort,
   buildValueCompletionEdit,
   buildBooleanInsertText,
+  buildCommaEdit,
   filterValuesByPartial,
+  groupKeyInsertText,
 } from "@/utils/logchefql-autocomplete";
 
 const { t } = useI18n();
@@ -50,7 +53,7 @@ const { t } = useI18n();
 interface SqlMonacoEditorProps {
   value: string;
   theme: MonacoThemeName;
-  language: "clickhouse-sql" | "logchefql";
+  language: "clickhouse-sql" | "logql" | "logchefql";
   schema: Record<string, { type: string }>;
   teamId: number;
   sourceId: number;
@@ -304,11 +307,18 @@ function scheduleDiagnostics() {
   }
   cancelValidation();
   const query = model.getValue();
-  deps.monaco.editor.setModelMarkers(model, fieldWarningsOwner, getUnknownLogchefQLFields(query, props.schema).map(field => ({
-    ...markerRange(model, field.start, field.end),
-    severity: deps.monaco.MarkerSeverity.Warning,
-    message: t('queryEditor.unknownField', { field: field.name }),
-  })));
+  deps.monaco.editor.setModelMarkers(model, fieldWarningsOwner, [
+    ...getUnknownLogchefQLFields(query, props.schema).map(field => ({
+      ...markerRange(model, field.start, field.end),
+      severity: deps.monaco.MarkerSeverity.Warning,
+      message: t('queryEditor.unknownField', { field: field.name }),
+    })),
+    ...getNumberFunctionWarnings(query, props.schema).map(warning => ({
+      ...markerRange(model, warning.start, warning.end),
+      severity: deps.monaco.MarkerSeverity.Warning,
+      message: t('queryEditor.numberFieldNeeded', { func: warning.func, field: warning.field, type: unwrapFieldType(warning.type) }),
+    })),
+  ]);
   const revision = validationRevision;
   validationTimer = setTimeout(() => { void validateModel(deps, model, query, revision); }, 400);
 }
@@ -402,20 +412,80 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
 
       const ctx = parseLogchefQLContext(textBeforeCursor, fieldNames.value);
 
+      // Only a filter field retriggers, to offer its operators.
+      const fieldSuggestions = (names: string[], { insertText = (name: string) => name, sortPrefix = "", retrigger = false } = {}) =>
+        names.map((name, i): MonacoCompletionItem => {
+          const fieldType = props.schema[name]?.type || "Unknown";
+          const summary = fieldValuesStore.getFieldSummary(props.sourceId, name);
+          return {
+            label: name,
+            kind: deps.monaco.languages.CompletionItemKind.Field,
+            insertText: insertText(name),
+            range: replaceRange,
+            detail: formatFieldDetail(fieldType, summary?.totalDistinct ?? null),
+            sortText: sortPrefix + String(i).padStart(3, "0"),
+            command: retrigger ? retriggerSuggest : undefined,
+          };
+        });
+
       switch (ctx.suggest) {
         case "fields":
+          return { suggestions: fieldSuggestions(fieldNames.value, { retrigger: true }) };
+
+        case "functions": {
+          const functions = AGGREGATE_FUNCTIONS.map((name, i): MonacoCompletionItem => {
+            const argument = functionArgument(name);
+            return {
+              label: name,
+              kind: deps.monaco.languages.CompletionItemKind.Function,
+              insertText: argument === "none" ? `${name}()` : `${name}($0)`,
+              insertTextRules: deps.monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              range: replaceRange,
+              detail: argument === "none" ? `${name}()` : `${name}(field)`,
+              sortText: `0${String(i).padStart(2, "0")}`,
+              command: retriggerSuggest,
+            };
+          });
+          return { suggestions: ctx.fields ? [...functions, ...fieldSuggestions(fieldNames.value, { sortPrefix: "1" })] : functions };
+        }
+
+        case "functionArgument": {
+          const argument = functionArgument(ctx.func);
+          if (argument === "none") return { suggestions: [] };
+          const names = argument === "number"
+            ? fieldNames.value.filter(name => numberColumnKind(schemaType(name) ?? "") === "number")
+            : fieldNames.value;
+          return { suggestions: fieldSuggestions(names) };
+        }
+
+        case "groupKeys":
           return {
-            suggestions: fieldNames.value.map((name, i) => {
-              const fieldType = props.schema[name]?.type || "Unknown";
-              const summary = fieldValuesStore.getFieldSummary(props.sourceId, name);
+            suggestions: [
+              {
+                label: "time", kind: deps.monaco.languages.CompletionItemKind.Keyword,
+                insertText: "time", range: replaceRange, sortText: "0",
+              },
+              ...fieldSuggestions(fieldNames.value, { insertText: groupKeyInsertText, sortPrefix: "1" }),
+            ],
+          };
+
+        case "aggregationKeywords":
+          return {
+            suggestions: ctx.keywords.map((keyword, i): MonacoCompletionItem => {
+              const item = {
+                label: keyword, kind: deps.monaco.languages.CompletionItemKind.Keyword,
+                range: replaceRange, sortText: String(i),
+              };
+              if (keyword !== ",") {
+                return { ...item, insertText: buildBooleanInsertText(keyword, textBeforeCursor, ctx.partial), command: keyword === "by" ? retriggerSuggest : undefined };
+              }
+              const { insertText, deleteBefore } = buildCommaEdit(textBeforeCursor, ctx.partial);
+              const start = replaceRange.startColumn - deleteBefore;
               return {
-                label: name,
-                kind: deps.monaco.languages.CompletionItemKind.Field,
-                insertText: name,
-                range: replaceRange,
-                detail: formatFieldDetail(fieldType, summary?.totalDistinct ?? null),
-                sortText: String(i).padStart(3, "0"),
-                command: retriggerSuggest,
+                ...item, insertText, command: retriggerSuggest,
+                additionalTextEdits: deleteBefore ? [{
+                  range: { ...replaceRange, startColumn: start, endColumn: replaceRange.startColumn }, text: "",
+                }] : undefined,
               };
             }),
           };
@@ -469,7 +539,7 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
           return { suggestions: [] };
       }
     },
-    triggerCharacters: [" ", "(", ")", "=", "!", "~", ">", "<", '"', "'"],
+    triggerCharacters: [" ", "(", ")", "=", "!", "~", ">", "<", '"', "'", "|", ","],
   });
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { addExact, averageExact, compareExact, exactString, parseExact, roundExact } from "../exactNumber";
-import { countFrame, frameCellText, frameWithKinds, reduceStat, resultFrame, suggestKind } from "../panelFrame";
+import { countFrame, fillAggregationGaps, frameCellText, frameWithKinds, reduceStat, resultFrame, suggestKind } from "../panelFrame";
 import { epochMs, parseZoneId } from "../timeWindow";
 import { formatNumber } from "../numberFormat";
 
@@ -225,4 +225,50 @@ it.each([
   expect(frame.rawRows.map((row) => row.time)).toEqual(times);
   expect(frameCellText(reduceStat(frame, { value: "count", reduce: "avg", count: true }).value)).toBe("4");
   expect(frameCellText(reduceStat(frame, { value: "count", reduce: "min", count: true }).value)).toBe("4");
+});
+
+describe("aggregation gap fill", () => {
+  const range = { start: epochMs(Date.parse("2026-11-12T00:00:00Z")), end: epochMs(Date.parse("2026-11-12T00:04:00Z")), zone: parseZoneId("UTC")! };
+  const info = (groups: string[], limit = 0) => ({
+    shape: groups.length ? "grouped_timeseries" as const : "timeseries" as const, interval: "1m", limit,
+    columns: [
+      { name: "time", role: "time" as const, type: "DateTime" },
+      ...groups.map((name) => ({ name, role: "group" as const, type: "String" })),
+      { name: "count", role: "value" as const, type: "UInt64" },
+      { name: "p95", role: "value" as const, type: "Float64" },
+    ],
+  });
+  const frame = (rows: Record<string, unknown>[], truncation: "none" | "rows" = "none") => resultFrame({
+    columns: [{ name: "time", type: "DateTime" }, { name: "service", type: "String" }, { name: "host", type: "String" }, { name: "count", type: "UInt64" }, { name: "p95", type: "Float64" }],
+    rows, stats: { execution_time_ms: 0, rows_read: 0, bytes_read: 0, truncation },
+  });
+  const cells = (filled: ReturnType<typeof frame>) => filled.rows
+    .map((r) => [Date.parse(String(r.time)), r.service ?? "", r.count === null ? null : frameCellText(r.count), r.p95])
+    .sort((a, b) => Number(a[0]) - Number(b[0]) || String(a[1]).localeCompare(String(b[1])));
+  const at = (minute: number) => Date.parse(`2026-11-12T00:0${minute}:00Z`);
+
+  it("adds every empty bucket in the range: count 0, other values null", () => {
+    const filled = fillAggregationGaps(frame([{ time: "2026-11-12T00:01:00Z", count: "3", p95: 12.5 }, { time: "2026-11-12T00:03:00Z", count: "1", p95: 4 }]), info([]), range, "calendar");
+    expect(cells(filled)).toEqual([[at(0), "", "0", null], [at(1), "", "3", 12.5], [at(2), "", "0", null], [at(3), "", "1", 4], [at(4), "", "0", null]]);
+  });
+
+  it("adds a series that a bucket lacks", () => {
+    const rows = [{ time: "2026-11-12T00:00:00Z", service: "api", count: "2", p95: 1 }, { time: "2026-11-12T00:00:00Z", service: "web", count: "5", p95: 2 }, { time: "2026-11-12T00:01:00Z", service: "web", count: "1", p95: 3 }];
+    const filled = fillAggregationGaps(frame(rows), info(["service"]), { ...range, end: epochMs(at(1)) }, "calendar");
+    expect(cells(filled)).toEqual([[at(0), "api", "2", 1], [at(0), "web", "5", 2], [at(1), "api", "0", null], [at(1), "web", "1", 3]]);
+  });
+
+  it("leaves a result cut by a cap or a limit stage as it is", () => {
+    // The cap kept api at 00:01 and cut web there: web's count is unknown, not 0.
+    const rows = [{ time: "2026-11-12T00:00:00Z", service: "api", count: "2", p95: 1 }, { time: "2026-11-12T00:00:00Z", service: "web", count: "5", p95: 2 }, { time: "2026-11-12T00:01:00Z", service: "api", count: "1", p95: 3 }];
+    const capped = frame(rows, "rows");
+    expect(fillAggregationGaps(capped, info(["service"]), range, "calendar")).toBe(capped);
+    const limited = frame([{ time: "2026-11-12T00:01:00Z", count: "3", p95: 1 }]);
+    expect(fillAggregationGaps(limited, info([], 1), range, "calendar")).toBe(limited);
+  });
+
+  it("leaves a result with two group fields as it is", () => {
+    const input = frame([{ time: "2026-11-12T00:01:00Z", service: "api", host: "a", count: "3", p95: 1 }]);
+    expect(fillAggregationGaps(input, info(["service", "host"]), range, "calendar")).toBe(input);
+  });
 });

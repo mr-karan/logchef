@@ -178,6 +178,10 @@ pub struct QueryRequest {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_timeout: Option<u32>,
+    /// The bucket size of a `by time` aggregation key that has no window of
+    /// its own, such as `5m`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -275,6 +279,10 @@ pub struct TranslateRequest {
     pub timezone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    /// The bucket size of a `by time` aggregation key that has no window of
+    /// its own, such as `5m`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,6 +299,8 @@ pub struct TranslateResponse {
     pub valid: bool,
     #[serde(default)]
     pub error: Option<QueryParseError>,
+    #[serde(default)]
+    pub aggregation: Option<AggregationInfo>,
 }
 
 impl TranslateResponse {
@@ -311,6 +321,7 @@ impl TranslateResponse {
     pub fn language_label(&self) -> &'static str {
         match self.generated_query_language.as_deref() {
             Some("logsql") => "LogsQL",
+            Some("logql") => "LogQL",
             Some("clickhouse-sql") => "ClickHouse SQL",
             _ => "query",
         }
@@ -438,6 +449,34 @@ pub struct QueryResponse {
     pub generated_query_language: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Present when the LogchefQL query aggregates: the rows are the result
+    /// rows, not log rows.
+    #[serde(default)]
+    pub aggregation: Option<AggregationInfo>,
+}
+
+/// The result of an aggregated LogchefQL query, as the server describes it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregationInfo {
+    /// `scalar`, `grouped`, `timeseries` or `grouped_timeseries`.
+    pub shape: String,
+    /// Time first, then group keys, then values, each in written order.
+    pub columns: Vec<AggregationColumn>,
+    /// The bucket window in use, such as `5m`. Empty without a time key.
+    #[serde(default)]
+    pub interval: String,
+    /// The query's own `limit` stage, or 0.
+    #[serde(default)]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AggregationColumn {
+    pub name: String,
+    /// `time`, `group` or `value`.
+    pub role: String,
+    #[serde(rename = "type")]
+    pub column_type: String,
 }
 
 impl QueryResponse {
@@ -466,7 +505,7 @@ pub type LogEntry = HashMap<String, serde_json::Value>;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct QueryStats {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "whole_millis")]
     pub execution_time_ms: i64,
     #[serde(default)]
     pub rows_read: i64,
@@ -504,6 +543,33 @@ pub struct Collection {
     pub updated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub source_name: Option<String>,
+}
+
+/// The list route's response: the views the caller can see for one team and
+/// source, and the view the default rules pick (personal, then team, then
+/// source default).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedViewList {
+    pub views: Vec<SavedView>,
+    pub default_view_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedView {
+    pub id: i64,
+    pub name: String,
+    /// `personal`, `team` or `source`.
+    pub scope: String,
+    /// The default of its own scope, which is not always the one the
+    /// default rules pick.
+    #[serde(default)]
+    pub is_default: bool,
+    /// The definition as sent. Each key other than `version` is a part of
+    /// the Explorer that the view sets.
+    pub definition: serde_json::Map<String, serde_json::Value>,
+    /// The remaining fields, kept so `--output json` prints the response.
+    #[serde(flatten)]
+    pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -675,6 +741,13 @@ impl CollectionQueryContent {
     }
 }
 
+/// The server sends `execution_time_ms` as a JSON number that can carry a
+/// fraction (Loki reports sub-millisecond durations). The CLI shows whole
+/// milliseconds, so it rounds rather than rejecting the response.
+fn whole_millis<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
+    Ok(f64::deserialize(deserializer)?.round() as i64)
+}
+
 #[cfg(test)]
 mod template_request_tests {
     use super::*;
@@ -839,6 +912,7 @@ mod template_request_tests {
             timezone: None,
             limit: None,
             query_timeout: None,
+            interval: None,
         };
         let native = serde_json::to_value(native).unwrap();
         let dsl = serde_json::to_value(dsl).unwrap();
@@ -868,4 +942,141 @@ mod template_request_tests {
             ])
         );
     }
+}
+
+/// One audit event from `GET /api/v1/admin/audit-events`. Action, outcome,
+/// auth method and target type stay strings: the server adds kinds without
+/// a CLI release.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEvent {
+    pub id: String,
+    pub occurred_at: DateTime<Utc>,
+    pub action: String,
+    pub outcome: String,
+    pub reason: String,
+    pub actor_type: String,
+    pub actor_id: Option<i64>,
+    pub actor_label: String,
+    pub auth_method: String,
+    pub credential_id: String,
+    pub client_id: String,
+    pub target_type: String,
+    pub target_id: String,
+    pub target_label: String,
+    pub team_id: Option<i64>,
+    pub source_id: Option<i64>,
+    pub ip: String,
+    pub user_agent: String,
+    pub http_method: String,
+    pub route: String,
+    pub status: u16,
+    pub changes: serde_json::Map<String, serde_json::Value>,
+    pub detail: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AuditEventsPage {
+    pub events: Vec<AuditEvent>,
+    pub next_cursor: String,
+}
+
+/// Filters of the audit event list. `None` leaves a filter off; without
+/// `from` the server starts seven days before `to`.
+#[derive(Debug, Clone, Default)]
+pub struct AuditEventFilter {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    /// An exact action, or a resource with a trailing dot such as `source.`.
+    pub action: Option<String>,
+    pub actor_id: Option<i64>,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub outcome: Option<String>,
+}
+
+/// The schema advisor's stored report of a ClickHouse source, as
+/// `GET .../advisor` and its refresh return it. `report` is `None` before the
+/// first analysis.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvice {
+    pub source_id: i64,
+    pub generated_at: Option<DateTime<Utc>>,
+    pub window_days: Option<u32>,
+    pub stale: bool,
+    pub report: Option<SchemaAdvisorReport>,
+    #[serde(default)]
+    pub dismissals: Vec<SchemaFindingDismissal>,
+}
+
+/// Statuses and impacts stay strings: the server adds kinds without a CLI
+/// release.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvisorReport {
+    pub status: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub clickhouse_version: String,
+    pub target: Option<SchemaAdvisorTarget>,
+    #[serde(default)]
+    pub inputs: Vec<SchemaAdvisorInput>,
+    pub queries_analyzed: i64,
+    pub queries_unanalyzed: i64,
+    #[serde(default)]
+    pub findings: Vec<SchemaFinding>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvisorTarget {
+    pub kind: String,
+    pub database: String,
+    pub table: String,
+    #[serde(default)]
+    pub cluster: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaAdvisorInput {
+    pub name: String,
+    pub state: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaFinding {
+    pub id: String,
+    pub rule: String,
+    pub impact: String,
+    pub title: String,
+    #[serde(default)]
+    pub evidence: Vec<SchemaFindingEvidence>,
+    /// Statements in the order to run them; empty when `rebuild` is set.
+    #[serde(default)]
+    pub ddl: Vec<String>,
+    #[serde(default)]
+    pub rebuild: bool,
+    #[serde(default)]
+    pub candidate: bool,
+    #[serde(default)]
+    pub gain: String,
+    #[serde(default)]
+    pub cost: String,
+    #[serde(default)]
+    pub verify: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaFindingEvidence {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SchemaFindingDismissal {
+    pub finding_id: String,
+    #[serde(default)]
+    pub reason: String,
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -46,10 +47,10 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(team-a): %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, teamA.ID, creator.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, teamA.ID, creator.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(creator, team-a): %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, teamA.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), teamA.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(team-a, src): %v", err)
 	}
 
@@ -61,10 +62,10 @@ func TestListSavedQueriesForUserCrossTeamVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(team-b): %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, teamB.ID, crossTeamUser.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, teamB.ID, crossTeamUser.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(crossTeamUser, team-b): %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, teamB.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), teamB.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(team-b, src): %v", err)
 	}
 
@@ -127,10 +128,10 @@ func TestUserCanEditSavedQueryDelegation(t *testing.T) {
 	if _, err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, models.CollectionLinkManaged, &creator.ID); err != nil {
 		t.Fatalf("AddCollectionItem: %v", err)
 	}
-	if err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, editor.ID, models.CollectionRoleEditor); err != nil {
+	if _, err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, editor.ID, models.CollectionRoleEditor); err != nil {
 		t.Fatalf("AddCollectionMember(editor): %v", err)
 	}
-	if err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, member.ID, models.CollectionRoleMember); err != nil {
+	if _, err := AddCollectionMember(ctx, db, log, coll.ID, collOwner.ID, member.ID, models.CollectionRoleMember); err != nil {
 		t.Fatalf("AddCollectionMember(member): %v", err)
 	}
 
@@ -190,10 +191,10 @@ func TestMarkSavedQueriesRunnable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam: %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember: %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, team.ID, accessibleSrc.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), team.ID, accessibleSrc.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 
@@ -468,7 +469,7 @@ func TestSavedQueryVariableNamesReserveTheMacroPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	update := func(variables ...string) error {
-		_, err := UpdateSavedQuery(ctx, db, nil, log, stored.ID, "old", "", content(variables...), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
+		_, _, err := UpdateSavedQuery(ctx, db, nil, log, stored.ID, "old", "", content(variables...), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
 		return err
 	}
 	if err := update("a", "__tenant"); err != nil {
@@ -486,7 +487,7 @@ func TestSavedQueryVariableNamesReserveTheMacroPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = UpdateSavedQuery(ctx, db, nil, log, shadow.ID, "shadow", "", content("a", "__from"), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
+	_, _, err = UpdateSavedQuery(ctx, db, nil, log, shadow.ID, "shadow", "", content("a", "__from"), models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative)
 	if !errors.Is(err, ErrInvalidQueryContent) {
 		t.Errorf("an update that keeps a stored macro name: error = %v", err)
 	}

@@ -79,6 +79,12 @@ func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, 
 	return teamToModel(teamRow), nil
 }
 
+// GetTeamForUpdate retrieves a team by ID. Inside WithTx the read runs on the
+// transaction, and BEGIN IMMEDIATE already excludes every other writer.
+func (db *DB) GetTeamForUpdate(ctx context.Context, teamID models.TeamID) (*models.Team, error) {
+	return db.GetTeam(ctx, teamID)
+}
+
 // UpdateTeam updates an existing team record.
 // The `updated_at` timestamp is automatically set by the query.
 func (db *DB) UpdateTeam(ctx context.Context, team *models.Team) error {
@@ -174,6 +180,23 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 	}
 
 	return nil
+}
+
+// InsertTeamMember adds a membership and reports whether this call inserted
+// it. An existing membership is left as it is.
+func (db *DB) InsertTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) (bool, error) {
+	n, err := db.writeQueries.InsertTeamMember(ctx, sqlc.InsertTeamMemberParams{TeamID: int64(teamID), UserID: int64(userID), Role: string(role)})
+	if err != nil {
+		return false, fmt.Errorf("error inserting team member: %w", err)
+	}
+	return n > 0, nil
+}
+
+// GetTeamMemberForUpdate retrieves a membership. Inside WithTx the read runs
+// on the transaction, and BEGIN IMMEDIATE already excludes every other
+// writer.
+func (db *DB) GetTeamMemberForUpdate(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
+	return db.GetTeamMember(ctx, teamID, userID)
 }
 
 // GetTeamMember retrieves a specific team membership record.

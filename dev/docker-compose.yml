@@ -42,6 +42,20 @@ services:
         volumes:
             - victorialogs-data:/victoria-logs-data
 
+    loki-local:
+        # Distroless image: it has no shell, wget or curl, so it cannot run a
+        # container healthcheck. just dev-setup polls /ready from the host.
+        image: grafana/loki:3.7.6
+        hostname: loki
+        restart: on-failure
+        command:
+            - -config.file=/etc/loki/logchef.yaml
+        ports:
+            - '0.0.0.0:3100:3100'
+        volumes:
+            - ./loki.yaml:/etc/loki/logchef.yaml:ro
+            - loki-data:/loki
+
     dex-local:
         image: dexidp/dex:v2.35.3
         ports:
@@ -97,4 +111,5 @@ volumes:
     clickhouse-data:
     clickhouse-logs:
     victorialogs-data:
+    loki-data:
     postgres-data:

@@ -135,6 +135,10 @@ func quotedEnd(query string, start int, dialect Dialect) int {
 	if quote != '\'' && quote != '"' && (quote != '`' || dialect == LogchefQL) {
 		return start
 	}
+	// LogQL has no single-quoted strings.
+	if quote == '\'' && dialect == LogQL {
+		return start
+	}
 	for i := start + 1; i < len(query); i++ {
 		if query[i] == '\\' && (quote != '`' || dialect == ClickHouseSQL) {
 			i++

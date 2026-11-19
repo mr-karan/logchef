@@ -54,6 +54,11 @@ function button(text: string): HTMLButtonElement {
 }
 
 describe("DateTimePicker", () => {
+  it.each([["today-6d", "Last 7 calendar days"], ["today", "Today"]])("names the calendar range %s on its trigger", async (spec, label) => {
+    await openPicker({ kind: "relative", spec });
+    expect(document.body.querySelector("button")?.textContent).toContain(label);
+  });
+
   it("anchors the open popover to its trigger so it is placed on screen", async () => {
     await openPicker({ kind: "relative", spec: "15m" });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -98,7 +103,9 @@ describe("DateTimePicker", () => {
     expect(range).toBe("2026-03-02 00:00:00 - 2026-03-02 10:00:00");
 
     const { emitted } = await openPicker(window, resolved);
-    expect(document.body.querySelector("button")?.textContent?.trim()).toBe(range);
+    expect(document.body.querySelector("button")?.textContent?.trim()).toBe("Today");
+    const inputs = [...document.body.querySelectorAll("input")].map((i) => i.value);
+    expect(inputs).toEqual(expect.arrayContaining([expect.stringContaining("2026-03-02 00:00:00"), expect.stringContaining("2026-03-02 10:00:00")]));
     button("Apply time range").click();
 
     expect(emitted).toEqual([{ kind: "relative", spec: "today" }]);

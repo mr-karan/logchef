@@ -85,6 +85,7 @@ func newAskChefEnv(t *testing.T, cfg *config.Config, chat askchef.ChatModel) *as
 	srv := New(ServerOptions{
 		Config:      cfg,
 		SQLite:      db,
+		Audit:       testAuditRecorder(t, db),
 		Datasources: datasources,
 		FS:          http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}}),
 		Logger:      log,
@@ -543,7 +544,7 @@ func TestAskChefTurnFromAnAlertEntry(t *testing.T) {
 	env := newAskChefEnv(t, cfg, &echoChat{})
 	insert := func(alert models.AlertID) int64 {
 		value := 23.0
-		entry, err := env.db.InsertAlertHistory(context.Background(), alert, models.AlertStatusTriggered, &value, "fired", nil)
+		entry, err := env.db.InsertAlertHistory(context.Background(), alert, "", nil, models.AlertStatusTriggered, &value, "fired", nil)
 		if err != nil {
 			t.Fatalf("InsertAlertHistory: %v", err)
 		}

@@ -1,6 +1,9 @@
 ---
 title: Database Backends
-description: Choose between the default SQLite metadata store and the opt-in Postgres backend for multi-replica deployments
+head:
+  - tag: title
+    content: "SQLite and Postgres Metadata Stores | Logchef"
+description: "Choose SQLite or Postgres for Logchef metadata. Configure the default local store or use Postgres to share metadata across multiple replicas."
 ---
 
 Logchef stores its **application metadata** (users, teams, sources, sessions,
@@ -62,14 +65,39 @@ Shared metadata in Postgres is necessary for multi-replica operation, but it is
 **not sufficient on its own**. Before running more than one replica, understand
 these constraints:
 
-### Run exactly one alert-manager replica
+### Background jobs run on any replica
 
-Alert evaluation runs on a per-replica timer. Postgres does **not** coordinate
-this: if N replicas each run the alert manager, every alert is evaluated N times,
-producing duplicate notifications. Until leader election is added, run the alert
-evaluation loop on **exactly one** replica (e.g. a dedicated instance, or disable
-alerts on all but one). See [Alerting](/features/alerting) for the `alerts.enabled`
-switch used to disable evaluation on the other replicas.
+Alert evaluation runs on the background job runner. Each rule is a job in the
+metadata database with its own frequency. Every replica polls for due jobs
+(`[jobs] poll_interval`, default `2s`) and claims them with a lease, so one
+replica evaluates a given tick and the load spreads across replicas. A replica
+whose claim was taken over, for example after it stalled past its lease, cannot
+commit alert state or history.
+
+Set `[jobs] enabled = false` (`LOGCHEF_JOBS__ENABLED=false`) on a replica that
+should serve HTTP only. `[alerts] max_concurrent_evaluations` (default `4`)
+bounds the rules one replica evaluates at once.
+
+An evaluation sends nothing itself. It writes its notifications as delivery
+rows in the same transaction as the rule's state, and the `notify.deliver` job
+sends them. Each row is reserved by one replica at a time, and rows for the
+same group go out in order. A replica that stalls or dies after a webhook,
+Slack or PagerDuty request was accepted and before its result was written
+sends that message again once the reservation ends; an email is never sent
+twice and is marked `unknown` instead. See
+[Delivery and retries](/features/alerting/#delivery-and-retries).
+
+This release cannot be rolled out one replica at a time when upgrading from
+2.7: stop every old replica before the first new one starts. See
+[Upgrading from 2.7](/features/alerting/#upgrading-from-27).
+
+[Scheduled reports](/features/scheduled-reports/) use the same runner, one job
+per report. The report's run row is its claim: one row per scheduled tick and
+one running run per report, so two replicas never send the same edition, and a
+manual run answers 409 while any replica runs that report. A replica whose claim
+was taken over writes nothing; the cleanup marks its run `interrupted` two
+minutes after the run's deadline. `[reports] max_concurrent_runs` (default `2`)
+bounds the runs one replica executes at once.
 
 ### Give each export replica a stable identity
 

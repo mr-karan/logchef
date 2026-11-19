@@ -94,6 +94,52 @@ jobs:
           exit 1
       - name: Integration tests (VictoriaLogs)
         run: go test ./internal/victorialogs/ -run Integration -v
+      - name: Alert conditions against VictoriaLogs
+        run: go test ./internal/alerts/ -run '^TestLogchefQLConditionVictoriaLogs$' -v
+
+  # The Loki provider integration tests (RFC 0011) run against the dev stack's
+  # config (auth_enabled, filesystem storage). The image is distroless, so the
+  # runner polls /ready instead of a container health check.
+  loki-integration:
+    runs-on: ubuntu-latest
+    env:
+      LOGCHEF_TEST_LOKI_URL: http://localhost:3100
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start Loki
+        run: |
+          docker run -d --name loki -p 3100:3100 \
+            -v "$PWD/dev/loki.yaml:/etc/loki/logchef.yaml:ro" \
+            grafana/loki:3.7.6 -config.file=/etc/loki/logchef.yaml
+      - name: Wait for Loki
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf "${LOGCHEF_TEST_LOKI_URL}/ready" >/dev/null; then
+              echo "Loki is ready"
+              exit 0
+            fi
+            echo "Waiting for Loki ($i/60)..."
+            sleep 1
+          done
+          echo "::error::Loki did not become ready in time"
+          docker logs loki || true
+          exit 1
+      - name: Integration tests (Loki)
+        run: go test ./internal/loki/ -run Integration -v
+      - name: Alert conditions against Loki
+        run: go test ./internal/alerts/ -run '^TestLogchefQLConditionLoki$' -v
+      - name: MCP log context against Loki
+        run: go test ./internal/mcp/ -run '^TestLokiLogContextUsesStreamLabels$' -v
+      # The test job runs the rest of internal/server; these are the tests that
+      # skip there for lack of a Loki URL. Add new ones here.
+      - name: Server responses against Loki
+        run: >-
+          go test -race -gcflags='modernc.org/...=-d=checkptr=0' ./internal/server -count=1
+          -run '^(TestLokiConditionAlertTests)$'
 
   clickhouse-integration:
     runs-on: ubuntu-latest
@@ -134,8 +180,24 @@ jobs:
           docker exec "$c" chmod 755 /var/lib/clickhouse/user_scripts/logchef_test_effect.sh
           docker exec "$c" clickhouse-client --query 'SYSTEM RELOAD FUNCTIONS'
           test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.functions WHERE name = 'logchef_test_effect'")" = 1
+      # The schema advisor gates read through a Distributed table over two
+      # shards, both this server.
+      - name: Install the two-shard test cluster
+        run: |
+          c=${{ job.services.clickhouse.id }}
+          docker cp internal/clickhouse/testdata/advisor_two_shards.xml "$c":/etc/clickhouse-server/config.d/
+          docker exec "$c" clickhouse-client --query 'SYSTEM RELOAD CONFIG'
+          test "$(docker exec "$c" clickhouse-client --query "SELECT count() FROM system.clusters WHERE cluster = 'logchef_two_shards'")" = 2
       - name: Query, schema, and lifecycle compatibility
-        run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql -count=1
+        run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql ./internal/advisor ./internal/core -count=1
+      - name: Alert conditions against ClickHouse
+        run: go test -race ./internal/alerts -count=1 -run '^TestLogchefQLConditionClickHouse$'
+      # The test job runs the rest of internal/server; these are the tests that
+      # skip there for lack of a ClickHouse address. Add new ones here.
+      - name: Server responses against ClickHouse
+        run: >-
+          go test -race -gcflags='modernc.org/...=-d=checkptr=0' ./internal/server -count=1
+          -run '^(TestClickHouseQueryFailureResponses|TestClickHouseResourceFailureResponses|TestClickHousePreviewClientDisconnect|TestClickHousePreviewContextCancellation|TestExportQueriesClickHouse|TestExportJobCancelledAtShutdown|TestViewActivityCapResponseClickHouse)$'
 
   lint:
     runs-on: ubuntu-latest

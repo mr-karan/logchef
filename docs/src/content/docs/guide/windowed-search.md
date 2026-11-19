@@ -1,6 +1,6 @@
 ---
 title: VictoriaLogs windowed search
-description: Settings, progress, pagination, and limits for windowed searches on large VictoriaLogs sources.
+description: "Search large VictoriaLogs sources with windowed queries in Logchef. Configure window settings and understand search progress, pagination, and limits."
 ---
 
 Windowed search is an opt-in Explorer mode for VictoriaLogs sources. The source

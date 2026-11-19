@@ -112,7 +112,9 @@
                   ? t('ui.stopLiveTail')
                   : (canGoLive
                     ? t('ui.streamNewLogsAsTheyArrive')
-                    : t('ui.liveTailNeedsLogchefQLOrLogsQLForVictoriaLogs')) }}
+                    : exploreStore.liveTailNeedsLogRows
+                      ? t('ui.liveTailNeedsLogRows')
+                      : t('ui.liveTailNeedsLogchefQLOrLogsQLForVictoriaLogs')) }}
               </p>
             </TooltipContent>
           </Tooltip>
@@ -220,6 +222,23 @@
                     <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
                 </div>
               </div>
+              <div v-else-if="isLokiSource" class="text-xs space-y-1.5">
+                <div>
+                  <code class='bg-muted px-1 rounded'>{service_name="api"}</code> {{ t('ui.streamSelector') }}
+                </div>
+                <div>
+                  <code class='bg-muted px-1 rounded'>|= "timeout"</code> {{ t('ui.lineFilter') }}
+                </div>
+                <div>
+                  <code class='bg-muted px-1 rounded'>| json | status >= 500</code> {{ t('ui.parseAndFilterFields') }}
+                </div>
+                <div>
+                  <code class='bg-muted px-1 rounded'>sum by (level) (count_over_time({service_name="api"}[5m]))</code> {{ t('ui.metricQuery') }}
+                </div>
+                <div class="pt-1">
+                  <em>{{ t('ui.useNativeLokiLogQLTimeRangeIsAppliedSeparatelyFromThePicker') }}</em>
+                </div>
+              </div>
               <div v-else-if="isVictoriaLogsSource" class="text-xs space-y-1.5">
                 <div>
                   <code class='bg-muted px-1 rounded'>level:="error"</code> {{ t('ui.exactMatch') }}
@@ -272,7 +291,7 @@
         :class="{ 'is-empty': isEditorEmpty }"
         :style="{ height: `${editorHeight}px` }"
         :data-placeholder="currentPlaceholder"
-        :data-mode="isVictoriaLogsSource ? 'logsql' : 'clickhouse-sql'"
+        :data-mode="nativeEditorMode"
       >
         <div v-if="sqlEditorLoadError" class="sql-editor-error">
           <p class="sql-editor-error__title">{{ t('ui.unableToLoadSQLEditor') }}</p>
@@ -288,7 +307,7 @@
           ref="sqlEditorRef"
           :value="editorContent"
           :theme="theme"
-          :language="props.activeMode"
+          :language="props.activeMode === 'logchefql' ? 'logchefql' : nativeEditorMode"
           :schema="props.schema"
           :team-id="props.teamId"
           :source-id="props.sourceId"
@@ -405,7 +424,7 @@ import type { CompletionValuesWindowGetter } from "@/composables/useCompletionFi
 import { useVariableStore } from '@/stores/variables';
 import { extractVariablesWithOptional } from "@/composables/useVariables.ts";
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
-import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
+import { getNativeQueryLanguageForSource, getQueryLanguageLabel, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
 
 const { t } = useI18n();
 
@@ -430,6 +449,8 @@ interface QueryEditorProps {
   schema: Record<string, { type: string }>
   activeMode: EditorMode
   tableName: string
+  // The default stream selector of a Loki source, the empty-editor hint.
+  streamSelector?: string
   teamId: number
   value?: string
   placeholder?: string
@@ -512,10 +533,14 @@ const sourceDescriptor = computed(() => ({
   query_languages: props.queryLanguages,
   capabilities: props.capabilities,
 }));
-const isVictoriaLogsSource = computed(() => getNativeQueryLanguageForSource(sourceDescriptor.value) === "logsql");
+const nativeLanguage = computed(() => getNativeQueryLanguageForSource(sourceDescriptor.value));
+const isVictoriaLogsSource = computed(() => nativeLanguage.value === "logsql");
+const isLokiSource = computed(() => nativeLanguage.value === "logql");
+// The Monaco language of the native editor. LogsQL has no grammar of its own.
+const nativeEditorMode = computed(() => (isLokiSource.value ? "logql" : "clickhouse-sql"));
 const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDescriptor.value, "logchefql"));
 const supportsAiAssistant = computed(() => hasSourceCapability(sourceDescriptor.value, "ai_sql_generation"));
-const nativeEditorLabel = computed(() => (getNativeQueryLanguageForSource(sourceDescriptor.value) === "logsql" ? "LogsQL" : "SQL"));
+const nativeEditorLabel = computed(() => (nativeLanguage.value === "clickhouse-sql" ? "SQL" : getQueryLanguageLabel(nativeLanguage.value)));
 const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
@@ -523,6 +548,8 @@ const currentPlaceholder = computed(() => {
     ? t('query.filterExample', { example: 'method="GET" and status>=500' })
     : isVictoriaLogsSource.value
       ? t('query.logsQLExample', { example: 'level:="error" service:="api"' })
+      : isLokiSource.value
+      ? t('query.logQLExample', { example: props.streamSelector || '{service_name=~".+"}' })
       : `SELECT * FROM ${props.tableName || "your_table"} WHERE …`;
 });
 

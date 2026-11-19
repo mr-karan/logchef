@@ -1,5 +1,8 @@
 ---
 title: Query Examples
+head:
+  - tag: title
+    content: "ClickHouse SQL Log Query Examples | Logchef"
 description: Practical LogchefQL query examples for common log analytics scenarios, from basic filters to more advanced field searches.
 ---
 
@@ -582,8 +585,8 @@ trace_id!="" and span_id!="" and level="error"
    - Then add conditions for errors, warnings, or specific events
    - Finally, add free-text search terms with the `~` operator
 
-7. **Switch to SQL Mode for Aggregations**
-   - LogchefQL is for filtering; use SQL mode for `COUNT`, `GROUP BY`, etc.
+7. **Aggregate with a Pipe**
+   - `level=error | count() by service` counts and groups without SQL. See [Aggregations](/guide/aggregations). Use SQL mode for ratios, joins and subqueries
 
 ## Next steps
 

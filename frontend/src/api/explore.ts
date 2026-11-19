@@ -2,6 +2,8 @@ import { apiClient, type RequestOptions } from "./apiUtils";
 import { apiBaseURL } from "./config";
 import { streamSSE } from "./eventStream";
 import type { TemplateVariable } from "./logchefql";
+import type { SavedViewDefinition } from "@/lib/savedViewLayout";
+import type { QueryLanguage } from "@/lib/queryMetadata";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
 // tens of seconds, and the shared axios client otherwise aborts after 10s.
@@ -87,6 +89,21 @@ export interface QueryStats {
   truncation?: Truncation;
 }
 
+/** What an output column of a LogchefQL aggregation holds. */
+export type AggregationRole = "time" | "group" | "value";
+export type AggregationShape = "scalar" | "grouped" | "timeseries" | "grouped_timeseries";
+
+/** The description of an aggregated LogchefQL result (RFC 0005). */
+export interface AggregationInfo {
+  shape: AggregationShape;
+  // Time first, then group keys, then values, each in written order.
+  columns: { name: string; role: AggregationRole; type: string }[];
+  // The bucket window in use, such as "5m". "" without a time key.
+  interval: string;
+  // The query's own limit stage, or 0.
+  limit: number;
+}
+
 export interface QueryWarning {
   code: string;
   message: string;
@@ -137,6 +154,8 @@ export interface LogContextRequest {
   before_offset?: number;
   after_offset?: number;
   exclude_boundary?: boolean;
+  /** A Loki row's stream labels, which identify the stream to read. */
+  stream_labels?: Record<string, string>;
 }
 
 export interface LogContextResponse {
@@ -191,6 +210,9 @@ export interface QuerySharePayload {
     isRequired?: boolean;
     options?: Array<{ value: string; label?: string }>;
   }>;
+  // The sender's table layout (RFC 0007): columns, sort and display mode. A
+  // share made before layouts, or without one, has none.
+  layout?: SavedViewDefinition;
 }
 
 export interface QueryShareResponse {
@@ -207,7 +229,7 @@ export interface QueryShareResponse {
 // Persistent, server-backed query history (cross-device). Backed by
 // GET /api/v1/me/query-history, which returns the caller's recent queries
 // across all teams/sources, newest-first. See issue #58.
-export type QueryHistoryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type QueryHistoryLanguage = "logchefql" | "clickhouse-sql" | "logsql" | "logql";
 
 export interface QueryHistoryRecord {
   id: number;
@@ -355,7 +377,7 @@ export const exploreApi = {
 
 // query_language values accepted by the tail endpoint. clickhouse-sql is
 // rejected server-side (400) by design, so it is intentionally excluded here.
-export type TailQueryLanguage = "logchefql" | "logsql";
+export type TailQueryLanguage = Exclude<QueryLanguage, "clickhouse-sql">;
 
 export interface TailNotice {
   code?: string;

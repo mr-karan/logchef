@@ -14,6 +14,8 @@ export type ExploreTarget =
 export interface ExploreLocation {
   teamId: number | null
   sourceId: number | null
+  /** The saved view the URL names. It combines with every target. */
+  viewId: number | null
   target: ExploreTarget
 }
 
@@ -32,6 +34,8 @@ function normalizeQueryParams(query: QueryParams): Record<string, string | undef
   if (team) normalized.team = team
   const source = getValue('source')
   if (source) normalized.source = source
+  const view = getValue('view')
+  if (view) normalized.view = view
 
   const relativeTime = getValue('t') ?? getValue('time')
   if (relativeTime) normalized.t = relativeTime
@@ -77,12 +81,13 @@ export function parseExploreLocation(query: QueryParams): ExploreLocation {
   const params = normalizeQueryParams(query)
   const teamId = parseId(params.team)
   const sourceId = parseId(params.source)
+  const viewId = parseId(params.view)
 
-  if (params.share) return { teamId, sourceId, target: { kind: 'share', token: params.share } }
+  if (params.share) return { teamId, sourceId, viewId, target: { kind: 'share', token: params.share } }
   const queryId = parseId(params.id)
-  if (queryId) return { teamId, sourceId, target: { kind: 'saved', queryId } }
-  if (Object.keys(params).every((key) => key === 'team' || key === 'source')) {
-    return { teamId, sourceId, target: { kind: 'draft' } }
+  if (queryId) return { teamId, sourceId, viewId, target: { kind: 'saved', queryId } }
+  if (Object.keys(params).every((key) => key === 'team' || key === 'source' || key === 'view')) {
+    return { teamId, sourceId, viewId, target: { kind: 'draft' } }
   }
 
   const mode = params.mode
@@ -91,6 +96,7 @@ export function parseExploreLocation(query: QueryParams): ExploreLocation {
   return {
     teamId,
     sourceId,
+    viewId,
     target: {
       kind: 'query',
       mode,

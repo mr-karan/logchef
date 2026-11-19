@@ -1,5 +1,6 @@
 import { i18n } from "@/i18n";
 import type { DashboardViz, DashboardVizType, NumberFormat } from "@/api/dashboards";
+import type { AggregationInfo } from "@/api/explore";
 import { addExact, compareExact, exactString, isExact, multiplyExact, parseExact, type FrameNumber } from "./exactNumber";
 import { frameCellText, frameWithKinds, suggestKind, type FrameColumn, type PanelFrame } from "./panelFrame";
 import { getColorForGroupValue } from "./histogram-chart";
@@ -13,11 +14,17 @@ export interface ChartRow { key: string; x: number; label: () => string; values:
 export interface ChartModel { rows: ChartRow[]; series: ChartSeries[]; time: boolean; notices: string[] }
 export interface ListItem extends ChartSeries { value: ChartValue; percentage: number; displayPercentage: number }
 
+// HTTP status classes keep one meaning everywhere: 2xx green, 4xx amber, 5xx red.
+const STATUS_CLASS_COLORS: Record<string, string> = {
+  "1": "var(--panel-gray)", "2": "var(--panel-green)", "3": "var(--panel-blue)", "4": "var(--panel-amber)", "5": "var(--panel-red)",
+};
+
 export function chartColors(key: string, text: string, other = false, used = new Set<string>()): Pick<ChartSeries, "color"> {
   let hash = 0;
   for (const char of key) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) | 0;
   const semantic = /^(error|err|fatal|critical|crit|alert|emerg|emergency|warn|warning|info|information|notice|debug|trace|verbose|get|post|put|delete|patch|options|head)$/i.test(text);
-  const preferred = other ? "var(--panel-chart-other)" : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})`;
+  const status = /^([1-5])xx$/i.exec(text)?.[1];
+  const preferred = other ? "var(--panel-chart-other)" : status ? STATUS_CLASS_COLORS[status] : semantic ? getColorForGroupValue(text) : `var(--panel-chart-${Math.abs(hash) % 12 + 1})`;
   let color = preferred;
   for (let offset = 1; used.has(color) && offset <= 12; offset++) color = `var(--panel-chart-${(Math.abs(hash) + offset) % 12 + 1})`;
   if (used.has(color)) color = `hsl(${(used.size * 137.508) % 360} 65% var(--panel-chart-generated-lightness))`;
@@ -31,6 +38,19 @@ export function chartLabelColor(hex: string | undefined): string | undefined {
   const channels = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
   return luminance > 0.179 ? "#000000" : "#ffffff";
+}
+
+// Splits rows into runs with a finite value, so an unstacked area leaves a gap
+// at a missing point instead of drawing down to zero.
+export function definedRuns<T>(rows: T[], value: (row: T) => number): T[][] {
+  const runs: T[][] = [];
+  let run: T[] = [];
+  for (const row of rows) {
+    if (Number.isFinite(value(row))) run.push(row);
+    else if (run.length) { runs.push(run); run = []; }
+  }
+  if (run.length) runs.push(run);
+  return runs;
 }
 
 export function chartStacked(viz: ChartViz): boolean {
@@ -239,6 +259,33 @@ export function buildPanelList(input: PanelFrame, viz: ListViz, count: boolean, 
   }
   if (items.some((i) => i.value.approximate)) notices.push("Chart coordinates are approximate. Tooltips show exact values.");
   return { items, notices, total: totalValue === null ? null : chartValue(totalValue, viz.format) };
+}
+
+// The chart roles that an aggregation's columns declare: the time key is x,
+// every value is a y, and the one group field is the series. Null when the
+// result has no time key, or two group fields, which a chart cannot tell apart.
+function aggregationChartRoles(info: AggregationInfo): Pick<ChartViz, "x" | "y" | "series"> | null {
+  const time = info.columns.find((c) => c.role === "time");
+  const groups = info.columns.filter((c) => c.role === "group");
+  if (!time || groups.length > 1) return null;
+  return { x: time.name, y: info.columns.filter((c) => c.role === "value").map((c) => c.name), ...(groups[0] ? { series: groups[0].name } : {}) };
+}
+
+/**
+ * The first visualization for an aggregated LogchefQL result. A time key gives
+ * a line chart with the roles its columns declare. Two group fields give a
+ * table. Any other shape takes the suggestion for its frame.
+ */
+export function suggestAggregationViz(frame: PanelFrame, info: AggregationInfo): DashboardViz {
+  if (info.columns.filter((c) => c.role === "group").length > 1) return { type: "table" };
+  const roles = aggregationChartRoles(info);
+  return roles ? { type: "chart", ...roles, mark: "line", stack: "none" } : suggestViz(frame);
+}
+
+/** Fills the roles a chart lacks from an aggregation's columns, and any other gap as `withSuggestedRoles` does. */
+export function withAggregationRoles(frame: PanelFrame, viz: DashboardViz, info: AggregationInfo): DashboardViz {
+  const roles = viz.type === "chart" && !(viz.x && viz.y?.length) ? aggregationChartRoles(info) : null;
+  return roles ? { ...viz, ...roles } : withSuggestedRoles(frame, viz);
 }
 
 export function withSuggestedRoles(frame: PanelFrame, viz: DashboardViz): DashboardViz {

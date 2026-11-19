@@ -224,9 +224,15 @@ export function sqlTimeCondition(tsField: string, window: ResolvedWindow): strin
   return `${field} BETWEEN ${sqlBound(window.start, window.zone)} AND ${sqlBound(window.end, window.zone)}`;
 }
 
-export type BucketAlignment = "calendar" | "fixed-offset";
+export type BucketAlignment = "calendar" | "fixed-offset" | "utc";
 
 export function histogramBucketBounds(range: ResolvedWindow, stepMs: number, alignment: BucketAlignment = "calendar"): { first: number; last: number; next: (ts: number) => number } {
+  if (alignment === "utc") {
+    // Loki starts every bucket at a multiple of the window since the epoch,
+    // and the range end is exclusive, so an aligned end starts no bucket.
+    const align = (ts: number) => Math.floor(ts / stepMs) * stepMs;
+    return { first: align(range.start), last: align(range.end - 1), next: (ts) => ts + stepMs };
+  }
   if (alignment === "fixed-offset") {
     // VictoriaLogs /hits keeps the range-start offset even across DST changes.
     const offset = zoneOffsetMs(range.start, range.zone);

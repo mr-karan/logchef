@@ -17,7 +17,7 @@ type QueryLogsParams struct {
 	SourceID     int    `json:"source_id" jsonschema:"The ID of the source to query logs from"`
 	StartTime    string `json:"start_time,omitempty" jsonschema:"Inclusive start time (RFC3339)"`
 	EndTime      string `json:"end_time,omitempty" jsonschema:"End time (RFC3339)"`
-	RawSQL       string `json:"raw_sql" jsonschema:"Datasource-native query: ClickHouse SQL or VictoriaLogs LogsQL. Use get_source_schema first to understand available columns. Include WHERE clauses with timestamp filters and ORDER BY and LIMIT clauses."`
+	RawSQL       string `json:"raw_sql" jsonschema:"Datasource-native query: ClickHouse SQL, VictoriaLogs LogsQL or Loki LogQL. Use get_source_schema first to understand available columns. For ClickHouse include WHERE clauses with timestamp filters and ORDER BY and LIMIT clauses. A LogQL query starts with a stream selector such as {service_name=\"api\"} and needs start_time and end_time."`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Request row limit (1-100 default 100). A smaller LIMIT in raw_sql wins. stats.limit_source names the bound that applied and stats.truncation (none rows bytes unknown) says whether rows were cut"`
 	QueryTimeout *int   `json:"query_timeout,omitempty" jsonschema:"Query timeout in seconds (default 30)"`
 	Timezone     string `json:"timezone,omitempty" jsonschema:"IANA timezone for the {{__timezone}} and {{__tz_offset}} macros (default UTC)"`
@@ -37,7 +37,7 @@ type GetLogHistogramParams struct {
 	SourceID     int    `json:"source_id" jsonschema:"The ID of the source to generate histogram for"`
 	StartTime    string `json:"start_time,omitempty" jsonschema:"Inclusive start time (RFC3339)"`
 	EndTime      string `json:"end_time,omitempty" jsonschema:"End time (RFC3339)"`
-	RawSQL       string `json:"raw_sql" jsonschema:"Executable datasource-native query for histogram generation. Use translate_logchefql first; pass full_sql for ClickHouse or generated_query for VictoriaLogs."`
+	RawSQL       string `json:"raw_sql" jsonschema:"Executable datasource-native query of log rows for histogram generation. Use translate_logchefql on a filter first and pass its full_sql for ClickHouse or generated_query for VictoriaLogs. Never pass the translation of a query with an aggregation pipe (| count() ...): translate the filter before the pipe instead."`
 	Window       string `json:"window,omitempty" jsonschema:"Time window for histogram buckets (e.g. 1m 5m 1h 1d). Defaults to 1m."`
 	GroupBy      string `json:"group_by,omitempty" jsonschema:"Optional field to group histogram data by (e.g. severity_text or service_name)"`
 	Timezone     string `json:"timezone,omitempty" jsonschema:"Timezone for histogram timestamps (default UTC)"`
@@ -52,6 +52,11 @@ type ListSavedQueriesParams struct {
 
 type GetSavedQueryParams struct {
 	QueryID int `json:"query_id" jsonschema:"The ID of the saved query to retrieve"`
+}
+
+type ListSavedViewsParams struct {
+	TeamID   int `json:"team_id" jsonschema:"The ID of the team that has access to the source"`
+	SourceID int `json:"source_id" jsonschema:"The ID of the source whose views to list"`
 }
 
 // --- Output schemas ---
@@ -199,6 +204,30 @@ func (t *tools) listSavedQueries(ctx context.Context, sourceID int) ([]*models.S
 	return core.ListSavedQueriesForUser(ctx, t.deps.DB, t.deps.Log, p.User.ID)
 }
 
+func (t *tools) handleListSavedViews(ctx context.Context, _ mcp.CallToolRequest, args ListSavedViewsParams) (*models.SavedViewList, error) {
+	list, err := t.listSavedViews(ctx, args.TeamID, args.SourceID)
+	if err != nil {
+		return nil, t.storeError("list saved views", err)
+	}
+	return list, nil
+}
+
+func (t *tools) listSavedViews(ctx context.Context, teamID, sourceID int) (*models.SavedViewList, error) {
+	src, err := t.authorizeSource(ctx, teamID, sourceID, models.TokenScopeSavedViewsRead)
+	if err != nil {
+		return nil, err
+	}
+	p, err := principalFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	caller, err := core.NewSavedViewCaller(ctx, t.deps.DB, p, src)
+	if err != nil {
+		return nil, err
+	}
+	return core.ListSavedViews(ctx, t.deps.DB, caller)
+}
+
 func (t *tools) handleGetSavedQuery(ctx context.Context, _ mcp.CallToolRequest, args GetSavedQueryParams) (SavedQueryResult, error) {
 	got, err := t.getSavedQuery(ctx, args.QueryID)
 	if err != nil {
@@ -287,6 +316,15 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		readOnlyTool,
 	)
 	s.AddTool(listSavedQueriesTool, mcp.NewStructuredToolHandler(t.handleListSavedQueries))
+
+	listSavedViewsTool := mcp.NewTool("list_saved_views",
+		mcp.WithDescription("List the saved Explorer views of a source that the caller can see: their personal views, the team's views and the source's views, ordered by scope then name. A view sets the Explorer's columns, column order and widths, sort, display mode, and optionally a LogchefQL filter and a relative time range. Use it to learn which columns a team reads for a source, or to give a person a view id (the Explorer URL parameter view=<id>). default_view_id is the view the Explorer opens with: the personal default, else the team default, else the source default."),
+		mcp.WithInputSchema[ListSavedViewsParams](),
+		mcp.WithOutputSchema[models.SavedViewList](),
+		mcp.WithTitleAnnotation("List Saved Views"),
+		readOnlyTool,
+	)
+	s.AddTool(listSavedViewsTool, mcp.NewStructuredToolHandler(t.handleListSavedViews))
 
 	getSavedQueryTool := mcp.NewTool("get_saved_query",
 		mcp.WithDescription("Get a single saved query by ID. Returns name, description, query_type, query_content, source, and metadata."),

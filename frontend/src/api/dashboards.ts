@@ -3,7 +3,7 @@ import type { HistogramResponse, QuerySuccessResponse } from "./explore";
 import type { QueryResponse as LogchefqlQueryResponse, TranslateResponse } from "./logchefql";
 
 // Panel query languages accepted by the panel blob. Mirrors pkg/models QueryLanguage.
-export type PanelQueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type PanelQueryLanguage = "logchefql" | "clickhouse-sql" | "logsql" | "logql";
 
 // ---------------------------------------------------------------------------
 // Panel blob schema 2 (RFC 0003). A panel is a query plus a visualization,
@@ -20,7 +20,7 @@ export const DASHBOARD_PANELS_VERSION = 2;
  * feature name here together with the code that keeps it. Never copy a
  * dashboard's stored `features` into this list.
  */
-export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats", "tabs", "free_grid", "panel_time"];
+export const DASHBOARD_CLIENT_FEATURES: readonly string[] = ["result_frames", "formats", "result_charts", "stat_compare", "thresholds", "table_rules", "column_formats", "tabs", "free_grid", "panel_time", "loki_queries"];
 
 // A dashboard this client cannot round-trip: the server's stub for an older
 // client, or a stored feature this build does not know.
@@ -204,6 +204,8 @@ export interface DashboardSummary {
   /** Creator or global admin only; a team editor may edit a shared dashboard but not delete it. */
   can_delete: boolean;
   corrupt: boolean;
+  /** The reports a delete removes with the dashboard; 0 for a caller who cannot delete it. */
+  report_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -292,6 +294,8 @@ export interface LogchefqlQueryRequestBody {
   end_time: string; // RFC3339
   timezone?: string;
   limit?: number;
+  /** The window of a `by time` key that names none. */
+  interval?: PanelInterval;
   // See HistogramRequestBody.query_language.
   query_language?: PanelQueryLanguage;
   // Dashboard result-cache directive; omitted when caching is off.

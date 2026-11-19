@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -22,6 +23,9 @@ type QueryResult struct {
 	GeneratedQuery         string                `json:"generated_query,omitempty"`
 	GeneratedQueryLanguage string                `json:"generated_query_language,omitempty"`
 	Warnings               []models.QueryWarning `json:"warnings,omitempty"`
+	// Aggregation is set by query_logchefql for an aggregated query, whose
+	// logs are the result rows.
+	Aggregation *logchefql.AggregationInfo `json:"aggregation,omitempty"`
 }
 
 type HistogramResult struct {

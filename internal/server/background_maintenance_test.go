@@ -254,7 +254,7 @@ func TestStartupExportReapLogs(t *testing.T) {
 					defer output.Close()
 					cfg := testOAuthConfig()
 					cfg.Export.InstanceID = tc.instance
-					srv := New(ServerOptions{Config: cfg, SQLite: db, Logger: slog.New(slog.NewJSONHandler(output, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+					srv := New(ServerOptions{Config: cfg, SQLite: db, Audit: testAuditRecorder(t, db), Logger: slog.New(slog.NewJSONHandler(output, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
 					if err := srv.Shutdown(ctx); err != nil {
 						t.Fatal(err)
 					}

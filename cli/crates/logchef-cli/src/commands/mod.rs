@@ -1,4 +1,6 @@
+pub mod advisor;
 pub mod agent;
+pub mod audit;
 pub mod auth;
 pub mod collections;
 pub mod completions;
@@ -11,6 +13,7 @@ pub mod histogram;
 pub mod history;
 pub mod open;
 pub mod query;
+pub mod reports;
 pub mod saved_queries;
 pub mod schema;
 pub mod skills;
@@ -18,6 +21,7 @@ pub mod sources;
 pub mod sql;
 pub mod tail;
 pub mod teams;
+pub mod views;
 pub mod whoami;
 
 use anyhow::{Context, Result};

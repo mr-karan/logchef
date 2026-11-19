@@ -249,3 +249,67 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestUncachedDashboardPanelsUseTheDashboardCap(t *testing.T) {
+	for _, endpoint := range []string{"logs", "logchefql"} {
+		for _, sourceType := range []models.SourceType{models.SourceTypeClickHouse, models.SourceTypeVictoriaLogs} {
+			t.Run(endpoint+"/"+string(sourceType), func(t *testing.T) {
+				s := newDashboardTestServer(t)
+				s.config = &config.Config{}
+				s.config.Query.DefaultPreviewLimit = 100
+				s.config.Query.MaxPreviewLimit = 1000
+				s.config.Query.DefaultTimeoutSeconds = 10
+				s.config.Query.MaxConcurrentPerUser = 1
+				s.config.DashboardCache.MaxConcurrentFills = 8
+				provider := &failingDashboardQueryProvider{sourceType: sourceType, err: errors.New("database query failed"), release: make(chan struct{})}
+				close(provider.release)
+				s.datasources = datasource.NewService(s.store, s.log)
+				s.datasources.Register(provider)
+				source := &models.Source{Name: "dashboard-admission-test", SourceType: sourceType}
+				if sourceType == models.SourceTypeVictoriaLogs {
+					source.ConnectionConfig = json.RawMessage(`{"url":"http://localhost:9428"}`)
+				}
+				if err := s.store.CreateSource(t.Context(), source); err != nil {
+					t.Fatal(err)
+				}
+				app := fiber.New()
+				handler := s.handleQueryLogs
+				body := `{"query_text":"SELECT * FROM logs"`
+				if endpoint == "logchefql" {
+					handler = s.handleLogchefQLQuery
+					body = `{"query":"level=\"error\"","start_time":"2026-09-01 00:00:00","end_time":"2026-09-01 01:00:00"`
+				}
+				user, src := authorizeTestSource(t, s.store, source.ID)
+				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, handler)
+				path := fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID)
+				status := func(extra string) int {
+					t.Helper()
+					req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body+extra+"}"))
+					req.Header.Set("Content-Type", "application/json")
+					resp, err := app.Test(req, fiber.TestConfig{Timeout: 5 * time.Second, FailOnTimeout: true})
+					if err != nil {
+						t.Fatal(err)
+					}
+					resp.Body.Close()
+					return resp.StatusCode
+				}
+
+				queryID, err := queryTracker.StartQuery(QueryClassPreview, user.ID, source.ID, src.TeamID(), "explorer", func() {}, 0, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { queryTracker.RemoveQuery(queryID) })
+
+				if got := status(""); got != http.StatusTooManyRequests {
+					t.Fatalf("explorer query over the preview cap: status=%d, want 429", got)
+				}
+				if got := status(`,"cache":{"scope":"dashboard","ttl_seconds":0}`); got == http.StatusTooManyRequests {
+					t.Fatal("an uncached dashboard panel was rejected by the preview cap")
+				}
+				if got := provider.executions.Load(); got != 1 {
+					t.Fatalf("executions=%d, want 1", got)
+				}
+			})
+		}
+	}
+}

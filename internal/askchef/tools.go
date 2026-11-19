@@ -17,6 +17,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/mcp"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -118,9 +119,18 @@ func readQueryLogchefQL(input json.RawMessage, result string) (toolReading, erro
 		return toolReading{}, err
 	}
 	summary := rowsSummary(res.RowCount, res.Stats.Truncated)
+	query := params.Query
+	if res.Aggregation != nil {
+		summary = fmt.Sprintf("%s aggregation, %s", res.Aggregation.Shape, summary)
+		// Evidence replays the query text alone, so a bucket window that came
+		// from the interval parameter moves into the query.
+		if res.Aggregation.Interval != "" {
+			query = logchefql.PinTimeWindow(query, res.Aggregation.Interval)
+		}
+	}
 	return toolReading{summary: summary, evidence: []Evidence{{
 		TeamID: models.TeamID(res.TeamID), SourceID: models.SourceID(res.SourceID), Mode: ModeLogchefQL,
-		Query: params.Query, StartMS: start, EndMS: end, Summary: summary,
+		Query: query, StartMS: start, EndMS: end, Summary: summary,
 	}}}, nil
 }
 

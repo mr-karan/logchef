@@ -71,6 +71,12 @@ func TestDashboardTeamEditorAccess(t *testing.T) {
 	shared := mkDash("shared", panelsOn(pair(teamA, srcA)))
 	twoTeams := mkDash("two teams", panelsOn(pair(teamA, srcA), pair(teamB, srcB)))
 	unlinked := mkDash("unlinked", panelsOn(pair(teamL, srcL)))
+	report := &models.Report{Name: "daily", OwnerID: &creator.ID, SourceKind: models.ReportSourceDashboard, DashboardID: &shared.ID,
+		Schedule: models.ReportSchedule{Frequency: models.ReportDaily, Hour: new(9)}, Timezone: "UTC", RangeAnchor: models.ReportAnchorSendTime, MaxRows: 25}
+	if err := s.store.CreateReport(ctx, report); err != nil {
+		t.Fatalf("CreateReport: %v", err)
+	}
+
 	request := func(u *models.User, method, path, body string) (int, map[string]any) {
 		t.Helper()
 		status, resp, _ := call(t, dashboardApp(s, u), method, path, body, schema2)
@@ -120,19 +126,20 @@ func TestDashboardTeamEditorAccess(t *testing.T) {
 			user               *models.User
 			dash               *models.Dashboard
 			canEdit, canDelete bool
+			reportCount        float64
 		}{
-			{creator, shared, true, true},
-			{editor, shared, true, false},
-			{teamAdmin, shared, true, false},
-			{teamAdmin, twoTeams, true, false},
-			{member, shared, false, false},
-			{mixed, twoTeams, false, false},
-			{editor, twoTeams, false, false},
+			{creator, shared, true, true, 1},
+			{editor, shared, true, false, 0},
+			{teamAdmin, shared, true, false, 0},
+			{teamAdmin, twoTeams, true, false, 0},
+			{member, shared, false, false, 0},
+			{mixed, twoTeams, false, false, 0},
+			{editor, twoTeams, false, false, 0},
 		} {
 			row := listRow(tc.user, tc.dash)
-			if row["can_edit"] != tc.canEdit || row["can_delete"] != tc.canDelete {
-				t.Errorf("list %q as %s: can_edit %v can_delete %v, want %v %v",
-					tc.dash.Name, tc.user.Email, row["can_edit"], row["can_delete"], tc.canEdit, tc.canDelete)
+			if row["can_edit"] != tc.canEdit || row["can_delete"] != tc.canDelete || row["report_count"] != tc.reportCount {
+				t.Errorf("list %q as %s: can_edit %v can_delete %v report_count %v, want %v %v %v",
+					tc.dash.Name, tc.user.Email, row["can_edit"], row["can_delete"], row["report_count"], tc.canEdit, tc.canDelete, tc.reportCount)
 			}
 			if got := detailCanEdit(tc.user, tc.dash); got != tc.canEdit {
 				t.Errorf("detail %q as %s: can_edit %v, want %v", tc.dash.Name, tc.user.Email, got, tc.canEdit)

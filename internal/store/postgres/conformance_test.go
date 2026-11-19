@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"testing"
@@ -22,6 +23,9 @@ func TestConformance(t *testing.T) {
 	s := opener(dsn)(t)
 	storetest.Run(t, s)
 	t.Run("MembershipWritesSerialized", func(t *testing.T) { storetest.RunMembershipWritesSerialized(t, s) })
+	t.Run("ForUpdateSerialized", func(t *testing.T) { storetest.RunForUpdateSerialized(t, s) })
+	t.Run("TeamForUpdateSerialized", func(t *testing.T) { storetest.RunTeamForUpdateSerialized(t, s) })
+	t.Run("ContentForUpdateSerialized", func(t *testing.T) { storetest.RunContentForUpdateSerialized(t, s) })
 	t.Run("DashboardSummaries", func(t *testing.T) {
 		conn, err := pgx.Connect(context.Background(), dsn)
 		if err != nil {
@@ -48,11 +52,57 @@ func TestOAuthConformance(t *testing.T) {
 	storetest.RunOAuth(t, opener(dsn))
 }
 
+// TestSavedViewDefaultRace runs two default swaps from two pools; the second
+// waits on the first's row or index lock.
+func TestSavedViewDefaultRace(t *testing.T) {
+	storetest.RunSavedViewDefaultRace(t, opener(postgrestest.DSN(t)))
+}
+
 // TestCollectionLinkRaces runs the link races with two pools, so the second
 // writer waits on the collection row lock.
 func TestCollectionLinkRaces(t *testing.T) {
 	dsn := postgrestest.DSN(t)
 	storetest.RunCollectionLinkRaces(t, opener(dsn))
+}
+
+// TestJobs runs the job claim and takeover tests with separate pools, like
+// separate replicas.
+func TestJobs(t *testing.T) {
+	jobsDSN, deliveriesDSN := postgrestest.DSN(t), postgrestest.DSN(t)
+	storetest.RunJobs(t, opener(jobsDSN), true, leaseHooks(t, jobsDSN))
+	storetest.RunDeliveries(t, opener(deliveriesDSN), leaseHooks(t, deliveriesDSN))
+}
+
+// leaseHooks end leases one second ago on the database clock.
+func leaseHooks(t *testing.T, dsn string) storetest.LeaseHooks {
+	t.Helper()
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect for lease hooks: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	expire := func(query string) func(context.Context, int64) error {
+		return func(ctx context.Context, id int64) error {
+			tag, err := conn.Exec(ctx, query, id)
+			if err != nil {
+				return err
+			}
+			if n := tag.RowsAffected(); n != 1 {
+				return fmt.Errorf("updated %d rows, want 1", n)
+			}
+			return nil
+		}
+	}
+	return storetest.LeaseHooks{
+		ExpireJobLease:            expire(`UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1`),
+		ExpireDeliveryReservation: expire(`UPDATE notification_deliveries SET reserved_until = now() - interval '1 second' WHERE id = $1`),
+	}
+}
+
+// TestReports runs the report store tests with separate pools, like
+// separate replicas.
+func TestReports(t *testing.T) {
+	storetest.RunReports(t, opener(postgrestest.DSN(t)))
 }
 
 func opener(dsn string) storetest.Opener {

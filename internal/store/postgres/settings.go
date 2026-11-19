@@ -20,6 +20,26 @@ func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 	return setting.Value, nil
 }
 
+// settingWritesLockKey names the advisory lock that serializes the
+// read-modify-write of a setting.
+const settingWritesLockKey int64 = 0x6c63_7365_7474_6901
+
+// GetSettingForUpdate takes the setting write lock until the transaction
+// ends, then reads the setting. Returns models.ErrNotFound if absent.
+func (s *Store) GetSettingForUpdate(ctx context.Context, key string) (*models.SystemSetting, error) {
+	if err := s.q.LockSettingWrites(ctx, settingWritesLockKey); err != nil {
+		return nil, fmt.Errorf("failed to lock setting writes: %w", err)
+	}
+	row, err := s.q.GetSystemSetting(ctx, key)
+	if err != nil {
+		if notFound(err) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get setting %s: %w", key, err)
+	}
+	return mapSystemSettings([]sqlc.SystemSetting{row})[0], nil
+}
+
 // ListSettings retrieves all settings.
 func (s *Store) ListSettings(ctx context.Context) ([]*models.SystemSetting, error) {
 	rows, err := s.q.ListSystemSettings(ctx)

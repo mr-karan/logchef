@@ -85,13 +85,16 @@ func (db *DB) UpdateAPITokenLastUsed(ctx context.Context, id int) error {
 // DeleteAPIToken deletes an API token, scoped to its owner so a user cannot
 // delete another user's token.
 func (db *DB) DeleteAPIToken(ctx context.Context, id int, userID models.UserID) error {
-	err := db.writeQueries.DeleteAPIToken(ctx, sqlc.DeleteAPITokenParams{
+	n, err := db.writeQueries.DeleteAPIToken(ctx, sqlc.DeleteAPITokenParams{
 		ID:     int64(id),
 		UserID: int64(userID),
 	})
 	if err != nil {
 		db.log.Error("failed to delete API token from db", "error", err, "token_id", id, "user_id", userID)
 		return fmt.Errorf("failed to delete API token: %w", err)
+	}
+	if n == 0 {
+		return models.ErrNotFound
 	}
 	return nil
 }

@@ -1,14 +1,18 @@
 ---
 title: Search Syntax
-description: Learn LogchefQL, Logchef's search syntax for filtering and querying logs without writing SQL.
+head:
+  - tag: title
+    content: "LogchefQL Log Search Syntax | Logchef"
+description: "Filter logs with LogchefQL using field comparisons, logical operators, and text search. Query ClickHouse or VictoriaLogs without writing native queries."
 ---
 
-**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL.
+**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL, and to count and summarize them with an [aggregation pipe](/guide/aggregations).
 
 LogchefQL is the quick-filter language shared across supported datasources:
 
 - **ClickHouse** sources compile LogchefQL to SQL
 - **VictoriaLogs** sources compile LogchefQL to LogsQL
+- **Grafana Loki** sources compile LogchefQL to LogQL
 
 ## Basic Syntax
 
@@ -137,6 +141,11 @@ service="api" | timestamp log_attributes.user_id log_attributes.endpoint
 
 The selected fields appear as columns in the result set, making it easy to focus on the data you need.
 
+A pipe whose first item is a function call, such as `| count() by service`,
+is an aggregation and not a field list. [Aggregations](/guide/aggregations)
+has the syntax. `| count` without parentheses still selects the field named
+`count`.
+
 ## Examples
 
 ### Finding Errors
@@ -260,17 +269,44 @@ Compiles to:
 
 Logchef applies the selected time range separately when executing LogsQL queries.
 
+### Grafana Loki
+
+For Loki sources, LogchefQL compiles to a LogQL log query that starts with the
+source's default stream selector. A condition on a stream label joins the
+selector, a condition on `_msg` becomes a line filter, and the rest becomes a
+label filter after the source's parser.
+
+For example, on a source with the selector `{service_name=~".+"}` and the JSON
+parser:
+
+```text
+level="error" and status>=500
+```
+
+Compiles to:
+
+```text
+{service_name=~".+", level="error"} | json | drop __error__, __error_details__ | status>=500 | __error__=""
+```
+
+A few constructs cannot be written in LogQL and are rejected on Loki: ordering
+comparisons on `_msg`, an `or` that joins `_msg` to another field, `null`
+comparisons and aggregation pipes. See [LogQL Queries](/guide/logql-queries#how-logchefql-compiles-to-logql)
+for the full mapping.
+
 ## Native Mode
 
 For advanced queries that go beyond LogchefQL's capabilities, you can switch to the datasource's **native mode** in the query editor:
 
 - **SQL** for ClickHouse
 - **LogsQL** for VictoriaLogs
+- **LogQL** for Grafana Loki
 
 Native mode gives you direct access to backend-specific capabilities, including:
 
-- ClickHouse aggregations (`COUNT`, `SUM`, `AVG`, etc.)
+- Aggregations that a LogchefQL [aggregation pipe](/guide/aggregations) does not cover, such as arithmetic between aggregates or a filter on an aggregated value
 - VictoriaLogs-specific LogsQL pipes and processing operators
+- LogQL parsers, line formatting and metric queries on Loki
 - Subqueries
 - Joins
 - Custom functions
@@ -284,10 +320,11 @@ In SQL mode, your query executes exactly as written. Time range and limit contro
 2. **Use parentheses for complex logic**: `(a or b) and c` is clearer than relying on operator precedence
 3. **Use nested field access**: Don't flatten your logs. Query them directly
 4. **Use the pipe operator**: Select only the fields you need for faster queries
-5. **Switch to SQL mode**: For aggregations and advanced analysis
+5. **Aggregate with a pipe**: `level=error | count() by service` counts without SQL. Switch to native mode for ratios, joins and subqueries
 
 ## Next steps
 
+- Count, sum and take percentiles with [Aggregations](/guide/aggregations)
 - See [Query Examples](/guide/examples) for LogchefQL patterns applied to real scenarios
 - Review the [Query Interface](/user-guide/query-interface) for time controls and result views
 - Try the [Field Values Sidebar](/features/field-sidebar) to build filters without typing

@@ -60,7 +60,7 @@ func newLinkEnv(t *testing.T) *linkEnv {
 		user *models.User
 		role models.CollectionRole
 	}{{e.editor, models.CollectionRoleEditor}, {e.member, models.CollectionRoleMember}} {
-		if err := AddCollectionMember(context.Background(), e.db, e.log, e.coll.ID, e.creator.ID, m.user.ID, m.role); err != nil {
+		if _, err := AddCollectionMember(context.Background(), e.db, e.log, e.coll.ID, e.creator.ID, m.user.ID, m.role); err != nil {
 			t.Fatalf("AddCollectionMember(%s): %v", m.user.Email, err)
 		}
 	}
@@ -76,11 +76,13 @@ func (e *linkEnv) add(caller *models.User, collectionID, queryID int, kind model
 }
 
 func (e *linkEnv) convert(caller *models.User, kind models.CollectionLinkKind) (*models.CollectionItemLink, error) {
-	return UpdateCollectionItem(context.Background(), e.db, e.log, e.coll.ID, caller, e.query.ID, kind)
+	_, link, err := UpdateCollectionItem(context.Background(), e.db, e.log, e.coll.ID, caller, e.query.ID, kind)
+	return link, err
 }
 
 func (e *linkEnv) remove(caller *models.User) error {
-	return RemoveCollectionItem(context.Background(), e.db, e.log, e.coll.ID, caller, e.query.ID)
+	_, err := RemoveCollectionItem(context.Background(), e.db, e.log, e.coll.ID, caller, e.query.ID)
+	return err
 }
 
 func (e *linkEnv) storedKind(t *testing.T) models.CollectionLinkKind {
@@ -137,7 +139,7 @@ func TestLinkAuthorityExploit(t *testing.T) {
 	if _, _, err := e.add(e.member, own.ID, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionLinkAuthority) {
 		t.Fatalf("managed link by a non-creator = %v, want ErrCollectionLinkAuthority", err)
 	}
-	if _, err := UpdateCollectionItem(context.Background(), e.db, e.log, own.ID, e.member, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionLinkAuthority) {
+	if _, _, err := UpdateCollectionItem(context.Background(), e.db, e.log, own.ID, e.member, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionLinkAuthority) {
 		t.Fatalf("conversion by a non-creator = %v, want ErrCollectionLinkAuthority", err)
 	}
 	if e.canEdit(t, e.member) {
@@ -215,7 +217,7 @@ func TestUpdateCollectionItemAnswers(t *testing.T) {
 		t.Fatalf("EnsurePersonalCollection: %v", err)
 	}
 
-	if _, err := UpdateCollectionItem(context.Background(), e.db, e.log, 999999, e.creator, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionNotFound) {
+	if _, _, err := UpdateCollectionItem(context.Background(), e.db, e.log, 999999, e.creator, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionNotFound) {
 		t.Errorf("missing collection = %v, want ErrCollectionNotFound", err)
 	}
 	if _, err := e.convert(e.outsider, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionNotParticipant) {
@@ -227,7 +229,7 @@ func TestUpdateCollectionItemAnswers(t *testing.T) {
 	if _, err := e.convert(e.member, ""); !errors.Is(err, ErrInvalidCollectionLinkKind) {
 		t.Errorf("missing kind = %v, want ErrInvalidCollectionLinkKind", err)
 	}
-	if _, err := UpdateCollectionItem(context.Background(), e.db, e.log, creatorPersonal.ID, e.creator, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrManagedLinkInPersonalCollection) {
+	if _, _, err := UpdateCollectionItem(context.Background(), e.db, e.log, creatorPersonal.ID, e.creator, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrManagedLinkInPersonalCollection) {
 		t.Errorf("managed in personal = %v, want ErrManagedLinkInPersonalCollection", err)
 	}
 	for _, kind := range []models.CollectionLinkKind{models.CollectionLinkManaged, models.CollectionLinkPin} {
@@ -235,7 +237,7 @@ func TestUpdateCollectionItemAnswers(t *testing.T) {
 			t.Errorf("editor converting to %s = %v, want ErrCollectionLinkAuthority", kind, err)
 		}
 	}
-	if _, err := UpdateCollectionItem(context.Background(), e.db, e.log, e.coll.ID, e.creator, e.lockedQuery.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionLinkNotFound) {
+	if _, _, err := UpdateCollectionItem(context.Background(), e.db, e.log, e.coll.ID, e.creator, e.lockedQuery.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionLinkNotFound) {
 		t.Errorf("no link = %v, want ErrCollectionLinkNotFound", err)
 	}
 	if e.storedKind(t) != models.CollectionLinkPin {
@@ -259,7 +261,7 @@ func TestUpdateCollectionItemAnswers(t *testing.T) {
 		t.Error("conversion to pin kept the delegation")
 	}
 	// The creator loses conversion authority outside the collection.
-	if err := RemoveCollectionMember(context.Background(), e.db, e.log, e.coll.ID, e.creator.ID, e.creator.ID); !errors.Is(err, ErrLastOwnerRemoval) {
+	if _, err := RemoveCollectionMember(context.Background(), e.db, e.log, e.coll.ID, e.creator.ID, e.creator.ID); !errors.Is(err, ErrLastOwnerRemoval) {
 		t.Fatalf("self-removal of the last owner = %v, want ErrLastOwnerRemoval", err)
 	}
 }
@@ -276,7 +278,7 @@ func TestUpdateCollectionItemAdminBypass(t *testing.T) {
 	if _, _, err := e.add(e.admin, e.coll.ID, e.query.ID, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionNotParticipant) {
 		t.Fatalf("non-participating admin POST = %v, want ErrCollectionNotParticipant", err)
 	}
-	link, err := UpdateCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID, models.CollectionLinkManaged)
+	_, link, err := UpdateCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID, models.CollectionLinkManaged)
 	if err != nil || link.Kind != models.CollectionLinkManaged {
 		t.Fatalf("admin conversion = %+v / %v", link, err)
 	}
@@ -286,13 +288,13 @@ func TestUpdateCollectionItemAdminBypass(t *testing.T) {
 		}
 	}
 	logs.Reset()
-	if _, err := UpdateCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID, models.CollectionLinkManaged); err != nil {
+	if _, _, err := UpdateCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID, models.CollectionLinkManaged); err != nil {
 		t.Fatalf("admin replay: %v", err)
 	}
 	if logs.Len() != 0 {
 		t.Errorf("same-kind replay logged: %s", logs.String())
 	}
-	if err := RemoveCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID); !errors.Is(err, ErrCollectionNotParticipant) {
+	if _, err := RemoveCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID); !errors.Is(err, ErrCollectionNotParticipant) {
 		t.Errorf("non-participating admin DELETE = %v, want ErrCollectionNotParticipant", err)
 	}
 
@@ -300,7 +302,7 @@ func TestUpdateCollectionItemAdminBypass(t *testing.T) {
 	if err := e.db.DeleteUser(context.Background(), e.creator.ID); err != nil {
 		t.Fatalf("DeleteUser(creator): %v", err)
 	}
-	if link, err = UpdateCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID, models.CollectionLinkPin); err != nil || link.Kind != models.CollectionLinkPin {
+	if _, link, err = UpdateCollectionItem(context.Background(), e.db, log, e.coll.ID, e.admin, e.query.ID, models.CollectionLinkPin); err != nil || link.Kind != models.CollectionLinkPin {
 		t.Fatalf("admin conversion of an orphaned query = %+v / %v", link, err)
 	}
 	if _, err := e.convert(e.editor, models.CollectionLinkManaged); !errors.Is(err, ErrCollectionLinkAuthority) {
@@ -312,7 +314,7 @@ func TestUpdateCollectionItemAdminBypass(t *testing.T) {
 func TestRemoveCollectionItemAnswers(t *testing.T) {
 	t.Parallel()
 	e := newLinkEnv(t)
-	if err := RemoveCollectionItem(context.Background(), e.db, e.log, 999999, e.member, e.query.ID); !errors.Is(err, ErrCollectionNotFound) {
+	if _, err := RemoveCollectionItem(context.Background(), e.db, e.log, 999999, e.member, e.query.ID); !errors.Is(err, ErrCollectionNotFound) {
 		t.Errorf("missing collection = %v, want ErrCollectionNotFound", err)
 	}
 	if err := e.remove(e.outsider); !errors.Is(err, ErrCollectionNotParticipant) {
@@ -321,7 +323,7 @@ func TestRemoveCollectionItemAnswers(t *testing.T) {
 	if err := e.remove(e.member); !errors.Is(err, ErrCollectionLinkNotFound) {
 		t.Errorf("no link = %v, want ErrCollectionLinkNotFound", err)
 	}
-	if err := RemoveCollectionItem(context.Background(), e.db, e.log, e.coll.ID, e.member, 999999); !errors.Is(err, ErrCollectionLinkNotFound) {
+	if _, err := RemoveCollectionItem(context.Background(), e.db, e.log, e.coll.ID, e.member, 999999); !errors.Is(err, ErrCollectionLinkNotFound) {
 		t.Errorf("missing query = %v, want ErrCollectionLinkNotFound", err)
 	}
 

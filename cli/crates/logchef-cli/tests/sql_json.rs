@@ -63,3 +63,47 @@ fn sql_json_reads_a_server_without_them() {
         serde_json::json!({"execution_time_ms": 4, "rows_read": 9, "bytes_read": 72})
     );
 }
+
+/// Loki and VictoriaLogs report sub-millisecond durations, so the server can
+/// send `execution_time_ms` as a decimal. The CLI rounds it to whole
+/// milliseconds instead of failing to read the response.
+#[test]
+fn sql_json_reads_a_fractional_execution_time() {
+    let output = sql_json(
+        "sql-json-fractional-ms",
+        serde_json::json!({"execution_time_ms": 4.764, "rows_read": 9, "bytes_read": 72}),
+    );
+    assert_eq!(output["stats"]["execution_time_ms"], 5);
+    assert_eq!(output["count"], 1);
+}
+
+/// Loki rejects a query without a time range, and a LogQL query has no place
+/// to splice one, so `sql` on a Loki source always sends the window in the
+/// request and leaves the query text alone.
+#[test]
+fn sql_on_a_loki_source_sends_the_default_window() {
+    let server = FakeServer::start(false);
+    server.state().source_type = Some("loki".to_string());
+    server.state().query_logs = vec![serde_json::json!({"_msg": "boom"})];
+    let home = TestHome::new("sql-loki-window");
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({"token": PAT, "token_expires_at": "2099-01-01T00:00:00Z"}),
+    ));
+    let query = r#"{service_name="payments-api"} |= "error""#;
+    let mut cmd = home.logchef();
+    cmd.args([
+        "sql", query, "--team", "1", "--source", "2", "--output", "json",
+    ]);
+    let out = run(cmd);
+    assert_success(&out);
+
+    let requests = server.state().native_requests.clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["query_text"], query);
+    let start = chrono::DateTime::parse_from_rfc3339(requests[0]["start_time"].as_str().unwrap())
+        .expect("start_time is RFC3339");
+    let end = chrono::DateTime::parse_from_rfc3339(requests[0]["end_time"].as_str().unwrap())
+        .expect("end_time is RFC3339");
+    assert_eq!(end - start, chrono::Duration::minutes(15));
+}

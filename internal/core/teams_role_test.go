@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -19,7 +20,7 @@ func seedTeamWithMember(t *testing.T, db *sqlite.DB, teamName, ownerEmail string
 	if err != nil {
 		t.Fatalf("CreateTeam(%q): %v", teamName, err)
 	}
-	if err := AddTeamMember(context.Background(), db, log, team.ID, user.ID, role); err != nil {
+	if _, _, err := AddTeamMember(context.Background(), db, log, team.ID, user.ID, role); err != nil {
 		t.Fatalf("AddTeamMember(team=%d, user=%d, role=%s): %v", team.ID, user.ID, role, err)
 	}
 	return team.ID, user.ID
@@ -86,12 +87,12 @@ func TestAddTeamMemberIsUpsertNotDuplicate(t *testing.T) {
 	}
 	user := newTestUser(t, db, "upsert-member@example.com", "Member")
 
-	if err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(initial): %v", err)
 	}
 	// Re-adding with a different role must update in place, not error or
 	// create a second membership row.
-	if err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleAdmin); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleAdmin); err != nil {
 		t.Fatalf("AddTeamMember(role change): %v", err)
 	}
 
@@ -113,7 +114,7 @@ func TestAddTeamMemberIsUpsertNotDuplicate(t *testing.T) {
 	}
 
 	// Re-adding with the SAME role again is also a no-op, not an error.
-	if err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleAdmin); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRoleAdmin); err != nil {
 		t.Errorf("AddTeamMember(same role again): %v", err)
 	}
 }
@@ -132,13 +133,13 @@ func TestAddTeamMemberValidation(t *testing.T) {
 	}
 	user := newTestUser(t, db, "validation-member@example.com", "Member")
 
-	if err := AddTeamMember(ctx, db, log, models.TeamID(999999), user.ID, models.TeamRoleMember); !errors.Is(err, ErrTeamNotFound) {
+	if _, _, err := AddTeamMember(ctx, db, log, models.TeamID(999999), user.ID, models.TeamRoleMember); !errors.Is(err, ErrTeamNotFound) {
 		t.Errorf("AddTeamMember(missing team) err = %v, want ErrTeamNotFound", err)
 	}
-	if err := AddTeamMember(ctx, db, log, team.ID, models.UserID(999999), models.TeamRoleMember); !errors.Is(err, ErrUserNotFound) {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, models.UserID(999999), models.TeamRoleMember); !errors.Is(err, ErrUserNotFound) {
 		t.Errorf("AddTeamMember(missing user) err = %v, want ErrUserNotFound", err)
 	}
-	if err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRole("owner")); err == nil {
+	if _, _, err := AddTeamMember(ctx, db, log, team.ID, user.ID, models.TeamRole("owner")); err == nil {
 		t.Error("AddTeamMember(invalid role) should have failed")
 	}
 }
@@ -158,7 +159,7 @@ func TestRemoveTeamMemberNotAMemberIsNoOp(t *testing.T) {
 	}
 	stranger := newTestUser(t, db, "remove-noop-stranger@example.com", "Stranger")
 
-	if err := RemoveTeamMember(ctx, db, log, team.ID, stranger.ID); err != nil {
+	if _, err := RemoveTeamMember(ctx, db, log, team.ID, stranger.ID); err != nil {
 		t.Errorf("RemoveTeamMember(never a member) err = %v, want nil", err)
 	}
 }
@@ -176,7 +177,7 @@ func TestRemoveTeamMemberRemovesMembership(t *testing.T) {
 	if isMember, err := IsTeamMember(ctx, db, team, userID); err != nil || !isMember {
 		t.Fatalf("precondition IsTeamMember = %v / %v, want true", isMember, err)
 	}
-	if err := RemoveTeamMember(ctx, db, log, team, userID); err != nil {
+	if _, err := RemoveTeamMember(ctx, db, log, team, userID); err != nil {
 		t.Fatalf("RemoveTeamMember: %v", err)
 	}
 	if isMember, err := IsTeamMember(ctx, db, team, userID); err != nil || isMember {
@@ -249,11 +250,11 @@ func TestUpdateTeamNameConflict(t *testing.T) {
 		t.Fatalf("CreateTeam(beta): %v", err)
 	}
 
-	if err := UpdateTeam(ctx, db, log, teamA.ID, models.Team{Name: "team-beta"}); !errors.Is(err, ErrTeamAlreadyExists) {
+	if _, _, err := UpdateTeam(ctx, db, log, teamA.ID, models.Team{Name: "team-beta"}); !errors.Is(err, ErrTeamAlreadyExists) {
 		t.Errorf("UpdateTeam(rename to existing) err = %v, want ErrTeamAlreadyExists", err)
 	}
 
-	if err := UpdateTeam(ctx, db, log, teamA.ID, models.Team{Name: "team-alpha-renamed"}); err != nil {
+	if _, _, err := UpdateTeam(ctx, db, log, teamA.ID, models.Team{Name: "team-alpha-renamed"}); err != nil {
 		t.Errorf("UpdateTeam(rename to free name): %v", err)
 	}
 	updated, err := GetTeam(ctx, db, teamA.ID)
@@ -261,7 +262,7 @@ func TestUpdateTeamNameConflict(t *testing.T) {
 		t.Errorf("GetTeam after rename = %+v / %v", updated, err)
 	}
 
-	if err := UpdateTeam(ctx, db, log, models.TeamID(999999), models.Team{Name: "whatever"}); !errors.Is(err, ErrTeamNotFound) {
+	if _, _, err := UpdateTeam(ctx, db, log, models.TeamID(999999), models.Team{Name: "whatever"}); !errors.Is(err, ErrTeamNotFound) {
 		t.Errorf("UpdateTeam(missing team) err = %v, want ErrTeamNotFound", err)
 	}
 }
@@ -288,7 +289,7 @@ func TestUserHasAccessToTeamSourceRequiresBothMembershipAndLink(t *testing.T) {
 		t.Error("member should not have access before the source is linked")
 	}
 
-	if err := AddTeamSource(ctx, db, log, team, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), team, src.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 
@@ -317,7 +318,7 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	src := newTestSource(t, db, "intersection-src")
 
 	linkedAndMember, userID := seedTeamWithMember(t, db, "linked-and-member", "intersection-user@example.com", models.TeamRoleMember)
-	if err := AddTeamSource(ctx, db, log, linkedAndMember, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), linkedAndMember, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(linkedAndMember): %v", err)
 	}
 
@@ -326,7 +327,7 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(linkedNotMember): %v", err)
 	}
-	if err := AddTeamSource(ctx, db, log, linkedNotMember.ID, src.ID); err != nil {
+	if _, err := AddTeamSource(ctx, db, log, access.SystemPrincipal(), linkedNotMember.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource(linkedNotMember): %v", err)
 	}
 
@@ -335,7 +336,7 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTeam(memberNotLinked): %v", err)
 	}
-	if err := AddTeamMember(ctx, db, log, memberNotLinked.ID, userID, models.TeamRoleMember); err != nil {
+	if _, _, err := AddTeamMember(ctx, db, log, memberNotLinked.ID, userID, models.TeamRoleMember); err != nil {
 		t.Fatalf("AddTeamMember(memberNotLinked): %v", err)
 	}
 
@@ -345,5 +346,72 @@ func TestListTeamsWithAccessToSourceIntersection(t *testing.T) {
 	}
 	if len(accessible) != 1 || accessible[0].ID != linkedAndMember {
 		t.Errorf("ListTeamsWithAccessToSource = %+v, want exactly [team %d]", accessible, linkedAndMember)
+	}
+}
+
+// A team admin must not be able to link a source they cannot already query:
+// once linked, the source is readable by everyone on their team.
+func TestAddTeamSourceRequiresSourceAccess(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	teamA, err := CreateTeam(ctx, db, log, "link-team-a", "")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	teamB, err := CreateTeam(ctx, db, log, "link-team-b", "")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	srcB := newTestSource(t, db, "link_src_b")
+	if err := db.AddTeamSource(ctx, teamB.ID, srcB.ID); err != nil {
+		t.Fatalf("AddTeamSource: %v", err)
+	}
+
+	teamAdmin := newTestUser(t, db, "link-team-admin@example.com", "Team Admin")
+	if _, _, err := AddTeamMember(ctx, db, log, teamA.ID, teamAdmin.ID, models.TeamRoleAdmin); err != nil {
+		t.Fatalf("AddTeamMember: %v", err)
+	}
+	inBothTeams := newTestUser(t, db, "link-both-teams@example.com", "In Both Teams")
+	if _, _, err := AddTeamMember(ctx, db, log, teamA.ID, inBothTeams.ID, models.TeamRoleAdmin); err != nil {
+		t.Fatalf("AddTeamMember: %v", err)
+	}
+	if _, _, err := AddTeamMember(ctx, db, log, teamB.ID, inBothTeams.ID, models.TeamRoleMember); err != nil {
+		t.Fatalf("AddTeamMember: %v", err)
+	}
+	globalAdmin := &models.User{Email: "link-global-admin@example.com", FullName: "Global Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	if err := db.CreateUser(ctx, globalAdmin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		p       access.Principal
+		wantErr error
+	}{
+		{"team admin without access to the source", access.SessionPrincipal(teamAdmin), ErrSourceNotFound},
+		{"global admin through OAuth", access.OAuthPrincipal(globalAdmin, 1, "client", []models.TokenScope{models.TokenScopeTeamsWrite}), ErrSourceNotFound},
+		{"team admin who sees the source through another team", access.SessionPrincipal(inBothTeams), nil},
+		{"global admin session", access.SessionPrincipal(globalAdmin), nil},
+		{"system", access.SystemPrincipal(), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := db.RemoveTeamSource(ctx, teamA.ID, srcB.ID); err != nil {
+				t.Fatalf("RemoveTeamSource: %v", err)
+			}
+			_, err := AddTeamSource(ctx, db, log, tc.p, teamA.ID, srcB.ID)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("AddTeamSource error = %v, want %v", err, tc.wantErr)
+			}
+			linked, err := db.TeamHasSource(ctx, teamA.ID, srcB.ID)
+			if err != nil {
+				t.Fatalf("TeamHasSource: %v", err)
+			}
+			if linked != (tc.wantErr == nil) {
+				t.Errorf("source linked = %v, want %v", linked, tc.wantErr == nil)
+			}
+		})
 	}
 }

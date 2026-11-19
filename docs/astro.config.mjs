@@ -34,6 +34,7 @@ export default defineConfig({
       // Header override: adds a "Blog" link next to the social icons in the
       // top-right of the docs header (keeps it out of the sidebar).
       components: {
+        Head: "./src/components/starlight/Head.astro",
         SocialIcons: "./src/components/starlight/SocialIcons.astro",
       },
       // "<Page title> | Logchef" for all docs pages.
@@ -53,7 +54,7 @@ Key areas of the docs:
 
 - Getting Started: install, configure, and understand the architecture.
 - Querying Logs: LogchefQL syntax, SQL examples, the query interface, and the field sidebar.
-- Features: collections/saved queries, dashboards, alerting, AI SQL generation, user management, service tokens, and declarative provisioning.
+- Features: collections/saved queries, dashboards, alerting, AI SQL generation, the ClickHouse schema advisor, user management, service tokens, and declarative provisioning.
 - Integration: CLI, MCP server (for AI assistants), and schema design guidance.
 - Tutorials: connecting VictoriaLogs, ingesting via Vector/OTEL, and a worked NGINX logs example.
 - Operations: database backends (SQLite vs Postgres), reverse proxy and subpath setup, and the Prometheus metrics reference.`,
@@ -113,8 +114,7 @@ Key areas of the docs:
           tag: "meta",
           attrs: { name: "twitter:image:alt", content: "Logchef log explorer" },
         },
-        // Sitewide JSON-LD (WebSite + Organization). Per-page structured data
-        // (e.g. Article/BreadcrumbList) is left to whoever owns BaseLayout.astro.
+        // Sitewide JSON-LD. The Head override adds per-page breadcrumbs.
         {
           tag: "script",
           attrs: { type: "application/ld+json" },
@@ -182,8 +182,10 @@ Key areas of the docs:
             { label: "Query Interface", link: "/user-guide/query-interface" },
             { label: "Command Palette", link: "/features/command-palette" },
             { label: "LogchefQL Syntax", link: "/guide/search-syntax" },
+            { label: "LogchefQL Aggregations", link: "/guide/aggregations" },
             { label: "SQL Examples", link: "/guide/examples" },
             { label: "LogsQL Queries", link: "/guide/logsql-queries" },
+            { label: "LogQL Queries", link: "/guide/logql-queries" },
             { label: "Time Macros", link: "/guide/time-macros" },
             { label: "VictoriaLogs Windowed Search", link: "/guide/windowed-search" },
             { label: "Field Sidebar", link: "/features/field-sidebar" },
@@ -193,10 +195,13 @@ Key areas of the docs:
           label: "Features",
           items: [
             { label: "Collections & Saved Queries", link: "/features/collections" },
+            { label: "Saved Views", link: "/features/saved-views" },
             { label: "Dashboards", link: "/features/dashboards" },
             { label: "Dashboard Gallery", link: "/features/dashboard-gallery" },
             { label: "Alerting", link: "/features/alerting" },
+            { label: "Scheduled Reports", link: "/features/scheduled-reports" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
+            { label: "Schema Advisor", link: "/features/schema-advisor" },
             { label: "User Management", link: "/core/user-management" },
             { label: "Service Tokens", link: "/features/service-tokens" },
             { label: "Provisioning", link: "/getting-started/provisioning" },
@@ -221,6 +226,7 @@ Key areas of the docs:
           items: [
             { label: "VictoriaLogs", link: "/tutorials/victorialogs" },
             { label: "VictoriaLogs Explorer", link: "/tutorials/victorialogs-explorer" },
+            { label: "Grafana Loki", link: "/tutorials/loki" },
             { label: "NGINX Logs", link: "/tutorials/nginx-logs" },
           ],
         },
@@ -229,7 +235,13 @@ Key areas of the docs:
           items: [
             { label: "Overview", link: "/comparisons" },
             { label: "Logchef vs ClickStack", link: "/comparisons/logchef-vs-clickstack" },
+            { label: "Logchef vs SigNoz", link: "/comparisons/logchef-vs-signoz" },
             { label: "Logchef vs Grafana Loki", link: "/comparisons/logchef-vs-grafana-loki" },
+            { label: "Logchef vs Grafana", link: "/comparisons/logchef-vs-grafana" },
+            { label: "Logchef vs Elasticsearch", link: "/comparisons/logchef-vs-elasticsearch" },
+            { label: "Logchef vs OpenObserve", link: "/comparisons/logchef-vs-openobserve" },
+            { label: "Logchef vs Graylog", link: "/comparisons/logchef-vs-graylog" },
+            { label: "Logchef vs Datadog", link: "/comparisons/logchef-vs-datadog" },
           ],
         },
         {
@@ -246,6 +258,7 @@ Key areas of the docs:
             { label: "Database & High Availability", link: "/operations/database-backends" },
             { label: "Reverse Proxy", link: "/operations/reverse-proxy" },
             { label: "Metrics Reference", link: "/operations/metrics" },
+            { label: "Audit Log", link: "/operations/audit-log" },
             { label: "Contributing", link: "/contributing/setup" },
           ],
         },
