@@ -225,7 +225,8 @@ func (s *Store) QueryCostBySourceDay(ctx context.Context, f models.QueryStatsFil
 		return nil, fmt.Errorf("error listing query cost by source and day: %w", err)
 	}
 	out := make([]models.SourceDayCost, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		out = append(out, models.SourceDayCost{
 			SourceID: models.SourceID(r.SourceID),
 			Date:     r.BucketDate.Time.Format(time.DateOnly),

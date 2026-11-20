@@ -241,32 +241,7 @@ func GetQueryActivity(ctx context.Context, db store.Store, now time.Time, req Qu
 		return nil, err
 	}
 	out.VolumeByDay = dailySeries(now, window, days)
-	collected, err := db.QueryCostCollectedSince(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if collected != "" {
-		out.CollectedSince = &collected
-	}
-	cost, err := db.QueryCostSummary(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	reasons, err := db.QueryFailuresByReason(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	var failed, priorFailed int64
-	for _, r := range reasons {
-		failed += r.Count
-		priorFailed += r.Prior
-	}
-	out.Summary = QueryActivitySummary{
-		Current: ActivityPeriod{QueryStatsPeriod: summary.Current, AvgDailyActiveUsers: avgDailyActive(window, days), RunHealth: runHealth(cost.Current, failed)},
-		Prior:   ActivityPeriod{QueryStatsPeriod: summary.Prior, AvgDailyActiveUsers: avgDailyActive(prior, days), RunHealth: runHealth(cost.Prior, priorFailed)},
-	}
-	out.Failures.ByReason = failureReasons(reasons, collected != "" && prior.Since >= collected)
-	if out.Failures.Top, err = db.TopQueryFailures(ctx, filter, queryActivityTopFailures); err != nil {
+	if err := addRunHealth(ctx, db, out, filter, summary, days); err != nil {
 		return nil, err
 	}
 	if out.TopUsers, err = db.QueryStatsByUser(ctx, filter, queryActivityTopUsers); err != nil {
@@ -280,35 +255,78 @@ func GetQueryActivity(ctx context.Context, db store.Store, now time.Time, req Qu
 	if out.LanguageMix, err = db.QueryStatsByLanguage(ctx, filter); err != nil {
 		return nil, err
 	}
+	if err := addSourcesAndShapes(ctx, db, now, out, filter, req.SourceID); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// addRunHealth fills out's run health and failures: latency, scan cost and
+// failure counts for both windows, failures by reason, and the top failing
+// source and user pairs.
+func addRunHealth(ctx context.Context, db store.Store, out *QueryActivity, filter models.QueryStatsFilter, summary models.QueryStatsSummary, days []models.DailyQueryStat) error {
+	window, prior := out.Window, out.PriorWindow
+	collected, err := db.QueryCostCollectedSince(ctx)
+	if err != nil {
+		return err
+	}
+	if collected != "" {
+		out.CollectedSince = &collected
+	}
+	cost, err := db.QueryCostSummary(ctx, filter)
+	if err != nil {
+		return err
+	}
+	reasons, err := db.QueryFailuresByReason(ctx, filter)
+	if err != nil {
+		return err
+	}
+	var failed, priorFailed int64
+	for _, r := range reasons {
+		failed += r.Count
+		priorFailed += r.Prior
+	}
+	out.Summary = QueryActivitySummary{
+		Current: ActivityPeriod{QueryStatsPeriod: summary.Current, AvgDailyActiveUsers: avgDailyActive(window, days), RunHealth: runHealth(cost.Current, failed)},
+		Prior:   ActivityPeriod{QueryStatsPeriod: summary.Prior, AvgDailyActiveUsers: avgDailyActive(prior, days), RunHealth: runHealth(cost.Prior, priorFailed)},
+	}
+	out.Failures.ByReason = failureReasons(reasons, collected != "" && prior.Since >= collected)
+	out.Failures.Top, err = db.TopQueryFailures(ctx, filter, queryActivityTopFailures)
+	return err
+}
+
+// addSourcesAndShapes fills out's per-source activity and health and its
+// top query shapes, both with their open findings.
+func addSourcesAndShapes(ctx context.Context, db store.Store, now time.Time, out *QueryActivity, filter models.QueryStatsFilter, sourceID models.SourceID) error {
 	sources, err := db.QueryStatsBySource(ctx, filter, queryActivityTopSources)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	sourceDays, err := db.QueryCostBySourceDay(ctx, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	sourceFailures, err := db.QueryFailuresBySource(ctx, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	shapeFilter, priorKept := shapeWindow(now, window, prior, req.SourceID)
+	shapeFilter, priorKept := shapeWindow(now, out.Window, out.PriorWindow, sourceID)
 	shapes, err := db.TopQueryShapes(ctx, shapeFilter, queryActivityTopShapes)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	unanalyzed, err := db.CountUnanalyzedQueryShapes(ctx, shapeFilter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	findings, err := openFindings(ctx, db, sources, shapes)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	out.Sources = sourceActivity(sources, findings)
 	addSourceHealth(out.Sources, out.VolumeByDay, sourceDays, sourceFailures)
 	out.Shapes = ShapeActivity{Since: shapeFilter.Since, Rows: shapeRows(shapes, findings, priorKept), UnanalyzedQueryCount: unanalyzed}
-	return out, nil
+	return nil
 }
 
 func accountTypeOf(account QueryActivityAccount) models.UserAccountType {

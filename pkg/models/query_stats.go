@@ -153,11 +153,12 @@ func (h LatencyHistogram) Count() int64 {
 	return n
 }
 
-// Add adds o's counts to h.
-func (h *LatencyHistogram) Add(o LatencyHistogram) {
+// Plus is the sum of h's and o's counts.
+func (h LatencyHistogram) Plus(o LatencyHistogram) LatencyHistogram {
 	for i := range h {
 		h[i] += o[i]
 	}
+	return h
 }
 
 // Percentile is a latency percentile estimated from a histogram.
@@ -202,7 +203,7 @@ type RunCost struct {
 
 // Add adds o to c.
 func (c *RunCost) Add(o RunCost) {
-	c.Latency.Add(o.Latency)
+	c.Latency = c.Latency.Plus(o.Latency)
 	c.RowsRead += o.RowsRead
 	c.BytesRead += o.BytesRead
 }
