@@ -71,10 +71,9 @@ var viewCases = []viewCase{
 		fillStrings(reflect.ValueOf(&g), tag, "Grant")
 		return audit.OAuthGrantFields(&g, "api"), nil
 	}},
+	// An export records its query in full: reading it is the point.
 	{"log export", func(tag string) (*audit.Fields, []string) {
-		literal := tag + "-literal"
-		query := `SELECT * FROM logs WHERE session_id = '` + literal + `'`
-		return audit.LogExportFields(models.QueryLanguageClickHouseSQL, tag+":format;", 100, query), []string{literal}
+		return audit.LogExportFields(models.QueryLanguageClickHouseSQL, tag+":format;", 100, tag+":query;", tag+":from;", tag+":to;"), nil
 	}},
 	{"clickhouse source", func(tag string) (*audit.Fields, []string) {
 		var s models.Source

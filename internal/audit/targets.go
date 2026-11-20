@@ -49,13 +49,20 @@ func DashboardTarget(dashboardID int, name string) Target {
 }
 
 // ExportJobTarget is an export job: the artifact that log_export.create made.
-func ExportJobTarget(job *models.ExportJob, teamID models.TeamID) Target {
+// sourceName labels it, as a query.run event is labelled.
+func ExportJobTarget(job *models.ExportJob, teamID models.TeamID, sourceName string) Target {
 	sourceID := job.SourceID
-	return Target{Type: "log_export", ID: job.ID, TeamID: &teamID, SourceID: &sourceID}
+	return Target{Type: "log_export", ID: job.ID, Label: sourceName, TeamID: &teamID, SourceID: &sourceID}
 }
 
-// ExportSourceTarget is the source of a streamed export, which has no ID of
-// its own.
+// StreamedExportTarget is a streamed export. It stores no job, so its ID is
+// the query ID that its create and complete events share.
+func StreamedExportTarget(exportID string, teamID models.TeamID, sourceID models.SourceID, sourceName string) Target {
+	return Target{Type: "log_export", ID: exportID, Label: sourceName, TeamID: &teamID, SourceID: &sourceID}
+}
+
+// ExportSourceTarget is the source of an export that was refused before it
+// had an ID.
 func ExportSourceTarget(teamID models.TeamID, sourceID models.SourceID) Target {
 	return Target{Type: "source", ID: id(sourceID), TeamID: &teamID, SourceID: &sourceID}
 }
