@@ -127,20 +127,24 @@ before the change records nothing, except a failed sign-in.
 
 Every data query records one `query.run` event, whether it succeeds or fails:
 `POST /logs/query` (buffered or streamed), `POST /logs/windowed` and
-`POST /logchefql/query`, from the UI, the CLI or an API token. The target is
-the source, with `team_id`, `source_id` and the source name as
-`target_label`. A failed query has `outcome` `failure` and a `reason` of
-`invalid_query`, `timeout`, `cancelled`, `rejected` (a concurrency limit),
-`upstream_error` or `internal_error`.
+`POST /logchefql/query`, from the UI, the CLI or an API token, and also each
+live tail session, each log context request, and each MCP or Ask Chef tool
+call that reads logs. The target is the source, with `team_id`, `source_id`
+and the source name as `target_label`. A failed query has `outcome`
+`failure` and a `reason` of `invalid_query`, `timeout`, `cancelled`,
+`rejected` (a concurrency limit), `upstream_error` or `internal_error`.
 
 | `detail` key | Meaning |
 |--------------|---------|
 | `query` | The query text as sent, up to 8 KiB. LogchefQL is recorded as LogchefQL, not the SQL it compiles to |
 | `language` | `clickhouse-sql`, `logchefql` or `logsql` |
-| `mode` | `buffered`, `stream` or `windowed` |
+| `mode` | `buffered`, `stream`, `windowed`, `tail`, `context`, `mcp` or `ask_chef` |
+| `tool` | The MCP tool that read the logs, for `mcp` and `ask_chef` |
+| `fields` | The fields whose values a field value tool read |
+| `anchor` | The timestamp that a log context read is around, UTC |
 | `time_from`, `time_to` | The requested time range, UTC. `null` for SQL that carries its own range |
 | `limit_requested`, `limit_applied` | The row limit the caller asked for and the one that applied |
-| `duration_ms` | Execution time |
+| `duration_ms` | Execution time. For a tail, how long the session ran |
 | `rows_returned` | Rows sent to the client. A failed stream counts the rows sent before it failed |
 | `rows_read`, `bytes_read` | What the backend scanned, when it reports it |
 | `result_truncated` | Whether a limit cut the result |
@@ -148,8 +152,31 @@ the source, with `team_id`, `source_id` and the source name as
 | `cache` | For a dashboard panel answered through the result cache: `hit`, `miss`, `coalesced` or `bypass`. Such an event has no row counts |
 
 A windowed search records one event per request, including each later page.
-A windowed `count` request, the histogram, the field sidebar, live tail, log
-context, MCP tools and Ask Chef record no `query.run` yet.
+
+A live tail is one event, recorded when the session ends: the client
+disconnects, the session TTL expires, the server shuts down or the backend
+fails. `query` is the filter as sent, `rows_returned` counts the rows sent
+(not the rows that the row ceiling dropped), and only a backend error fails
+it. A tail refused at the concurrency limit is a `rejected` failure. A log
+context request records `anchor`, the rows it asked for on both sides as
+`limit_requested`, and the before, target and after rows together as
+`rows_returned`.
+
+An MCP or Ask Chef tool call is one event per call that reads logs, with the
+user it ran for as the actor. An MCP call has `auth_method` `oauth_mcp` with
+the grant and the client, and `route` `/mcp`. An Ask Chef call has the
+credential of the turn request (`session` or `api_token`) and its route. The
+tools that read logs are `query_logs`, `get_log_histogram`,
+`query_logchefql`, `compare_windows` (one event for both windows, with the
+range that covers both), `get_field_values`, `top_values`,
+`get_all_field_dimensions` and `get_log_context`. Tools that read only
+metadata, such as `get_sources`, `get_source_schema`, `translate_logchefql`,
+`list_saved_queries` and `list_alerts`, record nothing. A call refused before
+its source is authorized records nothing either.
+
+Tails, log context and tool calls write no query history. A windowed `count`
+request, the histogram and the field sidebar in the UI record no `query.run`
+yet.
 
 The query answers before its event is stored: the event goes through the
 background writer that also writes query history, so a slow audit insert never

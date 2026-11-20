@@ -160,6 +160,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stored, the request answers 503 and no token or data leaves the server. The
   new Audit Log docs page covers the event format, every action, retention and
   the metrics.
+- `query.run` audit events for reads outside the query endpoints. Each MCP or
+  Ask Chef tool call that reads logs records one event with `detail.mode`
+  `mcp` or `ask_chef` and `detail.tool`, as the user it ran for: an MCP call
+  carries the OAuth grant and client, and an Ask Chef call carries the session
+  or API token of the turn request. A live tail records one event with mode
+  `tail` when the session ends, with its filter, the rows it sent and how long
+  it ran. A log context request records one with mode `context`, its anchor
+  and the rows returned. A failed read records a failure with the same reason
+  codes as other queries. None of these write query history.
 - ClickHouse schema advisor. Logchef records the filter shape of each
   Explorer query on a ClickHouse source (columns, Map keys, JSON paths and
   match kinds, never values) and joins it with the table's metadata. A global
