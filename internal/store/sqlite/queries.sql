@@ -1219,22 +1219,6 @@ WHERE user_id = ?
 ORDER BY created_at DESC, id DESC
 LIMIT ?;
 
--- name: ListQueryActivity :many
--- Most recent query_history rows across all users, newest first, enriched with
--- the executing user's email and the source's display name. LEFT JOIN on
--- sources so history survives a deleted source (source_name is NULL then).
--- Backs the admin recent-activity view; the table is capped per user, so this
--- is a recent window, not all-time analytics.
-SELECT
-    qh.*,
-    u.email AS user_email,
-    s.name AS source_name
-FROM query_history qh
-JOIN users u ON u.id = qh.user_id
-LEFT JOIN sources s ON s.id = qh.source_id
-ORDER BY qh.created_at DESC, qh.id DESC
-LIMIT ?;
-
 -- Query stats daily rollup -----------------------------------------------------
 
 -- name: IncrementQueryStats :exec
@@ -1247,58 +1231,133 @@ DO UPDATE SET
     query_count = query_count + 1,
     total_duration_ms = total_duration_ms + excluded.total_duration_ms;
 
+-- The Query Activity reads below take one window from prior_since to until,
+-- both inclusive, and count a row as current when bucket_date >= since. An
+-- empty account_type and a zero source_id or user_id select everything. A
+-- user row that is gone has no account type, so its queries count only when
+-- account_type is empty.
+
 -- name: QueryStatsSummary :one
 SELECT
-    CAST(COALESCE(SUM(query_count), 0) AS INTEGER) AS query_count,
-    CAST(COUNT(DISTINCT user_id) AS INTEGER) AS active_users,
-    CAST(COUNT(DISTINCT source_id) AS INTEGER) AS active_sources,
-    CAST(CASE WHEN SUM(query_count) > 0
-        THEN SUM(total_duration_ms) / SUM(query_count)
-        ELSE 0 END AS INTEGER) AS avg_duration_ms
-FROM query_stats_daily
-WHERE bucket_date >= ?;
-
--- name: TopSourcesByQueries :many
--- Top sources by total query count over rollup rows on/after `since`, with the
--- source display name (LEFT JOIN so a deleted source yields ''), and integer
--- average duration (0 when count is 0).
-SELECT
-    qsd.source_id AS source_id,
-    COALESCE(s.name, '') AS source_name,
-    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count,
-    CAST(CASE WHEN SUM(qsd.query_count) > 0
-        THEN SUM(qsd.total_duration_ms) / SUM(qsd.query_count)
-        ELSE 0 END AS INTEGER) AS avg_duration_ms
+    CAST(COALESCE(SUM(CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.query_count ELSE 0 END), 0) AS INTEGER) AS query_count,
+    CAST(COALESCE(SUM(CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.total_duration_ms ELSE 0 END), 0) AS INTEGER) AS total_duration_ms,
+    CAST(COUNT(DISTINCT CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.user_id END) AS INTEGER) AS active_users,
+    CAST(COUNT(DISTINCT CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.source_id END) AS INTEGER) AS active_sources,
+    CAST(COALESCE(SUM(CASE WHEN qsd.bucket_date < sqlc.arg(since) THEN qsd.query_count ELSE 0 END), 0) AS INTEGER) AS prior_query_count,
+    CAST(COALESCE(SUM(CASE WHEN qsd.bucket_date < sqlc.arg(since) THEN qsd.total_duration_ms ELSE 0 END), 0) AS INTEGER) AS prior_total_duration_ms,
+    CAST(COUNT(DISTINCT CASE WHEN qsd.bucket_date < sqlc.arg(since) THEN qsd.user_id END) AS INTEGER) AS prior_active_users,
+    CAST(COUNT(DISTINCT CASE WHEN qsd.bucket_date < sqlc.arg(since) THEN qsd.source_id END) AS INTEGER) AS prior_active_sources
 FROM query_stats_daily qsd
-LEFT JOIN sources s ON s.id = qsd.source_id
-WHERE qsd.bucket_date >= ?
-GROUP BY qsd.source_id, s.name
-ORDER BY query_count DESC, qsd.source_id ASC
-LIMIT ?;
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= sqlc.arg(prior_since) AND qsd.bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(account_type) AS TEXT) = '' OR u.account_type = sqlc.arg(account_type))
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qsd.source_id = sqlc.arg(source_id))
+  AND (CAST(sqlc.arg(user_id) AS INTEGER) = 0 OR qsd.user_id = sqlc.arg(user_id));
 
--- name: TopUsersByQueries :many
--- Top users by total query count over rollup rows on/after `since`, joined to
--- users for the email.
+-- name: QueryCountsByAccountType :many
+-- Current-window query counts per account type, honoring the source and user
+-- filters. account_type is '' for queries of deleted users.
 SELECT
-    qsd.user_id AS user_id,
-    u.email AS user_email,
+    CAST(COALESCE(u.account_type, '') AS TEXT) AS account_type,
     CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
 FROM query_stats_daily qsd
-JOIN users u ON u.id = qsd.user_id
-WHERE qsd.bucket_date >= ?
-GROUP BY qsd.user_id, u.email
-ORDER BY query_count DESC, qsd.user_id ASC
-LIMIT ?;
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= sqlc.arg(since) AND qsd.bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qsd.source_id = sqlc.arg(source_id))
+  AND (CAST(sqlc.arg(user_id) AS INTEGER) = 0 OR qsd.user_id = sqlc.arg(user_id))
+GROUP BY COALESCE(u.account_type, '');
 
--- name: QueryVolumeByDay :many
--- Per-day total query count over rollup rows on/after `since`, ascending by day.
+-- name: QueryStatsByDay :many
+-- Per-day query count and distinct users over both windows, ascending.
 SELECT
     qsd.bucket_date AS bucket_date,
-    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count,
+    CAST(COUNT(DISTINCT qsd.user_id) AS INTEGER) AS active_users
 FROM query_stats_daily qsd
-WHERE qsd.bucket_date >= ?
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= sqlc.arg(prior_since) AND qsd.bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(account_type) AS TEXT) = '' OR u.account_type = sqlc.arg(account_type))
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qsd.source_id = sqlc.arg(source_id))
+  AND (CAST(sqlc.arg(user_id) AS INTEGER) = 0 OR qsd.user_id = sqlc.arg(user_id))
 GROUP BY qsd.bucket_date
 ORDER BY qsd.bucket_date ASC;
+
+-- name: QueryStatsByUser :many
+-- Users with a current-window query, by current query count desc.
+SELECT
+    qsd.user_id AS user_id,
+    CAST(COALESCE(u.email, '') AS TEXT) AS email,
+    CAST(COALESCE(u.full_name, '') AS TEXT) AS full_name,
+    CAST(COALESCE(u.account_type, '') AS TEXT) AS account_type,
+    CAST(COUNT(DISTINCT CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.bucket_date END) AS INTEGER) AS active_days,
+    CAST(SUM(CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.query_count ELSE 0 END) AS INTEGER) AS query_count,
+    CAST(SUM(CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.total_duration_ms ELSE 0 END) AS INTEGER) AS total_duration_ms,
+    CAST(SUM(CASE WHEN qsd.bucket_date < sqlc.arg(since) THEN qsd.query_count ELSE 0 END) AS INTEGER) AS prior_query_count,
+    CAST(SUM(CASE WHEN qsd.bucket_date < sqlc.arg(since) THEN qsd.total_duration_ms ELSE 0 END) AS INTEGER) AS prior_total_duration_ms
+FROM query_stats_daily qsd
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= sqlc.arg(prior_since) AND qsd.bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(account_type) AS TEXT) = '' OR u.account_type = sqlc.arg(account_type))
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qsd.source_id = sqlc.arg(source_id))
+  AND (CAST(sqlc.arg(user_id) AS INTEGER) = 0 OR qsd.user_id = sqlc.arg(user_id))
+GROUP BY qsd.user_id, u.email, u.full_name, u.account_type
+HAVING SUM(CASE WHEN qsd.bucket_date >= sqlc.arg(since) THEN qsd.query_count ELSE 0 END) > 0
+ORDER BY query_count DESC, qsd.user_id ASC
+LIMIT sqlc.arg(limit);
+
+-- name: QueryStatsBySource :many
+-- Sources with a current-window query of the selected account type, by
+-- current total duration desc. service_query_count ignores the account type.
+SELECT
+    r.source_id AS source_id,
+    CAST(COALESCE(s.name, '') AS TEXT) AS source_name,
+    CAST(COALESCE(s.source_type, '') AS TEXT) AS source_type,
+    CAST(MIN(r.team_id) AS INTEGER) AS team_id,
+    CAST(SUM(CASE WHEN r.is_current AND r.is_service THEN r.query_count ELSE 0 END) AS INTEGER) AS service_query_count,
+    CAST(SUM(CASE WHEN r.is_current AND r.is_selected THEN r.query_count ELSE 0 END) AS INTEGER) AS query_count,
+    CAST(SUM(CASE WHEN r.is_current AND r.is_selected THEN r.total_duration_ms ELSE 0 END) AS INTEGER) AS total_duration_ms,
+    CAST(SUM(CASE WHEN NOT r.is_current AND r.is_selected THEN r.query_count ELSE 0 END) AS INTEGER) AS prior_query_count,
+    CAST(SUM(CASE WHEN NOT r.is_current AND r.is_selected THEN r.total_duration_ms ELSE 0 END) AS INTEGER) AS prior_total_duration_ms
+FROM (
+    SELECT
+        qsd.source_id,
+        qsd.team_id,
+        qsd.query_count,
+        qsd.total_duration_ms,
+        qsd.bucket_date >= sqlc.arg(since) AS is_current,
+        COALESCE(u.account_type = 'service', 0) AS is_service,
+        (CAST(sqlc.arg(account_type) AS TEXT) = '' OR COALESCE(u.account_type = sqlc.arg(account_type), 0)) AS is_selected
+    FROM query_stats_daily qsd
+    LEFT JOIN users u ON u.id = qsd.user_id
+    WHERE qsd.bucket_date >= sqlc.arg(prior_since) AND qsd.bucket_date <= sqlc.arg(until)
+      AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qsd.source_id = sqlc.arg(source_id))
+      AND (CAST(sqlc.arg(user_id) AS INTEGER) = 0 OR qsd.user_id = sqlc.arg(user_id))
+) r
+LEFT JOIN sources s ON s.id = r.source_id
+GROUP BY r.source_id, s.name, s.source_type
+HAVING SUM(CASE WHEN r.is_current AND r.is_selected THEN r.query_count ELSE 0 END) > 0
+ORDER BY total_duration_ms DESC, query_count DESC, r.source_id ASC
+LIMIT sqlc.arg(limit);
+
+-- name: QueryStatsByLanguage :many
+-- Current-window query count per language, most used first.
+SELECT
+    qsd.query_language AS query_language,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
+FROM query_stats_daily qsd
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= sqlc.arg(since) AND qsd.bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(account_type) AS TEXT) = '' OR u.account_type = sqlc.arg(account_type))
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qsd.source_id = sqlc.arg(source_id))
+  AND (CAST(sqlc.arg(user_id) AS INTEGER) = 0 OR qsd.user_id = sqlc.arg(user_id))
+GROUP BY qsd.query_language
+ORDER BY query_count DESC, qsd.query_language ASC;
+
+-- name: CountActiveUsersByAccountType :many
+SELECT account_type, CAST(COUNT(*) AS INTEGER) AS user_count
+FROM users
+WHERE status = 'active'
+GROUP BY account_type;
 
 -- Query shape stats daily rollup (RFC 0010) ------------------------------------
 
@@ -1359,6 +1418,43 @@ SELECT
 FROM query_shape_stats_daily
 WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since) AND bucket_date <= sqlc.arg(until);
 
+-- name: TopQueryShapes :many
+-- Analyzed shapes with a current-window query, across sources unless
+-- source_id is set, by current total duration desc. Dates are as in the
+-- Query Activity reads above. lookback_rows is 0 when no current row has a
+-- lookback, and then max_lookback_s means nothing.
+SELECT
+    qss.source_id AS source_id,
+    CAST(COALESCE(s.name, '') AS TEXT) AS source_name,
+    CAST(COALESCE(s.source_type, '') AS TEXT) AS source_type,
+    qss.query_language AS query_language,
+    qss.shape_hash AS shape_hash,
+    qss.shape AS shape,
+    CAST(SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.query_count ELSE 0 END) AS INTEGER) AS query_count,
+    CAST(SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.total_duration_ms ELSE 0 END) AS INTEGER) AS total_duration_ms,
+    CAST(SUM(CASE WHEN qss.bucket_date < sqlc.arg(since) THEN qss.query_count ELSE 0 END) AS INTEGER) AS prior_query_count,
+    CAST(SUM(CASE WHEN qss.bucket_date < sqlc.arg(since) THEN qss.total_duration_ms ELSE 0 END) AS INTEGER) AS prior_total_duration_ms,
+    CAST(COUNT(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.max_lookback_s END) AS INTEGER) AS lookback_rows,
+    CAST(COALESCE(MAX(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.max_lookback_s END), 0) AS INTEGER) AS max_lookback_s
+FROM query_shape_stats_daily qss
+LEFT JOIN sources s ON s.id = qss.source_id
+WHERE qss.bucket_date >= sqlc.arg(prior_since) AND qss.bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR qss.source_id = sqlc.arg(source_id))
+  AND qss.shape_hash NOT IN ('unanalyzed', 'overflow')
+GROUP BY qss.source_id, s.name, s.source_type, qss.query_language, qss.shape_hash, qss.shape
+HAVING SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.query_count ELSE 0 END) > 0
+ORDER BY total_duration_ms DESC, query_count DESC, qss.source_id ASC, qss.query_language ASC, qss.shape_hash ASC
+LIMIT sqlc.arg(limit);
+
+-- name: CountUnanalyzedQueryShapes :one
+-- Queries from since to until, both inclusive, that no single shape stands
+-- for: the 'unanalyzed' and 'overflow' rows.
+SELECT CAST(COALESCE(SUM(query_count), 0) AS INTEGER) AS query_count
+FROM query_shape_stats_daily
+WHERE bucket_date >= sqlc.arg(since) AND bucket_date <= sqlc.arg(until)
+  AND (CAST(sqlc.arg(source_id) AS INTEGER) = 0 OR source_id = sqlc.arg(source_id))
+  AND shape_hash IN ('unanalyzed', 'overflow');
+
 -- name: PruneQueryShapeStats :exec
 DELETE FROM query_shape_stats_daily WHERE bucket_date < ?;
 
@@ -1380,6 +1476,16 @@ ON CONFLICT (source_id) DO UPDATE SET
 SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
 FROM schema_advisor_dismissals WHERE source_id = ?
 ORDER BY dismissed_at, finding_id;
+
+-- name: ListSchemaAdvisorReportsBySources :many
+SELECT source_id, generated_at, generated_by, window_days, report
+FROM schema_advisor_reports WHERE source_id IN (sqlc.slice(source_ids))
+ORDER BY source_id;
+
+-- name: ListSchemaAdvisorDismissalsBySources :many
+SELECT source_id, finding_id, reason, dismissed_by, dismissed_at
+FROM schema_advisor_dismissals WHERE source_id IN (sqlc.slice(source_ids))
+ORDER BY source_id, dismissed_at, finding_id;
 
 -- name: GetSchemaAdvisorDismissal :one
 SELECT source_id, finding_id, reason, dismissed_by, dismissed_at

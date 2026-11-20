@@ -69,6 +69,8 @@ type UserStore interface {
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
 	CountAdminUsers(ctx context.Context) (int, error)
+	// CountActiveUsersByAccountType counts active users per account type.
+	CountActiveUsersByAccountType(ctx context.Context) (map[models.UserAccountType]int64, error)
 	// LockMembershipWrites serializes provisioning, cascading deletes, and admin removals until WithTx ends.
 	LockMembershipWrites(ctx context.Context) error
 	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
@@ -409,11 +411,6 @@ type JobStore interface {
 type QueryHistoryStore interface {
 	RecordQueryHistory(ctx context.Context, entry *models.QueryHistory) error
 	ListQueryHistory(ctx context.Context, userID models.UserID, limit int) ([]*models.QueryHistory, error)
-	// ListQueryActivity returns the most recent query_history rows across all
-	// users (newest first, capped at limit), enriched with user email and
-	// source name. It backs the admin recent-activity view; because
-	// query_history is capped per user, this is a recent window, not all-time.
-	ListQueryActivity(ctx context.Context, limit int) ([]models.QueryActivityRecord, error)
 
 	// IncrementQueryStats upserts one executed query into the non-pruned
 	// query_stats_daily rollup: it adds 1 to query_count and durationMs to
@@ -421,20 +418,25 @@ type QueryHistoryStore interface {
 	// key. bucketDate is 'YYYY-MM-DD' (UTC). Called at record time (best-effort)
 	// so all-time usage analytics stay correct despite query_history pruning.
 	IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error
-	// QueryStatsSummary aggregates all rollup rows with bucket_date >= since,
-	// including recorded users and sources whose metadata rows no longer exist.
-	QueryStatsSummary(ctx context.Context, since string) (models.QueryStatsSummary, error)
-	// TopSourcesByQueries returns sources ordered by total query count desc
-	// (capped at limit) over rollup rows with bucket_date >= since. source_name
-	// is "" when the source row is gone (LEFT JOIN); avg_duration_ms is
-	// total_duration_ms/query_count (integer, 0 when count 0).
-	TopSourcesByQueries(ctx context.Context, since string, limit int) ([]models.SourceQueryStat, error)
-	// TopUsersByQueries returns users ordered by total query count desc (capped
-	// at limit) over rollup rows with bucket_date >= since.
-	TopUsersByQueries(ctx context.Context, since string, limit int) ([]models.UserQueryStat, error)
-	// QueryVolumeByDay returns per-day total query counts (ascending by date)
-	// over rollup rows with bucket_date >= since.
-	QueryVolumeByDay(ctx context.Context, since string) ([]models.DailyQueryVolume, error)
+	// The Query Activity reads below take a models.QueryStatsFilter: rows
+	// from PriorSince to Until, current from Since on.
+
+	// QueryStatsSummary totals both windows.
+	QueryStatsSummary(ctx context.Context, f models.QueryStatsFilter) (models.QueryStatsSummary, error)
+	// QueryCountsByAccountType counts current-window queries per account
+	// type. It ignores f.AccountType and PriorSince.
+	QueryCountsByAccountType(ctx context.Context, f models.QueryStatsFilter) ([]models.AccountQueryCount, error)
+	// QueryStatsByDay returns each day of both windows with a query, ascending.
+	QueryStatsByDay(ctx context.Context, f models.QueryStatsFilter) ([]models.DailyQueryStat, error)
+	// QueryStatsByUser returns the users with a current-window query, by
+	// current query count desc, capped at limit.
+	QueryStatsByUser(ctx context.Context, f models.QueryStatsFilter, limit int) ([]models.UserQueryStat, error)
+	// QueryStatsBySource returns the sources with a current-window query of
+	// f.AccountType, by current total duration desc, capped at limit.
+	QueryStatsBySource(ctx context.Context, f models.QueryStatsFilter, limit int) ([]models.SourceQueryStat, error)
+	// QueryStatsByLanguage counts current-window queries per language, most
+	// used first. It ignores PriorSince.
+	QueryStatsByLanguage(ctx context.Context, f models.QueryStatsFilter) ([]models.LanguageQueryCount, error)
 
 	// IncrementQueryShapeStats adds inc to its query_shape_stats_daily row:
 	// the three counters sum and the larger lookback is kept.
@@ -447,6 +449,13 @@ type QueryHistoryStore interface {
 	// QueryShapeCoverage summarizes every row of a source with bucket_date
 	// from since to until, both inclusive.
 	QueryShapeCoverage(ctx context.Context, sourceID models.SourceID, since, until string) (models.QueryShapeCoverage, error)
+	// TopQueryShapes returns the analyzed shapes with a current-window
+	// query, by current total duration desc, capped at limit. Rows under the
+	// unanalyzed and overflow hashes are left out.
+	TopQueryShapes(ctx context.Context, f models.QueryShapeFilter, limit int) ([]models.QueryShapeStat, error)
+	// CountUnanalyzedQueryShapes counts the current-window queries under the
+	// unanalyzed and overflow hashes. It ignores PriorSince.
+	CountUnanalyzedQueryShapes(ctx context.Context, f models.QueryShapeFilter) (int64, error)
 	// PruneQueryShapeStats deletes the rows with bucket_date < before.
 	PruneQueryShapeStats(ctx context.Context, before string) error
 }
@@ -461,6 +470,12 @@ type SchemaAdvisorStore interface {
 	UpsertSchemaAdvisorReport(ctx context.Context, report *models.StoredSchemaAdvisorReport) error
 	// ListSchemaAdvisorDismissals returns the source's dismissals, oldest first.
 	ListSchemaAdvisorDismissals(ctx context.Context, sourceID models.SourceID) ([]models.SchemaAdvisorDismissal, error)
+	// ListSchemaAdvisorReports returns the reports of those of the sources
+	// that have one.
+	ListSchemaAdvisorReports(ctx context.Context, sourceIDs []models.SourceID) ([]*models.StoredSchemaAdvisorReport, error)
+	// ListSchemaAdvisorDismissalsBySources returns the dismissals of the
+	// sources.
+	ListSchemaAdvisorDismissalsBySources(ctx context.Context, sourceIDs []models.SourceID) ([]models.SchemaAdvisorDismissal, error)
 	// GetSchemaAdvisorDismissal returns models.ErrNotFound when the finding
 	// is not dismissed.
 	GetSchemaAdvisorDismissal(ctx context.Context, sourceID models.SourceID, findingID string) (*models.SchemaAdvisorDismissal, error)
