@@ -24,7 +24,32 @@ export interface DateWindow {
   days: number;
 }
 
-export interface ActivityPeriod extends QueryTotals {
+/** A latency percentile; open when it is past the last bucket bound (Ms). */
+export interface Percentile {
+  ms: number;
+  open: boolean;
+}
+
+/** The cost of the runs that recorded one, those since `collected_since`. */
+export interface RunCost {
+  runs: number;
+  p50: Percentile;
+  p95: Percentile;
+  avg_rows_read: number;
+  avg_bytes_read: number;
+}
+
+/**
+ * How a window's runs performed. `cost` is null when no run recorded one;
+ * `failure_rate` (0..1) is null when nothing ran or failed since collection.
+ */
+export interface RunHealth {
+  cost: RunCost | null;
+  failure_count: number;
+  failure_rate: number | null;
+}
+
+export interface ActivityPeriod extends QueryTotals, RunHealth {
   active_users: number;
   active_sources: number;
   avg_daily_active_users: number;
@@ -55,7 +80,7 @@ export interface AdvisorFindingCounts {
   low: number;
 }
 
-export interface SourceActivity {
+export interface SourceActivity extends RunHealth {
   source_id: number;
   source_name: string;
   source_type: string;
@@ -67,6 +92,8 @@ export interface SourceActivity {
   prior: QueryTotals;
   /** Null for a source the schema advisor does not analyze. */
   advisor: AdvisorFindingCounts | null;
+  /** Each day of the window: its p95 latency in ms, null without a recorded run. */
+  p95_by_day: (number | null)[];
 }
 
 export interface ShapeFilterItem {
@@ -88,6 +115,27 @@ export interface ShapeActivityRow {
   /** Null when the shape rollup no longer keeps the whole prior window. */
   prior: QueryTotals | null;
   finding: { id: string; title: string; impact: string } | null;
+  /** Bytes scanned per run since scan collection began, null before. */
+  avg_bytes_read: number | null;
+}
+
+export interface FailureReason {
+  reason: string;
+  count: number;
+  /** Null when failures were not recorded on every day of the prior window. */
+  prior: number | null;
+}
+
+/** Identity fields are "" when the source or user is deleted. */
+export interface FailurePair {
+  source_id: number;
+  source_name: string;
+  source_type: string;
+  user_id: number;
+  email: string;
+  full_name: string;
+  account_type: "human" | "service" | "";
+  count: number;
 }
 
 export interface QueryStatsResponse {
@@ -113,6 +161,9 @@ export interface QueryStatsResponse {
   /** No user or account filter applies; `since` is where kept rows start. */
   shapes: { since: string; rows: ShapeActivityRow[]; unanalyzed_query_count: number };
   language_mix: { language: string; query_count: number }[];
+  /** First day with latency, scan and failure data; null before any. */
+  collected_since: string | null;
+  failures: { by_reason: FailureReason[]; top: FailurePair[] };
 }
 
 export interface QueryStatsParams {

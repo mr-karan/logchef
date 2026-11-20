@@ -2,24 +2,25 @@
 import { computed, onBeforeUnmount, ref, toValue, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
-import { Activity, FileSearch, RefreshCw, Settings2, Telescope, X } from "lucide-vue-next";
+import { Activity, CircleCheck, FileSearch, RefreshCw, Settings2, Telescope, X } from "lucide-vue-next";
 import { PageHeader, LoadingState, EmptyState } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { adminApi, type QueryAccount, type QueryStatsResponse, type UserQueryStat } from "@/api/admin";
+import { adminApi, type FailurePair, type QueryAccount, type QueryStatsResponse, type RunHealth, type UserQueryStat } from "@/api/admin";
 import { isSuccessResponse } from "@/api/types";
 import { formatErrorMessage } from "@/api/error-handler";
 import { formatHistoryDuration } from "@/lib/queryHistory";
-import { advisorLink, auditLink, averageMs, formatLookback, formatTotalTime, shapeColumn, userName } from "@/lib/queryActivity";
+import { advisorLink, auditLink, averageMs, formatBytes, formatLookback, formatPercentile, formatRate, formatTotalTime, shapeColumn, userName } from "@/lib/queryActivity";
 import QueryActivityDelta from "./components/QueryActivityDelta.vue";
 import QueryActivityDailyChart from "./components/QueryActivityDailyChart.vue";
+import QueryActivitySparkline from "./components/QueryActivitySparkline.vue";
 
 const WINDOWS = [7, 30, 90] as const;
 const ACCOUNTS: QueryAccount[] = ["human", "service", "all"];
 // Languages keep their color whatever their rank.
 const LANGUAGES = ["logchefql", "clickhouse-sql", "logsql", "logql"];
 
-const { t, locale } = useI18n();
+const { t, te, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const stats = ref<QueryStatsResponse | null>(null);
@@ -83,7 +84,20 @@ const formatDay = (date: string) =>
 const languageLabel = (language: string) =>
   ({ logchefql: "LogchefQL", "clickhouse-sql": "ClickHouse SQL", logsql: "LogsQL", logql: "LogQL" })[language] ?? language;
 const sourceLabel = (name: string, id: number) => name || t("admin.sourceFallback", { id });
-const userLabel = (user: UserQueryStat) => userName(user) || t("admin.userFallback", { id: user.user_id });
+const userLabel = (user: Pick<UserQueryStat, "user_id" | "full_name" | "email" | "account_type">) => userName(user) || t("admin.userFallback", { id: user.user_id });
+const rate = (health: RunHealth) => (health.failure_rate === null ? "—" : formatRate(health.failure_rate, toValue(locale)));
+const bytes = (value: number) => formatBytes(value, toValue(locale));
+const reasonLabel = (reason: string) => (te(`admin.failureReason.${reason}`) ? t(`admin.failureReason.${reason}`) : reason);
+// Why a latency, scan or failure value is missing: it was not recorded yet.
+const notCollected = computed(() => {
+  const since = stats.value?.collected_since;
+  return since ? t("admin.collectedFrom", { date: formatDay(since) }) : t("admin.notCollectedYet");
+});
+// The window starts before latency, scan and failure data does.
+const partlyCollected = computed(() => {
+  const since = stats.value?.collected_since;
+  return since && stats.value && since > stats.value.window.since ? t("admin.collectedPartly", { date: formatDay(since) }) : undefined;
+});
 
 const accountTabs = computed(() => ACCOUNTS.map(key => ({
   key,
@@ -104,30 +118,59 @@ const headline = computed(() => {
   const { current, prior } = stats.value.summary;
   return [
     {
-      key: "users", label: t("admin.activeUsers"), value: number(current.active_users),
+      key: "users", label: t("admin.activeUsers"), value: number(current.active_users), title: undefined,
       aside: t("admin.ofUsers", { count: number(stats.value.total_users) }),
       detail: t("admin.avgDailyActive", { count: number(current.avg_daily_active_users) }),
       current: current.active_users, prior: prior.active_users, priorText: number(prior.active_users), kind: "count" as const,
     },
     {
-      key: "queries", label: t("admin.queries"), value: number(current.query_count),
-      aside: "",
+      key: "queries", label: t("admin.queries"), value: number(current.query_count), title: undefined,
+      aside: t("admin.sourceCount", { count: number(current.active_sources) }, current.active_sources),
       detail: account.value === "human" && stats.value.account_totals.service
         ? t("admin.serviceQueriesHidden", { count: compact(stats.value.account_totals.service) })
         : "",
       current: current.query_count, prior: prior.query_count, priorText: number(prior.query_count), kind: "count" as const,
     },
+    latencyMetric(),
     {
-      key: "latency", label: t("admin.averageLatency"), value: duration(averageMs(current)),
-      aside: "", detail: "",
-      current: averageMs(current), prior: averageMs(prior), priorText: duration(averageMs(prior)), kind: "latency" as const,
-    },
-    {
-      key: "sources", label: t("admin.sourcesQueried"), value: number(current.active_sources),
-      aside: "", detail: "",
-      current: current.active_sources, prior: prior.active_sources, priorText: number(prior.active_sources), kind: "count" as const,
+      key: "failures", label: t("admin.failureRate"), value: rate(current),
+      title: current.failure_rate === null ? notCollected.value : partlyCollected.value,
+      aside: current.failure_rate === null ? "" : t("admin.failedCount", { count: number(current.failure_count) }),
+      detail: stats.value.failures.by_reason.slice(0, 2).map(r => `${number(r.count)} ${reasonLabel(r.reason).toLowerCase()}`).join(" · "),
+      current: current.failure_rate, prior: prior.failure_rate, priorText: rate(prior), kind: "rate" as const,
     },
   ];
+});
+
+// p50 and p95 when the window has latency data, else the average alone. The
+// delta follows p95 when both windows have it.
+function latencyMetric() {
+  const { current, prior } = stats.value!.summary;
+  const avg = averageMs(current);
+  const base = { key: "latency", label: t("admin.latencyPercentiles"), detail: avg === null ? "" : t("admin.averageValue", { value: duration(avg) }) };
+  if (!current.cost) {
+    return {
+      ...base, value: "—", title: notCollected.value, aside: "",
+      current: avg, prior: averageMs(prior), priorText: duration(averageMs(prior)), kind: "latency" as const,
+    };
+  }
+  const locale_ = toValue(locale);
+  return {
+    ...base,
+    value: formatPercentile(current.cost.p50, locale_),
+    title: partlyCollected.value,
+    aside: `p95 ${formatPercentile(current.cost.p95, locale_)}`,
+    current: prior.cost ? current.cost.p95.ms : avg,
+    prior: prior.cost ? prior.cost.p95.ms : averageMs(prior),
+    priorText: prior.cost ? `p95 ${formatPercentile(prior.cost.p95, locale_)}` : duration(averageMs(prior)),
+    kind: "latency" as const,
+  };
+}
+
+const failureLink = (pair?: FailurePair) => auditLink(stats.value!.window, {
+  outcome: "failure",
+  source_id: pair?.source_id ?? sourceId.value,
+  actor_id: pair?.user_id ?? userId.value,
 });
 
 const todayInWindow = computed(() => stats.value?.window.until);
@@ -225,7 +268,7 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
             <QueryActivityDelta :current="metric.current" :prior="metric.prior" :kind="metric.kind" />
           </div>
           <dd class="flex items-baseline gap-2">
-            <span class="text-2xl font-semibold tracking-tight tabular-nums">{{ metric.value }}</span>
+            <span class="text-2xl font-semibold tracking-tight tabular-nums" :title="metric.title">{{ metric.value }}</span>
             <span v-if="metric.aside" class="text-xs text-muted-foreground">{{ metric.aside }}</span>
           </dd>
           <dd class="flex flex-wrap justify-between gap-x-3 text-xs text-muted-foreground">
@@ -270,19 +313,27 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
           <div class="min-w-0 space-y-4 lg:col-span-2">
             <div>
               <h3 class="text-sm font-medium">{{ t('admin.topUsers') }}</h3>
-              <Table class="mt-2" data-table="users">
+              <!-- Fixed columns keep the table inside its column: names truncate and headers wrap. -->
+              <Table class="mt-2 table-fixed" data-table="users">
+                <colgroup>
+                  <col>
+                  <col class="w-[4.5rem]">
+                  <col class="w-[3.75rem]">
+                  <col class="w-[4.75rem]">
+                  <col class="w-8">
+                </colgroup>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{{ t('ui.user') }}</TableHead>
-                    <TableHead class="text-right">{{ t('admin.queries') }}</TableHead>
-                    <TableHead class="text-right">{{ t('admin.activeDays') }}</TableHead>
-                    <TableHead class="text-right">{{ t('admin.avgLatency') }}</TableHead>
-                    <TableHead class="w-8"><span class="sr-only">{{ t('routes.auditLog') }}</span></TableHead>
+                    <TableHead class="whitespace-normal text-right leading-tight">{{ t('admin.queries') }}</TableHead>
+                    <TableHead class="whitespace-normal text-right leading-tight">{{ t('admin.activeDays') }}</TableHead>
+                    <TableHead class="whitespace-normal text-right leading-tight">{{ t('admin.avgLatency') }}</TableHead>
+                    <TableHead><span class="sr-only">{{ t('routes.auditLog') }}</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   <TableRow v-for="user in stats.top_users" :key="user.user_id">
-                    <TableCell class="max-w-44">
+                    <TableCell class="truncate" data-cell="user">
                       <button type="button" class="block max-w-full truncate text-left font-medium hover:underline focus-visible:underline" @click="setQuery({ user: String(user.user_id) })">
                         {{ userLabel(user) }}
                       </button>
@@ -298,7 +349,7 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                     </TableCell>
                     <TableCell class="text-right">
                       <div class="whitespace-nowrap text-xs tabular-nums">{{ duration(averageMs(user.current)) }}</div>
-                      <QueryActivityDelta :current="averageMs(user.current)" :prior="averageMs(user.prior)" kind="latency" />
+                      <QueryActivityDelta :current="averageMs(user.current)" :prior="averageMs(user.prior)" kind="latency" compact />
                     </TableCell>
                     <TableCell>
                       <router-link :to="auditLink(stats.window, { actor_id: user.user_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="text-muted-foreground hover:text-foreground">
@@ -346,12 +397,14 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
         </header>
         <EmptyState v-if="!stats.sources.length" :title="t('admin.noUsageInWindow')" class="py-10" />
         <div v-else class="overflow-x-auto">
-          <Table class="min-w-[760px]">
+          <Table class="min-w-[960px]">
             <TableHeader>
               <TableRow>
                 <TableHead>{{ t('ui.source') }}</TableHead>
                 <TableHead class="text-right">{{ t('admin.queries') }}</TableHead>
-                <TableHead class="text-right">{{ t('admin.avgLatency') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.latencyPercentiles') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.avgScanned') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.failureRate') }}</TableHead>
                 <TableHead>{{ t('admin.schemaAdvisor') }}</TableHead>
                 <TableHead>{{ t('admin.openIn') }}</TableHead>
               </TableRow>
@@ -373,9 +426,28 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                   <div class="tabular-nums">{{ number(source.current.query_count) }}</div>
                   <QueryActivityDelta :current="source.current.query_count" :prior="source.prior.query_count" kind="count" />
                 </TableCell>
-                <TableCell class="text-right">
-                  <div class="whitespace-nowrap tabular-nums">{{ duration(averageMs(source.current)) }}</div>
+                <TableCell class="text-right" data-cell="latency">
+                  <div v-if="source.cost" class="whitespace-nowrap tabular-nums">
+                    {{ formatPercentile(source.cost.p50, locale) }} <span class="text-muted-foreground">/</span> {{ formatPercentile(source.cost.p95, locale) }}
+                  </div>
+                  <div v-else class="tabular-nums text-muted-foreground" :title="notCollected">—</div>
+                  <div class="flex items-center justify-end gap-2">
+                    <QueryActivitySparkline :values="source.p95_by_day" :label="t('admin.p95ByDay')" />
+                    <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{{ t('admin.averageValue', { value: duration(averageMs(source.current)) }) }}</span>
+                  </div>
                   <QueryActivityDelta :current="averageMs(source.current)" :prior="averageMs(source.prior)" kind="latency" />
+                </TableCell>
+                <TableCell class="text-right" data-cell="scanned">
+                  <template v-if="source.cost && (source.cost.avg_bytes_read || source.source_type === 'clickhouse')">
+                    <div class="whitespace-nowrap tabular-nums">{{ bytes(source.cost.avg_bytes_read) }}</div>
+                    <div class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{{ t('admin.rowsValue', { count: compact(source.cost.avg_rows_read) }) }}</div>
+                  </template>
+                  <span v-else-if="source.cost" class="text-muted-foreground" :title="t('admin.scanClickHouseOnly')">—</span>
+                  <span v-else class="text-muted-foreground" :title="notCollected">—</span>
+                </TableCell>
+                <TableCell class="text-right" data-cell="failures">
+                  <div class="tabular-nums" :title="source.failure_rate === null ? notCollected : undefined">{{ rate(source) }}</div>
+                  <div v-if="source.failure_count" class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{{ t('admin.failedCount', { count: number(source.failure_count) }) }}</div>
                 </TableCell>
                 <TableCell class="text-xs">
                   <router-link v-if="source.advisor" :to="advisorLink(source.source_id)" class="hover:underline" data-link="advisor">
@@ -428,6 +500,7 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                 <TableHead class="text-right">{{ t('admin.runs') }}</TableHead>
                 <TableHead class="text-right">{{ t('admin.totalTime') }}</TableHead>
                 <TableHead class="text-right">{{ t('admin.avgLatency') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.scannedPerRun') }}</TableHead>
                 <TableHead>{{ t('admin.schemaAdvisor') }}</TableHead>
               </TableRow>
             </TableHeader>
@@ -457,6 +530,10 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                   <div class="whitespace-nowrap tabular-nums">{{ duration(averageMs(row.current)) }}</div>
                   <QueryActivityDelta :current="averageMs(row.current)" :prior="row.prior ? averageMs(row.prior) : null" kind="latency" />
                 </TableCell>
+                <TableCell class="whitespace-nowrap text-right tabular-nums" data-cell="scanned">
+                  <template v-if="row.avg_bytes_read !== null">{{ bytes(row.avg_bytes_read) }}</template>
+                  <span v-else class="text-muted-foreground" :title="notCollected">—</span>
+                </TableCell>
                 <TableCell class="max-w-64 text-xs">
                   <router-link v-if="row.source_type === 'clickhouse'" :to="advisorLink(row.source_id)" class="hover:underline" data-link="advisor">
                     {{ row.finding ? row.finding.title : t('admin.openAdvisor') }}
@@ -470,6 +547,61 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
         <footer v-if="stats.shapes.unanalyzed_query_count || stats.shapes.since !== stats.window.since" class="space-y-1 border-t px-4 py-2 text-xs text-muted-foreground">
           <p v-if="stats.shapes.unanalyzed_query_count">{{ t('admin.unanalyzedFootnote', { count: number(stats.shapes.unanalyzed_query_count) }) }}</p>
           <p v-if="stats.shapes.since !== stats.window.since">{{ t('admin.shapesSince', { date: formatDay(stats.shapes.since) }) }}</p>
+        </footer>
+      </section>
+
+      <section class="rounded-lg border bg-card" data-section="failures">
+        <header class="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h2 class="text-base font-medium">{{ t('admin.failuresTitle') }}</h2>
+            <p v-if="stats.summary.current.failure_count" class="mt-0.5 text-xs text-muted-foreground">
+              {{ t('admin.failuresScope', { count: number(stats.summary.current.failure_count), rate: rate(stats.summary.current) }) }}
+            </p>
+          </div>
+          <Button v-if="stats.summary.current.failure_count" variant="link" size="sm" class="h-auto p-0" as-child>
+            <router-link :to="failureLink()" data-link="all-failures">{{ t('admin.viewAllFailures') }}</router-link>
+          </Button>
+        </header>
+        <EmptyState
+          v-if="!stats.summary.current.failure_count"
+          :icon="CircleCheck"
+          :title="stats.collected_since ? t('admin.noFailures') : t('admin.notCollectedYet')"
+          class="py-10"
+        />
+        <div v-else class="grid gap-6 p-4 lg:grid-cols-2">
+          <div class="min-w-0">
+            <h3 class="text-sm font-medium">{{ t('admin.failuresByReason') }}</h3>
+            <ul class="mt-2 divide-y rounded-md border text-sm" data-list="reasons">
+              <li v-for="item in stats.failures.by_reason" :key="item.reason" class="flex items-center justify-between gap-3 px-3 py-2">
+                <router-link :to="failureLink()" class="min-w-0 truncate hover:underline">{{ reasonLabel(item.reason) }}</router-link>
+                <span class="flex shrink-0 items-baseline gap-2">
+                  <span class="font-medium tabular-nums">{{ number(item.count) }}</span>
+                  <QueryActivityDelta :current="item.count" :prior="item.prior" kind="failures" />
+                </span>
+              </li>
+            </ul>
+          </div>
+          <div class="min-w-0">
+            <h3 class="text-sm font-medium">{{ t('admin.failuresWhere') }}</h3>
+            <ul class="mt-2 divide-y rounded-md border text-sm" data-list="failure-pairs">
+              <li v-for="pair in stats.failures.top" :key="`${pair.source_id}-${pair.user_id}`" class="flex items-center justify-between gap-3 px-3 py-2">
+                <div class="min-w-0">
+                  <div class="truncate font-medium">
+                    {{ sourceLabel(pair.source_name, pair.source_id) }} · {{ t('admin.failedCount', { count: number(pair.count) }) }}
+                  </div>
+                  <div class="truncate text-xs text-muted-foreground">
+                    {{ userLabel(pair) }}<template v-if="pair.account_type === 'service'"> · {{ t('admin.serviceAccount') }}</template>
+                  </div>
+                </div>
+                <router-link :to="failureLink(pair)" class="shrink-0 text-xs text-muted-foreground hover:text-foreground" :aria-label="t('admin.viewFailedRuns')">
+                  {{ t('routes.auditLog') }} →
+                </router-link>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <footer v-if="partlyCollected" class="border-t px-4 py-2 text-xs text-muted-foreground">
+          {{ partlyCollected }}
         </footer>
       </section>
     </template>
