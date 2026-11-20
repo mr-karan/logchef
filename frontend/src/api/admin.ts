@@ -2,118 +2,131 @@ import { api } from "./config";
 import { apiClient, type RequestOptions } from "./apiUtils";
 
 // ---------------------------------------------------------------------------
-// Admin "Query Activity" (#58)
+// Admin Query Activity
 //
-// Honest RECENT-activity view over the capped query_history table. The backend
-// aggregates over a bounded recent window, so these figures are deliberately
-// framed as recent activity — NOT authoritative all-time analytics.
-//
-// Response shape mirrors GET /api/v1/admin/query-activity exactly (snake_case).
+// Mirrors GET /api/v1/admin/query-stats (core.QueryActivity in Go), read from
+// the daily rollups. Every count covers `window` and honors `filters`; each
+// `prior` covers `prior_window`, the same number of days just before it.
+// Dates are "YYYY-MM-DD" (UTC), both ends inclusive.
 // ---------------------------------------------------------------------------
 
-export interface QueryActivityRecent {
-  id: number;
-  user_id: number;
-  user_email: string;
-  team_id: number;
-  source_id: number;
-  source_name: string;
-  query_text: string;
-  query_language: string;
-  duration_ms: number;
-  row_count: number;
-  created_at: string;
-}
+export type QueryAccount = "human" | "service" | "all";
 
-export interface QueryActivityByLanguage {
-  language: string;
-  count: number;
-}
-
-export interface QueryActivityBySource {
-  source_id: number;
-  source_name: string;
-  count: number;
-}
-
-export interface QueryActivityResponse {
-  total: number;
-  window_size: number;
-  window_limit: number;
-  recent: QueryActivityRecent[];
-  by_language: QueryActivityByLanguage[];
-  by_source: QueryActivityBySource[];
-  slowest: QueryActivityRecent[];
-}
-
-// ---------------------------------------------------------------------------
-// Admin "Query Stats" (#127)
-//
-// AUTHORITATIVE all-time usage analytics backed by a non-pruned daily rollup
-// (query_stats_daily). Unlike the recent-activity view above (capped at 200
-// rows/user), these aggregates are complete for the requested window.
-//
-// Response shape mirrors GET /api/v1/admin/query-stats exactly (snake_case).
-// ---------------------------------------------------------------------------
-
-export interface TopSourceStat {
-  source_id: number;
-  // Empty string when the source row has been deleted (LEFT JOIN).
-  source_name: string;
+/** Average latency is total_duration_ms / query_count. */
+export interface QueryTotals {
   query_count: number;
-  avg_duration_ms: number;
+  total_duration_ms: number;
 }
 
-export interface TopUserStat {
-  user_id: number;
-  user_email: string;
-  query_count: number;
+export interface DateWindow {
+  since: string;
+  until: string;
+  days: number;
 }
 
-export interface DailyQueryVolume {
+export interface ActivityPeriod extends QueryTotals {
+  active_users: number;
+  active_sources: number;
+  avg_daily_active_users: number;
+}
+
+export interface DailyQueryStat {
   date: string;
   query_count: number;
+  active_users: number;
+}
+
+/** Identity fields are "" when the user is deleted. */
+export interface UserQueryStat {
+  user_id: number;
+  email: string;
+  full_name: string;
+  account_type: "human" | "service" | "";
+  active_days: number;
+  current: QueryTotals;
+  prior: QueryTotals;
+}
+
+/** Open findings of a source; analyzed is false before its first report. */
+export interface AdvisorFindingCounts {
+  analyzed: boolean;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface SourceActivity {
+  source_id: number;
+  source_name: string;
+  source_type: string;
+  team_id: number;
+  /** Service-account queries in the window, whatever the account filter. */
+  service_query_count: number;
+  current: QueryTotals;
+  prior: QueryTotals;
+  /** Null for a source the schema advisor does not analyze. */
+  advisor: AdvisorFindingCounts | null;
+}
+
+export interface ShapeFilterItem {
+  column: string;
+  path?: string[];
+  access?: string;
+  kind: string;
+}
+
+export interface ShapeActivityRow {
+  source_id: number;
+  source_name: string;
+  source_type: string;
+  query_language: string;
+  shape_hash: string;
+  shape: ShapeFilterItem[];
+  max_lookback_s: number | null;
+  current: QueryTotals;
+  /** Null when the shape rollup no longer keeps the whole prior window. */
+  prior: QueryTotals | null;
+  finding: { id: string; title: string; impact: string } | null;
 }
 
 export interface QueryStatsResponse {
-  // Inclusive start of the window, "YYYY-MM-DD" (UTC).
-  since: string;
-  days: number;
-  summary: {
-    query_count: number;
-    active_users: number;
-    active_sources: number;
-    avg_duration_ms: number;
+  window: DateWindow;
+  prior_window: DateWindow;
+  filters: {
+    account: QueryAccount;
+    source_id: number | null;
+    source_name: string;
+    user_id: number | null;
+    user_name: string;
   };
-  top_sources: TopSourceStat[];
-  top_users: TopUserStat[];
-  // Ascending by date.
-  volume_by_day: DailyQueryVolume[];
+  /** Ignores filters.account. */
+  account_totals: { human: number; service: number; all: number };
+  /** Active users of the selected account type. */
+  total_users: number;
+  summary: { current: ActivityPeriod; prior: ActivityPeriod };
+  /** Every day of the window, ascending. */
+  volume_by_day: DailyQueryStat[];
+  top_users: UserQueryStat[];
+  service_summary: { account_count: number; query_count: number; top: UserQueryStat[] } | null;
+  sources: SourceActivity[];
+  /** No user or account filter applies; `since` is where kept rows start. */
+  shapes: { since: string; rows: ShapeActivityRow[]; unanalyzed_query_count: number };
+  language_mix: { language: string; query_count: number }[];
 }
 
-export interface QueryActivityFilters {
-  q?: string;
-  user_id?: number;
+export interface QueryStatsParams {
+  days: number;
+  account: QueryAccount;
   source_id?: number;
-  language?: string;
+  user_id?: number;
 }
 
 export const adminApi = {
-  // Fetch recent query activity across all users. `limit` controls the
-  // recent-feed length; it is clamped server-side (default 100, max 500).
-  getQueryActivity: (limit = 100, filters: QueryActivityFilters = {}, options?: RequestOptions) => {
-    const search = new URLSearchParams({ limit: String(limit) });
-    for (const [key, value] of Object.entries(filters)) {
-      if (value !== undefined && value !== "") search.set(key, String(value));
-    }
-    return apiClient.get<QueryActivityResponse>(`/admin/query-activity?${search}`, options);
-  },
-
-  // Fetch authoritative all-time usage stats over the last `days` (default 30,
-  // clamped 1..365 server-side).
-  getQueryStats: (days?: number, options?: RequestOptions) => {
-    const search = typeof days === "number" ? `?days=${days}` : "";
-    return apiClient.get<QueryStatsResponse>(`/admin/query-stats${search}`, options);
+  getQueryStats: (params: QueryStatsParams, options?: RequestOptions) => {
+    const search = new URLSearchParams({ days: String(params.days), account: params.account });
+    if (params.source_id) search.set("source_id", String(params.source_id));
+    if (params.user_id) search.set("user_id", String(params.user_id));
+    return apiClient.get<QueryStatsResponse>(`/admin/query-stats?${search}`, options);
   },
 };
 

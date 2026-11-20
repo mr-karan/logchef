@@ -1,33 +1,55 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp, nextTick, type App } from "vue";
 import { createPinia } from "pinia";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { createMemoryHistory, createRouter, type Router } from "vue-router";
 import { i18n } from "@/i18n";
 import { controlledApi } from "@/test/controlledApi";
-import { useMetaStore } from "@/stores/meta";
-import type { QueryActivityResponse, QueryStatsResponse } from "@/api/admin";
+import type { QueryStatsResponse, QueryTotals, UserQueryStat } from "@/api/admin";
 import QueryActivity from "../QueryActivity.vue";
 
+const totals = (query_count: number, total_duration_ms: number): QueryTotals => ({ query_count, total_duration_ms });
+const user = (id: number, fields: Partial<UserQueryStat>): UserQueryStat => ({
+  user_id: id, email: `user${id}@example.test`, full_name: "", account_type: "human", active_days: 3,
+  current: totals(10, 1000), prior: totals(10, 1000), ...fields,
+});
 const stats: QueryStatsResponse = {
-  since: "2026-11-01", days: 3,
-  summary: { query_count: 12345, active_users: 42, active_sources: 23, avg_duration_ms: 456 },
-  top_sources: Array.from({ length: 10 }, (_, i) => ({ source_id: i + 1, source_name: `Source ${i + 1}`, query_count: 100 - i, avg_duration_ms: 10 })),
-  top_users: Array.from({ length: 10 }, (_, i) => ({ user_id: i + 1, user_email: `user${i + 1}@example.test`, query_count: 50 - i })),
-  volume_by_day: [{ date: "2026-11-01", query_count: 12345 }],
+  window: { since: "2026-10-22", until: "2026-11-20", days: 30 },
+  prior_window: { since: "2026-09-22", until: "2026-10-21", days: 30 },
+  filters: { account: "human", source_id: null, source_name: "", user_id: null, user_name: "" },
+  account_totals: { human: 14820, service: 253700, all: 268520 },
+  total_users: 68,
+  summary: {
+    current: { query_count: 14820, total_duration_ms: 14820 * 1480, active_users: 42, active_sources: 10, avg_daily_active_users: 14.6 },
+    prior: { query_count: 11950, total_duration_ms: 11950 * 1000, active_users: 36, active_sources: 10, avg_daily_active_users: 12 },
+  },
+  volume_by_day: Array.from({ length: 30 }, (_, i) => ({ date: `2026-${i < 10 ? "10" : "11"}-${String(i < 10 ? 22 + i : i - 9).padStart(2, "0")}`, query_count: i * 10, active_users: i % 5 })),
+  top_users: [
+    user(5, { full_name: "Alice Example", email: "alice@example.test", active_days: 24, current: totals(2140, 2140 * 2400), prior: totals(1633, 1633 * 2400) }),
+    user(6, { current: totals(900, 900 * 500), prior: totals(0, 0) }),
+  ],
+  service_summary: {
+    account_count: 3, query_count: 253700,
+    top: [user(90, { account_type: "service", full_name: "Error Digest Worker", email: "svc-1@service.logchef.internal", current: totals(241000, 0) })],
+  },
+  sources: [
+    { source_id: 1, source_name: "HTTP Access", source_type: "clickhouse", team_id: 4, service_query_count: 178600, current: totals(4920, 4920 * 1820), prior: totals(3814, 3814 * 1200), advisor: { analyzed: true, high: 1, medium: 0, low: 2 } },
+    { source_id: 2, source_name: "Order Engine", source_type: "clickhouse", team_id: 4, service_query_count: 0, current: totals(3410, 3410 * 340), prior: totals(3045, 3045 * 374), advisor: { analyzed: false, high: 0, medium: 0, low: 0 } },
+    { source_id: 3, source_name: "Edge Proxy", source_type: "loki", team_id: 5, service_query_count: 0, current: totals(620, 620 * 410), prior: totals(660, 660 * 406), advisor: null },
+  ],
+  shapes: {
+    since: "2026-10-22",
+    unanalyzed_query_count: 148,
+    rows: [
+      { source_id: 1, source_name: "HTTP Access", source_type: "clickhouse", query_language: "clickhouse-sql", shape_hash: "a", shape: [{ column: "http_referer", kind: "like" }, { column: "attrs", path: ["merchant_id"], access: "map", kind: "eq" }], max_lookback_s: 30 * 86400, current: totals(842, 842 * 4380), prior: totals(600, 600 * 4000), finding: { id: "f1", title: "Add a bloom filter index on http_referer", impact: "high" } },
+      { source_id: 2, source_name: "Order Engine", source_type: "clickhouse", query_language: "logchefql", shape_hash: "b", shape: [{ column: "status", kind: "in" }], max_lookback_s: null, current: totals(100, 10000), prior: null, finding: null },
+    ],
+  },
+  language_mix: [{ language: "logchefql", query_count: 640 }, { language: "clickhouse-sql", query_count: 310 }, { language: "logql", query_count: 50 }],
 };
-const record = {
-  id: 1, user_id: 1, user_email: "user1@example.test", team_id: 1,
-  source_id: 1, source_name: "Source 1", query_language: "logchefql",
-  query_text: "level = error\nAND message contains 'inspect this entire query'", duration_ms: 25, row_count: 12,
-  created_at: "2026-11-01T12:00:00Z",
-};
-const activity: QueryActivityResponse = {
-  total: 140, window_size: 2000, window_limit: 2000,
-  recent: Array.from({ length: 25 }, (_, i) => ({ ...record, id: i + 1 })),
-  slowest: [{ ...record, id: 50 }], by_source: [], by_language: [],
-};
+
 let app: App | undefined;
 let root: HTMLDivElement;
+let router: Router;
 let network: ReturnType<typeof controlledApi>;
 async function flush() {
   for (let i = 0; i < 5; i++) {
@@ -35,142 +57,184 @@ async function flush() {
     await nextTick();
   }
 }
-async function mount(demo = false) {
+const blank = { template: "<div />" };
+async function mount(path = "/") {
   network = controlledApi();
-  const pinia = createPinia();
-  if (demo) {
-    const loading = useMetaStore(pinia).loadMeta();
-    network.requests[0].succeed({ version: "test", max_query_limit: 100, demo_read_only: true });
-    await loading;
-  }
-  const router = createRouter({ history: createMemoryHistory(), routes: [
+  router = createRouter({ history: createMemoryHistory(), routes: [
     { path: "/", component: QueryActivity },
-    { path: "/admin/audit-log", name: "AdminAuditLog", component: { template: "<div />" } },
+    { path: "/admin/audit-log", name: "AdminAuditLog", component: blank },
+    { path: "/admin/sources/stats", name: "SourceInspection", component: blank },
+    { path: "/admin/sources/:sourceId/edit", name: "EditSource", component: blank },
+    { path: "/logs/explore", name: "LogExplorer", component: blank },
   ] });
-  await router.push("/");
+  await router.push(path);
   root = document.createElement("div"); document.body.appendChild(root);
-  app = createApp(QueryActivity);
-  app.use(pinia).use(i18n).use(router).mount(root);
+  app = createApp({ template: "<router-view />" });
+  app.use(createPinia()).use(i18n).use(router).mount(root);
   await flush();
 }
-function request(path: string) {
-  const found = [...network.requests].reverse().find(item => item.config.url?.includes(path));
-  if (!found) throw new Error(`Missing request ${path}`);
+function last() {
+  const found = network.requests.at(-1);
+  if (!found?.config.url?.startsWith("/admin/query-stats")) throw new Error("Missing query-stats request");
   return found;
 }
-async function ready() {
-  request("query-stats").succeed(stats);
-  request("query-activity").succeed(activity);
-  await flush();
+function params() {
+  return Object.fromEntries(new URL(last().config.url!, "http://fixture.test").searchParams);
+}
+async function respond(data: QueryStatsResponse = stats) {
+  last().succeed(data); await flush();
 }
 function button(text: string) {
-  const found = [...root.querySelectorAll("button")].find(item => item.textContent?.trim() === text);
+  const found = [...root.querySelectorAll("button")].find(item => item.textContent?.trim().startsWith(text));
   if (!found) throw new Error(`Missing button ${text}`);
   return found;
 }
-function recentSection() {
-  const heading = [...root.querySelectorAll("h3")].find(item => item.textContent === "Recent queries");
-  if (!heading?.parentElement?.parentElement) throw new Error("Missing recent section");
-  return heading.parentElement.parentElement;
+function section(name: string) {
+  const found = root.querySelector<HTMLElement>(`[data-section="${name}"]`);
+  if (!found) throw new Error(`Missing section ${name}`);
+  return found;
+}
+function hrefs(scope: ParentNode, label: string) {
+  return [...scope.querySelectorAll<HTMLAnchorElement>(`a[aria-label="${label}"]`)].map(a => decodeURIComponent(a.getAttribute("href") ?? ""));
 }
 afterEach(() => {
-  app?.unmount(); app = undefined; root?.remove(); network?.restore(); localStorage.clear();
+  app?.unmount(); app = undefined; root?.remove(); network?.restore();
 });
 
-describe("Query Activity usage and investigation", () => {
-  it("uses summary metrics, all ten rankings and accessible daily values", async () => {
+describe("Query Activity", () => {
+  it("asks for humans over 30 days and compares every headline number with the prior window", async () => {
     await mount();
-    expect(request("query-activity").config.url).toBe("/admin/query-activity?limit=100");
-    await ready();
-    expect([...root.querySelectorAll("dd")].map(item => item.textContent)).toEqual(["12,345", "23", "42", "456 ms"]);
-    expect(button("Source 10")).toBeTruthy(); expect(button("user10@example.test")).toBeTruthy();
-    const daily = root.querySelector("details");
-    expect(daily?.querySelector("summary")?.textContent).toBe("View daily values");
-    expect(daily?.textContent).toContain("2026-11-02");
-    expect(daily?.querySelectorAll("tbody tr")).toHaveLength(3);
-    expect(root.textContent).toContain("140 matches in 2,000 scanned records");
+    expect(params()).toEqual({ days: "30", account: "human" });
+    await respond();
+    const metric = (key: string) => section("headline").querySelector(`[data-metric="${key}"]`)?.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(metric("users")).toContain("42of 68 users");
+    expect(metric("users")).toContain("↑ +17%");
+    expect(metric("users")).toContain("prior: 36");
+    expect(metric("queries")).toContain("14,820");
+    expect(metric("queries")).toContain("↑ +24%");
+    expect(metric("queries")).toContain("253.7K service account queries hidden");
+    expect(metric("latency")).toContain("1.48 s");
+    expect(metric("latency")).toContain("↑ +48% slower");
+    expect(metric("latency")).toContain("prior: 1.00 s");
+    expect(metric("sources")).toContain("→ 0%");
+    expect(root.textContent).not.toContain("Failure rate");
   });
 
-  it("combines drilldowns, language and submitted search, then clears filters", async () => {
-    await mount(); await ready();
-    button("Source 10").click(); await flush();
-    button("user10@example.test").click(); await flush();
-    const input = root.querySelector<HTMLInputElement>('input[type="search"]')!;
-    input.value = "needle & value"; input.dispatchEvent(new Event("input", { bubbles: true })); await flush();
-    expect(network.requests.filter(item => item.config.url?.includes("query-activity"))).toHaveLength(3);
-    input.closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await flush();
-    const select = root.querySelector<HTMLSelectElement>("#activity-language")!;
-    select.value = "logql"; select.dispatchEvent(new Event("change", { bubbles: true })); await flush();
-    const params = new URL(request("query-activity").config.url!, "http://fixture.test").searchParams;
-    expect(Object.fromEntries(params)).toEqual({ limit: "100", source_id: "10", user_id: "10", q: "needle & value", language: "logql" });
-    request("query-activity").succeed({ ...activity, total: 0, recent: [], slowest: [] }); await flush();
-    expect(root.textContent).toContain("No queries match this filter.");
-    expect(root.textContent).toContain("Source: Source 10");
-    button("Clear filters").click(); await flush();
-    expect(request("query-activity").config.url).toBe("/admin/query-activity?limit=100");
-    request("query-activity").succeed(activity); await flush();
-    expect(input.value).toBe(""); expect(root.querySelectorAll("dd")[0].textContent).toBe("12,345");
-  });
-
-  it("ignores superseded feed requests and usage periods", async () => {
-    await mount(); await ready();
-    button("Source 9").click(); await flush(); const old = request("query-activity");
-    button("Source 10").click(); await flush();
-    request("query-activity").succeed({ ...activity, recent: [{ ...record, query_text: "newest scope" }] }); await flush();
-    old.succeed({ ...activity, recent: [{ ...record, query_text: "stale scope" }] }); await flush();
-    expect(root.textContent).toContain("newest scope"); expect(root.textContent).not.toContain("stale scope");
-    const days = root.querySelector<HTMLSelectElement>("#stats-days")!;
-    days.value = "7"; days.dispatchEvent(new Event("change", { bubbles: true })); await flush();
-    const oldStats = request("query-stats");
-    days.value = "90"; days.dispatchEvent(new Event("change", { bubbles: true })); await flush();
-    expect(request("query-stats").config.url).toBe("/admin/query-stats?days=90");
-    request("query-stats").succeed(stats); await flush();
-    oldStats.succeed({ ...stats, summary: { ...stats.summary, query_count: 999 } }); await flush();
-    expect(root.querySelectorAll("dd")[0].textContent).toBe("12,345");
-  });
-
-  it("expands query text locally and shows more records without another request", async () => {
-    await mount(); await ready();
-    const section = recentSection(); expect(section.querySelectorAll("tbody tr")).toHaveLength(20);
-    const details = section.querySelector("details")!; details.open = true;
-    expect(details.querySelector("pre")?.textContent).toBe(record.query_text);
-    expect(details.textContent).not.toContain(record.user_email);
-    button("Show 5 more").click(); await flush();
-    expect(section.querySelectorAll("tbody tr")).toHaveLength(25); expect(network.requests).toHaveLength(2);
-    expect(root.querySelector('a[href="/admin/audit-log"]')).toBeTruthy();
-  });
-
-  it("preserves filters after failure and retries the same scope", async () => {
-    await mount(); await ready(); button("Source 10").click(); await flush();
-    const url = request("query-activity").config.url;
-    request("query-activity").respond(500, { status: "error", message: "history unavailable", error_type: "DatabaseError" }); await flush();
-    expect(root.querySelector('[role="alert"]')?.textContent).toContain("history unavailable");
-    expect(button("Clear filters")).toBeTruthy(); button("Retry").click(); await flush();
-    expect(request("query-activity").config.url).toBe(url);
-    request("query-activity").succeed({ ...activity, total: 0, window_size: 0, recent: [], slowest: [] }); await flush();
-    button("Clear filters").click(); await flush();
-    request("query-activity").succeed({ ...activity, total: 0, window_size: 0, recent: [], slowest: [] }); await flush();
-    expect(root.textContent).toContain("No recent queries."); expect(root.textContent).not.toContain("No queries match this filter.");
-  });
-
-  it("keeps recent investigation available when usage fails and handles a zero-usage window", async () => {
+  it("switches accounts and windows through the URL and ignores superseded responses", async () => {
     await mount();
-    request("query-stats").respond(500, { status: "error", message: "usage unavailable", error_type: "DatabaseError" });
-    request("query-activity").succeed(activity); await flush();
-    expect(root.querySelector('[role="alert"]')?.textContent).toContain("usage unavailable");
-    expect(recentSection().querySelectorAll("tbody tr")).toHaveLength(20);
+    await respond();
+    expect(button("Service accounts").textContent).toContain("253.7K");
+    button("Service accounts").click(); await flush();
+    const superseded = last();
+    expect(params()).toEqual({ days: "30", account: "service" });
+    button("7 days").click(); await flush();
+    expect(params()).toEqual({ days: "7", account: "service" });
+    expect(router.currentRoute.value.query).toEqual({ account: "service", days: "7" });
+    await respond({ ...stats, window: { ...stats.window, days: 7 }, filters: { ...stats.filters, account: "service" }, service_summary: null });
+    superseded.succeed({ ...stats, summary: { ...stats.summary, current: { ...stats.summary.current, query_count: 999 } } }); await flush();
+    expect(section("headline").textContent).not.toContain("999");
+    expect(root.querySelector('[data-section="service-summary"]')).toBeNull();
+  });
+
+  it("scopes the page to a clicked source or user and removes each filter chip", async () => {
+    await mount();
+    await respond();
+    button("HTTP Access").click(); await flush();
+    expect(params()).toEqual({ days: "30", account: "human", source_id: "1" });
+    await respond({ ...stats, filters: { ...stats.filters, source_id: 1, source_name: "HTTP Access" } });
+    button("Alice Example").click(); await flush();
+    expect(params()).toEqual({ days: "30", account: "human", source_id: "1", user_id: "5" });
+    await respond({ ...stats, filters: { ...stats.filters, source_id: 1, source_name: "HTTP Access", user_id: 5, user_name: "Alice Example" } });
+    expect(button("Source: HTTP Access").getAttribute("aria-label")).toBe("Remove filter Source: HTTP Access");
+    button("Source: HTTP Access").click(); await flush();
+    expect(params()).toEqual({ days: "30", account: "human", user_id: "5" });
+    await respond({ ...stats, filters: { ...stats.filters, user_id: 5, user_name: "Alice Example" } });
+    button("User: Alice Example").click(); await flush();
+    expect(params()).toEqual({ days: "30", account: "human" });
+  });
+
+  it("opens a linked scope from the URL and labels a chip before the name loads", async () => {
+    await mount("/?account=all&source=3&days=90");
+    expect(params()).toEqual({ days: "90", account: "all", source_id: "3" });
+    expect(button("Source: Source #3")).toBeTruthy();
+  });
+
+  it("lists users with their deltas and audit links, and names service accounts by their full name", async () => {
+    await mount();
+    await respond();
+    const adoption = section("adoption");
+    const rows = [...adoption.querySelectorAll('[data-table="users"] tbody tr')].map(row => row.textContent?.replace(/\s+/g, " ").trim());
+    expect(rows[0]).toContain("Alice Example");
+    expect(rows[0]).toContain("alice@example.test");
+    expect(rows[0]).toContain("24 / 30");
+    expect(rows[0]).toContain("↑ +31%");
+    expect(rows[1]).toContain("user6@example.test");
+    expect(rows[1]).toContain("new");
+    expect(hrefs(adoption, "Query runs in the Audit Log")[0]).toBe("/admin/audit-log?action=query.run&t=30d&actor_id=5");
+    const service = section("service-summary").textContent ?? "";
+    expect(service).toContain("3 service accounts");
+    expect(service).toContain("Error Digest Worker (241K)");
+    expect(service).not.toContain("service.logchef.internal");
+    button("Show service accounts").click(); await flush();
+    expect(params().account).toBe("service");
+  });
+
+  it("shows the language mix, the daily charts and their values", async () => {
+    await mount();
+    await respond();
+    const languages = [...section("languages").querySelectorAll("li")].map(li => li.textContent?.replace(/\s+/g, " ").trim());
+    expect(languages).toEqual(["64% LogchefQL", "31% ClickHouse SQL", "5% LogQL"]);
+    expect(root.querySelectorAll("[data-chart]")).toHaveLength(2);
+    expect(root.textContent).toContain("Prior average 398.3");
+    expect(root.querySelectorAll("details tbody tr")).toHaveLength(30);
+  });
+
+  it("links each source to Explorer, its settings, its query runs and its advisor findings", async () => {
+    await mount();
+    await respond();
+    const sources = section("sources");
+    const row = (id: number) => sources.querySelector(`[data-source="${id}"]`)!;
+    expect(row(1).textContent).toContain("+178.6K service account queries");
+    expect(row(1).textContent).toContain("1.82 s");
+    expect(row(1).querySelector('[data-link="advisor"]')?.textContent?.trim()).toBe("1 high · 2 low");
+    expect(row(1).querySelector('[data-link="advisor"]')?.getAttribute("href")).toBe("/admin/sources/stats?sourceId=1");
+    expect(row(2).querySelector('[data-link="advisor"]')?.textContent?.trim()).toBe("Not analyzed");
+    expect(row(3).querySelector('[data-link="advisor"]')).toBeNull();
+    expect(hrefs(row(1), "Open in Explorer")).toEqual(["/logs/explore?team=4&source=1"]);
+    expect(hrefs(row(1), "Source settings")).toEqual(["/admin/sources/1/edit"]);
+    expect(hrefs(row(1), "Query runs in the Audit Log")).toEqual(["/admin/audit-log?action=query.run&t=30d&target_type=source&target_id=1"]);
+    const failed = [...root.querySelectorAll("a")].find(a => a.textContent?.trim() === "Failed queries");
+    expect(decodeURIComponent(failed?.getAttribute("href") ?? "")).toBe("/admin/audit-log?action=query.run&t=30d&outcome=failure");
+  });
+
+  it("ranks filter shapes with their advisor finding and counts the unanalyzed queries apart", async () => {
+    await mount();
+    await respond();
+    const patterns = section("patterns");
+    const [first, second] = [...patterns.querySelectorAll("tbody tr")];
+    expect(first.textContent).toContain("http_referer like");
+    expect(first.textContent).toContain("attrs['merchant_id'] eq");
+    expect(first.textContent).toContain("max 30d lookback");
+    expect(first.textContent).toContain("1 h");
+    expect(second.textContent).toContain("10.0 s");
+    expect(first.textContent).toContain("↑ +40%");
+    expect(first.querySelector('[data-link="advisor"]')?.textContent?.trim()).toBe("Add a bloom filter index on http_referer");
+    expect(second.querySelector('[data-link="advisor"]')?.textContent?.trim()).toBe("Open Schema Advisor");
+    expect(second.textContent).not.toContain("new");
+    expect(second.textContent).not.toContain("%");
+    expect(patterns.textContent).toContain("148 queries have no single filter shape");
+    expect(patterns.textContent).not.toContain("kept for 90 days");
+  });
+
+  it("retries the same scope after a failure", async () => {
+    await mount("/?source=2");
+    const url = last().config.url;
+    last().respond(500, { status: "error", message: "rollup unavailable", error_type: "DatabaseError" }); await flush();
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain("rollup unavailable");
     button("Retry").click(); await flush();
-    request("query-stats").succeed({ ...stats, summary: { query_count: 0, active_users: 0, active_sources: 0, avg_duration_ms: 0 }, top_sources: [], top_users: [], volume_by_day: [] }); await flush();
-    expect(root.querySelectorAll("dd")[0].textContent).toBe("0");
+    expect(last().config.url).toBe(url);
+    await respond({ ...stats, sources: [], top_users: [], service_summary: null, shapes: { ...stats.shapes, rows: [], unanalyzed_query_count: 0 }, summary: { current: { ...stats.summary.current, query_count: 0 }, prior: stats.summary.prior } });
     expect(root.textContent).toContain("No usage in this window.");
-    expect(recentSection().querySelectorAll("tbody tr")).toHaveLength(20);
-  });
-
-  it("does not fetch retained text or offer investigation controls on the demo", async () => {
-    await mount(true); request("query-stats").succeed({ ...stats, top_users: [] }); await flush();
-    expect(network.requests.some(item => item.config.url?.includes("query-activity"))).toBe(false);
-    expect(root.textContent).toContain("Aggregate-only on the public demo");
-    expect(root.querySelector('input[type="search"]')).toBeNull(); expect(root.textContent).not.toContain(record.query_text);
-    expect([...root.querySelectorAll("button")].some(item => item.textContent === "Source 10")).toBe(false);
+    expect(root.textContent).toContain("No filter shapes in this window.");
   });
 });
