@@ -2226,6 +2226,7 @@
   "admin.findingsMedium": "{count} medium",
   "admin.findingsLow": "{count} low",
   "admin.openInExplorer": "Open in Explorer",
+  "admin.noTeamLinksSource": "No team links this source",
   "admin.sourceSettings": "Source settings",
   "admin.patternsTitle": "Which repeated query patterns cost the most?",
   "admin.patternsScope": "Filter shapes, never values, ranked by total query time. The account and user filters do not apply.",

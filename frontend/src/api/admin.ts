@@ -59,7 +59,8 @@ export interface SourceActivity {
   source_id: number;
   source_name: string;
   source_type: string;
-  team_id: number;
+  /** A team that links the source now, to open it in Explorer; null when none does. */
+  team_id: number | null;
   /** Service-account queries in the window, whatever the account filter. */
   service_query_count: number;
   current: QueryTotals;

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -104,7 +105,7 @@ func (db *DB) QueryStatsBySource(ctx context.Context, f models.QueryStatsFilter,
 			SourceID:          models.SourceID(r.SourceID),
 			SourceName:        r.SourceName,
 			SourceType:        r.SourceType,
-			TeamID:            models.TeamID(r.TeamID),
+			TeamID:            nullableTeamID(sql.NullInt64{Int64: r.TeamID, Valid: r.TeamID != 0}),
 			ServiceQueryCount: r.ServiceQueryCount,
 			Current:           models.QueryTotals{QueryCount: r.QueryCount, TotalDurationMs: r.TotalDurationMs},
 			Prior:             models.QueryTotals{QueryCount: r.PriorQueryCount, TotalDurationMs: r.PriorTotalDurationMs},

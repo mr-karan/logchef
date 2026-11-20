@@ -2226,6 +2226,7 @@
   "admin.findingsMedium": "{count} 个中",
   "admin.findingsLow": "{count} 个低",
   "admin.openInExplorer": "在浏览器中打开",
+  "admin.noTeamLinksSource": "没有团队关联此数据源",
   "admin.sourceSettings": "数据源设置",
   "admin.patternsTitle": "哪些重复的查询模式开销最大？",
   "admin.patternsScope": "按查询总耗时排序的筛选结构，不含任何值。账户和用户筛选不适用于此处。",

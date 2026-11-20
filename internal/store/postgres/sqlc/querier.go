@@ -466,6 +466,8 @@ type Querier interface {
 	QueryStatsByLanguage(ctx context.Context, arg QueryStatsByLanguageParams) ([]QueryStatsByLanguageRow, error)
 	// Sources with a current-window query of the selected account type, by
 	// current total duration desc. service_query_count ignores the account type.
+	// team_id is the lowest team that links the source now, 0 when none does:
+	// the rollup's team_id records where a query ran, not who has the source.
 	QueryStatsBySource(ctx context.Context, arg QueryStatsBySourceParams) ([]QueryStatsBySourceRow, error)
 	// Users with a current-window query, by current query count desc.
 	QueryStatsByUser(ctx context.Context, arg QueryStatsByUserParams) ([]QueryStatsByUserRow, error)

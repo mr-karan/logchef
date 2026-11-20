@@ -34,7 +34,7 @@ const stats: QueryStatsResponse = {
   sources: [
     { source_id: 1, source_name: "HTTP Access", source_type: "clickhouse", team_id: 4, service_query_count: 178600, current: totals(4920, 4920 * 1820), prior: totals(3814, 3814 * 1200), advisor: { analyzed: true, high: 1, medium: 0, low: 2 } },
     { source_id: 2, source_name: "Order Engine", source_type: "clickhouse", team_id: 4, service_query_count: 0, current: totals(3410, 3410 * 340), prior: totals(3045, 3045 * 374), advisor: { analyzed: false, high: 0, medium: 0, low: 0 } },
-    { source_id: 3, source_name: "Edge Proxy", source_type: "loki", team_id: 5, service_query_count: 0, current: totals(620, 620 * 410), prior: totals(660, 660 * 406), advisor: null },
+    { source_id: 3, source_name: "Edge Proxy", source_type: "loki", team_id: null, service_query_count: 0, current: totals(620, 620 * 410), prior: totals(660, 660 * 406), advisor: null },
   ],
   shapes: {
     since: "2026-10-22",
@@ -205,6 +205,16 @@ describe("Query Activity", () => {
     expect(hrefs(row(1), "Query runs in the Audit Log")).toEqual(["/admin/audit-log?action=query.run&t=30d&target_type=source&target_id=1"]);
     const failed = [...root.querySelectorAll("a")].find(a => a.textContent?.trim() === "Failed queries");
     expect(decodeURIComponent(failed?.getAttribute("href") ?? "")).toBe("/admin/audit-log?action=query.run&t=30d&outcome=failure");
+  });
+
+  it("disables the Explorer link of a source no team links", async () => {
+    await mount();
+    await respond();
+    const row = section("sources").querySelector('[data-source="3"]')!;
+    expect(hrefs(row, "Open in Explorer")).toEqual([]);
+    const disabled = row.querySelector('[aria-label="Open in Explorer"]');
+    expect(disabled?.getAttribute("aria-disabled")).toBe("true");
+    expect(disabled?.getAttribute("title")).toBe("No team links this source");
   });
 
   it("ranks filter shapes with their advisor finding and counts the unanalyzed queries apart", async () => {
