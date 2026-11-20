@@ -27,6 +27,10 @@ type windowedQueryRequest struct {
 
 const windowedQueryFailure = "Windowed query failed"
 
+// errWindowFailed ends the query.run event of a windowed search in which a
+// window failed.
+var errWindowFailed = &datasource.UpstreamError{Message: "a window of the search failed"}
+
 func (s *Server) handleStreamFields(c fiber.Ctx) error {
 	src, ok := s.authorizedSource(c)
 	if !ok {
@@ -41,7 +45,7 @@ func (s *Server) handleStreamFields(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fields)
 }
 
-func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
+func (s *Server) handleWindowedQuery(c fiber.Ctx) (err error) {
 	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
@@ -50,9 +54,25 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
+	user := currentUser(c)
+	if user == nil {
+		return sendMissingUser(c)
+	}
+	// A count request draws the histogram of a search: like /logs/histogram,
+	// it returns no rows, so it records no query run.
+	var run *queryRun
+	if !req.Count {
+		run = s.newQueryRun(c, src, user, queryRunWindowed, req.QueryText, req.QueryLanguage, req.Limit)
+		// The first page writes the history row; later pages continue it.
+		run.history = req.Cursor == "" && req.WindowIndex == nil && req.SkipWindow == nil
+		defer func() { s.endQueryRun(c, run, err, recover()) }()
+	}
 	source, err := core.LoadSource(c.Context(), s.datasources, src.SourceID())
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
+	}
+	if run != nil {
+		run.source = source
 	}
 	if !source.IsVictoriaLogs() {
 		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, "Windowed search requires a VictoriaLogs source", models.ValidationErrorType)
@@ -75,6 +95,9 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 		}
 	}
+	if run != nil {
+		run.from, run.to = params.StartTime, params.EndTime
+	}
 	plan, err := s.datasources.PrepareWindowedQuery(c.Context(), src.SourceID(), datasource.WindowedRequest{
 		QueryRequest: params, Cursor: req.Cursor, Count: req.Count, Step: req.Step, WindowIndex: req.WindowIndex, SkipWindow: req.SkipWindow, StreamFilters: req.ExtraStreamFilters,
 	})
@@ -84,7 +107,6 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 	}
-	user := currentUser(c)
 	class := QueryClassPreview
 	if req.Count {
 		class = QueryClassHistogram
@@ -95,25 +117,34 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		cancel()
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, err.Error(), models.ValidationErrorType)
 	}
-	var record func(int64)
-	if !req.Count && req.Cursor == "" && req.WindowIndex == nil && req.SkipWindow == nil {
-		started := time.Now()
-		record = func(rows int64) {
-			duration := time.Since(started).Milliseconds()
-			s.recordQueryHistory(user, src.TeamID(), source, params.StartTime, req.QueryText, req.QueryLanguage, duration, rows)
-			s.log.Info("query.execute", "user", user.Email, "team_id", src.TeamID(), "source_id", src.SourceID(), "mode", "windowed", "query_id", queryID, "rows", rows, "duration_ms", duration)
-		}
+	if run != nil {
+		run.handedOff = true
 	}
-	return s.streamWindowedResponse(ctx, c, src.SourceID(), plan, cancel, queryID, record)
+	return s.streamWindowedResponse(ctx, c, src.SourceID(), plan, cancel, queryID, run)
 }
 
-func (s *Server) streamWindowedResponse(ctx context.Context, c fiber.Ctx, sourceID models.SourceID, plan *datasource.WindowedPlan, cancel context.CancelFunc, queryID string, record func(int64)) error {
+// streamWindowedResponse streams the windows of a search as server-sent
+// events and finishes run, which is nil for a count request.
+func (s *Server) streamWindowedResponse(ctx context.Context, c fiber.Ctx, sourceID models.SourceID, plan *datasource.WindowedPlan, cancel context.CancelFunc, queryID string, run *queryRun) error {
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("X-Accel-Buffering", "no")
 	c.Set("X-LogChef-Query-ID", queryID)
 	c.RequestCtx().Response.ImmediateHeaderFlush = true
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
+		var rows int64
+		// runErr is why the search stopped, nil when every window completed.
+		// A failed write means the client went away.
+		var runErr error
+		defer func() {
+			if run == nil {
+				return
+			}
+			if runErr == nil {
+				s.log.Info("query.execute", "user", run.user.Email, "team_id", run.teamID, "source_id", sourceID, "mode", "windowed", "query_id", queryID, "rows", rows, "duration_ms", time.Since(run.started).Milliseconds())
+			}
+			s.finishQueryRun(run, queryOutcome{err: runErr, status: fiber.StatusOK, queryID: queryID, rows: rows})
+		}()
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
 		events := make(chan datasource.WindowedEvent, 1)
@@ -140,39 +171,44 @@ func (s *Server) streamWindowedResponse(ctx context.Context, c fiber.Ctx, source
 			return w.Flush()
 		}
 		if _, err := w.WriteString(": ok\n\n"); err != nil {
+			runErr = context.Canceled
 			return
 		}
 		if err := w.Flush(); err != nil {
+			runErr = context.Canceled
 			return
 		}
-		var rows int64
-		failed := false
 		heartbeat := time.NewTicker(tailHeartbeatInterval)
 		defer heartbeat.Stop()
 		for {
 			select {
 			case <-ctx.Done():
+				runErr = ctx.Err()
 				return
 			case <-heartbeat.C:
 				if _, err := w.WriteString(": hb\n\n"); err != nil {
+					runErr = context.Canceled
 					return
 				}
 				if err := w.Flush(); err != nil {
+					runErr = context.Canceled
 					return
 				}
 			case event, open := <-events:
 				if !open {
 					if err := <-done; err != nil {
+						runErr = err
 						s.log.Warn("windowed query ended", "source_id", sourceID, "error", err)
 						_ = writeEvent(datasource.WindowedEvent{Type: datasource.WindowEnd, Message: "Windowed query stopped before completion. Retry the pending window."})
-					} else if !failed && record != nil {
-						record(rows)
 					}
 					return
 				}
 				rows += int64(len(event.Logs))
-				failed = failed || event.Status == "failed"
+				if event.Status == datasource.WindowFailed && runErr == nil {
+					runErr = errWindowFailed
+				}
 				if err := writeEvent(event); err != nil {
+					runErr = context.Canceled
 					return
 				}
 			}

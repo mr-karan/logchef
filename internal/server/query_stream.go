@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -274,6 +273,9 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
 	}
 
+	run := q.run
+	run.mode = queryRunStream
+	run.handedOff = true
 	reader, producer := io.Pipe()
 	done := make(chan struct{})
 	go func() {
@@ -283,13 +285,14 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 		defer producer.Close()
 		output := bufio.NewWriter(producer)
 		writer := newQueryStreamWriter(output, cfg, queryID)
-		start := time.Now()
 		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, q.params, writer)
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
-					time.Since(start).Milliseconds(), int64(writer.rows))
-			} else if writer.begun {
+			status := fiber.StatusOK
+			if !writer.begun {
+				status = classifyQueryError(err, cfg.failure, cfg.operation).status
+			}
+			s.finishQueryRun(run, queryOutcome{err: err, status: status, queryID: queryID, rows: int64(writer.rows)})
+			if writer.begun && !errors.Is(err, context.Canceled) {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", q.mode)
 			}
 			if !writer.begun {
@@ -312,8 +315,7 @@ func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQue
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
-		s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
-			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
+		s.finishQueryRun(run, queryOutcome{status: fiber.StatusOK, queryID: queryID, rows: int64(stats.RowsReturned), stats: &stats})
 	}()
 
 	// The first byte proves execution reached Begin before HTTP headers are committed.

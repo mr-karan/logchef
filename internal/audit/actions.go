@@ -53,6 +53,8 @@ const (
 
 	OAuthGrantRevoke Action = "oauth_grant.revoke"
 
+	QueryRun Action = "query.run"
+
 	QueryShareCreate Action = "query_share.create"
 	QueryShareDelete Action = "query_share.delete"
 
@@ -142,6 +144,7 @@ var registrations = []struct {
 	{NotificationDestinationCreate, true}, {NotificationDestinationUpdate, true}, {NotificationDestinationDelete, true}, {NotificationDestinationTest, false},
 	{OAuthConsentApprove, true}, {OAuthConsentDeny, true},
 	{OAuthGrantRevoke, true},
+	{QueryRun, false},
 	{QueryShareCreate, true}, {QueryShareDelete, true},
 	{SavedQueryCreate, true}, {SavedQueryUpdate, true}, {SavedQueryDelete, true},
 	{ServiceAccountCreate, true}, {ServiceAccountDelete, true},
@@ -168,7 +171,7 @@ var verbs = []string{
 	"create", "update", "delete", "add", "remove", "link", "unlink", "approve",
 	"deny", "revoke", "resolve", "test", "login", "logout", "download", "export",
 	"set_default", "clear_default",
-	"pause", "resume", "claim",
+	"pause", "resume", "claim", "run",
 }
 
 var resourcePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)

@@ -61,9 +61,11 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 		`"warnings":[{"code":"LIMIT_APPLIED","message":"limit applied"}]`
 	generatedSQL := `SELECT * FROM logs WHERE 1=1 AND timestamp BETWEEN '2026-09-01 00:00:00' AND '2026-09-01 01:00:00'`
 	endpoints := []struct {
-		name        string
-		body        string
-		wantData    string
+		name     string
+		body     string
+		wantData string
+		// wantHistory has no QueryLanguage for a query in the source's
+		// native language.
 		wantHistory models.QueryHistory
 		wantStart   time.Time // the start time behind the history lookback; zero for none
 	}{
@@ -71,7 +73,7 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 			name:        "logs",
 			body:        `{"query_text":"SELECT * FROM logs"`,
 			wantData:    `{"data":[{"message":"first row"}],` + commonData + `}`,
-			wantHistory: models.QueryHistory{QueryText: "SELECT * FROM logs", QueryLanguage: models.QueryLanguageClickHouseSQL, DurationMs: 7, RowCount: 1},
+			wantHistory: models.QueryHistory{QueryText: "SELECT * FROM logs", DurationMs: 7, RowCount: 1},
 		},
 		{
 			name: "logchefql",
@@ -82,6 +84,10 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 			wantHistory: models.QueryHistory{QueryText: `level="error"`, QueryLanguage: models.QueryLanguageLogchefQL, DurationMs: 7, RowCount: 1},
 			wantStart:   time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
 		},
+	}
+	nativeLanguage := map[models.SourceType]models.QueryLanguage{
+		models.SourceTypeClickHouse:   models.QueryLanguageClickHouseSQL,
+		models.SourceTypeVictoriaLogs: models.QueryLanguageLogsQL,
 	}
 	for _, endpoint := range endpoints {
 		for _, sourceType := range []models.SourceType{models.SourceTypeClickHouse, models.SourceTypeVictoriaLogs} {
@@ -96,7 +102,7 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 				s.config.DashboardCache.MaxConcurrentFills = 1
 				s.dashCache = cache.New(cache.Config{Enabled: true, MaxEntryBytes: 4096, MaxBytes: 8192})
 				t.Cleanup(s.dashCache.Close)
-				s.historyQueue = make(chan *models.QueryHistory, 4)
+				s.queryRecords = make(chan queryRecord, 4)
 				s.datasources = datasource.NewService(s.store, s.log)
 				s.datasources.Register(&succeedingQueryProvider{sourceType: sourceType})
 				source := &models.Source{Name: "preview-success", SourceType: sourceType}
@@ -165,7 +171,11 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 					t.Fatalf("X-LogChef-Query-ID=%q, want %q", got, wantHeader)
 				}
 				select {
-				case entry := <-s.historyQueue:
+				case rec := <-s.queryRecords:
+					entry := rec.history
+					if entry == nil {
+						t.Fatal("the query wrote no history row")
+					}
 					if endpoint.wantStart.IsZero() {
 						if entry.LookbackSeconds != nil {
 							t.Fatalf("lookback=%d, want none", *entry.LookbackSeconds)
@@ -177,6 +187,9 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 					entry.LookbackSeconds = nil
 					want := endpoint.wantHistory
 					want.UserID, want.TeamID, want.SourceID = user.ID, src.TeamID(), source.ID
+					if want.QueryLanguage == "" {
+						want.QueryLanguage = nativeLanguage[sourceType]
+					}
 					if !reflect.DeepEqual(*entry, want) {
 						t.Fatalf("history=%+v, want %+v", *entry, want)
 					}
@@ -192,8 +205,10 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 						t.Fatalf("X-Logchef-Cache=%q, want %q", got, wantCache)
 					}
 				}
-				if len(s.historyQueue) != 0 {
-					t.Fatal("a dashboard cache fill recorded query history")
+				for len(s.queryRecords) > 0 {
+					if rec := <-s.queryRecords; rec.history != nil {
+						t.Fatal("a dashboard cache fill recorded query history")
+					}
 				}
 			})
 		}

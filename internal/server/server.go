@@ -89,21 +89,32 @@ type Server struct {
 	// audit table, the only events an unauthenticated caller can cause.
 	signInFailureAudit *auth.WindowLimiter
 
-	listener        net.Listener
-	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
-	backgroundMu    sync.Mutex
-	shutdownOnce    sync.Once
-	shutdownErr     error
-	backgroundDone  chan struct{}
-	exportOwner     models.ExportJobOwner
-	historyQueue    chan *models.QueryHistory
-	historyDropped  atomic.Uint64
-	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
-	shapes          shapeRecorder
-	tokenQueue      chan int
-	tokenLastQueued map[int]time.Time
-	tokenDropped    atomic.Uint64
-	stop            chan struct{} // closed by Shutdown to stop background maintenance loops
+	listener            net.Listener
+	baseCtx             context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
+	backgroundMu        sync.Mutex
+	shutdownOnce        sync.Once
+	shutdownErr         error
+	backgroundDone      chan struct{}
+	exportOwner         models.ExportJobOwner
+	queryRecords        chan queryRecord
+	queryRecordsDropped atomic.Uint64
+	historyDrainCtx     context.Context //nolint:containedctx // Published before the stop channel closes.
+	shapes              shapeRecorder
+	tokenQueue          chan int
+	tokenLastQueued     map[int]time.Time
+	tokenDropped        atomic.Uint64
+	stop                chan struct{} // closed by Shutdown to stop background maintenance loops
+
+	// activeQueryRuns counts unfinished query runs. Once Shutdown has
+	// stopped the HTTP server, so no handler starts another run,
+	// queryRunsDone closes when the count reaches zero. The writer accepts
+	// records until then, and sets queryRecordsClosed when it stops. All
+	// are guarded by backgroundMu.
+	activeQueryRuns    int
+	httpStopped        bool
+	queryRunsDone      chan struct{}
+	queryRecordsClosed bool
+
 	// cancelRequests cancels the base context every request runs on (see
 	// requestContext).
 	cancelRequests context.CancelFunc
@@ -221,11 +232,12 @@ func New(opts ServerOptions) *Server {
 		exportOwner:     models.ExportJobOwner{InstanceID: opts.Config.Export.InstanceID, ProcessID: uuid.NewString()},
 		baseCtx:         baseCtx,
 		backgroundDone:  make(chan struct{}),
-		historyQueue:    make(chan *models.QueryHistory, 128),
+		queryRecords:    make(chan queryRecord, 128),
 		tokenQueue:      make(chan int, 128),
 		tokenLastQueued: make(map[int]time.Time),
 		stop:            make(chan struct{}),
 		cancelRequests:  cancelRequests,
+		queryRunsDone:   make(chan struct{}),
 	}
 
 	s.signInFailureAudit = auth.NewGlobalWindowLimiter(time.Minute, failedSignInEventsPerMinute)
@@ -711,6 +723,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 				s.shutdownErr = err
 				s.log.Warn("HTTP shutdown failed", "error", err)
 			}
+			s.backgroundMu.Lock()
+			s.httpStopped = true
+			s.closeIfQueryRunsDone()
+			s.backgroundMu.Unlock()
 			s.wg.Wait()
 			s.logBackgroundDrops()
 			if s.dashCache != nil {
