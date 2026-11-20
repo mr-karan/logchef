@@ -196,17 +196,14 @@ describe("Query Activity", () => {
     await mount();
     await respond();
     const readout = () => root.querySelector("[data-chart-readout]")!.textContent!.trim();
-    const latest = readout();
-    expect(latest).toMatch(/queries, .* active users$/);
+    expect(readout()).toBe("Hover a day to see its numbers");
     const days = root.querySelectorAll('[data-chart="users"] [data-day]');
     days[0].dispatchEvent(new Event("mouseenter"));
     await flush();
-    const first = readout();
-    expect(first).not.toBe(latest);
-    expect(first).toMatch(/queries, .* active users$/);
+    expect(readout()).toMatch(/: [\d,]+ queries, [\d,.]+ active users$/);
     root.querySelector('[data-chart="queries"] [data-day]')!.closest(".space-y-4")!.dispatchEvent(new Event("mouseleave"));
     await flush();
-    expect(readout()).toBe(latest);
+    expect(readout()).toBe("Hover a day to see its numbers");
   });
 
   it("links each source to Explorer, its settings, its query runs and its advisor findings", async () => {
