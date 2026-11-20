@@ -1,337 +1,472 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toValue } from "vue";
+import { computed, onBeforeUnmount, ref, toValue, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Activity, RefreshCw, ShieldCheck } from "lucide-vue-next";
-import { PageHeader, LoadingState, EmptyState, SearchInput } from "@/components/layout";
+import { useRoute, useRouter, type LocationQueryRaw } from "vue-router";
+import { Activity, FileSearch, RefreshCw, Settings2, Telescope, X } from "lucide-vue-next";
+import { PageHeader, LoadingState, EmptyState } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { adminApi, type QueryActivityFilters, type QueryActivityResponse, type QueryStatsResponse } from "@/api/admin";
+import { adminApi, type QueryAccount, type QueryStatsResponse, type UserQueryStat } from "@/api/admin";
 import { isSuccessResponse } from "@/api/types";
 import { formatErrorMessage } from "@/api/error-handler";
-import { formatHistoryTimeAgo, formatHistoryDuration } from "@/lib/queryHistory";
-import { useMetaStore } from "@/stores/meta";
-import { usePreferencesStore } from "@/stores/preferences";
+import { formatHistoryDuration } from "@/lib/queryHistory";
+import { advisorLink, auditLink, averageMs, formatLookback, formatTotalTime, shapeColumn, userName } from "@/lib/queryActivity";
+import QueryActivityDelta from "./components/QueryActivityDelta.vue";
+import QueryActivityDailyChart from "./components/QueryActivityDailyChart.vue";
 
-const RECENT_LIMIT = 100;
-const PAGE_SIZE = 20;
+const WINDOWS = [7, 30, 90] as const;
+const ACCOUNTS: QueryAccount[] = ["human", "service", "all"];
+// Languages keep their color whatever their rank.
+const LANGUAGES = ["logchefql", "clickhouse-sql", "logsql", "logql"];
+
 const { t, locale } = useI18n();
-const metaStore = useMetaStore();
-const preferencesStore = usePreferencesStore();
-const isDemo = computed(() => metaStore.demoReadOnly);
-const statsDays = ref("30");
+const route = useRoute();
+const router = useRouter();
 const stats = ref<QueryStatsResponse | null>(null);
-const statsLoading = ref(true);
-const statsError = ref<string | null>(null);
-const activity = ref<QueryActivityResponse | null>(null);
-const activityLoading = ref(true);
-const activityError = ref<string | null>(null);
-const searchDraft = ref("");
-const filters = ref<QueryActivityFilters>({});
-const sourceScope = ref<string | null>(null);
-const userScope = ref<string | null>(null);
-const visibleCount = ref(PAGE_SIZE);
-const investigation = ref<HTMLElement | null>(null);
-const nowMs = ref(Date.now());
-let statsRequest: AbortController | undefined;
-let activityRequest: AbortController | undefined;
-const hasFilters = computed(() => Object.values(filters.value).some(value => value !== undefined && value !== ""));
-const isRefreshing = computed(() => statsLoading.value || activityLoading.value);
-const dailySeries = computed(() => {
+const loading = ref(true);
+const error = ref<string | null>(null);
+let request: AbortController | undefined;
+
+function queryNumber(key: string): number | undefined {
+  const raw = route.query[key];
+  const value = typeof raw === "string" ? Number(raw) : NaN;
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+const days = computed(() => {
+  const value = queryNumber("days");
+  return value && (WINDOWS as readonly number[]).includes(value) ? value : 30;
+});
+const account = computed<QueryAccount>(() => {
+  const raw = route.query.account;
+  return ACCOUNTS.includes(raw as QueryAccount) ? raw as QueryAccount : "human";
+});
+const sourceId = computed(() => queryNumber("source"));
+const userId = computed(() => queryNumber("user"));
+
+function setQuery(changes: Record<string, string | null>) {
+  const query: LocationQueryRaw = { ...route.query };
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) delete query[key];
+    else query[key] = value;
+  }
+  void router.replace({ query });
+}
+
+async function load() {
+  request?.abort();
+  const controller = new AbortController();
+  request = controller;
+  loading.value = true;
+  error.value = null;
+  try {
+    const response = await adminApi.getQueryStats(
+      { days: days.value, account: account.value, source_id: sourceId.value, user_id: userId.value },
+      { signal: controller.signal },
+    );
+    if (controller.signal.aborted) return;
+    if (isSuccessResponse(response)) stats.value = response.data ?? null;
+    else error.value = response.message || t("admin.usageStatsLoadFailed");
+  } catch (err: unknown) {
+    if (!controller.signal.aborted) error.value = formatErrorMessage(err, t("admin.usageStatsLoadFailed"));
+  } finally {
+    if (!controller.signal.aborted) loading.value = false;
+  }
+}
+watch([days, account, sourceId, userId], load, { immediate: true });
+onBeforeUnmount(() => request?.abort());
+
+const number = (value: number) => value.toLocaleString(toValue(locale), { maximumFractionDigits: 1 });
+const compact = (value: number) => new Intl.NumberFormat(toValue(locale), { notation: "compact", maximumFractionDigits: 1 }).format(value);
+const duration = (ms: number | null) => (ms === null ? "—" : formatHistoryDuration(ms, toValue(locale)));
+const formatDay = (date: string) =>
+  new Intl.DateTimeFormat(toValue(locale), { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+const languageLabel = (language: string) =>
+  ({ logchefql: "LogchefQL", "clickhouse-sql": "ClickHouse SQL", logsql: "LogsQL", logql: "LogQL" })[language] ?? language;
+const sourceLabel = (name: string, id: number) => name || t("admin.sourceFallback", { id });
+const userLabel = (user: UserQueryStat) => userName(user) || t("admin.userFallback", { id: user.user_id });
+
+const accountTabs = computed(() => ACCOUNTS.map(key => ({
+  key,
+  label: t({ human: "admin.accountHumans", service: "admin.accountServices", all: "admin.accountAll" }[key]),
+  count: stats.value?.account_totals[key],
+})));
+
+const chips = computed(() => {
+  const filters = stats.value?.filters;
+  const out: { key: "source" | "user"; label: string }[] = [];
+  if (sourceId.value) out.push({ key: "source", label: `${t("ui.source")}: ${filters?.source_name || t("admin.sourceFallback", { id: sourceId.value })}` });
+  if (userId.value) out.push({ key: "user", label: `${t("ui.user")}: ${filters?.user_name || t("admin.userFallback", { id: userId.value })}` });
+  return out;
+});
+
+const headline = computed(() => {
   if (!stats.value) return [];
-  const counts = new Map(stats.value.volume_by_day.map(day => [day.date, day.query_count]));
-  const start = new Date(`${stats.value.since}T00:00:00Z`);
-  return Array.from({ length: stats.value.days }, (_, index) => {
-    const date = new Date(start);
-    date.setUTCDate(start.getUTCDate() + index);
-    const key = date.toISOString().slice(0, 10);
-    return { date: key, count: counts.get(key) ?? 0 };
+  const { current, prior } = stats.value.summary;
+  return [
+    {
+      key: "users", label: t("admin.activeUsers"), value: number(current.active_users),
+      aside: t("admin.ofUsers", { count: number(stats.value.total_users) }),
+      detail: t("admin.avgDailyActive", { count: number(current.avg_daily_active_users) }),
+      current: current.active_users, prior: prior.active_users, priorText: number(prior.active_users), kind: "count" as const,
+    },
+    {
+      key: "queries", label: t("admin.queries"), value: number(current.query_count),
+      aside: "",
+      detail: account.value === "human" && stats.value.account_totals.service
+        ? t("admin.serviceQueriesHidden", { count: compact(stats.value.account_totals.service) })
+        : "",
+      current: current.query_count, prior: prior.query_count, priorText: number(prior.query_count), kind: "count" as const,
+    },
+    {
+      key: "latency", label: t("admin.averageLatency"), value: duration(averageMs(current)),
+      aside: "", detail: "",
+      current: averageMs(current), prior: averageMs(prior), priorText: duration(averageMs(prior)), kind: "latency" as const,
+    },
+    {
+      key: "sources", label: t("admin.sourcesQueried"), value: number(current.active_sources),
+      aside: "", detail: "",
+      current: current.active_sources, prior: prior.active_sources, priorText: number(prior.active_sources), kind: "count" as const,
+    },
+  ];
+});
+
+const todayInWindow = computed(() => stats.value?.window.until);
+const priorAvgQueries = computed(() => stats.value ? stats.value.summary.prior.query_count / stats.value.prior_window.days : 0);
+
+const languageMix = computed(() => {
+  const mix = stats.value?.language_mix ?? [];
+  const total = mix.reduce((sum, item) => sum + item.query_count, 0);
+  if (!total) return [];
+  return mix.map(item => {
+    const slot = LANGUAGES.indexOf(item.language);
+    return {
+      language: item.language,
+      label: languageLabel(item.language),
+      percent: (item.query_count / total) * 100,
+      color: slot === -1 ? "var(--panel-chart-other)" : `var(--panel-chart-${slot + 1})`,
+    };
   });
 });
-const maxDaily = computed(() => Math.max(1, ...dailySeries.value.map(day => day.count)));
-const metrics = computed(() => stats.value ? [
-  { label: t("admin.totalQueries"), value: stats.value.summary.query_count.toLocaleString(toValue(locale)) },
-  { label: t("admin.activeSources"), value: stats.value.summary.active_sources.toLocaleString(toValue(locale)) },
-  { label: t("admin.activeUsers"), value: stats.value.summary.active_users.toLocaleString(toValue(locale)) },
-  { label: t("admin.averageLatency"), value: duration(stats.value.summary.avg_duration_ms) },
-] : []);
-const feeds = computed(() => [
-  { key: "recent", title: t("admin.recentQueries"), queries: activity.value?.recent.slice(0, visibleCount.value) ?? [] },
-  { key: "slowest", title: t("admin.slowestRecentQueries"), queries: activity.value?.slowest ?? [] },
-]);
-
-async function loadStats() {
-  statsRequest?.abort();
-  const request = new AbortController();
-  statsRequest = request;
-  statsLoading.value = true;
-  statsError.value = null;
-  try {
-    const response = await adminApi.getQueryStats(Number(statsDays.value), { signal: request.signal });
-    if (request.signal.aborted) return;
-    if (isSuccessResponse(response)) stats.value = response.data ?? null;
-    else statsError.value = response.message || t("admin.usageStatsLoadFailed");
-  } catch (err: unknown) {
-    if (!request.signal.aborted) statsError.value = formatErrorMessage(err, t("admin.usageStatsLoadFailed"));
-  } finally {
-    if (!request.signal.aborted) statsLoading.value = false;
-  }
-}
-
-async function loadActivity() {
-  activityRequest?.abort();
-  const request = new AbortController();
-  activityRequest = request;
-  activityError.value = null;
-  visibleCount.value = PAGE_SIZE;
-  if (isDemo.value) {
-    activity.value = null;
-    activityLoading.value = false;
-    return;
-  }
-  activityLoading.value = true;
-  try {
-    const response = await adminApi.getQueryActivity(RECENT_LIMIT, filters.value, { signal: request.signal });
-    if (request.signal.aborted) return;
-    if (isSuccessResponse(response)) {
-      activity.value = response.data ?? null;
-      nowMs.value = Date.now();
-    } else activityError.value = response.message || t("admin.queryActivityLoadFailed");
-  } catch (err: unknown) {
-    if (!request.signal.aborted) activityError.value = formatErrorMessage(err, t("admin.queryActivityLoadFailed"));
-  } finally {
-    if (!request.signal.aborted) activityLoading.value = false;
-  }
-}
-
-async function refreshAll() {
-  await Promise.all([loadStats(), loadActivity()]);
-}
-function search() {
-  filters.value = { ...filters.value, q: searchDraft.value.trim() || undefined };
-  loadActivity();
-}
-async function scopeSource(id: number, label: string) {
-  sourceScope.value = label;
-  filters.value = { ...filters.value, source_id: id };
-  loadActivity();
-  await nextTick();
-  investigation.value?.focus();
-  investigation.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-}
-async function scopeUser(id: number, label: string) {
-  userScope.value = label;
-  filters.value = { ...filters.value, user_id: id };
-  loadActivity();
-  await nextTick();
-  investigation.value?.focus();
-  investigation.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-}
-function clearFilter(key?: keyof QueryActivityFilters) {
-  if (!key || key === "source_id") sourceScope.value = null;
-  if (!key || key === "user_id") userScope.value = null;
-  if (!key || key === "q") searchDraft.value = "";
-  if (key) {
-    const next = { ...filters.value };
-    delete next[key];
-    filters.value = next;
-  } else filters.value = {};
-  loadActivity();
-}
-function sourceLabel(name: string, id: number) {
-  return name || t("admin.sourceFallback", { id });
-}
-function userLabel(email: string, id: number) {
-  return email || t("admin.userFallback", { id });
-}
-function formatDay(date: string) {
-  return new Intl.DateTimeFormat(toValue(locale), { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
-}
-function timeAgo(date: string) {
-  return formatHistoryTimeAgo(date, preferencesStore.zone, nowMs.value, toValue(locale));
-}
-function duration(ms: number) {
-  return formatHistoryDuration(ms, toValue(locale));
-}
-function languageLabel(language: string) {
-  return ({ logchefql: "LogChefQL", "clickhouse-sql": "ClickHouse SQL", logsql: "LogsQL", logql: "LogQL" })[language] ?? language;
-}
-onMounted(refreshAll);
-onBeforeUnmount(() => {
-  statsRequest?.abort();
-  activityRequest?.abort();
-});
+const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(value)}%`;
 </script>
 
 <template>
   <div class="space-y-6">
     <PageHeader :title="t('routes.queryActivity')">
       <template #actions>
-        <Button variant="ghost" size="sm" as-child><router-link :to="{ name: 'AdminAuditLog' }">{{ t('routes.auditLog') }}</router-link></Button>
-        <Button variant="outline" size="sm" :disabled="isRefreshing" @click="refreshAll">
-          <RefreshCw :class="['mr-2 h-3.5 w-3.5', isRefreshing && 'animate-spin']" />{{ t('ui.refresh') }}
+        <Button variant="ghost" size="sm" as-child>
+          <router-link :to="auditLink(days, { outcome: 'failure' })">{{ t('admin.failedQueries') }}</router-link>
+        </Button>
+        <Button variant="ghost" size="sm" as-child>
+          <router-link :to="auditLink(days)">{{ t('routes.auditLog') }}</router-link>
+        </Button>
+        <Button variant="outline" size="sm" :disabled="loading" @click="load">
+          <RefreshCw :class="['mr-2 h-3.5 w-3.5', loading && 'animate-spin']" />{{ t('ui.refresh') }}
         </Button>
       </template>
     </PageHeader>
 
-    <section class="overflow-hidden rounded-lg border bg-card">
-      <div class="flex flex-wrap items-center justify-between gap-4 border-b px-5 py-4">
-        <div>
-          <h2 class="font-semibold">{{ t('admin.recordedUsage') }}</h2>
-          <p v-if="stats && !statsLoading" class="mt-1 text-xs text-muted-foreground">{{ t('admin.recordedUsageScope', { date: formatDay(stats.since) }) }}</p>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <div role="tablist" :aria-label="t('admin.accountType')" class="inline-flex rounded-md border bg-muted/40 p-0.5">
+          <button
+            v-for="tab in accountTabs"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            :aria-selected="account === tab.key"
+            :class="['rounded px-3 py-1 text-sm', account === tab.key ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground']"
+            @click="setQuery({ account: tab.key === 'human' ? null : tab.key })"
+          >
+            {{ tab.label }}<span v-if="tab.count !== undefined" class="ml-1.5 text-xs tabular-nums text-muted-foreground">{{ compact(tab.count) }}</span>
+          </button>
         </div>
-        <div class="flex items-center gap-2">
-          <label for="stats-days" class="text-sm text-muted-foreground">{{ t('admin.window') }}</label>
-          <select id="stats-days" v-model="statsDays" class="h-9 rounded-md border bg-background px-3 text-sm" @change="loadStats">
-            <option v-for="days in [7, 30, 90]" :key="days" :value="String(days)">{{ t('settings.days', { count: days }, days) }}</option>
-          </select>
+        <Button
+          v-for="chip in chips"
+          :key="chip.key"
+          variant="secondary"
+          size="sm"
+          :aria-label="t('admin.removeFilter', { name: chip.label })"
+          @click="setQuery({ [chip.key]: null })"
+        >
+          {{ chip.label }}<X class="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <span v-if="stats" class="text-xs text-muted-foreground tabular-nums">
+          {{ t('admin.windowVsPrior', { since: formatDay(stats.window.since), until: formatDay(stats.window.until), days: stats.prior_window.days }) }}
+        </span>
+        <div role="group" :aria-label="t('admin.window')" class="inline-flex rounded-md border p-0.5">
+          <button
+            v-for="option in WINDOWS"
+            :key="option"
+            type="button"
+            :aria-pressed="days === option"
+            :class="['rounded px-2.5 py-1 text-sm tabular-nums', days === option ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground']"
+            @click="setQuery({ days: option === 30 ? null : String(option) })"
+          >
+            {{ t('settings.days', { count: option }, option) }}
+          </button>
         </div>
       </div>
-      <LoadingState v-if="statsLoading" class="py-16" :label="t('admin.loadingUsageStats')" />
-      <div v-else-if="statsError" role="alert" class="p-5 text-sm text-destructive">
-        {{ statsError }} <Button variant="outline" size="sm" class="ml-3" @click="loadStats">{{ t('admin.retry') }}</Button>
-      </div>
-      <template v-else-if="stats">
-        <dl class="grid border-b sm:grid-cols-2 xl:grid-cols-4">
-          <div v-for="metric in metrics" :key="metric.label" class="border-border p-5 sm:odd:border-r xl:border-r xl:last:border-0">
+    </div>
+
+    <LoadingState v-if="loading && !stats" class="py-16" :label="t('admin.loadingUsageStats')" />
+    <div v-else-if="error" role="alert" class="rounded-md border border-destructive/50 p-4 text-sm text-destructive">
+      {{ error }} <Button variant="outline" size="sm" class="ml-3" @click="load">{{ t('admin.retry') }}</Button>
+    </div>
+    <template v-else-if="stats">
+      <dl class="grid overflow-hidden rounded-lg border bg-card sm:grid-cols-2 xl:grid-cols-4" data-section="headline">
+        <div v-for="metric in headline" :key="metric.key" :data-metric="metric.key" class="space-y-1 border-border p-4 sm:odd:border-r xl:border-r xl:last:border-r-0">
+          <div class="flex items-center justify-between gap-2">
             <dt class="text-xs font-medium text-muted-foreground">{{ metric.label }}</dt>
-            <dd class="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{{ metric.value }}</dd>
+            <QueryActivityDelta :current="metric.current" :prior="metric.prior" :kind="metric.kind" />
           </div>
-        </dl>
-        <div class="p-5">
-          <h3 class="text-sm font-semibold">{{ t('admin.dailyVolume') }}</h3>
-          <p class="mt-1 text-xs text-muted-foreground">{{ t('admin.dailyVolumeDescription') }}</p>
-          <EmptyState v-if="!stats.summary.query_count" :icon="Activity" :title="t('admin.noUsageInWindow')" />
-          <template v-else>
-            <div class="mt-5 overflow-x-auto pb-7">
-              <div class="flex h-44 items-end gap-1 border-b" :style="{ minWidth: `${dailySeries.length * 18}px` }" aria-hidden="true">
-                <div v-for="(day, index) in dailySeries" :key="day.date" class="relative flex h-full min-w-3 flex-1 items-end justify-center">
-                  <div class="w-full rounded-t-sm bg-primary/65" :style="{ height: day.count ? `${Math.max(2, day.count / maxDaily * 85)}%` : '1px' }" :title="`${formatDay(day.date)}: ${day.count}`" />
-                  <span v-if="index % Math.max(1, Math.ceil(dailySeries.length / 8)) === 0" class="absolute bottom-0 left-0 translate-y-5 whitespace-nowrap text-[10px] text-muted-foreground">{{ formatDay(day.date) }}</span>
-                </div>
-              </div>
-            </div>
-            <details class="mt-3 text-sm">
+          <dd class="flex items-baseline gap-2">
+            <span class="text-2xl font-semibold tracking-tight tabular-nums">{{ metric.value }}</span>
+            <span v-if="metric.aside" class="text-xs text-muted-foreground">{{ metric.aside }}</span>
+          </dd>
+          <dd class="flex flex-wrap justify-between gap-x-3 text-xs text-muted-foreground">
+            <span>{{ metric.detail }}</span>
+            <span class="tabular-nums">{{ t('admin.priorValue', { value: metric.priorText }) }}</span>
+          </dd>
+        </div>
+      </dl>
+
+      <section class="rounded-lg border bg-card" data-section="adoption">
+        <header class="border-b px-4 py-3">
+          <h2 class="text-base font-medium">{{ t('admin.adoptionTitle') }}</h2>
+        </header>
+        <EmptyState v-if="!stats.summary.current.query_count" :icon="Activity" :title="t('admin.noUsageInWindow')" class="py-10" />
+        <div v-else class="grid gap-6 p-4 lg:grid-cols-5">
+          <div class="min-w-0 lg:col-span-3">
+            <QueryActivityDailyChart :days="stats.volume_by_day" :prior-avg-queries="priorAvgQueries" :prior-avg-users="stats.summary.prior.avg_daily_active_users" />
+            <p class="mt-2 text-xs text-muted-foreground">{{ t('admin.utcDayInProgress', { date: formatDay(todayInWindow ?? '') }) }}</p>
+            <details class="mt-2 text-sm">
               <summary class="w-fit cursor-pointer text-muted-foreground hover:text-foreground">{{ t('admin.viewDailyValues') }}</summary>
               <div class="mt-2 max-h-60 overflow-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>{{ t('admin.utcDate') }}</TableHead>
-                      <TableHead class="text-right">{{ t('admin.totalQueries') }}</TableHead></TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      <TableRow v-for="day in dailySeries" :key="day.date"><TableCell>{{ day.date }}</TableCell>
-                      <TableCell class="text-right tabular-nums">{{ day.count.toLocaleString() }}</TableCell></TableRow>
-                    </TableBody>
-                  </Table>
+                      <TableHead class="text-right">{{ t('admin.queries') }}</TableHead>
+                      <TableHead class="text-right">{{ t('admin.activeUsers') }}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="day in stats.volume_by_day" :key="day.date">
+                      <TableCell>{{ day.date }}</TableCell>
+                      <TableCell class="text-right tabular-nums">{{ number(day.query_count) }}</TableCell>
+                      <TableCell class="text-right tabular-nums">{{ number(day.active_users) }}</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
               </div>
             </details>
-          </template>
-        </div>
-        <div class="grid border-t lg:grid-cols-2">
-          <section class="min-w-0 border-b p-5 lg:border-b-0 lg:border-r">
-            <h3 class="text-sm font-semibold">{{ t('admin.topSources') }}</h3>
-            <p class="mt-1 text-xs text-muted-foreground">{{ t('admin.rankingScope') }}</p>
-            <Table v-if="stats.top_sources.length" class="mt-3">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{{ t('ui.source') }}</TableHead>
-                  <TableHead class="text-right">{{ t('admin.totalQueries') }}</TableHead>
-                  <TableHead class="text-right">{{ t('admin.averageLatency') }}</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="source in stats.top_sources" :key="source.source_id">
-                    <TableCell class="max-w-48 truncate"><Button v-if="!isDemo" variant="link" class="h-auto max-w-full p-0 text-left" @click="scopeSource(source.source_id, sourceLabel(source.source_name, source.source_id))"><span class="truncate">{{ sourceLabel(source.source_name, source.source_id) }}</span></Button><span v-else>{{ sourceLabel(source.source_name, source.source_id) }}</span></TableCell>
-                    <TableCell class="text-right tabular-nums">{{ source.query_count.toLocaleString() }}</TableCell>
-                    <TableCell class="whitespace-nowrap text-right tabular-nums">{{ duration(source.avg_duration_ms) }}</TableCell>
+          </div>
+
+          <div class="min-w-0 space-y-4 lg:col-span-2">
+            <div>
+              <h3 class="text-sm font-medium">{{ t('admin.topUsers') }}</h3>
+              <Table class="mt-2" data-table="users">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{{ t('ui.user') }}</TableHead>
+                    <TableHead class="text-right">{{ t('admin.queries') }}</TableHead>
+                    <TableHead class="text-right">{{ t('admin.activeDays') }}</TableHead>
+                    <TableHead class="text-right">{{ t('admin.avgLatency') }}</TableHead>
+                    <TableHead class="w-8"><span class="sr-only">{{ t('routes.auditLog') }}</span></TableHead>
                   </TableRow>
-                </TableBody>
-              </Table>
-            <EmptyState v-else :title="t('admin.noUsageInWindow')" />
-          </section>
-          <section class="min-w-0 p-5">
-            <h3 class="text-sm font-semibold">{{ t('admin.topUsers') }}</h3>
-            <p class="mt-1 text-xs text-muted-foreground">{{ t('admin.rankingScope') }}</p>
-            <Table v-if="stats.top_users.length" class="mt-3">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{{ t('ui.user') }}</TableHead>
-                  <TableHead class="text-right">{{ t('admin.totalQueries') }}</TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
                   <TableRow v-for="user in stats.top_users" :key="user.user_id">
-                    <TableCell class="max-w-48 truncate"><Button v-if="!isDemo" variant="link" class="h-auto max-w-full p-0 text-left" @click="scopeUser(user.user_id, userLabel(user.user_email, user.user_id))"><span class="truncate">{{ userLabel(user.user_email, user.user_id) }}</span></Button><span v-else>{{ userLabel(user.user_email, user.user_id) }}</span></TableCell>
-                    <TableCell class="text-right tabular-nums">{{ user.query_count.toLocaleString() }}</TableCell>
+                    <TableCell class="max-w-44">
+                      <button type="button" class="block max-w-full truncate text-left font-medium hover:underline focus-visible:underline" @click="setQuery({ user: String(user.user_id) })">
+                        {{ userLabel(user) }}
+                      </button>
+                      <span v-if="user.account_type === 'service'" class="text-xs text-muted-foreground">{{ t('admin.serviceAccount') }}</span>
+                      <span v-else-if="user.full_name && user.email" class="block truncate text-xs text-muted-foreground">{{ user.email }}</span>
+                    </TableCell>
+                    <TableCell class="text-right">
+                      <div class="tabular-nums">{{ number(user.current.query_count) }}</div>
+                      <QueryActivityDelta :current="user.current.query_count" :prior="user.prior.query_count" kind="count" />
+                    </TableCell>
+                    <TableCell class="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                      {{ t('admin.activeDaysValue', { count: user.active_days, days: stats.window.days }) }}
+                    </TableCell>
+                    <TableCell class="text-right">
+                      <div class="whitespace-nowrap text-xs tabular-nums">{{ duration(averageMs(user.current)) }}</div>
+                      <QueryActivityDelta :current="averageMs(user.current)" :prior="averageMs(user.prior)" kind="latency" />
+                    </TableCell>
+                    <TableCell>
+                      <router-link :to="auditLink(days, { actor_id: user.user_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="text-muted-foreground hover:text-foreground">
+                        <FileSearch class="h-4 w-4" />
+                      </router-link>
+                    </TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
-            <EmptyState v-else :title="t('admin.noUsageInWindow')" />
-          </section>
-        </div>
-      </template>
-    </section>
+            </div>
 
-    <section v-if="isDemo" class="flex gap-3 rounded-lg border p-5">
-      <ShieldCheck class="h-5 w-5 shrink-0 text-muted-foreground" />
-      <div><h2 class="text-sm font-semibold">{{ t('admin.publicDemoAggregateOnly') }}</h2><p class="mt-1 text-sm text-muted-foreground">{{ t('admin.publicDemoAggregateDescription') }}</p></div>
-    </section>
-    <section v-else ref="investigation" tabindex="-1" class="scroll-mt-5 space-y-4 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <div>
-        <h2 class="text-base font-semibold">{{ t('admin.recentQuerySample') }}</h2>
-        <p class="mt-1 text-sm text-muted-foreground">{{ t('admin.retainedScope') }}</p>
-      </div>
-      <div class="space-y-3 rounded-lg border bg-card p-4">
-        <form class="flex flex-wrap items-center gap-2" @submit.prevent="search">
-          <SearchInput v-model="searchDraft" :placeholder="t('admin.searchRetained')" class="sm:max-w-md" />
-          <Button type="submit" variant="outline" size="sm">{{ t('ui.search') }}</Button>
-          <label for="activity-language" class="sr-only">{{ t('admin.language') }}</label>
-          <select id="activity-language" v-model="filters.language" class="h-9 rounded-md border bg-background px-3 text-sm" @change="loadActivity">
-            <option :value="undefined">{{ t('admin.allLanguages') }}</option>
-            <option v-for="language in ['logchefql', 'clickhouse-sql', 'logsql', 'logql']" :key="language" :value="language">{{ languageLabel(language) }}</option>
-          </select>
-          <Button v-if="hasFilters" type="button" variant="ghost" size="sm" @click="clearFilter()">{{ t('admin.clearFilters') }}</Button>
-        </form>
-        <div v-if="hasFilters" class="flex flex-wrap gap-2 text-xs">
-          <Button v-if="sourceScope" variant="secondary" size="sm" @click="clearFilter('source_id')">{{ t('ui.source') }}: {{ sourceScope }} ×</Button>
-          <Button v-if="userScope" variant="secondary" size="sm" @click="clearFilter('user_id')">{{ t('ui.user') }}: {{ userScope }} ×</Button>
-          <Button v-if="filters.q" variant="secondary" size="sm" @click="clearFilter('q')">{{ t('ui.search') }}: {{ filters.q }} ×</Button>
-        </div>
-        <p v-if="activity && !activityLoading && !activityError" class="text-xs text-muted-foreground tabular-nums" role="status">{{ t('admin.retainedMatches', { matches: activity.total.toLocaleString(), scanned: activity.window_size.toLocaleString(), limit: activity.window_limit.toLocaleString(), loaded: activity.recent.length }) }}</p>
-      </div>
-      <LoadingState v-if="activityLoading" :label="t('admin.loadingRecentQueryActivity')" />
-      <div v-else-if="activityError" role="alert" class="rounded-md border border-destructive/50 p-4 text-sm text-destructive">{{ activityError }} <Button variant="outline" size="sm" class="ml-3" @click="loadActivity">{{ t('admin.retry') }}</Button></div>
-      <EmptyState v-else-if="!activity?.total" :icon="Activity" :title="hasFilters ? t('admin.noQueriesMatchFilter') : t('admin.noRecentQueries')" />
-      <template v-else>
-        <section v-for="feed in feeds" :key="feed.key" class="overflow-hidden rounded-lg border bg-card">
-          <div class="border-b px-5 py-4"><h3 class="text-sm font-semibold">{{ feed.title }}</h3><p class="mt-1 text-xs text-muted-foreground">{{ t(feed.key === 'recent' ? 'admin.recentFeedScope' : 'admin.slowFeedScope', { count: feed.queries.length, limit: RECENT_LIMIT }) }}</p></div>
-          <div class="overflow-x-auto">
-            <Table class="min-w-[850px] table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead class="w-28">{{ t('admin.time') }}</TableHead>
-                  <TableHead class="w-36">{{ t('ui.source') }}</TableHead>
-                  <TableHead class="w-44">{{ t('ui.user') }}</TableHead>
-                  <TableHead class="w-28">{{ t('admin.language') }}</TableHead>
-                  <TableHead class="w-24 text-right">{{ t('admin.duration') }}</TableHead>
-                  <TableHead class="w-20 text-right">{{ t('admin.rows') }}</TableHead>
-                  <TableHead class="w-72">{{ t('admin.query') }}</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-for="query in feed.queries" :key="`${feed.key}-${query.id}`">
-                    <TableCell class="text-xs text-muted-foreground"><time :datetime="query.created_at" :title="query.created_at">{{ timeAgo(query.created_at) }}</time></TableCell>
-                    <TableCell><button class="block max-w-full truncate text-left text-xs hover:underline focus-visible:underline" :title="sourceLabel(query.source_name, query.source_id)" @click="scopeSource(query.source_id, sourceLabel(query.source_name, query.source_id))">{{ sourceLabel(query.source_name, query.source_id) }}</button></TableCell>
-                    <TableCell><button class="block max-w-full truncate text-left text-xs hover:underline focus-visible:underline" :title="userLabel(query.user_email, query.user_id)" @click="scopeUser(query.user_id, userLabel(query.user_email, query.user_id))">{{ userLabel(query.user_email, query.user_id) }}</button></TableCell>
-                    <TableCell class="text-xs">{{ languageLabel(query.query_language) }}</TableCell>
-                    <TableCell class="text-right text-xs tabular-nums">{{ duration(query.duration_ms) }}</TableCell>
-                    <TableCell class="text-right text-xs tabular-nums">{{ query.row_count.toLocaleString() }}</TableCell>
-                    <TableCell class="align-top"><details v-if="query.query_text?.trim()" class="group"><summary class="cursor-pointer text-xs"><span class="inline-block max-w-56 truncate align-bottom font-mono group-open:hidden">{{ query.query_text }}</span><span class="hidden group-open:inline">{{ t('admin.hideQuery') }}</span></summary><pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-xs">{{ query.query_text }}</pre></details><span v-else class="text-xs italic text-muted-foreground">{{ t('admin.queryTextUnavailable', { language: languageLabel(query.query_language) }) }}</span></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+            <div v-if="stats.service_summary" class="flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3 text-sm" data-section="service-summary">
+              <div class="min-w-0">
+                <div class="font-medium">
+                  {{ t('admin.serviceAccountCount', { count: stats.service_summary.account_count }, stats.service_summary.account_count) }}
+                  · <span class="tabular-nums">{{ t('admin.queryCount', { count: number(stats.service_summary.query_count) }) }}</span>
+                </div>
+                <div class="truncate text-xs text-muted-foreground">
+                  {{ stats.service_summary.top.map(user => `${userLabel(user)} (${compact(user.current.query_count)})`).join(' · ') }}
+                </div>
+              </div>
+              <Button variant="link" size="sm" class="h-auto shrink-0 p-0" @click="setQuery({ account: 'service' })">{{ t('admin.showServiceAccounts') }}</Button>
+            </div>
+
+            <div v-if="languageMix.length" data-section="languages">
+              <div class="mb-1 text-xs font-medium">{{ t('admin.language') }}</div>
+              <div class="flex h-2 gap-0.5 overflow-hidden rounded-full" aria-hidden="true">
+                <div v-for="item in languageMix" :key="item.language" :style="{ width: `${item.percent}%`, background: item.color }" />
+              </div>
+              <ul class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <li v-for="item in languageMix" :key="item.language" class="flex items-center gap-1">
+                  <span class="inline-block h-2 w-2 rounded-full" :style="{ background: item.color }" aria-hidden="true" />
+                  <span class="font-medium text-foreground tabular-nums">{{ percent(item.percent) }}</span> {{ item.label }}
+                </li>
+              </ul>
+            </div>
           </div>
-          <div v-if="feed.key === 'recent' && visibleCount < activity.recent.length" class="border-t p-3 text-center"><Button variant="ghost" size="sm" @click="visibleCount += PAGE_SIZE">{{ t('admin.showMoreRecords', { count: Math.min(PAGE_SIZE, activity.recent.length - visibleCount) }) }}</Button></div>
-        </section>
-      </template>
-    </section>
+        </div>
+      </section>
+
+      <section class="rounded-lg border bg-card" data-section="sources">
+        <header class="border-b px-4 py-3">
+          <h2 class="text-base font-medium">{{ t('admin.sourcesTitle') }}</h2>
+          <p class="mt-0.5 text-xs text-muted-foreground">{{ t('admin.sourcesScope') }}</p>
+        </header>
+        <EmptyState v-if="!stats.sources.length" :title="t('admin.noUsageInWindow')" class="py-10" />
+        <div v-else class="overflow-x-auto">
+          <Table class="min-w-[760px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{{ t('ui.source') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.queries') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.avgLatency') }}</TableHead>
+                <TableHead>{{ t('admin.schemaAdvisor') }}</TableHead>
+                <TableHead>{{ t('admin.openIn') }}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="source in stats.sources" :key="source.source_id" :data-source="source.source_id">
+                <TableCell class="max-w-64">
+                  <button type="button" class="block max-w-full truncate text-left font-medium hover:underline focus-visible:underline" @click="setQuery({ source: String(source.source_id) })">
+                    {{ sourceLabel(source.source_name, source.source_id) }}
+                  </button>
+                  <span v-if="account === 'human' && source.service_query_count" class="text-xs text-muted-foreground">
+                    {{ t('admin.serviceQueriesExtra', { count: compact(source.service_query_count) }) }}
+                  </span>
+                  <span v-else-if="account === 'all' && source.service_query_count" class="text-xs text-muted-foreground">
+                    {{ t('admin.serviceQueriesIncluded', { count: compact(source.service_query_count) }) }}
+                  </span>
+                </TableCell>
+                <TableCell class="text-right">
+                  <div class="tabular-nums">{{ number(source.current.query_count) }}</div>
+                  <QueryActivityDelta :current="source.current.query_count" :prior="source.prior.query_count" kind="count" />
+                </TableCell>
+                <TableCell class="text-right">
+                  <div class="whitespace-nowrap tabular-nums">{{ duration(averageMs(source.current)) }}</div>
+                  <QueryActivityDelta :current="averageMs(source.current)" :prior="averageMs(source.prior)" kind="latency" />
+                </TableCell>
+                <TableCell class="text-xs">
+                  <router-link v-if="source.advisor" :to="advisorLink(source.source_id)" class="hover:underline" data-link="advisor">
+                    <template v-if="!source.advisor.analyzed">{{ t('admin.advisorNotAnalyzed') }}</template>
+                    <template v-else-if="!source.advisor.high && !source.advisor.medium && !source.advisor.low">{{ t('admin.advisorClean') }}</template>
+                    <template v-else>
+                      {{ [
+                        source.advisor.high && t('admin.findingsHigh', { count: source.advisor.high }),
+                        source.advisor.medium && t('admin.findingsMedium', { count: source.advisor.medium }),
+                        source.advisor.low && t('admin.findingsLow', { count: source.advisor.low }),
+                      ].filter(Boolean).join(' · ') }}
+                    </template>
+                  </router-link>
+                  <span v-else class="text-muted-foreground">—</span>
+                </TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-2 text-muted-foreground">
+                    <router-link :to="{ name: 'LogExplorer', query: { team: String(source.team_id), source: String(source.source_id) } }" :title="t('admin.openInExplorer')" :aria-label="t('admin.openInExplorer')" class="hover:text-foreground">
+                      <Telescope class="h-4 w-4" />
+                    </router-link>
+                    <router-link :to="{ name: 'EditSource', params: { sourceId: String(source.source_id) } }" :title="t('admin.sourceSettings')" :aria-label="t('admin.sourceSettings')" class="hover:text-foreground">
+                      <Settings2 class="h-4 w-4" />
+                    </router-link>
+                    <router-link :to="auditLink(days, { source_id: source.source_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="hover:text-foreground">
+                      <FileSearch class="h-4 w-4" />
+                    </router-link>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </section>
+
+      <section class="rounded-lg border bg-card" data-section="patterns">
+        <header class="border-b px-4 py-3">
+          <h2 class="text-base font-medium">{{ t('admin.patternsTitle') }}</h2>
+          <p class="mt-0.5 text-xs text-muted-foreground">{{ t('admin.patternsScope') }}</p>
+        </header>
+        <EmptyState v-if="!stats.shapes.rows.length" :title="t('admin.noShapes')" class="py-10" />
+        <div v-else class="overflow-x-auto">
+          <Table class="min-w-[760px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{{ t('admin.filterShape') }}</TableHead>
+                <TableHead>{{ t('ui.source') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.runs') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.totalTime') }}</TableHead>
+                <TableHead class="text-right">{{ t('admin.avgLatency') }}</TableHead>
+                <TableHead>{{ t('admin.schemaAdvisor') }}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="row in stats.shapes.rows" :key="`${row.source_id}-${row.query_language}-${row.shape_hash}`">
+                <TableCell class="max-w-80">
+                  <div class="flex flex-wrap gap-1">
+                    <code v-for="item in row.shape" :key="`${shapeColumn(item)}-${item.kind}`" class="rounded bg-muted px-1.5 py-0.5 text-xs">
+                      {{ shapeColumn(item) }} <span class="text-muted-foreground">{{ item.kind }}</span>
+                    </code>
+                  </div>
+                  <div class="mt-1 text-xs text-muted-foreground">
+                    {{ languageLabel(row.query_language) }}<template v-if="row.max_lookback_s !== null"> · {{ t('admin.maxLookback', { duration: formatLookback(row.max_lookback_s) }) }}</template>
+                  </div>
+                </TableCell>
+                <TableCell class="max-w-40">
+                  <button type="button" class="block max-w-full truncate text-left text-sm hover:underline focus-visible:underline" @click="setQuery({ source: String(row.source_id) })">
+                    {{ sourceLabel(row.source_name, row.source_id) }}
+                  </button>
+                </TableCell>
+                <TableCell class="text-right">
+                  <div class="tabular-nums">{{ number(row.current.query_count) }}</div>
+                  <QueryActivityDelta :current="row.current.query_count" :prior="row.prior?.query_count ?? null" kind="count" />
+                </TableCell>
+                <TableCell class="whitespace-nowrap text-right tabular-nums">{{ formatTotalTime(row.current.total_duration_ms, locale) ?? duration(row.current.total_duration_ms) }}</TableCell>
+                <TableCell class="text-right">
+                  <div class="whitespace-nowrap tabular-nums">{{ duration(averageMs(row.current)) }}</div>
+                  <QueryActivityDelta :current="averageMs(row.current)" :prior="row.prior ? averageMs(row.prior) : null" kind="latency" />
+                </TableCell>
+                <TableCell class="max-w-64 text-xs">
+                  <router-link v-if="row.source_type === 'clickhouse'" :to="advisorLink(row.source_id)" class="hover:underline" data-link="advisor">
+                    {{ row.finding ? row.finding.title : t('admin.openAdvisor') }}
+                  </router-link>
+                  <span v-else class="text-muted-foreground">—</span>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+        <footer v-if="stats.shapes.unanalyzed_query_count || stats.shapes.since !== stats.window.since" class="space-y-1 border-t px-4 py-2 text-xs text-muted-foreground">
+          <p v-if="stats.shapes.unanalyzed_query_count">{{ t('admin.unanalyzedFootnote', { count: number(stats.shapes.unanalyzed_query_count) }) }}</p>
+          <p v-if="stats.shapes.since !== stats.window.since">{{ t('admin.shapesSince', { date: formatDay(stats.shapes.since) }) }}</p>
+        </footer>
+      </section>
+    </template>
   </div>
 </template>
