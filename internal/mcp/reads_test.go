@@ -214,22 +214,25 @@ func TestKnownErrorKeepsTheCauseBehindItsMessage(t *testing.T) {
 func TestTopValuesFailure(t *testing.T) {
 	boom := errors.New("boom")
 	missing := fmt.Errorf("%w: field %q is not in the source schema", errInvalidArgument, "x")
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
 	for _, tc := range []struct {
-		name string
-		ctx  context.Context
-		errs []error
-		want error
+		name      string
+		cancelled bool
+		errs      []error
+		want      error
 	}{
-		{"all read", context.Background(), []error{nil, nil}, nil},
-		{"partial", context.Background(), []error{boom, nil}, nil},
-		{"all failed", context.Background(), []error{boom, missing}, boom},
-		{"all missing from schema", context.Background(), []error{missing}, errInvalidArgument},
-		{"cancelled with partial results", cancelled, []error{nil, boom}, context.Canceled},
+		{"all read", false, []error{nil, nil}, nil},
+		{"partial", false, []error{boom, nil}, nil},
+		{"all failed", false, []error{boom, missing}, boom},
+		{"all missing from schema", false, []error{missing}, errInvalidArgument},
+		{"cancelled with partial results", true, []error{nil, boom}, context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := topValuesFailure(tc.ctx, tc.errs)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			}
+			got := topValuesFailure(ctx, tc.errs)
 			if tc.want == nil {
 				if got != nil {
 					t.Fatalf("got %v, want success", got)
