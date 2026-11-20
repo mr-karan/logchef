@@ -7181,7 +7181,7 @@ SELECT
     r.source_id AS source_id,
     (COALESCE(s.name, ''))::text AS source_name,
     (COALESCE(s.source_type, ''))::text AS source_type,
-    (MIN(r.team_id))::bigint AS team_id,
+    (COALESCE(ts.team_id, 0))::bigint AS team_id,
     (SUM(CASE WHEN r.is_current AND r.is_service THEN r.query_count ELSE 0 END))::bigint AS service_query_count,
     (SUM(CASE WHEN r.is_current AND r.is_selected THEN r.query_count ELSE 0 END))::bigint AS query_count,
     (SUM(CASE WHEN r.is_current AND r.is_selected THEN r.total_duration_ms ELSE 0 END))::bigint AS total_duration_ms,
@@ -7190,7 +7190,6 @@ SELECT
 FROM (
     SELECT
         qsd.source_id,
-        qsd.team_id,
         qsd.query_count,
         qsd.total_duration_ms,
         qsd.bucket_date >= $1::date AS is_current,
@@ -7203,7 +7202,8 @@ FROM (
       AND ($6::bigint = 0 OR qsd.user_id = $6)
 ) r
 LEFT JOIN sources s ON s.id = r.source_id
-GROUP BY r.source_id, s.name, s.source_type
+LEFT JOIN (SELECT source_id, MIN(team_id) AS team_id FROM team_sources GROUP BY source_id) ts ON ts.source_id = r.source_id
+GROUP BY r.source_id, s.name, s.source_type, ts.team_id
 HAVING SUM(CASE WHEN r.is_current AND r.is_selected THEN r.query_count ELSE 0 END) > 0
 ORDER BY total_duration_ms DESC, query_count DESC, r.source_id ASC
 LIMIT $7::bigint
@@ -7233,6 +7233,8 @@ type QueryStatsBySourceRow struct {
 
 // Sources with a current-window query of the selected account type, by
 // current total duration desc. service_query_count ignores the account type.
+// team_id is the lowest team that links the source now, 0 when none does:
+// the rollup's team_id records where a query ran, not who has the source.
 func (q *Queries) QueryStatsBySource(ctx context.Context, arg QueryStatsBySourceParams) ([]QueryStatsBySourceRow, error) {
 	rows, err := q.db.Query(ctx, queryStatsBySource,
 		arg.Since,

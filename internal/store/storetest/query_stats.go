@@ -33,6 +33,17 @@ func testQueryStats(t *testing.T, ctx context.Context, s store.Store) {
 	const ghost = models.UserID(888001) // no users row
 	srcA := mkSource(t, ctx, s, "qs_a")
 	srcB := mkSource(t, ctx, s, "qs_b")
+	// Source A's queries ran in oldTeam, which no longer links it; newTeam
+	// does. No team links source B.
+	oldTeam, newTeam := &models.Team{Name: "qs-old"}, &models.Team{Name: "qs-new"}
+	for _, team := range []*models.Team{oldTeam, newTeam} {
+		if err := s.CreateTeam(ctx, team); err != nil {
+			t.Fatalf("CreateTeam(%s): %v", team.Name, err)
+		}
+	}
+	if err := s.AddTeamSource(ctx, newTeam.ID, srcA.ID); err != nil {
+		t.Fatalf("AddTeamSource: %v", err)
+	}
 
 	inc := func(day string, u models.UserID, team models.TeamID, src models.SourceID, lang models.QueryLanguage, dur int64) {
 		t.Helper()
@@ -41,22 +52,22 @@ func testQueryStats(t *testing.T, ctx context.Context, s store.Store) {
 		}
 	}
 	logchefql, sql, logql := models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL, models.QueryLanguageLogQL
-	inc("2024-12-31", alice.ID, 7, srcA.ID, logchefql, 999) // before the prior window
-	inc("2025-01-07", alice.ID, 7, srcA.ID, logchefql, 999) // after the window
-	inc("2025-01-03", alice.ID, 7, srcA.ID, logchefql, 100) // last prior day
+	inc("2024-12-31", alice.ID, oldTeam.ID, srcA.ID, logchefql, 999) // before the prior window
+	inc("2025-01-07", alice.ID, oldTeam.ID, srcA.ID, logchefql, 999) // after the window
+	inc("2025-01-03", alice.ID, oldTeam.ID, srcA.ID, logchefql, 100) // last prior day
 	inc("2025-01-01", bob.ID, 3, srcB.ID, sql, 300)
 	inc("2025-01-02", svc.ID, 9, srcB.ID, logchefql, 500)
-	inc("2025-01-04", alice.ID, 7, srcA.ID, logchefql, 50) // first current day
-	inc("2025-01-04", alice.ID, 7, srcA.ID, logchefql, 70)
+	inc("2025-01-04", alice.ID, oldTeam.ID, srcA.ID, logchefql, 50) // first current day
+	inc("2025-01-04", alice.ID, oldTeam.ID, srcA.ID, logchefql, 70)
 	inc("2025-01-05", carol.ID, 3, srcB.ID, logchefql, 10)
 	for range 3 {
-		inc("2025-01-05", svc.ID, 9, srcA.ID, logchefql, 1000)
+		inc("2025-01-05", svc.ID, oldTeam.ID, srcA.ID, logchefql, 1000)
 	}
 	inc("2025-01-06", alice.ID, 3, srcB.ID, sql, 30)
 	inc("2025-01-06", ghost, 3, srcB.ID, logql, 40)
 
 	fx := queryStatsFixture{
-		s: s, alice: alice, carol: carol, svc: svc, ghost: ghost, srcA: srcA, srcB: srcB,
+		s: s, alice: alice, carol: carol, svc: svc, ghost: ghost, srcA: srcA, srcB: srcB, srcATeam: newTeam.ID,
 		window: models.QueryStatsFilter{PriorSince: "2025-01-01", Since: "2025-01-04", Until: "2025-01-06"},
 	}
 	t.Run("summary", func(t *testing.T) { verifyQueryStatsSummary(t, ctx, fx) })
@@ -82,6 +93,7 @@ type queryStatsFixture struct {
 	svc          *models.User
 	ghost        models.UserID
 	srcA, srcB   *models.Source
+	srcATeam     models.TeamID
 	window       models.QueryStatsFilter
 }
 
@@ -192,15 +204,15 @@ func verifyQueryStatsByUser(t *testing.T, ctx context.Context, fx queryStatsFixt
 func verifyQueryStatsBySource(t *testing.T, ctx context.Context, fx queryStatsFixture) {
 	got, err := fx.s.QueryStatsBySource(ctx, fx.scoped(qsHuman, 0, 0), 10)
 	want := []models.SourceQueryStat{
-		{SourceID: fx.srcA.ID, SourceName: fx.srcA.Name, SourceType: "clickhouse", TeamID: 7, ServiceQueryCount: 3, Current: qsTotals(2, 120), Prior: qsTotals(1, 100)},
-		{SourceID: fx.srcB.ID, SourceName: fx.srcB.Name, SourceType: "clickhouse", TeamID: 3, Current: qsTotals(2, 40), Prior: qsTotals(1, 300)},
+		{SourceID: fx.srcA.ID, SourceName: fx.srcA.Name, SourceType: "clickhouse", TeamID: &fx.srcATeam, ServiceQueryCount: 3, Current: qsTotals(2, 120), Prior: qsTotals(1, 100)},
+		{SourceID: fx.srcB.ID, SourceName: fx.srcB.Name, SourceType: "clickhouse", Current: qsTotals(2, 40), Prior: qsTotals(1, 300)},
 	}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("QueryStatsBySource(humans) = %+v / %v\nwant %+v", got, err, want)
 	}
 	// Source B has service queries only in the prior window.
 	got, err = fx.s.QueryStatsBySource(ctx, fx.scoped(qsService, 0, 0), 10)
-	want = []models.SourceQueryStat{{SourceID: fx.srcA.ID, SourceName: fx.srcA.Name, SourceType: "clickhouse", TeamID: 7, ServiceQueryCount: 3, Current: qsTotals(3, 3000)}}
+	want = []models.SourceQueryStat{{SourceID: fx.srcA.ID, SourceName: fx.srcA.Name, SourceType: "clickhouse", TeamID: &fx.srcATeam, ServiceQueryCount: 3, Current: qsTotals(3, 3000)}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("QueryStatsBySource(service) = %+v / %v\nwant %+v", got, err, want)
 	}

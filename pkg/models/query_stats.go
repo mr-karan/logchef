@@ -69,13 +69,13 @@ type UserQueryStat struct {
 // SourceQueryStat is one source's usage. Current and Prior honor the
 // filter's account type; ServiceQueryCount counts service-account queries in
 // the current window whatever the account type. SourceName and SourceType are
-// "" when the source row is gone. TeamID is a team the source's queries ran
-// in, to open it in Explorer.
+// "" when the source row is gone. TeamID is a team that links the source
+// now, to open it in Explorer, nil when no team does.
 type SourceQueryStat struct {
 	SourceID          SourceID    `json:"source_id"`
 	SourceName        string      `json:"source_name"`
 	SourceType        string      `json:"source_type"`
-	TeamID            TeamID      `json:"team_id"`
+	TeamID            *TeamID     `json:"team_id"`
 	ServiceQueryCount int64       `json:"service_query_count"`
 	Current           QueryTotals `json:"current"`
 	Prior             QueryTotals `json:"prior"`

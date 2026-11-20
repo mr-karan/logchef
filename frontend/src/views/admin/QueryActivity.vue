@@ -391,9 +391,12 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                 </TableCell>
                 <TableCell>
                   <div class="flex items-center gap-2 text-muted-foreground">
-                    <router-link :to="{ name: 'LogExplorer', query: { team: String(source.team_id), source: String(source.source_id) } }" :title="t('admin.openInExplorer')" :aria-label="t('admin.openInExplorer')" class="hover:text-foreground">
+                    <router-link v-if="source.team_id" :to="{ name: 'LogExplorer', query: { team: String(source.team_id), source: String(source.source_id) } }" :title="t('admin.openInExplorer')" :aria-label="t('admin.openInExplorer')" class="hover:text-foreground">
                       <Telescope class="h-4 w-4" />
                     </router-link>
+                    <span v-else role="link" aria-disabled="true" :title="t('admin.noTeamLinksSource')" :aria-label="t('admin.openInExplorer')" class="opacity-40">
+                      <Telescope class="h-4 w-4" />
+                    </span>
                     <router-link :to="{ name: 'EditSource', params: { sourceId: String(source.source_id) } }" :title="t('admin.sourceSettings')" :aria-label="t('admin.sourceSettings')" class="hover:text-foreground">
                       <Settings2 class="h-4 w-4" />
                     </router-link>

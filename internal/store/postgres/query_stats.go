@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -105,7 +107,7 @@ func (s *Store) QueryStatsBySource(ctx context.Context, f models.QueryStatsFilte
 			SourceID:          models.SourceID(r.SourceID),
 			SourceName:        r.SourceName,
 			SourceType:        r.SourceType,
-			TeamID:            models.TeamID(r.TeamID),
+			TeamID:            teamIDPtr(pgtype.Int8{Int64: r.TeamID, Valid: r.TeamID != 0}),
 			ServiceQueryCount: r.ServiceQueryCount,
 			Current:           models.QueryTotals{QueryCount: r.QueryCount, TotalDurationMs: r.TotalDurationMs},
 			Prior:             models.QueryTotals{QueryCount: r.PriorQueryCount, TotalDurationMs: r.PriorTotalDurationMs},
