@@ -18,6 +18,28 @@ func (s *Store) GetSchemaAdvisorReport(ctx context.Context, sourceID models.Sour
 		}
 		return nil, fmt.Errorf("error getting schema advisor report of source %d: %w", sourceID, err)
 	}
+	return reportFromRow(row)
+}
+
+// ListSchemaAdvisorReports returns the reports of those of the sources that
+// have one.
+func (s *Store) ListSchemaAdvisorReports(ctx context.Context, sourceIDs []models.SourceID) ([]*models.StoredSchemaAdvisorReport, error) {
+	rows, err := s.q.ListSchemaAdvisorReportsBySources(ctx, sourceIDParams(sourceIDs))
+	if err != nil {
+		return nil, fmt.Errorf("error listing schema advisor reports: %w", err)
+	}
+	out := make([]*models.StoredSchemaAdvisorReport, 0, len(rows))
+	for _, row := range rows {
+		stored, err := reportFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, stored)
+	}
+	return out, nil
+}
+
+func reportFromRow(row sqlc.SchemaAdvisorReport) (*models.StoredSchemaAdvisorReport, error) {
 	stored := &models.StoredSchemaAdvisorReport{
 		SourceID:    models.SourceID(row.SourceID),
 		GeneratedAt: row.GeneratedAt.Time.UTC(),
@@ -28,7 +50,7 @@ func (s *Store) GetSchemaAdvisorReport(ctx context.Context, sourceID models.Sour
 		stored.GeneratedBy = &by
 	}
 	if err := json.Unmarshal([]byte(row.Report), &stored.Report); err != nil {
-		return nil, fmt.Errorf("error decoding schema advisor report of source %d: %w", sourceID, err)
+		return nil, fmt.Errorf("error decoding schema advisor report of source %d: %w", row.SourceID, err)
 	}
 	return stored, nil
 }
@@ -81,6 +103,28 @@ func (s *Store) ListSchemaAdvisorDismissals(ctx context.Context, sourceID models
 		out[i] = dismissalFromRow(row)
 	}
 	return out, nil
+}
+
+// ListSchemaAdvisorDismissalsBySources returns the dismissed findings of the
+// sources.
+func (s *Store) ListSchemaAdvisorDismissalsBySources(ctx context.Context, sourceIDs []models.SourceID) ([]models.SchemaAdvisorDismissal, error) {
+	rows, err := s.q.ListSchemaAdvisorDismissalsBySources(ctx, sourceIDParams(sourceIDs))
+	if err != nil {
+		return nil, fmt.Errorf("error listing schema advisor dismissals: %w", err)
+	}
+	out := make([]models.SchemaAdvisorDismissal, len(rows))
+	for i, row := range rows {
+		out[i] = dismissalFromRow(row)
+	}
+	return out, nil
+}
+
+func sourceIDParams(ids []models.SourceID) []int64 {
+	out := make([]int64, len(ids))
+	for i, id := range ids {
+		out[i] = int64(id)
+	}
+	return out
 }
 
 // GetSchemaAdvisorDismissal returns the dismissal of one finding.

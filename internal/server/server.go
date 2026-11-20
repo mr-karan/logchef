@@ -423,10 +423,8 @@ func (s *Server) setupRoutes() {
 	admin.Put("/sources/:sourceID/advisor/findings/:findingID/dismissal", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleDismissSchemaFinding).Name(string(audit.SchemaAdvisorDismissalCreate))
 	admin.Delete("/sources/:sourceID/advisor/findings/:findingID/dismissal", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleRestoreSchemaFinding).Name(string(audit.SchemaAdvisorDismissalDelete))
 
-	// Recent query activity (admin recent-activity view over query_history).
-	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)
-
-	// Authoritative all-time usage analytics over the non-pruned query_stats_daily rollup.
+	// Query Activity: usage analytics over the query_stats_daily and
+	// query_shape_stats_daily rollups.
 	admin.Get("/query-stats", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryStats)
 
 	// Audit log (RFC 0009). The export records audit_event.export.

@@ -4,87 +4,55 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v3"
 )
 
-// Query-stats window bounds and the top-N cap for the authoritative all-time
-// usage endpoint. Unlike the recent-activity view, these aggregates come from
-// the non-pruned query_stats_daily rollup, so they are correct all-time.
-const (
-	queryStatsDefaultDays = 30
-	queryStatsMinDays     = 1
-	queryStatsMaxDays     = 365
-	queryStatsTopN        = 10
-)
+const queryStatsDefaultDays = 30
 
-// queryStatsResponse is the admin all-time usage payload, sourced from the
-// non-pruned daily rollup. since is 'YYYY-MM-DD' (UTC), the inclusive start of
-// the window; top_sources/top_users are count-desc (capped at 10); volume_by_day
-// is ascending by date.
-type queryStatsResponse struct {
-	Summary     models.QueryStatsSummary  `json:"summary"`
-	Since       string                    `json:"since"`
-	Days        int                       `json:"days"`
-	TopSources  []models.SourceQueryStat  `json:"top_sources"`
-	TopUsers    []models.UserQueryStat    `json:"top_users"`
-	VolumeByDay []models.DailyQueryVolume `json:"volume_by_day"`
-}
-
-// handleAdminQueryStats returns authoritative all-time usage analytics over the
-// non-pruned query_stats_daily rollup: top sources, top users, and volume by
-// day for the last `days` days (default 30, clamped 1..365). Unlike
-// /admin/query-activity (a recent window over the capped query_history), these
-// aggregates are correct all-time because the rollup is never pruned.
-// URL: GET /api/v1/admin/query-stats?days=<N>
+// handleAdminQueryStats returns the Query Activity page: usage over the
+// query_stats_daily and query_shape_stats_daily rollups for the last `days`
+// UTC days (default 30, clamped 1..365) beside the same-length window before.
+// URL: GET /api/v1/admin/query-stats?days=<N>&account=human|service|all&source_id=<id>&user_id=<id>
 // Requires: admin (requireAuth + requireAdmin) and logs:read token scope.
 func (s *Server) handleAdminQueryStats(c fiber.Ctx) error {
-	days := queryStatsDefaultDays
+	req := core.QueryActivityRequest{Days: queryStatsDefaultDays, Account: core.QueryActivityHumans}
 	if raw := c.Query("days"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
+		days, err := strconv.Atoi(raw)
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid days", models.ValidationErrorType)
 		}
-		days = parsed
+		req.Days = min(max(days, core.MinQueryActivityDays), core.MaxQueryActivityDays)
 	}
-	if days < queryStatsMinDays {
-		days = queryStatsMinDays
+	if raw := c.Query("account"); raw != "" {
+		switch account := core.QueryActivityAccount(raw); account {
+		case core.QueryActivityHumans, core.QueryActivityServices, core.QueryActivityAll:
+			req.Account = account
+		default:
+			return SendErrorWithType(c, fiber.StatusBadRequest, "account must be human, service or all", models.ValidationErrorType)
+		}
 	}
-	if days > queryStatsMaxDays {
-		days = queryStatsMaxDays
+	if raw := c.Query("source_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id", models.ValidationErrorType)
+		}
+		req.SourceID = models.SourceID(id)
 	}
-
-	since := time.Now().UTC().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
-
-	summary, err := s.store.QueryStatsSummary(c.Context(), since)
-	if err != nil {
-		s.log.Error("failed to summarize query stats", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
-	}
-
-	topSources, err := s.store.TopSourcesByQueries(c.Context(), since, queryStatsTopN)
-	if err != nil {
-		s.log.Error("failed to list top sources by queries", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
-	}
-	topUsers, err := s.store.TopUsersByQueries(c.Context(), since, queryStatsTopN)
-	if err != nil {
-		s.log.Error("failed to list top users by queries", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
-	}
-	volumeByDay, err := s.store.QueryVolumeByDay(c.Context(), since)
-	if err != nil {
-		s.log.Error("failed to list query volume by day", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
+	if raw := c.Query("user_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user_id", models.ValidationErrorType)
+		}
+		req.UserID = models.UserID(id)
 	}
 
-	return SendSuccess(c, fiber.StatusOK, queryStatsResponse{
-		Summary:     summary,
-		Since:       since,
-		Days:        days,
-		TopSources:  topSources,
-		TopUsers:    topUsers,
-		VolumeByDay: volumeByDay,
-	})
+	activity, err := core.GetQueryActivity(c.Context(), s.store, time.Now(), req)
+	if err != nil {
+		s.log.Error("failed to read query activity", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
+	}
+	return SendSuccess(c, fiber.StatusOK, activity)
 }
