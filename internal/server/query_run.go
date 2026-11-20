@@ -72,17 +72,27 @@ type queryOutcome struct {
 	status  int
 	queryID string
 	rows    int64
-	// stats is nil when the query returned none: a failure, a cached
-	// response or a windowed search.
+	// stats is nil when the query returned none: a failure, a windowed
+	// search, or a cached response that this request's fill did not run.
 	stats *models.QueryStats
 	// cache is the dashboard cache status of a cached response.
 	cache string
 }
 
-// queryRecord is a finished run as the background writer stores it.
+// queryRecord is a finished run as the background writer stores it. Each
+// part is nil when the run writes none.
 type queryRecord struct {
 	event   *audit.Event
 	history *models.QueryHistory
+	usage   *queryUsage
+	failure *models.QueryFailureIncrement
+}
+
+// queryUsage is a successful run as the daily rollups count it: run as a
+// history row holds it, and what it scanned.
+type queryUsage struct {
+	run                 *models.QueryHistory
+	rowsRead, bytesRead int64
 }
 
 // newQueryRun starts the run of a handler's query. A nil user writes no
@@ -135,15 +145,22 @@ func (s *Server) endQueryRun(c fiber.Ctx, run *queryRun, chainErr error, panicke
 	s.finishQueryRun(run, queryOutcome{err: queryErr, status: responseStatus(c, chainErr)})
 }
 
-// finishCachedQueryRun records a dashboard panel that the cache answered. A
-// hit ran no query and a fill's rows are inside the cached body, so the event
-// has the cache status and no row count. Neither writes query history.
-func (s *Server) finishCachedQueryRun(c fiber.Ctx, run *queryRun) {
+// finishCachedQueryRun records a dashboard panel that the cache answered.
+// filled is the stats of the query this request's fill ran, nil when the
+// response came from an entry or another request's fill. A fill counts like
+// any query; a response that ran nothing has the cache status and no row
+// count. Neither writes query history.
+func (s *Server) finishCachedQueryRun(c fiber.Ctx, run *queryRun, filled *models.QueryStats) {
 	run.history = false
-	s.finishQueryRun(run, queryOutcome{
+	out := queryOutcome{
 		status: c.Response().StatusCode(),
 		cache:  strings.ToLower(c.GetRespHeader("X-Logchef-Cache")),
-	})
+		stats:  filled,
+	}
+	if filled != nil {
+		out.rows = int64(filled.RowsReturned)
+	}
+	s.finishQueryRun(run, out)
 }
 
 // finishQueryRun queues the run's record for the background writer. A query
@@ -158,17 +175,37 @@ func (s *Server) finishQueryRun(run *queryRun, out queryOutcome) {
 	if out.stats != nil && out.stats.ExecutionTimeMs > 0 {
 		durationMs = int64(out.stats.ExecutionTimeMs)
 	}
+	reason := ""
+	if out.err != nil || out.status >= fiber.StatusBadRequest {
+		reason = queryFailureReason(out.err, out.status)
+	}
 	var rec queryRecord
 	if run.actor != nil {
-		ev := run.event(out, durationMs)
+		ev := run.event(out, durationMs, reason)
 		rec.event = &ev
 	}
 	// A cancelled query stays in the history: the user ran it.
-	ran := out.err == nil && out.status < fiber.StatusBadRequest || errors.Is(out.err, context.Canceled)
-	if run.history && ran {
+	if run.history && (reason == "" || errors.Is(out.err, context.Canceled)) {
 		rec.history = run.historyEntry(durationMs, out.rows)
 	}
-	if rec.event == nil && rec.history == nil {
+	switch {
+	// A run with no user, such as a tail, log context or MCP read, counts in
+	// no rollup, so its failure does not either: the failure rate divides by
+	// the counted runs.
+	case run.user == nil:
+	case reason != "":
+		rec.failure = &models.QueryFailureIncrement{
+			UserID: run.user.ID, TeamID: run.teamID, SourceID: run.sourceID, Language: run.language, Reason: reason,
+		}
+	// A windowed page after the first and a cached response that ran nothing
+	// count no run.
+	case run.history || out.cache != "" && out.stats != nil:
+		rec.usage = &queryUsage{run: run.historyEntry(durationMs, out.rows)}
+		if out.stats != nil {
+			rec.usage.rowsRead, rec.usage.bytesRead = int64(out.stats.RowsRead), int64(out.stats.BytesRead)
+		}
+	}
+	if rec.event == nil && rec.history == nil && rec.usage == nil && rec.failure == nil {
 		return
 	}
 	s.enqueueQueryRecord(rec)
@@ -218,10 +255,11 @@ func (s *Server) dropQueryRecord(rec queryRecord) {
 	}
 }
 
-func (r *queryRun) event(out queryOutcome, durationMs int64) audit.Event {
-	outcome, reason := models.AuditOutcomeSuccess, ""
-	if out.err != nil || out.status >= fiber.StatusBadRequest {
-		outcome, reason = models.AuditOutcomeFailure, queryFailureReason(out.err, out.status)
+// event is the run's query.run event. reason is "" for a success.
+func (r *queryRun) event(out queryOutcome, durationMs int64, reason string) audit.Event {
+	outcome := models.AuditOutcomeSuccess
+	if reason != "" {
+		outcome = models.AuditOutcomeFailure
 	}
 	label := ""
 	if r.source != nil {
@@ -235,10 +273,12 @@ func (r *queryRun) event(out queryOutcome, durationMs int64) audit.Event {
 		Set("time_to", r.to).
 		Set("limit_requested", r.limit).
 		Set("duration_ms", durationMs)
-	if out.cache == "" {
-		detail.Set("rows_returned", out.rows)
-	} else {
+	if out.cache != "" {
 		detail.Set("cache", out.cache)
+	}
+	// A cached response that ran nothing returned no rows of its own.
+	if out.cache == "" || out.stats != nil {
+		detail.Set("rows_returned", out.rows)
 	}
 	if st := out.stats; st != nil {
 		detail.Set("limit_applied", st.LimitApplied).

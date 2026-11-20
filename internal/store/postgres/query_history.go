@@ -85,19 +85,32 @@ func (s *Store) ListQueryHistory(ctx context.Context, userID models.UserID, limi
 	return history, nil
 }
 
-// IncrementQueryStats upserts one executed query into the non-pruned
-// query_stats_daily rollup, adding 1 to query_count and durationMs to
-// total_duration_ms for the composite key.
-func (s *Store) IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error {
+// IncrementQueryStats upserts one successful query run into the non-pruned
+// query_stats_daily rollup.
+func (s *Store) IncrementQueryStats(ctx context.Context, inc models.QueryStatsIncrement) error {
+	h := models.LatencyHistogramOf(inc.DurationMs)
 	if err := s.q.IncrementQueryStats(ctx, sqlc.IncrementQueryStatsParams{
-		BucketDate:      bucketDateParam(bucketDate),
-		UserID:          int64(userID),
-		TeamID:          int64(teamID),
-		SourceID:        int64(sourceID),
-		QueryLanguage:   string(models.NormalizeQueryLanguage(language)),
-		TotalDurationMs: durationMs,
+		BucketDate:      bucketDateParam(inc.BucketDate),
+		UserID:          int64(inc.UserID),
+		TeamID:          int64(inc.TeamID),
+		SourceID:        int64(inc.SourceID),
+		QueryLanguage:   string(models.NormalizeQueryLanguage(inc.Language)),
+		TotalDurationMs: inc.DurationMs,
+		RowsRead:        inc.RowsRead,
+		BytesRead:       inc.BytesRead,
+		RowsReturned:    inc.RowsReturned,
+		LatencyLe100ms:  h[0],
+		LatencyLe250ms:  h[1],
+		LatencyLe500ms:  h[2],
+		LatencyLe1s:     h[3],
+		LatencyLe2500ms: h[4],
+		LatencyLe5s:     h[5],
+		LatencyLe10s:    h[6],
+		LatencyLe30s:    h[7],
+		LatencyLe60s:    h[8],
+		LatencyGt60s:    h[9],
 	}); err != nil {
-		s.log.Error("failed to increment query stats", "error", err, "user_id", userID, "source_id", sourceID)
+		s.log.Error("failed to increment query stats", "error", err, "user_id", inc.UserID, "source_id", inc.SourceID)
 		return fmt.Errorf("error incrementing query stats: %w", err)
 	}
 	return nil

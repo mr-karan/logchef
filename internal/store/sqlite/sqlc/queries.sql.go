@@ -3322,17 +3322,51 @@ func (q *Queries) HoldJob(ctx context.Context, arg HoldJobParams) (int64, error)
 	return result.RowsAffected()
 }
 
+const incrementQueryFailureStats = `-- name: IncrementQueryFailureStats :exec
+
+INSERT INTO query_failure_stats_daily (bucket_date, user_id, team_id, source_id, query_language, reason, query_count)
+VALUES (?, ?, ?, ?, ?, ?, 1)
+ON CONFLICT (bucket_date, user_id, team_id, source_id, query_language, reason)
+DO UPDATE SET query_count = query_count + 1
+`
+
+type IncrementQueryFailureStatsParams struct {
+	BucketDate    string `json:"bucket_date"`
+	UserID        int64  `json:"user_id"`
+	TeamID        int64  `json:"team_id"`
+	SourceID      int64  `json:"source_id"`
+	QueryLanguage string `json:"query_language"`
+	Reason        string `json:"reason"`
+}
+
+// Query failure stats daily rollup ---------------------------------------------
+// Upsert one failed query run into the non-pruned daily failure rollup.
+func (q *Queries) IncrementQueryFailureStats(ctx context.Context, arg IncrementQueryFailureStatsParams) error {
+	_, err := q.exec(ctx, q.incrementQueryFailureStatsStmt, incrementQueryFailureStats,
+		arg.BucketDate,
+		arg.UserID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.QueryLanguage,
+		arg.Reason,
+	)
+	return err
+}
+
 const incrementQueryShapeStats = `-- name: IncrementQueryShapeStats :exec
 
 INSERT INTO query_shape_stats_daily (
     bucket_date, source_id, query_language, shape_hash, shape,
-    query_count, total_duration_ms, total_rows, max_lookback_s
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    query_count, total_duration_ms, total_rows, max_lookback_s,
+    total_rows_read, total_bytes_read
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
 DO UPDATE SET
     query_count = query_count + excluded.query_count,
     total_duration_ms = total_duration_ms + excluded.total_duration_ms,
     total_rows = total_rows + excluded.total_rows,
+    total_rows_read = total_rows_read + excluded.total_rows_read,
+    total_bytes_read = total_bytes_read + excluded.total_bytes_read,
     max_lookback_s = COALESCE(MAX(max_lookback_s, excluded.max_lookback_s), max_lookback_s, excluded.max_lookback_s)
 `
 
@@ -3346,10 +3380,12 @@ type IncrementQueryShapeStatsParams struct {
 	TotalDurationMs int64         `json:"total_duration_ms"`
 	TotalRows       int64         `json:"total_rows"`
 	MaxLookbackS    sql.NullInt64 `json:"max_lookback_s"`
+	TotalRowsRead   int64         `json:"total_rows_read"`
+	TotalBytesRead  int64         `json:"total_bytes_read"`
 }
 
 // Query shape stats daily rollup (RFC 0010) ------------------------------------
-// Add one increment to a shape's daily row: sum the three counters and keep
+// Add one increment to a shape's daily row: sum the counters and keep
 // the larger max_lookback_s (a NULL lookback never replaces a known one).
 func (q *Queries) IncrementQueryShapeStats(ctx context.Context, arg IncrementQueryShapeStatsParams) error {
 	_, err := q.exec(ctx, q.incrementQueryShapeStatsStmt, incrementQueryShapeStats,
@@ -3362,18 +3398,37 @@ func (q *Queries) IncrementQueryShapeStats(ctx context.Context, arg IncrementQue
 		arg.TotalDurationMs,
 		arg.TotalRows,
 		arg.MaxLookbackS,
+		arg.TotalRowsRead,
+		arg.TotalBytesRead,
 	)
 	return err
 }
 
 const incrementQueryStats = `-- name: IncrementQueryStats :exec
 
-INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
-VALUES (?, ?, ?, ?, ?, 1, ?)
+INSERT INTO query_stats_daily (
+    bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms,
+    rows_read, bytes_read, rows_returned,
+    latency_le_100ms, latency_le_250ms, latency_le_500ms, latency_le_1s, latency_le_2500ms,
+    latency_le_5s, latency_le_10s, latency_le_30s, latency_le_60s, latency_gt_60s
+) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (bucket_date, user_id, team_id, source_id, query_language)
 DO UPDATE SET
     query_count = query_count + 1,
-    total_duration_ms = total_duration_ms + excluded.total_duration_ms
+    total_duration_ms = total_duration_ms + excluded.total_duration_ms,
+    rows_read = rows_read + excluded.rows_read,
+    bytes_read = bytes_read + excluded.bytes_read,
+    rows_returned = rows_returned + excluded.rows_returned,
+    latency_le_100ms = latency_le_100ms + excluded.latency_le_100ms,
+    latency_le_250ms = latency_le_250ms + excluded.latency_le_250ms,
+    latency_le_500ms = latency_le_500ms + excluded.latency_le_500ms,
+    latency_le_1s = latency_le_1s + excluded.latency_le_1s,
+    latency_le_2500ms = latency_le_2500ms + excluded.latency_le_2500ms,
+    latency_le_5s = latency_le_5s + excluded.latency_le_5s,
+    latency_le_10s = latency_le_10s + excluded.latency_le_10s,
+    latency_le_30s = latency_le_30s + excluded.latency_le_30s,
+    latency_le_60s = latency_le_60s + excluded.latency_le_60s,
+    latency_gt_60s = latency_gt_60s + excluded.latency_gt_60s
 `
 
 type IncrementQueryStatsParams struct {
@@ -3383,11 +3438,25 @@ type IncrementQueryStatsParams struct {
 	SourceID        int64  `json:"source_id"`
 	QueryLanguage   string `json:"query_language"`
 	TotalDurationMs int64  `json:"total_duration_ms"`
+	RowsRead        int64  `json:"rows_read"`
+	BytesRead       int64  `json:"bytes_read"`
+	RowsReturned    int64  `json:"rows_returned"`
+	LatencyLe100ms  int64  `json:"latency_le_100ms"`
+	LatencyLe250ms  int64  `json:"latency_le_250ms"`
+	LatencyLe500ms  int64  `json:"latency_le_500ms"`
+	LatencyLe1s     int64  `json:"latency_le_1s"`
+	LatencyLe2500ms int64  `json:"latency_le_2500ms"`
+	LatencyLe5s     int64  `json:"latency_le_5s"`
+	LatencyLe10s    int64  `json:"latency_le_10s"`
+	LatencyLe30s    int64  `json:"latency_le_30s"`
+	LatencyLe60s    int64  `json:"latency_le_60s"`
+	LatencyGt60s    int64  `json:"latency_gt_60s"`
 }
 
 // Query stats daily rollup -----------------------------------------------------
-// Upsert one executed query into the non-pruned daily rollup: add 1 to
-// query_count and the given duration to total_duration_ms for the composite key.
+// Upsert one successful query run into the non-pruned daily rollup: add 1 to
+// query_count, and its duration, scan and returned rows to their totals. The
+// latency_* arguments are the run's histogram: 1 in its bucket, 0 elsewhere.
 func (q *Queries) IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error {
 	_, err := q.exec(ctx, q.incrementQueryStatsStmt, incrementQueryStats,
 		arg.BucketDate,
@@ -3396,6 +3465,19 @@ func (q *Queries) IncrementQueryStats(ctx context.Context, arg IncrementQuerySta
 		arg.SourceID,
 		arg.QueryLanguage,
 		arg.TotalDurationMs,
+		arg.RowsRead,
+		arg.BytesRead,
+		arg.RowsReturned,
+		arg.LatencyLe100ms,
+		arg.LatencyLe250ms,
+		arg.LatencyLe500ms,
+		arg.LatencyLe1s,
+		arg.LatencyLe2500ms,
+		arg.LatencyLe5s,
+		arg.LatencyLe10s,
+		arg.LatencyLe30s,
+		arg.LatencyLe60s,
+		arg.LatencyGt60s,
 	)
 	return err
 }
@@ -7102,6 +7184,217 @@ func (q *Queries) PruneReportRuns(ctx context.Context, arg PruneReportRunsParams
 	return err
 }
 
+const queryCostBySourceDay = `-- name: QueryCostBySourceDay :many
+SELECT
+    qsd.source_id AS source_id,
+    qsd.bucket_date AS bucket_date,
+    CAST(SUM(qsd.rows_read) AS INTEGER) AS rows_read,
+    CAST(SUM(qsd.bytes_read) AS INTEGER) AS bytes_read,
+    CAST(SUM(qsd.latency_le_100ms) AS INTEGER) AS latency_le_100ms,
+    CAST(SUM(qsd.latency_le_250ms) AS INTEGER) AS latency_le_250ms,
+    CAST(SUM(qsd.latency_le_500ms) AS INTEGER) AS latency_le_500ms,
+    CAST(SUM(qsd.latency_le_1s) AS INTEGER) AS latency_le_1s,
+    CAST(SUM(qsd.latency_le_2500ms) AS INTEGER) AS latency_le_2500ms,
+    CAST(SUM(qsd.latency_le_5s) AS INTEGER) AS latency_le_5s,
+    CAST(SUM(qsd.latency_le_10s) AS INTEGER) AS latency_le_10s,
+    CAST(SUM(qsd.latency_le_30s) AS INTEGER) AS latency_le_30s,
+    CAST(SUM(qsd.latency_le_60s) AS INTEGER) AS latency_le_60s,
+    CAST(SUM(qsd.latency_gt_60s) AS INTEGER) AS latency_gt_60s
+FROM query_stats_daily qsd
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= ?1 AND qsd.bucket_date <= ?2
+  AND (CAST(?3 AS TEXT) = '' OR u.account_type = ?3)
+  AND (CAST(?4 AS INTEGER) = 0 OR qsd.source_id = ?4)
+  AND (CAST(?5 AS INTEGER) = 0 OR qsd.user_id = ?5)
+GROUP BY qsd.source_id, qsd.bucket_date
+ORDER BY qsd.source_id ASC, qsd.bucket_date ASC
+`
+
+type QueryCostBySourceDayParams struct {
+	Since       string `json:"since"`
+	Until       string `json:"until"`
+	AccountType string `json:"account_type"`
+	SourceID    int64  `json:"source_id"`
+	UserID      int64  `json:"user_id"`
+}
+
+type QueryCostBySourceDayRow struct {
+	SourceID        int64  `json:"source_id"`
+	BucketDate      string `json:"bucket_date"`
+	RowsRead        int64  `json:"rows_read"`
+	BytesRead       int64  `json:"bytes_read"`
+	LatencyLe100ms  int64  `json:"latency_le_100ms"`
+	LatencyLe250ms  int64  `json:"latency_le_250ms"`
+	LatencyLe500ms  int64  `json:"latency_le_500ms"`
+	LatencyLe1s     int64  `json:"latency_le_1s"`
+	LatencyLe2500ms int64  `json:"latency_le_2500ms"`
+	LatencyLe5s     int64  `json:"latency_le_5s"`
+	LatencyLe10s    int64  `json:"latency_le_10s"`
+	LatencyLe30s    int64  `json:"latency_le_30s"`
+	LatencyLe60s    int64  `json:"latency_le_60s"`
+	LatencyGt60s    int64  `json:"latency_gt_60s"`
+}
+
+// Cost per source per current-window day, by source and day.
+func (q *Queries) QueryCostBySourceDay(ctx context.Context, arg QueryCostBySourceDayParams) ([]QueryCostBySourceDayRow, error) {
+	rows, err := q.query(ctx, q.queryCostBySourceDayStmt, queryCostBySourceDay,
+		arg.Since,
+		arg.Until,
+		arg.AccountType,
+		arg.SourceID,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryCostBySourceDayRow{}
+	for rows.Next() {
+		var i QueryCostBySourceDayRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.BucketDate,
+			&i.RowsRead,
+			&i.BytesRead,
+			&i.LatencyLe100ms,
+			&i.LatencyLe250ms,
+			&i.LatencyLe500ms,
+			&i.LatencyLe1s,
+			&i.LatencyLe2500ms,
+			&i.LatencyLe5s,
+			&i.LatencyLe10s,
+			&i.LatencyLe30s,
+			&i.LatencyLe60s,
+			&i.LatencyGt60s,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryCostCollectedSince = `-- name: QueryCostCollectedSince :one
+SELECT CAST(COALESCE(MIN(d), '') AS TEXT) AS collected_since FROM (
+    SELECT MIN(bucket_date) AS d FROM query_stats_daily WHERE latency_le_100ms + latency_le_250ms + latency_le_500ms + latency_le_1s + latency_le_2500ms + latency_le_5s + latency_le_10s + latency_le_30s + latency_le_60s + latency_gt_60s > 0
+    UNION ALL
+    SELECT MIN(bucket_date) AS d FROM query_failure_stats_daily
+) firsts
+`
+
+// The first day with a recorded cost or failure: when collection began. ”
+// before any.
+func (q *Queries) QueryCostCollectedSince(ctx context.Context) (string, error) {
+	row := q.queryRow(ctx, q.queryCostCollectedSinceStmt, queryCostCollectedSince)
+	var collected_since string
+	err := row.Scan(&collected_since)
+	return collected_since, err
+}
+
+const queryCostSummary = `-- name: QueryCostSummary :many
+
+SELECT
+    CAST(qsd.bucket_date >= ?1 AS INTEGER) AS is_current,
+    CAST(SUM(qsd.rows_read) AS INTEGER) AS rows_read,
+    CAST(SUM(qsd.bytes_read) AS INTEGER) AS bytes_read,
+    CAST(SUM(qsd.latency_le_100ms) AS INTEGER) AS latency_le_100ms,
+    CAST(SUM(qsd.latency_le_250ms) AS INTEGER) AS latency_le_250ms,
+    CAST(SUM(qsd.latency_le_500ms) AS INTEGER) AS latency_le_500ms,
+    CAST(SUM(qsd.latency_le_1s) AS INTEGER) AS latency_le_1s,
+    CAST(SUM(qsd.latency_le_2500ms) AS INTEGER) AS latency_le_2500ms,
+    CAST(SUM(qsd.latency_le_5s) AS INTEGER) AS latency_le_5s,
+    CAST(SUM(qsd.latency_le_10s) AS INTEGER) AS latency_le_10s,
+    CAST(SUM(qsd.latency_le_30s) AS INTEGER) AS latency_le_30s,
+    CAST(SUM(qsd.latency_le_60s) AS INTEGER) AS latency_le_60s,
+    CAST(SUM(qsd.latency_gt_60s) AS INTEGER) AS latency_gt_60s
+FROM query_stats_daily qsd
+LEFT JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= ?2 AND qsd.bucket_date <= ?3
+  AND (CAST(?4 AS TEXT) = '' OR u.account_type = ?4)
+  AND (CAST(?5 AS INTEGER) = 0 OR qsd.source_id = ?5)
+  AND (CAST(?6 AS INTEGER) = 0 OR qsd.user_id = ?6)
+GROUP BY is_current
+`
+
+type QueryCostSummaryParams struct {
+	Since       string `json:"since"`
+	PriorSince  string `json:"prior_since"`
+	Until       string `json:"until"`
+	AccountType string `json:"account_type"`
+	SourceID    int64  `json:"source_id"`
+	UserID      int64  `json:"user_id"`
+}
+
+type QueryCostSummaryRow struct {
+	IsCurrent       int64 `json:"is_current"`
+	RowsRead        int64 `json:"rows_read"`
+	BytesRead       int64 `json:"bytes_read"`
+	LatencyLe100ms  int64 `json:"latency_le_100ms"`
+	LatencyLe250ms  int64 `json:"latency_le_250ms"`
+	LatencyLe500ms  int64 `json:"latency_le_500ms"`
+	LatencyLe1s     int64 `json:"latency_le_1s"`
+	LatencyLe2500ms int64 `json:"latency_le_2500ms"`
+	LatencyLe5s     int64 `json:"latency_le_5s"`
+	LatencyLe10s    int64 `json:"latency_le_10s"`
+	LatencyLe30s    int64 `json:"latency_le_30s"`
+	LatencyLe60s    int64 `json:"latency_le_60s"`
+	LatencyGt60s    int64 `json:"latency_gt_60s"`
+}
+
+// The cost reads below are as the Query Activity reads above. Days written
+// before cost collection began have zero cost and add nothing.
+// Cost totals of the current window (is_current) and the prior one. A window
+// without rows has no row.
+func (q *Queries) QueryCostSummary(ctx context.Context, arg QueryCostSummaryParams) ([]QueryCostSummaryRow, error) {
+	rows, err := q.query(ctx, q.queryCostSummaryStmt, queryCostSummary,
+		arg.Since,
+		arg.PriorSince,
+		arg.Until,
+		arg.AccountType,
+		arg.SourceID,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryCostSummaryRow{}
+	for rows.Next() {
+		var i QueryCostSummaryRow
+		if err := rows.Scan(
+			&i.IsCurrent,
+			&i.RowsRead,
+			&i.BytesRead,
+			&i.LatencyLe100ms,
+			&i.LatencyLe250ms,
+			&i.LatencyLe500ms,
+			&i.LatencyLe1s,
+			&i.LatencyLe2500ms,
+			&i.LatencyLe5s,
+			&i.LatencyLe10s,
+			&i.LatencyLe30s,
+			&i.LatencyLe60s,
+			&i.LatencyGt60s,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const queryCountsByAccountType = `-- name: QueryCountsByAccountType :many
 SELECT
     CAST(COALESCE(u.account_type, '') AS TEXT) AS account_type,
@@ -7143,6 +7436,126 @@ func (q *Queries) QueryCountsByAccountType(ctx context.Context, arg QueryCountsB
 	for rows.Next() {
 		var i QueryCountsByAccountTypeRow
 		if err := rows.Scan(&i.AccountType, &i.QueryCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryFailuresByReason = `-- name: QueryFailuresByReason :many
+
+SELECT
+    qfd.reason AS reason,
+    CAST(SUM(CASE WHEN qfd.bucket_date >= ?1 THEN qfd.query_count ELSE 0 END) AS INTEGER) AS query_count,
+    CAST(SUM(CASE WHEN qfd.bucket_date < ?1 THEN qfd.query_count ELSE 0 END) AS INTEGER) AS prior_query_count
+FROM query_failure_stats_daily qfd
+LEFT JOIN users u ON u.id = qfd.user_id
+WHERE qfd.bucket_date >= ?2 AND qfd.bucket_date <= ?3
+  AND (CAST(?4 AS TEXT) = '' OR u.account_type = ?4)
+  AND (CAST(?5 AS INTEGER) = 0 OR qfd.source_id = ?5)
+  AND (CAST(?6 AS INTEGER) = 0 OR qfd.user_id = ?6)
+GROUP BY qfd.reason
+ORDER BY query_count DESC, prior_query_count DESC, qfd.reason ASC
+`
+
+type QueryFailuresByReasonParams struct {
+	Since       string `json:"since"`
+	PriorSince  string `json:"prior_since"`
+	Until       string `json:"until"`
+	AccountType string `json:"account_type"`
+	SourceID    int64  `json:"source_id"`
+	UserID      int64  `json:"user_id"`
+}
+
+type QueryFailuresByReasonRow struct {
+	Reason          string `json:"reason"`
+	QueryCount      int64  `json:"query_count"`
+	PriorQueryCount int64  `json:"prior_query_count"`
+}
+
+// The failure reads take the filters of the Query Activity reads above.
+// Failed runs per reason in both windows, most current failures first.
+func (q *Queries) QueryFailuresByReason(ctx context.Context, arg QueryFailuresByReasonParams) ([]QueryFailuresByReasonRow, error) {
+	rows, err := q.query(ctx, q.queryFailuresByReasonStmt, queryFailuresByReason,
+		arg.Since,
+		arg.PriorSince,
+		arg.Until,
+		arg.AccountType,
+		arg.SourceID,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryFailuresByReasonRow{}
+	for rows.Next() {
+		var i QueryFailuresByReasonRow
+		if err := rows.Scan(&i.Reason, &i.QueryCount, &i.PriorQueryCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryFailuresBySource = `-- name: QueryFailuresBySource :many
+SELECT
+    qfd.source_id AS source_id,
+    CAST(SUM(qfd.query_count) AS INTEGER) AS query_count
+FROM query_failure_stats_daily qfd
+LEFT JOIN users u ON u.id = qfd.user_id
+WHERE qfd.bucket_date >= ?1 AND qfd.bucket_date <= ?2
+  AND (CAST(?3 AS TEXT) = '' OR u.account_type = ?3)
+  AND (CAST(?4 AS INTEGER) = 0 OR qfd.source_id = ?4)
+  AND (CAST(?5 AS INTEGER) = 0 OR qfd.user_id = ?5)
+GROUP BY qfd.source_id
+ORDER BY qfd.source_id ASC
+`
+
+type QueryFailuresBySourceParams struct {
+	Since       string `json:"since"`
+	Until       string `json:"until"`
+	AccountType string `json:"account_type"`
+	SourceID    int64  `json:"source_id"`
+	UserID      int64  `json:"user_id"`
+}
+
+type QueryFailuresBySourceRow struct {
+	SourceID   int64 `json:"source_id"`
+	QueryCount int64 `json:"query_count"`
+}
+
+// Current-window failed runs per source.
+func (q *Queries) QueryFailuresBySource(ctx context.Context, arg QueryFailuresBySourceParams) ([]QueryFailuresBySourceRow, error) {
+	rows, err := q.query(ctx, q.queryFailuresBySourceStmt, queryFailuresBySource,
+		arg.Since,
+		arg.Until,
+		arg.AccountType,
+		arg.SourceID,
+		arg.UserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryFailuresBySourceRow{}
+	for rows.Next() {
+		var i QueryFailuresBySourceRow
+		if err := rows.Scan(&i.SourceID, &i.QueryCount); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -8329,6 +8742,88 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (b
 	return exists, err
 }
 
+const topQueryFailures = `-- name: TopQueryFailures :many
+SELECT
+    qfd.source_id AS source_id,
+    CAST(COALESCE(s.name, '') AS TEXT) AS source_name,
+    CAST(COALESCE(s.source_type, '') AS TEXT) AS source_type,
+    qfd.user_id AS user_id,
+    CAST(COALESCE(u.email, '') AS TEXT) AS email,
+    CAST(COALESCE(u.full_name, '') AS TEXT) AS full_name,
+    CAST(COALESCE(u.account_type, '') AS TEXT) AS account_type,
+    CAST(SUM(qfd.query_count) AS INTEGER) AS query_count
+FROM query_failure_stats_daily qfd
+LEFT JOIN users u ON u.id = qfd.user_id
+LEFT JOIN sources s ON s.id = qfd.source_id
+WHERE qfd.bucket_date >= ?1 AND qfd.bucket_date <= ?2
+  AND (CAST(?3 AS TEXT) = '' OR u.account_type = ?3)
+  AND (CAST(?4 AS INTEGER) = 0 OR qfd.source_id = ?4)
+  AND (CAST(?5 AS INTEGER) = 0 OR qfd.user_id = ?5)
+GROUP BY qfd.source_id, s.name, s.source_type, qfd.user_id, u.email, u.full_name, u.account_type
+ORDER BY query_count DESC, qfd.source_id ASC, qfd.user_id ASC
+LIMIT ?6
+`
+
+type TopQueryFailuresParams struct {
+	Since       string `json:"since"`
+	Until       string `json:"until"`
+	AccountType string `json:"account_type"`
+	SourceID    int64  `json:"source_id"`
+	UserID      int64  `json:"user_id"`
+	Limit       int64  `json:"limit"`
+}
+
+type TopQueryFailuresRow struct {
+	SourceID    int64  `json:"source_id"`
+	SourceName  string `json:"source_name"`
+	SourceType  string `json:"source_type"`
+	UserID      int64  `json:"user_id"`
+	Email       string `json:"email"`
+	FullName    string `json:"full_name"`
+	AccountType string `json:"account_type"`
+	QueryCount  int64  `json:"query_count"`
+}
+
+// The source and user pairs with the most current-window failed runs.
+func (q *Queries) TopQueryFailures(ctx context.Context, arg TopQueryFailuresParams) ([]TopQueryFailuresRow, error) {
+	rows, err := q.query(ctx, q.topQueryFailuresStmt, topQueryFailures,
+		arg.Since,
+		arg.Until,
+		arg.AccountType,
+		arg.SourceID,
+		arg.UserID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopQueryFailuresRow{}
+	for rows.Next() {
+		var i TopQueryFailuresRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.SourceName,
+			&i.SourceType,
+			&i.UserID,
+			&i.Email,
+			&i.FullName,
+			&i.AccountType,
+			&i.QueryCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const topQueryShapes = `-- name: TopQueryShapes :many
 SELECT
     qss.source_id AS source_id,
@@ -8341,6 +8836,9 @@ SELECT
     CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.total_duration_ms ELSE 0 END) AS INTEGER) AS total_duration_ms,
     CAST(SUM(CASE WHEN qss.bucket_date < ?1 THEN qss.query_count ELSE 0 END) AS INTEGER) AS prior_query_count,
     CAST(SUM(CASE WHEN qss.bucket_date < ?1 THEN qss.total_duration_ms ELSE 0 END) AS INTEGER) AS prior_total_duration_ms,
+    CAST(SUM(CASE WHEN qss.bucket_date >= ?1 AND qss.total_bytes_read > 0 THEN qss.query_count ELSE 0 END) AS INTEGER) AS scanned_count,
+    CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.total_rows_read ELSE 0 END) AS INTEGER) AS rows_read,
+    CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.total_bytes_read ELSE 0 END) AS INTEGER) AS bytes_read,
     CAST(COUNT(CASE WHEN qss.bucket_date >= ?1 THEN qss.max_lookback_s END) AS INTEGER) AS lookback_rows,
     CAST(COALESCE(MAX(CASE WHEN qss.bucket_date >= ?1 THEN qss.max_lookback_s END), 0) AS INTEGER) AS max_lookback_s
 FROM query_shape_stats_daily qss
@@ -8373,6 +8871,9 @@ type TopQueryShapesRow struct {
 	TotalDurationMs      int64  `json:"total_duration_ms"`
 	PriorQueryCount      int64  `json:"prior_query_count"`
 	PriorTotalDurationMs int64  `json:"prior_total_duration_ms"`
+	ScannedCount         int64  `json:"scanned_count"`
+	RowsRead             int64  `json:"rows_read"`
+	BytesRead            int64  `json:"bytes_read"`
 	LookbackRows         int64  `json:"lookback_rows"`
 	MaxLookbackS         int64  `json:"max_lookback_s"`
 }
@@ -8380,7 +8881,9 @@ type TopQueryShapesRow struct {
 // Analyzed shapes with a current-window query, across sources unless
 // source_id is set, by current total duration desc. Dates are as in the
 // Query Activity reads above. lookback_rows is 0 when no current row has a
-// lookback, and then max_lookback_s means nothing.
+// lookback, and then max_lookback_s means nothing. scanned_count counts the
+// current queries on days whose row recorded a scan, the days since scan
+// collection began.
 func (q *Queries) TopQueryShapes(ctx context.Context, arg TopQueryShapesParams) ([]TopQueryShapesRow, error) {
 	rows, err := q.query(ctx, q.topQueryShapesStmt, topQueryShapes,
 		arg.Since,
@@ -8407,6 +8910,9 @@ func (q *Queries) TopQueryShapes(ctx context.Context, arg TopQueryShapesParams) 
 			&i.TotalDurationMs,
 			&i.PriorQueryCount,
 			&i.PriorTotalDurationMs,
+			&i.ScannedCount,
+			&i.RowsRead,
+			&i.BytesRead,
 			&i.LookbackRows,
 			&i.MaxLookbackS,
 		); err != nil {

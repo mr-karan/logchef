@@ -215,6 +215,7 @@ func TestAuditQueryRunRecordsEachQuery(t *testing.T) {
 			if rows := e.history(); len(rows) != 1 || rows[0].QueryLanguage != tc.language {
 				t.Errorf("history %+v, want one row in %s", rows, tc.language)
 			}
+			e.wantRollups(1, nil)
 		})
 	}
 }
@@ -257,6 +258,7 @@ func TestAuditQueryRunRecordsFailures(t *testing.T) {
 			if got := e.historyRows(); got != 0 {
 				t.Errorf("history rows %d, want none for a failed query", got)
 			}
+			e.wantRollups(0, map[string]int64{tc.reason: 1})
 		})
 	}
 }
@@ -317,4 +319,5 @@ func TestAuditQueryRunRecordsQueryEndingAtShutdown(t *testing.T) {
 	if got := e.historyRows(); got != 1 {
 		t.Errorf("history rows %d, want the cancelled query's row", got)
 	}
+	e.wantRollups(0, map[string]int64{"cancelled": 1})
 }

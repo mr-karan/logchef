@@ -124,6 +124,8 @@ type QueryShapeIncrement struct {
 	BucketDate string // YYYY-MM-DD, UTC
 	SourceID   SourceID
 	Usage      QueryShapeUsage
+	RowsRead   int64
+	BytesRead  int64
 }
 
 // QueryShapeCoverage summarizes every rollup row of a source in a window, so

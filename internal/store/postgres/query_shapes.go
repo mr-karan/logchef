@@ -25,6 +25,8 @@ func (s *Store) IncrementQueryShapeStats(ctx context.Context, inc models.QuerySh
 		TotalDurationMs: inc.Usage.TotalDurationMs,
 		TotalRows:       inc.Usage.TotalRows,
 		MaxLookbackS:    int8FromPtr(inc.Usage.MaxLookbackSeconds),
+		TotalRowsRead:   inc.RowsRead,
+		TotalBytesRead:  inc.BytesRead,
 	}); err != nil {
 		return fmt.Errorf("error incrementing query shape stats: %w", err)
 	}

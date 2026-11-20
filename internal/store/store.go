@@ -412,12 +412,15 @@ type QueryHistoryStore interface {
 	RecordQueryHistory(ctx context.Context, entry *models.QueryHistory) error
 	ListQueryHistory(ctx context.Context, userID models.UserID, limit int) ([]*models.QueryHistory, error)
 
-	// IncrementQueryStats upserts one executed query into the non-pruned
-	// query_stats_daily rollup: it adds 1 to query_count and durationMs to
-	// total_duration_ms for the (bucketDate,userID,teamID,sourceID,language)
-	// key. bucketDate is 'YYYY-MM-DD' (UTC). Called at record time (best-effort)
-	// so all-time usage analytics stay correct despite query_history pruning.
-	IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error
+	// IncrementQueryStats upserts one successful query run into the
+	// non-pruned query_stats_daily rollup: it adds 1 to query_count, the
+	// run's duration, scan and returned rows to their totals, and 1 to its
+	// latency bucket. Called at record time (best-effort) so all-time usage
+	// analytics stay correct despite query_history pruning.
+	IncrementQueryStats(ctx context.Context, inc models.QueryStatsIncrement) error
+	// IncrementQueryFailureStats upserts one failed query run into the
+	// non-pruned query_failure_stats_daily rollup.
+	IncrementQueryFailureStats(ctx context.Context, inc models.QueryFailureIncrement) error
 	// The Query Activity reads below take a models.QueryStatsFilter: rows
 	// from PriorSince to Until, current from Since on.
 
@@ -438,8 +441,27 @@ type QueryHistoryStore interface {
 	// used first. It ignores PriorSince.
 	QueryStatsByLanguage(ctx context.Context, f models.QueryStatsFilter) ([]models.LanguageQueryCount, error)
 
+	// QueryCostSummary totals the cost of both windows.
+	QueryCostSummary(ctx context.Context, f models.QueryStatsFilter) (models.QueryCostSummary, error)
+	// QueryCostBySourceDay returns the cost of each source on each
+	// current-window day with a successful run, by source and day. It
+	// ignores PriorSince.
+	QueryCostBySourceDay(ctx context.Context, f models.QueryStatsFilter) ([]models.SourceDayCost, error)
+	// QueryCostCollectedSince returns the first day with a recorded cost or
+	// failure, "" before any.
+	QueryCostCollectedSince(ctx context.Context) (string, error)
+	// QueryFailuresByReason counts failed runs per reason in both windows,
+	// most current failures first.
+	QueryFailuresByReason(ctx context.Context, f models.QueryStatsFilter) ([]models.FailureReasonCount, error)
+	// QueryFailuresBySource counts current-window failed runs per source. It
+	// ignores PriorSince.
+	QueryFailuresBySource(ctx context.Context, f models.QueryStatsFilter) ([]models.SourceFailureCount, error)
+	// TopQueryFailures returns the source and user pairs with the most
+	// current-window failed runs, capped at limit. It ignores PriorSince.
+	TopQueryFailures(ctx context.Context, f models.QueryStatsFilter, limit int) ([]models.FailurePairStat, error)
+
 	// IncrementQueryShapeStats adds inc to its query_shape_stats_daily row:
-	// the three counters sum and the larger lookback is kept.
+	// the counters sum and the larger lookback is kept.
 	IncrementQueryShapeStats(ctx context.Context, inc models.QueryShapeIncrement) error
 	// ListQueryShapeStats returns a source's analyzed shapes with bucket_date
 	// from since to until, both inclusive, summed over days, by query count

@@ -160,13 +160,15 @@ func dashboardStreamErrorStatus(err error) int {
 // result into the exact streamed JSON envelope (via queryStreamWriter, so cached
 // bytes are byte-identical to the streaming response), bounded by
 // max_entry_bytes. On overflow it returns errCacheBudgetExceeded and the caller
-// falls back to the unbuffered streaming path.
-func (s *Server) fillClickHouseStream(userID models.UserID, teamID models.TeamID, sourceID models.SourceID, params datasource.QueryRequest, cfg queryStreamConfig) func(ctx context.Context) ([]byte, error) {
+// falls back to the unbuffered streaming path. A fill that succeeds passes
+// its query stats to filled.
+func (s *Server) fillClickHouseStream(userID models.UserID, teamID models.TeamID, sourceID models.SourceID, params datasource.QueryRequest, cfg queryStreamConfig, filled func(models.QueryStats)) func(ctx context.Context) ([]byte, error) {
 	return s.dashboardQueryFill(userID, teamID, sourceID, params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
 		cb := &cappedBuffer{limit: s.config.DashboardCache.MaxEntryBytes}
 		bw := bufio.NewWriter(cb)
 		writer := newQueryStreamWriter(bw, cfg, queryID)
-		if _, err := s.datasources.QueryLogsStream(ctx, sourceID, params, writer); err != nil {
+		stats, err := s.datasources.QueryLogsStream(ctx, sourceID, params, writer)
+		if err != nil {
 			if !writer.begun || errors.Is(err, errCacheBudgetExceeded) {
 				return nil, err
 			}
@@ -180,6 +182,7 @@ func (s *Server) fillClickHouseStream(userID models.UserID, teamID models.TeamID
 		if err := bw.Flush(); err != nil {
 			return nil, err
 		}
+		filled(stats)
 		return cb.buf.Bytes(), nil
 	})
 }
