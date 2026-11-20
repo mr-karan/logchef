@@ -396,6 +396,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.holdJobStmt, err = db.PrepareContext(ctx, holdJob); err != nil {
 		return nil, fmt.Errorf("error preparing query HoldJob: %w", err)
 	}
+	if q.incrementQueryFailureStatsStmt, err = db.PrepareContext(ctx, incrementQueryFailureStats); err != nil {
+		return nil, fmt.Errorf("error preparing query IncrementQueryFailureStats: %w", err)
+	}
 	if q.incrementQueryShapeStatsStmt, err = db.PrepareContext(ctx, incrementQueryShapeStats); err != nil {
 		return nil, fmt.Errorf("error preparing query IncrementQueryShapeStats: %w", err)
 	}
@@ -657,8 +660,23 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.pruneReportRunsStmt, err = db.PrepareContext(ctx, pruneReportRuns); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneReportRuns: %w", err)
 	}
+	if q.queryCostBySourceDayStmt, err = db.PrepareContext(ctx, queryCostBySourceDay); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryCostBySourceDay: %w", err)
+	}
+	if q.queryCostCollectedSinceStmt, err = db.PrepareContext(ctx, queryCostCollectedSince); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryCostCollectedSince: %w", err)
+	}
+	if q.queryCostSummaryStmt, err = db.PrepareContext(ctx, queryCostSummary); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryCostSummary: %w", err)
+	}
 	if q.queryCountsByAccountTypeStmt, err = db.PrepareContext(ctx, queryCountsByAccountType); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryCountsByAccountType: %w", err)
+	}
+	if q.queryFailuresByReasonStmt, err = db.PrepareContext(ctx, queryFailuresByReason); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryFailuresByReason: %w", err)
+	}
+	if q.queryFailuresBySourceStmt, err = db.PrepareContext(ctx, queryFailuresBySource); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryFailuresBySource: %w", err)
 	}
 	if q.queryShapeCoverageStmt, err = db.PrepareContext(ctx, queryShapeCoverage); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryShapeCoverage: %w", err)
@@ -773,6 +791,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
+	}
+	if q.topQueryFailuresStmt, err = db.PrepareContext(ctx, topQueryFailures); err != nil {
+		return nil, fmt.Errorf("error preparing query TopQueryFailures: %w", err)
 	}
 	if q.topQueryShapesStmt, err = db.PrepareContext(ctx, topQueryShapes); err != nil {
 		return nil, fmt.Errorf("error preparing query TopQueryShapes: %w", err)
@@ -1480,6 +1501,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing holdJobStmt: %w", cerr)
 		}
 	}
+	if q.incrementQueryFailureStatsStmt != nil {
+		if cerr := q.incrementQueryFailureStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing incrementQueryFailureStatsStmt: %w", cerr)
+		}
+	}
 	if q.incrementQueryShapeStatsStmt != nil {
 		if cerr := q.incrementQueryShapeStatsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing incrementQueryShapeStatsStmt: %w", cerr)
@@ -1915,9 +1941,34 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing pruneReportRunsStmt: %w", cerr)
 		}
 	}
+	if q.queryCostBySourceDayStmt != nil {
+		if cerr := q.queryCostBySourceDayStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryCostBySourceDayStmt: %w", cerr)
+		}
+	}
+	if q.queryCostCollectedSinceStmt != nil {
+		if cerr := q.queryCostCollectedSinceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryCostCollectedSinceStmt: %w", cerr)
+		}
+	}
+	if q.queryCostSummaryStmt != nil {
+		if cerr := q.queryCostSummaryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryCostSummaryStmt: %w", cerr)
+		}
+	}
 	if q.queryCountsByAccountTypeStmt != nil {
 		if cerr := q.queryCountsByAccountTypeStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing queryCountsByAccountTypeStmt: %w", cerr)
+		}
+	}
+	if q.queryFailuresByReasonStmt != nil {
+		if cerr := q.queryFailuresByReasonStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryFailuresByReasonStmt: %w", cerr)
+		}
+	}
+	if q.queryFailuresBySourceStmt != nil {
+		if cerr := q.queryFailuresBySourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryFailuresBySourceStmt: %w", cerr)
 		}
 	}
 	if q.queryShapeCoverageStmt != nil {
@@ -2108,6 +2159,11 @@ func (q *Queries) Close() error {
 	if q.teamHasSourceStmt != nil {
 		if cerr := q.teamHasSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing teamHasSourceStmt: %w", cerr)
+		}
+	}
+	if q.topQueryFailuresStmt != nil {
+		if cerr := q.topQueryFailuresStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing topQueryFailuresStmt: %w", cerr)
 		}
 	}
 	if q.topQueryShapesStmt != nil {
@@ -2408,6 +2464,7 @@ type Queries struct {
 	getUserPreferencesStmt                   *sql.Stmt
 	getUserTeamForSourceStmt                 *sql.Stmt
 	holdJobStmt                              *sql.Stmt
+	incrementQueryFailureStatsStmt           *sql.Stmt
 	incrementQueryShapeStatsStmt             *sql.Stmt
 	incrementQueryStatsStmt                  *sql.Stmt
 	insertAlertHistoryStmt                   *sql.Stmt
@@ -2495,7 +2552,12 @@ type Queries struct {
 	pruneQueryHistoryForUserStmt             *sql.Stmt
 	pruneQueryShapeStatsStmt                 *sql.Stmt
 	pruneReportRunsStmt                      *sql.Stmt
+	queryCostBySourceDayStmt                 *sql.Stmt
+	queryCostCollectedSinceStmt              *sql.Stmt
+	queryCostSummaryStmt                     *sql.Stmt
 	queryCountsByAccountTypeStmt             *sql.Stmt
+	queryFailuresByReasonStmt                *sql.Stmt
+	queryFailuresBySourceStmt                *sql.Stmt
 	queryShapeCoverageStmt                   *sql.Stmt
 	queryStatsByDayStmt                      *sql.Stmt
 	queryStatsByLanguageStmt                 *sql.Stmt
@@ -2534,6 +2596,7 @@ type Queries struct {
 	takeReportManualRunCooldownStmt          *sql.Stmt
 	takeReportPreviewCooldownStmt            *sql.Stmt
 	teamHasSourceStmt                        *sql.Stmt
+	topQueryFailuresStmt                     *sql.Stmt
 	topQueryShapesStmt                       *sql.Stmt
 	touchAlertEvaluatedStmt                  *sql.Stmt
 	touchOAuthGrantStmt                      *sql.Stmt
@@ -2691,6 +2754,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserPreferencesStmt:                   q.getUserPreferencesStmt,
 		getUserTeamForSourceStmt:                 q.getUserTeamForSourceStmt,
 		holdJobStmt:                              q.holdJobStmt,
+		incrementQueryFailureStatsStmt:           q.incrementQueryFailureStatsStmt,
 		incrementQueryShapeStatsStmt:             q.incrementQueryShapeStatsStmt,
 		incrementQueryStatsStmt:                  q.incrementQueryStatsStmt,
 		insertAlertHistoryStmt:                   q.insertAlertHistoryStmt,
@@ -2778,7 +2842,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneQueryHistoryForUserStmt:             q.pruneQueryHistoryForUserStmt,
 		pruneQueryShapeStatsStmt:                 q.pruneQueryShapeStatsStmt,
 		pruneReportRunsStmt:                      q.pruneReportRunsStmt,
+		queryCostBySourceDayStmt:                 q.queryCostBySourceDayStmt,
+		queryCostCollectedSinceStmt:              q.queryCostCollectedSinceStmt,
+		queryCostSummaryStmt:                     q.queryCostSummaryStmt,
 		queryCountsByAccountTypeStmt:             q.queryCountsByAccountTypeStmt,
+		queryFailuresByReasonStmt:                q.queryFailuresByReasonStmt,
+		queryFailuresBySourceStmt:                q.queryFailuresBySourceStmt,
 		queryShapeCoverageStmt:                   q.queryShapeCoverageStmt,
 		queryStatsByDayStmt:                      q.queryStatsByDayStmt,
 		queryStatsByLanguageStmt:                 q.queryStatsByLanguageStmt,
@@ -2817,6 +2886,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		takeReportManualRunCooldownStmt:          q.takeReportManualRunCooldownStmt,
 		takeReportPreviewCooldownStmt:            q.takeReportPreviewCooldownStmt,
 		teamHasSourceStmt:                        q.teamHasSourceStmt,
+		topQueryFailuresStmt:                     q.topQueryFailuresStmt,
 		topQueryShapesStmt:                       q.topQueryShapesStmt,
 		touchAlertEvaluatedStmt:                  q.touchAlertEvaluatedStmt,
 		touchOAuthGrantStmt:                      q.touchOAuthGrantStmt,

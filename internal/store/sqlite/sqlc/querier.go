@@ -253,13 +253,17 @@ type Querier interface {
 	// Get a team ID that the user belongs to and that has access to the source
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
 	HoldJob(ctx context.Context, arg HoldJobParams) (int64, error)
+	// Query failure stats daily rollup ---------------------------------------------
+	// Upsert one failed query run into the non-pruned daily failure rollup.
+	IncrementQueryFailureStats(ctx context.Context, arg IncrementQueryFailureStatsParams) error
 	// Query shape stats daily rollup (RFC 0010) ------------------------------------
-	// Add one increment to a shape's daily row: sum the three counters and keep
+	// Add one increment to a shape's daily row: sum the counters and keep
 	// the larger max_lookback_s (a NULL lookback never replaces a known one).
 	IncrementQueryShapeStats(ctx context.Context, arg IncrementQueryShapeStatsParams) error
 	// Query stats daily rollup -----------------------------------------------------
-	// Upsert one executed query into the non-pruned daily rollup: add 1 to
-	// query_count and the given duration to total_duration_ms for the composite key.
+	// Upsert one successful query run into the non-pruned daily rollup: add 1 to
+	// query_count, and its duration, scan and returned rows to their totals. The
+	// latency_* arguments are the run's histogram: 1 in its bucket, 0 elsewhere.
 	IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
@@ -425,9 +429,24 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	PruneQueryShapeStats(ctx context.Context, bucketDate string) error
 	PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error
+	// Cost per source per current-window day, by source and day.
+	QueryCostBySourceDay(ctx context.Context, arg QueryCostBySourceDayParams) ([]QueryCostBySourceDayRow, error)
+	// The first day with a recorded cost or failure: when collection began. ''
+	// before any.
+	QueryCostCollectedSince(ctx context.Context) (string, error)
+	// The cost reads below are as the Query Activity reads above. Days written
+	// before cost collection began have zero cost and add nothing.
+	// Cost totals of the current window (is_current) and the prior one. A window
+	// without rows has no row.
+	QueryCostSummary(ctx context.Context, arg QueryCostSummaryParams) ([]QueryCostSummaryRow, error)
 	// Current-window query counts per account type, honoring the source and user
 	// filters. account_type is '' for queries of deleted users.
 	QueryCountsByAccountType(ctx context.Context, arg QueryCountsByAccountTypeParams) ([]QueryCountsByAccountTypeRow, error)
+	// The failure reads take the filters of the Query Activity reads above.
+	// Failed runs per reason in both windows, most current failures first.
+	QueryFailuresByReason(ctx context.Context, arg QueryFailuresByReasonParams) ([]QueryFailuresByReasonRow, error)
+	// Current-window failed runs per source.
+	QueryFailuresBySource(ctx context.Context, arg QueryFailuresBySourceParams) ([]QueryFailuresBySourceRow, error)
 	// Totals over every rollup row of a source from `since` to `until`, both
 	// inclusive, not only the rows
 	// that ListQueryShapeStats returns. filtered_days counts the days with a
@@ -514,10 +533,14 @@ type Querier interface {
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)
+	// The source and user pairs with the most current-window failed runs.
+	TopQueryFailures(ctx context.Context, arg TopQueryFailuresParams) ([]TopQueryFailuresRow, error)
 	// Analyzed shapes with a current-window query, across sources unless
 	// source_id is set, by current total duration desc. Dates are as in the
 	// Query Activity reads above. lookback_rows is 0 when no current row has a
-	// lookback, and then max_lookback_s means nothing.
+	// lookback, and then max_lookback_s means nothing. scanned_count counts the
+	// current queries on days whose row recorded a scan, the days since scan
+	// collection began.
 	TopQueryShapes(ctx context.Context, arg TopQueryShapesParams) ([]TopQueryShapesRow, error)
 	TouchAlertEvaluated(ctx context.Context, id int64) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error

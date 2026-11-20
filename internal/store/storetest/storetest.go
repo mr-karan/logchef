@@ -45,6 +45,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
 	t.Run("QueryShapeStats", func(t *testing.T) { testQueryShapeStats(t, ctx, s) })
+	t.Run("QueryCostAndFailures", func(t *testing.T) { testQueryCostAndFailures(t, ctx, s) })
 	t.Run("TopQueryShapes", func(t *testing.T) { testTopQueryShapes(t, ctx, s) })
 	t.Run("SchemaAdvisorReports", func(t *testing.T) { testSchemaAdvisorReports(t, ctx, s) })
 	t.Run("SchemaAdvisorDismissals", func(t *testing.T) { testSchemaAdvisorDismissals(t, ctx, s) })

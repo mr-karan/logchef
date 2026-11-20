@@ -54,10 +54,12 @@ func TestQueryShapeRollup(t *testing.T) {
 		}
 		select {
 		case rec := <-s.queryRecords:
-			if rec.history == nil {
-				t.Fatalf("%s: the query wrote no history row", endpoint)
+			if rec.usage == nil {
+				t.Fatalf("%s: the query counted no run", endpoint)
 			}
-			s.writeQueryHistory(context.Background(), rec.history)
+			// This server records no audit events.
+			rec.event = nil
+			s.writeQueryRecord(context.Background(), rec)
 		case <-time.After(5 * time.Second):
 			t.Fatalf("%s: query history was not recorded", endpoint)
 		}
@@ -111,10 +113,10 @@ func TestQueryShapeOverflow(t *testing.T) {
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	record := func(query string, language models.QueryLanguage, table string) {
 		t.Helper()
-		s.recordQueryShape(ctx, now, &models.QueryHistory{
+		s.recordQueryShape(ctx, now, &queryUsage{run: &models.QueryHistory{
 			SourceID: sourceID, QueryText: query, QueryLanguage: language,
 			SourceDatabase: "logs", SourceTable: table, DurationMs: 1, RowCount: 1,
-		})
+		}})
 	}
 	record(`level=`, models.QueryLanguageLogchefQL, "app") // does not parse
 	record(`_time:5m error`, models.QueryLanguageLogsQL, "app")
@@ -157,7 +159,7 @@ func TestQueryShapePrunesOncePerDay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s.recordQueryShape(ctx, now, &models.QueryHistory{SourceID: sourceID, QueryText: `level="error"`, QueryLanguage: models.QueryLanguageLogchefQL, SourceDatabase: "logs", SourceTable: "app"})
+	s.recordQueryShape(ctx, now, &queryUsage{run: &models.QueryHistory{SourceID: sourceID, QueryText: `level="error"`, QueryLanguage: models.QueryLanguageLogchefQL, SourceDatabase: "logs", SourceTable: "app"}})
 	coverage, err := s.store.QueryShapeCoverage(ctx, sourceID, "2026-01-01", "9999-12-31")
 	if err != nil {
 		t.Fatal(err)

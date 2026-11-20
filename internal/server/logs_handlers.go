@@ -312,8 +312,10 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 		// max_entry_bytes); on overflow the fill errors and we fall through to the
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
 		if q.cacheable {
-			if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, q.params, q.cfg)); handled {
-				s.finishCachedQueryRun(c, q.run)
+			var filled *models.QueryStats
+			fill := s.fillClickHouseStream(user.ID, teamID, sourceID, q.params, q.cfg, func(stats models.QueryStats) { filled = &stats })
+			if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, fill); handled {
+				s.finishCachedQueryRun(c, q.run, filled)
 				return err
 			} else if err != nil {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", q.mode)
@@ -327,15 +329,20 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
 	// panels from the cache when eligible.
 	if q.cacheable {
+		var filled *models.QueryStats
 		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, q.params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
 			result, err := core.QueryLogs(ctx, s.datasources, q.src, q.params)
 			if err != nil {
 				return nil, err
 			}
-			return json.Marshal(NewSuccessResponse(q.bufferedResponse(result, queryID)))
+			body, err := json.Marshal(NewSuccessResponse(q.bufferedResponse(result, queryID)))
+			if err == nil {
+				filled = &result.Stats
+			}
+			return body, err
 		})
 		if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, fill); handled {
-			s.finishCachedQueryRun(c, q.run)
+			s.finishCachedQueryRun(c, q.run, filled)
 			return err
 		} else if err != nil {
 			return s.sendQueryError(c, sourceID, err, q.cfg.failure, q.cfg.operation)

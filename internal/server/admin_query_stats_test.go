@@ -51,7 +51,7 @@ func newQueryStatsFixture(t *testing.T) queryStatsFixture {
 	day := func(ago int) string { return today.AddDate(0, 0, -ago).Format(time.DateOnly) }
 	inc := func(ago int, user *models.User, src *models.Source, durationMs int64) {
 		t.Helper()
-		if err := db.IncrementQueryStats(ctx, day(ago), user.ID, 1, src.ID, models.QueryLanguageLogchefQL, durationMs); err != nil {
+		if err := db.IncrementQueryStats(ctx, models.QueryStatsIncrement{BucketDate: day(ago), UserID: user.ID, TeamID: 1, SourceID: src.ID, Language: models.QueryLanguageLogchefQL, DurationMs: durationMs}); err != nil {
 			t.Fatal(err)
 		}
 	}

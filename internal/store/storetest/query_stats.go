@@ -47,7 +47,7 @@ func testQueryStats(t *testing.T, ctx context.Context, s store.Store) {
 
 	inc := func(day string, u models.UserID, team models.TeamID, src models.SourceID, lang models.QueryLanguage, dur int64) {
 		t.Helper()
-		if err := s.IncrementQueryStats(ctx, day, u, team, src, lang, dur); err != nil {
+		if err := s.IncrementQueryStats(ctx, models.QueryStatsIncrement{BucketDate: day, UserID: u, TeamID: team, SourceID: src, Language: lang, DurationMs: dur}); err != nil {
 			t.Fatalf("IncrementQueryStats(%s,%d,%d): %v", day, u, src, err)
 		}
 	}

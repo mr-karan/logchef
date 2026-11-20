@@ -168,6 +168,7 @@ func (db *DB) TopQueryShapes(ctx context.Context, f models.QueryShapeFilter, lim
 			MaxLookbackSeconds: lookbackOf(r.LookbackRows, r.MaxLookbackS),
 			Current:            models.QueryTotals{QueryCount: r.QueryCount, TotalDurationMs: r.TotalDurationMs},
 			Prior:              &models.QueryTotals{QueryCount: r.PriorQueryCount, TotalDurationMs: r.PriorTotalDurationMs},
+			Scan:               models.ShapeScan{ScannedRuns: r.ScannedCount, RowsRead: r.RowsRead, BytesRead: r.BytesRead},
 		})
 	}
 	return out, nil
@@ -183,4 +184,141 @@ func (db *DB) CountUnanalyzedQueryShapes(ctx context.Context, f models.QueryShap
 		return 0, fmt.Errorf("error counting unanalyzed query shapes: %w", err)
 	}
 	return n, nil
+}
+
+// QueryCostSummary totals the cost of the current and prior windows.
+func (db *DB) QueryCostSummary(ctx context.Context, f models.QueryStatsFilter) (models.QueryCostSummary, error) {
+	rows, err := db.readQueries.QueryCostSummary(ctx, sqlc.QueryCostSummaryParams{
+		Since: f.Since, PriorSince: f.PriorSince, Until: f.Until,
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return models.QueryCostSummary{}, fmt.Errorf("error summarizing query cost: %w", err)
+	}
+	var out models.QueryCostSummary
+	for _, r := range rows {
+		cost := models.RunCost{
+			RowsRead:  r.RowsRead,
+			BytesRead: r.BytesRead,
+			Latency: models.LatencyHistogram{r.LatencyLe100ms, r.LatencyLe250ms, r.LatencyLe500ms, r.LatencyLe1s, r.LatencyLe2500ms,
+				r.LatencyLe5s, r.LatencyLe10s, r.LatencyLe30s, r.LatencyLe60s, r.LatencyGt60s},
+		}
+		if r.IsCurrent != 0 {
+			out.Current = cost
+		} else {
+			out.Prior = cost
+		}
+	}
+	return out, nil
+}
+
+// QueryCostBySourceDay returns the cost of each source on each current-window
+// day with a successful run.
+func (db *DB) QueryCostBySourceDay(ctx context.Context, f models.QueryStatsFilter) ([]models.SourceDayCost, error) {
+	rows, err := db.readQueries.QueryCostBySourceDay(ctx, sqlc.QueryCostBySourceDayParams{
+		Since: f.Since, Until: f.Until,
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error listing query cost by source and day: %w", err)
+	}
+	out := make([]models.SourceDayCost, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.SourceDayCost{
+			SourceID: models.SourceID(r.SourceID),
+			Date:     r.BucketDate,
+			Cost: models.RunCost{
+				RowsRead:  r.RowsRead,
+				BytesRead: r.BytesRead,
+				Latency: models.LatencyHistogram{r.LatencyLe100ms, r.LatencyLe250ms, r.LatencyLe500ms, r.LatencyLe1s, r.LatencyLe2500ms,
+					r.LatencyLe5s, r.LatencyLe10s, r.LatencyLe30s, r.LatencyLe60s, r.LatencyGt60s},
+			},
+		})
+	}
+	return out, nil
+}
+
+// QueryCostCollectedSince returns the first day with a recorded cost or
+// failure, "" before any.
+func (db *DB) QueryCostCollectedSince(ctx context.Context) (string, error) {
+	d, err := db.readQueries.QueryCostCollectedSince(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error reading when query cost collection began: %w", err)
+	}
+	return d, nil
+}
+
+// IncrementQueryFailureStats upserts one failed query run into the non-pruned
+// query_failure_stats_daily rollup.
+func (db *DB) IncrementQueryFailureStats(ctx context.Context, inc models.QueryFailureIncrement) error {
+	if err := db.writeQueries.IncrementQueryFailureStats(ctx, sqlc.IncrementQueryFailureStatsParams{
+		BucketDate:    inc.BucketDate,
+		UserID:        int64(inc.UserID),
+		TeamID:        int64(inc.TeamID),
+		SourceID:      int64(inc.SourceID),
+		QueryLanguage: string(models.NormalizeQueryLanguage(inc.Language)),
+		Reason:        inc.Reason,
+	}); err != nil {
+		return fmt.Errorf("error incrementing query failure stats: %w", err)
+	}
+	return nil
+}
+
+// QueryFailuresByReason counts failed runs per reason in both windows.
+func (db *DB) QueryFailuresByReason(ctx context.Context, f models.QueryStatsFilter) ([]models.FailureReasonCount, error) {
+	rows, err := db.readQueries.QueryFailuresByReason(ctx, sqlc.QueryFailuresByReasonParams{
+		Since: f.Since, PriorSince: f.PriorSince, Until: f.Until,
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error counting query failures by reason: %w", err)
+	}
+	out := make([]models.FailureReasonCount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.FailureReasonCount{Reason: r.Reason, Count: r.QueryCount, Prior: r.PriorQueryCount})
+	}
+	return out, nil
+}
+
+// QueryFailuresBySource counts current-window failed runs per source.
+func (db *DB) QueryFailuresBySource(ctx context.Context, f models.QueryStatsFilter) ([]models.SourceFailureCount, error) {
+	rows, err := db.readQueries.QueryFailuresBySource(ctx, sqlc.QueryFailuresBySourceParams{
+		Since: f.Since, Until: f.Until,
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error counting query failures by source: %w", err)
+	}
+	out := make([]models.SourceFailureCount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.SourceFailureCount{SourceID: models.SourceID(r.SourceID), Count: r.QueryCount})
+	}
+	return out, nil
+}
+
+// TopQueryFailures returns the source and user pairs with the most
+// current-window failed runs.
+func (db *DB) TopQueryFailures(ctx context.Context, f models.QueryStatsFilter, limit int) ([]models.FailurePairStat, error) {
+	rows, err := db.readQueries.TopQueryFailures(ctx, sqlc.TopQueryFailuresParams{
+		Since: f.Since, Until: f.Until,
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+		Limit: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error listing top query failures: %w", err)
+	}
+	out := make([]models.FailurePairStat, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.FailurePairStat{
+			SourceID:    models.SourceID(r.SourceID),
+			SourceName:  r.SourceName,
+			SourceType:  r.SourceType,
+			UserID:      models.UserID(r.UserID),
+			Email:       r.Email,
+			FullName:    r.FullName,
+			AccountType: models.UserAccountType(r.AccountType),
+			Count:       r.QueryCount,
+		})
+	}
+	return out, nil
 }

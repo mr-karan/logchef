@@ -304,6 +304,16 @@ type OauthRefreshToken struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type QueryFailureStatsDaily struct {
+	BucketDate    pgtype.Date `json:"bucket_date"`
+	UserID        int64       `json:"user_id"`
+	TeamID        int64       `json:"team_id"`
+	SourceID      int64       `json:"source_id"`
+	QueryLanguage string      `json:"query_language"`
+	Reason        string      `json:"reason"`
+	QueryCount    int64       `json:"query_count"`
+}
+
 type QueryHistory struct {
 	ID            int64              `json:"id"`
 	UserID        int64              `json:"user_id"`
@@ -326,6 +336,8 @@ type QueryShapeStatsDaily struct {
 	TotalDurationMs int64       `json:"total_duration_ms"`
 	TotalRows       int64       `json:"total_rows"`
 	MaxLookbackS    pgtype.Int8 `json:"max_lookback_s"`
+	TotalRowsRead   int64       `json:"total_rows_read"`
+	TotalBytesRead  int64       `json:"total_bytes_read"`
 }
 
 type QueryShare struct {
@@ -347,6 +359,19 @@ type QueryStatsDaily struct {
 	QueryLanguage   string      `json:"query_language"`
 	QueryCount      int64       `json:"query_count"`
 	TotalDurationMs int64       `json:"total_duration_ms"`
+	RowsRead        int64       `json:"rows_read"`
+	BytesRead       int64       `json:"bytes_read"`
+	RowsReturned    int64       `json:"rows_returned"`
+	LatencyLe100ms  int64       `json:"latency_le_100ms"`
+	LatencyLe250ms  int64       `json:"latency_le_250ms"`
+	LatencyLe500ms  int64       `json:"latency_le_500ms"`
+	LatencyLe1s     int64       `json:"latency_le_1s"`
+	LatencyLe2500ms int64       `json:"latency_le_2500ms"`
+	LatencyLe5s     int64       `json:"latency_le_5s"`
+	LatencyLe10s    int64       `json:"latency_le_10s"`
+	LatencyLe30s    int64       `json:"latency_le_30s"`
+	LatencyLe60s    int64       `json:"latency_le_60s"`
+	LatencyGt60s    int64       `json:"latency_gt_60s"`
 }
 
 type Report struct {

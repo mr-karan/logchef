@@ -170,6 +170,7 @@ func (s *Store) TopQueryShapes(ctx context.Context, f models.QueryShapeFilter, l
 			MaxLookbackSeconds: lookbackOf(r.LookbackRows, r.MaxLookbackS),
 			Current:            models.QueryTotals{QueryCount: r.QueryCount, TotalDurationMs: r.TotalDurationMs},
 			Prior:              &models.QueryTotals{QueryCount: r.PriorQueryCount, TotalDurationMs: r.PriorTotalDurationMs},
+			Scan:               models.ShapeScan{ScannedRuns: r.ScannedCount, RowsRead: r.RowsRead, BytesRead: r.BytesRead},
 		})
 	}
 	return out, nil
@@ -185,4 +186,144 @@ func (s *Store) CountUnanalyzedQueryShapes(ctx context.Context, f models.QuerySh
 		return 0, fmt.Errorf("error counting unanalyzed query shapes: %w", err)
 	}
 	return n, nil
+}
+
+// QueryCostSummary totals the cost of the current and prior windows.
+func (s *Store) QueryCostSummary(ctx context.Context, f models.QueryStatsFilter) (models.QueryCostSummary, error) {
+	rows, err := s.q.QueryCostSummary(ctx, sqlc.QueryCostSummaryParams{
+		Since: bucketDateParam(f.Since), PriorSince: bucketDateParam(f.PriorSince), Until: bucketDateParam(f.Until),
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return models.QueryCostSummary{}, fmt.Errorf("error summarizing query cost: %w", err)
+	}
+	var out models.QueryCostSummary
+	for _, r := range rows {
+		cost := models.RunCost{
+			RowsRead:  r.RowsRead,
+			BytesRead: r.BytesRead,
+			Latency: models.LatencyHistogram{r.LatencyLe100ms, r.LatencyLe250ms, r.LatencyLe500ms, r.LatencyLe1s, r.LatencyLe2500ms,
+				r.LatencyLe5s, r.LatencyLe10s, r.LatencyLe30s, r.LatencyLe60s, r.LatencyGt60s},
+		}
+		if r.IsCurrent {
+			out.Current = cost
+		} else {
+			out.Prior = cost
+		}
+	}
+	return out, nil
+}
+
+// QueryCostBySourceDay returns the cost of each source on each current-window
+// day with a successful run.
+func (s *Store) QueryCostBySourceDay(ctx context.Context, f models.QueryStatsFilter) ([]models.SourceDayCost, error) {
+	rows, err := s.q.QueryCostBySourceDay(ctx, sqlc.QueryCostBySourceDayParams{
+		Since: bucketDateParam(f.Since), Until: bucketDateParam(f.Until),
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error listing query cost by source and day: %w", err)
+	}
+	out := make([]models.SourceDayCost, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.SourceDayCost{
+			SourceID: models.SourceID(r.SourceID),
+			Date:     r.BucketDate.Time.Format(time.DateOnly),
+			Cost: models.RunCost{
+				RowsRead:  r.RowsRead,
+				BytesRead: r.BytesRead,
+				Latency: models.LatencyHistogram{r.LatencyLe100ms, r.LatencyLe250ms, r.LatencyLe500ms, r.LatencyLe1s, r.LatencyLe2500ms,
+					r.LatencyLe5s, r.LatencyLe10s, r.LatencyLe30s, r.LatencyLe60s, r.LatencyGt60s},
+			},
+		})
+	}
+	return out, nil
+}
+
+// QueryCostCollectedSince returns the first day with a recorded cost or
+// failure, "" before any.
+func (s *Store) QueryCostCollectedSince(ctx context.Context) (string, error) {
+	d, err := s.q.QueryCostCollectedSince(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error reading when query cost collection began: %w", err)
+	}
+	if !d.Valid {
+		return "", nil
+	}
+	return d.Time.Format(time.DateOnly), nil
+}
+
+// IncrementQueryFailureStats upserts one failed query run into the non-pruned
+// query_failure_stats_daily rollup.
+func (s *Store) IncrementQueryFailureStats(ctx context.Context, inc models.QueryFailureIncrement) error {
+	if err := s.q.IncrementQueryFailureStats(ctx, sqlc.IncrementQueryFailureStatsParams{
+		BucketDate:    bucketDateParam(inc.BucketDate),
+		UserID:        int64(inc.UserID),
+		TeamID:        int64(inc.TeamID),
+		SourceID:      int64(inc.SourceID),
+		QueryLanguage: string(models.NormalizeQueryLanguage(inc.Language)),
+		Reason:        inc.Reason,
+	}); err != nil {
+		return fmt.Errorf("error incrementing query failure stats: %w", err)
+	}
+	return nil
+}
+
+// QueryFailuresByReason counts failed runs per reason in both windows.
+func (s *Store) QueryFailuresByReason(ctx context.Context, f models.QueryStatsFilter) ([]models.FailureReasonCount, error) {
+	rows, err := s.q.QueryFailuresByReason(ctx, sqlc.QueryFailuresByReasonParams{
+		Since: bucketDateParam(f.Since), PriorSince: bucketDateParam(f.PriorSince), Until: bucketDateParam(f.Until),
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error counting query failures by reason: %w", err)
+	}
+	out := make([]models.FailureReasonCount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.FailureReasonCount{Reason: r.Reason, Count: r.QueryCount, Prior: r.PriorQueryCount})
+	}
+	return out, nil
+}
+
+// QueryFailuresBySource counts current-window failed runs per source.
+func (s *Store) QueryFailuresBySource(ctx context.Context, f models.QueryStatsFilter) ([]models.SourceFailureCount, error) {
+	rows, err := s.q.QueryFailuresBySource(ctx, sqlc.QueryFailuresBySourceParams{
+		Since: bucketDateParam(f.Since), Until: bucketDateParam(f.Until),
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error counting query failures by source: %w", err)
+	}
+	out := make([]models.SourceFailureCount, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.SourceFailureCount{SourceID: models.SourceID(r.SourceID), Count: r.QueryCount})
+	}
+	return out, nil
+}
+
+// TopQueryFailures returns the source and user pairs with the most
+// current-window failed runs.
+func (s *Store) TopQueryFailures(ctx context.Context, f models.QueryStatsFilter, limit int) ([]models.FailurePairStat, error) {
+	rows, err := s.q.TopQueryFailures(ctx, sqlc.TopQueryFailuresParams{
+		Since: bucketDateParam(f.Since), Until: bucketDateParam(f.Until),
+		AccountType: string(f.AccountType), SourceID: int64(f.SourceID), UserID: int64(f.UserID),
+		RowLimit: int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error listing top query failures: %w", err)
+	}
+	out := make([]models.FailurePairStat, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, models.FailurePairStat{
+			SourceID:    models.SourceID(r.SourceID),
+			SourceName:  r.SourceName,
+			SourceType:  r.SourceType,
+			UserID:      models.UserID(r.UserID),
+			Email:       r.Email,
+			FullName:    r.FullName,
+			AccountType: models.UserAccountType(r.AccountType),
+			Count:       r.QueryCount,
+		})
+	}
+	return out, nil
 }
