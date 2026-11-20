@@ -1,5 +1,5 @@
 import type { RouteLocationRaw } from "vue-router";
-import type { QueryTotals, ShapeFilterItem, UserQueryStat } from "@/api/admin";
+import type { DateWindow, QueryTotals, ShapeFilterItem, UserQueryStat } from "@/api/admin";
 
 /** Average latency in ms, or null when nothing ran. */
 export function averageMs(totals: QueryTotals): number | null {
@@ -29,9 +29,18 @@ export function shapeColumn(item: ShapeFilterItem): string {
   return item.access === "map" ? `${item.column}['${item.path.join("']['")}']` : [item.column, ...item.path].join(".");
 }
 
-/** Audit Log links for query.run events over the same number of days. */
-export function auditLink(days: number, filter: { actor_id?: number; source_id?: number; outcome?: "failure" } = {}): RouteLocationRaw {
-  const query: Record<string, string> = { action: "query.run", t: `${days}d` };
+const DAY_MS = 86_400_000;
+
+/**
+ * Audit Log links for query.run events over the same whole UTC days as
+ * window: from its first midnight to the midnight after its last day.
+ */
+export function auditLink(window: DateWindow, filter: { actor_id?: number; source_id?: number; outcome?: "failure" } = {}): RouteLocationRaw {
+  const query: Record<string, string> = {
+    action: "query.run",
+    start: String(Date.parse(window.since)),
+    end: String(Date.parse(window.until) + DAY_MS),
+  };
   if (filter.actor_id) query.actor_id = String(filter.actor_id);
   if (filter.source_id) {
     query.target_type = "source";

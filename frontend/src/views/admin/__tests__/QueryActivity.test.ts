@@ -47,6 +47,9 @@ const stats: QueryStatsResponse = {
   language_mix: [{ language: "logchefql", query_count: 640 }, { language: "clickhouse-sql", query_count: 310 }, { language: "logql", query_count: 50 }],
 };
 
+// The fixture window's whole UTC days: 2026-10-22T00:00Z up to 2026-11-21T00:00Z.
+const windowRange = "start=1792627200000&end=1795219200000";
+
 let app: App | undefined;
 let root: HTMLDivElement;
 let router: Router;
@@ -170,7 +173,7 @@ describe("Query Activity", () => {
     expect(rows[0]).toContain("↑ +31%");
     expect(rows[1]).toContain("user6@example.test");
     expect(rows[1]).toContain("new");
-    expect(hrefs(adoption, "Query runs in the Audit Log")[0]).toBe("/admin/audit-log?action=query.run&t=30d&actor_id=5");
+    expect(hrefs(adoption, "Query runs in the Audit Log")[0]).toBe(`/admin/audit-log?action=query.run&${windowRange}&actor_id=5`);
     const service = section("service-summary").textContent ?? "";
     expect(service).toContain("3 service accounts");
     expect(service).toContain("Error Digest Worker (241K)");
@@ -202,9 +205,10 @@ describe("Query Activity", () => {
     expect(row(3).querySelector('[data-link="advisor"]')).toBeNull();
     expect(hrefs(row(1), "Open in Explorer")).toEqual(["/logs/explore?team=4&source=1"]);
     expect(hrefs(row(1), "Source settings")).toEqual(["/admin/sources/1/edit"]);
-    expect(hrefs(row(1), "Query runs in the Audit Log")).toEqual(["/admin/audit-log?action=query.run&t=30d&target_type=source&target_id=1"]);
-    const failed = [...root.querySelectorAll("a")].find(a => a.textContent?.trim() === "Failed queries");
-    expect(decodeURIComponent(failed?.getAttribute("href") ?? "")).toBe("/admin/audit-log?action=query.run&t=30d&outcome=failure");
+    expect(hrefs(row(1), "Query runs in the Audit Log")).toEqual([`/admin/audit-log?action=query.run&${windowRange}&target_type=source&target_id=1`]);
+    const header = (text: string) => decodeURIComponent([...root.querySelectorAll("a")].find(a => a.textContent?.trim() === text)?.getAttribute("href") ?? "");
+    expect(header("Failed queries")).toBe(`/admin/audit-log?action=query.run&${windowRange}&outcome=failure`);
+    expect(header("Audit Log")).toBe(`/admin/audit-log?action=query.run&${windowRange}`);
   });
 
   it("disables the Explorer link of a source no team links", async () => {
