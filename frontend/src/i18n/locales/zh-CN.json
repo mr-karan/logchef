@@ -2206,6 +2206,7 @@
   "admin.dailyQueries": "每日查询",
   "admin.dailyActiveUsers": "每日活跃用户",
   "admin.priorAverage": "之前平均 {value}",
+  "admin.dailyChartReadout": "{date}：{queries} 次查询，{users} 名活跃用户",
   "admin.utcDayInProgress": "日期按 UTC 计算。{date} 尚未结束。",
   "admin.activeDays": "活跃天数",
   "admin.activeDaysValue": "{count} / {days}",
