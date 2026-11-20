@@ -27,6 +27,7 @@ const (
 	queryActivityTopSources  = 20
 	queryActivityTopShapes   = 10
 	queryActivityTopServices = 3
+	queryActivityTopFailures = 5
 )
 
 // QueryActivityRequest is a validated Query Activity request. Days is within
@@ -69,6 +70,10 @@ type QueryActivity struct {
 	Sources        []SourceActivity            `json:"sources"`
 	Shapes         ShapeActivity               `json:"shapes"`
 	LanguageMix    []models.LanguageQueryCount `json:"language_mix"`
+	// CollectedSince is the first day with a recorded latency, scan or
+	// failure, nil before any. Days before it count queries only.
+	CollectedSince *string         `json:"collected_since"`
+	Failures       FailureActivity `json:"failures"`
 }
 
 // QueryActivityFilters echoes the request. A name is "" when its user or
@@ -100,6 +105,25 @@ type QueryActivitySummary struct {
 type ActivityPeriod struct {
 	models.QueryStatsPeriod
 	AvgDailyActiveUsers float64 `json:"avg_daily_active_users"`
+	RunHealth
+}
+
+// RunHealth is how the runs of a window performed. Cost is nil when no run
+// recorded its cost. FailureRate divides FailureCount by itself plus
+// Cost.Runs, the runs since collection began, and is nil when both are 0.
+type RunHealth struct {
+	Cost         *RunCostSummary `json:"cost"`
+	FailureCount int64           `json:"failure_count"`
+	FailureRate  *float64        `json:"failure_rate"`
+}
+
+// RunCostSummary summarizes the cost of the Runs that recorded one.
+type RunCostSummary struct {
+	Runs         int64             `json:"runs"`
+	P50          models.Percentile `json:"p50"`
+	P95          models.Percentile `json:"p95"`
+	AvgRowsRead  float64           `json:"avg_rows_read"`
+	AvgBytesRead float64           `json:"avg_bytes_read"`
 }
 
 // ServiceAccountSummary sums the service accounts outside the service view.
@@ -110,10 +134,14 @@ type ServiceAccountSummary struct {
 }
 
 // SourceActivity is one row of the sources table. Advisor is nil for a
-// source the schema advisor does not analyze.
+// source the schema advisor does not analyze. P95ByDay holds every day of
+// Window, ascending: that day's p95 latency in ms, nil without a run that
+// recorded its cost.
 type SourceActivity struct {
 	models.SourceQueryStat
-	Advisor *AdvisorFindingCounts `json:"advisor"`
+	RunHealth
+	Advisor  *AdvisorFindingCounts `json:"advisor"`
+	P95ByDay []*int64              `json:"p95_by_day"`
 }
 
 // AdvisorFindingCounts counts a source's open schema advisor findings by
@@ -137,10 +165,27 @@ type ShapeActivity struct {
 }
 
 // ShapeActivityRow is one shape and the open finding of its source that
-// filters on one of its columns, the most impactful first.
+// filters on one of its columns, the most impactful first. AvgBytesRead is
+// per run since scan collection began, nil before.
 type ShapeActivityRow struct {
 	models.QueryShapeStat
-	Finding *ShapeFinding `json:"finding"`
+	Finding      *ShapeFinding `json:"finding"`
+	AvgBytesRead *float64      `json:"avg_bytes_read"`
+}
+
+// FailureActivity is what failed in Window. Top ranks the source and user
+// pairs with the most failed runs.
+type FailureActivity struct {
+	ByReason []FailureReasonActivity  `json:"by_reason"`
+	Top      []models.FailurePairStat `json:"top"`
+}
+
+// FailureReasonActivity counts the failed runs of one reason. Prior is nil
+// when failures were not yet recorded on every day of PriorWindow.
+type FailureReasonActivity struct {
+	Reason string `json:"reason"`
+	Count  int64  `json:"count"`
+	Prior  *int64 `json:"prior"`
 }
 
 // ShapeFinding names a schema advisor finding.
@@ -196,9 +241,33 @@ func GetQueryActivity(ctx context.Context, db store.Store, now time.Time, req Qu
 		return nil, err
 	}
 	out.VolumeByDay = dailySeries(now, window, days)
+	collected, err := db.QueryCostCollectedSince(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if collected != "" {
+		out.CollectedSince = &collected
+	}
+	cost, err := db.QueryCostSummary(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	reasons, err := db.QueryFailuresByReason(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	var failed, priorFailed int64
+	for _, r := range reasons {
+		failed += r.Count
+		priorFailed += r.Prior
+	}
 	out.Summary = QueryActivitySummary{
-		Current: ActivityPeriod{QueryStatsPeriod: summary.Current, AvgDailyActiveUsers: avgDailyActive(window, days)},
-		Prior:   ActivityPeriod{QueryStatsPeriod: summary.Prior, AvgDailyActiveUsers: avgDailyActive(prior, days)},
+		Current: ActivityPeriod{QueryStatsPeriod: summary.Current, AvgDailyActiveUsers: avgDailyActive(window, days), RunHealth: runHealth(cost.Current, failed)},
+		Prior:   ActivityPeriod{QueryStatsPeriod: summary.Prior, AvgDailyActiveUsers: avgDailyActive(prior, days), RunHealth: runHealth(cost.Prior, priorFailed)},
+	}
+	out.Failures.ByReason = failureReasons(reasons, collected != "" && prior.Since >= collected)
+	if out.Failures.Top, err = db.TopQueryFailures(ctx, filter, queryActivityTopFailures); err != nil {
+		return nil, err
 	}
 	if out.TopUsers, err = db.QueryStatsByUser(ctx, filter, queryActivityTopUsers); err != nil {
 		return nil, err
@@ -212,6 +281,14 @@ func GetQueryActivity(ctx context.Context, db store.Store, now time.Time, req Qu
 		return nil, err
 	}
 	sources, err := db.QueryStatsBySource(ctx, filter, queryActivityTopSources)
+	if err != nil {
+		return nil, err
+	}
+	sourceDays, err := db.QueryCostBySourceDay(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	sourceFailures, err := db.QueryFailuresBySource(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +306,7 @@ func GetQueryActivity(ctx context.Context, db store.Store, now time.Time, req Qu
 		return nil, err
 	}
 	out.Sources = sourceActivity(sources, findings)
+	addSourceHealth(out.Sources, out.VolumeByDay, sourceDays, sourceFailures)
 	out.Shapes = ShapeActivity{Since: shapeFilter.Since, Rows: shapeRows(shapes, findings, priorKept), UnanalyzedQueryCount: unanalyzed}
 	return out, nil
 }
@@ -446,6 +524,10 @@ func shapeRows(shapes []models.QueryShapeStat, findings map[models.SourceID][]mo
 			s.Prior = nil
 		}
 		out[i] = ShapeActivityRow{QueryShapeStat: s, Finding: shapeFinding(s.Shape, findings[s.SourceID])}
+		if s.Scan.ScannedRuns > 0 {
+			avg := float64(s.Scan.BytesRead) / float64(s.Scan.ScannedRuns)
+			out[i].AvgBytesRead = &avg
+		}
 	}
 	return out
 }
@@ -469,4 +551,72 @@ func shapeFinding(shape models.FilterShape, findings []models.SchemaFinding) *Sh
 		return nil
 	}
 	return &ShapeFinding{ID: best.ID, Title: best.Title, Impact: best.Impact}
+}
+
+// runHealth summarizes a window's cost and failed runs.
+func runHealth(cost models.RunCost, failed int64) RunHealth {
+	h := RunHealth{FailureCount: failed}
+	runs := cost.Latency.Count()
+	if runs > 0 {
+		p50, _ := cost.Latency.Quantile(0.5)
+		p95, _ := cost.Latency.Quantile(0.95)
+		h.Cost = &RunCostSummary{
+			Runs: runs, P50: p50, P95: p95,
+			AvgRowsRead:  float64(cost.RowsRead) / float64(runs),
+			AvgBytesRead: float64(cost.BytesRead) / float64(runs),
+		}
+	}
+	if runs+failed > 0 {
+		rate := float64(failed) / float64(runs+failed)
+		h.FailureRate = &rate
+	}
+	return h
+}
+
+// failureReasons keeps the prior counts only when failures were recorded on
+// every day of the prior window, so a partial count never reads as a rise. A
+// reason with no current failure stays only beside its prior count.
+func failureReasons(reasons []models.FailureReasonCount, priorCollected bool) []FailureReasonActivity {
+	out := make([]FailureReasonActivity, 0, len(reasons))
+	for _, r := range reasons {
+		if r.Count == 0 && !priorCollected {
+			continue
+		}
+		row := FailureReasonActivity{Reason: r.Reason, Count: r.Count}
+		if priorCollected {
+			row.Prior = &r.Prior
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// addSourceHealth fills each source's run health and daily p95 series over
+// the days of the window.
+func addSourceHealth(sources []SourceActivity, window []models.DailyQueryStat, days []models.SourceDayCost, failures []models.SourceFailureCount) {
+	dayIndex := make(map[string]int, len(window))
+	for i, d := range window {
+		dayIndex[d.Date] = i
+	}
+	failed := make(map[models.SourceID]int64, len(failures))
+	for _, f := range failures {
+		failed[f.SourceID] = f.Count
+	}
+	bySource := make(map[models.SourceID][]models.SourceDayCost)
+	for _, d := range days {
+		bySource[d.SourceID] = append(bySource[d.SourceID], d)
+	}
+	for i := range sources {
+		src := &sources[i]
+		var total models.RunCost
+		src.P95ByDay = make([]*int64, len(window))
+		for _, d := range bySource[src.SourceID] {
+			total.Add(d.Cost)
+			j, ok := dayIndex[d.Date]
+			if p95, has := d.Cost.Latency.Quantile(0.95); ok && has {
+				src.P95ByDay[j] = &p95.Ms
+			}
+		}
+		src.RunHealth = runHealth(total, failed[src.SourceID])
+	}
 }

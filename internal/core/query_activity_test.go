@@ -3,6 +3,8 @@ package core
 import (
 	"testing"
 	"time"
+
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestQueryActivityWindows(t *testing.T) {
@@ -71,5 +73,21 @@ func TestQueryActivityWindows(t *testing.T) {
 					f, priorOK, tc.shapeSince, tc.shapePrior, tc.current.Until, tc.shapePriorOK)
 			}
 		})
+	}
+}
+
+func TestRunHealthWithoutCost(t *testing.T) {
+	if h := runHealth(models.RunCost{}, 0); h.Cost != nil || h.FailureCount != 0 || h.FailureRate != nil {
+		t.Errorf("an idle window = %+v, want no cost and no rate", h)
+	}
+	// Runs before cost collection began recorded no cost: only failures since
+	// then are known, and all of those runs failed.
+	if h := runHealth(models.RunCost{}, 2); h.Cost != nil || h.FailureRate == nil || *h.FailureRate != 1 {
+		t.Errorf("failures alone = %+v, want no cost and a rate of 1", h)
+	}
+	h := runHealth(models.RunCost{Latency: models.LatencyHistogram{9: 2}, RowsRead: 10, BytesRead: 30}, 0)
+	want := RunCostSummary{Runs: 2, P50: models.Percentile{Ms: 60_000, Open: true}, P95: models.Percentile{Ms: 60_000, Open: true}, AvgRowsRead: 5, AvgBytesRead: 15}
+	if h.Cost == nil || *h.Cost != want || h.FailureRate == nil || *h.FailureRate != 0 {
+		t.Errorf("slow runs = %+v, want %+v and a rate of 0", h.Cost, want)
 	}
 }

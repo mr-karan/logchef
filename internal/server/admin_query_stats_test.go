@@ -20,6 +20,7 @@ import (
 
 type queryStatsFixture struct {
 	app            *fiber.App
+	db             *sqlite.DB
 	alice, service *models.User
 	hot, quiet     *models.Source
 }
@@ -34,7 +35,7 @@ func newQueryStatsFixture(t *testing.T) queryStatsFixture {
 	db := newServerTestDB(t)
 	ctx := t.Context()
 	s := &Server{store: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	f := queryStatsFixture{app: fiber.New()}
+	f := queryStatsFixture{app: fiber.New(), db: db}
 	f.app.Get("/api/v1/admin/query-stats", s.handleAdminQueryStats)
 
 	f.alice = &models.User{Email: "alice@example.com", FullName: "Alice Example", Role: models.UserRoleMember, Status: models.UserStatusActive}
@@ -265,4 +266,99 @@ func TestAdminQueryStatsParams(t *testing.T) {
 			t.Errorf("%q: status %d, %d days, want %d", query, status, got.Window.Days, days)
 		}
 	}
+}
+
+// TestAdminQueryStatsRunHealth checks latency percentiles, scan averages,
+// failure rates and the failures block over 7 UTC days, on top of the
+// fixture's runs: alice ran 100, 300 and 20 ms in the window and 50 ms in the
+// prior one, and the service account ran 5 runs of 1 s.
+func TestAdminQueryStatsRunHealth(t *testing.T) {
+	f := newQueryStatsFixture(t)
+	ctx := t.Context()
+	today := time.Now().UTC()
+	day := func(ago int) string { return today.AddDate(0, 0, -ago).Format(time.DateOnly) }
+	if err := f.db.IncrementQueryStats(ctx, models.QueryStatsIncrement{
+		BucketDate: day(3), UserID: f.alice.ID, TeamID: 1, SourceID: f.hot.ID, Language: models.QueryLanguageLogchefQL,
+		DurationMs: 4_000, RowsRead: 1_000, BytesRead: 1_000_000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fail := func(ago int, user *models.User, src *models.Source, reason string, times int) {
+		t.Helper()
+		for range times {
+			if err := f.db.IncrementQueryFailureStats(ctx, models.QueryFailureIncrement{
+				BucketDate: day(ago), UserID: user.ID, TeamID: 1, SourceID: src.ID, Language: models.QueryLanguageLogchefQL, Reason: reason,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	fail(1, f.alice, f.hot, "timeout", 2)
+	fail(0, f.alice, f.quiet, "invalid_query", 1)
+	fail(1, f.service, f.hot, "rejected", 1)
+	fail(8, f.alice, f.hot, "timeout", 1) // prior window
+
+	_, got := f.get(t, "?days=7")
+	// The fixture's 14-day-old run is the first with a latency.
+	if got.CollectedSince == nil || *got.CollectedSince != day(14) {
+		t.Errorf("collected since = %v, want %s", got.CollectedSince, day(14))
+	}
+	current, prior := got.Summary.Current, got.Summary.Prior
+	wantCost := &core.RunCostSummary{Runs: 4, P50: models.Percentile{Ms: 100}, P95: models.Percentile{Ms: 4_500}, AvgRowsRead: 250, AvgBytesRead: 250_000}
+	if !reflect.DeepEqual(current.Cost, wantCost) {
+		t.Errorf("current cost = %+v, want %+v", current.Cost, wantCost)
+	}
+	if current.FailureCount != 3 || current.FailureRate == nil || *current.FailureRate != 3.0/7 {
+		t.Errorf("current failures = %d at %v, want 3 of 7 runs", current.FailureCount, current.FailureRate)
+	}
+	if prior.Cost == nil || prior.Cost.Runs != 1 || prior.Cost.P95 != (models.Percentile{Ms: 95}) || prior.FailureRate == nil || *prior.FailureRate != 0.5 {
+		t.Errorf("prior health = %+v / %v, want 1 run of 50 ms and 1 of 2 runs failed", prior.Cost, prior.FailureRate)
+	}
+	one, zero := int64(1), int64(0)
+	wantReasons := []core.FailureReasonActivity{{Reason: "timeout", Count: 2, Prior: &one}, {Reason: "invalid_query", Count: 1, Prior: &zero}}
+	if !reflect.DeepEqual(got.Failures.ByReason, wantReasons) {
+		t.Errorf("failures by reason = %+v, want %+v", got.Failures.ByReason, wantReasons)
+	}
+	if top := got.Failures.Top; len(top) != 2 || top[0].SourceID != f.hot.ID || top[0].UserID != f.alice.ID || top[0].Count != 2 || top[1].SourceID != f.quiet.ID {
+		t.Errorf("top failures = %+v, want alice on hot (2), then on quiet", top)
+	}
+
+	byID := map[models.SourceID]core.SourceActivity{}
+	for _, s := range got.Sources {
+		byID[s.SourceID] = s
+	}
+	hot := byID[f.hot.ID]
+	if hot.Cost == nil || hot.Cost.Runs != 3 || hot.FailureRate == nil || *hot.FailureRate != 2.0/5 {
+		t.Errorf("hot health = %+v / %v, want 3 runs and 2 of 5 failed", hot.Cost, hot.FailureRate)
+	}
+	ms := func(v int64) *int64 { return &v }
+	if want := []*int64{ms(95), nil, nil, ms(4_875), nil, nil, ms(488)}; !reflect.DeepEqual(hot.P95ByDay, want) {
+		t.Errorf("hot p95 by day = %v, want %v", derefAll(hot.P95ByDay), derefAll(want))
+	}
+	if quiet := byID[f.quiet.ID]; quiet.FailureRate == nil || *quiet.FailureRate != 0.5 {
+		t.Errorf("quiet failure rate = %v, want 1 of 2", quiet.FailureRate)
+	}
+
+	_, got = f.get(t, "?days=7&account=all&user_id="+strconv.FormatInt(int64(f.service.ID), 10))
+	if reasons := got.Failures.ByReason; len(reasons) != 1 || reasons[0].Reason != "rejected" || got.Summary.Current.FailureRate == nil || *got.Summary.Current.FailureRate != 1.0/6 {
+		t.Errorf("service user failures = %+v at %v, want 1 rejected of 6 runs", reasons, got.Summary.Current.FailureRate)
+	}
+
+	// The 30-day prior window starts before failures were recorded.
+	_, got = f.get(t, "?days=30")
+	for _, r := range got.Failures.ByReason {
+		if r.Prior != nil {
+			t.Errorf("30-day reason %s prior = %d, want none", r.Reason, *r.Prior)
+		}
+	}
+}
+
+func derefAll(values []*int64) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		if v != nil {
+			out[i] = *v
+		}
+	}
+	return out
 }
