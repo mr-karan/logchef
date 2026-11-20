@@ -5,8 +5,7 @@ import type { DailyQueryStat } from "@/api/admin";
 
 // Two single-series bar charts on one day axis: queries and active users
 // differ in scale, so they never share a y-axis. Hovering a day in either
-// chart highlights it in both and shows its numbers in the readout; with no
-// day hovered, the readout shows the latest day.
+// chart highlights it in both and shows its numbers in the readout.
 const props = defineProps<{ days: DailyQueryStat[]; priorAvgQueries: number; priorAvgUsers: number }>();
 const { t, locale } = useI18n();
 
@@ -26,9 +25,8 @@ const panels = computed(() => [
 const labelEvery = computed(() => Math.max(1, Math.ceil(props.days.length / 7)));
 
 const readout = computed(() => {
-  const index = hovered.value ?? props.days.length - 1;
-  const day = props.days[index];
-  if (!day) return null;
+  const day = hovered.value === null ? undefined : props.days[hovered.value];
+  if (!day) return t("admin.dailyChartHint");
   return t("admin.dailyChartReadout", {
     date: formatDay(day.date, true),
     queries: formatCount(day.query_count),

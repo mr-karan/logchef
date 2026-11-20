@@ -2207,6 +2207,7 @@
   "admin.dailyActiveUsers": "Active users per day",
   "admin.priorAverage": "Prior average {value}",
   "admin.dailyChartReadout": "{date}: {queries} queries, {users} active users",
+  "admin.dailyChartHint": "Hover a day to see its numbers",
   "admin.utcDayInProgress": "Days are UTC. {date} is still in progress.",
   "admin.activeDays": "Active days",
   "admin.activeDaysValue": "{count} / {days}",
