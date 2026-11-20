@@ -209,11 +209,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   New and edited rules need a frequency of at least 10 seconds.
 - A grouped rule sends one notification per group to every destination type,
   including email, Slack and webhook version 2.
+- **Administration → Query Activity** answers who uses Logchef, which
+  sources are hot or slow, and which repeated query patterns cost the most.
+  It counts human users by default, with a switch to service accounts or
+  all, and names service accounts by their full name. Clicking a source or
+  a user scopes the whole page. Every number compares with the window of
+  the same length before it. Sources show open schema advisor findings,
+  and filter shapes link to the advisor finding on one of their columns.
+  `GET /api/v1/admin/query-stats` takes `account`, `source_id` and
+  `user_id` and returns the new payload; its old fields are gone.
 - MCP `list_alerts`, `get_alert_history` and the `investigate_alert` prompt
   describe groups, no-data episodes, silences and deliveries.
 
 ### Removed
 
+- `GET /api/v1/admin/query-activity` and the recent query sample and slowest
+  recent queries on Query Activity.
 - `alerts.evaluation_interval`. Each rule runs at its own frequency.
 - `recipient_user_ids` and `webhook_urls` in alert requests and responses.
   Use `destination_ids`.
