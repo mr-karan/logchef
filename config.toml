@@ -231,10 +231,11 @@ default_ttl = "720h"
 max_query_text_bytes = 1048576
 
 [audit]
-# Configuration changes, sign-ins and exports are stored in audit_events.
-# 0 disables a bound. Each event is also written as one JSON log line with
+# Configuration changes, sign-ins, query runs and exports are stored in
+# audit_events. Every query adds an event, so size max_rows for the query
+# volume. 0 disables a bound. Each event is also written as one JSON log line with
 # msg "audit", so a log shipper can keep a copy off the host.
-retention_days = 365
+retention_days = 30
 max_rows = 1000000
 log_events = true
 

@@ -302,14 +302,14 @@ Set `audit.log_events = false` to turn the line off.
 
 ```toml
 [audit]
-retention_days = 365
+retention_days = 30
 max_rows = 1000000
 log_events = true
 ```
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `audit.retention_days` | `365` | Delete events older than this many days. `0` keeps every event |
+| `audit.retention_days` | `30` | Delete events older than this many days. `0` keeps every event |
 | `audit.max_rows` | `1000000` | Delete the oldest events above this count. `0` removes the bound |
 | `audit.log_events` | `true` | Write the `audit` log line |
 
