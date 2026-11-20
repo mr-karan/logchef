@@ -30,6 +30,7 @@ func (s *Server) newAskChef(chat askchef.ChatModel) *askchef.Agent {
 		Version:     s.version,
 		Log:         s.log.With("component", "ask_chef_tools"),
 		Admit:       s.admitMCPQuery,
+		StartRead:   s.startToolQueryRun,
 	})
 	return askchef.New(askchef.Opts{
 		Tools: tools,
@@ -99,7 +100,15 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 		}
 	}
 
-	turnCtx, cancelTurn, preempted := s.askChefTurns.start(ctx, user.ID, askChefTurnLease)
+	// The tools read logs for the user, so their query.run events name the
+	// user and the credential of this request.
+	actor, ok := requestActor(c)
+	if !ok {
+		return sendMissingUser(c)
+	}
+	turnCtx, cancelTurn, preempted := s.askChefTurns.start(withToolCaller(ctx, toolCaller{
+		actor: actor, request: auditRequest(c), mode: queryRunAskChef,
+	}), user.ID, askChefTurnLease)
 	if preempted {
 		s.log.Info("ask chef turn preempted by a newer turn", "user_id", user.ID)
 	}

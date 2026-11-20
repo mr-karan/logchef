@@ -103,7 +103,7 @@ func (t *tools) fieldValues(ctx context.Context, src access.AuthorizedSource, fi
 }
 
 // get_field_values returns dynamic field data, so it uses a typed handler.
-func (t *tools) handleGetFieldValues(ctx context.Context, _ mcp.CallToolRequest, params GetFieldValuesParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleGetFieldValues(ctx context.Context, req mcp.CallToolRequest, params GetFieldValuesParams) (*mcp.CallToolResult, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 20
@@ -116,13 +116,18 @@ func (t *tools) handleGetFieldValues(ctx context.Context, _ mcp.CallToolRequest,
 	if err != nil {
 		return t.errorResult(t.storeError("get field values failed", err)), nil
 	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: params.Query, Language: models.QueryLanguageLogchefQL, Limit: limit, Fields: []string{params.FieldName}})
+	defer func() { read.end(recover()) }()
 	if params.FieldName == "" || params.FieldType == "" {
-		return t.errorResult(t.storeError("get field values failed", fmt.Errorf("%w: field_name and field_type are required", errInvalidArgument))), nil
+		read.Err = fmt.Errorf("%w: field_name and field_type are required", errInvalidArgument)
+		return t.errorResult(t.storeError("get field values failed", read.Err)), nil
 	}
 	start, end, err := parseTimeRange(params.StartTime, params.EndTime)
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.storeError("get field values failed", err)), nil
 	}
+	read.From, read.To = &start, &end
 	var result *core.FieldValuesResult
 	err = t.admit(ctx, QueryClassPreview, src, "get_field_values: "+params.FieldName, func(ctx context.Context, _ string) error {
 		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
@@ -133,16 +138,18 @@ func (t *tools) handleGetFieldValues(ctx context.Context, _ mcp.CallToolRequest,
 		return err
 	})
 	if err != nil {
+		read.Err = err
 		if _, ok := errors.AsType[*admissionError](err); ok {
 			return t.errorResult(t.queryError("get field values failed", err)), nil
 		}
 		return t.errorResult(err), nil
 	}
+	read.Rows = int64(len(result.Values))
 	return jsonTextResult(result)
 }
 
 // get_log_context returns flexible log data, so it uses a typed handler.
-func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, params GetLogContextParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleGetLogContext(ctx context.Context, req mcp.CallToolRequest, params GetLogContextParams) (*mcp.CallToolResult, error) {
 	beforeLimit := params.BeforeLimit
 	if beforeLimit <= 0 {
 		beforeLimit = 10
@@ -166,6 +173,8 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 		return mcp.NewToolResultError("get log context failed: timestamp is required and must be positive"), nil
 	}
 	targetTime := time.UnixMilli(params.Timestamp)
+	read := t.startRead(ctx, req, ReadCall{Source: src, Limit: beforeLimit + afterLimit, Anchor: &targetTime})
+	defer func() { read.end(recover()) }()
 	var resp *models.LogContextResponse
 	err = t.admit(ctx, QueryClassPreview, src, "get_log_context", func(ctx context.Context, _ string) error {
 		var err error
@@ -179,8 +188,10 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 		return err
 	})
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.queryError("get log context failed", err)), nil
 	}
+	read.Rows = int64(len(resp.BeforeLogs) + len(resp.TargetLogs) + len(resp.AfterLogs))
 
 	result := map[string]any{
 		"target_timestamp": resp.TargetTimestamp,

@@ -47,6 +47,7 @@ type Deps struct {
 	Version     string
 	Log         *slog.Logger
 	Admit       AdmitQuery
+	StartRead   StartRead
 	// ResourceMetadataURL is the protected resource metadata URL that auth
 	// challenges in tool results name. Empty omits it.
 	ResourceMetadataURL string
@@ -240,7 +241,7 @@ func (t *tools) admit(ctx context.Context, class QueryClass, src access.Authoriz
 	defer cancel()
 	queryID, release, err := t.deps.Admit(class, src, queryText, cancel)
 	if err != nil {
-		return &admissionError{message: err.Error()}
+		return &admissionError{message: err.Error(), err: err}
 	}
 	defer release()
 	return work(ctx, queryID)
@@ -249,9 +250,13 @@ func (t *tools) admit(ctx context.Context, class QueryClass, src access.Authoriz
 // admissionError is a refusal from AdmitQuery. Its message is shown.
 type admissionError struct {
 	message string
+	err     error
 }
 
 func (e *admissionError) Error() string { return e.message }
+
+// Unwrap returns the refusal that AdmitQuery returned.
+func (e *admissionError) Unwrap() error { return e.err }
 
 var (
 	errAlertsDisabled  = errors.New("alerting is disabled on this server")
