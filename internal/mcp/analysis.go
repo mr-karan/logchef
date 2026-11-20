@@ -209,6 +209,9 @@ func (t *tools) handleTopValues(ctx context.Context, req mcp.CallToolRequest, pa
 	// preview admission slot, and at most topValuesWorkers field queries
 	// run at once inside it.
 	fieldResults := make([]FieldTopValues, len(fields))
+	// fieldErrs keeps each field's error for the query.run event; the
+	// result shows it to the caller as text.
+	fieldErrs := make([]error, len(fields))
 	err = t.admit(ctx, QueryClassPreview, src, "top_values: "+strings.Join(fields, ", "), func(ctx context.Context, _ string) error {
 		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
 			return t.queryError("top values", err)
@@ -229,6 +232,7 @@ func (t *tools) handleTopValues(ctx context.Context, req mcp.CallToolRequest, pa
 			fieldType, ok := fieldTypes[fieldName]
 			if !ok {
 				fieldResults[i].Error = "field is not in the source schema"
+				fieldErrs[i] = fmt.Errorf("%w: field %q is not in the source schema", errInvalidArgument, fieldName)
 				continue
 			}
 			wg.Go(func() {
@@ -238,6 +242,7 @@ func (t *tools) handleTopValues(ctx context.Context, req mcp.CallToolRequest, pa
 				if err != nil {
 					// One failed field does not fail the others.
 					fieldResults[i].Error = err.Error()
+					fieldErrs[i] = err
 					return
 				}
 				values := make([]FieldValue, len(resp.Values))
@@ -260,7 +265,28 @@ func (t *tools) handleTopValues(ctx context.Context, req mcp.CallToolRequest, pa
 	for _, f := range fieldResults {
 		read.Rows += int64(len(f.Values))
 	}
+	read.Err = topValuesFailure(ctx, fieldErrs)
 	return TopValuesResult{Fields: fieldResults}, nil
+}
+
+// topValuesFailure is the error the query.run event of a top_values call
+// records: the context's error when the call was cancelled or timed out,
+// otherwise the first field error when every queried field failed. Partial
+// results are a success.
+func topValuesFailure(ctx context.Context, fieldErrs []error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var first error
+	for _, err := range fieldErrs {
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // uniqueFields drops empty and repeated field names and keeps the order.

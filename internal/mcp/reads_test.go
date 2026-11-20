@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -184,4 +186,59 @@ func TestToolCallsThatFailRecordTheError(t *testing.T) {
 			t.Errorf("recorded %+v, want no read", got)
 		}
 	})
+}
+
+// A caller-safe message must not hide a cancellation or timeout from the
+// query.run event, which classifies the error by its cause.
+func TestKnownErrorKeepsTheCauseBehindItsMessage(t *testing.T) {
+	for _, tc := range []struct {
+		cause error
+		msg   string
+	}{
+		{context.Canceled, "op: cancelled"},
+		{context.DeadlineExceeded, "op: timed out"},
+		{fmt.Errorf("read: %w", context.Canceled), "op: cancelled"},
+	} {
+		err := knownError("op", tc.cause)
+		if err == nil || err.Error() != tc.msg {
+			t.Fatalf("knownError(%v) = %v, want message %q", tc.cause, err, tc.msg)
+		}
+		if !errors.Is(err, tc.cause) && !errors.Is(err, errors.Unwrap(tc.cause)) {
+			t.Errorf("knownError(%v) lost its cause", tc.cause)
+		}
+	}
+}
+
+// top_values fails its read only when it was cancelled or no field could
+// be read; one readable field makes it a success with partial results.
+func TestTopValuesFailure(t *testing.T) {
+	boom := errors.New("boom")
+	missing := fmt.Errorf("%w: field %q is not in the source schema", errInvalidArgument, "x")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		errs []error
+		want error
+	}{
+		{"all read", context.Background(), []error{nil, nil}, nil},
+		{"partial", context.Background(), []error{boom, nil}, nil},
+		{"all failed", context.Background(), []error{boom, missing}, boom},
+		{"all missing from schema", context.Background(), []error{missing}, errInvalidArgument},
+		{"cancelled with partial results", cancelled, []error{nil, boom}, context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := topValuesFailure(tc.ctx, tc.errs)
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("got %v, want success", got)
+				}
+				return
+			}
+			if !errors.Is(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
