@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, toValue } from "vue";
+import { computed, ref, toValue } from "vue";
 import { useI18n } from "vue-i18n";
 import type { DailyQueryStat } from "@/api/admin";
 
 // Two single-series bar charts on one day axis: queries and active users
-// differ in scale, so they never share a y-axis.
+// differ in scale, so they never share a y-axis. Hovering a day in either
+// chart highlights it in both and shows its numbers in the readout; with no
+// day hovered, the readout shows the latest day.
 const props = defineProps<{ days: DailyQueryStat[]; priorAvgQueries: number; priorAvgUsers: number }>();
 const { t, locale } = useI18n();
+
+const hovered = ref<number | null>(null);
 
 const panels = computed(() => [
   { key: "queries", title: t("admin.dailyQueries"), value: (d: DailyQueryStat) => d.query_count, prior: props.priorAvgQueries, height: "h-36" },
@@ -21,8 +25,24 @@ const panels = computed(() => [
 }));
 const labelEvery = computed(() => Math.max(1, Math.ceil(props.days.length / 7)));
 
-function formatDay(date: string) {
-  return new Intl.DateTimeFormat(toValue(locale), { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+const readout = computed(() => {
+  const index = hovered.value ?? props.days.length - 1;
+  const day = props.days[index];
+  if (!day) return null;
+  return t("admin.dailyChartReadout", {
+    date: formatDay(day.date, true),
+    queries: formatCount(day.query_count),
+    users: formatCount(day.active_users),
+  });
+});
+
+function formatDay(date: string, withWeekday = false) {
+  return new Intl.DateTimeFormat(toValue(locale), {
+    weekday: withWeekday ? "short" : undefined,
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
 }
 function formatCount(value: number) {
   return value.toLocaleString(toValue(locale), { maximumFractionDigits: 1 });
@@ -30,7 +50,10 @@ function formatCount(value: number) {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="space-y-4" @mouseleave="hovered = null">
+    <p class="min-h-4 text-xs tabular-nums" data-chart-readout>
+      <span :class="hovered === null ? 'text-muted-foreground' : 'font-medium'">{{ readout }}</span>
+    </p>
     <figure v-for="panel in panels" :key="panel.key" :data-chart="panel.key">
       <figcaption class="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-xs">
         <span class="font-medium">{{ panel.title }}</span>
@@ -41,12 +64,18 @@ function formatCount(value: number) {
       </figcaption>
       <div :class="['relative flex items-end gap-0.5 border-b', panel.height]" aria-hidden="true">
         <div
-          v-for="bar in panel.bars"
+          v-for="(bar, index) in panel.bars"
           :key="bar.day.date"
-          class="flex h-full min-w-1 flex-1 items-end"
-          :title="`${formatDay(bar.day.date)}: ${formatCount(bar.value)}`"
+          class="flex h-full min-w-1 flex-1 cursor-default items-end"
+          :class="hovered === index ? 'bg-foreground/5' : ''"
+          :data-day="bar.day.date"
+          @mouseenter="hovered = index"
         >
-          <div class="w-full rounded-t-sm bg-[var(--panel-chart-1)]" :style="{ height: bar.value ? `${Math.max(2, bar.pct)}%` : '0' }" />
+          <div
+            class="w-full rounded-t-sm bg-[var(--panel-chart-1)] transition-opacity"
+            :class="hovered !== null && hovered !== index ? 'opacity-40' : ''"
+            :style="{ height: bar.value ? `${Math.max(2, bar.pct)}%` : '0' }"
+          />
         </div>
         <div class="pointer-events-none absolute inset-x-0 border-t border-dashed border-foreground/60" :style="{ bottom: `${panel.priorPct}%` }" />
       </div>
