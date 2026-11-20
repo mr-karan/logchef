@@ -1,14 +1,21 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/audit"
@@ -16,6 +23,45 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+// auditReadProvider is auditQueryProvider with live tail and log context. A
+// context read fails the way query does.
+type auditReadProvider struct {
+	auditQueryProvider
+	tail func(ctx context.Context, emit datasource.TailEmitter) error
+}
+
+func newAuditReadProvider(query func(context.Context) error, tail func(context.Context, datasource.TailEmitter) error) *auditReadProvider {
+	return &auditReadProvider{
+		auditQueryProvider: auditQueryProvider{succeedingQueryProvider: succeedingQueryProvider{sourceType: models.SourceTypeClickHouse}, query: query},
+		tail:               tail,
+	}
+}
+
+func (p *auditReadProvider) Describe() datasource.Descriptor {
+	d := p.auditQueryProvider.Describe()
+	d.Capabilities = append(d.Capabilities, datasource.CapabilityLiveTail, datasource.CapabilityLogContext)
+	return d
+}
+
+func (p *auditReadProvider) TailLogs(ctx context.Context, _ *models.Source, _ datasource.TailRequest, emit datasource.TailEmitter) error {
+	return p.tail(ctx, emit)
+}
+
+func (p *auditReadProvider) GetLogContext(ctx context.Context, _ *models.Source, req datasource.LogContextRequest) (*models.LogContextResponse, error) {
+	if p.query != nil {
+		if err := p.query(ctx); err != nil {
+			return nil, err
+		}
+	}
+	row := []map[string]any{previewTestRow}
+	return &models.LogContextResponse{TargetTimestamp: req.TargetTimestamp, BeforeLogs: row, TargetLogs: row, AfterLogs: row}, nil
+}
+
+// withTail allows each user one tail with no row ceiling.
+func withTail(s *auditEnvSetup) {
+	s.opts.Config.Tail = config.TailConfig{PollInterval: time.Second, MaxPerUser: 1, MaxGlobal: 10}
+}
 
 // onlyEvent returns the one stored event, or fails.
 func onlyEvent(t *testing.T, events []models.AuditEvent) models.AuditEvent {
@@ -47,6 +93,158 @@ func (e *queryAuditEnv) checkReadEvent(t *testing.T, ev models.AuditEvent, outco
 		t.Errorf("history rows %d, want none", got)
 	}
 	return d
+}
+
+// A log context request records one event with its anchor, the rows it asked
+// for around it and the rows it returned.
+func TestAuditQueryRunRecordsLogContext(t *testing.T) {
+	t.Parallel()
+	const anchor = 1790850000000
+	body := fmt.Sprintf(`{"timestamp":%d,"before_limit":5,"after_limit":7}`, anchor)
+	route := teamSourcePrefix + "/logs/context"
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+		e := newQueryAuditEnvWith(t, newAuditReadProvider(nil, nil))
+		wantStatus(t, e.do(http.MethodPost, e.base+"/logs/context", body, e.cookie), http.StatusOK)
+		ev := onlyEvent(t, e.settledEvents())
+		checkActorAndTarget(t, ev, string(audit.QueryRun), e.admin, "source", strconv.Itoa(int(e.sourceID)))
+		d := e.checkReadEvent(t, ev, models.AuditOutcomeSuccess, "", route, "context", 3)
+		if d["anchor"] != time.UnixMilli(anchor).UTC().Format(time.RFC3339Nano) || d["limit_requested"] != float64(12) {
+			t.Errorf("anchor %v limit %v", d["anchor"], d["limit_requested"])
+		}
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		t.Parallel()
+		e := newQueryAuditEnvWith(t, newAuditReadProvider(failWith(&datasource.UpstreamError{Message: "boom"}), nil))
+		wantStatus(t, e.do(http.MethodPost, e.base+"/logs/context", body, e.cookie), http.StatusBadGateway)
+		ev := onlyEvent(t, e.settledEvents())
+		e.checkReadEvent(t, ev, models.AuditOutcomeFailure, "upstream_error", route, "context", 0)
+		if ev.Status != http.StatusBadGateway {
+			t.Errorf("status %d, want 502", ev.Status)
+		}
+	})
+}
+
+// tailClient is a live tail read over a real connection, so the test can
+// disconnect it.
+type tailClient struct {
+	conn net.Conn
+	r    *bufio.Reader
+}
+
+func (e *queryAuditEnv) openTail(t *testing.T, query string) *tailClient {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = e.s.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true}) }()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	fmt.Fprintf(conn, "GET %s/logs/tail?query=%s HTTP/1.1\r\nHost: logchef\r\nCookie: %s=%s\r\n\r\n", e.base, url.QueryEscape(query), e.cookie.Name, e.cookie.Value)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("tail status %d", resp.StatusCode)
+	}
+	return &tailClient{conn: conn, r: bufio.NewReader(resp.Body)}
+}
+
+// waitFor reads frames until one of event arrives and returns its data.
+func (c *tailClient) waitFor(t *testing.T, event string) string {
+	t.Helper()
+	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		line, err := c.r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("waiting for %s: %v", event, err)
+		}
+		if strings.TrimSpace(line) != "event: "+event {
+			continue
+		}
+		data, err := c.r.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimPrefix(strings.TrimSpace(data), "data: ")
+	}
+}
+
+// A tail session is one event, recorded when its client disconnects, with
+// its filter and the rows it streamed.
+func TestAuditQueryRunRecordsTailEndingAtDisconnect(t *testing.T) {
+	t.Parallel()
+	e := newQueryAuditEnvWith(t, newAuditReadProvider(nil, func(ctx context.Context, emit datasource.TailEmitter) error {
+		if err := emit([]map[string]any{previewTestRow, previewTestRow}); err != nil {
+			return err
+		}
+		if err := emit([]map[string]any{previewTestRow}); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}), withTail)
+	client := e.openTail(t, `level="error"`)
+	client.waitFor(t, "rows")
+	client.waitFor(t, "rows")
+	_ = client.conn.Close()
+
+	ev := onlyEvent(t, e.settledEvents())
+	checkActorAndTarget(t, ev, string(audit.QueryRun), e.admin, "source", strconv.Itoa(int(e.sourceID)))
+	d := e.checkReadEvent(t, ev, models.AuditOutcomeSuccess, "", teamSourcePrefix+"/logs/tail", "tail", 3)
+	if d["query"] != `level="error"` || d["language"] != string(models.QueryLanguageLogchefQL) {
+		t.Errorf("query %v language %v", d["query"], d["language"])
+	}
+	if id, _ := d["query_id"].(string); id == "" {
+		t.Errorf("query_id missing: %v", d)
+	}
+}
+
+// A tail that the provider ends with an error is a failed event with the
+// rows sent before it.
+func TestAuditQueryRunRecordsTailFailure(t *testing.T) {
+	t.Parallel()
+	e := newQueryAuditEnvWith(t, newAuditReadProvider(nil, func(_ context.Context, emit datasource.TailEmitter) error {
+		if err := emit([]map[string]any{previewTestRow}); err != nil {
+			return err
+		}
+		return &datasource.UpstreamError{Message: "boom"}
+	}), withTail)
+	client := e.openTail(t, "")
+	if end := client.waitFor(t, "end"); !strings.Contains(end, `"reason":"error"`) {
+		t.Fatalf("end frame %s, want an error", end)
+	}
+	e.checkReadEvent(t, onlyEvent(t, e.settledEvents()), models.AuditOutcomeFailure, "upstream_error", teamSourcePrefix+"/logs/tail", "tail", 1)
+}
+
+// A tail refused before it streams, here by the per-user cap, is a failed
+// event with the refusal's status.
+func TestAuditQueryRunRecordsRefusedTail(t *testing.T) {
+	// Not parallel: the query tracker is process-global and every test DB
+	// starts user IDs at 1, so admission tests must not overlap.
+	e := newQueryAuditEnvWith(t, newAuditReadProvider(nil, nil), withTail)
+	held, err := queryTracker.StartQuery(QueryClassTail, e.admin.ID, e.sourceID, e.teamID, "held", func() {}, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := e.do(http.MethodGet, e.base+"/logs/tail?query=x", "", e.cookie)
+	queryTracker.RemoveQuery(held)
+	wantStatus(t, resp, http.StatusTooManyRequests)
+	ev := onlyEvent(t, e.settledEvents())
+	if ev.Outcome != models.AuditOutcomeFailure || ev.Reason != "rejected" || ev.Status != http.StatusTooManyRequests {
+		t.Errorf("event %s %q status %d, want failure rejected 429", ev.Outcome, ev.Reason, ev.Status)
+	}
+	if d := detailOf(t, ev); d["mode"] != "tail" || d["query"] != "x" {
+		t.Errorf("detail %v", d)
+	}
 }
 
 // toolCallingChat is a model that asks for one tool call, then answers.

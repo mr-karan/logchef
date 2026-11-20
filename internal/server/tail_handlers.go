@@ -32,7 +32,7 @@ const tailHeartbeatInterval = 15 * time.Second
 //	data: {"reason":"ttl_expired"}
 //
 // GET /api/v1/teams/:teamID/sources/:sourceID/logs/tail?query=&query_language=
-func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
+func (s *Server) handleTailLogs(c fiber.Ctx) (err error) { //nolint:gocyclo // request handler, inherently branchy
 	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
@@ -42,6 +42,15 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	if user == nil {
 		return sendMissingUser(c)
 	}
+
+	// The session records its query as sent: LogchefQL unless the request
+	// names a native language.
+	language := models.NormalizeQueryLanguage(models.QueryLanguage(c.Query("query_language")))
+	if language == "" {
+		language = models.QueryLanguageLogchefQL
+	}
+	run := s.newQueryRun(c, src, nil, queryRunTail, c.Query("query"), language, 0)
+	defer func() { s.endQueryRun(c, run, err, recover()) }()
 
 	// Gate on the source capability before any streaming setup so non-supporting
 	// sources get a clean 400.
@@ -53,6 +62,7 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 		s.log.Error("failed to get source for tail", "source_id", sourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
+	run.source = source
 	if !source.HasCapability(string(datasource.CapabilityLiveTail)) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Live tail is not supported for this source type yet", models.ValidationErrorType)
 	}
@@ -114,7 +124,15 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	email := user.Email
 	conn := c.RequestCtx().Conn()
 
+	// The stream writer ends the session, so it finishes the run: its rows
+	// are the rows sent, and only a provider error fails it.
+	run.handedOff = true
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
+		var rows int64
+		var tailErr error
+		defer func() {
+			s.finishQueryRun(run, queryOutcome{err: tailErr, status: fiber.StatusOK, queryID: queryID, rows: rows})
+		}()
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
 		defer watchDisconnect(conn, cancel)()
@@ -202,6 +220,7 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 					// provider error may embed upstream response bodies (e.g. a
 					// VictoriaLogs error page up to 4KiB) that must never reach
 					// the browser verbatim.
+					tailErr = err
 					log.Warn("tail stream ended with error", "source_id", sourceID, "query_id", queryID, "error", err)
 					payload, _ := json.Marshal(map[string]string{"reason": "error", "message": sanitizeTailErrorMessage(err)})
 					writeFrame("end", payload)
@@ -217,6 +236,7 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 						if !writeFrame("rows", payload) {
 							return
 						}
+						rows += int64(allowed)
 					}
 				}
 				if dropped > 0 && limiter.shouldNotify() {
