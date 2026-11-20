@@ -338,6 +338,7 @@ type QueryShapeStatsDaily struct {
 	MaxLookbackS    pgtype.Int8 `json:"max_lookback_s"`
 	TotalRowsRead   int64       `json:"total_rows_read"`
 	TotalBytesRead  int64       `json:"total_bytes_read"`
+	ScannedCount    int64       `json:"scanned_count"`
 }
 
 type QueryShare struct {

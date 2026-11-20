@@ -18,6 +18,9 @@ ALTER TABLE query_stats_daily ADD COLUMN latency_gt_60s INTEGER NOT NULL DEFAULT
 
 ALTER TABLE query_shape_stats_daily ADD COLUMN total_rows_read INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE query_shape_stats_daily ADD COLUMN total_bytes_read INTEGER NOT NULL DEFAULT 0;
+-- The runs since scan collection began, the ones total_rows_read and
+-- total_bytes_read cover.
+ALTER TABLE query_shape_stats_daily ADD COLUMN scanned_count INTEGER NOT NULL DEFAULT 0;
 
 -- Failed query runs per day, by query.run failure reason. Like
 -- query_stats_daily it is never pruned and has no foreign keys.

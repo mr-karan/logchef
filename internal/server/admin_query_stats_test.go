@@ -339,6 +339,21 @@ func TestAdminQueryStatsRunHealth(t *testing.T) {
 		t.Errorf("quiet failure rate = %v, want 1 of 2", quiet.FailureRate)
 	}
 
+	// Over 10 days the prior window starts before collection did: its
+	// percentiles and failure rate cover only some days, so neither is compared.
+	_, partial := f.get(t, "?days=10")
+	if p := partial.Summary.Prior; p.Cost != nil || p.FailureRate != nil {
+		t.Errorf("partly collected prior health = %+v / %v, want neither", p.Cost, p.FailureRate)
+	}
+	if partial.Summary.Current.FailureRate == nil {
+		t.Error("current failure rate is missing over 10 days")
+	}
+	for _, r := range partial.Failures.ByReason {
+		if r.Prior != nil {
+			t.Errorf("partly collected prior for %s = %d, want none", r.Reason, *r.Prior)
+		}
+	}
+
 	_, got = f.get(t, "?days=7&account=all&user_id="+strconv.FormatInt(int64(f.service.ID), 10))
 	if reasons := got.Failures.ByReason; len(reasons) != 1 || reasons[0].Reason != "rejected" || got.Summary.Current.FailureRate == nil || *got.Summary.Current.FailureRate != 1.0/6 {
 		t.Errorf("service user failures = %+v at %v, want 1 rejected of 6 runs", reasons, got.Summary.Current.FailureRate)

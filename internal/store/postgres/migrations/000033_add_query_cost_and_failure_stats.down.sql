@@ -1,5 +1,6 @@
 DROP TABLE query_failure_stats_daily;
 
+ALTER TABLE query_shape_stats_daily DROP COLUMN scanned_count;
 ALTER TABLE query_shape_stats_daily DROP COLUMN total_bytes_read;
 ALTER TABLE query_shape_stats_daily DROP COLUMN total_rows_read;
 

@@ -110,8 +110,8 @@ type QueryShapeStat struct {
 	MaxLookbackSeconds *int64        `json:"max_lookback_s"`
 	Current            QueryTotals   `json:"current"`
 	Prior              *QueryTotals  `json:"prior"`
-	// Scan covers the current window: ScannedRuns counts the runs on days
-	// whose rows recorded a scan, and BytesRead and RowsRead sum it.
+	// Scan covers the current window: ScannedRuns counts the runs recorded
+	// since scan collection began, and BytesRead and RowsRead sum them.
 	Scan ShapeScan `json:"-"`
 }
 
