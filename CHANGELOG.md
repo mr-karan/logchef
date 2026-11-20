@@ -141,14 +141,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ones), OAuth consent and grant revocations, query runs and log exports as
   audit events, each with the actor, how they authenticated, the target and
   the fields that changed. Credentials are recorded only as "changed", and
-  stored query text (saved queries, alerts, shares, views) and export queries
-  only as a digest. Every data query on `/logs/query`, `/logs/windowed` and
-  `/logchefql/query` records one `query.run` event with the full query text,
-  the requested time range and limit, the rows returned and scanned, and the
-  duration, success or failure; it is written in the background, so queries do
-  not wait for it. Provisioning runs, startup admins, OIDC auto-provisioning
-  and the report scheduler record their changes too. Global admins browse and
-  download events in Administration → Audit Log, and read them through `GET
+  stored query text (saved queries, alerts, shares, views) only as a digest.
+  Every data query on `/logs/query`, `/logs/windowed` and `/logchefql/query`
+  records one `query.run` event with the full query text, the requested time
+  range and limit, the rows returned and scanned, and the duration, success or
+  failure; it is written in the background, so queries do not wait for it. An
+  export records its full query and time range on `log_export.create`, its
+  rows and bytes on the new `log_export.complete`, and each download, once per
+  download, with the file and the creator on `log_export.download`.
+  Provisioning runs, startup admins, OIDC auto-provisioning and the report
+  scheduler record their changes too. Global admins browse and download events
+  in Administration → Audit Log, and read them through `GET
   /api/v1/admin/audit-events` and its NDJSON `/export` with a session or an
   API token that has the new `audit:read` scope. Each event is also written as
   a JSON log line with `msg` `audit` for shipping off the host. API token

@@ -108,8 +108,8 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 
 	// No log data leaves the server without a stored event, so the event is
 	// stored before the query runs and a failed insert stops the export.
-	target := audit.ExportSourceTarget(teamID, sourceID)
-	auditSet(c, target, nil, audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, exportLimit, req.RawSQL))
+	target := audit.StreamedExportTarget(queryID, teamID, sourceID, source.Name)
+	auditSet(c, target, nil, audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, exportLimit, req.RawSQL, req.StartTime, req.EndTime))
 	if err := s.recordRouteEventOrFail(c, fiber.StatusOK); err != nil {
 		cancel()
 		queryTracker.RemoveQuery(queryID)
@@ -118,6 +118,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		s.log.Error("export not started: audit event not stored", "error", err, "source_id", sourceID, "user_id", user.ID)
 		return SendError(c, fiber.StatusServiceUnavailable, "Audit log unavailable: the export did not start")
 	}
+	done := s.newExportCompletion(c, target)
 
 	opts := buildResult.QueryOptions(*req.QueryTimeout)
 
@@ -133,12 +134,15 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
 
-		writer := newExportRowWriter(format, w, queryID, buildResult.AppliedLimit)
+		counter := &countingWriter{w: w}
+		out := bufio.NewWriter(counter)
+		writer := newExportRowWriter(format, out, queryID, buildResult.AppliedLimit)
 		stats, err := client.QueryStream(streamCtx, buildResult.SQL, opts, writer)
 		if err != nil {
 			s.log.Error("failed to stream export", "error", err, "source_id", sourceID, "query_id", queryID)
 			_ = writer.WriteError(err)
-			_ = w.Flush()
+			_ = out.Flush()
+			s.recordExportComplete(done, err, writer.rowsWritten, counter.n)
 			return
 		}
 		s.log.Info("query.export",
@@ -152,10 +156,65 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
-		_ = w.Flush()
+		_ = out.Flush()
+		s.recordExportComplete(done, nil, writer.rowsWritten, counter.n)
 	})
 
 	return nil
+}
+
+// countingWriter counts the bytes of a streamed export and flushes each
+// write to the client, as the row writer's flushes did before.
+type countingWriter struct {
+	w *bufio.Writer
+	n int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.n += int64(n)
+	if err != nil {
+		return n, err
+	}
+	return n, cw.w.Flush()
+}
+
+// exportCompletion records log_export.complete for an export whose create
+// event is stored. The export ends after its request returned, so it holds
+// the creator as the actor and the create event's target.
+type exportCompletion struct {
+	actor   audit.Actor
+	target  audit.Target
+	started time.Time
+}
+
+func (s *Server) newExportCompletion(c fiber.Ctx, target audit.Target) exportCompletion {
+	// The create event needed an actor, so the request has one.
+	actor, _ := requestActor(c)
+	return exportCompletion{actor: actor, target: target, started: time.Now()}
+}
+
+// errExportIncomplete ends an export that stopped without a query error,
+// such as a failed write of its artifact.
+var errExportIncomplete = errors.New("export did not complete")
+
+// recordExportComplete records how an export ended: err is nil when every
+// row was written.
+func (s *Server) recordExportComplete(done exportCompletion, err error, rows int, bytes int64) {
+	ev := audit.Event{
+		Action:  audit.LogExportComplete,
+		Outcome: models.AuditOutcomeSuccess,
+		Actor:   done.actor,
+		Target:  done.target,
+		Detail: audit.NewFields().
+			Set("rows_exported", rows).
+			Set("bytes_written", bytes).
+			Set("duration_ms", time.Since(done.started).Milliseconds()),
+	}
+	if err != nil {
+		ev.Outcome, ev.Reason = models.AuditOutcomeFailure, queryFailureReason(err, 0)
+	}
+	s.audit.Record(s.baseCtx, ev)
 }
 
 // exportRequest is an export request whose source supports exports, whose

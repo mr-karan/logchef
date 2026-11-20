@@ -67,15 +67,17 @@ object.
   `api_key`, `authorization`, `cookie`, `hash`, `headers`, `credential` or
   `dsn` is replaced with `[redacted]`.
 - **Stored query text.** Saved query content, alert queries and conditions,
-  export queries, share payloads and saved view filters are recorded as a
-  SHA-256 digest and a byte length. Alert labels and annotations are a digest plus the label
+  share payloads and saved view filters are recorded as a SHA-256 digest and a
+  byte length: the event says the stored query changed, and the object itself
+  holds the text. Alert labels and annotations are a digest plus the label
   names.
 - **URLs.** Any other absolute URL is reduced to its scheme and host.
 - **Large objects.** A dashboard is recorded by name, revision, panel count
   and tab count, never the panel definitions.
 
-The text of a query that ran is the exception: `query.run` records it in
-full, because reading it is the point of the event. A literal in that text, such as a user ID or an email in a filter,
+The text of a query that ran or was exported is the exception: `query.run`
+and `log_export.create` record it in full, because reading it is the point of
+the event. A literal in that text, such as a user ID or an email in a filter,
 reaches the table and the `audit` log line. Restrict who reads both.
 
 One string value holds at most 1,024 bytes and ends with `...` when cut. Query
@@ -100,7 +102,7 @@ before the change records nothing, except a failed sign-in.
 | Collection member | `collection_member.add`, `collection_member.remove` | A user is given or loses access to a collection |
 | Collection team | `collection_team.add`, `collection_team.remove` | A collection is shared with or unshared from a team |
 | Dashboard | `dashboard.create`, `dashboard.update`, `dashboard.delete` | A dashboard changes. A delete also removes the dashboard's scheduled reports, with no `report.delete` of their own: `detail.reports_removed` counts them |
-| Log export | `log_export.create`, `log_export.download` | Logs are exported, streamed (`detail.mode` `stream`) or as a job (`job`), and a job's file is downloaded. Creation fails closed |
+| Log export | `log_export.create`, `log_export.complete`, `log_export.download` | Logs are exported, streamed (`detail.mode` `stream`) or as a job (`job`), the export ends, and a job's file is downloaded. See [Exports](#exports). Creation fails closed |
 | Notification destination | `notification_destination.create`, `notification_destination.update`, `notification_destination.delete`, `notification_destination.test` | A destination changes or is tested |
 | OAuth consent | `oauth_consent.approve`, `oauth_consent.deny` | A user decides an OAuth authorization request. The event holds the client, the resource and the scopes |
 | OAuth grant | `oauth_grant.revoke` | A grant is revoked: by the user in Connected apps, by the client at `/oauth/revoke`, or by the server on a replayed code or refresh token |
@@ -154,6 +156,23 @@ background writer that also writes query history, so a slow audit insert never
 slows a query. When the writer's queue is full, the event is dropped, counted
 in `logchef_audit_events_total{result="dropped"}`, and a warning names the
 count.
+
+### Exports
+
+An export is one target, `log_export`, from create to download, so **History
+of this target** shows the whole export. A job uses its job ID. A streamed
+export has no job, so its query ID is the ID of its create and complete events.
+
+| Action | Holds |
+|--------|-------|
+| `log_export.create` | In `changes`: the full query, `language`, `format`, `row_limit`, and `time_from` and `time_to` as sent |
+| `log_export.complete` | The creator as actor, `outcome`, a failure `reason`, and in `detail` `rows_exported`, `bytes_written` and `duration_ms`. It runs after the request, so it has no IP or route |
+| `log_export.download` | The downloader, and in `detail` `format`, `file_name`, `rows_exported`, `bytes_written` and `created_by` (the creator's user ID) |
+
+A download is one event. A `Range` request that resumes it, one whose first
+range does not start at byte 0, records nothing. A job's file and its row are
+deleted after `export.artifact_ttl`, but its events stay for
+`audit.retention_days`.
 
 ### Events from outside a request
 
@@ -330,8 +349,8 @@ without a stored event.
 | `log_export.create`, streamed | The request answers 503 before the query runs. No log data is sent |
 | `log_export.create`, export job | The job is rolled back. The request answers 503 and no job exists |
 
-`log_export.download` fails open, because `log_export.create` already
-recorded who made the file. `query.run` fails open
+`log_export.complete` and `log_export.download` fail open, because
+`log_export.create` already recorded who made the file. `query.run` fails open
 too: the query has already answered when its event is written.
 
 ## Limits
