@@ -297,10 +297,10 @@ func (t *tools) queryError(op string, err error) error {
 // any other error.
 func knownError(op string, err error) error {
 	if reqErr, ok := errors.AsType[*core.QueryRequestError](err); ok {
-		return fmt.Errorf("%s: %s", op, reqErr.Message)
+		return &maskedError{msg: op + ": " + reqErr.Message, cause: err}
 	}
 	if admitErr, ok := errors.AsType[*admissionError](err); ok {
-		return fmt.Errorf("%s: %s", op, admitErr.message)
+		return &maskedError{msg: op + ": " + admitErr.message, cause: err}
 	}
 	switch {
 	case errors.Is(err, errNoPrincipal),
@@ -318,11 +318,22 @@ func knownError(op string, err error) error {
 		errors.Is(err, errInvalidArgument):
 		return fmt.Errorf("%s: %w", op, err)
 	case errors.Is(err, context.DeadlineExceeded):
-		return fmt.Errorf("%s: timed out", op)
+		return &maskedError{msg: op + ": timed out", cause: err}
 	case errors.Is(err, context.Canceled):
-		return fmt.Errorf("%s: cancelled", op)
+		return &maskedError{msg: op + ": cancelled", cause: err}
 	case errors.Is(err, datasource.ErrOperationNotSupported):
-		return fmt.Errorf("%s: not supported for this source type", op)
+		return &maskedError{msg: op + ": not supported for this source type", cause: err}
 	}
 	return nil
 }
+
+// maskedError shows the caller a safe message and keeps the original error
+// for errors.Is and errors.As, so the query.run event still records a
+// cancellation or timeout as such.
+type maskedError struct {
+	msg   string
+	cause error
+}
+
+func (e *maskedError) Error() string { return e.msg }
+func (e *maskedError) Unwrap() error { return e.cause }
