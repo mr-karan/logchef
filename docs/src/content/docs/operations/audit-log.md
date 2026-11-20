@@ -16,9 +16,9 @@ range, how many rows came back, and who downloaded the file. Each query is one
 `query.run` event with its full text. The audit log keeps every query for
 `audit.retention_days`. [Query history](/user-guide/query-interface/#query-history)
 keeps only the last queries of each user to reload in the editor, and
-**Administration → Query Activity** (`/admin/query-activity`) ranks users and
-sources by query volume from the same runs. Each of the two admin pages links
-to the other.
+**Administration → Query Activity** (`/admin/query-activity`) shows query usage
+as daily totals by user, source and filter shape. Each of the two admin pages
+links to the other.
 
 ## What an event holds
 
