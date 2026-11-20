@@ -154,12 +154,14 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
   <div class="space-y-6">
     <PageHeader :title="t('routes.queryActivity')">
       <template #actions>
-        <Button variant="ghost" size="sm" as-child>
-          <router-link :to="auditLink(days, { outcome: 'failure' })">{{ t('admin.failedQueries') }}</router-link>
-        </Button>
-        <Button variant="ghost" size="sm" as-child>
-          <router-link :to="auditLink(days)">{{ t('routes.auditLog') }}</router-link>
-        </Button>
+        <template v-if="stats">
+          <Button variant="ghost" size="sm" as-child>
+            <router-link :to="auditLink(stats.window, { outcome: 'failure' })">{{ t('admin.failedQueries') }}</router-link>
+          </Button>
+          <Button variant="ghost" size="sm" as-child>
+            <router-link :to="auditLink(stats.window)">{{ t('routes.auditLog') }}</router-link>
+          </Button>
+        </template>
         <Button variant="outline" size="sm" :disabled="loading" @click="load">
           <RefreshCw :class="['mr-2 h-3.5 w-3.5', loading && 'animate-spin']" />{{ t('ui.refresh') }}
         </Button>
@@ -299,7 +301,7 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                       <QueryActivityDelta :current="averageMs(user.current)" :prior="averageMs(user.prior)" kind="latency" />
                     </TableCell>
                     <TableCell>
-                      <router-link :to="auditLink(days, { actor_id: user.user_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="text-muted-foreground hover:text-foreground">
+                      <router-link :to="auditLink(stats.window, { actor_id: user.user_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="text-muted-foreground hover:text-foreground">
                         <FileSearch class="h-4 w-4" />
                       </router-link>
                     </TableCell>
@@ -400,7 +402,7 @@ const percent = (value: number) => `${value < 1 ? value.toFixed(1) : Math.round(
                     <router-link :to="{ name: 'EditSource', params: { sourceId: String(source.source_id) } }" :title="t('admin.sourceSettings')" :aria-label="t('admin.sourceSettings')" class="hover:text-foreground">
                       <Settings2 class="h-4 w-4" />
                     </router-link>
-                    <router-link :to="auditLink(days, { source_id: source.source_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="hover:text-foreground">
+                    <router-link :to="auditLink(stats.window, { source_id: source.source_id })" :title="t('admin.viewQueryRuns')" :aria-label="t('admin.viewQueryRuns')" class="hover:text-foreground">
                       <FileSearch class="h-4 w-4" />
                     </router-link>
                   </div>
