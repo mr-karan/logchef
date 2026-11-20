@@ -32,8 +32,9 @@ const (
 // Exactly one owner finishes a run: the handler, or the stream goroutine it
 // handed the run to.
 type queryRun struct {
-	actor    *audit.Actor // nil when no authenticated actor made the request
-	request  audit.Request
+	actor   *audit.Actor // nil when no authenticated actor made the request
+	request audit.Request
+	// user owns the history row. It is nil for a run that writes none.
 	user     *models.User
 	teamID   models.TeamID
 	sourceID models.SourceID
@@ -74,14 +75,11 @@ type queryRecord struct {
 	history *models.QueryHistory
 }
 
+// newQueryRun starts the run of a handler's query. A nil user writes no
+// history row.
 func (s *Server) newQueryRun(c fiber.Ctx, src access.AuthorizedSource, user *models.User, mode queryRunMode, query string, language models.QueryLanguage, limit int) *queryRun {
 	run := &queryRun{
-		request: audit.Request{
-			IP:        strings.Clone(c.IP()),
-			UserAgent: strings.Clone(c.Get(fiber.HeaderUserAgent)),
-			Method:    strings.Clone(c.Method()),
-			Route:     c.Route().Path,
-		},
+		request:  auditRequest(c),
 		user:     user,
 		teamID:   src.TeamID(),
 		sourceID: src.SourceID(),
@@ -89,12 +87,18 @@ func (s *Server) newQueryRun(c fiber.Ctx, src access.AuthorizedSource, user *mod
 		language: language,
 		mode:     mode,
 		limit:    limit,
-		started:  time.Now(),
-		history:  true,
+		history:  user != nil,
 	}
 	if actor, ok := requestActor(c); ok {
 		run.actor = &actor
 	}
+	return s.startQueryRun(run)
+}
+
+// startQueryRun starts run, which its caller filled, and counts it until it
+// finishes.
+func (s *Server) startQueryRun(run *queryRun) *queryRun {
+	run.started = time.Now()
 	s.backgroundMu.Lock()
 	s.activeQueryRuns++
 	s.backgroundMu.Unlock()

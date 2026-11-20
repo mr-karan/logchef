@@ -139,13 +139,19 @@ func auditSignInFailure(c fiber.Ctx, email, method, reason string) {
 // own events, such as the OAuth endpoints, through the request context.
 func withAuditRequest(next fiber.Handler) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		c.SetContext(audit.WithRequest(c.Context(), audit.Request{
-			IP:        c.IP(),
-			UserAgent: c.Get(fiber.HeaderUserAgent),
-			Method:    c.Method(),
-			Route:     c.Route().Path,
-		}))
+		c.SetContext(audit.WithRequest(c.Context(), auditRequest(c)))
 		return next(c)
+	}
+}
+
+// auditRequest copies the request metadata of an event, so it outlives the
+// request context that Fiber reuses.
+func auditRequest(c fiber.Ctx) audit.Request {
+	return audit.Request{
+		IP:        strings.Clone(c.IP()),
+		UserAgent: strings.Clone(c.Get(fiber.HeaderUserAgent)),
+		Method:    strings.Clone(c.Method()),
+		Route:     c.Route().Path,
 	}
 }
 
@@ -182,14 +188,19 @@ func requestActor(c fiber.Ctx) (audit.Actor, bool) {
 		if strings.HasPrefix(c.Route().Path, MCPPath) {
 			method = models.AuditAuthOAuthMCP
 		}
-		a := userActor(p.User, method)
-		a.CredentialID, a.ClientID = strconv.Itoa(int(p.GrantID)), string(p.ClientID)
-		return a, true
+		return oauthActor(p, method), true
 	case access.AuthAssistant:
 		return userActor(p.User, models.AuditAuthAssistant), true
 	case access.AuthSystem, access.AuthReport:
 	}
 	return audit.Actor{}, false
+}
+
+// oauthActor is the actor for an OAuth access token's principal.
+func oauthActor(p access.Principal, method models.AuditAuthMethod) audit.Actor {
+	a := userActor(p.User, method)
+	a.CredentialID, a.ClientID = strconv.Itoa(int(p.GrantID)), string(p.ClientID)
+	return a
 }
 
 // responseStatus is the status the client receives. Fiber runs the error
