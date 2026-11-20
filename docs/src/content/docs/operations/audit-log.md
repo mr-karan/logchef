@@ -211,8 +211,10 @@ outcome, and target type and ID. The filters live in the URL, so
 `/admin/audit-log?target_type=source&target_id=7` is the history of one
 source, and each expanded row links to its target's history. A row expands to
 show the changed fields, the detail, the route, the status, the auth method,
-the credential and client IDs and the user agent. **Load more** fetches the
-next page, and **Download** exports the events that match the filters.
+the credential and client IDs and the user agent, and names the event's
+source and team. A query or export event shows its query in full with the
+time range, rows, bytes and duration. **Load more** fetches the next page, and
+**Download** exports the events that match the filters.
 
 ### Through the API
 
