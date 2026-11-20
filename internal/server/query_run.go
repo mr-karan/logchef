@@ -24,6 +24,8 @@ const (
 	queryRunWindowed queryRunMode = "windowed"
 	queryRunMCP      queryRunMode = "mcp"
 	queryRunAskChef  queryRunMode = "ask_chef"
+	queryRunTail     queryRunMode = "tail"
+	queryRunContext  queryRunMode = "context"
 )
 
 // queryRun is one data query, from the handler or tool that receives it to
@@ -52,7 +54,7 @@ type queryRun struct {
 	// fields whose values it read.
 	tool   string
 	fields []string
-	// anchor is the timestamp that a log context tool reads around.
+	// anchor is the timestamp that a log context read is around.
 	anchor  *time.Time
 	started time.Time
 	// history says that the run writes a query history row when it ran:

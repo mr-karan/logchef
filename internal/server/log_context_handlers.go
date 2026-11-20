@@ -14,7 +14,7 @@ import (
 // handleGetLogContext returns logs surrounding a specific timestamp (grep -C
 // for logs). Routed through the datasource service; sources whose provider
 // lacks the log_context capability get a 400.
-func (s *Server) handleGetLogContext(c fiber.Ctx) error {
+func (s *Server) handleGetLogContext(c fiber.Ctx) (err error) {
 	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
@@ -25,6 +25,8 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
+	run := s.newQueryRun(c, src, nil, queryRunContext, "", "", 0)
+	defer func() { s.endQueryRun(c, run, err, recover()) }()
 
 	if req.Timestamp <= 0 && req.TimestampRFC3339 == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Timestamp is required and must be positive", models.ValidationErrorType)
@@ -53,6 +55,10 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 	if afterLimit > 100 {
 		afterLimit = 100
 	}
+	run.anchor, run.limit = &targetTime, beforeLimit+afterLimit
+	if run.source, err = core.LoadSource(c.Context(), s.datasources, sourceID); err != nil {
+		return s.sendQueryError(c, sourceID, err, "Failed to retrieve log context", "Log context")
+	}
 
 	result, err := core.GetLogContext(c.Context(), s.datasources, src, core.LogContextParams{
 		TargetTimestamp: targetTime.UnixMilli(),
@@ -67,6 +73,7 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 	if err != nil {
 		return s.sendQueryError(c, sourceID, err, "Failed to retrieve log context", "Log context")
 	}
-
+	rows := len(result.BeforeLogs) + len(result.TargetLogs) + len(result.AfterLogs)
+	s.finishQueryRun(run, queryOutcome{status: fiber.StatusOK, rows: int64(rows)})
 	return SendSuccess(c, fiber.StatusOK, result)
 }
