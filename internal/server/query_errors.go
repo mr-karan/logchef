@@ -15,6 +15,10 @@ import (
 type queryErrorLogKey struct{}
 type queryCancellationKey struct{}
 
+// queryErrorKey holds the error that sendQueryError answered, so endQueryRun
+// can give a failed query.run event its reason.
+type queryErrorKey struct{}
+
 var queryErrorLoggedKey queryErrorLogKey
 
 const (
@@ -69,6 +73,7 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 
 func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error, failure, operation string) error {
 	response := classifyQueryError(err, failure, operation)
+	c.Locals(queryErrorKey{}, err)
 	if errors.Is(err, context.Canceled) {
 		c.Locals(queryCancellationKey{}, true)
 	}

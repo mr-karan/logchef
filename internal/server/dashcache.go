@@ -147,6 +147,15 @@ func (s *Server) writeDashboardStreamError(c fiber.Ctx, sourceID models.SourceID
 	return s.sendQueryError(c, sourceID, err, failure, operation)
 }
 
+// dashboardStreamErrorStatus is the status that writeDashboardStreamError
+// answers err with.
+func dashboardStreamErrorStatus(err error) int {
+	if _, ok := errors.AsType[*dashboardStreamError](err); ok {
+		return fiber.StatusOK
+	}
+	return classifyQueryError(err, "", "").status
+}
+
 // fillClickHouseStream returns a cache fill that buffers a ClickHouse query
 // result into the exact streamed JSON envelope (via queryStreamWriter, so cached
 // bytes are byte-identical to the streaming response), bounded by

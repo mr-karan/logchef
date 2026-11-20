@@ -26,7 +26,7 @@ func TestQueryShapeRollup(t *testing.T) {
 	s.config.Query.DefaultPreviewLimit = 100
 	s.config.Query.MaxPreviewLimit = 1000
 	s.config.Query.DefaultTimeoutSeconds = 10
-	s.historyQueue = make(chan *models.QueryHistory, 4)
+	s.queryRecords = make(chan queryRecord, 4)
 	s.datasources = datasource.NewService(s.store, s.log)
 	s.datasources.Register(&succeedingQueryProvider{sourceType: models.SourceTypeClickHouse})
 	source := &models.Source{Name: "shapes", SourceType: models.SourceTypeClickHouse, Connection: models.ConnectionInfo{Host: "ch:9000", Database: "logs", TableName: "app"}}
@@ -53,8 +53,11 @@ func TestQueryShapeRollup(t *testing.T) {
 			t.Fatalf("%s: status=%d, want 200", endpoint, resp.StatusCode)
 		}
 		select {
-		case entry := <-s.historyQueue:
-			s.writeQueryHistory(context.Background(), entry)
+		case rec := <-s.queryRecords:
+			if rec.history == nil {
+				t.Fatalf("%s: the query wrote no history row", endpoint)
+			}
+			s.writeQueryHistory(context.Background(), rec.history)
 		case <-time.After(5 * time.Second):
 			t.Fatalf("%s: query history was not recorded", endpoint)
 		}

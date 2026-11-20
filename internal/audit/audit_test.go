@@ -266,6 +266,28 @@ func TestDigestAndURLDropSentinels(t *testing.T) {
 	}
 }
 
+// Query keeps query text whole up to 8 KiB, eight times a plain string, and
+// cuts a longer one with a marker.
+func TestQueryRecordsTextInFull(t *testing.T) {
+	h := newMemHarness()
+	long := "SELECT * FROM logs WHERE " + strings.Repeat("a = 1 AND ", 300) + "b = 2"
+	huge := strings.Repeat("x", 9000)
+	e := event(audit.QueryRun)
+	e.Detail = audit.NewFields().Query("query", long).Query("huge", huge)
+	h.rec.Record(context.Background(), e)
+
+	got := decode(t, h.store.events[0].Detail)
+	if got["query"] != long {
+		t.Errorf("query is %d bytes, want the %d-byte text whole", len(got["query"].(string)), len(long))
+	}
+	if cut, _ := got["huge"].(string); len(cut) != 8*1024 || !strings.HasSuffix(cut, "...") {
+		t.Errorf("huge is %d bytes, want 8192 ending in ...", len(cut))
+	}
+	if !strings.Contains(h.logs.String(), "a = 1 AND b = 2") {
+		t.Error("the log line does not hold the query text")
+	}
+}
+
 func TestPayloadCapSetsTruncated(t *testing.T) {
 	h := newMemHarness()
 	e := event(audit.DashboardUpdate)

@@ -3,17 +3,22 @@ title: Audit Log
 head:
   - tag: title
     content: "Audit Log for Log Access and Changes | Logchef"
-description: "Record who changed Logchef configuration, who signed in and who exported logs. Event format, actions, export, retention and failure handling."
+description: "Record who changed Logchef configuration, who signed in, who queried or exported which logs, and who downloaded them. Event format, actions, export, retention and failure handling."
 ---
 
-Logchef records configuration changes, sign-ins, OAuth decisions and data
-exports as audit events. Global admins read them in **Administration → Audit
-Log**, through the API, or with `logchef audit list`. Each event is also
+Logchef records configuration changes, sign-ins, OAuth decisions, query runs
+and data exports as audit events. Global admins read them in **Administration →
+Audit Log**, through the API, or with `logchef audit list`. Each event is also
 written as one JSON log line, so a log shipper can keep a copy off the host.
 
-The audit log records changes and security events. It does not record queries:
-query history and **Administration → Query Activity** own those. Each of the
-two pages links to the other.
+The audit log answers who queried or exported which data, over which time
+range, how many rows came back, and who downloaded the file. Each query is one
+`query.run` event with its full text. The audit log keeps every query for
+`audit.retention_days`. [Query history](/user-guide/query-interface/#query-history)
+keeps only the last queries of each user to reload in the editor, and
+**Administration → Query Activity** (`/admin/query-activity`) ranks users and
+sources by query volume from the same runs. Each of the two admin pages links
+to the other.
 
 ## What an event holds
 
@@ -61,17 +66,21 @@ object.
   its value. A field whose name contains `password`, `secret`, `token`,
   `api_key`, `authorization`, `cookie`, `hash`, `headers`, `credential` or
   `dsn` is replaced with `[redacted]`.
-- **Query text.** Saved query content, alert queries and conditions, export
-  queries, share payloads and saved view filters are recorded as a SHA-256
-  digest and a byte length. Alert labels and annotations are a digest plus
-  the label names.
+- **Stored query text.** Saved query content, alert queries and conditions,
+  export queries, share payloads and saved view filters are recorded as a
+  SHA-256 digest and a byte length. Alert labels and annotations are a digest plus the label
+  names.
 - **URLs.** Any other absolute URL is reduced to its scheme and host.
 - **Large objects.** A dashboard is recorded by name, revision, panel count
   and tab count, never the panel definitions.
 
-One string value holds at most 1,024 bytes and ends with `...` when cut.
-`changes` and `detail` together hold at most 16 KiB; later keys are dropped and
-`detail.truncated` is `true`.
+The text of a query that ran is the exception: `query.run` records it in
+full, because reading it is the point of the event. A literal in that text, such as a user ID or an email in a filter,
+reaches the table and the `audit` log line. Restrict who reads both.
+
+One string value holds at most 1,024 bytes and ends with `...` when cut. Query
+text holds at most 8 KiB. `changes` and `detail` together hold at most 16 KiB;
+later keys are dropped and `detail.truncated` is `true`.
 
 ## Actions
 
@@ -95,6 +104,7 @@ before the change records nothing, except a failed sign-in.
 | Notification destination | `notification_destination.create`, `notification_destination.update`, `notification_destination.delete`, `notification_destination.test` | A destination changes or is tested |
 | OAuth consent | `oauth_consent.approve`, `oauth_consent.deny` | A user decides an OAuth authorization request. The event holds the client, the resource and the scopes |
 | OAuth grant | `oauth_grant.revoke` | A grant is revoked: by the user in Connected apps, by the client at `/oauth/revoke`, or by the server on a replayed code or refresh token |
+| Query | `query.run` | A data query runs. See [Queries](#queries) |
 | Query share | `query_share.create`, `query_share.delete` | A share link is created or deleted |
 | Report | `report.create`, `report.update`, `report.delete`, `report.pause`, `report.resume`, `report.claim` | A scheduled report's configuration changes, or it is paused (by a user or by the scheduler), resumed, or claimed by a new owner. Report runs and sends are in the report's own run history |
 | Report recipient | `report_recipient.remove` | A direct recipient takes themself off a report. Recipients that the owner adds or removes are in the `recipients` field of `report.create` and `report.update` |
@@ -110,6 +120,40 @@ before the change records nothing, except a failed sign-in.
 | Team member | `team_member.add`, `team_member.remove` | A user joins or leaves a team. A role change is a `team_member.add` with a `role` diff |
 | Team source | `team_source.link`, `team_source.unlink` | A source is linked to or unlinked from a team |
 | User | `user.create`, `user.update`, `user.delete` | A user changes. Role and status are in `changes` |
+
+### Queries
+
+Every data query records one `query.run` event, whether it succeeds or fails:
+`POST /logs/query` (buffered or streamed), `POST /logs/windowed` and
+`POST /logchefql/query`, from the UI, the CLI or an API token. The target is
+the source, with `team_id`, `source_id` and the source name as
+`target_label`. A failed query has `outcome` `failure` and a `reason` of
+`invalid_query`, `timeout`, `cancelled`, `rejected` (a concurrency limit),
+`upstream_error` or `internal_error`.
+
+| `detail` key | Meaning |
+|--------------|---------|
+| `query` | The query text as sent, up to 8 KiB. LogchefQL is recorded as LogchefQL, not the SQL it compiles to |
+| `language` | `clickhouse-sql`, `logchefql` or `logsql` |
+| `mode` | `buffered`, `stream` or `windowed` |
+| `time_from`, `time_to` | The requested time range, UTC. `null` for SQL that carries its own range |
+| `limit_requested`, `limit_applied` | The row limit the caller asked for and the one that applied |
+| `duration_ms` | Execution time |
+| `rows_returned` | Rows sent to the client. A failed stream counts the rows sent before it failed |
+| `rows_read`, `bytes_read` | What the backend scanned, when it reports it |
+| `result_truncated` | Whether a limit cut the result |
+| `query_id` | The `query_id` of the response, which the cancel route takes |
+| `cache` | For a dashboard panel answered through the result cache: `hit`, `miss`, `coalesced` or `bypass`. Such an event has no row counts |
+
+A windowed search records one event per request, including each later page.
+A windowed `count` request, the histogram, the field sidebar, live tail, log
+context, MCP tools and Ask Chef record no `query.run` yet.
+
+The query answers before its event is stored: the event goes through the
+background writer that also writes query history, so a slow audit insert never
+slows a query. When the writer's queue is full, the event is dropped, counted
+in `logchef_audit_events_total{result="dropped"}`, and a warning names the
+count.
 
 ### Events from outside a request
 
@@ -258,8 +302,13 @@ UI. Like every key, they can be set with environment variables, such as
 Every five minutes each server deletes at most 5,000 events, oldest first, by
 both bounds. A larger backlog drains over the following runs. Pruning is
 idempotent, so replicas can run it at once. It logs the count and records no
-audit event. On a busy instance `max_rows` can end retention before
-`retention_days`.
+audit event.
+
+Every query adds a `query.run` event, and query events count toward
+`max_rows` like any other. On a busy instance `max_rows` can end retention
+before `retention_days`: at 50,000 queries a day, 1,000,000 rows hold about
+20 days. Raise `max_rows` to cover `retention_days` at your query volume, or
+ship the `audit` log line for longer retention.
 
 With `demo.read_only` set, events go to the log line only.
 
@@ -282,7 +331,8 @@ without a stored event.
 | `log_export.create`, export job | The job is rolled back. The request answers 503 and no job exists |
 
 `log_export.download` fails open, because `log_export.create` already
-recorded who made the file.
+recorded who made the file. `query.run` fails open
+too: the query has already answered when its event is written.
 
 ## Limits
 
@@ -290,6 +340,7 @@ recorded who made the file.
 |-------|-------|--------------|
 | `changes` plus `detail` | 16 KiB | Later keys dropped, `detail.truncated` is `true` |
 | One string value | 1,024 bytes | The value ends with `...` |
+| Query text | 8 KiB | The text ends with `...` |
 | List page | 500 events | `limit` is clamped |
 | Export | 100,000 events | 400 asking for a narrower time range |
 | Insert timeout | 2 seconds | Fails open or closed by action |
@@ -306,7 +357,7 @@ milliseconds apart can sort out of order under clock skew.
 
 | Metric | Meaning |
 |--------|---------|
-| `logchef_audit_events_total{result}` | Events by result: `stored`, `failed` (the insert failed; the log line has the event) or `limited` (the failed sign-in bound kept it out of the table) |
+| `logchef_audit_events_total{result}` | Events by result: `stored`, `failed` (the insert failed; the log line has the event), `limited` (the failed sign-in bound kept it out of the table) or `dropped` (a full query queue lost a `query.run` event, which has no log line either) |
 | `logchef_audit_redactions_total` | Values the serializer replaced with `[redacted]` |
 | `logchef_audit_unstaged_total` | Events whose handler staged no target or fields. Above zero means a code path is missing its audit fields |
 

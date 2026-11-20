@@ -90,7 +90,7 @@ teams, and a user can query only the sources of their teams. Automation gets
 [scoped service tokens](/features/service-tokens/), and teams, sources and
 memberships can be declared in a [TOML file](/getting-started/provisioning/)
 kept in Git. An [audit log](/operations/audit-log/) records configuration
-changes, sign-ins and data exports for global admins.
+changes, sign-ins, queries and data exports for global admins.
 
 ### Query languages
 

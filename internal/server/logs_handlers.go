@@ -191,7 +191,7 @@ const logsQueryFailure = "Failed to query logs"
 
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireTeamHasSource middleware.
-func (s *Server) handleQueryLogs(c fiber.Ctx) error {
+func (s *Server) handleQueryLogs(c fiber.Ctx) (err error) {
 	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
@@ -209,16 +209,23 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error {
 		return sendMissingUser(c)
 	}
 
+	// The query is in the source's native language, known once the source
+	// loads.
+	run := s.newQueryRun(c, src, user, queryRunBuffered, req.QueryText, "", req.Limit)
+	defer func() { s.endQueryRun(c, run, err, recover()) }()
+
 	params, err := core.PrepareSourceSQLQuery(c.Context(), s.datasources, s.config.Query, src, req)
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
 	}
+	run.from, run.to = params.StartTime, params.EndTime
 	processedQuery := params.RawQuery
 
 	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
 	}
+	run.source, run.language = source, source.NativeQueryLanguage()
 	if err := datasource.ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
 	}
@@ -255,20 +262,18 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error {
 	}
 
 	return s.executePreviewQuery(c, user, previewQuery{
-		src:             src,
-		source:          source,
-		params:          params,
-		cfg:             queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation},
-		mode:            "sql",
-		trackedQuery:    req.QueryText,
-		requestedLimit:  req.Limit,
-		historyQuery:    req.QueryText,
-		historyLanguage: models.QueryLanguageClickHouseSQL,
-		historyStart:    params.StartTime,
-		class:           queryClassFor(req.Cache),
-		cacheable:       cacheable,
-		cacheKey:        cacheKey,
-		cacheTTL:        effTTL,
+		src:            src,
+		source:         source,
+		params:         params,
+		cfg:            queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation},
+		mode:           "sql",
+		trackedQuery:   req.QueryText,
+		requestedLimit: req.Limit,
+		run:            run,
+		class:          queryClassFor(req.Cache),
+		cacheable:      cacheable,
+		cacheKey:       cacheKey,
+		cacheTTL:       effTTL,
 	})
 }
 
@@ -284,9 +289,8 @@ type previewQuery struct {
 	mode                 string
 	trackedQuery         string
 	requestedLimit       int
-	historyQuery         string
-	historyLanguage      models.QueryLanguage
-	historyStart         *time.Time // the request's start time, nil when it has none
+	// run records the query; the stream path takes it over.
+	run *queryRun
 	// class is QueryClassDashboard for a dashboard panel, cached or not.
 	class     QueryClass
 	cacheable bool
@@ -309,9 +313,11 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
 		if q.cacheable {
 			if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, q.params, q.cfg)); handled {
+				s.finishCachedQueryRun(c, q.run)
 				return err
 			} else if err != nil {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", q.mode)
+				s.finishQueryRun(q.run, queryOutcome{err: err, status: dashboardStreamErrorStatus(err)})
 				return s.writeDashboardStreamError(c, sourceID, err, q.cfg.failure, q.cfg.operation)
 			}
 		}
@@ -329,6 +335,7 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 			return json.Marshal(NewSuccessResponse(q.bufferedResponse(result, queryID)))
 		})
 		if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, fill); handled {
+			s.finishCachedQueryRun(c, q.run)
 			return err
 		} else if err != nil {
 			return s.sendQueryError(c, sourceID, err, q.cfg.failure, q.cfg.operation)
@@ -374,8 +381,7 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 		"limit_applied", result.Stats.LimitApplied,
 		"truncated", result.Stats.Truncated,
 	)
-	s.recordQueryHistory(user, teamID, q.source, q.historyStart, q.historyQuery, q.historyLanguage,
-		int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
+	s.finishQueryRun(q.run, queryOutcome{status: fiber.StatusOK, queryID: queryID, rows: int64(len(result.Logs)), stats: &result.Stats})
 
 	return SendSuccess(c, fiber.StatusOK, q.bufferedResponse(result, queryID))
 }

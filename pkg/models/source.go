@@ -469,6 +469,19 @@ func (s *Source) IsLoki() bool {
 	return NormalizeSourceType(s.SourceType) == SourceTypeLoki
 }
 
+// NativeQueryLanguage is the language the source's backend runs, which a
+// raw query to the source is written in.
+func (s *Source) NativeQueryLanguage() QueryLanguage {
+	switch {
+	case s.IsVictoriaLogs():
+		return QueryLanguageLogsQL
+	case s.IsLoki():
+		return QueryLanguageLogQL
+	default:
+		return QueryLanguageClickHouseSQL
+	}
+}
+
 func (s *Source) SupportsQueryLanguage(language QueryLanguage) bool {
 	normalized := NormalizeQueryLanguage(language)
 	for _, candidate := range s.QueryLanguages {

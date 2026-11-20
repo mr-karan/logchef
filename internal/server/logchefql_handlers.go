@@ -172,7 +172,7 @@ const logchefQLQueryFailure = "Query execution failed"
 // The backend handles the full translation and execution.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/query
-func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
+func (s *Server) handleLogchefQLQuery(c fiber.Ctx) (err error) {
 	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
@@ -190,25 +190,27 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	}
 	req.AllowAggregation = true
 
+	user := currentUser(c)
+	if user == nil {
+		return sendMissingUser(c)
+	}
+	run := s.newQueryRun(c, src, user, queryRunBuffered, req.Query, models.QueryLanguageLogchefQL, req.Limit)
+	defer func() { s.endQueryRun(c, run, err, recover()) }()
+
 	prepared, err := core.PrepareLogchefQLQuery(c.Context(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
 		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 	}
 	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
-	// ClickHouse bakes the time range into the SQL, so the start time for
-	// query history comes from the request.
-	historyStart, _, err := core.ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
+	run.source = source
+	// ClickHouse bakes the time range into the SQL, so the range that query
+	// history and the audit event record comes from the request.
+	run.from, run.to, err = core.ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
 	if err != nil {
 		return s.sendQueryError(c, sourceID, &core.QueryRequestError{Message: err.Error()}, logchefQLQueryFailure, logchefQLQueryOperation)
 	}
 	executableQuery := compiled.Query
 	executableQueryLanguage := compiled.Language
-
-	// Get user information for query tracking
-	user := currentUser(c)
-	if user == nil {
-		return sendMissingUser(c)
-	}
 
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
 	// key uses the finalized executable query (post-substitution + compilation);
@@ -257,9 +259,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		mode:                 "logchefql",
 		trackedQuery:         executableQuery,
 		requestedLimit:       queryParams.Limit,
-		historyQuery:         req.Query,
-		historyLanguage:      models.QueryLanguageLogchefQL,
-		historyStart:         historyStart,
+		run:                  run,
 		class:                queryClassFor(req.Cache),
 		cacheable:            cacheable,
 		cacheKey:             cacheKey,

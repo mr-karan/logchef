@@ -60,6 +60,12 @@ func ExportSourceTarget(teamID models.TeamID, sourceID models.SourceID) Target {
 	return Target{Type: "source", ID: id(sourceID), TeamID: &teamID, SourceID: &sourceID}
 }
 
+// QueryRunTarget is the source a query ran on. label is the source name, or
+// empty when the query failed before the source loaded.
+func QueryRunTarget(teamID models.TeamID, sourceID models.SourceID, label string) Target {
+	return Target{Type: "source", ID: id(sourceID), Label: label, TeamID: &teamID, SourceID: &sourceID}
+}
+
 func NotificationDestinationTarget(d *models.NotificationDestination) Target {
 	return Target{Type: "notification_destination", ID: id(d.ID), Label: d.Name, TeamID: d.TeamID}
 }

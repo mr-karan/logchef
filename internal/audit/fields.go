@@ -18,14 +18,17 @@ const (
 
 type field struct {
 	kind fieldKind
-	// value is nil, string, bool, int64, uint64, float64, []string or
-	// digestValue. A secret has no value.
+	// value is nil, string, bool, int64, uint64, float64, []string,
+	// queryText or digestValue. A secret has no value.
 	value any
 	// set and sum describe a secret: whether it is non-empty, and its digest
 	// for the equality check. Neither is serialized.
 	set bool
 	sum [sha256.Size]byte
 }
+
+// queryText is query text recorded in full, up to maxQueryTextBytes.
+type queryText string
 
 type digestValue struct {
 	SHA256 string `json:"sha256"`
@@ -108,6 +111,13 @@ func (f *Fields) Secret(key, value string) *Fields {
 func (f *Fields) Digest(key, text string) *Fields {
 	sum := sha256.Sum256([]byte(text))
 	return f.put(key, field{kind: kindValue, value: digestValue{SHA256: hex.EncodeToString(sum[:]), Bytes: len(text)}})
+}
+
+// Query records query text in full, up to maxQueryTextBytes, for an event
+// whose point is the query: a query run or an export. An object that stores a
+// query, such as a saved query, records it with Digest.
+func (f *Fields) Query(key, text string) *Fields {
+	return f.put(key, field{kind: kindValue, value: queryText(text)})
 }
 
 // URL records the scheme and host of a URL and drops the user info, the path

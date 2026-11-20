@@ -10,11 +10,12 @@ import (
 
 const (
 	redacted = "[redacted]"
-	// maxStringBytes bounds one string value; maxPayloadBytes bounds changes
-	// and detail together.
-	maxStringBytes  = 1024
-	maxPayloadBytes = 16 * 1024
-	truncatedKey    = "truncated"
+	// maxStringBytes bounds one string value and maxQueryTextBytes one query
+	// text; maxPayloadBytes bounds changes and detail together.
+	maxStringBytes    = 1024
+	maxQueryTextBytes = 8 * 1024
+	maxPayloadBytes   = 16 * 1024
+	truncatedKey      = "truncated"
 )
 
 // deniedKeyParts mark a key whose value is a credential unless Secret set it.
@@ -143,6 +144,8 @@ func (enc *encoded) value(key string, v any) any {
 		return redacted
 	}
 	switch v := v.(type) {
+	case queryText:
+		return truncateTo(string(v), maxQueryTextBytes)
 	case string:
 		return enc.text(v)
 	case []string:
@@ -164,10 +167,14 @@ func (enc *encoded) text(s string) string {
 }
 
 func truncate(s string) string {
-	if len(s) <= maxStringBytes {
+	return truncateTo(s, maxStringBytes)
+}
+
+func truncateTo(s string, n int) string {
+	if len(s) <= n {
 		return s
 	}
-	cut := maxStringBytes - len("...")
+	cut := n - len("...")
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
