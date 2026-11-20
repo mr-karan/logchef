@@ -3358,8 +3358,8 @@ const incrementQueryShapeStats = `-- name: IncrementQueryShapeStats :exec
 INSERT INTO query_shape_stats_daily (
     bucket_date, source_id, query_language, shape_hash, shape,
     query_count, total_duration_ms, total_rows, max_lookback_s,
-    total_rows_read, total_bytes_read
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    total_rows_read, total_bytes_read, scanned_count
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
 DO UPDATE SET
     query_count = query_count + excluded.query_count,
@@ -3367,6 +3367,7 @@ DO UPDATE SET
     total_rows = total_rows + excluded.total_rows,
     total_rows_read = total_rows_read + excluded.total_rows_read,
     total_bytes_read = total_bytes_read + excluded.total_bytes_read,
+    scanned_count = scanned_count + excluded.scanned_count,
     max_lookback_s = COALESCE(MAX(max_lookback_s, excluded.max_lookback_s), max_lookback_s, excluded.max_lookback_s)
 `
 
@@ -3382,6 +3383,7 @@ type IncrementQueryShapeStatsParams struct {
 	MaxLookbackS    sql.NullInt64 `json:"max_lookback_s"`
 	TotalRowsRead   int64         `json:"total_rows_read"`
 	TotalBytesRead  int64         `json:"total_bytes_read"`
+	ScannedCount    int64         `json:"scanned_count"`
 }
 
 // Query shape stats daily rollup (RFC 0010) ------------------------------------
@@ -3400,6 +3402,7 @@ func (q *Queries) IncrementQueryShapeStats(ctx context.Context, arg IncrementQue
 		arg.MaxLookbackS,
 		arg.TotalRowsRead,
 		arg.TotalBytesRead,
+		arg.ScannedCount,
 	)
 	return err
 }
@@ -8836,7 +8839,7 @@ SELECT
     CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.total_duration_ms ELSE 0 END) AS INTEGER) AS total_duration_ms,
     CAST(SUM(CASE WHEN qss.bucket_date < ?1 THEN qss.query_count ELSE 0 END) AS INTEGER) AS prior_query_count,
     CAST(SUM(CASE WHEN qss.bucket_date < ?1 THEN qss.total_duration_ms ELSE 0 END) AS INTEGER) AS prior_total_duration_ms,
-    CAST(SUM(CASE WHEN qss.bucket_date >= ?1 AND qss.total_bytes_read > 0 THEN qss.query_count ELSE 0 END) AS INTEGER) AS scanned_count,
+    CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.scanned_count ELSE 0 END) AS INTEGER) AS scanned_count,
     CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.total_rows_read ELSE 0 END) AS INTEGER) AS rows_read,
     CAST(SUM(CASE WHEN qss.bucket_date >= ?1 THEN qss.total_bytes_read ELSE 0 END) AS INTEGER) AS bytes_read,
     CAST(COUNT(CASE WHEN qss.bucket_date >= ?1 THEN qss.max_lookback_s END) AS INTEGER) AS lookback_rows,
@@ -8882,8 +8885,8 @@ type TopQueryShapesRow struct {
 // source_id is set, by current total duration desc. Dates are as in the
 // Query Activity reads above. lookback_rows is 0 when no current row has a
 // lookback, and then max_lookback_s means nothing. scanned_count counts the
-// current queries on days whose row recorded a scan, the days since scan
-// collection began.
+// current queries recorded since scan collection began, the ones rows_read
+// and bytes_read cover.
 func (q *Queries) TopQueryShapes(ctx context.Context, arg TopQueryShapesParams) ([]TopQueryShapesRow, error) {
 	rows, err := q.query(ctx, q.topQueryShapesStmt, topQueryShapes,
 		arg.Since,

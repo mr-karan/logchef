@@ -1533,8 +1533,8 @@ GROUP BY account_type;
 INSERT INTO query_shape_stats_daily (
     bucket_date, source_id, query_language, shape_hash, shape,
     query_count, total_duration_ms, total_rows, max_lookback_s,
-    total_rows_read, total_bytes_read
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    total_rows_read, total_bytes_read, scanned_count
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (bucket_date, source_id, query_language, shape_hash)
 DO UPDATE SET
     query_count = query_shape_stats_daily.query_count + EXCLUDED.query_count,
@@ -1542,6 +1542,7 @@ DO UPDATE SET
     total_rows = query_shape_stats_daily.total_rows + EXCLUDED.total_rows,
     total_rows_read = query_shape_stats_daily.total_rows_read + EXCLUDED.total_rows_read,
     total_bytes_read = query_shape_stats_daily.total_bytes_read + EXCLUDED.total_bytes_read,
+    scanned_count = query_shape_stats_daily.scanned_count + EXCLUDED.scanned_count,
     max_lookback_s = GREATEST(query_shape_stats_daily.max_lookback_s, EXCLUDED.max_lookback_s);
 
 -- name: ListQueryShapeStats :many
@@ -1592,8 +1593,8 @@ WHERE source_id = sqlc.arg(source_id) AND bucket_date >= sqlc.arg(since) AND buc
 -- source_id is set, by current total duration desc. Dates are as in the
 -- Query Activity reads above. lookback_rows is 0 when no current row has a
 -- lookback, and then max_lookback_s means nothing. scanned_count counts the
--- current queries on days whose row recorded a scan, the days since scan
--- collection began.
+-- current queries recorded since scan collection began, the ones rows_read
+-- and bytes_read cover.
 SELECT
     qss.source_id AS source_id,
     (COALESCE(s.name, ''))::text AS source_name,
@@ -1605,7 +1606,7 @@ SELECT
     (SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.total_duration_ms ELSE 0 END))::bigint AS total_duration_ms,
     (SUM(CASE WHEN qss.bucket_date < sqlc.arg(since) THEN qss.query_count ELSE 0 END))::bigint AS prior_query_count,
     (SUM(CASE WHEN qss.bucket_date < sqlc.arg(since) THEN qss.total_duration_ms ELSE 0 END))::bigint AS prior_total_duration_ms,
-    (SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) AND qss.total_bytes_read > 0 THEN qss.query_count ELSE 0 END))::bigint AS scanned_count,
+    (SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.scanned_count ELSE 0 END))::bigint AS scanned_count,
     (SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.total_rows_read ELSE 0 END))::bigint AS rows_read,
     (SUM(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.total_bytes_read ELSE 0 END))::bigint AS bytes_read,
     (COUNT(CASE WHEN qss.bucket_date >= sqlc.arg(since) THEN qss.max_lookback_s END))::bigint AS lookback_rows,

@@ -273,9 +273,9 @@ func testTopQueryShapes(t *testing.T, ctx context.Context, s store.Store) {
 	got, err := s.TopQueryShapes(ctx, f, 10)
 	logchefql := models.QueryLanguageLogchefQL
 	want := []models.QueryShapeStat{
-		{SourceID: srcY.ID, SourceName: srcY.Name, SourceType: "clickhouse", QueryLanguage: logchefql, ShapeHash: "bbbbbbbbbbbbbbbb", Shape: like, MaxLookbackSeconds: lookback(60), Current: models.QueryTotals{QueryCount: 1, TotalDurationMs: 500}, Prior: &models.QueryTotals{}},
-		{SourceID: srcX.ID, SourceName: srcX.Name, SourceType: "clickhouse", QueryLanguage: logchefql, ShapeHash: "aaaaaaaaaaaaaaaa", Shape: eq, MaxLookbackSeconds: lookback(600), Current: models.QueryTotals{QueryCount: 3, TotalDurationMs: 150}, Prior: &models.QueryTotals{QueryCount: 4, TotalDurationMs: 40}},
-		{SourceID: ghost, QueryLanguage: logchefql, ShapeHash: "eeeeeeeeeeeeeeee", Shape: eq, Current: models.QueryTotals{QueryCount: 1, TotalDurationMs: 10}, Prior: &models.QueryTotals{}},
+		{SourceID: srcY.ID, SourceName: srcY.Name, SourceType: "clickhouse", QueryLanguage: logchefql, ShapeHash: "bbbbbbbbbbbbbbbb", Shape: like, MaxLookbackSeconds: lookback(60), Current: models.QueryTotals{QueryCount: 1, TotalDurationMs: 500}, Prior: &models.QueryTotals{}, Scan: models.ShapeScan{ScannedRuns: 1}},
+		{SourceID: srcX.ID, SourceName: srcX.Name, SourceType: "clickhouse", QueryLanguage: logchefql, ShapeHash: "aaaaaaaaaaaaaaaa", Shape: eq, MaxLookbackSeconds: lookback(600), Current: models.QueryTotals{QueryCount: 3, TotalDurationMs: 150}, Prior: &models.QueryTotals{QueryCount: 4, TotalDurationMs: 40}, Scan: models.ShapeScan{ScannedRuns: 3}},
+		{SourceID: ghost, QueryLanguage: logchefql, ShapeHash: "eeeeeeeeeeeeeeee", Shape: eq, Current: models.QueryTotals{QueryCount: 1, TotalDurationMs: 10}, Prior: &models.QueryTotals{}, Scan: models.ShapeScan{ScannedRuns: 1}},
 	}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("TopQueryShapes = %+v / %v\nwant %+v", got, err, want)

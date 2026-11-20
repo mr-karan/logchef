@@ -286,11 +286,19 @@ func addRunHealth(ctx context.Context, db store.Store, out *QueryActivity, filte
 		failed += r.Count
 		priorFailed += r.Prior
 	}
+	// A prior window that starts before collection covers only some of its
+	// days, so its percentiles and failure rate are left out rather than
+	// compared as if whole. Its latency compares by average instead.
+	priorCollected := collected != "" && prior.Since >= collected
+	priorHealth := RunHealth{FailureCount: priorFailed}
+	if priorCollected {
+		priorHealth = runHealth(cost.Prior, priorFailed)
+	}
 	out.Summary = QueryActivitySummary{
 		Current: ActivityPeriod{QueryStatsPeriod: summary.Current, AvgDailyActiveUsers: avgDailyActive(window, days), RunHealth: runHealth(cost.Current, failed)},
-		Prior:   ActivityPeriod{QueryStatsPeriod: summary.Prior, AvgDailyActiveUsers: avgDailyActive(prior, days), RunHealth: runHealth(cost.Prior, priorFailed)},
+		Prior:   ActivityPeriod{QueryStatsPeriod: summary.Prior, AvgDailyActiveUsers: avgDailyActive(prior, days), RunHealth: priorHealth},
 	}
-	out.Failures.ByReason = failureReasons(reasons, collected != "" && prior.Since >= collected)
+	out.Failures.ByReason = failureReasons(reasons, priorCollected)
 	out.Failures.Top, err = db.TopQueryFailures(ctx, filter, queryActivityTopFailures)
 	return err
 }
@@ -542,7 +550,8 @@ func shapeRows(shapes []models.QueryShapeStat, findings map[models.SourceID][]mo
 			s.Prior = nil
 		}
 		out[i] = ShapeActivityRow{QueryShapeStat: s, Finding: shapeFinding(s.Shape, findings[s.SourceID])}
-		if s.Scan.ScannedRuns > 0 {
+		// Only ClickHouse reports what a query scanned.
+		if s.Scan.ScannedRuns > 0 && s.SourceType == "clickhouse" {
 			avg := float64(s.Scan.BytesRead) / float64(s.Scan.ScannedRuns)
 			out[i].AvgBytesRead = &avg
 		}

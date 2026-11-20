@@ -212,10 +212,10 @@ func (f *queryCostFixture) testShapeScan(t *testing.T) {
 	}
 	shape("2025-03-04", 10, 100)
 	shape("2025-03-04", 20, 200)
-	shape("2025-03-05", 0, 0)      // a day recorded before scans were
+	shape("2025-03-05", 0, 0)      // a run that scanned nothing still counts
 	shape("2025-03-02", 999, 9999) // prior
 	got, err := f.s.TopQueryShapes(t.Context(), models.QueryShapeFilter{PriorSince: "2025-03-01", Since: "2025-03-04", Until: "2025-03-06", SourceID: srcR.ID}, 10)
-	want := models.ShapeScan{ScannedRuns: 2, RowsRead: 30, BytesRead: 300}
+	want := models.ShapeScan{ScannedRuns: 3, RowsRead: 30, BytesRead: 300}
 	if err != nil || len(got) != 1 || got[0].Scan != want || got[0].Current.QueryCount != 3 {
 		t.Errorf("TopQueryShapes(source R) = %+v / %v, want 3 runs, scan %+v", got, err, want)
 	}

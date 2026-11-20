@@ -566,8 +566,8 @@ type Querier interface {
 	// source_id is set, by current total duration desc. Dates are as in the
 	// Query Activity reads above. lookback_rows is 0 when no current row has a
 	// lookback, and then max_lookback_s means nothing. scanned_count counts the
-	// current queries on days whose row recorded a scan, the days since scan
-	// collection began.
+	// current queries recorded since scan collection began, the ones rows_read
+	// and bytes_read cover.
 	TopQueryShapes(ctx context.Context, arg TopQueryShapesParams) ([]TopQueryShapesRow, error)
 	TouchAlertEvaluated(ctx context.Context, id int64) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
