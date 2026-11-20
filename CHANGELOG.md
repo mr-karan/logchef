@@ -284,14 +284,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports: use an API token.
 
 - A new `[audit]` config section bounds the `audit_events` table:
-  `retention_days` (default 365) and `max_rows` (default 1,000,000), pruned
+  `retention_days` (default 30) and `max_rows` (default 1,000,000), pruned
   every five minutes, 5,000 rows at a time. Every query adds a `query.run`
   event that counts toward `max_rows`, so size it for your query volume, or
-  ship the `audit` log line for longer retention. `log_events` (default
-  `true`) writes each event as an `audit` log line; set it to `false` to turn
-  the line off. The new token scope `audit:read` is in no preset and is not an
-  OAuth scope: reading the audit log needs a global admin's session or API
-  token.
+  ship the `audit` log line for longer retention. A build of this release line
+  from before query events kept 365 days by default: its events older than 30
+  days are pruned on the first start unless `audit.retention_days` is set.
+  `log_events` (default `true`) writes each event as an `audit` log line; set
+  it to `false` to turn the line off. The new token scope `audit:read` is in
+  no preset and is not an OAuth scope: reading the audit log needs a global
+  admin's session or API token.
 - Two token scopes are new, `saved_views:read` and `saved_views:write`. A token
   issued with an explicit scope list before this release, including one made
   with the Read-only preset, gets 403 on the saved view routes until it is

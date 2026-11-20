@@ -545,7 +545,7 @@ const (
 	minReportsQueryBudget     = time.Minute
 	maxReportsQueryBudget     = 30 * time.Minute
 
-	defaultAuditRetentionDays = 365
+	defaultAuditRetentionDays = 30
 	defaultAuditMaxRows       = 1_000_000
 	defaultAuditLogEvents     = true
 
