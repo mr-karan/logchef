@@ -181,7 +181,7 @@ func (c *tailClient) waitFor(t *testing.T, event string) string {
 // A tail session is one event, recorded when its client disconnects, with
 // its filter and the rows it streamed.
 func TestAuditQueryRunRecordsTailEndingAtDisconnect(t *testing.T) {
-	t.Parallel()
+	// Not parallel: tails share the process-global query tracker and user 1.
 	e := newQueryAuditEnvWith(t, newAuditReadProvider(nil, func(ctx context.Context, emit datasource.TailEmitter) error {
 		if err := emit([]map[string]any{previewTestRow, previewTestRow}); err != nil {
 			return err
@@ -211,7 +211,7 @@ func TestAuditQueryRunRecordsTailEndingAtDisconnect(t *testing.T) {
 // A tail that the provider ends with an error is a failed event with the
 // rows sent before it.
 func TestAuditQueryRunRecordsTailFailure(t *testing.T) {
-	t.Parallel()
+	// Not parallel: tails share the process-global query tracker and user 1.
 	e := newQueryAuditEnvWith(t, newAuditReadProvider(nil, func(_ context.Context, emit datasource.TailEmitter) error {
 		if err := emit([]map[string]any{previewTestRow}); err != nil {
 			return err
