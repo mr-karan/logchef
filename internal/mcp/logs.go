@@ -83,7 +83,7 @@ type SavedQueryResult struct {
 // --- Handlers ---
 
 // query_logs returns flexible log data, so it uses a typed handler.
-func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args QueryLogsParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleQueryLogs(ctx context.Context, req mcp.CallToolRequest, args QueryLogsParams) (*mcp.CallToolResult, error) {
 	if args.Limit < 0 {
 		args.Limit = 0
 	}
@@ -95,6 +95,9 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 	if err != nil {
 		return t.errorResult(t.storeError("query logs", err)), nil
 	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: args.RawSQL, Limit: args.Limit})
+	defer func() { read.end(recover()) }()
+	read.From, read.To = rfc3339Window(args.StartTime, args.EndTime)
 	var result *models.QueryResult
 	var queryID string
 	err = t.admit(ctx, QueryClassPreview, src, args.RawSQL, func(ctx context.Context, id string) error {
@@ -110,8 +113,10 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 		return runErr
 	})
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.queryError("query logs", err)), nil
 	}
+	read.Rows = int64(len(result.Logs))
 
 	return mcp.NewToolResultStructuredOnly(QueryResult{
 		Logs: result.Logs, Columns: core.ResultColumns(nil, result), Stats: result.Stats, QueryID: queryID,
@@ -148,11 +153,14 @@ func (t *tools) sourceSchema(ctx context.Context, teamID, sourceID int) ([]model
 }
 
 // get_log_histogram returns flexible histogram data, so it uses a typed handler.
-func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest, args GetLogHistogramParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleGetLogHistogram(ctx context.Context, req mcp.CallToolRequest, args GetLogHistogramParams) (*mcp.CallToolResult, error) {
 	src, err := t.authorizeSource(ctx, args.TeamID, args.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
 		return t.errorResult(t.storeError("get log histogram", err)), nil
 	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: args.RawSQL})
+	defer func() { read.end(recover()) }()
+	read.From, read.To = rfc3339Window(args.StartTime, args.EndTime)
 	var histogram *core.HistogramResponse
 	err = t.admit(ctx, QueryClassHistogram, src, args.RawSQL, func(ctx context.Context, _ string) error {
 		var runErr error
@@ -168,8 +176,10 @@ func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest
 		return runErr
 	})
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.queryError("get log histogram", err)), nil
 	}
+	read.Rows = int64(len(histogram.Data))
 
 	return mcp.NewToolResultStructuredOnly(HistogramResult{Granularity: histogram.Granularity, Data: histogram.Data, Notice: histogram.Notice}), nil
 }

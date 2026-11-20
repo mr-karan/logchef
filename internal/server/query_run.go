@@ -22,15 +22,17 @@ const (
 	queryRunBuffered queryRunMode = "buffered"
 	queryRunStream   queryRunMode = "stream"
 	queryRunWindowed queryRunMode = "windowed"
+	queryRunMCP      queryRunMode = "mcp"
+	queryRunAskChef  queryRunMode = "ask_chef"
 )
 
-// queryRun is one data query, from the handler that receives it to the
-// background writer that stores its query.run event and its history row.
+// queryRun is one data query, from the handler or tool that receives it to
+// the background writer that stores its query.run event and its history row.
 // It holds copies of the request values, because Fiber reuses the request
 // context after the handler returns.
 //
-// Exactly one owner finishes a run: the handler, or the stream goroutine it
-// handed the run to.
+// Exactly one owner finishes a run: the handler, the stream goroutine it
+// handed the run to, or the MCP tool call that started it.
 type queryRun struct {
 	actor   *audit.Actor // nil when no authenticated actor made the request
 	request audit.Request
@@ -46,7 +48,13 @@ type queryRun struct {
 	mode     queryRunMode
 	from, to *time.Time
 	limit    int
-	started  time.Time
+	// tool is the MCP tool of an mcp or ask_chef run, and fields are the
+	// fields whose values it read.
+	tool   string
+	fields []string
+	// anchor is the timestamp that a log context tool reads around.
+	anchor  *time.Time
+	started time.Time
 	// history says that the run writes a query history row when it ran:
 	// false for a cached dashboard panel and a windowed page after the first.
 	history bool
@@ -239,6 +247,15 @@ func (r *queryRun) event(out queryOutcome, durationMs int64) audit.Event {
 	}
 	if out.queryID != "" {
 		detail.Set("query_id", out.queryID)
+	}
+	if r.tool != "" {
+		detail.Set("tool", r.tool)
+	}
+	if len(r.fields) > 0 {
+		detail.Set("fields", r.fields)
+	}
+	if r.anchor != nil {
+		detail.Set("anchor", r.anchor)
 	}
 	request := r.request
 	request.Status = out.status

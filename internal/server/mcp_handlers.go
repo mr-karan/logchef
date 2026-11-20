@@ -9,6 +9,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/audit"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/mcp"
 	"github.com/mr-karan/logchef/internal/metrics"
@@ -32,6 +34,7 @@ func (s *Server) registerMCPRoutes() {
 		Version:             s.version,
 		Log:                 s.log.With("component", "mcp"),
 		Admit:               s.admitMCPQuery,
+		StartRead:           s.startToolQueryRun,
 		ResourceMetadataURL: s.oauth.MCPResourceMetadataURL(),
 	})
 	// mcp-go builds each tool context from the request context, which carries
@@ -82,7 +85,12 @@ func (s *Server) requireMCPToken(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
 	}
 	metrics.RecordAuthAttempt("oauth_mcp", true, token.Principal.User)
-	c.SetContext(mcp.WithPrincipal(c.Context(), token.Principal))
+	ctx := mcp.WithPrincipal(c.Context(), token.Principal)
+	c.SetContext(withToolCaller(ctx, toolCaller{
+		actor:   oauthActor(token.Principal, models.AuditAuthOAuthMCP),
+		request: auditRequest(c),
+		mode:    queryRunMCP,
+	}))
 	return c.Next()
 }
 
@@ -108,4 +116,56 @@ func (s *Server) admitMCPQuery(class mcp.QueryClass, src access.AuthorizedSource
 		return "", nil, err
 	}
 	return queryID, func() { queryTracker.RemoveQuery(queryID) }, nil
+}
+
+// toolCaller is who a tool call reads logs for: the actor and request that
+// its query.run events name, and the mode that tells MCP from Ask Chef.
+type toolCaller struct {
+	actor   audit.Actor
+	request audit.Request
+	mode    queryRunMode
+}
+
+type toolCallerKey struct{}
+
+func withToolCaller(ctx context.Context, caller toolCaller) context.Context {
+	return context.WithValue(ctx, toolCallerKey{}, caller)
+}
+
+// startToolQueryRun is the mcp.StartRead of the MCP and Ask Chef tool
+// servers. Each tool call that reads logs is one run, recorded like an HTTP
+// query and writing no history row.
+func (s *Server) startToolQueryRun(ctx context.Context, call mcp.ReadCall) func(mcp.ReadResult) {
+	caller, ok := ctx.Value(toolCallerKey{}).(toolCaller)
+	if !ok {
+		s.log.Error("tool call reads logs without a caller, so no query.run event is recorded", "tool", call.Tool, "source_id", call.Source.SourceID())
+		return func(mcp.ReadResult) {}
+	}
+	run := s.startQueryRun(&queryRun{
+		actor:    &caller.actor,
+		request:  caller.request,
+		teamID:   call.Source.TeamID(),
+		sourceID: call.Source.SourceID(),
+		query:    call.Query,
+		language: call.Language,
+		mode:     caller.mode,
+		limit:    call.Limit,
+		tool:     call.Tool,
+		fields:   call.Fields,
+		anchor:   call.Anchor,
+	})
+	// The tool loads the source again when it runs; a source that fails to
+	// load here fails the tool too, and the event then has no source name.
+	if source, err := core.LoadSource(ctx, s.datasources, run.sourceID); err == nil {
+		run.source = source
+		if run.language == "" {
+			run.language = source.NativeQueryLanguage()
+		}
+	}
+	return func(res mcp.ReadResult) {
+		run.from, run.to = res.From, res.To
+		// The tool answered over a response that succeeded, whatever the
+		// call's outcome.
+		s.finishQueryRun(run, queryOutcome{err: res.Err, status: fiber.StatusOK, rows: res.Rows})
+	}
 }

@@ -76,11 +76,19 @@ type queryAuditEnv struct {
 
 func newQueryAuditEnv(t *testing.T, sourceType models.SourceType, query func(context.Context) error) *queryAuditEnv {
 	t.Helper()
+	return newQueryAuditEnvWith(t, &auditQueryProvider{succeedingQueryProvider: succeedingQueryProvider{sourceType: sourceType}, query: query})
+}
+
+// newQueryAuditEnvWith is newQueryAuditEnv with any provider. setups run
+// after the env's own setup.
+func newQueryAuditEnvWith(t *testing.T, provider datasource.Provider, setups ...func(*auditEnvSetup)) *queryAuditEnv {
+	t.Helper()
+	sourceType := provider.Type()
 	env := &queryAuditEnv{sourceName: "query-audit-" + string(sourceType)}
 	setup := func(s *auditEnvSetup) {
 		s.opts.Config.Query = config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 10}
 		s.opts.Datasources = datasource.NewService(s.db, s.opts.Logger)
-		s.opts.Datasources.Register(&auditQueryProvider{succeedingQueryProvider: succeedingQueryProvider{sourceType: sourceType}, query: query})
+		s.opts.Datasources.Register(provider)
 		ctx := context.Background()
 		source := &models.Source{Name: env.sourceName, SourceType: sourceType}
 		switch sourceType {
@@ -102,6 +110,9 @@ func newQueryAuditEnv(t *testing.T, sourceType models.SourceType, query func(con
 		}
 		env.sourceID, env.teamID = source.ID, team.ID
 		env.base = fmt.Sprintf("/api/v1/teams/%d/sources/%d", team.ID, source.ID)
+		for _, extra := range setups {
+			extra(s)
+		}
 	}
 	env.auditRouteEnv = newAuditRouteEnv(t, setup, withAuditLogLines())
 	return env

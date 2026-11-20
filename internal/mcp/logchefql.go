@@ -7,6 +7,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -57,25 +58,18 @@ type logchefQLRun struct {
 	queryID  string
 }
 
-// runLogchefQL authorizes, admits and runs one LogchefQL query.
-func (t *tools) runLogchefQL(ctx context.Context, teamID, sourceID int, req core.LogchefQLQueryRequest) (logchefQLRun, error) {
-	src, err := t.authorizeSource(ctx, teamID, sourceID, models.TokenScopeLogsRead)
-	if err != nil {
-		return logchefQLRun{}, t.storeError("logchefql query failed", err)
-	}
+// runLogchefQL admits and runs one LogchefQL query on an authorized source.
+func (t *tools) runLogchefQL(ctx context.Context, src access.AuthorizedSource, req core.LogchefQLQueryRequest) (logchefQLRun, error) {
 	var run logchefQLRun
-	err = t.admit(ctx, QueryClassPreview, src, req.Query, func(ctx context.Context, queryID string) error {
+	err := t.admit(ctx, QueryClassPreview, src, req.Query, func(ctx context.Context, queryID string) error {
 		prepared, result, err := core.RunLogchefQL(ctx, t.deps.Datasources, t.deps.Config.Query, src, req)
 		run = logchefQLRun{prepared: prepared, result: result, queryID: queryID}
 		return err
 	})
-	if err != nil {
-		return logchefQLRun{}, t.queryError("logchefql query failed", err)
-	}
-	return run, nil
+	return run, err
 }
 
-func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest, params QueryLogchefQLParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleQueryLogchefQL(ctx context.Context, req mcp.CallToolRequest, params QueryLogchefQLParams) (*mcp.CallToolResult, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 100
@@ -88,7 +82,14 @@ func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest,
 		timezone = "UTC"
 	}
 
-	run, err := t.runLogchefQL(ctx, params.TeamID, params.SourceID, core.LogchefQLQueryRequest{
+	src, err := t.authorizeSource(ctx, params.TeamID, params.SourceID, models.TokenScopeLogsRead)
+	if err != nil {
+		return t.errorResult(t.storeError("logchefql query failed", err)), nil
+	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: params.Query, Language: models.QueryLanguageLogchefQL, Limit: limit})
+	defer func() { read.end(recover()) }()
+	read.From, read.To = logchefQLWindow(params.StartTime, params.EndTime, timezone)
+	run, err := t.runLogchefQL(ctx, src, core.LogchefQLQueryRequest{
 		Query:        params.Query,
 		Limit:        limit,
 		StartTime:    params.StartTime,
@@ -101,8 +102,10 @@ func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest,
 		AllowAggregation: true,
 	})
 	if err != nil {
-		return t.errorResult(err), nil
+		read.Err = err
+		return t.errorResult(t.queryError("logchefql query failed", err)), nil
 	}
+	read.Rows = int64(len(run.result.Logs))
 
 	compiled := run.prepared.Compiled
 	return mcp.NewToolResultStructuredOnly(QueryResult{
