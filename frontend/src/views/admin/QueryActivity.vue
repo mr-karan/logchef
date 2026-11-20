@@ -143,7 +143,8 @@ const headline = computed(() => {
 });
 
 // p50 and p95 when the window has latency data, else the average alone. The
-// delta follows p95 when both windows have it.
+// delta follows p95 when both windows have a bounded one: an open p95 says
+// only "past the last bucket", so the delta follows the average instead.
 function latencyMetric() {
   const { current, prior } = stats.value!.summary;
   const avg = averageMs(current);
@@ -155,13 +156,14 @@ function latencyMetric() {
     };
   }
   const locale_ = toValue(locale);
+  const byP95 = prior.cost && !prior.cost.p95.open && !current.cost.p95.open;
   return {
     ...base,
     value: formatPercentile(current.cost.p50, locale_),
     title: partlyCollected.value,
     aside: `p95 ${formatPercentile(current.cost.p95, locale_)}`,
-    current: prior.cost ? current.cost.p95.ms : avg,
-    prior: prior.cost ? prior.cost.p95.ms : averageMs(prior),
+    current: byP95 ? current.cost.p95.ms : avg,
+    prior: byP95 ? prior.cost!.p95.ms : averageMs(prior),
     priorText: prior.cost ? `p95 ${formatPercentile(prior.cost.p95, locale_)}` : duration(averageMs(prior)),
     kind: "latency" as const,
   };

@@ -195,6 +195,15 @@ describe("Query Activity", () => {
     expect(title("failures")).toBe(title("latency"));
   });
 
+  it("compares latency by average when a p95 is past the last bucket", async () => {
+    await mount();
+    const current = { ...healthy.summary.current, cost: { ...healthy.summary.current.cost!, p95: { ms: 60_000, open: true } } };
+    await respond({ ...healthy, summary: { ...healthy.summary, current } });
+    const metric = section("headline").querySelector('[data-metric="latency"]')?.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(metric).toContain("p95 >60.0 s");
+    expect(metric).toContain("↑ +48% slower");
+  });
+
   it("switches accounts and windows through the URL and ignores superseded responses", async () => {
     await mount();
     await respond();
