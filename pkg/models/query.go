@@ -294,6 +294,11 @@ type SavedQueryContent struct {
 	Limit     int                  `json:"limit"`
 	Content   string               `json:"content"`
 	Variables []SavedQueryVariable `json:"variables"`
+	// Layout is the table layout saved with the query: its columns, their
+	// widths and the sort. It uses the saved view definition format (RFC
+	// 0007) without filter or time_range, which the query itself holds.
+	// Absent on queries saved before layouts were stored.
+	Layout *SavedViewDefinition `json:"layout,omitempty"`
 }
 
 // SavedQuery represents a cross-team saved query bound to a single source.

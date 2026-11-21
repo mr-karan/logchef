@@ -1228,7 +1228,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
 
         <!-- Save Query Modal -->
         <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
-          :edit-data="editQueryData" :query-content="currentQueryContentJson"
+          :edit-data="editQueryData" :query-content="currentQueryContentJson" :layout="savedViews.savedQueryLayout()"
           @close="closeSaveQueryModal" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
 
         <ConfirmDialog :open="shareRefusal !== null" :title="t('explore.shareWithoutLayoutTitle')"

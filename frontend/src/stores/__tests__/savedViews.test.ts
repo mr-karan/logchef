@@ -367,3 +367,35 @@ describe("saved views store: the layout a share carries", () => {
     expect(store.shareLayout("table")).toEqual({ version: 1, columns: [{ name: "msg" }], sort: [{ column: "ts", desc: false }], display_mode: "table" });
   });
 });
+
+describe("saved views store: a saved query's layout", () => {
+  it("takes the working columns and sort, never the display mode or a query part", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(view(1, {}, { filter: "level=error", time_range: "1h", display_mode: "json", sort: [{ column: "ts", desc: true }] })), 1);
+    expect(store.savedQueryLayout()).toEqual({ version: 1, columns: [{ name: "msg", width: 300 }, { name: "level" }], sort: [{ column: "ts", desc: true }] });
+    store.reportTableLayout(1, { columns: [{ name: "level", width: 90 }] });
+    expect(store.savedQueryLayout()).toEqual({ version: 1, columns: [{ name: "level", width: 90 }], sort: [{ column: "ts", desc: true }] });
+  });
+
+  it("is null when the table has no columns or sort", () => {
+    const store = useSavedViewsStore();
+    store.enter(2, 5, list(), null);
+    expect(store.savedQueryLayout()).toBeNull();
+  });
+
+  it("opens in memory over a remembered view and says it came from a saved query", () => {
+    localStorage.setItem("logchef-activeView-2-5", "1");
+    const store = useSavedViewsStore();
+    const layout = { version: 1, columns: [{ name: "host", width: 200 }], sort: [{ column: "host", desc: true }] };
+    expect(store.enter(2, 5, list(view(1)), null, layout, "savedQuery")).toBe("ready");
+    expect(store.activeViewId).toBeNull();
+    expect(store.activeSeed).toMatchObject({ viewId: null, definition: layout });
+    expect(store.sharedLayoutOrigin).toBe("savedQuery");
+    expect(localStorage.getItem("logchef-activeView-2-5")).toBe("1");
+    // A query saved before layouts were stored opens under the remembered view.
+    store.enter(2, 5, list(view(1)), null, undefined, "savedQuery");
+    expect(store.activeViewId).toBe(1);
+    store.enter(2, 5, list(view(1)), null, layout);
+    expect(store.sharedLayoutOrigin).toBe("share");
+  });
+});

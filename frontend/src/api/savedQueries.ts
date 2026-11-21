@@ -2,6 +2,18 @@ import { apiClient, type RequestOptions } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
 import type { TeamSummary } from "./teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
+import type { SavedViewColumn, SavedViewSort } from "@/lib/savedViewLayout";
+
+/**
+ * The table layout saved with a query, in the saved view definition format
+ * (RFC 0007). It holds the visible columns in order, their widths and the
+ * sort; the query's own content and time range hold the rest.
+ */
+export interface SavedQueryLayout {
+  version: 1;
+  columns?: SavedViewColumn[];
+  sort?: SavedViewSort[];
+}
 
 export interface SavedQueryTimeRange {
   relative?: string;
@@ -18,6 +30,8 @@ export interface SavedQueryContent {
   limit: number;
   content: string;
   variables?: VariableState[];
+  /** Absent on queries saved before layouts were stored. */
+  layout?: SavedQueryLayout | null;
 }
 
 /**

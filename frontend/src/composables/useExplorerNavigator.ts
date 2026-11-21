@@ -140,8 +140,13 @@ export function useExplorerNavigator() {
           if (!resolved) continue
           const { list, details, generation, sourceNotice, views, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
-          const shareLayout = location.content.kind === 'share' && !sourceNotice ? location.content.share.payload.layout : undefined
-          const viewEntry = savedViews.enter(location.teamId, location.sourceId, views, sourceNotice ? null : target.viewId, shareLayout)
+          // A share or a saved query opens with the table layout it carries.
+          const heldLayout = sourceNotice ? undefined
+            : location.content.kind === 'share' ? location.content.share.payload.layout
+              : location.content.kind === 'saved' ? location.content.queryContent.layout
+                : undefined
+          const viewEntry = savedViews.enter(location.teamId, location.sourceId, views, sourceNotice ? null : target.viewId, heldLayout,
+            location.content.kind === 'saved' ? 'savedQuery' : 'share')
           const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location, savedViews.activeView?.definition)
           applyChoice()
           status.value = 'ready'

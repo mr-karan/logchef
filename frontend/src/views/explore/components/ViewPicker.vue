@@ -132,7 +132,7 @@ const groupLabel: Record<SavedViewScope, string> = {
     <DropdownMenuTrigger as-child>
       <Button variant="ghost" size="sm" class="h-7 gap-1.5 px-2 text-xs max-w-[14rem]" :aria-label="t('explore.viewPicker')" data-testid="view-picker">
         <Bookmark class="h-3.5 w-3.5 shrink-0" />
-        <span class="truncate">{{ store.activeView?.name ?? (store.sharedLayout ? t('explore.sharedLayout') : t('explore.noView')) }}</span>
+        <span class="truncate">{{ store.activeView?.name ?? (store.sharedLayout ? t(store.sharedLayoutOrigin === 'savedQuery' ? 'explore.savedQueryLayout' : 'explore.sharedLayout') : t('explore.noView')) }}</span>
         <span v-if="store.isModified" class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" :title="t('explore.viewModified')" data-testid="view-modified" />
         <span v-if="missingColumns.length" class="shrink-0 text-amber-600 dark:text-amber-400" :title="missingTitle" :aria-label="missingTitle" role="img" data-testid="view-missing-columns">
           <TriangleAlert class="h-3.5 w-3.5" />

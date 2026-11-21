@@ -36,7 +36,7 @@ import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import { storeToRefs } from "pinia";
 import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata, type ExploreMode } from '@/lib/queryMetadata';
-import type { SavedQueryTimeRange } from '@/api/savedQueries';
+import type { SavedQueryLayout, SavedQueryTimeRange } from '@/api/savedQueries';
 import { encodeStoredRange } from '@/utils/timeWindowCodec';
 
 const { t } = useI18n();
@@ -46,6 +46,9 @@ const props = defineProps<{
   editData?: any;    // For editing an existing query
   queryContent?: string;
   queryType?: ExploreMode;
+  // The table layout on screen. Without one, the query keeps the layout it
+  // already has.
+  layout?: SavedQueryLayout | null;
 }>();
 
 const emit = defineEmits<{
@@ -78,6 +81,9 @@ function onToggleSaveTimestamp(value: boolean | 'indeterminate') {
   saveTimestamp.value = value === true;
   saveTimestampUserModified.value = true;
 }
+// Whether the table layout on screen goes into the query.
+const saveColumns = ref(true);
+const canSaveColumns = computed(() => !!props.layout);
 // Inline save-to-collection (new queries only); defaults to the personal collection.
 const selectedCollectionId = ref<string>('');
 const collectionOptions = computed(() => {
@@ -246,10 +252,12 @@ function initFromProps() {
   queryId.value = isEditing.value ? data?.id?.toString() || '' : '';
   saveTimestampUserModified.value = false;
   saveTimestamp.value = !data;
+  saveColumns.value = !data;
   if (data?.query_content) {
     try {
       const content = JSON.parse(data.query_content);
       saveTimestamp.value = !!(content.timeRange?.absolute || content.timeRange?.relative);
+      saveColumns.value = !!content.layout;
     } catch (error) {
       console.error("Failed to parse saved query content", error);
     }
@@ -343,6 +351,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       limit: limitValue,
       content: queryContent,
       variables: allVariables.value?.length ? allVariables.value : (content.variables || []),
+      ...savedLayout(originalSavedContent),
     };
 
     return JSON.stringify(simplifiedContent);
@@ -360,6 +369,13 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       variables: allVariables?.value || []
     });
   }
+}
+
+// The layout part of the content: the table on screen when the box is ticked,
+// or the query's own layout when there is no table layout to save.
+function savedLayout(original: Record<string, any>): { layout?: SavedQueryLayout } {
+  if (!props.layout) return original.layout ? { layout: original.layout } : {};
+  return saveColumns.value ? { layout: props.layout } : {};
 }
 
 // Handle form submission
@@ -517,6 +533,17 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
             <Label for="save_timestamp">{{ t('ui.saveCurrentTimestamp') }}</Label>
             <p class="text-sm text-muted-foreground">
               {{ t('ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery') }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Save Table Columns Checkbox -->
+        <div v-if="canSaveColumns" class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
+          <Checkbox id="save_columns" :model-value="saveColumns" @update:model-value="(value) => (saveColumns = value === true)" />
+          <div class="space-y-1 leading-none">
+            <Label for="save_columns">{{ t('ui.saveTableColumns') }}</Label>
+            <p class="text-sm text-muted-foreground">
+              {{ t('ui.includeTheVisibleColumnsAndSortInTheSavedQuery') }}
             </p>
           </div>
         </div>

@@ -237,6 +237,17 @@ func TestParseAndValidateSavedQueryContent(t *testing.T) {
 		{"absolute end non-positive", `{"version":1,"limit":10,"content":"x","timeRange":{"absolute":{"start":5,"end":0}}}`, true},
 		{"absolute end before start", `{"version":1,"limit":10,"content":"x","timeRange":{"absolute":{"start":10,"end":5}}}`, true},
 		{"absolute end after start is valid", `{"version":1,"limit":10,"content":"x","timeRange":{"absolute":{"start":5,"end":10}}}`, false},
+		{"no layout keeps working", `{"version":2,"limit":10,"content":"x","variables":[]}`, false},
+		{"null layout is allowed", `{"version":2,"limit":10,"content":"x","layout":null}`, false},
+		{"layout with columns and sort", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"columns":[{"name":"timestamp"},{"name":"msg","width":320}],"sort":[{"column":"timestamp","desc":true}]}}`, false},
+		{"layout with wrong version", `{"version":2,"limit":10,"content":"x","layout":{"version":2,"columns":[{"name":"msg"}]}}`, true},
+		{"layout with unknown key", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"hidden":["msg"]}}`, true},
+		{"layout with empty columns", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"columns":[]}}`, true},
+		{"layout with duplicate column", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"columns":[{"name":"msg"},{"name":"msg"}]}}`, true},
+		{"layout column too narrow", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"columns":[{"name":"msg","width":10}]}}`, true},
+		{"layout cannot set a filter", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"filter":"level=\"error\""}}`, true},
+		{"layout cannot set a time range", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"time_range":"15m"}}`, true},
+		{"layout that is not an object", `{"version":2,"limit":10,"content":"x","layout":"msg"}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -256,6 +267,31 @@ func TestParseAndValidateSavedQueryContent(t *testing.T) {
 // persisting a (language, content) mismatch (root cause of prod query #119).
 // The must-PASS (no-false-reject) cases matter as much as the must-REJECT ones:
 // a false reject would break legitimate no-filter and templated saved queries.
+// TestParseAndValidateSavedQueryContentKeepsLayout checks that the layout
+// survives the parse, so readers of the content see the saved columns.
+func TestParseAndValidateSavedQueryContentKeepsLayout(t *testing.T) {
+	t.Parallel()
+
+	parsed, err := parseAndValidateSavedQueryContent(`{"version":2,"limit":10,"content":"x","layout":{"version":1,"columns":[{"name":"timestamp"},{"name":"msg","width":320}]}}`)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if parsed.Layout == nil || len(parsed.Layout.Columns) != 2 {
+		t.Fatalf("layout = %+v, want two columns", parsed.Layout)
+	}
+	if got := parsed.Layout.Columns[1]; got.Name != "msg" || got.Width == nil || *got.Width != 320 {
+		t.Errorf("columns[1] = %+v, want msg at width 320", got)
+	}
+
+	legacy, err := parseAndValidateSavedQueryContent(`{"version":1,"limit":10,"content":"x"}`)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if legacy.Layout != nil {
+		t.Errorf("legacy layout = %+v, want nil", legacy.Layout)
+	}
+}
+
 func TestValidateContentMatchesLanguage(t *testing.T) {
 	t.Parallel()
 

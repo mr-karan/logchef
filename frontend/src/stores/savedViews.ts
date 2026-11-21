@@ -2,6 +2,7 @@ import { defineStore, storeToRefs } from "pinia";
 import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { z } from "zod";
 import { savedViewsApi, type SavedView, type SavedViewList, type SavedViewScope } from "@/api/savedViews";
+import type { SavedQueryLayout } from "@/api/savedQueries";
 import { getErrorType, isAbortError, showErrorToast } from "@/api/error-handler";
 import { useActiveSavedViewStore } from "@/stores/activeSavedView";
 import {
@@ -15,6 +16,9 @@ import {
 } from "@/lib/savedViewLayout";
 
 export type DisplayMode = NonNullable<SavedViewDefinition["display_mode"]>;
+
+/** Where an in-memory layout came from: a share link or a saved query. */
+export type HeldLayoutOrigin = "share" | "savedQuery";
 
 /** What happened to the view a location asked for. */
 export type ViewEntry = "ready" | "unavailable" | "failed";
@@ -119,6 +123,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
   // The layout of the share the Explorer opened, held in memory with no view
   // id. Its revision counts shared layouts, so the table seeds from each one.
   const sharedSeed = shallowRef<TableViewSeed | null>(null);
+  const sharedLayoutOrigin = ref<HeldLayoutOrigin>("share");
   let sharedLayoutCount = 0;
 
   const suffix = computed(() => (scope.value ? `${scope.value.teamId}-${scope.value.sourceId}` : null));
@@ -189,8 +194,8 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
 
   /**
    * Shows a location's views. The view the URL names wins when the caller
-   * can read it. Then the layout of the share the URL names, held in memory
-   * only. Otherwise the browser's remembered choice applies, where a
+   * can read it. Then the layout of the share or saved query the URL names,
+   * held in memory only. Otherwise the browser's remembered choice applies, where a
    * remembered No view stops the search, and then the default view.
    */
   function enter(
@@ -199,6 +204,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     list: SavedViewList | null,
     requestedViewId: number | null,
     shareLayout?: unknown,
+    layoutOrigin: HeldLayoutOrigin = "share",
   ): ViewEntry {
     scope.value = sourceId === null ? null : { teamId, sourceId };
     views.value = list ? [...list.views] : [];
@@ -210,6 +216,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
       return "ready";
     }
     const shared = parseSharedLayout(shareLayout);
+    sharedLayoutOrigin.value = layoutOrigin;
     const useShared = () => {
       activeViewId.value = null;
       sharedSeed.value = shared && { viewId: null, revision: ++sharedLayoutCount, definition: shared };
@@ -299,6 +306,19 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
       ...(parts.filter && shown.filter !== null ? { filter: shown.filter } : {}),
       ...(parts.timeRange && shown.timeRange !== null ? { time_range: shown.timeRange } : {}),
     };
+  }
+
+  /**
+   * The working layout a saved query carries: its columns and sort. Null when
+   * the table has neither, so the query keeps the table's own layout.
+   */
+  function savedQueryLayout(): SavedQueryLayout | null {
+    const { columns, sort } = newDefinition(
+      { columns: true, sort: true, displayMode: false, filter: false, timeRange: false },
+      { displayMode: "table", filter: null, timeRange: null },
+    );
+    if (!columns && !sort) return null;
+    return { version: 1, ...(columns ? { columns } : {}), ...(sort ? { sort } : {}) };
   }
 
   /** The working layout a share carries: its columns, sort and display mode, never a query part. */
@@ -448,6 +468,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     activeView,
     activeSeed,
     sharedLayout,
+    sharedLayoutOrigin,
     displayMode,
     isModified,
     staleSave,
@@ -459,6 +480,7 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     setDisplayMode,
     newDefinition,
     shareLayout,
+    savedQueryLayout,
     saveAsNew,
     updateView,
     updateActive,

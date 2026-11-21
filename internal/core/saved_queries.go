@@ -81,6 +81,20 @@ func parseAndValidateSavedQueryContent(contentJSON string) (*models.SavedQueryCo
 		}
 	}
 
+	// The layout parses strictly, so a stored query never holds a layout key
+	// that the server did not validate. A query without one keeps working.
+	var rawLayout struct {
+		Layout json.RawMessage `json:"layout"`
+	}
+	if err := json.Unmarshal([]byte(contentJSON), &rawLayout); err != nil {
+		return nil, fmt.Errorf("%w: failed to parse JSON: %w", ErrInvalidQueryContent, err)
+	}
+	if len(rawLayout.Layout) > 0 && string(rawLayout.Layout) != "null" {
+		if _, err := models.ParseSavedQueryLayout(rawLayout.Layout); err != nil {
+			return nil, fmt.Errorf("%w: layout: %w", ErrInvalidQueryContent, err)
+		}
+	}
+
 	return &queryContent, nil
 }
 

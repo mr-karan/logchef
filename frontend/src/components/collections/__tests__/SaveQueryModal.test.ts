@@ -259,3 +259,102 @@ describe("SaveQueryModal submission lock", () => {
     app.unmount();
   });
 });
+
+describe("SaveQueryModal table columns", () => {
+  const layout = {
+    version: 1 as const,
+    columns: [{ name: "timestamp" }, { name: "msg", width: 320 }],
+    sort: [{ column: "timestamp", desc: true }],
+  };
+  let host: HTMLDivElement;
+
+  beforeEach(() => {
+    loadSources.mockReset().mockResolvedValue(undefined);
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    host.remove();
+  });
+
+  async function submit(props: Record<string, unknown>, untick = false) {
+    const payloads: Array<{ query_content: string }> = [];
+    const Harness = defineComponent({
+      components: { SaveQueryModal },
+      setup() {
+        const record = (payload: { query_content: string }) => payloads.push(payload);
+        return { props, onSave: record, onUpdate: (_id: string, payload: { query_content: string }) => record(payload) };
+      },
+      template: `<SaveQueryModal :is-open="true" query-type="logchefql" v-bind="props" @save="onSave" @update="onUpdate" />`,
+    });
+    const app = createApp(Harness);
+    app.use(i18n);
+    app.mount(host);
+    try {
+      await nextTick();
+      const name = host.querySelector<HTMLInputElement>("#name");
+      if (!name) throw new Error("name input was not rendered");
+      if (!name.value) {
+        name.value = "with columns";
+        name.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      const box = host.querySelector<HTMLInputElement>("#save_columns");
+      if (untick) {
+        if (!box) throw new Error("columns checkbox was not rendered");
+        box.checked = false;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await nextTick();
+      host.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await nextTick();
+      expect(payloads).toHaveLength(1);
+      return { content: JSON.parse(payloads[0].query_content), hadCheckbox: box !== null };
+    } finally {
+      app.unmount();
+    }
+  }
+
+  const editData = (content: Record<string, unknown>) => ({
+    id: 3,
+    name: "existing",
+    description: "",
+    query_language: "logchefql",
+    editor_mode: "logchefql",
+    query_content: JSON.stringify(content),
+  });
+
+  it("saves the table layout with a new query", async () => {
+    const { content, hadCheckbox } = await submit({ queryContent: JSON.stringify(queryContentFixture), layout });
+    expect(hadCheckbox).toBe(true);
+    expect(content.layout).toEqual(layout);
+  });
+
+  it("leaves the layout out when the box is unticked", async () => {
+    const { content } = await submit({ queryContent: JSON.stringify(queryContentFixture), layout }, true);
+    expect(content).not.toHaveProperty("layout");
+  });
+
+  it("shows no checkbox and saves no layout when the table has none", async () => {
+    const { content, hadCheckbox } = await submit({ queryContent: JSON.stringify(queryContentFixture), layout: null });
+    expect(hadCheckbox).toBe(false);
+    expect(content).not.toHaveProperty("layout");
+  });
+
+  it("keeps a query's saved layout when there is no table layout", async () => {
+    const saved = { ...queryContentFixture, layout };
+    const { content } = await submit({ queryContent: JSON.stringify(queryContentFixture), editData: editData(saved) });
+    expect(content.layout).toEqual(layout);
+  });
+
+  it("replaces a query's saved layout with the table's", async () => {
+    const saved = { ...queryContentFixture, layout: { version: 1, columns: [{ name: "old" }] } };
+    const { content } = await submit({ queryContent: JSON.stringify(queryContentFixture), editData: editData(saved), layout });
+    expect(content.layout).toEqual(layout);
+  });
+
+  it("starts unticked when editing a query saved without columns", async () => {
+    const { content } = await submit({ queryContent: JSON.stringify(queryContentFixture), editData: editData(queryContentFixture), layout });
+    expect(content).not.toHaveProperty("layout");
+  });
+});

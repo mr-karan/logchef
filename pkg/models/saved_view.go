@@ -102,12 +102,23 @@ func ParseSavedViewDefinition(raw []byte) (SavedViewDefinition, error) {
 // query and time range travel in the payload itself, so a layout that sets
 // filter or time_range is rejected.
 func ParseQueryShareLayout(raw []byte) (SavedViewDefinition, error) {
+	return parseQueryLayout(raw, "share")
+}
+
+// ParseSavedQueryLayout parses the layout saved with a saved query. Like a
+// share's, it holds only the table layout: the saved query's own content and
+// time range hold the filter and time range.
+func ParseSavedQueryLayout(raw []byte) (SavedViewDefinition, error) {
+	return parseQueryLayout(raw, "saved query")
+}
+
+func parseQueryLayout(raw []byte, owner string) (SavedViewDefinition, error) {
 	def, err := ParseSavedViewDefinition(raw)
 	if err != nil {
 		return SavedViewDefinition{}, err
 	}
 	if def.Filter != nil || def.TimeRange != nil {
-		return SavedViewDefinition{}, invalidSavedViewDefinition("a share layout cannot set filter or time_range; the share's query and time range hold them")
+		return SavedViewDefinition{}, invalidSavedViewDefinition("a %s layout cannot set filter or time_range; the %s's query and time range hold them", owner, owner)
 	}
 	return def, nil
 }
