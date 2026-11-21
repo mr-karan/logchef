@@ -140,3 +140,56 @@ it('offers no row filters for a native language without filter support', async (
     host.remove()
   }
 })
+
+it('pins the expanded panel to the visible width so long values wrap beside their actions', async () => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 900 })
+  const app = createApp(DataTable, {
+    columns: [{ name: '_time', type: 'DateTime' }, { name: '_msg', type: 'String' }],
+    data: [{ _time: '2026-01-01T00:00:00Z', _msg: 'long '.repeat(400) }],
+    timestampField: '_time',
+    sourceId: 'expansion-width-test',
+    teamId: null,
+  })
+  app.use(createPinia())
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await nextTick()
+    host.querySelector<HTMLTableRowElement>('tbody tr')?.click()
+    await nextTick()
+    const panel = host.querySelector<HTMLElement>('.expanded-row-panel')
+    expect(panel?.style.width).toBe('900px')
+    expect(panel?.classList.contains('sticky')).toBe(true)
+  } finally {
+    app.unmount()
+    host.remove()
+    if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth)
+  }
+})
+
+it('treats a shown column with a dot in its name as shown', async () => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp(DataTable, {
+    columns: [{ name: 'timestamp', type: 'DateTime' }, { name: 'http.method', type: 'String' }],
+    data: [{ timestamp: '2026-01-01T00:00:00Z', 'http.method': 'GET' }],
+    sourceId: 'expansion-dotted-test',
+    teamId: null,
+  })
+  app.use(createPinia())
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await nextTick()
+    host.querySelector<HTMLTableRowElement>('tbody tr')?.click()
+    await nextTick()
+    const fieldRow = (field: string) => [...host.querySelectorAll<HTMLElement>('[data-field-row]')].find(element => element.querySelector('span')?.textContent === field)
+    expect(fieldRow('"http.method"')?.querySelector('button[aria-label^="Add as column"]')).toBeNull()
+  } finally {
+    app.unmount()
+    host.remove()
+  }
+})

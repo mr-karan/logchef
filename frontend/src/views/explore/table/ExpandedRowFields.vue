@@ -108,12 +108,12 @@ function canFilterField(item: RowField): boolean {
           ><Minus class="h-3 w-3" /></button>
         </template>
         <button
-          v-if="!item.isObject && (item.nested ? canFilter && !flatOnly : !shownColumns.includes(item.field))"
+          v-if="!item.isObject && (item.nested ? canFilter && !flatOnly : !shownColumns.includes(item.column))"
           type="button"
           class="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
           :title="t('explore.addAsColumn')"
           :aria-label="`${t('explore.addAsColumn')}: ${item.field}`"
-          @click.stop="emit('add-column', { field: item.field, nested: item.nested })"
+          @click.stop="emit('add-column', { field: item.nested ? item.field : item.column, nested: item.nested })"
         ><Columns3 class="h-3 w-3" /></button>
         <button
           type="button"

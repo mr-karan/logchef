@@ -3,6 +3,8 @@ import { fieldPath } from '@/utils/logchefql/filters'
 export interface RowField {
   // LogchefQL field reference, e.g. msg.http.status
   field: string
+  // The top-level column the field belongs to, unquoted, e.g. http.method
+  column: string
   depth: number
   value: unknown
   nested: boolean
@@ -40,7 +42,7 @@ export function flattenRow(row: Record<string, unknown>): RowField[] {
   const visit = (path: string[], value: unknown, textual: boolean) => {
     const depth = path.length - 1
     const object = depth < MAX_DEPTH ? embeddedObject(value) : null
-    fields.push({ field: fieldPath(path), depth, value, nested: depth > 0, textual, isObject: object !== null })
+    fields.push({ field: fieldPath(path), column: path[0], depth, value, nested: depth > 0, textual, isObject: object !== null })
     const childrenTextual = textual || typeof value === 'string'
     if (object) for (const [key, child] of Object.entries(object)) visit([...path, key], child, childrenTextual)
   }
