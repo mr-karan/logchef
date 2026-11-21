@@ -1394,5 +1394,14 @@
   "alerts.backtestGroupEpisodes": "एपिसोड",
   "alerts.backtestGroupBreaching": "सीमा पार करने वाले मूल्यांकन",
   "alerts.backtestGroupMax": "अधिकतम मान",
-  "alerts.backtestGroupsOmitted": "{count} और समूह नहीं दिखाया गया | {count} और समूह नहीं दिखाए गए"
+  "alerts.backtestGroupsOmitted": "{count} और समूह नहीं दिखाया गया | {count} और समूह नहीं दिखाए गए",
+  "fields.query.label": "क्वेरी में",
+  "fields.query.description": "वे फ़ील्ड जिनका उपयोग वर्तमान फ़िल्टर करता है।",
+  "fields.absent.label": "परिणामों में नहीं",
+  "fields.absent.description": "वे फ़ील्ड जिनका दिखाए गए परिणामों में कोई मान नहीं है।",
+  "ui.onlyFieldsInResults": "केवल परिणामों वाले फ़ील्ड दिखाएँ",
+  "ui.showAllFields": "सभी फ़ील्ड दिखाएँ",
+  "ui.fieldsNotInResultsHidden": "इन परिणामों में न होने वाले {count} फ़ील्ड छिपे हैं",
+  "ui.hoverValueForActions": "शामिल करने, बाहर करने या कॉपी करने के लिए किसी मान पर होवर करें",
+  "explore.fieldNotInResults": "{field} वर्तमान परिणामों में नहीं है"
 }

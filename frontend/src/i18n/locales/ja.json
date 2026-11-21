@@ -1394,5 +1394,14 @@
   "alerts.backtestGroupEpisodes": "エピソード",
   "alerts.backtestGroupBreaching": "しきい値を超えた評価",
   "alerts.backtestGroupMax": "最大値",
-  "alerts.backtestGroupsOmitted": "表示されていないグループがあと {count} 件"
+  "alerts.backtestGroupsOmitted": "表示されていないグループがあと {count} 件",
+  "fields.query.label": "クエリ内",
+  "fields.query.description": "現在のフィルターが使用しているフィールド。",
+  "fields.absent.label": "結果にない",
+  "fields.absent.description": "表示中の結果に値がないフィールド。",
+  "ui.onlyFieldsInResults": "結果にあるフィールドのみ表示",
+  "ui.showAllFields": "すべてのフィールドを表示",
+  "ui.fieldsNotInResultsHidden": "この結果にない {count} 個のフィールドを非表示にしています",
+  "ui.hoverValueForActions": "値にカーソルを合わせると、含める・除外する・コピーができます",
+  "explore.fieldNotInResults": "{field} は現在の結果にありません"
 }

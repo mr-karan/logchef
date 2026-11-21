@@ -1394,5 +1394,14 @@
   "alerts.backtestGroupEpisodes": "에피소드",
   "alerts.backtestGroupBreaching": "임계값을 넘은 평가",
   "alerts.backtestGroupMax": "최댓값",
-  "alerts.backtestGroupsOmitted": "표시되지 않은 그룹 {count}개"
+  "alerts.backtestGroupsOmitted": "표시되지 않은 그룹 {count}개",
+  "fields.query.label": "쿼리에 사용",
+  "fields.query.description": "현재 필터가 사용하는 필드입니다.",
+  "fields.absent.label": "결과에 없음",
+  "fields.absent.description": "표시된 결과에 값이 없는 필드입니다.",
+  "ui.onlyFieldsInResults": "결과에 있는 필드만 표시",
+  "ui.showAllFields": "모든 필드 표시",
+  "ui.fieldsNotInResultsHidden": "이 결과에 없는 필드 {count}개가 숨겨져 있습니다",
+  "ui.hoverValueForActions": "값에 마우스를 올려 포함, 제외 또는 복사하세요",
+  "explore.fieldNotInResults": "{field} 필드가 현재 결과에 없습니다"
 }

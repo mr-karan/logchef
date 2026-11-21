@@ -22,6 +22,7 @@ import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { usePreferencesStore } from "@/stores/preferences";
 import { FieldSideBar } from "@/components/field-sidebar";
+import { fieldsWithValues, logsqlFilterFields } from "@/components/field-sidebar/fieldRelevance";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
 import CompactLogList from "./table/CompactLogListSimple.vue";
@@ -258,6 +259,21 @@ const parsedQuery = computed(() => {
 const queryFields = computed(() => {
   if (!parsedQuery.value.success) return [];
   return parsedQuery.value.meta?.fieldsUsed || [];
+});
+
+// Fields the query on screen filters on, for the Fields sidebar: LogchefQL
+// reports them when it compiles; a LogsQL query is read from its text.
+const sidebarQueryFields = computed((): string[] => {
+  const shown = runs.shown;
+  if (!shown) return [];
+  if (shown.query.mode === "logchefql") return queryFields.value;
+  return getNativeQueryLanguageForSource(shown.source) === "logsql" ? logsqlFilterFields(shown.query.text) : [];
+});
+
+// Fields with a value in the log rows on screen; null when there are none to go by.
+const sidebarResultFields = computed((): string[] | null => {
+  if (!runs.results || runs.results.aggregation || rows.value.length === 0) return null;
+  return [...fieldsWithValues(rows.value as Record<string, unknown>[])];
 });
 
 // Use structured data for regex patterns
@@ -733,8 +749,13 @@ const appendLogsqlExpression = (query: string, expression: string) => {
   return `${nextBase} ${pipeSection}`;
 };
 
-// Handle adding a field filter from the sidebar
+// Handle adding a field filter from the sidebar. Native LogsQL on screen keeps
+// its mode, like a filter from a table cell.
 const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!=') => {
+  if (filterLanguage.value === "logsql") {
+    handleDrillDown({ column: field, value, operator });
+    return;
+  }
   if (!supportsLogchefQL.value) {
     const exactFilter = `${field}:=${formatLogsqlValue(value)}`;
     const filterExpression = operator === '!=' ? `NOT ${exactFilter}` : exactFilter;
@@ -763,6 +784,28 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
   // Focus the editor
   nextTick(() => {
     queryEditorRef.value?.focus(true);
+  });
+};
+
+const resultsViewRef = ref<{ showColumn?: (field: string) => boolean; shownColumns?: string[] } | null>(null);
+
+// Shows a field from the sidebar as a table column. A LogchefQL query that
+// selects its columns gets the field added to its select instead.
+const handleAddFieldColumn = async (field: string) => {
+  if (rows.value.length > 0 && !aggregation.value && displayMode.value !== "table") {
+    displayMode.value = "table";
+    await nextTick();
+  }
+  const table = resultsViewRef.value;
+  if (table?.showColumn?.(field)) return;
+  if (activeMode.value === "logchefql" && runs.results && !aggregation.value) {
+    logchefQuery.value = addSelectField(logchefQuery.value ?? "", fieldPath([field]), table?.shownColumns ?? []);
+    nextTick(() => queryEditorRef.value?.focus(true));
+    return;
+  }
+  toast({
+    get title() { return t('explore.fieldNotInResults', { field }); },
+    duration: TOAST_DURATION.WARNING,
   });
 };
 
@@ -979,7 +1022,10 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
             :team-id="currentTeamId ?? undefined"
             :source-id="currentSourceId ?? undefined"
             :source="sourceDetails"
+            :query-fields="sidebarQueryFields"
+            :result-fields="sidebarResultFields"
             @add-filter="handleAddFieldFilter"
+            @add-column="handleAddFieldColumn"
             @field-click="handleFieldClick"
           />
 
@@ -1176,6 +1222,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
 
                   <component
                     v-else-if="runs.results?.columns.length"
+                    ref="resultsViewRef"
                     :is="displayMode === 'table' ? DataTable : CompactLogList"
                     :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${runs.shown?.id}-${displayMode}`"
                     :columns="runs.results.columns as any"

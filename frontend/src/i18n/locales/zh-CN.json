@@ -2196,5 +2196,14 @@
   "alerts.backtestGroupEpisodes": "事件",
   "alerts.backtestGroupBreaching": "超过阈值的评估",
   "alerts.backtestGroupMax": "最大值",
-  "alerts.backtestGroupsOmitted": "还有 {count} 个分组未显示"
+  "alerts.backtestGroupsOmitted": "还有 {count} 个分组未显示",
+  "fields.query.label": "查询中",
+  "fields.query.description": "当前过滤条件使用的字段。",
+  "fields.absent.label": "不在结果中",
+  "fields.absent.description": "在当前结果中没有值的字段。",
+  "ui.onlyFieldsInResults": "仅显示结果中的字段",
+  "ui.showAllFields": "显示所有字段",
+  "ui.fieldsNotInResultsHidden": "已隐藏 {count} 个不在这些结果中的字段",
+  "ui.hoverValueForActions": "将鼠标悬停在值上可包含、排除或复制",
+  "explore.fieldNotInResults": "{field} 不在当前结果中"
 }

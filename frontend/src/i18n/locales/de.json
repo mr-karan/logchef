@@ -1394,5 +1394,14 @@
   "alerts.backtestGroupEpisodes": "Episoden",
   "alerts.backtestGroupBreaching": "Auswertungen über dem Schwellenwert",
   "alerts.backtestGroupMax": "Höchstwert",
-  "alerts.backtestGroupsOmitted": "{count} weitere Gruppe nicht angezeigt | {count} weitere Gruppen nicht angezeigt"
+  "alerts.backtestGroupsOmitted": "{count} weitere Gruppe nicht angezeigt | {count} weitere Gruppen nicht angezeigt",
+  "fields.query.label": "In der Abfrage",
+  "fields.query.description": "Felder, die der aktuelle Filter verwendet.",
+  "fields.absent.label": "Nicht in den Ergebnissen",
+  "fields.absent.description": "Felder ohne Wert in den angezeigten Ergebnissen.",
+  "ui.onlyFieldsInResults": "Nur Felder in den Ergebnissen anzeigen",
+  "ui.showAllFields": "Alle Felder anzeigen",
+  "ui.fieldsNotInResultsHidden": "{count} Felder ohne Wert in diesen Ergebnissen sind ausgeblendet",
+  "ui.hoverValueForActions": "Über einen Wert fahren, um ihn einzuschließen, auszuschließen oder zu kopieren",
+  "explore.fieldNotInResults": "{field} ist nicht in den aktuellen Ergebnissen"
 }

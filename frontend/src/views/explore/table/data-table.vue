@@ -624,6 +624,16 @@ const handleAddColumn = ({ field, nested }: { field: string, nested: boolean }) 
     emit('add-column', { field, shownColumns: shownColumns.value })
 };
 
+// Shows a result column from outside the table, such as the Fields sidebar.
+// False when the results have no such column.
+const showColumn = (field: string): boolean => {
+    if (!props.columns.some(column => column.name === field)) return false
+    if (columnVisibility.value[field] === false) columnVisibility.value = { ...columnVisibility.value, [field]: true }
+    return true
+}
+
+defineExpose({ showColumn, shownColumns })
+
 const detailView = ref<'fields' | 'json'>('fields')
 
 // The message column takes the width left over by the other columns; without

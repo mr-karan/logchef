@@ -1394,5 +1394,14 @@
   "alerts.backtestGroupEpisodes": "事件",
   "alerts.backtestGroupBreaching": "超過閾值的評估",
   "alerts.backtestGroupMax": "最大值",
-  "alerts.backtestGroupsOmitted": "還有 {count} 個群組未顯示"
+  "alerts.backtestGroupsOmitted": "還有 {count} 個群組未顯示",
+  "fields.query.label": "查詢中",
+  "fields.query.description": "目前篩選條件使用的欄位。",
+  "fields.absent.label": "不在結果中",
+  "fields.absent.description": "在目前結果中沒有值的欄位。",
+  "ui.onlyFieldsInResults": "僅顯示結果中的欄位",
+  "ui.showAllFields": "顯示所有欄位",
+  "ui.fieldsNotInResultsHidden": "已隱藏 {count} 個不在這些結果中的欄位",
+  "ui.hoverValueForActions": "將游標停在值上可包含、排除或複製",
+  "explore.fieldNotInResults": "{field} 不在目前結果中"
 }

@@ -18,6 +18,10 @@ import {
   Database,
   Plus,
   Minus,
+  Columns3,
+  Filter,
+  EyeOff,
+  ListFilter,
   RefreshCw,
   Tag,
   X,
@@ -28,7 +32,7 @@ import { toRfc3339 } from '@/utils/timeWindow'
 import { cn } from '@/lib/utils'
 import { useFieldValuesLoader } from '@/composables/useFieldValuesLoader'
 import { getNativeQueryLanguageForSource, supportsQueryLanguage, type QueryLanguage } from '@/lib/queryMetadata'
-import { buildSourceFieldGroups, type SourceFieldGroup } from '@/lib/sourceFields'
+import { buildSourceFieldGroups, isFilterableField, type SourceFieldGroup, type SourceFieldGroupId } from '@/lib/sourceFields'
 import FieldSidebarRow from './FieldSidebarRow.vue'
 import { getCleanType, getTypeColorClass, getTypeIcon, skipsValueLoading, type FieldInfo } from './fieldDisplay'
 
@@ -41,9 +45,15 @@ const props = withDefaults(defineProps<{
   teamId?: number
   sourceId?: number
   source?: Pick<Source, 'source_type' | '_meta_ts_field' | '_meta_severity_field' | 'query_languages'> | null
+  // Fields the query on screen filters on; they are listed first.
+  queryFields?: string[]
+  // Fields with a value in the results on screen, or null when nothing is shown.
+  resultFields?: string[] | null
 }>(), {
   expanded: false,
   source: null,
+  queryFields: () => [],
+  resultFields: null,
 })
 
 const exploreStore = useExploreStore()
@@ -68,10 +78,31 @@ const emit = defineEmits<{
   (e: 'update:expanded', value: boolean): void
   (e: 'add-filter', field: string, value: string, operator: '=' | '!='): void
   (e: 'field-click', field: string): void
+  (e: 'add-column', field: string): void
 }>()
 
 // Local state
 const fieldSearch = ref('')
+
+// Hide the fields the results on screen have no value for. On by default; the
+// choice is kept per browser.
+const ONLY_RESULT_FIELDS_KEY = 'logchef.fieldsSidebar.onlyResultFields'
+const readOnlyResultFields = (): boolean => {
+  try {
+    return localStorage.getItem(ONLY_RESULT_FIELDS_KEY) !== 'false'
+  } catch {
+    return true
+  }
+}
+const onlyResultFields = ref(readOnlyResultFields())
+const toggleOnlyResultFields = () => {
+  onlyResultFields.value = !onlyResultFields.value
+  try {
+    localStorage.setItem(ONLY_RESULT_FIELDS_KEY, String(onlyResultFields.value))
+  } catch {
+    // Storage blocked: the choice lasts until reload.
+  }
+}
 const expandedFields = ref<Set<string>>(new Set())
 
 // Use the field values loader composable for progressive per-field loading
@@ -117,12 +148,53 @@ watch([fieldSearch, () => props.fields, () => props.sourceId], () => {
   fieldRenderLimit.value = FIELD_RENDER_STEP
 })
 
-const allFieldGroups = computed((): SourceFieldGroup<FieldInfo>[] => {
-  return buildSourceFieldGroups<FieldInfo>(filteredFields.value, props.source)
+type SidebarGroupId = SourceFieldGroupId | 'query' | 'absent'
+type SidebarGroup = Omit<SourceFieldGroup<FieldInfo>, 'id'> & { id: SidebarGroupId }
+
+const customGroup = (id: 'query' | 'absent', fields: FieldInfo[]): SidebarGroup[] => fields.length === 0 ? [] : [{
+  id,
+  label: id,
+  description: id,
+  fields,
+  filterableFields: fields.filter(field => isFilterableField(field.type)),
+  plainFields: fields.filter(field => !isFilterableField(field.type)),
+}]
+
+// A query field matches by name or, for a nested LogchefQL path, by its column.
+const queryFieldNames = computed(() => new Set(props.queryFields.flatMap(name => [name, name.split('.')[0]])))
+const resultFieldNames = computed(() => props.resultFields ? new Set(props.resultFields) : null)
+
+// Fields the query filters on come first, then the usual groups of fields
+// present in the results, then the fields absent from them.
+const relevance = computed(() => {
+  const inQuery: FieldInfo[] = []
+  const present: FieldInfo[] = []
+  const absent: FieldInfo[] = []
+  const results = resultFieldNames.value
+  for (const field of filteredFields.value) {
+    if (queryFieldNames.value.has(field.name)) inQuery.push(field)
+    else if (!results || results.has(field.name)) present.push(field)
+    else absent.push(field)
+  }
+  return { inQuery, present, absent }
 })
 
+const hidesAbsentFields = computed(() => onlyResultFields.value && relevance.value.absent.length > 0)
+
+const allFieldGroups = computed((): SidebarGroup[] => {
+  const { inQuery, present, absent } = relevance.value
+  return [
+    ...customGroup('query', inQuery),
+    ...buildSourceFieldGroups<FieldInfo>(present, props.source),
+    ...(onlyResultFields.value ? [] : customGroup('absent', absent)),
+  ]
+})
+
+// Rows the list can show with the current toggle, before the render cap.
+const listedFieldCount = computed(() => allFieldGroups.value.reduce((count, group) => count + group.fields.length, 0))
+
 // Group counts stay complete; only the rows rendered inside groups are capped.
-const fieldGroups = computed((): SourceFieldGroup<FieldInfo>[] => {
+const fieldGroups = computed((): SidebarGroup[] => {
   let budget = fieldRenderLimit.value
   const take = (fields: FieldInfo[]): FieldInfo[] => {
     const taken = fields.slice(0, Math.max(0, budget))
@@ -138,14 +210,16 @@ const renderedFields = computed((): FieldInfo[] => {
   return fieldGroups.value.flatMap(group => [...group.filterableFields, ...group.plainFields])
 })
 
-const hiddenFieldCount = computed(() => filteredFields.value.length - renderedFields.value.length)
+const hiddenFieldCount = computed(() => listedFieldCount.value - renderedFields.value.length)
 
 const showMoreFields = () => {
   fieldRenderLimit.value += FIELD_RENDER_STEP
 }
 
-const getGroupHeaderIconClass = (groupId: SourceFieldGroup['id']): string => {
+const getGroupHeaderIconClass = (groupId: SidebarGroupId): string => {
   switch (groupId) {
+    case 'query':
+      return 'text-primary'
     case 'core':
       return 'text-blue-500'
     case 'context':
@@ -227,6 +301,10 @@ const addFilter = (field: string, value: string, operator: '=' | '!=' = '=') => 
   emit('add-filter', field, value, operator)
 }
 
+const addColumn = (field: string) => {
+  emit('add-column', field)
+}
+
 // Handle field name click
 const handleFieldClick = (fieldName: string) => {
   emit('field-click', fieldName)
@@ -277,6 +355,26 @@ onUnmounted(() => {
                   <Button
                     variant="ghost"
                     size="sm"
+                    data-only-result-fields
+                    :class="cn('h-6 w-6 p-0', onlyResultFields && 'bg-primary/10 text-primary hover:bg-primary/15')"
+                    :aria-label="t('ui.onlyFieldsInResults')"
+                    :aria-pressed="onlyResultFields"
+                    @click="toggleOnlyResultFields"
+                  >
+                    <ListFilter class="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p class='text-xs'>{{ onlyResultFields ? t('ui.showAllFields') : t('ui.onlyFieldsInResults') }}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     class="h-6 w-6 p-0"
                     :aria-label="t('ui.refreshFieldValues')"
                     :disabled="isAnyLoading"
@@ -318,10 +416,10 @@ onUnmounted(() => {
         <div class="p-2 space-y-1">
 
           <template v-for="group in fieldGroups" :key="group.id">
-            <div class="mb-2">
+            <div class="mb-2" :data-field-group="group.id">
               <div class="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                 <component
-                  :is="group.id === 'system' || group.id === 'other' ? Database : Tag"
+                  :is="group.id === 'query' ? Filter : group.id === 'absent' ? EyeOff : group.id === 'system' || group.id === 'other' ? Database : Tag"
                   :class="cn('h-3 w-3', getGroupHeaderIconClass(group.id))"
                 />
                 <span>{{ t(`fields.${group.id}.label`) }}</span>
@@ -343,12 +441,13 @@ onUnmounted(() => {
                   @toggle="toggleField"
                   @load="field => loadField(field.name, field.type)"
                   @add-filter="addFilter"
+                  @add-column="addColumn"
                 />
 
                 <div
                   v-for="field in group.plainFields"
                   :key="`${group.id}-${field.name}`"
-                  class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
+                  class="group/plain flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
                   @click="handleFieldClick(field.name)"
                 >
                   <component
@@ -361,6 +460,15 @@ onUnmounted(() => {
                   >
                     {{ field.name }}
                   </span>
+                  <button
+                    type="button"
+                    class="h-5 w-5 flex items-center justify-center rounded flex-shrink-0 opacity-0 group-hover/plain:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:bg-background hover:text-foreground transition-opacity"
+                    :title="t('explore.addAsColumn')"
+                    :aria-label="`${t('explore.addAsColumn')}: ${field.name}`"
+                    @click.stop="addColumn(field.name)"
+                  >
+                    <Columns3 class="h-3 w-3" />
+                  </button>
                   <Badge
                     variant="outline"
                     class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-60"
@@ -374,16 +482,26 @@ onUnmounted(() => {
 
           <div v-if="hiddenFieldCount > 0" class="px-2 pt-1 pb-2" data-field-render-hint>
             <p class="text-[10px] text-muted-foreground mb-1.5">
-              {{ t('ui.showingFieldsOfTotal', { shown: renderedFields.length.toLocaleString(), total: filteredFields.length.toLocaleString() }) }}
+              {{ t('ui.showingFieldsOfTotal', { shown: renderedFields.length.toLocaleString(), total: listedFieldCount.toLocaleString() }) }}
             </p>
             <Button variant="outline" size="sm" class="w-full h-7 text-xs" @click="showMoreFields">
               {{ t('ui.showMore') }}
             </Button>
           </div>
 
+          <div v-if="hidesAbsentFields" class="flex items-center gap-2 px-2 pt-1 pb-2" data-absent-fields-hint>
+            <EyeOff class="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+            <p class="flex-1 text-[10px] leading-relaxed text-muted-foreground">
+              {{ t('ui.fieldsNotInResultsHidden', { count: relevance.absent.length.toLocaleString() }) }}
+            </p>
+            <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click="toggleOnlyResultFields">
+              {{ t('ui.show') }}
+            </Button>
+          </div>
+
           <!-- Empty State -->
           <div
-            v-if="fieldGroups.length === 0"
+            v-if="fieldGroups.length === 0 && !hidesAbsentFields"
             class="text-center py-8"
           >
             <Database class="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
@@ -407,7 +525,7 @@ onUnmounted(() => {
         </div>
         <div class="flex items-center gap-1 mt-0.5">
           <Minus class="h-3 w-3" />
-          <span>{{ t('ui.clickMinusToExclude') }}</span>
+          <span>{{ t('ui.hoverValueForActions') }}</span>
         </div>
       </div>
     </div>

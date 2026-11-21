@@ -1394,5 +1394,14 @@
   "alerts.backtestGroupEpisodes": "Episódios",
   "alerts.backtestGroupBreaching": "Avaliações acima do limite",
   "alerts.backtestGroupMax": "Valor máximo",
-  "alerts.backtestGroupsOmitted": "Mais {count} grupo não exibido | Mais {count} grupos não exibidos"
+  "alerts.backtestGroupsOmitted": "Mais {count} grupo não exibido | Mais {count} grupos não exibidos",
+  "fields.query.label": "Na consulta",
+  "fields.query.description": "Campos usados pelo filtro atual.",
+  "fields.absent.label": "Fora dos resultados",
+  "fields.absent.description": "Campos sem valor nos resultados exibidos.",
+  "ui.onlyFieldsInResults": "Mostrar só campos dos resultados",
+  "ui.showAllFields": "Mostrar todos os campos",
+  "ui.fieldsNotInResultsHidden": "{count} campos fora destes resultados estão ocultos",
+  "ui.hoverValueForActions": "Passe o mouse sobre um valor para incluir, excluir ou copiar",
+  "explore.fieldNotInResults": "{field} não está nos resultados atuais"
 }

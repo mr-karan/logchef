@@ -78,7 +78,7 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
     await flush()
     expect(getFieldValues).toHaveBeenCalledTimes(21)
 
-    const refresh = host.querySelector<HTMLButtonElement>('button')
+    const refresh = host.querySelector<HTMLButtonElement>(`button[aria-label="${i18n.global.t('ui.refreshFieldValues')}"]`)
     if (!refresh) throw new Error('Refresh button was not rendered')
     refresh.click()
     await flush()
@@ -214,6 +214,72 @@ it('preloads Loki stream label values in one request and loads a label it skips 
     expect(getFieldValues.mock.calls[0][2]).toBe('pod')
     expect(valueButton('pod-a')?.textContent).toContain('7')
     expect(getAllFieldValues).toHaveBeenCalledOnce()
+  } finally {
+    app.unmount()
+  }
+})
+
+it('lists query fields first and hides fields absent from the results until asked', async () => {
+  vi.spyOn(sourcesApi, 'getFieldValues').mockImplementation(async (_team, _source, fieldName, fieldType) => ({
+    status: 'success',
+    data: { field_name: fieldName, field_type: fieldType, is_low_cardinality: false, values: [{ value: `${fieldName}-a`, count: 2 }], total_distinct: 50 },
+  }))
+  localStorage.removeItem('logchef.fieldsSidebar.onlyResultFields')
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useExploreStore().setWindow({ kind: "relative", spec: "15m" })
+  const fields = ['level', 'service', 'host', 'unused'].map(name => ({ name, type: 'String' }))
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp({ render: () => h(FieldSideBar, { fields, expanded: true, sourceId: 1, teamId: 1, queryFields: ['level'], resultFields: ['level', 'service', 'host'] }) })
+  app.use(pinia)
+  app.use(i18n)
+  const groupFields = (id: string) => [...host.querySelectorAll(`[data-field-group="${id}"] [data-slot="collapsible-trigger"]`)].map(el => el.textContent?.replace(/String.*/, '').trim())
+  try {
+    app.mount(host)
+    await flush()
+    const groups = [...host.querySelectorAll('[data-field-group]')].map(el => el.getAttribute('data-field-group'))
+    expect(groups[0]).toBe('query')
+    expect(groupFields('query')).toEqual(['level'])
+    expect(host.textContent).not.toContain('unused')
+    expect(host.querySelector('[data-absent-fields-hint]')?.textContent).toContain('1 fields not in these results are hidden')
+
+    host.querySelector<HTMLButtonElement>('[data-only-result-fields]')?.click()
+    await flush()
+    expect(groupFields('absent')).toEqual(['unused'])
+    expect(host.querySelector('[data-absent-fields-hint]')).toBeNull()
+    expect(localStorage.getItem('logchef.fieldsSidebar.onlyResultFields')).toBe('false')
+  } finally {
+    app.unmount()
+    localStorage.removeItem('logchef.fieldsSidebar.onlyResultFields')
+  }
+})
+
+it('offers include, exclude and copy on each value and add-as-column on the field', async () => {
+  vi.spyOn(sourcesApi, 'getFieldValues').mockImplementation(async (_team, _source, fieldName, fieldType) => ({
+    status: 'success',
+    data: { field_name: fieldName, field_type: fieldType, is_low_cardinality: false, values: [{ value: 'error', count: 2 }], total_distinct: 1 },
+  }))
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useExploreStore().setWindow({ kind: "relative", spec: "15m" })
+  const onAddFilter = vi.fn()
+  const onAddColumn = vi.fn()
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp({ render: () => h(FieldSideBar, { fields: [{ name: 'level', type: 'Int64' }], expanded: true, sourceId: 1, teamId: 1, onAddFilter, onAddColumn }) })
+  app.use(pinia)
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await flush()
+    const action = (kind: string) => host.querySelector<HTMLButtonElement>(`[data-value-action="${kind}"]`)
+    expect(action('copy')).not.toBeNull()
+    action('include')?.click()
+    action('exclude')?.click()
+    expect(onAddFilter.mock.calls).toEqual([['level', 'error', '='], ['level', 'error', '!=']])
+    host.querySelector<HTMLButtonElement>('button[aria-label^="Add as column"]')?.click()
+    expect(onAddColumn).toHaveBeenCalledWith('level')
   } finally {
     app.unmount()
   }

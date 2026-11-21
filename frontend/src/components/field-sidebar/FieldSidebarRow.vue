@@ -2,14 +2,14 @@
 // One filterable field in the Fields sidebar. It is its own component so a
 // value load re-renders only this row: the sidebar passes the field's state
 // object, which keeps its identity while other fields change.
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { AlertTriangle, ChevronRight, Loader2, Minus, RefreshCw } from 'lucide-vue-next'
+import { AlertTriangle, Check, ChevronRight, Columns3, Copy, Loader2, Minus, Plus, RefreshCw } from 'lucide-vue-next'
+import { copyText } from '@/utils/clipboard'
 import { cn } from '@/lib/utils'
 import type { FieldLoadingState } from '@/composables/useFieldValuesLoader'
 import { formatCount, getCleanType, getTypeColorClass, getTypeIcon, hasTooManyValues, type FieldInfo } from './fieldDisplay'
@@ -25,6 +25,7 @@ const emit = defineEmits<{
   (e: 'toggle', field: FieldInfo): void
   (e: 'load', field: FieldInfo): void
   (e: 'add-filter', field: string, value: string, operator: '=' | '!='): void
+  (e: 'add-column', field: string): void
 }>()
 
 const { t } = useI18n()
@@ -32,12 +33,29 @@ const { t } = useI18n()
 const status = computed(() => props.state?.status ?? 'idle')
 const values = computed(() => props.state?.values)
 const tooManyValues = computed(() => hasTooManyValues(props.field, values.value))
+
+// The value just copied shows a check mark for a moment.
+const copiedValue = ref<string | null>(null)
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
+const copy = async (value: string) => {
+  try {
+    await copyText(value)
+    copiedValue.value = value
+    clearTimeout(copiedTimer)
+    copiedTimer = setTimeout(() => { copiedValue.value = null }, 1200)
+  } catch (error) {
+    console.warn('Copy failed', error)
+  }
+}
+
+const actionClass = 'h-5 w-5 flex items-center justify-center rounded flex-shrink-0 text-muted-foreground hover:bg-background hover:text-foreground'
 </script>
 
 <template>
   <Collapsible :open="expanded" @update:open="emit('toggle', field)">
     <div class="rounded-md hover:bg-muted/50 transition-colors">
-      <CollapsibleTrigger class="w-full">
+      <div class="group/header flex items-center pr-1">
+      <CollapsibleTrigger class="min-w-0 flex-1">
         <div class="flex items-center gap-2 px-2 py-1.5 cursor-pointer group">
           <ChevronRight
             :class="cn(
@@ -75,6 +93,16 @@ const tooManyValues = computed(() => hasTooManyValues(props.field, values.value)
           </Badge>
         </div>
       </CollapsibleTrigger>
+      <button
+        type="button"
+        :class="cn(actionClass, 'opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 transition-opacity')"
+        :title="t('explore.addAsColumn')"
+        :aria-label="`${t('explore.addAsColumn')}: ${field.name}`"
+        @click.stop="emit('add-column', field.name)"
+      >
+        <Columns3 class="h-3 w-3" />
+      </button>
+      </div>
 
       <CollapsibleContent v-if="expanded">
         <div class="pl-8 pr-2 pb-2">
@@ -141,22 +169,39 @@ const tooManyValues = computed(() => hasTooManyValues(props.field, values.value)
                   </span>
                 </button>
 
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        class="h-5 w-5 flex items-center justify-center rounded opacity-0 group-hover/value:opacity-100 hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
-                        :aria-label="`${t('ui.exclude')} ${field.name}!=&quot;${valueInfo.value}&quot;`"
-                        @click="emit('add-filter', field.name, valueInfo.value, '!=')"
-                      >
-                        <Minus class="h-3 w-3" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" class="text-xs">
-                      <p>{{ t('ui.exclude') }} {{ field.name }}!="{{ valueInfo.value }}"</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <span class="flex items-center flex-shrink-0 opacity-60 group-hover/value:opacity-100 focus-within:opacity-100">
+                  <button
+                    type="button"
+                    :class="actionClass"
+                    :title="`${t('ui.filterThisValue')}: ${field.name}`"
+                    :aria-label="`${t('ui.filterThisValue')}: ${field.name}=&quot;${valueInfo.value}&quot;`"
+                    data-value-action="include"
+                    @click="emit('add-filter', field.name, valueInfo.value, '=')"
+                  >
+                    <Plus class="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    :class="cn(actionClass, 'hover:bg-destructive/20 hover:text-destructive')"
+                    :title="`${t('ui.filterThisValue2')}: ${field.name}`"
+                    :aria-label="`${t('ui.filterThisValue2')}: ${field.name}!=&quot;${valueInfo.value}&quot;`"
+                    data-value-action="exclude"
+                    @click="emit('add-filter', field.name, valueInfo.value, '!=')"
+                  >
+                    <Minus class="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    :class="actionClass"
+                    :title="t('ui.copyValue')"
+                    :aria-label="`${t('ui.copyValue')}: ${valueInfo.value}`"
+                    data-value-action="copy"
+                    @click="copy(valueInfo.value)"
+                  >
+                    <Check v-if="copiedValue === valueInfo.value" class="h-3 w-3 text-emerald-500" />
+                    <Copy v-else class="h-3 w-3" />
+                  </button>
+                </span>
               </div>
 
               <div

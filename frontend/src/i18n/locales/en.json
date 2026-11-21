@@ -2196,5 +2196,14 @@
   "alerts.backtestGroupEpisodes": "Episodes",
   "alerts.backtestGroupBreaching": "Breaching evaluations",
   "alerts.backtestGroupMax": "Max value",
-  "alerts.backtestGroupsOmitted": "{count} more group not shown | {count} more groups not shown"
+  "alerts.backtestGroupsOmitted": "{count} more group not shown | {count} more groups not shown",
+  "fields.query.label": "In query",
+  "fields.query.description": "Fields the current filter uses.",
+  "fields.absent.label": "Not in results",
+  "fields.absent.description": "Fields with no value in the results on screen.",
+  "ui.onlyFieldsInResults": "Show only fields in results",
+  "ui.showAllFields": "Show all fields",
+  "ui.fieldsNotInResultsHidden": "{count} fields not in these results are hidden",
+  "ui.hoverValueForActions": "Hover a value to include, exclude or copy it",
+  "explore.fieldNotInResults": "{field} is not in the current results"
 }
