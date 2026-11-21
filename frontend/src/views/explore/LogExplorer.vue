@@ -44,6 +44,7 @@ import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
 import { addSelectField, appendCondition, buildCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
+import { appendLogsqlFilter, buildLogsqlFilter } from "@/utils/logsql/filters";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
@@ -291,10 +292,23 @@ const regexHighlights = computed(() => {
   return highlights;
 });
 
-// Adds a filter from a table cell or an expanded row to the LogchefQL query.
+// The query language that cell and row filters edit: LogchefQL, or native
+// LogsQL on a VictoriaLogs source. Other native languages get no filters.
+const filterLanguage = computed<"logchefql" | "logsql" | null>(() => {
+  if (activeMode.value === "logchefql") return "logchefql";
+  if (activeMode.value === "native" && sourceDetails.value && getNativeQueryLanguageForSource(sourceDetails.value) === "logsql") return "logsql";
+  return null;
+});
+
+// Adds a filter from a table cell or an expanded row to the active query.
 const handleDrillDown = (data: { column: string; value: unknown; operator: FilterOperator }) => {
-  if (activeMode.value !== "logchefql") return;
-  logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(data.column, data.operator, data.value));
+  if (filterLanguage.value === "logsql") {
+    sqlQuery.value = appendLogsqlFilter(sqlQuery.value ?? "", buildLogsqlFilter(data.column, data.operator, data.value));
+  } else if (filterLanguage.value === "logchefql") {
+    logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(data.column, data.operator, data.value));
+  } else {
+    return;
+  }
   nextTick(() => {
     queryEditorRef.value?.focus(true);
   });
@@ -1175,6 +1189,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :query-fields="queryFields"
                     :regex-highlights="regexHighlights"
                     :active-mode="activeMode"
+                    :filter-language="filterLanguage"
                     :display-mode="displayMode"
                     v-bind="displayMode === 'table' ? {
                       filteredColumns: columnFilters,

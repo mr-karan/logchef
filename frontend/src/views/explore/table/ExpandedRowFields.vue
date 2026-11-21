@@ -9,6 +9,8 @@ import { flattenRow, type RowField } from './rowFields'
 const props = defineProps<{
   row: Record<string, unknown>
   canFilter: boolean
+  // Only top-level fields filter, as in LogsQL, which cannot reach into a JSON string.
+  flatOnly?: boolean
   timestampField: string
   shownColumns: string[]
 }>()
@@ -62,8 +64,8 @@ function copy(value: unknown) {
   copyText(displayValue(value)).catch(error => console.warn('Copy failed', error))
 }
 
-function canFilterField(field: string): boolean {
-  return props.canFilter && field !== props.timestampField
+function canFilterField(item: RowField): boolean {
+  return props.canFilter && item.field !== props.timestampField && !(props.flatOnly && item.nested)
 }
 </script>
 
@@ -87,7 +89,7 @@ function canFilterField(field: string): boolean {
         :class="item.isObject ? 'line-clamp-1 text-muted-foreground' : ''"
       >{{ displayValue(item.value) }}</span>
       <span class="flex items-center gap-0.5 opacity-60 group-hover/field:opacity-100">
-        <template v-if="canFilterField(item.field) && !item.isObject">
+        <template v-if="canFilterField(item) && !item.isObject">
           <button
             type="button"
             class="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
@@ -106,7 +108,7 @@ function canFilterField(field: string): boolean {
           ><Minus class="h-3 w-3" /></button>
         </template>
         <button
-          v-if="!item.isObject && (item.nested ? canFilter : !shownColumns.includes(item.field))"
+          v-if="!item.isObject && (item.nested ? canFilter && !flatOnly : !shownColumns.includes(item.field))"
           type="button"
           class="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
           :title="t('explore.addAsColumn')"

@@ -36,6 +36,7 @@ interface Props {
   queryFields?: any[]
   regexHighlights?: Record<string, { pattern: string; isNegated: boolean }>
   activeMode?: 'logchefql' | 'clickhouse-sql' | 'native'
+  filterLanguage?: 'logchefql' | 'logsql' | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -168,7 +169,8 @@ const prefixText = (row: Record<string, any>) => {
 }
 
 const searchQueryField = computed(() => {
-  if (props.activeMode !== 'logchefql') return undefined
+  const canFilter = props.filterLanguage !== undefined ? props.filterLanguage !== null : props.activeMode === 'logchefql'
+  if (!canFilter) return undefined
   return tableColumns.value.map(column => column.id).find(id => !!id && isPrimaryMessageField(id))
 })
 

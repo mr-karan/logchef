@@ -75,3 +75,68 @@ it('filters, excludes and adds columns from nested keys in the expanded row', as
     host.remove()
   }
 })
+
+it('filters top-level LogsQL fields from the expanded row but not keys inside a JSON string', async () => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const onDrillDown = vi.fn()
+  const onAddColumn = vi.fn()
+  const app = createApp(DataTable, {
+    columns: [{ name: '_time', type: 'DateTime' }, { name: '_msg', type: 'String' }],
+    data: [{ _time: '2026-01-01T00:00:00Z', _msg: '{"http":{"status":500}}', 'http.method': 'GET' }],
+    timestampField: '_time',
+    sourceId: 'expansion-logsql-test',
+    teamId: null,
+    activeMode: 'native',
+    filterLanguage: 'logsql',
+    onDrillDown,
+    onAddColumn,
+  })
+  app.use(createPinia())
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await nextTick()
+    host.querySelector<HTMLTableRowElement>('tbody tr')?.click()
+    await nextTick()
+    const fieldRow = (field: string) => {
+      const row = [...host.querySelectorAll<HTMLElement>('[data-field-row]')].find(element => element.querySelector('span')?.textContent === field)
+      if (!row) throw new Error(`Field ${field} was not listed`)
+      return row
+    }
+    fieldRow('"http.method"').querySelector<HTMLButtonElement>('button[aria-label^="Filter = this value"]')?.click()
+    expect(onDrillDown).toHaveBeenCalledExactlyOnceWith({ column: '"http.method"', operator: '=', value: 'GET' })
+    const nested = fieldRow('_msg.http.status')
+    expect(nested.querySelector('button[aria-label^="Filter"]')).toBeNull()
+    expect(nested.querySelector('button[aria-label^="Add as column"]')).toBeNull()
+    expect(onAddColumn).not.toHaveBeenCalled()
+  } finally {
+    app.unmount()
+    host.remove()
+  }
+})
+
+it('offers no row filters for a native language without filter support', async () => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp(DataTable, {
+    columns: [{ name: 'timestamp', type: 'DateTime' }, { name: 'job', type: 'String' }],
+    data: [{ timestamp: '2026-01-01T00:00:00Z', job: 'api' }],
+    sourceId: 'expansion-sql-test',
+    teamId: null,
+    activeMode: 'native',
+    filterLanguage: null,
+  })
+  app.use(createPinia())
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await nextTick()
+    host.querySelector<HTMLTableRowElement>('tbody tr')?.click()
+    await nextTick()
+    expect(host.querySelector('[data-field-row] button[aria-label^="Filter"]')).toBeNull()
+  } finally {
+    app.unmount()
+    host.remove()
+  }
+})

@@ -56,6 +56,7 @@ interface Props {
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
     activeMode?: 'logchefql' | 'clickhouse-sql' | 'native' // Current query mode
     filteredColumns?: string[] // Columns with a top-level condition in the LogchefQL query
+    filterLanguage?: 'logchefql' | 'logsql' | null // Query language cell and row filters edit; null disables them
     isLoading?: boolean // Prop to indicate loading state
 }
 
@@ -80,6 +81,10 @@ const severityFieldName = computed(() => props.severityField || 'severity_text')
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
 const logContext = computed(() => logContextState(props.source, props.activeMode))
+// Cell and row filters work in LogchefQL, and in LogsQL on VictoriaLogs sources.
+const canFilterRows = computed(() => props.filterLanguage !== undefined ? props.filterLanguage !== null : props.activeMode === 'logchefql')
+// LogsQL reads flattened columns only, so nested keys inside a JSON string get no filter.
+const flatFiltersOnly = computed(() => props.filterLanguage === 'logsql')
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 
@@ -337,7 +342,7 @@ const onTableContextMenu = (event: MouseEvent) => {
         field: cell.column.id,
         value: cell.getValue(),
         selection: selected,
-        canFilter: props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName.value,
+        canFilter: canFilterRows.value && cell.column.id !== timestampFieldName.value,
     }
 }
 
@@ -596,7 +601,7 @@ watch(tableLayout, layout => {
 watch(() => props.layoutResetToken, () => resetTableStateToDefaults())
 
 const handleDrillDown = (value: { column: string, value: unknown, operator: FilterOperator }) => {
-    if (props.activeMode !== 'logchefql') return;
+    if (!canFilterRows.value) return;
     emit('drill-down', value);
 };
 
@@ -630,7 +635,7 @@ const growColumnId = computed(() => {
 
 // The loaded-rows search can be promoted to a contains filter on the message field.
 const searchQueryField = computed(() => {
-    if (props.activeMode !== 'logchefql') return undefined
+    if (!canFilterRows.value) return undefined
     return props.columns.find(column => isPrimaryMessageField(column.name))?.name
 })
 
@@ -819,7 +824,7 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                 </Button>
                                             </div>
                                             <ExpandedRowFields v-if="detailView === 'fields'" :row="row.original"
-                                                :can-filter="props.activeMode === 'logchefql'" :timestamp-field="timestampFieldName"
+                                                :can-filter="canFilterRows" :flat-only="flatFiltersOnly" :timestamp-field="timestampFieldName"
                                                 :shown-columns="shownColumns" @drill-down="handleDrillDown" @add-column="handleAddColumn" />
                                             <JsonViewer v-else :value="row.original" :expanded="true" class="text-xs" />
                                         </div>
