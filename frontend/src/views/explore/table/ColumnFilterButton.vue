@@ -1,22 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ListFilter } from 'lucide-vue-next'
+import { ListFilter, X } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { NUMBER_OPERATORS, TEXT_OPERATORS, type FilterOperator } from '@/utils/logchefql/filters'
+import { pageFilterOperatorLabel, type PageFilter } from './pageFilters'
 
-const props = defineProps<{
+// A header filter narrows the rows loaded on this page. It never reruns
+// the query; the column's filters are listed so each can be removed.
+const props = withDefaults(defineProps<{
   column: string
   kind: 'text' | 'number'
-  active: boolean
-  disabled: boolean
-}>()
+  filters?: PageFilter[]
+}>(), { filters: () => [] })
 
 const emit = defineEmits<{
-  (e: 'apply', value: { column: string; operator: FilterOperator; value: string | number }): void
+  (e: 'apply', value: PageFilter): void
+  (e: 'remove', filter: PageFilter): void
   (e: 'clear', column: string): void
 }>()
 
@@ -27,17 +30,11 @@ const operator = ref<FilterOperator>('=')
 // v-model on a number input yields a number, so read the draft as text.
 const draft = ref<string | number>('')
 
+const active = computed(() => props.filters.length > 0)
 const operators = computed(() => props.kind === 'number' ? NUMBER_OPERATORS : TEXT_OPERATORS)
 
 function operatorLabel(op: FilterOperator): string {
-  if (props.kind === 'number') return op
-  switch (op) {
-    case '=': return t('explore.columnFilterEquals')
-    case '!=': return t('explore.columnFilterNotEquals')
-    case '~': return t('explore.columnFilterContains')
-    case '!~': return t('explore.columnFilterNotContains')
-    default: return op
-  }
+  return pageFilterOperatorLabel(t, op, props.kind === 'number')
 }
 
 const value = computed<string | number | null>(() => {
@@ -59,29 +56,11 @@ function clear() {
   open.value = false
 }
 
-const title = computed(() => {
-  if (props.disabled) return t('explore.columnFilterLogchefqlOnly')
-  return props.active ? t('explore.columnFiltered', { column: props.column }) : t('explore.filterColumn', { column: props.column })
-})
+const title = computed(() => active.value ? t('explore.pageFiltered', { column: props.column }) : t('explore.filterColumn', { column: props.column }))
 </script>
 
 <template>
-  <button
-    v-if="disabled"
-    type="button"
-    draggable="false"
-    data-column-filter
-    class="relative z-20 flex items-center justify-center flex-shrink-0 h-5 w-5 rounded cursor-not-allowed text-muted-foreground/30 opacity-0 group-hover:opacity-100"
-    :title="title"
-    :aria-label="title"
-    aria-disabled="true"
-    @mousedown.stop
-    @dragstart.stop.prevent
-    @click.stop
-  >
-    <ListFilter class="h-3 w-3" />
-  </button>
-  <Popover v-else v-model:open="open">
+  <Popover v-model:open="open">
     <PopoverTrigger as-child>
       <button
         type="button"
@@ -100,25 +79,40 @@ const title = computed(() => {
     </PopoverTrigger>
     <PopoverContent class="w-64 p-2" align="start" @mousedown.stop @click.stop>
       <form class="space-y-2" @submit.prevent="apply">
+        <p class="text-xs text-muted-foreground">{{ t('explore.pageFilterHint') }}</p>
+        <ul v-if="active" class="space-y-1" data-testid="column-page-filters">
+          <li v-for="(filter, index) in filters" :key="index" class="flex items-center justify-between gap-1 rounded bg-muted px-2 py-0.5 text-xs">
+            <span class="truncate">{{ operatorLabel(filter.operator) }} {{ filter.value }}</span>
+            <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('ui.delete')" @click="emit('remove', filter)">
+              <X class="h-3 w-3" />
+            </button>
+          </li>
+        </ul>
         <div class="flex gap-1.5">
-          <NativeSelect v-model="operator" class="h-7 px-2 pr-7 text-xs" :aria-label="t('explore.columnFilterOperator')">
-            <NativeSelectOption v-for="op in operators" :key="op" :value="op">{{ operatorLabel(op) }}</NativeSelectOption>
-          </NativeSelect>
+          <Select v-model="operator">
+            <SelectTrigger size="sm" class="h-7 px-2 text-xs" :aria-label="t('explore.columnFilterOperator')" data-testid="column-filter-operator">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="op in operators" :key="op" :value="op" class="text-xs">{{ operatorLabel(op) }}</SelectItem>
+            </SelectContent>
+          </Select>
           <Input
             v-model="draft"
             :type="kind === 'number' ? 'number' : 'text'"
             :placeholder="t('explore.columnFilterValue')"
             :aria-label="t('explore.columnFilterValue')"
             class="h-7 min-w-0 flex-1 text-xs"
+            data-testid="column-filter-value"
             autofocus
           />
         </div>
         <div class="flex items-center justify-between gap-2">
           <Button v-if="active" type="button" variant="ghost" size="sm" class="h-7 px-2 text-xs" @click="clear">
-            {{ t('explore.columnFilterClear') }}
+            {{ t('explore.pageFilterClear') }}
           </Button>
           <Button type="submit" size="sm" class="ml-auto h-7 px-2 text-xs" :disabled="value === null">
-            {{ t('explore.columnFilterApply') }}
+            {{ t('explore.pageFilterApply') }}
           </Button>
         </div>
       </form>

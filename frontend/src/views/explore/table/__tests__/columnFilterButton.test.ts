@@ -16,7 +16,7 @@ async function openFilter(kind: "text" | "number") {
   const element = document.createElement("div");
   document.body.appendChild(element);
   app = createApp({
-    render: () => h(ColumnFilterButton, { column: "status", kind, active: false, disabled: false, onApply: (value: unknown) => applied.push(value) }),
+    render: () => h(ColumnFilterButton, { column: "status", kind, onApply: (value: unknown) => applied.push(value) }),
   });
   app.use(i18n);
   app.mount(element);

@@ -44,9 +44,9 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
-import { addSelectField, appendCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
-import { appendLogsqlFilter, logsqlFilteredColumns, removeLogsqlColumnFilters } from "@/utils/logsql/filters";
-import { filterExpression, filterFieldLabel, filterFromAction, filteredFields, sameFilter, type QueryFilter } from "@/utils/queryFilters";
+import { addSelectField, appendCondition, fieldPath, type FilterOperator } from "@/utils/logchefql/filters";
+import { appendLogsqlFilter } from "@/utils/logsql/filters";
+import { filterExpression, filterFieldLabel, filterFromAction, sameFilter, type QueryFilter } from "@/utils/queryFilters";
 import FilterPillsBar from "@/components/filter-pills/FilterPillsBar.vue";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
@@ -398,32 +398,6 @@ const handleDrillDown = (data: { column: string; value: unknown; operator: Filte
 const aggregation = computed(() => runs.results?.aggregation ?? null);
 
 const handleAddGroupCondition = (field: string, value: unknown) => handleDrillDown({ column: field, value, operator: "=" });
-
-// Header filters add pills like the cell menu. A column shows as filtered
-// when a pill or a top-level condition of the query filters it.
-const columnFilters = computed(() => {
-  const pills = filteredFields(exploreStore.filters);
-  if (filterLanguage.value === "logchefql") return [...new Set([...pills, ...filteredColumns(logchefQuery.value ?? "")])];
-  if (filterLanguage.value === "logsql") return [...new Set([...pills, ...logsqlFilteredColumns(sqlQuery.value ?? "")])];
-  return [];
-});
-
-const handleApplyColumnFilter = (data: { column: string; operator: FilterOperator; value: string | number }) => {
-  if (!filterLanguage.value) return;
-  addFilterPill(filterFromAction(fieldPath([data.column]), data.operator, data.value));
-};
-
-// Clearing a header filter drops the column's pills and its conditions in the query.
-const handleClearColumnFilter = (column: string) => {
-  if (filterLanguage.value === "logsql") {
-    sqlQuery.value = removeLogsqlColumnFilters(sqlQuery.value ?? "", column);
-  } else if (filterLanguage.value === "logchefql") {
-    logchefQuery.value = removeColumnConditions(logchefQuery.value ?? "", column);
-  } else {
-    return;
-  }
-  setFilters(exploreStore.filters.filter((filter) => filterFieldLabel(filter.field) !== column));
-};
 
 // Projects a nested field as an extra column; top-level columns are shown by the table itself.
 const handleAddColumn = (data: { field: string; shownColumns: string[] }) => {
@@ -1325,7 +1299,6 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :filter-language="filterLanguage"
                     :display-mode="displayMode"
                     v-bind="displayMode === 'table' ? {
-                      filteredColumns: columnFilters,
                       viewSeed: savedViews.activeSeed,
                       layoutResetToken: savedViews.layoutResetToken,
                       onWorkingLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(savedViews.activeViewId, layout),
@@ -1333,8 +1306,6 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     } : {}"
                     @drill-down="handleDrillDown"
                     @add-column="handleAddColumn"
-                    @apply-column-filter="handleApplyColumnFilter"
-                    @clear-column-filter="handleClearColumnFilter"
                     @shown-columns="tableShownColumns = $event"
                     @update:display-mode="displayMode = $event"
                   />

@@ -38,6 +38,7 @@ import type { FilterOperator } from '@/utils/logchefql/filters'
 import { isNumericFieldType } from '@/utils/logchefql-autocomplete'
 import { usePreferencesStore } from '@/stores/preferences'
 import { isPrimaryMessageField } from './fieldSemantics'
+import { applyPageFilters, pageFilterLabel, type PageFilter } from './pageFilters'
 
 const { t } = useI18n();
 
@@ -55,7 +56,6 @@ interface Props {
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
     activeMode?: 'logchefql' | 'clickhouse-sql' | 'native' // Current query mode
-    filteredColumns?: string[] // Columns with a top-level condition in the LogchefQL query
     filterLanguage?: 'logchefql' | 'logsql' | null // Query language cell and row filters edit; null disables them
     isLoading?: boolean // Prop to indicate loading state
 }
@@ -66,7 +66,6 @@ const props = withDefaults(defineProps<Props>(), {
     queryFields: () => [],
     regexHighlights: () => ({}),
     activeMode: 'logchefql',
-    filteredColumns: () => [],
     isLoading: false // Default isLoading to false
 })
 
@@ -99,6 +98,29 @@ const pagination = ref<PaginationState>({
     pageSize: 50,
 })
 const globalFilter = ref('')
+// Header filters narrow the rows loaded on this page; they never rerun the query.
+const pageFilters = ref<PageFilter[]>([])
+const pageRows = computed(() => applyPageFilters(props.data, pageFilters.value))
+const filtersByColumn = computed(() => {
+    const byColumn = new Map<string, PageFilter[]>()
+    for (const filter of pageFilters.value) byColumn.set(filter.column, [...(byColumn.get(filter.column) ?? []), filter])
+    return byColumn
+})
+const columnPageFilters = (column: string) => filtersByColumn.value.get(column) ?? []
+const addPageFilter = (filter: PageFilter) => {
+    if (pageFilters.value.some(item => item.column === filter.column && item.operator === filter.operator && item.value === filter.value)) return
+    pageFilters.value = [...pageFilters.value, filter]
+}
+const removePageFilter = (filter: PageFilter) => {
+    pageFilters.value = pageFilters.value.filter(item => item !== filter)
+}
+const clearPageFilters = (column?: string) => {
+    pageFilters.value = column === undefined ? [] : pageFilters.value.filter(item => item.column !== column)
+}
+// A narrower page starts again from its first rows.
+watch(pageFilters, () => {
+    pagination.value = { ...pagination.value, pageIndex: 0 }
+})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const preferencesStore = usePreferencesStore()
@@ -257,7 +279,7 @@ const effectiveSorting = computed(() => props.viewSeed
 const table = useTable({
     features: logTableFeatures,
     get data() {
-        return props.data
+        return pageRows.value
     },
     // Use tableColumns directly
     get columns() {
@@ -576,8 +598,6 @@ const onDragEnd = () => { // No event parameter
 const emit = defineEmits<{
     (e: 'drill-down', value: { column: string, value: unknown, operator: FilterOperator }): void
     (e: 'add-column', value: { field: string, shownColumns: string[] }): void
-    (e: 'apply-column-filter', value: { column: string, operator: FilterOperator, value: string | number }): void
-    (e: 'clear-column-filter', column: string): void
     (e: 'shown-columns', columns: string[]): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
     (e: 'working-layout', value: SavedViewLayout): void
@@ -686,6 +706,23 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
             @reset-columns="resetTableStateToDefaults"
         />
 
+        <!-- Header filters on this page: what they keep, and a way to drop them. -->
+        <div v-if="pageFilters.length" class="flex flex-wrap items-center gap-1.5 border-b bg-muted/30 px-3 py-1 text-xs" data-testid="page-filters">
+            <span class="font-medium text-muted-foreground">{{ t('explore.pageFilterHint') }}</span>
+            <span v-for="(filter, index) in pageFilters" :key="index"
+                class="inline-flex items-center gap-1 rounded border bg-background px-1.5 py-0.5">
+                {{ pageFilterLabel(t, filter) }}
+                <button type="button" class="text-muted-foreground hover:text-foreground" :aria-label="t('ui.delete')"
+                    data-testid="page-filter-remove" @click="removePageFilter(filter)">
+                    <X class="h-3 w-3" />
+                </button>
+            </span>
+            <span class="text-muted-foreground" data-testid="page-filter-count">{{ t('explore.pageFilterShowing', { shown: pageRows.length, total: data.length }) }}</span>
+            <button type="button" class="ml-auto text-primary hover:underline" data-testid="page-filter-clear-all" @click="clearPageFilters()">
+                {{ t('explore.pageFilterClearAll') }}
+            </button>
+        </div>
+
         <!-- Table Section with full-height scrolling -->
         <div class="flex-1 relative overflow-hidden"
             :class="{ 'opacity-60 pointer-events-none': isLoading }"> <!-- Dim table during load -->
@@ -735,14 +772,14 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
-                                        <!-- Column filter: adds a condition to the query. An active one stays in view. -->
-                                        <span v-if="columnFilterKind(header.column) && filteredColumns.includes(header.column.id)" class="ml-1 flex-shrink-0">
+                                        <!-- Column filter: narrows the rows on this page. An active one stays in view. -->
+                                        <span v-if="columnFilterKind(header.column) && columnPageFilters(header.column.id).length" class="ml-1 flex-shrink-0">
                                             <ColumnFilterButton :column="header.column.id"
                                                 :kind="columnFilterKind(header.column)!"
-                                                :active="true"
-                                                :disabled="!canFilterRows"
-                                                @apply="emit('apply-column-filter', $event)"
-                                                @clear="emit('clear-column-filter', $event)" />
+                                                :filters="columnPageFilters(header.column.id)"
+                                                @apply="addPageFilter"
+                                                @remove="removePageFilter"
+                                                @clear="clearPageFilters" />
                                         </span>
                                         <span class="absolute right-5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
                                             <button v-if="shownColumns.length > 1" type="button" draggable="false"
@@ -754,13 +791,10 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                 @click.stop="hideColumn(header.column.id)">
                                                 <X class="h-3 w-3" />
                                             </button>
-                                            <ColumnFilterButton v-if="columnFilterKind(header.column) && !filteredColumns.includes(header.column.id)"
+                                            <ColumnFilterButton v-if="columnFilterKind(header.column) && !columnPageFilters(header.column.id).length"
                                                 :column="header.column.id"
                                                 :kind="columnFilterKind(header.column)!"
-                                                :active="false"
-                                                :disabled="!canFilterRows"
-                                                @apply="emit('apply-column-filter', $event)"
-                                                @clear="emit('clear-column-filter', $event)" />
+                                                @apply="addPageFilter" />
                                         </span>
 
                                         <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
