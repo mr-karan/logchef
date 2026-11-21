@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appendLogsqlFilter, buildLogsqlFilter, escapeRegex, logsqlColumn, logsqlField } from './filters'
+import { appendLogsqlFilter, buildLogsqlFilter, escapeRegex, logsqlColumn, logsqlField, logsqlFilteredColumns, removeLogsqlColumnFilters } from './filters'
 
 describe('logsqlField', () => {
   it('keeps simple and dotted names bare and quotes the rest', () => {
@@ -72,5 +72,21 @@ describe('appendLogsqlFilter', () => {
 
   it('ignores pipes inside quoted values', () => {
     expect(appendLogsqlFilter('_msg:~"a|b"', 'c:=3')).toBe('_msg:~"a|b" c:=3')
+  })
+})
+
+describe('LogsQL column filters', () => {
+  it('lists the columns with a top-level filter', () => {
+    expect(logsqlFilteredColumns('_time:5m service:="api" NOT level:="debug" -env:dev "http.status":>=500 error | stats count()'))
+      .toEqual(['service', 'level', 'env', 'http.status'])
+    expect(logsqlFilteredColumns('service:="api" or level:="error"')).toEqual([])
+    expect(logsqlFilteredColumns('(service:="a" or service:="b") level:="error"')).toEqual(['level'])
+  })
+
+  it('removes the filters on one column and keeps the rest and the pipes', () => {
+    expect(removeLogsqlColumnFilters('service:="api" NOT level:="debug" and level:="x" error | sort by (_time)', 'level'))
+      .toBe('service:="api" error | sort by (_time)')
+    expect(removeLogsqlColumnFilters('level:="debug"', 'level')).toBe('*')
+    expect(removeLogsqlColumnFilters('service:="a" or level:="b"', 'level')).toBe('service:="a" or level:="b"')
   })
 })

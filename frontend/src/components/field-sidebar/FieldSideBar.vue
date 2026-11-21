@@ -49,11 +49,14 @@ const props = withDefaults(defineProps<{
   queryFields?: string[]
   // Fields with a value in the results on screen, or null when nothing is shown.
   resultFields?: string[] | null
+  // Columns the results table shows; their fields offer to remove the column.
+  shownColumns?: string[]
 }>(), {
   expanded: false,
   source: null,
   queryFields: () => [],
   resultFields: null,
+  shownColumns: () => [],
 })
 
 const exploreStore = useExploreStore()
@@ -79,6 +82,7 @@ const emit = defineEmits<{
   (e: 'add-filter', field: string, value: string, operator: '=' | '!='): void
   (e: 'field-click', field: string): void
   (e: 'add-column', field: string): void
+  (e: 'remove-column', field: string): void
 }>()
 
 // Local state
@@ -301,8 +305,12 @@ const addFilter = (field: string, value: string, operator: '=' | '!=' = '=') => 
   emit('add-filter', field, value, operator)
 }
 
-const addColumn = (field: string) => {
-  emit('add-column', field)
+const shownColumnSet = computed(() => new Set(props.shownColumns))
+
+// The column button adds a field's column, or removes it when the table shows it.
+const toggleColumn = (field: string) => {
+  if (shownColumnSet.value.has(field)) emit('remove-column', field)
+  else emit('add-column', field)
 }
 
 // Handle field name click
@@ -441,7 +449,8 @@ onUnmounted(() => {
                   @toggle="toggleField"
                   @load="field => loadField(field.name, field.type)"
                   @add-filter="addFilter"
-                  @add-column="addColumn"
+                  :column-shown="shownColumnSet.has(field.name)"
+                  @toggle-column="toggleColumn"
                 />
 
                 <div
@@ -462,10 +471,15 @@ onUnmounted(() => {
                   </span>
                   <button
                     type="button"
-                    class="h-5 w-5 flex items-center justify-center rounded flex-shrink-0 opacity-0 group-hover/plain:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:bg-background hover:text-foreground transition-opacity"
-                    :title="t('explore.addAsColumn')"
-                    :aria-label="`${t('explore.addAsColumn')}: ${field.name}`"
-                    @click.stop="addColumn(field.name)"
+                    :class="cn(
+                      'h-5 w-5 flex items-center justify-center rounded flex-shrink-0 focus-visible:opacity-100 hover:bg-background transition-opacity',
+                      shownColumnSet.has(field.name) ? 'text-primary' : 'opacity-0 group-hover/plain:opacity-100 text-muted-foreground hover:text-foreground'
+                    )"
+                    :title="shownColumnSet.has(field.name) ? t('explore.removeColumn') : t('explore.addAsColumn')"
+                    :aria-label="`${shownColumnSet.has(field.name) ? t('explore.removeColumn') : t('explore.addAsColumn')}: ${field.name}`"
+                    :aria-pressed="shownColumnSet.has(field.name)"
+                    data-column-toggle
+                    @click.stop="toggleColumn(field.name)"
                   >
                     <Columns3 class="h-3 w-3" />
                   </button>

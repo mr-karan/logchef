@@ -550,7 +550,7 @@
   "explore.columnFilterNotContains": "不包含",
   "explore.columnFilterApply": "加入查詢",
   "explore.columnFilterClear": "從查詢中移除",
-  "explore.columnFilterLogchefqlOnly": "欄位篩選僅適用於 LogchefQL 模式",
+  "explore.columnFilterLogchefqlOnly": "欄篩選器適用於 LogchefQL 與 LogsQL 模式",
   "ui.off": "關閉",
   "ui.dashboard": "儀表板",
   "ui.unsaved": "未儲存",
@@ -1403,5 +1403,7 @@
   "ui.showAllFields": "顯示所有欄位",
   "ui.fieldsNotInResultsHidden": "已隱藏 {count} 個不在這些結果中的欄位",
   "ui.hoverValueForActions": "將游標停在值上可包含、排除或複製",
-  "explore.fieldNotInResults": "{field} 不在目前結果中"
+  "explore.fieldNotInResults": "{field} 不在目前結果中",
+  "explore.removeColumn": "移除欄",
+  "explore.hideColumn": "移除欄 {column}"
 }

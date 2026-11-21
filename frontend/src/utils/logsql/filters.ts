@@ -96,3 +96,72 @@ export function appendLogsqlFilter(query: string, filter: string): string {
   if (where && where !== '*') combined = `${hasTopLevelOr(where) ? `(${where})` : where} ${filter}`
   return pipes ? `${combined} ${pipes}` : combined
 }
+
+// The query's filter expression split at top-level whitespace, with a `NOT`
+// joined to the term it negates. Null when a top-level `or` makes removing a
+// term change the meaning of the rest.
+function topLevelTerms(where: string): string[] | null {
+  if (hasTopLevelOr(where)) return null
+  const terms: string[] = []
+  let quote = ''
+  let depth = 0
+  let current = ''
+  for (let i = 0; i < where.length; i++) {
+    const char = where[i]
+    if (quote) {
+      current += char
+      if (char === '\\' && i + 1 < where.length) current += where[++i]
+      else if (char === quote) quote = ''
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') quote = char
+    else if (char === '(') depth++
+    else if (char === ')') depth--
+    if (depth === 0 && /\s/.test(char)) {
+      if (current) terms.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  if (current) terms.push(current)
+  const joined: string[] = []
+  for (const term of terms) {
+    const previous = joined.at(-1)
+    if (previous && /^(?:not|and)$/i.test(previous) && !/^and$/i.test(term)) joined[joined.length - 1] = `${previous} ${term}`
+    else joined.push(term)
+  }
+  return joined.map(term => term.replace(/^and\s+/i, '')).filter(term => !/^and$/i.test(term))
+}
+
+const TERM_FIELD = /^(?:"((?:[^"\\]|\\.)*)"|([^\s:()"'`!-][^\s:()"'`]*)):/
+
+// The column a filter term filters on, or null for a word or a group.
+function termColumn(term: string): string | null {
+  const bare = term.replace(/^not\s+/i, '').replace(/^[!-]/, '')
+  const match = TERM_FIELD.exec(bare)
+  if (!match) return null
+  return match[1] !== undefined ? match[1].replace(/\\(.)/g, '$1') : match[2]
+}
+
+function splitQuery(query: string): { where: string; pipes: string } {
+  const index = pipeIndex(query)
+  return index < 0 ? { where: query.trim(), pipes: '' } : { where: query.slice(0, index).trim(), pipes: query.slice(index).trim() }
+}
+
+// Columns with a top-level filter in the query, for the table header filters.
+export function logsqlFilteredColumns(query: string): string[] {
+  const terms = topLevelTerms(splitQuery(query).where) ?? []
+  return [...new Set(terms.map(termColumn).filter((column): column is string => column !== null && column !== '_time'))]
+}
+
+// Drops the top-level filters on a column; `*` stands in for an emptied filter.
+export function removeLogsqlColumnFilters(query: string, column: string): string {
+  const { where, pipes } = splitQuery(query)
+  const terms = topLevelTerms(where)
+  if (!terms) return query
+  const kept = terms.filter(term => termColumn(term) !== column)
+  if (kept.length === terms.length) return query
+  const filter = kept.join(' ') || '*'
+  return pipes ? `${filter} ${pipes}` : filter
+}

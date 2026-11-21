@@ -19,13 +19,15 @@ const props = defineProps<{
   // Undefined until the loader has seen the field; treated as idle.
   state: FieldLoadingState | undefined
   expanded: boolean
+  // The results table shows this field as a column.
+  columnShown?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle', field: FieldInfo): void
   (e: 'load', field: FieldInfo): void
   (e: 'add-filter', field: string, value: string, operator: '=' | '!='): void
-  (e: 'add-column', field: string): void
+  (e: 'toggle-column', field: string): void
 }>()
 
 const { t } = useI18n()
@@ -95,10 +97,12 @@ const actionClass = 'h-5 w-5 flex items-center justify-center rounded flex-shrin
       </CollapsibleTrigger>
       <button
         type="button"
-        :class="cn(actionClass, 'opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 transition-opacity')"
-        :title="t('explore.addAsColumn')"
-        :aria-label="`${t('explore.addAsColumn')}: ${field.name}`"
-        @click.stop="emit('add-column', field.name)"
+        :class="cn(actionClass, 'focus-visible:opacity-100 transition-opacity', columnShown ? 'text-primary hover:text-primary' : 'opacity-0 group-hover/header:opacity-100')"
+        :title="columnShown ? t('explore.removeColumn') : t('explore.addAsColumn')"
+        :aria-label="`${columnShown ? t('explore.removeColumn') : t('explore.addAsColumn')}: ${field.name}`"
+        :aria-pressed="!!columnShown"
+        data-column-toggle
+        @click.stop="emit('toggle-column', field.name)"
       >
         <Columns3 class="h-3 w-3" />
       </button>

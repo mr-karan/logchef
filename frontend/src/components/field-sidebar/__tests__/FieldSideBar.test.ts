@@ -267,7 +267,9 @@ it('offers include, exclude and copy on each value and add-as-column on the fiel
   const onAddColumn = vi.fn()
   const host = document.createElement('div')
   document.body.appendChild(host)
-  const app = createApp({ render: () => h(FieldSideBar, { fields: [{ name: 'level', type: 'Int64' }], expanded: true, sourceId: 1, teamId: 1, onAddFilter, onAddColumn }) })
+  const onRemoveColumn = vi.fn()
+  const state = reactive({ shownColumns: [] as string[] })
+  const app = createApp({ render: () => h(FieldSideBar, { fields: [{ name: 'level', type: 'Int64' }], expanded: true, sourceId: 1, teamId: 1, shownColumns: state.shownColumns, onAddFilter, onAddColumn, onRemoveColumn }) })
   app.use(pinia)
   app.use(i18n)
   try {
@@ -280,6 +282,13 @@ it('offers include, exclude and copy on each value and add-as-column on the fiel
     expect(onAddFilter.mock.calls).toEqual([['level', 'error', '='], ['level', 'error', '!=']])
     host.querySelector<HTMLButtonElement>('button[aria-label^="Add as column"]')?.click()
     expect(onAddColumn).toHaveBeenCalledWith('level')
+
+    // A field the table shows as a column offers to remove it instead.
+    state.shownColumns = ['level']
+    await flush()
+    host.querySelector<HTMLButtonElement>('button[aria-label^="Remove column"]')?.click()
+    expect(onRemoveColumn).toHaveBeenCalledWith('level')
+    expect(onAddColumn).toHaveBeenCalledTimes(1)
   } finally {
     app.unmount()
   }

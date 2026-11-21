@@ -550,7 +550,7 @@
   "explore.columnFilterNotContains": "enthält nicht",
   "explore.columnFilterApply": "Zur Abfrage hinzufügen",
   "explore.columnFilterClear": "Aus Abfrage entfernen",
-  "explore.columnFilterLogchefqlOnly": "Spaltenfilter funktionieren im LogchefQL-Modus",
+  "explore.columnFilterLogchefqlOnly": "Spaltenfilter funktionieren im LogchefQL- und LogsQL-Modus",
   "ui.off": "Aus",
   "ui.dashboard": "Dashboard",
   "ui.unsaved": "ungespeichert",
@@ -1403,5 +1403,7 @@
   "ui.showAllFields": "Alle Felder anzeigen",
   "ui.fieldsNotInResultsHidden": "{count} Felder ohne Wert in diesen Ergebnissen sind ausgeblendet",
   "ui.hoverValueForActions": "Über einen Wert fahren, um ihn einzuschließen, auszuschließen oder zu kopieren",
-  "explore.fieldNotInResults": "{field} ist nicht in den aktuellen Ergebnissen"
+  "explore.fieldNotInResults": "{field} ist nicht in den aktuellen Ergebnissen",
+  "explore.removeColumn": "Spalte entfernen",
+  "explore.hideColumn": "Spalte {column} entfernen"
 }

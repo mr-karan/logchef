@@ -17,7 +17,7 @@ import { useLocalStorage } from '@vueuse/core'
 import { useColumnState } from '@/composables/useColumnState'
 import { sortingForResult, tableLayoutToDefinition, type SavedViewLayout, type TableViewSeed } from '@/lib/savedViewLayout'
 import { Button } from '@/components/ui/button'
-import { GripVertical, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
+import { GripVertical, ChevronUp, ChevronDown, Clock, X } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater } from '@/lib/utils'
 import type { ColumnInfo } from '@/api/explore'
@@ -578,6 +578,7 @@ const emit = defineEmits<{
     (e: 'add-column', value: { field: string, shownColumns: string[] }): void
     (e: 'apply-column-filter', value: { column: string, operator: FilterOperator, value: string | number }): void
     (e: 'clear-column-filter', column: string): void
+    (e: 'shown-columns', columns: string[]): void
     (e: 'update:displayMode', value: 'table' | 'compact'): void
     (e: 'working-layout', value: SavedViewLayout): void
     (e: 'table-layout', value: SavedViewLayout): void
@@ -632,7 +633,17 @@ const showColumn = (field: string): boolean => {
     return true
 }
 
-defineExpose({ showColumn, shownColumns })
+// Hides a column from its header or from outside the table. The last shown
+// column stays, so the table never goes blank.
+const hideColumn = (field: string) => {
+    if (!shownColumns.value.includes(field) || shownColumns.value.length <= 1) return
+    columnVisibility.value = { ...columnVisibility.value, [field]: false }
+}
+
+watch(shownColumns, columns => emit('shown-columns', columns), { immediate: true })
+onBeforeUnmount(() => emit('shown-columns', []))
+
+defineExpose({ showColumn, hideColumn, shownColumns })
 
 const detailView = ref<'fields' | 'json'>('fields')
 
@@ -724,13 +735,30 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
 
-                                        <!-- Column filter: adds a condition to the LogchefQL query -->
-                                        <span v-if="columnFilterKind(header.column)"
-                                            :class="filteredColumns.includes(header.column.id) ? 'ml-1 flex-shrink-0' : 'absolute right-5 top-1/2 -translate-y-1/2'">
+                                        <!-- Column filter: adds a condition to the query. An active one stays in view. -->
+                                        <span v-if="columnFilterKind(header.column) && filteredColumns.includes(header.column.id)" class="ml-1 flex-shrink-0">
                                             <ColumnFilterButton :column="header.column.id"
                                                 :kind="columnFilterKind(header.column)!"
-                                                :active="filteredColumns.includes(header.column.id)"
-                                                :disabled="activeMode !== 'logchefql'"
+                                                :active="true"
+                                                :disabled="!canFilterRows"
+                                                @apply="emit('apply-column-filter', $event)"
+                                                @clear="emit('clear-column-filter', $event)" />
+                                        </span>
+                                        <span class="absolute right-5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                                            <button v-if="shownColumns.length > 1" type="button" draggable="false"
+                                                data-hide-column
+                                                class="relative z-20 flex items-center justify-center flex-shrink-0 h-5 w-5 rounded bg-muted/80 text-muted-foreground hover:bg-background hover:text-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                                                :title="t('explore.hideColumn', { column: header.column.id })"
+                                                :aria-label="t('explore.hideColumn', { column: header.column.id })"
+                                                @mousedown.stop @dragstart.stop.prevent
+                                                @click.stop="hideColumn(header.column.id)">
+                                                <X class="h-3 w-3" />
+                                            </button>
+                                            <ColumnFilterButton v-if="columnFilterKind(header.column) && !filteredColumns.includes(header.column.id)"
+                                                :column="header.column.id"
+                                                :kind="columnFilterKind(header.column)!"
+                                                :active="false"
+                                                :disabled="!canFilterRows"
                                                 @apply="emit('apply-column-filter', $event)"
                                                 @clear="emit('clear-column-filter', $event)" />
                                         </span>

@@ -45,7 +45,7 @@ import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
 import { addSelectField, appendCondition, buildCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
-import { appendLogsqlFilter, buildLogsqlFilter } from "@/utils/logsql/filters";
+import { appendLogsqlFilter, buildLogsqlFilter, logsqlFilteredColumns, removeLogsqlColumnFilters } from "@/utils/logsql/filters";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
@@ -336,17 +336,31 @@ const aggregation = computed(() => runs.results?.aggregation ?? null);
 const handleAddGroupCondition = (field: string, value: unknown) => handleDrillDown({ column: field, value, operator: "=" });
 
 // Header filters edit the query like the cell menu, then rerun it.
-const columnFilters = computed(() => activeMode.value === "logchefql" ? filteredColumns(logchefQuery.value ?? "") : []);
+const columnFilters = computed(() => {
+  if (filterLanguage.value === "logchefql") return filteredColumns(logchefQuery.value ?? "");
+  if (filterLanguage.value === "logsql") return logsqlFilteredColumns(sqlQuery.value ?? "");
+  return [];
+});
 
 const handleApplyColumnFilter = (data: { column: string; operator: FilterOperator; value: string | number }) => {
-  if (activeMode.value !== "logchefql") return;
-  logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(fieldPath([data.column]), data.operator, data.value));
+  if (filterLanguage.value === "logsql") {
+    sqlQuery.value = appendLogsqlFilter(sqlQuery.value ?? "", buildLogsqlFilter(data.column, data.operator, data.value));
+  } else if (filterLanguage.value === "logchefql") {
+    logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(fieldPath([data.column]), data.operator, data.value));
+  } else {
+    return;
+  }
   nav.run();
 };
 
 const handleClearColumnFilter = (column: string) => {
-  if (activeMode.value !== "logchefql") return;
-  logchefQuery.value = removeColumnConditions(logchefQuery.value ?? "", column);
+  if (filterLanguage.value === "logsql") {
+    sqlQuery.value = removeLogsqlColumnFilters(sqlQuery.value ?? "", column);
+  } else if (filterLanguage.value === "logchefql") {
+    logchefQuery.value = removeColumnConditions(logchefQuery.value ?? "", column);
+  } else {
+    return;
+  }
   nav.run();
 };
 
@@ -787,7 +801,14 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
   });
 };
 
-const resultsViewRef = ref<{ showColumn?: (field: string) => boolean; shownColumns?: string[] } | null>(null);
+const resultsViewRef = ref<{ showColumn?: (field: string) => boolean; hideColumn?: (field: string) => void; shownColumns?: string[] } | null>(null);
+
+// Columns the results table shows, so the Fields sidebar can offer to remove them.
+const tableShownColumns = ref<string[]>([]);
+
+const handleRemoveFieldColumn = (field: string) => {
+  resultsViewRef.value?.hideColumn?.(field);
+};
 
 // Shows a field from the sidebar as a table column. A LogchefQL query that
 // selects its columns gets the field added to its select instead.
@@ -1025,7 +1046,9 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
             :query-fields="sidebarQueryFields"
             :result-fields="sidebarResultFields"
             @add-filter="handleAddFieldFilter"
+            :shown-columns="tableShownColumns"
             @add-column="handleAddFieldColumn"
+            @remove-column="handleRemoveFieldColumn"
             @field-click="handleFieldClick"
           />
 
@@ -1249,6 +1272,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     @add-column="handleAddColumn"
                     @apply-column-filter="handleApplyColumnFilter"
                     @clear-column-filter="handleClearColumnFilter"
+                    @shown-columns="tableShownColumns = $event"
                     @update:display-mode="displayMode = $event"
                   />
 

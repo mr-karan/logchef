@@ -550,7 +550,7 @@
   "explore.columnFilterNotContains": "non contiene",
   "explore.columnFilterApply": "Aggiungi alla query",
   "explore.columnFilterClear": "Rimuovi dalla query",
-  "explore.columnFilterLogchefqlOnly": "I filtri di colonna funzionano in modalità LogchefQL",
+  "explore.columnFilterLogchefqlOnly": "I filtri di colonna funzionano nelle modalità LogchefQL e LogsQL",
   "ui.off": "Disattivato",
   "ui.dashboard": "Dashboard",
   "ui.unsaved": "non salvato",
@@ -1403,5 +1403,7 @@
   "ui.showAllFields": "Mostra tutti i campi",
   "ui.fieldsNotInResultsHidden": "{count} campi non presenti in questi risultati sono nascosti",
   "ui.hoverValueForActions": "Passa sopra un valore per includerlo, escluderlo o copiarlo",
-  "explore.fieldNotInResults": "{field} non è nei risultati correnti"
+  "explore.fieldNotInResults": "{field} non è nei risultati correnti",
+  "explore.removeColumn": "Rimuovi colonna",
+  "explore.hideColumn": "Rimuovi la colonna {column}"
 }

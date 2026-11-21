@@ -550,7 +550,7 @@
   "explore.columnFilterNotContains": "शामिल नहीं है",
   "explore.columnFilterApply": "क्वेरी में जोड़ें",
   "explore.columnFilterClear": "क्वेरी से हटाएँ",
-  "explore.columnFilterLogchefqlOnly": "कॉलम फ़िल्टर LogchefQL मोड में काम करते हैं",
+  "explore.columnFilterLogchefqlOnly": "कॉलम फ़िल्टर LogchefQL और LogsQL मोड में काम करते हैं",
   "ui.off": "बंद",
   "ui.dashboard": "डैशबोर्ड",
   "ui.unsaved": "सहेजा नहीं गया",
@@ -1403,5 +1403,7 @@
   "ui.showAllFields": "सभी फ़ील्ड दिखाएँ",
   "ui.fieldsNotInResultsHidden": "इन परिणामों में न होने वाले {count} फ़ील्ड छिपे हैं",
   "ui.hoverValueForActions": "शामिल करने, बाहर करने या कॉपी करने के लिए किसी मान पर होवर करें",
-  "explore.fieldNotInResults": "{field} वर्तमान परिणामों में नहीं है"
+  "explore.fieldNotInResults": "{field} वर्तमान परिणामों में नहीं है",
+  "explore.removeColumn": "कॉलम हटाएँ",
+  "explore.hideColumn": "{column} कॉलम हटाएँ"
 }

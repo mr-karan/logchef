@@ -548,7 +548,7 @@
   "explore.columnFilterNotContains": "不包含",
   "explore.columnFilterApply": "添加到查询",
   "explore.columnFilterClear": "从查询中移除",
-  "explore.columnFilterLogchefqlOnly": "列筛选仅适用于 LogchefQL 模式",
+  "explore.columnFilterLogchefqlOnly": "列过滤器适用于 LogchefQL 和 LogsQL 模式",
   "ui.off": "关闭",
   "ui.dashboard": "仪表盘",
   "ui.unsaved": "未保存",
@@ -2205,5 +2205,7 @@
   "ui.showAllFields": "显示所有字段",
   "ui.fieldsNotInResultsHidden": "已隐藏 {count} 个不在这些结果中的字段",
   "ui.hoverValueForActions": "将鼠标悬停在值上可包含、排除或复制",
-  "explore.fieldNotInResults": "{field} 不在当前结果中"
+  "explore.fieldNotInResults": "{field} 不在当前结果中",
+  "explore.removeColumn": "移除列",
+  "explore.hideColumn": "移除列 {column}"
 }

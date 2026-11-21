@@ -550,7 +550,7 @@
   "explore.columnFilterNotContains": "含まない",
   "explore.columnFilterApply": "クエリに追加",
   "explore.columnFilterClear": "クエリから削除",
-  "explore.columnFilterLogchefqlOnly": "列フィルターは LogchefQL モードで使用できます",
+  "explore.columnFilterLogchefqlOnly": "列フィルターは LogchefQL と LogsQL モードで使えます",
   "ui.off": "オフ",
   "ui.dashboard": "ダッシュボード",
   "ui.unsaved": "未保存",
@@ -1403,5 +1403,7 @@
   "ui.showAllFields": "すべてのフィールドを表示",
   "ui.fieldsNotInResultsHidden": "この結果にない {count} 個のフィールドを非表示にしています",
   "ui.hoverValueForActions": "値にカーソルを合わせると、含める・除外する・コピーができます",
-  "explore.fieldNotInResults": "{field} は現在の結果にありません"
+  "explore.fieldNotInResults": "{field} は現在の結果にありません",
+  "explore.removeColumn": "列を削除",
+  "explore.hideColumn": "列 {column} を削除"
 }

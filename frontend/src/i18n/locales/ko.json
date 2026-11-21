@@ -550,7 +550,7 @@
   "explore.columnFilterNotContains": "미포함",
   "explore.columnFilterApply": "쿼리에 추가",
   "explore.columnFilterClear": "쿼리에서 제거",
-  "explore.columnFilterLogchefqlOnly": "열 필터는 LogchefQL 모드에서 작동합니다",
+  "explore.columnFilterLogchefqlOnly": "열 필터는 LogchefQL 및 LogsQL 모드에서 작동합니다",
   "ui.off": "끔",
   "ui.dashboard": "대시보드",
   "ui.unsaved": "저장되지 않음",
@@ -1403,5 +1403,7 @@
   "ui.showAllFields": "모든 필드 표시",
   "ui.fieldsNotInResultsHidden": "이 결과에 없는 필드 {count}개가 숨겨져 있습니다",
   "ui.hoverValueForActions": "값에 마우스를 올려 포함, 제외 또는 복사하세요",
-  "explore.fieldNotInResults": "{field} 필드가 현재 결과에 없습니다"
+  "explore.fieldNotInResults": "{field} 필드가 현재 결과에 없습니다",
+  "explore.removeColumn": "열 제거",
+  "explore.hideColumn": "{column} 열 제거"
 }
