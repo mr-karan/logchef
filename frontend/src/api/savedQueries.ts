@@ -3,6 +3,7 @@ import type { VariableState } from "@/stores/variables";
 import type { TeamSummary } from "./teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import type { SavedViewColumn, SavedViewSort } from "@/lib/savedViewLayout";
+import type { QueryFilter } from "@/utils/queryFilters";
 
 /**
  * The table layout saved with a query, in the saved view definition format
@@ -32,6 +33,8 @@ export interface SavedQueryContent {
   variables?: VariableState[];
   /** Absent on queries saved before layouts were stored. */
   layout?: SavedQueryLayout | null;
+  /** Filter pills that join the content with "and" when it runs. */
+  filters?: QueryFilter[];
 }
 
 /**

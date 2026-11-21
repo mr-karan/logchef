@@ -23,6 +23,7 @@ import { epochMs, relativeWindow, resolveWindow, sameWindow, type ResolvedWindow
 import { decodeDraftWindow, decodeStoredRange, encodeStoredRange, encodeWindowForUrl, type DraftTime } from '@/utils/timeWindowCodec';
 import type { Source } from '@/api/sources';
 import { isAggregation } from '@/utils/logchefql/aggregation';
+import { applyFilters, decodeFilters, encodeFilters, sameFilters, type QueryFilter } from '@/utils/queryFilters';
 import {
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
@@ -36,6 +37,8 @@ import {
 export interface RunQuery {
   mode: 'logchefql' | 'native';
   text: string;
+  /** Filter pills that join the text with "and" when it runs. */
+  filters?: QueryFilter[];
 }
 
 /** A query over a window with a row limit: what a run asks for and what the URL records. */
@@ -48,6 +51,7 @@ export interface RunRequest {
 interface SavedQuerySnapshot {
   mode: "logchefql" | "native";
   queryContent: string;
+  filters: QueryFilter[];
   limit: number;
   window: TimeWindow;
 }
@@ -59,6 +63,7 @@ type ExploreDraft = DraftTime & {
   logchefqlCode: string;
   limit: number;
   variables: VariableState[];
+  filters?: QueryFilter[];
 };
 
 // The non-time fields of a stored draft, any version. The time goes through decodeDraftWindow.
@@ -88,6 +93,8 @@ export interface ExploreState {
   nativeQuery: string;
   showsDefaultSql: boolean;
   logchefqlCode: string;
+  // Filter pills beside the query text.
+  filters: QueryFilter[];
   activeMode: "logchefql" | "native";
   selectedQueryId: string | null;
   activeShareToken: string | null;
@@ -144,6 +151,7 @@ export const useExploreStore = defineStore("explore", () => {
     nativeQuery: "",
     showsDefaultSql: false,
     logchefqlCode: "",
+    filters: [],
     activeMode: "logchefql",
     selectedQueryId: null,
     activeShareToken: null,
@@ -187,6 +195,14 @@ export const useExploreStore = defineStore("explore", () => {
   const templateDialect = computed(() => state.data.value.activeMode === "logchefql"
     ? "logchefql" : getCurrentSource() ? getNativeQueryLanguageForSource(getCurrentSource()) : null);
 
+  // The language filter pills translate to: LogchefQL, or native LogsQL on a
+  // VictoriaLogs source. Other native languages get no pills.
+  const filterLanguage = computed<"logchefql" | "logsql" | null>(() => {
+    if (state.data.value.activeMode === "logchefql") return "logchefql";
+    return getNativeQueryLanguageForSource(getCurrentSource()) === "logsql" ? "logsql" : null;
+  });
+  const supportsFilterPills = computed(() => filterLanguage.value !== null);
+
   // Live tail: the current source must advertise the capability, and the tail
   // endpoint accepts LogchefQL or a native language other than ClickHouse SQL
   // (LogsQL, LogQL). Native clickhouse-sql is rejected 400 server-side, so the
@@ -217,7 +233,7 @@ export const useExploreStore = defineStore("explore", () => {
       return;
     }
 
-    const { activeMode, nativeQuery, showsDefaultSql, logchefqlCode, limit } = state.data.value;
+    const { activeMode, nativeQuery, showsDefaultSql, logchefqlCode, limit, filters } = state.data.value;
     const draft: ExploreDraft = {
       version: 2,
       window: state.data.value.window,
@@ -227,6 +243,7 @@ export const useExploreStore = defineStore("explore", () => {
       logchefqlCode,
       limit,
       variables: cloneVariables(variableStore.allVariables),
+      filters,
     };
 
     try {
@@ -258,6 +275,7 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.nativeQuery = draft.nativeQuery || "";
       state.data.value.showsDefaultSql = draft.showsDefaultSql === true && state.data.value.nativeQuery === draft.nativeQuery;
       state.data.value.logchefqlCode = draft.logchefqlCode || "";
+      state.data.value.filters = decodeFilters(draft.filters);
       if (draft.limit && draft.limit > 0) {
         state.data.value.limit = draft.limit;
       }
@@ -284,6 +302,7 @@ export const useExploreStore = defineStore("explore", () => {
       sourceId: sourceId.value,
       mode: activeMode,
       query: activeMode === "native" ? nativeQuery : logchefqlCode,
+      filters: state.data.value.filters,
       limit,
       window,
       variables: cloneVariables(variableStore.allVariables),
@@ -314,6 +333,7 @@ export const useExploreStore = defineStore("explore", () => {
   const editorQuery = computed<RunQuery>(() => ({
     mode: state.data.value.activeMode,
     text: state.data.value.activeMode === 'native' ? state.data.value.nativeQuery : state.data.value.logchefqlCode,
+    ...(supportsFilterPills.value && state.data.value.filters.length ? { filters: state.data.value.filters } : {}),
   }));
   const editorRun = computed<RunRequest>(() => ({ query: editorQuery.value, window: timeWindow.value, limit: state.data.value.limit }));
 
@@ -326,6 +346,9 @@ export const useExploreStore = defineStore("explore", () => {
 
     const currentContent = activeMode === 'logchefql' ? logchefqlCode : nativeQuery;
     if (activeMode !== savedQuerySnapshot.mode || currentContent !== savedQuerySnapshot.queryContent) {
+      return true;
+    }
+    if (!sameFilters(state.data.value.filters, savedQuerySnapshot.filters)) {
       return true;
     }
 
@@ -356,7 +379,7 @@ export const useExploreStore = defineStore("explore", () => {
       params.view = viewId.toString();
     }
 
-    const isEditorQuery = query.mode === editorQuery.value.mode && query.text === editorQuery.value.text;
+    const isEditorQuery = query.mode === editorQuery.value.mode && query.text === editorQuery.value.text && sameFilters(query.filters, editorQuery.value.filters);
     if (isEditorQuery && selectedQueryId && !hasDivergedFromSavedQuery.value) {
       params.id = selectedQueryId;
       return params;
@@ -376,6 +399,8 @@ export const useExploreStore = defineStore("explore", () => {
     } else {
       params.q = query.text;
     }
+    const filters = encodeFilters(query.filters ?? []);
+    if (filters) params.filters = filters;
 
     return params;
   }
@@ -417,6 +442,13 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
+  /** Replaces the filter pills. Does not run; the Explorer runs after a change. */
+  function setFilters(filters: QueryFilter[]) {
+    state.data.value.filters = filters;
+    clearShareSelectionIfDirty();
+    persistDraft();
+  }
+
   /** Shows the default SQL a run generated. */
   function showDefaultSql(sql: string) {
     state.data.value.nativeQuery = sql;
@@ -454,12 +486,14 @@ export const useExploreStore = defineStore("explore", () => {
     if (!state.data.value.window) assignWindow(DEFAULT_WINDOW);
     state.data.value.logchefqlCode = '';
     state.data.value.nativeQuery = '';
+    state.data.value.filters = [];
     state.data.value.activeMode = getDefaultModeForSource();
     if (!restoreDraftForCurrentContext() && viewWindow) assignWindow(viewWindow);
   }
 
-  function openQuery({ mode, text, window, limit }: Extract<ExploreTarget, { kind: 'query' }>, viewWindow: TimeWindow | null) {
+  function openQuery({ mode, text, window, limit, filters }: Extract<ExploreTarget, { kind: 'query' }>, viewWindow: TimeWindow | null) {
     assignWindow(window ?? viewWindow ?? DEFAULT_WINDOW);
+    state.data.value.filters = filters ?? [];
     if (limit && limit > 0) state.data.value.limit = limit;
     if (mode) state.data.value.activeMode = mode;
     state.data.value.logchefqlCode = state.data.value.activeMode === 'logchefql' ? text : '';
@@ -498,6 +532,8 @@ export const useExploreStore = defineStore("explore", () => {
 
     const limit = content.limit || 100;
     state.data.value.limit = limit;
+    const filters = decodeFilters(content.filters);
+    state.data.value.filters = filters;
 
     // A saved query without a time range keeps the current window.
     const window = decodeStoredRange(content.timeRange, {
@@ -507,7 +543,7 @@ export const useExploreStore = defineStore("explore", () => {
     }) ?? viewWindow ?? timeWindow.value;
     assignWindow(window);
 
-    state.data.value.savedQuerySnapshot = { mode: resolvedMode, queryContent, limit, window };
+    state.data.value.savedQuerySnapshot = { mode: resolvedMode, queryContent, filters, limit, window };
 
     // Ensure variables from the query content are initialized in the variable store
     if (Array.isArray(content.variables)) {
@@ -530,6 +566,8 @@ export const useExploreStore = defineStore("explore", () => {
 
     state.data.value.activeShareToken = share.token;
     state.data.value.activeMode = payload.mode ? normalizeExploreMode(payload.mode) : "logchefql";
+    // A share carries its pills inside its query text.
+    state.data.value.filters = [];
 
     if (state.data.value.activeMode === "native") {
       state.data.value.nativeQuery = payload.query || "";
@@ -642,6 +680,7 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.showsDefaultSql = false;
     state.data.value.logchefqlCode = '';
     state.data.value.nativeQuery = '';
+    state.data.value.filters = [];
     state.data.value.activeMode = getDefaultModeForSource();
     state.data.value.selectedQueryId = null;
     clearActiveShareSelection();
@@ -701,6 +740,8 @@ export const useExploreStore = defineStore("explore", () => {
     } else {
       return;
     }
+
+    if (supportsFilterPills.value) queryText = applyFilters(queryText, state.data.value.filters, filterLanguage.value ?? "logchefql");
 
     // Abort any prior stream and reset the buffer for a fresh session.
     stopLiveTail();
@@ -782,6 +823,7 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.savedQuerySnapshot = {
       mode: normalizeModeForSource(getExploreModeForQueryLanguage(saved.query_language)),
       queryContent: content.content || '',
+      filters: decodeFilters(content.filters),
       limit: content.limit || 100,
       window: decodeStoredRange(content.timeRange, {
         format: 'saved-query', version: content.version, prefZone: preferencesStore.zone,
@@ -816,12 +858,14 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function buildQuerySharePayload(layout: SavedViewDefinition | null): QuerySharePayload {
-    const { activeMode, nativeQuery, logchefqlCode, limit, window } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, window, filters } = state.data.value;
     const stored = window ? encodeStoredRange(window) : null;
+    const text = activeMode === "native" ? nativeQuery : logchefqlCode;
     return {
       version: 2,
       mode: activeMode === "native" ? "sql" : "logchefql",
-      query: activeMode === "native" ? nativeQuery : logchefqlCode,
+      // A share has no pills of its own, so they join its query text.
+      query: filterLanguage.value ? applyFilters(text, filters, filterLanguage.value) : text,
       limit,
       timezone: preferencesStore.zone,
       variables: variableStore.allVariables as unknown as QuerySharePayload["variables"],
@@ -913,6 +957,7 @@ export const useExploreStore = defineStore("explore", () => {
         state.data.value.activeMode,
         state.data.value.logchefqlCode,
         state.data.value.nativeQuery,
+        state.data.value.filters,
       ] as const,
     () => {
       if (state.data.value.isLive) stopLiveTail();
@@ -932,6 +977,10 @@ export const useExploreStore = defineStore("explore", () => {
     nativeQuery: computed(() => state.data.value.nativeQuery),
     showsDefaultSql: computed(() => state.data.value.showsDefaultSql),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
+    filters: computed(() => state.data.value.filters),
+    filterLanguage,
+    supportsFilterPills,
+    setFilters,
     activeMode: computed(() => state.data.value.activeMode),
     templateDialect,
     error: state.error,

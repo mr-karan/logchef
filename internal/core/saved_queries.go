@@ -95,6 +95,10 @@ func parseAndValidateSavedQueryContent(contentJSON string) (*models.SavedQueryCo
 		}
 	}
 
+	if err := models.ValidateQueryFilters(queryContent.Filters); err != nil {
+		return nil, fmt.Errorf("%w: filters: %w", ErrInvalidQueryContent, err)
+	}
+
 	return &queryContent, nil
 }
 

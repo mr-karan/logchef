@@ -248,6 +248,11 @@ func TestParseAndValidateSavedQueryContent(t *testing.T) {
 		{"layout cannot set a filter", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"filter":"level=\"error\""}}`, true},
 		{"layout cannot set a time range", `{"version":2,"limit":10,"content":"x","layout":{"version":1,"time_range":"15m"}}`, true},
 		{"layout that is not an object", `{"version":2,"limit":10,"content":"x","layout":"msg"}`, true},
+		{"filters are allowed", `{"version":2,"limit":10,"content":"x","filters":[{"field":"level","operator":"is","values":["error"],"negate":true,"label":"no errors"},{"field":"user","operator":"exists","values":[]}]}`, false},
+		{"filter with unknown operator", `{"version":2,"limit":10,"content":"x","filters":[{"field":"level","operator":"like","values":["e"]}]}`, true},
+		{"filter without field", `{"version":2,"limit":10,"content":"x","filters":[{"field":"","operator":"is","values":["e"]}]}`, true},
+		{"filter with two values for is", `{"version":2,"limit":10,"content":"x","filters":[{"field":"a","operator":"is","values":["b","c"]}]}`, true},
+		{"filter with object value", `{"version":2,"limit":10,"content":"x","filters":[{"field":"a","operator":"is","values":[{"b":1}]}]}`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

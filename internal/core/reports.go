@@ -315,6 +315,8 @@ func savedQueryContent(sq *models.SavedQuery) (*models.SavedQueryContent, error)
 	if strings.TrimSpace(content.Content) == "" {
 		return nil, fmt.Errorf("saved query %d has no query", sq.ID)
 	}
+	// The query's filter pills join its text, as they do in the Explorer.
+	content.Content = ApplyQueryFilters(content.Content, sq.QueryLanguage, content.Filters)
 	return &content, nil
 }
 

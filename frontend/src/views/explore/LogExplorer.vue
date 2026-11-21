@@ -44,8 +44,10 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { copyText } from "@/utils/clipboard";
-import { addSelectField, appendCondition, buildCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
-import { appendLogsqlFilter, buildLogsqlFilter, logsqlFilteredColumns, removeLogsqlColumnFilters } from "@/utils/logsql/filters";
+import { addSelectField, appendCondition, fieldPath, filteredColumns, removeColumnConditions, type FilterOperator } from "@/utils/logchefql/filters";
+import { appendLogsqlFilter, logsqlFilteredColumns, removeLogsqlColumnFilters } from "@/utils/logsql/filters";
+import { filterExpression, filterFieldLabel, filterFromAction, filteredFields, sameFilter, type QueryFilter } from "@/utils/queryFilters";
+import FilterPillsBar from "@/components/filter-pills/FilterPillsBar.vue";
 import { epochMs, toRfc3339 } from "@/utils/timeWindow";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import type { CompletionValuesWindow } from "@/composables/useCompletionFieldValues";
@@ -246,12 +248,15 @@ const currentQueryContentJson = computed(() => {
     content: exploreStore.activeMode === 'logchefql' 
       ? exploreStore.logchefqlCode 
       : exploreStore.nativeQuery,
+    // The pills save with the query; the language lets an empty query take them as its text.
+    filters: exploreStore.supportsFilterPills ? exploreStore.filters : [],
+    filterLanguage: exploreStore.filterLanguage,
   });
 });
 
 const parsedQuery = computed(() => {
   const compilation = runs.results?.compilation;
-  if (!runs.shown?.query.text.trim() || !compilation) return EMPTY_PARSED_QUERY;
+  if (!runs.shown?.sent.text.trim() || !compilation) return EMPTY_PARSED_QUERY;
   return { success: true, meta: compilation };
 });
 
@@ -267,7 +272,7 @@ const sidebarQueryFields = computed((): string[] => {
   const shown = runs.shown;
   if (!shown) return [];
   if (shown.query.mode === "logchefql") return queryFields.value;
-  return getNativeQueryLanguageForSource(shown.source) === "logsql" ? logsqlFilterFields(shown.query.text) : [];
+  return getNativeQueryLanguageForSource(shown.source) === "logsql" ? logsqlFilterFields(shown.sent.text) : [];
 });
 
 // Fields with a value in the log rows on screen; null when there are none to go by.
@@ -308,26 +313,58 @@ const regexHighlights = computed(() => {
   return highlights;
 });
 
-// The query language that cell and row filters edit: LogchefQL, or native
+// The query language that filter pills translate to: LogchefQL, or native
 // LogsQL on a VictoriaLogs source. Other native languages get no filters.
-const filterLanguage = computed<"logchefql" | "logsql" | null>(() => {
-  if (activeMode.value === "logchefql") return "logchefql";
-  if (activeMode.value === "native" && sourceDetails.value && getNativeQueryLanguageForSource(sourceDetails.value) === "logsql") return "logsql";
-  return null;
+const filterLanguage = computed(() => exploreStore.filterLanguage);
+
+// Runs the query with the pills as they are now, stopping a run in flight.
+const rerunWithFilters = () => {
+  if (runs.isRunning) nav.cancel();
+  nav.run();
+};
+
+const setFilters = (filters: QueryFilter[]) => {
+  exploreStore.setFilters(filters);
+  rerunWithFilters();
+};
+
+// Adds a pill, unless the same filter is already there; an identical pill
+// that was disabled is enabled again.
+const addFilterPill = (filter: QueryFilter) => {
+  const filters = exploreStore.filters;
+  const existing = filters.findIndex((item) => sameFilter(item, filter));
+  if (existing >= 0 && !filters[existing].disabled) return;
+  setFilters(existing >= 0
+    ? filters.map((item, index) => (index === existing ? { ...item, disabled: undefined } : item))
+    : [...filters, filter]);
+};
+
+// Moves pills into the query text, joined with "and", and runs it.
+const copyFiltersToQuery = (copied: QueryFilter[]) => {
+  const language = filterLanguage.value;
+  if (!language || copied.length === 0) return;
+  let text = (language === "logsql" ? sqlQuery.value : logchefQuery.value) ?? "";
+  for (const filter of copied) {
+    if (filter.disabled) continue;
+    const expression = filterExpression(filter, language);
+    text = language === "logsql" ? appendLogsqlFilter(text, expression) : appendCondition(text, expression);
+  }
+  if (language === "logsql") sqlQuery.value = text;
+  else logchefQuery.value = text;
+  setFilters(exploreStore.filters.filter((filter) => filter.disabled || !copied.some((item) => sameFilter(item, filter))));
+};
+
+// Fields the filter editor suggests: the source's columns and the fields in the rows on screen.
+const filterFieldSuggestions = computed(() => {
+  const names = new Set((sourceDetails.value?.columns ?? []).map((column) => column.name));
+  for (const field of sidebarResultFields.value ?? []) names.add(field);
+  return [...names].sort((a, b) => a.localeCompare(b));
 });
 
-// Adds a filter from a table cell or an expanded row to the active query.
+// A table cell or an expanded row adds a filter pill and runs the query.
 const handleDrillDown = (data: { column: string; value: unknown; operator: FilterOperator }) => {
-  if (filterLanguage.value === "logsql") {
-    sqlQuery.value = appendLogsqlFilter(sqlQuery.value ?? "", buildLogsqlFilter(data.column, data.operator, data.value));
-  } else if (filterLanguage.value === "logchefql") {
-    logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(data.column, data.operator, data.value));
-  } else {
-    return;
-  }
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
+  if (!filterLanguage.value) return;
+  addFilterPill(filterFromAction(data.column, data.operator, data.value));
 };
 
 // An aggregated result shows its own view in place of the log rows.
@@ -335,24 +372,21 @@ const aggregation = computed(() => runs.results?.aggregation ?? null);
 
 const handleAddGroupCondition = (field: string, value: unknown) => handleDrillDown({ column: field, value, operator: "=" });
 
-// Header filters edit the query like the cell menu, then rerun it.
+// Header filters add pills like the cell menu. A column shows as filtered
+// when a pill or a top-level condition of the query filters it.
 const columnFilters = computed(() => {
-  if (filterLanguage.value === "logchefql") return filteredColumns(logchefQuery.value ?? "");
-  if (filterLanguage.value === "logsql") return logsqlFilteredColumns(sqlQuery.value ?? "");
+  const pills = filteredFields(exploreStore.filters);
+  if (filterLanguage.value === "logchefql") return [...new Set([...pills, ...filteredColumns(logchefQuery.value ?? "")])];
+  if (filterLanguage.value === "logsql") return [...new Set([...pills, ...logsqlFilteredColumns(sqlQuery.value ?? "")])];
   return [];
 });
 
 const handleApplyColumnFilter = (data: { column: string; operator: FilterOperator; value: string | number }) => {
-  if (filterLanguage.value === "logsql") {
-    sqlQuery.value = appendLogsqlFilter(sqlQuery.value ?? "", buildLogsqlFilter(data.column, data.operator, data.value));
-  } else if (filterLanguage.value === "logchefql") {
-    logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(fieldPath([data.column]), data.operator, data.value));
-  } else {
-    return;
-  }
-  nav.run();
+  if (!filterLanguage.value) return;
+  addFilterPill(filterFromAction(fieldPath([data.column]), data.operator, data.value));
 };
 
+// Clearing a header filter drops the column's pills and its conditions in the query.
 const handleClearColumnFilter = (column: string) => {
   if (filterLanguage.value === "logsql") {
     sqlQuery.value = removeLogsqlColumnFilters(sqlQuery.value ?? "", column);
@@ -361,7 +395,7 @@ const handleClearColumnFilter = (column: string) => {
   } else {
     return;
   }
-  nav.run();
+  setFilters(exploreStore.filters.filter((filter) => filterFieldLabel(filter.field) !== column));
 };
 
 // Projects a nested field as an extra column; top-level columns are shown by the table itself.
@@ -766,8 +800,9 @@ const appendLogsqlExpression = (query: string, expression: string) => {
 // Handle adding a field filter from the sidebar. Native LogsQL on screen keeps
 // its mode, like a filter from a table cell.
 const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!=') => {
-  if (filterLanguage.value === "logsql") {
-    handleDrillDown({ column: field, value, operator });
+  const filterValue = /^\d+$/.test(value) ? Number(value) : value;
+  if (filterLanguage.value) {
+    addFilterPill(filterFromAction(field, operator, filterLanguage.value === "logsql" ? value : filterValue));
     return;
   }
   if (!supportsLogchefQL.value) {
@@ -787,18 +822,9 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
     return;
   }
 
-  const filterValue = /^\d+$/.test(value) ? Number(value) : value;
-  exploreStore.setLogchefqlCode(appendCondition(exploreStore.logchefqlCode ?? '', buildCondition(field, operator, filterValue)));
-  
-  // Switch to LogchefQL mode if not already
-  if (activeMode.value !== 'logchefql') {
-    changeMode('logchefql');
-  }
-  
-  // Focus the editor
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
+  // Native SQL takes no pills, so the filter switches to LogchefQL.
+  changeMode('logchefql');
+  addFilterPill(filterFromAction(field, operator, filterValue));
 };
 
 const resultsViewRef = ref<{ showColumn?: (field: string) => boolean; hideColumn?: (field: string) => void; shownColumns?: string[] } | null>(null);
@@ -1118,6 +1144,15 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                       </div>
                     </template>
                   </QueryEditor>
+                  <FilterPillsBar
+                    v-if="filterLanguage"
+                    class="border-t"
+                    :filters="exploreStore.filters"
+                    :fields="filterFieldSuggestions"
+                    :language="filterLanguage"
+                    @update:filters="setFilters"
+                    @copy-to-query="copyFiltersToQuery"
+                  />
                 </div>
               </template>
 
@@ -1222,7 +1257,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :columns="runs.shown.results.columns"
                     :rows="runs.shown.results.rows"
                     :stats="runs.shown.results.stats"
-                    :query="runs.shown.query.text"
+                    :query="runs.shown.sent.text"
                     :team-id="runs.shown.teamId"
                     :source-id="runs.shown.source.id"
                     :range="runs.shown.resolved"

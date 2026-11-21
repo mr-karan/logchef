@@ -4,6 +4,9 @@ import { useTeamsStore } from '@/stores/teams';
 import { logchefqlApi } from '@/api/logchefql';
 import { useVariables } from "@/composables/useVariables";
 import { toRfc3339 } from '@/utils/timeWindow';
+import { applyFilters } from '@/utils/queryFilters';
+import { getNativeQueryLanguageForSource } from '@/lib/queryMetadata';
+import { useSourcesStore } from '@/stores/sources';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'native';
@@ -50,8 +53,12 @@ export function useQuery() {
         try {
           const { start, end, zone } = exploreStore.resolveNow();
 
+          // Native LogsQL keeps the filter pills. Other native languages take
+          // none, so the pills join the translated query and leave the bar.
+          const keepsPills = getNativeQueryLanguageForSource(useSourcesStore().currentSourceDetails) === 'logsql';
+          const foldsPills = !keepsPills && exploreStore.filters.length > 0;
           // Let the backend substitute typed variables exactly once.
-          const query = logchefQuery.value?.trim() || '';
+          const query = (foldsPills ? applyFilters(logchefQuery.value ?? '', exploreStore.filters, 'logchefql') : logchefQuery.value)?.trim() || '';
           const variables = getVariablesForApi();
 
           const response = await logchefqlApi.translate(currentTeamId, sourceId, {
@@ -71,6 +78,7 @@ export function useQuery() {
           const generatedQuery = response.data?.generated_query || response.data?.full_sql;
           if (generatedQuery) {
             exploreStore.setNativeQuery(generatedQuery);
+            if (foldsPills) exploreStore.setFilters([]);
           } else {
             exploreStore.setQueryError("Could not generate SQL from your query. Please refine and try again.");
             return;

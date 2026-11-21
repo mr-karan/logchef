@@ -10,6 +10,7 @@ import { getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 import { generateDefaultSql } from "@/services/SqlManager";
 import { prepareLogchefQLTemplate } from "@/utils/logchefql/template";
 import { isAggregation } from "@/utils/logchefql/aggregation";
+import { applyFilters } from "@/utils/queryFilters";
 import { toRfc3339, type ResolvedWindow, type TimeWindow } from "@/utils/timeWindow";
 import { useExploreStore, type RunQuery } from "./explore";
 import { useExploreHistogramStore } from "./exploreHistogram";
@@ -39,8 +40,10 @@ export interface Execution {
   readonly source: Source;
   // What the run was asked for. A replay asks again, so an empty native query regenerates its default SQL.
   readonly asked: RunQuery;
-  // What the run sent.
+  // What the run asked for with the source's default filled in: what the URL records.
   readonly query: RunQuery;
+  // What the run sent: the query text with its filter pills joined to it.
+  readonly sent: RunQuery;
   readonly window: TimeWindow;
   readonly resolved: ResolvedWindow;
   readonly limit: number;
@@ -98,11 +101,19 @@ function results(rows: LogRow[], columns: ColumnInfo[] | null | undefined, stats
 function withDefaultSql(query: RunQuery, source: Source, window: ResolvedWindow, limit: number): RunQuery {
   if (query.mode !== "native" || query.text.trim()) return query;
   const selector = getLokiSelector(source);
-  if (selector) return { mode: "native", text: selector };
+  if (selector) return { ...query, mode: "native", text: selector };
   if (getNativeQueryLanguageForSource(source) !== "clickhouse-sql") return query;
   const connection = asClickHouseConnection(source.connection);
   const tableName = connection?.database && connection.table_name ? `${connection.database}.${connection.table_name}` : "default.logs";
   return { mode: "native", text: generateDefaultSql({ tableName, tsField: source._meta_ts_field || "timestamp", window, limit }) };
+}
+
+// Filter pills join a LogchefQL query or a native LogsQL query with "and".
+function withFilters(query: RunQuery, source: Source): RunQuery {
+  if (!query.filters?.length) return query;
+  const language = query.mode === "logchefql" ? "logchefql" : getNativeQueryLanguageForSource(source) === "logsql" ? "logsql" : null;
+  if (!language) return query;
+  return { mode: query.mode, text: applyFilters(query.text, query.filters, language) };
 }
 
 // An aggregated result is already counted, and the histogram cannot count its grouped query.
@@ -148,12 +159,15 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
     halt(here.value.current);
     explore.clearError();
     const resolved = explore.resolveNow();
+    const query = withDefaultSql(asked, source, resolved, explore.limit);
+    const sent = withFilters(query, source);
     const execution = shallowReactive<Execution>({
       id: ++lastId,
       teamId,
       source,
       asked,
-      query: withDefaultSql(asked, source, resolved, explore.limit),
+      query,
+      sent,
       window: explore.window,
       resolved,
       limit: explore.limit,
@@ -162,7 +176,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
       streamFilters: explore.streamFilters,
       controller: new AbortController(),
       onShown,
-      status: validate && asked.mode === "logchefql" && asked.text.trim() ? "validating" : "running",
+      status: validate && sent.mode === "logchefql" && sent.text.trim() ? "validating" : "running",
       error: null,
       results: null,
       search: null,
@@ -203,7 +217,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
       }
       // Windowed search pages log rows, and it rejects an aggregation outright.
       const optimizer = getVictoriaLogsOptimizer(execution.source);
-      const aggregates = execution.query.mode === "logchefql" && isAggregation(execution.query.text);
+      const aggregates = execution.sent.mode === "logchefql" && isAggregation(execution.sent.text);
       if (optimizer && !aggregates) {
         try {
           return await searchWindows(execution, optimizer.histogram_enabled !== false);
@@ -229,7 +243,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
     if (status === "failed" && !execution.results) execution.search?.stop();
   }
 
-  async function validationError({ teamId, source, query }: Execution): Promise<string | null> {
+  async function validationError({ teamId, source, sent: query }: Execution): Promise<string | null> {
     try {
       const response = await logchefqlApi.validate(teamId, source.id, prepareLogchefQLTemplate(query.text));
       const valid = response.status !== "success" || response.data?.valid !== false;
@@ -243,7 +257,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
 
   // Each page shows as it arrives. An error after rows shows in the search panel.
   async function searchWindows(execution: Execution, withHistogram: boolean) {
-    const { teamId, source, query, resolved, limit, timeout, variables, streamFilters } = execution;
+    const { teamId, source, sent: query, resolved, limit, timeout, variables, streamFilters } = execution;
     const search = execution.search = createWindowedSession({
       teamId,
       sourceId: source.id,
@@ -282,7 +296,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
     }
   }
 
-  async function queryOnce({ teamId, source, query, resolved, limit, timeout, variables, streamFilters, controller }: Execution): Promise<Results> {
+  async function queryOnce({ teamId, source, sent: query, resolved, limit, timeout, variables, streamFilters, controller }: Execution): Promise<Results> {
     const optimizer = getVictoriaLogsOptimizer(source);
     const common = {
       extra_stream_filters: optimizer ? streamFilters : undefined,
@@ -336,7 +350,7 @@ export const useExploreRuns = defineStore("exploreRuns", () => {
       sourceId: execution.source.id,
       variables: execution.variables,
       extraStreamFilters: getVictoriaLogsOptimizer(execution.source) ? execution.streamFilters : undefined,
-      queryText: execution.query.mode === "logchefql" ? execution.results?.sql ?? "" : execution.query.text.trim() || "*",
+      queryText: execution.sent.mode === "logchefql" ? execution.results?.sql ?? "" : execution.sent.text.trim() || "*",
       window: execution.resolved,
       queryTimeout: execution.timeout,
     });

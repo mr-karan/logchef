@@ -299,6 +299,9 @@ type SavedQueryContent struct {
 	// 0007) without filter or time_range, which the query itself holds.
 	// Absent on queries saved before layouts were stored.
 	Layout *SavedViewDefinition `json:"layout,omitempty"`
+	// Filters are the Explorer's filter pills saved with the query. They
+	// join Content with "and" when it runs. Absent on queries saved without.
+	Filters []QueryFilter `json:"filters,omitempty"`
 }
 
 // SavedQuery represents a cross-team saved query bound to a single source.

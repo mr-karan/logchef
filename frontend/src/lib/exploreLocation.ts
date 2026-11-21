@@ -1,13 +1,14 @@
 import { normalizeExploreMode, type ExploreMode } from '@/lib/queryMetadata'
 import type { TimeWindow } from '@/utils/timeWindow'
 import { decodeWindowFromUrl } from '@/utils/timeWindowCodec'
+import { decodeFilters, type QueryFilter } from '@/utils/queryFilters'
 
 export const EXPLORE_PATH = '/logs/explore'
 
 /** What an Explorer URL names besides team and source. */
 export type ExploreTarget =
   | { kind: 'draft' }
-  | { kind: 'query'; mode: ExploreMode | null; text: string; window: TimeWindow | null; limit: number | null }
+  | { kind: 'query'; mode: ExploreMode | null; text: string; window: TimeWindow | null; limit: number | null; filters?: QueryFilter[] }
   | { kind: 'saved'; queryId: number }
   | { kind: 'share'; token: string }
 
@@ -63,6 +64,9 @@ function normalizeQueryParams(query: QueryParams): Record<string, string | undef
   const sql = getText('sql')
   if (sql !== undefined) normalized.sql = sql
 
+  const filters = getValue('filters')
+  if (filters) normalized.filters = filters
+
   const id = getValue('id')
   if (id) normalized.id = id
 
@@ -103,6 +107,7 @@ export function parseExploreLocation(query: QueryParams): ExploreLocation {
       text: (mode === 'native' ? params.sql : params.q) ?? '',
       window: decodeWindowFromUrl(params),
       limit: parseId(params.limit),
+      filters: decodeFilters(params.filters),
     },
   }
 }

@@ -38,6 +38,7 @@ import { storeToRefs } from "pinia";
 import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata, type ExploreMode } from '@/lib/queryMetadata';
 import type { SavedQueryLayout, SavedQueryTimeRange } from '@/api/savedQueries';
 import { encodeStoredRange } from '@/utils/timeWindowCodec';
+import { applyFilters, decodeFilters } from '@/utils/queryFilters';
 
 const { t } = useI18n();
 
@@ -309,7 +310,16 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     }
 
     // Use displayQueryContent which handles fallback from editData
-    const queryContent = displayQueryContent.value;
+    let queryContent: string = displayQueryContent.value;
+
+    // Filter pills: the Explorer's live pills, or the ones the query already has.
+    // A query with no text of its own takes its pills as its text.
+    let filters = decodeFilters(content.filters);
+    const filterLanguage = content.filterLanguage === 'logsql' || content.filterLanguage === 'logchefql' ? content.filterLanguage : null;
+    if (!queryContent.trim() && filterLanguage && filters.length) {
+      queryContent = applyFilters('', filters, filterLanguage);
+      filters = [];
+    }
 
     if (!queryContent.trim()) {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : displayQueryLanguageLabel.value} content is required`);
@@ -352,6 +362,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       content: queryContent,
       variables: allVariables.value?.length ? allVariables.value : (content.variables || []),
       ...savedLayout(originalSavedContent),
+      ...(filters.length ? { filters } : {}),
     };
 
     return JSON.stringify(simplifiedContent);
