@@ -38,7 +38,7 @@ import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSo
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
-import { getLokiSelector } from "@/api/sources";
+import { getLokiSelector, sourcesApi } from "@/api/sources";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
@@ -360,6 +360,33 @@ const filterFieldSuggestions = computed(() => {
   for (const field of sidebarResultFields.value ?? []) names.add(field);
   return [...names].sort((a, b) => a.localeCompare(b));
 });
+
+// Values the filter editor suggests for a field: the values in the rows on
+// screen, most common first, then the source's top values over the window.
+const loadFilterValues = async (field: string): Promise<string[]> => {
+  const name = filterFieldLabel(field);
+  const counts = new Map<string, number>();
+  for (const row of rows.value as Record<string, unknown>[]) {
+    const value = row[name];
+    if (value === null || value === undefined || value === "") continue;
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    counts.set(text, (counts.get(text) ?? 0) + 1);
+  }
+  const found = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([value]) => value);
+  const teamId = currentTeamId.value;
+  const sourceId = currentSourceId.value;
+  const window = getEditorValuesWindow();
+  if (teamId && sourceId && window) {
+    try {
+      const type = sourceDetails.value?.columns?.find((column) => column.name === name)?.type ?? "String";
+      const response = await sourcesApi.getFieldValues(teamId, sourceId, name, type, window.startTime, window.endTime, undefined, 20);
+      for (const item of [...(response.data?.values ?? [])].sort((a, b) => b.count - a.count)) found.push(String(item.value));
+    } catch {
+      // The rows on screen still give suggestions.
+    }
+  }
+  return [...new Set(found)].slice(0, 50);
+};
 
 // A table cell or an expanded row adds a filter pill and runs the query.
 const handleDrillDown = (data: { column: string; value: unknown; operator: FilterOperator }) => {
@@ -1150,6 +1177,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :filters="exploreStore.filters"
                     :fields="filterFieldSuggestions"
                     :language="filterLanguage"
+                    :load-values="loadFilterValues"
                     @update:filters="setFilters"
                     @copy-to-query="copyFiltersToQuery"
                   />

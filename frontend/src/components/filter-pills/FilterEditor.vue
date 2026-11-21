@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { X } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import SuggestInput from "./SuggestInput.vue";
 import { fieldPath } from "@/utils/logchefql/filters";
 import {
   filterExpression,
@@ -25,6 +27,8 @@ const props = defineProps<{
   filter?: QueryFilter | null;
   fields: string[];
   language: FilterLanguage;
+  // Values to suggest for a field, most common first.
+  loadValues?: (field: string) => Promise<string[]>;
 }>();
 
 const emit = defineEmits<{
@@ -58,7 +62,6 @@ const valueText = ref("");
 const values = ref<string[]>([]);
 const label = ref("");
 
-const listId = `filter-fields-${Math.random().toString(36).slice(2)}`;
 
 function choiceFor(filter: QueryFilter): string {
   const negate = !!filter.negate && !["gt", "gte", "lt", "lte"].includes(filter.operator);
@@ -79,6 +82,16 @@ watch(() => props.filter, reset, { immediate: true });
 const choice = computed(() => choices.find(item => item.key === choiceKey.value) ?? choices[0]);
 const arity = computed(() => operatorArity(choice.value.operator));
 
+// Switching between one value and a list carries the values across.
+watch(arity, (next, previous) => {
+  if (previous === "one" && next === "many" && valueText.value.trim()) {
+    values.value = [valueText.value.trim()];
+    valueText.value = "";
+  } else if (previous === "many" && next === "one" && !valueText.value && values.value.length) {
+    valueText.value = values.value[0];
+  }
+});
+
 // A field typed as shown keeps its path; a column whose name is no plain
 // identifier is quoted, so "http.status" stays one column.
 const IDENT = /^@?[a-zA-Z_][a-zA-Z0-9_:@.-]*$/;
@@ -97,6 +110,41 @@ function addValue() {
 
 function removeValue(index: number) {
   values.value = values.value.filter((_, i) => i !== index);
+}
+
+// Value suggestions for the field, loaded a moment after it stops changing.
+const valueSuggestions = ref<string[]>([]);
+const loadingValues = ref(false);
+let valuesTimer: ReturnType<typeof setTimeout> | undefined;
+let valuesRequest = 0;
+watch([fieldText, arity], () => {
+  clearTimeout(valuesTimer);
+  valueSuggestions.value = [];
+  const field = fieldText.value.trim();
+  if (!field || arity.value === "none" || !props.loadValues) return;
+  const request = ++valuesRequest;
+  loadingValues.value = true;
+  valuesTimer = setTimeout(async () => {
+    try {
+      const values = await props.loadValues!(fieldFromText(field));
+      if (request === valuesRequest) valueSuggestions.value = values;
+    } catch {
+      if (request === valuesRequest) valueSuggestions.value = [];
+    } finally {
+      if (request === valuesRequest) loadingValues.value = false;
+    }
+  }, 250);
+}, { immediate: true });
+onBeforeUnmount(() => clearTimeout(valuesTimer));
+
+// A value already in the list is not suggested again.
+const shownValueSuggestions = computed(() => valueSuggestions.value.filter((value) => !values.value.includes(value)));
+
+function onPickValue(value: string) {
+  if (arity.value === "many") {
+    valueText.value = value;
+    addValue();
+  }
 }
 
 const draft = computed<QueryFilter>(() => {
@@ -124,6 +172,10 @@ function save() {
   if (complete.value) emit("save", draft.value);
 }
 
+function onFieldEnter(event: KeyboardEvent) {
+  event.preventDefault();
+}
+
 function onValueEnter(event: KeyboardEvent) {
   if (arity.value === "many") {
     event.preventDefault();
@@ -140,22 +192,20 @@ function onValueEnter(event: KeyboardEvent) {
     <div class="grid gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       <div class="flex flex-col gap-1">
         <Label class="text-xs">{{ t('filters.field') }}</Label>
-        <Input v-model="fieldText" :list="listId" autocomplete="off" class="h-8" data-testid="filter-field" />
-        <datalist :id="listId">
-          <option v-for="field in fields" :key="field" :value="field" />
-        </datalist>
+        <SuggestInput v-model="fieldText" :suggestions="fields" test-id="filter-field" @enter="onFieldEnter" />
       </div>
       <div class="flex flex-col gap-1">
         <Label class="text-xs">{{ t('filters.operator') }}</Label>
-        <select
-          v-model="choiceKey"
-          data-testid="filter-operator"
-          class="h-8 rounded-md border border-input bg-transparent px-2 text-sm dark:bg-input/30"
-        >
-          <option v-for="item in choices" :key="item.key" :value="item.key">
-            {{ filterOperatorLabel(t, item.operator, item.negate) }}
-          </option>
-        </select>
+        <Select v-model="choiceKey">
+          <SelectTrigger size="sm" class="w-full" data-testid="filter-operator">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="item in choices" :key="item.key" :value="item.key" :data-testid="`filter-operator-${item.key}`">
+              {{ filterOperatorLabel(t, item.operator, item.negate) }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
 
@@ -173,7 +223,14 @@ function onValueEnter(event: KeyboardEvent) {
           </button>
         </span>
       </div>
-      <Input v-model="valueText" class="h-8" data-testid="filter-value" @keydown.enter="onValueEnter" />
+      <SuggestInput
+        v-model="valueText"
+        :suggestions="shownValueSuggestions"
+        :loading="loadingValues"
+        test-id="filter-value"
+        @pick="onPickValue"
+        @enter="onValueEnter"
+      />
       <p v-if="arity === 'many'" class="text-xs text-muted-foreground">{{ t('filters.valuesHint') }}</p>
     </div>
 

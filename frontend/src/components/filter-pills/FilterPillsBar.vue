@@ -22,6 +22,7 @@ const props = defineProps<{
   filters: QueryFilter[];
   fields: string[];
   language: FilterLanguage;
+  loadValues?: (field: string) => Promise<string[]>;
 }>();
 
 const emit = defineEmits<{
@@ -180,6 +181,7 @@ function setAll(patch: (filter: QueryFilter) => Partial<QueryFilter>) {
           :filter="filter"
           :fields="fields"
           :language="language"
+          :load-values="loadValues"
           @save="(next) => saveEdit(index, next)"
           @cancel="close"
         />
@@ -219,7 +221,8 @@ function setAll(patch: (filter: QueryFilter) => Partial<QueryFilter>) {
         </Button>
       </PopoverAnchor>
       <PopoverContent align="start" class="w-[min(34rem,90vw)] p-4">
-        <FilterEditor v-if="adding" :fields="fields" :language="language" @save="addFilter" @cancel="adding = false" />
+        <FilterEditor v-if="adding" :fields="fields" :language="language"
+          :load-values="loadValues" @save="addFilter" @cancel="adding = false" />
       </PopoverContent>
     </Popover>
   </div>

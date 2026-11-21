@@ -25,6 +25,21 @@ function mountComponent(component: Component, props: Record<string, unknown>) {
 const byTestId = (testId: string) => document.body.querySelector<HTMLElement>(`[data-testid="${testId}"]`)
 const allByTestId = (testId: string) => [...document.body.querySelectorAll<HTMLElement>(`[data-testid="${testId}"]`)]
 
+// jsdom lacks the pointer capture and scrolling that the select calls.
+Object.assign(Element.prototype, { hasPointerCapture: () => false, releasePointerCapture: () => {}, scrollIntoView: () => {} })
+
+async function chooseOperator(key: string) {
+  const trigger = byTestId('filter-operator')!
+  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+  trigger.click()
+  await flush()
+  const option = byTestId(`filter-operator-${key}`)
+  if (!option) throw new Error(`Missing operator ${key}`)
+  option.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }))
+  option.click()
+  await flush()
+}
+
 async function setValue(testId: string, value: string) {
   const element = byTestId(testId) as HTMLInputElement | HTMLSelectElement
   element.value = value
@@ -97,14 +112,14 @@ describe('FilterEditor', () => {
     const save = vi.fn()
     const { unmount } = mountComponent(FilterEditor, { filter: region, fields: ['cloud.region'], language: 'logsql', onSave: save })
     expect(byTestId('filter-preview')?.textContent).toBe('cloud.region:="us-central1"')
-    await setValue('filter-operator', 'is_one_of')
+    await chooseOperator('is_one_of')
     await setValue('filter-value', 'europe-west1')
     byTestId('filter-value')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
     await nextTick()
     await setValue('filter-label', 'Europe')
-    expect(byTestId('filter-preview')?.textContent).toBe('cloud.region:in("europe-west1")')
+    expect(byTestId('filter-preview')?.textContent).toBe('cloud.region:in("us-central1","europe-west1")')
     byTestId('filter-editor')?.dispatchEvent(new Event('submit'))
-    expect(save).toHaveBeenLastCalledWith({ field: 'cloud.region', operator: 'is_one_of', values: ['europe-west1'], label: 'Europe' })
+    expect(save).toHaveBeenLastCalledWith({ field: 'cloud.region', operator: 'is_one_of', values: ['us-central1', 'europe-west1'], label: 'Europe' })
     unmount()
   })
 
@@ -112,9 +127,30 @@ describe('FilterEditor', () => {
     const { unmount } = mountComponent(FilterEditor, { fields: [], language: 'logchefql' })
     await setValue('filter-field', 'user')
     expect((byTestId('filter-save') as HTMLButtonElement).disabled).toBe(true)
-    await setValue('filter-operator', 'not_exists')
+    await chooseOperator('not_exists')
     expect((byTestId('filter-save') as HTMLButtonElement).disabled).toBe(false)
     expect(byTestId('filter-preview')?.textContent).toBe('user=""')
+    unmount()
+  })
+
+  it('suggests values for the field and adds a picked one', async () => {
+    const save = vi.fn()
+    const loadValues = vi.fn(async () => ['us-central1', 'europe-west1', 'asia-east1'])
+    const { unmount } = mountComponent(FilterEditor, { filter: region, fields: ['cloud.region'], language: 'logsql', loadValues, onSave: save })
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flush()
+    expect(loadValues).toHaveBeenCalledWith('cloud.region')
+    await chooseOperator('is_one_of')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flush()
+    byTestId('filter-value')?.dispatchEvent(new Event('focus'))
+    await setValue('filter-value', 'europe')
+    const options = [...document.body.querySelectorAll<HTMLElement>('[data-testid="filter-value-suggestions"] [role="option"]')]
+    expect(options.map(option => option.textContent?.trim())).toEqual(['europe-west1'])
+    options[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await nextTick()
+    byTestId('filter-editor')?.dispatchEvent(new Event('submit'))
+    expect(save).toHaveBeenLastCalledWith({ field: 'cloud.region', operator: 'is_one_of', values: ['us-central1', 'europe-west1'] })
     unmount()
   })
 })
