@@ -10,8 +10,9 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Columns3 } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { SearchInput } from '@/components/layout'
+import { Check, Columns3, Minus } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
 import type { Table } from './tableFeatures'
 
 const { t } = useI18n();
@@ -32,22 +33,42 @@ const emit = defineEmits<{
 const columns = computed(() => props.table.getAllColumns().filter(column => column.getCanHide()))
 const visibleColumns = computed(() => columns.value.filter(column => column.getIsVisible()))
 
-const isAllSelected = computed(() => {
-  const hideable = columns.value.length
-  const visible = visibleColumns.value.length
-  return hideable > 0 && hideable === visible
+const search = ref('')
+const normalizedSearch = computed(() => search.value.trim().toLowerCase())
+const isFiltering = computed(() => normalizedSearch.value.length > 0)
+
+// Columns shown in the list. Matching is a case-insensitive substring match
+// on the column name.
+const filteredColumns = computed(() => {
+  const query = normalizedSearch.value
+  if (!query) return columns.value
+  return columns.value.filter(column => column.id.toLowerCase().includes(query))
+})
+
+// Select All acts on the listed columns only, so a search narrows what it
+// toggles and leaves hidden-by-search columns as they are.
+const selectAllState = computed<boolean | 'indeterminate'>(() => {
+  const listed = filteredColumns.value
+  if (listed.length === 0) return false
+  const visible = listed.filter(column => column.getIsVisible()).length
+  if (visible === 0) return false
+  return visible === listed.length ? true : 'indeterminate'
 })
 
 const toggleAll = (checked: boolean | 'indeterminate') => {
   const visible = checked === true
-  columns.value.forEach(column => {
+  filteredColumns.value.forEach(column => {
     column.toggleVisibility(visible)
   })
+}
+
+const onOpenChange = (open: boolean) => {
+  if (!open) search.value = ''
 }
 </script>
 
 <template>
-  <Popover>
+  <Popover @update:open="onOpenChange">
     <PopoverTrigger as-child>
       <Button variant='outline' size="sm" class='h-7 px-2 lg:w-[130px]' :title="t('ui.selectColumns')">
         <Columns3 class="h-4 w-4" />
@@ -76,22 +97,39 @@ const toggleAll = (checked: boolean | 'indeterminate') => {
             </Button>
           </div>
         </div>
+        <SearchInput
+          v-model="search"
+          :placeholder="t('ui.searchColumns')"
+          class="max-w-none"
+        />
         <ScrollArea class="h-[300px] pr-4">
           <div class="grid gap-2">
-            <!-- Select All option -->
-            <div class="flex items-center space-x-2 py-1 border-b border-border mb-2">
+            <!-- Select All option (acts on the columns matching the search) -->
+            <div
+              v-if="filteredColumns.length > 0"
+              class="flex items-center space-x-2 py-1 border-b border-border mb-2"
+            >
               <Checkbox
                 id="select-all"
-                :model-value="isAllSelected"
+                :model-value="selectAllState"
+                class="data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground data-[state=indeterminate]:border-primary"
                 @update:model-value="toggleAll"
-              />
+              >
+                <template #default="{ state }">
+                  <Minus v-if="state === 'indeterminate'" class="size-3.5" />
+                  <Check v-else class="size-3.5" />
+                </template>
+              </Checkbox>
               <Label for="select-all" class="flex-1 cursor-pointer font-medium">
-                {{ t('ui.selectAll') }}
+                {{ isFiltering ? t('ui.selectAllMatching', { count: filteredColumns.length }) : t('ui.selectAll') }}
               </Label>
             </div>
+            <p v-else class="py-6 text-center text-sm text-muted-foreground">
+              {{ t('ui.noColumnsMatch', { search: search.trim() }) }}
+            </p>
 
             <div
-              v-for="column in columns"
+              v-for="column in filteredColumns"
               :key="column.id"
               class="flex items-center space-x-2 py-1"
             >
