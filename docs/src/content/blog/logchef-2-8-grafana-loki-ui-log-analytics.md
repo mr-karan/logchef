@@ -39,7 +39,13 @@ The rest of the Explorer works too:
 
 Loki sources also work in saved queries, dashboards, alerts, AI query generation, the CLI and the MCP server.
 
-<!-- media: loki-explorer.mp4 -->
+<figure class="post-clip">
+<video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/loki-explorer.png" width="1280" height="720" aria-label="A LogchefQL filter on a Grafana Loki source: the histogram, the field sidebar, the compiled LogQL, log context and live tail.">
+<source src="/releases/v2.8.0/loki-explorer.webm" type="video/webm" />
+<source src="/releases/v2.8.0/loki-explorer.mp4" type="video/mp4" />
+</video>
+<figcaption>A LogchefQL filter on a Grafana Loki source: the histogram, the field sidebar, the compiled LogQL, log context and live tail.</figcaption>
+</figure>
 
 One rule matters before you link a Loki source to a team: the team gets the whole tenant. Native LogQL can name any stream, so the default selector is a convenience, not a boundary. The [Grafana Loki tutorial](/tutorials/loki) covers setup and every difference, and [LogQL Queries](/guide/logql-queries) has the full LogchefQL mapping. Exports, windowed search and LogchefQL aggregations are not available on Loki yet.
 
@@ -59,7 +65,13 @@ The functions are `count`, `count_distinct`, `sum`, `avg`, `min`, `max` and the 
 
 The Explorer shows the result as a table or a chart. **Add to dashboard** opens the panel builder on a dashboard you can edit, with a result panel filled in from the query. The [Aggregations](/guide/aggregations) page covers the syntax, the limits and the differences between backends.
 
-<!-- media: aggregations.mp4 -->
+<figure class="post-clip">
+<video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/aggregations.png" width="1280" height="720" aria-label="A pipe after the filter counts and groups, shown as a table, as a chart, then added to a dashboard.">
+<source src="/releases/v2.8.0/aggregations.webm" type="video/webm" />
+<source src="/releases/v2.8.0/aggregations.mp4" type="video/mp4" />
+</video>
+<figcaption>A pipe after the filter counts and groups, shown as a table, as a chart, then added to a dashboard.</figcaption>
+</figure>
 
 ## Alerts that fire per group
 
@@ -81,7 +93,13 @@ The rest of alerting changed with it:
 
 Rules also run on a background job runner, so several replicas on Postgres no longer each evaluate every rule. The [Alerting](/features/alerting) page covers all of it, including the upgrade from 2.7.
 
-<!-- media: alerting-v2.mp4 -->
+<figure class="post-clip">
+<video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/alerting-v2.png" width="1280" height="720" aria-label="One rule grouped by region, backtested over 24 hours, with each group firing and silenced on its own.">
+<source src="/releases/v2.8.0/alerting-v2.webm" type="video/webm" />
+<source src="/releases/v2.8.0/alerting-v2.mp4" type="video/mp4" />
+</video>
+<figcaption>One rule grouped by region, backtested over 24 hours, with each group firing and silenced on its own.</figcaption>
+</figure>
 
 ## Queries on the record
 
@@ -99,8 +117,20 @@ Each event is also written as a JSON log line, so you can ship it off the host f
 
 **Administration → Query Activity** is rebuilt on top of the same data. It answers three questions: who uses Logchef, which sources are busy or slow, and which repeated query patterns cost the most. Every number compares with the window of the same length before it, with latency percentiles, scan cost and failure rates. Click a source or a user to scope the whole page to it.
 
-<!-- media: audit-log.mp4 -->
-<!-- media: query-activity.mp4 -->
+<figure class="post-clip">
+<video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/audit-log.png" width="1280" height="720" aria-label="The audit log with a query an agent ran over MCP, opened to its full text, rows, duration and OAuth client.">
+<source src="/releases/v2.8.0/audit-log.webm" type="video/webm" />
+<source src="/releases/v2.8.0/audit-log.mp4" type="video/mp4" />
+</video>
+<figcaption>The audit log with a query an agent ran over MCP, opened to its full text, rows, duration and OAuth client.</figcaption>
+</figure>
+<figure class="post-clip">
+<video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/query-activity.png" width="1280" height="720" aria-label="Query Activity ranks sources by query time and scopes the whole page to one source with a click.">
+<source src="/releases/v2.8.0/query-activity.webm" type="video/webm" />
+<source src="/releases/v2.8.0/query-activity.mp4" type="video/mp4" />
+</video>
+<figcaption>Query Activity ranks sources by query time and scopes the whole page to one source with a click.</figcaption>
+</figure>
 
 ## Reports, views and shared dashboards
 
