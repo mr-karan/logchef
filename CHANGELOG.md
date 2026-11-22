@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Choosing a value in the Explorer field sidebar, a filter from a table cell
+  or expanded row, a group of an aggregation result, or "Add as column" for
+  a nested field now runs the query. Before, these edited the query text and
+  left the old results on screen until Run was pressed.
+- Choosing "No view" in the Explorer returns the table to the source's
+  default columns, widths and newest-first sort. If the query is still the
+  view's filter, the filter and the view's time range are cleared too. Before,
+  the view's columns, filter and range stayed.
+- An alert rule's Groups card shows a loading state until its groups arrive.
+  Before, it said "No group is firing." while loading. When the groups or the
+  history fail to load, each card now shows the error with a Retry instead of
+  reading as empty.
+- The sign-in page says "Your session ended. Sign in again." when a browser's
+  session has ended, for example because the same user signed in elsewhere
+  with the default `auth.max_concurrent_sessions` of 1. This works across tabs
+  and browser restarts. On single-sign-on-only instances, the page now waits
+  for a click instead of sending the user straight back to the identity
+  provider.
+- A dashboard says "not found" only when the server answers 404. Other
+  failures show "Failed to load" with a Retry, and a load that a newer one
+  replaced no longer overwrites what the page shows. Before, a failed or
+  abandoned read could show "Dashboard not found or you don't have access."
+  for a dashboard that exists.
+- Field values on a ClickHouse source answer 400 instead of 500 for a filter
+  with an aggregation pipe and no `query_language`, and for a filter that
+  names a column the table does not have.
+
 ## [2.8.1] - 2026-11-22
 
 Fixes found while recording the v2.8.0 launch videos. No migrations: upgrade
