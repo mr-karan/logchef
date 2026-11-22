@@ -725,7 +725,7 @@ The response:
 
 ### New-pattern rules (phase 2)
 
-A rule with `rule_type = 'new_pattern'` fires when a log template appears in the current window that the baseline window did not have. It builds on the Patterns and Compare RFC, called RFC 0004 here. That RFC is in review as pull request 194 under the number 0002.
+A rule with `rule_type = 'new_pattern'` fires when a log template appears in the current window that the baseline window did not have. It builds on RFC 0004, the Patterns and Compare RFC (`rfcs/0004-log-patterns-and-compare.md`).
 
 The rule stores a LogchefQL filter and a baseline kind in `pattern_json`. The current window is the rule's lookback. `threshold_value` is the minimum count, and `threshold_operator` is fixed to `gte`. `no_data_policy` is fixed to `zero` and `group_by` is empty.
 
