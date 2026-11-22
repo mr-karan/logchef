@@ -1,6 +1,190 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 
+// Swap any v2.8.0 showcase slot from a static light/dark screenshot to a
+// video clip by adding an entry here keyed by slot id (e.g. 'hero',
+// 'loki-explorer', 'aggregations', 'alerting-v2', 'audit-log',
+// 'query-activity', 'scheduled-reports', 'saved-views', 'schema-advisor',
+// 'playground'). Put web clips in docs/public/releases/v2.8.0/.
+interface ReleaseClip {
+  webm?: string;
+  mp4: string;
+  poster: string;
+  width: number;
+  height: number;
+}
+
+const v28Clips: Record<string, ReleaseClip> = {
+  // Example:
+  // 'loki-explorer': {
+  //   webm: '/releases/v2.8.0/loki-explorer.webm',
+  //   mp4: '/releases/v2.8.0/loki-explorer.mp4',
+  //   poster: '/releases/v2.8.0/loki-explorer-poster.png',
+  //   width: 1600,
+  //   height: 1000,
+  // },
+};
+
+interface ShowcaseShot {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  barLeft: string;
+  barRight: string;
+  alt: string;
+  caption?: string;
+  eager?: boolean;
+  href?: string;
+}
+
+const v28Shots: Record<string, ShowcaseShot> = {
+  hero: {
+    id: 'hero',
+    name: 'v28-mission-control',
+    width: 1600,
+    height: 1178,
+    barLeft: 'Dashboards',
+    barRight: 'ClickHouse · VictoriaLogs · Loki',
+    alt: 'All Systems Mission Control dashboard in Logchef combining ClickHouse application logs, VictoriaLogs edge metrics and Grafana Loki pod errors on one grid',
+    caption: 'All Systems: Mission Control on demo.logchef.app. ClickHouse, VictoriaLogs and Grafana Loki panels sharing one time range.',
+    eager: true,
+  },
+  'loki-explorer': {
+    id: 'loki-explorer',
+    name: 'v28-loki-explorer',
+    width: 1600,
+    height: 1000,
+    barLeft: 'Log Explorer',
+    barRight: 'Grafana Loki · LogchefQL',
+    alt: 'Logchef Explorer running app="checkout" and status>=500 on a Grafana Loki Kubernetes Platform source with a 1-hour error spike histogram and preloaded stream labels in the field sidebar',
+    caption: 'LogchefQL compiles straight to LogQL. Stream labels preload in the field sidebar while the histogram highlights the incident spike.',
+  },
+  'loki-dashboard': {
+    id: 'loki-dashboard',
+    name: 'v28-loki-dashboard',
+    width: 1600,
+    height: 1267,
+    barLeft: 'Dashboards',
+    barRight: 'Grafana Loki · Native LogQL',
+    alt: 'Kubernetes Platform Loki dashboard displaying stat tiles, volume by level, namespace breakdown, and native LogQL metric charts for errors per app and p95 latency',
+    caption: 'LogchefQL panels next to native LogQL metric queries on the same Loki dashboard.',
+  },
+  aggregations: {
+    id: 'aggregations',
+    name: 'v28-aggregations',
+    width: 1600,
+    height: 1000,
+    barLeft: 'Log Explorer',
+    barRight: 'LogchefQL Aggregations · Chart',
+    alt: 'Logchef Explorer plotting p95(duration_ms) by time and service_name across four services with a sharp latency spike at 17:30 and an Add to dashboard button',
+    caption: 'One piped LogchefQL query plotted directly in Explorer. Click Add to dashboard to promote it into a panel.',
+  },
+  'alerting-v2': {
+    id: 'alerting-v2',
+    name: 'v28-alerting-backtest',
+    width: 1600,
+    height: 1000,
+    barLeft: 'Alerts · Backtest',
+    barRight: '5 episodes · 10 notifications',
+    alt: 'Alert backtest replaying a grouped rule over 24 hours with a green and red state strip, per-service episode counts, no-data policy, and notify-on-resolve toggle',
+    caption: 'Run backtest replays an unsaved rule across up to 120 instants and breaks down episodes per group before you save.',
+  },
+  'alerting-history': {
+    id: 'alerting-history',
+    name: 'v28-alerting-history',
+    width: 1600,
+    height: 867,
+    barLeft: 'Alerts · Groups & History',
+    barRight: 'Per-service episodes',
+    alt: 'Alert history for Error burst by service showing separate resolved episodes for service_name=alerting and service_name=ingestion with View logs buttons',
+    caption: 'Each service fires, notifies and resolves on its own timeline, with a direct link to the matching logs.',
+  },
+  'alerting-silences': {
+    id: 'alerting-silences',
+    name: 'v28-alerting-silences',
+    width: 1600,
+    height: 600,
+    barLeft: 'Alerts · Silences',
+    barRight: 'Maintenance windows & matchers',
+    alt: 'Alert silences table showing a weekly Sunday maintenance window for all rules and an active silence matched to service_name=scheduler',
+    caption: 'Mute one rule or a whole source once or on a weekly schedule while evaluation and history keep running.',
+  },
+  'query-activity': {
+    id: 'query-activity',
+    name: 'v28-query-activity',
+    width: 1600,
+    height: 1171,
+    barLeft: 'Administration · Query Activity',
+    barRight: '30 days vs prior window',
+    alt: 'Rebuilt Query Activity dashboard showing 23,802 queries, p50 and p95 latency, query language breakdown across LogchefQL, SQL, LogQL and LogsQL, and hot sources with latency sparklines',
+    caption: 'Adoption trends, query language mix, and slow sources ranked by total query time, each compared with the prior window.',
+  },
+  'scheduled-reports': {
+    id: 'scheduled-reports',
+    name: 'v28-scheduled-reports',
+    width: 1600,
+    height: 578,
+    barLeft: 'Scheduled Reports',
+    barRight: 'Dashboards · Tabs · CSV',
+    alt: 'Scheduled reports list showing a daily failed payments CSV export in Europe/London, a weekday Mission Control digest in Asia/Kolkata, and a daily Loki payments tab report in UTC',
+    caption: 'Each report runs in its own timezone, respects per-recipient source permissions, and attaches CSV rows for saved queries.',
+  },
+  'saved-views': {
+    id: 'saved-views',
+    name: 'v28-saved-views',
+    width: 1600,
+    height: 1000,
+    barLeft: 'Log Explorer',
+    barRight: 'Saved Views',
+    alt: 'Saved Explorer views dropdown open on Kubernetes Platform listing Team and Source views alongside Save as new view and Manage views',
+    caption: 'Switch between personal, team and source layouts in one click, or carry your column layout in a share link.',
+  },
+  'schema-advisor': {
+    id: 'schema-advisor',
+    name: 'v28-schema-advisor',
+    width: 1600,
+    height: 844,
+    barLeft: 'Source Inspection',
+    barRight: 'ClickHouse Schema Advisor',
+    alt: 'ClickHouse Source Inspection page for App Logs listing table columns, primary keys, types and the Schema Advisor card with weekly refresh and Run analysis controls',
+    caption: 'Joins recorded Explorer filter shapes with ClickHouse metadata and outputs evidence and copyable DDL without running it.',
+  },
+  playground: {
+    id: 'playground',
+    name: 'v28-playground',
+    width: 1600,
+    height: 956,
+    barLeft: 'logchef.app/playground',
+    barRight: 'WASM compiler · In-browser',
+    alt: 'LogchefQL Playground compiling level="error" and status>=500 into ClickHouse SQL, VictoriaLogs LogsQL and Grafana Loki LogQL side by side',
+    caption: 'Try live filters and aggregations in the browser. Zero setup, shareable links.',
+    href: '/playground/',
+  },
+};
+
+const v28Nav = [
+  { href: '#v2.8.0-loki', label: 'Grafana Loki' },
+  { href: '#v2.8.0-aggregations', label: 'Aggregations' },
+  { href: '#v2.8.0-alerting', label: 'Alerting v2' },
+  { href: '#v2.8.0-audit-log', label: 'Audit log' },
+  { href: '#v2.8.0-query-activity', label: 'Query Activity' },
+  { href: '#v2.8.0-reports', label: 'Reports' },
+  { href: '#v2.8.0-saved-views', label: 'Saved views' },
+  { href: '#v2.8.0-schema-advisor', label: 'Schema advisor' },
+  { href: '#v2.8.0-mcp-cli', label: 'MCP & CLI' },
+  { href: '#v2.8.0-playground', label: 'Playground' },
+  { href: '#v2.8.0-upgrading', label: 'Upgrading' },
+];
+
+const dockerRunCmd = `docker run --rm -p 8125:8125 -v logchef-data:/data \\
+  -e LOGCHEF_AUTH__API_TOKEN_SECRET="$(openssl rand -hex 32)" \\
+  -e LOGCHEF_AUTH__LOCAL__ENABLED=true \\
+  -e LOGCHEF_AUTH__LOCAL__ADMIN_EMAIL=admin@example.com \\
+  -e LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD=change-me-please \\
+  -e LOGCHEF_SERVER__SECURE_COOKIE=false \\
+  ghcr.io/mr-karan/logchef:v2.8.0`;
+
 const unreleasedShots = [
   { name: 'palette-scoped', width: 1040, height: 560, alt: 'The Logchef command palette turning @shop/storefront service="payments" and status>=500 last:1h into a Run in Explore row with its team, source and time range', caption: 'Cmd/Ctrl+K, then <code>@team/source</code>: team, source and range completion, with the parsed scope shown before you run it.' },
   { name: 'ask-chef', width: 1160, height: 760, alt: 'Ask Chef answering why payments started failing, next to the error spike in the histogram', caption: 'Ask from the palette: the Explorer opens on the scope and Ask Chef answers with evidence you can run, and says what it could not establish.' },
@@ -13,27 +197,38 @@ const unreleasedShots = [
   <style>
     .cl-wrap { position: relative; overflow: clip; }
     .cl-wrap .bg-glow {
-      width: min(900px, 120vw); height: min(900px, 120vw);
-      top: -44%; left: 50%; transform: translateX(-50%);
+      width: min(980px, 125vw); height: min(980px, 125vw);
+      top: -42%; left: 50%; transform: translateX(-50%);
     }
-    main { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 8rem 1.5rem 4rem; }
+    main { position: relative; z-index: 1; max-width: 1060px; margin: 0 auto; padding: 7.5rem 1.5rem 4rem; }
 
-    .page-header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border); }
-    .page-header .kicker { display: block; margin-bottom: 1rem; }
-    .page-header h1 { font-size: clamp(2rem, 4.4vw, 2.75rem); font-weight: 700; letter-spacing: -0.033em; margin-bottom: 0.5rem; }
+    .page-header { margin-bottom: 2.5rem; padding-bottom: 1.75rem; border-bottom: 1px solid var(--color-border); }
+    .page-header .kicker { display: block; margin-bottom: 0.85rem; }
+    .page-header h1 { font-size: clamp(2rem, 4.4vw, 2.75rem); font-weight: 700; letter-spacing: -0.033em; margin-bottom: 0.45rem; }
     .page-header p { color: var(--color-text-secondary); font-size: 1.0625rem; }
 
-    .version { margin-bottom: 3rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--color-border); scroll-margin-top: 6rem; }
+    .version {
+      max-width: 900px;
+      margin: 0 auto 3rem;
+      padding-bottom: 2.5rem;
+      border-bottom: 1px solid var(--color-border);
+      scroll-margin-top: 6rem;
+    }
     .version:last-child { border-bottom: none; }
-    /* The milestone release gets a blue-bordered frame, not a gradient wash —
-       blue is the workspace colour and it should carry the emphasis alone. */
+    .version.showcase-release {
+      max-width: 100%;
+      margin-bottom: 4.5rem;
+      padding-bottom: 3.5rem;
+    }
+
+    /* Older milestone release style kept intact */
     .version.milestone {
       margin-inline: -1.25rem; padding: 1.75rem 1.25rem 2.5rem;
       border: 1px solid color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
       border-radius: 12px;
       background: var(--color-surface);
     }
-    .version-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .version-header { display: flex; align-items: center; gap: 0.75rem 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
     .version-tag { font-family: var(--font-mono); font-size: 1.1875rem; font-weight: 500; color: var(--color-text); }
     .version-tag.unreleased { color: var(--color-purple); }
     a.version-tag { text-decoration: none; }
@@ -50,13 +245,460 @@ const unreleasedShots = [
       border: 1px solid color-mix(in srgb, var(--color-success) 40%, transparent);
       color: var(--color-success);
     }
-    .version-link { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted); margin-left: auto; }
+    .version-stat {
+      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted);
+    }
+    .version-links { display: inline-flex; align-items: center; gap: 1rem; margin-left: auto; flex-wrap: wrap; }
+    .version-link { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted); }
     .version-link:hover { color: var(--color-accent); text-decoration: none; }
 
+    /* ---------------- v2.8.0 Showcase Hero ---------------- */
+    .v28-hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--color-accent) 32%, var(--color-border));
+      border-radius: 14px;
+      background: var(--color-surface);
+      padding: clamp(1.5rem, 3.5vw, 2.75rem);
+      margin-bottom: 2rem;
+    }
+    .v28-hero .bg-grid { opacity: 0.85; }
+    .v28-hero .bg-glow {
+      width: min(760px, 120vw); height: min(760px, 120vw);
+      top: -62%; left: 50%; transform: translateX(-50%);
+    }
+    .v28-hero-inner { position: relative; z-index: 1; }
+    .v28-hero-head { max-width: 74ch; margin-bottom: 1.75rem; }
+    .v28-eyebrow {
+      display: inline-flex; align-items: center; gap: 0.55rem; flex-wrap: wrap;
+      border: 1px solid var(--color-border);
+      background: var(--color-bg);
+      padding: 0.35rem 0.7rem; border-radius: 6px;
+      margin-bottom: 1.15rem;
+    }
+    .v28-eyebrow .kicker { color: var(--color-accent-soft); white-space: nowrap; }
+    .v28-eyebrow .sep { width: 1px; height: 11px; background: var(--color-border-strong); flex: none; }
+    .v28-eyebrow .what {
+      font-family: var(--font-mono); font-size: 0.6875rem;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-text-secondary);
+      white-space: nowrap;
+    }
+    .v28-title {
+      font-size: clamp(1.75rem, 3.8vw, 2.65rem);
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.032em;
+      margin-bottom: 0.9rem;
+      text-wrap: balance;
+    }
+    .v28-sub {
+      color: var(--color-text-secondary);
+      font-size: 1.03125rem;
+      line-height: 1.68;
+      max-width: 66ch;
+    }
+    .v28-sub strong { color: var(--color-text); font-weight: 500; }
+
+    /* One query, three engines strip */
+    .v28-compiler {
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-bg);
+      overflow: hidden;
+      margin-bottom: 1.75rem;
+    }
+    .v28-compiler-in {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+      padding: 0.85rem 1.1rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-elevated);
+    }
+    .v28-compiler-left { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; min-width: 0; }
+    .v28-compiler-tag {
+      font-family: var(--font-mono); font-size: 0.625rem; font-weight: 500;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--color-accent-soft);
+      border: 1px solid color-mix(in srgb, var(--color-accent) 36%, var(--color-border));
+      border-radius: 4px; padding: 0.2rem 0.45rem;
+      flex: none;
+    }
+    .v28-compiler-query {
+      font-family: var(--font-mono); font-size: 0.9375rem; line-height: 1.4;
+      word-break: break-word;
+    }
+    .v28-compiler-try {
+      font-family: var(--font-mono); font-size: 0.72rem;
+      color: var(--color-accent-soft); white-space: nowrap;
+    }
+    .v28-compiler-try:hover { text-decoration: underline; }
+    .v28-engines {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px; background: var(--color-border);
+    }
+    .v28-engine {
+      background: var(--code-bg);
+      padding: 0.9rem 1rem;
+      min-width: 0;
+    }
+    .v28-engine-top {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+      margin-bottom: 0.45rem;
+    }
+    .v28-engine-name { font-size: 0.8125rem; font-weight: 600; color: var(--color-text); }
+    .v28-engine-lang {
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+    .v28-engine.is-new .v28-engine-lang { color: var(--color-accent-soft); }
+    .v28-engine pre {
+      margin: 0;
+      font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.6;
+      color: var(--color-text-secondary);
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Syntax tokens shared with homepage */
+    .q-field { color: var(--q-field); }
+    .q-op { color: var(--q-op); }
+    .q-str { color: var(--q-str); }
+    .q-num { color: var(--q-num); }
+    .q-kw { color: var(--q-kw); }
+
+    /* Jump nav rail */
+    .v28-jump {
+      display: flex; flex-wrap: wrap; gap: 0.45rem;
+      margin: 0 0 2.75rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-surface);
+      align-items: center;
+    }
+    .v28-jump-label {
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-right: 0.35rem;
+    }
+    .v28-jump a {
+      font-family: var(--font-mono); font-size: 0.72rem;
+      color: var(--color-text-secondary);
+      padding: 0.26rem 0.58rem;
+      border: 1px solid var(--color-border);
+      border-radius: 5px;
+      background: var(--color-bg);
+      text-decoration: none;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    .v28-jump a:hover {
+      color: var(--color-text);
+      border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-border));
+      text-decoration: none;
+    }
+
+    /* ---------------- Product Frame (matches index.astro) ---------------- */
+    .frame {
+      position: relative;
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      background: var(--color-surface);
+      box-shadow: var(--shadow-frame);
+      overflow: hidden;
+    }
+    .frame-link { display: block; color: inherit; text-decoration: none; }
+    .frame-link:hover { text-decoration: none; }
+    .frame-link:hover .frame { border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border)); }
+    .frame-bar {
+      display: flex; align-items: center; gap: 0.6rem;
+      min-height: 34px; padding: 0.35rem 0.9rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-elevated);
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+    .frame-bar .right { margin-left: auto; color: var(--color-text-muted); text-align: right; }
+    .frame-media { position: relative; background: var(--color-bg); }
+    .frame-media picture { display: block; }
+    .frame-media img,
+    .frame-media video {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .frame-media .shot-dark { display: none; }
+    :root[data-theme='dark'] .frame-media .shot-light { display: none; }
+    :root[data-theme='dark'] .frame-media .shot-dark { display: block; }
+
+    .v28-figure { margin: 0; }
+    .v28-figure figcaption {
+      margin-top: 0.65rem;
+      color: var(--color-text-muted);
+      font-size: 0.85rem;
+      line-height: 1.55;
+    }
+    .v28-figure figcaption code {
+      font-family: var(--font-mono); font-size: 0.78rem;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--color-accent-soft);
+    }
+
+    /* ---------------- Feature Showcase Sections ---------------- */
+    .v28-sections {
+      display: flex;
+      flex-direction: column;
+      gap: 3.5rem;
+      margin-bottom: 3.5rem;
+    }
+    .v28-feature {
+      padding-top: 2.5rem;
+      border-top: 1px solid var(--color-border);
+      scroll-margin-top: 5.5rem;
+    }
+    .v28-feature:first-child { padding-top: 0; border-top: none; }
+
+    .v28-feature-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+      gap: 1.5rem 2.25rem;
+      align-items: start;
+      margin-bottom: 1.5rem;
+    }
+    .v28-feature-head.is-single {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: 72ch;
+    }
+    .v28-feature-copy .kicker { display: block; color: var(--color-accent-soft); margin-bottom: 0.55rem; }
+    .v28-feature-copy h3 {
+      font-size: clamp(1.3rem, 2.4vw, 1.65rem);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      line-height: 1.18;
+      margin-bottom: 0.65rem;
+    }
+    .v28-feature-copy p {
+      color: var(--color-text-secondary);
+      font-size: 0.96875rem;
+      line-height: 1.68;
+      margin-bottom: 0.7rem;
+    }
+    .v28-feature-copy p:last-child { margin-bottom: 0; }
+    .v28-feature-copy strong { color: var(--color-text); font-weight: 500; }
+    .v28-feature-copy code {
+      font-family: var(--font-mono); font-size: 0.82rem;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--color-accent-soft);
+    }
+    .v28-links {
+      display: flex; flex-wrap: wrap; gap: 0.9rem;
+      margin-top: 0.85rem;
+      font-family: var(--font-mono); font-size: 0.78rem;
+    }
+    .v28-links a { color: var(--color-accent-soft); }
+
+    /* Code card beside feature copy */
+    .v28-code {
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--code-bg);
+      overflow: hidden;
+      min-width: 0;
+    }
+    .v28-code-bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+      padding: 0.48rem 0.85rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-elevated);
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+    .v28-code pre {
+      margin: 0;
+      padding: 0.95rem 1.05rem;
+      font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.68;
+      color: var(--color-text);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .v28-code-divider {
+      border-top: 1px solid var(--color-border);
+      padding: 0.45rem 0.85rem;
+      background: var(--color-elevated);
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+
+    /* Two-up media grid for secondary proof shots */
+    .v28-pair {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.25rem;
+      margin-top: 1.25rem;
+      align-items: start;
+    }
+
+    /* Compact capability grid inside Alerting v2 */
+    .v28-facts {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--color-border);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 1.25rem;
+    }
+    .v28-fact {
+      background: var(--color-surface);
+      padding: 0.9rem 1rem;
+      min-width: 0;
+    }
+    .v28-fact-k {
+      display: block;
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--color-accent-soft);
+      margin-bottom: 0.35rem;
+    }
+    .v28-fact p {
+      font-size: 0.84rem;
+      line-height: 1.55;
+      color: var(--color-text-secondary);
+      margin: 0;
+    }
+    .v28-fact code {
+      font-family: var(--font-mono); font-size: 0.76rem;
+      color: var(--color-text);
+    }
+
+    /* Compact 2-column feature cards (Shared dashboards + MCP/CLI) */
+    .v28-split-cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.25rem;
+    }
+    .v28-card {
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      background: var(--color-surface);
+      padding: 1.35rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+    .v28-card .kicker { color: var(--color-accent-soft); }
+    .v28-card h3 { font-size: 1.1875rem; font-weight: 600; letter-spacing: -0.02em; }
+    .v28-card p { color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.65; margin: 0; }
+    .v28-card code {
+      font-family: var(--font-mono); font-size: 0.78rem;
+      background: var(--color-bg); border: 1px solid var(--color-border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--color-accent-soft);
+    }
+
+    /* Audit terminal showcase (placeholder slot for audit-log clip) */
+    .v28-audit-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 1px;
+      background: var(--color-border);
+    }
+    .v28-audit-pane {
+      background: var(--code-bg);
+      padding: 1rem 1.1rem;
+      min-width: 0;
+    }
+    .v28-audit-pane-label {
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.15em; text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-bottom: 0.55rem;
+    }
+    .v28-audit-pane pre {
+      margin: 0;
+      font-family: var(--font-mono); font-size: 0.77rem; line-height: 1.65;
+      color: var(--color-text-secondary);
+      overflow-x: auto;
+    }
+    .v28-audit-pane .hl { color: var(--color-text); }
+    .v28-audit-pane .ok { color: var(--color-success); }
+    .v28-audit-pane .dim { color: var(--color-text-muted); }
+
+    /* ---------------- Try it Strip ---------------- */
+    .v28-try {
+      border: 1px solid color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
+      border-radius: 14px;
+      background: var(--color-surface);
+      padding: clamp(1.35rem, 3vw, 2rem);
+      margin-bottom: 2.75rem;
+      scroll-margin-top: 5.5rem;
+    }
+    .v28-try-top {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 1rem 1.5rem; flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    .v28-try-top .kicker { display: block; color: var(--color-accent-soft); margin-bottom: 0.45rem; }
+    .v28-try-top h3 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.025em; }
+    .v28-try-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .v28-try-term {
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--code-bg);
+      overflow: hidden;
+    }
+    .v28-try-term-bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+      padding: 0.48rem 0.85rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-elevated);
+      font-family: var(--font-mono); font-size: 0.6875rem;
+      color: var(--color-text-muted);
+    }
+    .v28-copy-btn {
+      font-family: var(--font-mono); font-size: 0.6875rem;
+      color: var(--color-text-secondary);
+      background: var(--color-bg); border: 1px solid var(--color-border);
+      padding: 0.28rem 0.6rem; border-radius: 5px; cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    .v28-copy-btn:hover { color: var(--color-text); border-color: var(--color-text-dim); }
+    .v28-try-term pre {
+      margin: 0;
+      padding: 1rem 1.15rem;
+      font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.72;
+      color: var(--color-text);
+      overflow-x: auto;
+    }
+
+    /* ---------------- Upgrade & Reference Block ---------------- */
+    .v28-reference {
+      max-width: 900px;
+      margin: 0 auto;
+      padding-top: 2rem;
+      border-top: 1px solid var(--color-border);
+      scroll-margin-top: 5.5rem;
+    }
+    .v28-ref-head { margin-bottom: 1.25rem; }
+    .v28-ref-head .kicker { display: block; margin-bottom: 0.45rem; }
+    .v28-ref-head h3 { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }
+
+    .upgrade-steps {
+      margin: 0.85rem 0 0;
+      padding-left: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+
+    /* ---------------- Existing changelog styles ---------------- */
     .change-section { margin-bottom: 1.5rem; }
     .change-section:last-child { margin-bottom: 0; }
-    /* Change types read as outlined mono chips — same family as the film's
-       source chips, so severity stays legible without coloured blocks. */
     .change-type {
       display: inline-flex; align-items: center; gap: 0.4rem;
       font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500;
@@ -89,11 +731,11 @@ const unreleasedShots = [
     }
     .release-highlights strong { display: block; margin-bottom: 0.3rem; color: var(--color-text); font-size: 0.9375rem; }
     .upgrade-note {
-      margin: 0 0 1.75rem; padding: 1rem 1.125rem;
-      border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--color-border));
+      margin: 0 0 1.75rem; padding: 1.1rem 1.25rem;
+      border: 1px solid color-mix(in srgb, var(--color-warning) 36%, var(--color-border));
       border-left-width: 2px; border-left-color: var(--color-warning);
       border-radius: 0 8px 8px 0;
-      background: var(--color-bg);
+      background: var(--color-surface);
       color: var(--color-text-secondary); font-size: 0.9rem; line-height: 1.65;
     }
     .release-shot { margin: 0 0 1.75rem; }
@@ -114,7 +756,7 @@ const unreleasedShots = [
     .upgrade-note strong { color: var(--color-text); }
     .upgrade-note code {
       font-family: var(--font-mono); font-size: 0.8125rem;
-      background: var(--color-surface); border: 1px solid var(--color-border);
+      background: var(--color-bg); border: 1px solid var(--color-border);
       padding: 0.1em 0.35em; border-radius: 4px; color: var(--color-text);
     }
 
@@ -123,7 +765,6 @@ const unreleasedShots = [
       position: relative; padding-left: 1.35rem;
       font-size: 0.9375rem; color: var(--color-text-secondary); line-height: 1.65;
     }
-    /* A short log line rather than a bullet — the mark's motif at list scale. */
     .change-list li::before {
       content: ''; position: absolute; left: 0; top: 0.7rem;
       width: 9px; height: 2px; border-radius: 1px;
@@ -145,12 +786,27 @@ const unreleasedShots = [
     }
     .contributors a { color: var(--color-text-secondary); }
 
+    @media (max-width: 900px) {
+      .v28-engines { grid-template-columns: 1fr; }
+      .v28-feature-head { grid-template-columns: 1fr; }
+      .v28-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .v28-pair { grid-template-columns: 1fr; }
+      .v28-split-cards { grid-template-columns: 1fr; }
+      .v28-audit-grid { grid-template-columns: 1fr; }
+    }
+
     @media (max-width: 768px) {
-      main { padding-top: 6.5rem; }
+      main { padding: 6rem 1rem 3rem; }
       .version-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
-      .version-link { margin-left: 0; }
-      .version.milestone { margin-inline: -0.75rem; padding-inline: 0.9rem; }
+      .version-links, .version-link { margin-left: 0; }
+      .version.milestone { margin-inline: -0.5rem; padding-inline: 0.9rem; }
       .release-highlights { grid-template-columns: 1fr; }
+      .v28-hero { padding: 1.25rem; }
+      .v28-eyebrow { gap: 0.45rem; padding: 0.3rem 0.55rem; }
+      .v28-eyebrow .kicker, .v28-eyebrow .what { font-size: 0.625rem; letter-spacing: 0.1em; }
+      .v28-facts { grid-template-columns: 1fr; }
+      .v28-try-actions .btn { flex: 1 1 auto; justify-content: center; }
+      .frame-bar { font-size: 0.5625rem; letter-spacing: 0.08em; padding: 0.35rem 0.65rem; }
     }
   </style>
 
@@ -163,80 +819,910 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
-    <article class="version" id="v2.8.0">
+    <article class="version showcase-release" id="v2.8.0">
       <div class="version-header">
         <a class="version-tag" href="#v2.8.0">v2.8.0</a>
         <span class="version-date">Nov 22, 2026</span>
         <span class="version-badge">Latest</span>
-        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.0" class="version-link" target="_blank">Release notes &rarr;</a>
+        <span class="version-stat">171 commits · 18 migrations</span>
+        <span class="version-links">
+          <a href="/blog/logchef-2-8-grafana-loki-ui-log-analytics/" class="version-link">Release post &rarr;</a>
+          <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.0" class="version-link" target="_blank" rel="noopener">GitHub release &rarr;</a>
+        </span>
       </div>
 
-      <p class="release-kicker">Loki, aggregations, and queries on the record</p>
-      <p class="release-intro">
-        <strong>Logchef reads Grafana Loki as a third backend, LogchefQL counts and groups, and alerts fire per group.</strong> The audit log records each query run with its full text, and Query Activity shows who uses Logchef, which sources are slow and which query patterns cost the most. Scheduled reports, saved Explorer views, shared dashboard editing and a ClickHouse schema advisor complete the release. Read the <a href="/blog/logchef-2-8-grafana-loki-ui-log-analytics/">release post</a>.
-      </p>
+      <!-- ===================== V2.8.0 HERO ===================== -->
+      <section class="v28-hero" aria-label="Logchef v2.8.0 overview">
+        <div class="bg-grid" aria-hidden="true"></div>
+        <div class="bg-glow" aria-hidden="true"></div>
+        <div class="v28-hero-inner">
+          <div class="v28-hero-head">
+            <div class="v28-eyebrow">
+              <span class="kicker">Logchef 2.8</span>
+              <span class="sep" aria-hidden="true"></span>
+              <span class="what">One query, three engines</span>
+            </div>
+            <h2 class="v28-title">Search Grafana Loki, count with LogchefQL, alert per service, and audit every query.</h2>
+            <p class="v28-sub">
+              <strong>Grafana Loki joins ClickHouse and VictoriaLogs as a third backend.</strong>&#32;LogchefQL now counts and charts across sources, alert rules fire and resolve per group with backtests and silences, and the audit log records every query run with its full text.
+            </p>
+          </div>
 
-      <ul class="release-highlights">
-        <li><strong>Grafana Loki</strong>Search with LogchefQL or native LogQL, with the histogram, field sidebar, live tail, log context, dashboards, alerts, the CLI and MCP.</li>
-        <li><strong>LogchefQL aggregations</strong><code>level=error | count() by service</code> runs on ClickHouse and VictoriaLogs, as a table, a chart or a dashboard panel.</li>
-        <li><strong>Alerting v2</strong>Per-group alerts, a no-data policy, silences, backtests, and reusable email, webhook, Slack and PagerDuty destinations.</li>
-        <li><strong>Queries on the record</strong>A <code>query.run</code> audit event for each query run, including live tail, log context, MCP and Ask Chef, and a rebuilt Query Activity page.</li>
-      </ul>
+          <div class="v28-compiler" aria-label="One LogchefQL query compiled for three backends">
+            <div class="v28-compiler-in">
+              <div class="v28-compiler-left">
+                <span class="v28-compiler-tag">LogchefQL</span>
+                <code class="v28-compiler-query"><span class="q-field">level</span><span class="q-op">=</span><span class="q-str">"error"</span> <span class="q-kw">and</span> <span class="q-field">status</span><span class="q-op">&gt;=</span><span class="q-num">500</span></code>
+              </div>
+              <a href="/playground/" class="v28-compiler-try">Edit in Playground &rarr;</a>
+            </div>
+            <div class="v28-engines">
+              <div class="v28-engine">
+                <div class="v28-engine-top">
+                  <span class="v28-engine-name">ClickHouse</span>
+                  <span class="v28-engine-lang">SQL</span>
+                </div>
+                <pre><span class="q-kw">WHERE</span> (<span class="q-field">level</span> = <span class="q-str">'error'</span>) <span class="q-kw">AND</span> (<span class="q-field">status</span> &gt;= <span class="q-num">500</span>)</pre>
+              </div>
+              <div class="v28-engine">
+                <div class="v28-engine-top">
+                  <span class="v28-engine-name">VictoriaLogs</span>
+                  <span class="v28-engine-lang">LogsQL</span>
+                </div>
+                <pre>(<span class="q-field">level</span>:=<span class="q-str">"error"</span>) <span class="q-kw">AND</span> (<span class="q-field">status</span>:&gt;=<span class="q-num">500</span>)</pre>
+              </div>
+              <div class="v28-engine is-new">
+                <div class="v28-engine-top">
+                  <span class="v28-engine-name">Grafana Loki</span>
+                  <span class="v28-engine-lang">LogQL · New</span>
+                </div>
+                <pre>{`{service_name=~".+", level="error"} | json | status>=500`}</pre>
+              </div>
+            </div>
+          </div>
 
-      <aside class="upgrade-note">
-        <strong>Before upgrading:</strong> back up the metadata database, then stop every old replica before the first new one starts. Alerting v2 does not support a rolling upgrade. Startup runs 18 migrations on each store (SQLite 000042 to 000059, Postgres 000016 to 000033), and the alert migrations cannot be undone: rolling back means restoring the backup. Alert requests drop <code>recipient_user_ids</code> and <code>webhook_urls</code> for <code>destination_ids</code>, <code>alerts.evaluation_interval</code> is removed, and tokens with explicit scope lists need reissuing for the new scopes. The <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md#upgrade-notes">CHANGELOG</a> lists every upgrade note.
-      </aside>
+          {(() => {
+            const shot = v28Shots.hero;
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>{shot.barLeft}</span>
+                    <span class="right">{shot.barRight}</span>
+                  </div>
+                  <div class="frame-media">
+                    {clip ? (
+                      <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                        {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                        <source data-src={clip.mp4} type="video/mp4" />
+                      </video>
+                    ) : (
+                      <>
+                        <picture class="shot-light">
+                          <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="eager" decoding="async" />
+                        </picture>
+                        <picture class="shot-dark">
+                          <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="eager" fetchpriority="high" decoding="async" />
+                        </picture>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {shot.caption && <figcaption>{shot.caption}</figcaption>}
+              </figure>
+            );
+          })()}
+        </div>
+      </section>
 
-      <div class="change-section">
-        <div class="change-type security">Security</div>
-        <ul class="change-list">
-          <li><strong>Team source links need access</strong>: A team admin can link only a source they can already access. Before, a team admin could link any source and query its logs.</li>
-          <li><strong>No header values in exports</strong>: Provisioning export names an environment variable for each custom header of a VictoriaLogs or Loki source instead of writing its value.</li>
-          <li><strong>Quieter webhook failures</strong>: A failed delivery no longer writes the receiver's response body to the server log.</li>
-        </ul>
+      <div class="v28-jump" role="navigation" aria-label="Jump to v2.8.0 feature">
+        <span class="v28-jump-label">In v2.8.0</span>
+        {v28Nav.map(item => <a href={item.href}>{item.label}</a>)}
       </div>
 
-      <div class="change-section">
-        <div class="change-type added">Added</div>
-        <ul class="change-list">
-          <li><strong>Grafana Loki sources</strong>: A base URL, an optional tenant, a default stream selector and a parser. LogchefQL compiles to LogQL, and the LogQL tab runs native LogQL. A Loki source gives its teams the whole tenant.</li>
-          <li><strong>LogchefQL aggregations</strong>: <code>count</code>, <code>count_distinct</code>, <code>sum</code>, <code>avg</code>, <code>min</code>, <code>max</code> and <code>p50</code> to <code>p99</code>, with up to 5 <code>by</code> keys, a time bucket, <code>| sort</code> and <code>| limit</code>. <strong>Add to dashboard</strong> starts a panel from the query.</li>
-          <li><strong>Per-group alerts</strong>: <strong>Group by</strong> in condition and native mode. Each group fires, notifies and resolves on its own.</li>
-          <li><strong>No data, silences and backtests</strong>: Decide what an empty result means, mute notifications for maintenance windows, and replay an unsaved rule over up to 7 days.</li>
-          <li><strong>Notification destinations and a delivery queue</strong>: Reusable email, webhook, Slack and PagerDuty destinations. Retries after 30 seconds, 2, 10 and 30 minutes, with every attempt recorded.</li>
-          <li><strong>Audit log</strong>: Configuration changes, sign-ins, OAuth consent, exports and query runs, in Administration, the API, <code>logchef audit list</code> and JSON log lines.</li>
-          <li><strong>Scheduled reports</strong>: Email a dashboard, a dashboard tab or a saved query on a schedule, with per-recipient panel locking.</li>
-          <li><strong>Saved Explorer views</strong>: Columns, sort, display mode and optional query defaults as personal, team or source views, with defaults and shareable links.</li>
-          <li><strong>ClickHouse schema advisor</strong>: Index, column, codec, key and retention suggestions from real query shapes, with evidence and DDL that Logchef never runs.</li>
-          <li><strong>MCP and CLI</strong>: MCP queries Loki, runs aggregations and lists saved views. CLI 0.5.0 adds <code>advisor</code>, <code>audit list</code>, <code>reports</code>, <code>views list</code> and <code>open --view</code>.</li>
-        </ul>
+      <!-- ===================== FEATURE SHOWCASE ===================== -->
+      <div class="v28-sections">
+
+        <!-- 1. Grafana Loki -->
+        <section class="v28-feature" id="v2.8.0-loki">
+          <div class="v28-feature-head">
+            <div class="v28-feature-copy">
+              <span class="kicker">01 · Third backend</span>
+              <h3>Grafana Loki</h3>
+              <p>
+                Point Logchef at any Loki tenant and query it with LogchefQL or native LogQL. Top-level conditions on stream labels join the selector, conditions on <code>_msg</code> become line filters, and remaining fields run after the JSON or logfmt parser.
+              </p>
+              <p>
+                Native LogQL pages past Loki's 5,000-entry per-request cap. Histograms, the field sidebar, 2-second live tail, per-stream context, saved queries, dashboards, alerts, AI query generation, the CLI and MCP all work on Loki. Logchef never writes to Loki.
+              </p>
+              <p>
+                <strong>Tenant note:</strong> a Loki source grants linked teams the whole tenant; exports, windowed search and LogchefQL aggregations are not available on Loki yet.
+              </p>
+              <div class="v28-links">
+                <a href="/tutorials/loki/">Grafana Loki tutorial &rarr;</a>
+                <a href="/guide/logql-queries/">LogQL Queries &rarr;</a>
+              </div>
+            </div>
+
+            <div class="v28-code">
+              <div class="v28-code-bar"><span>LogchefQL</span><span>Input</span></div>
+              <pre>level="error"</pre>
+              <div class="v28-code-divider">Compiled LogQL (JSON parser)</div>
+              <pre>{`{service_name=~".+", level="error"}
+  | json
+  | drop __error__, __error_details__`}</pre>
+            </div>
+          </div>
+
+          {(() => {
+            const primary = v28Shots['loki-explorer'];
+            const secondary = v28Shots['loki-dashboard'];
+            const pClip = v28Clips[primary.id];
+            const sClip = v28Clips[secondary.id];
+            return (
+              <>
+                <figure class="v28-figure">
+                  <div class="frame">
+                    <div class="frame-bar">
+                      <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                      <span>{primary.barLeft}</span>
+                      <span class="right">{primary.barRight}</span>
+                    </div>
+                    <div class="frame-media">
+                      {pClip ? (
+                        <video data-autoplay-clip muted loop playsinline preload="none" poster={pClip.poster} width={pClip.width} height={pClip.height} aria-label={primary.alt}>
+                          {pClip.webm && <source data-src={pClip.webm} type="video/webm" />}
+                          <source data-src={pClip.mp4} type="video/mp4" />
+                        </video>
+                      ) : (
+                        <>
+                          <picture class="shot-light">
+                            <source srcset={`/screenshots/${primary.name}-light.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${primary.name}-light.webp`} type="image/webp" />
+                            <img src={`/screenshots/${primary.name}-light.png`} alt={primary.alt} width={primary.width} height={primary.height} loading="lazy" decoding="async" />
+                          </picture>
+                          <picture class="shot-dark">
+                            <source srcset={`/screenshots/${primary.name}-dark.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${primary.name}-dark.webp`} type="image/webp" />
+                            <img src={`/screenshots/${primary.name}-dark.png`} alt={primary.alt} width={primary.width} height={primary.height} loading="lazy" decoding="async" />
+                          </picture>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <figcaption>{primary.caption}</figcaption>
+                </figure>
+
+                <figure class="v28-figure" style="margin-top: 1.25rem;">
+                  <div class="frame">
+                    <div class="frame-bar">
+                      <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                      <span>{secondary.barLeft}</span>
+                      <span class="right">{secondary.barRight}</span>
+                    </div>
+                    <div class="frame-media">
+                      {sClip ? (
+                        <video data-autoplay-clip muted loop playsinline preload="none" poster={sClip.poster} width={sClip.width} height={sClip.height} aria-label={secondary.alt}>
+                          {sClip.webm && <source data-src={sClip.webm} type="video/webm" />}
+                          <source data-src={sClip.mp4} type="video/mp4" />
+                        </video>
+                      ) : (
+                        <>
+                          <picture class="shot-light">
+                            <source srcset={`/screenshots/${secondary.name}-light.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${secondary.name}-light.webp`} type="image/webp" />
+                            <img src={`/screenshots/${secondary.name}-light.png`} alt={secondary.alt} width={secondary.width} height={secondary.height} loading="lazy" decoding="async" />
+                          </picture>
+                          <picture class="shot-dark">
+                            <source srcset={`/screenshots/${secondary.name}-dark.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${secondary.name}-dark.webp`} type="image/webp" />
+                            <img src={`/screenshots/${secondary.name}-dark.png`} alt={secondary.alt} width={secondary.width} height={secondary.height} loading="lazy" decoding="async" />
+                          </picture>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <figcaption>{secondary.caption}</figcaption>
+                </figure>
+              </>
+            );
+          })()}
+        </section>
+
+        <!-- 2. LogchefQL aggregations -->
+        <section class="v28-feature" id="v2.8.0-aggregations">
+          <div class="v28-feature-head">
+            <div class="v28-feature-copy">
+              <span class="kicker">02 · Query language</span>
+              <h3>LogchefQL aggregations</h3>
+              <p>
+                Pipe matching logs into <code>count</code>, <code>count_distinct</code>, <code>sum</code>, <code>avg</code>, <code>min</code>, <code>max</code>, and approximate percentiles <code>p50</code> through <code>p99</code>. Group by up to 5 keys, add a <code>time(5m)</code> bucket, and finish with <code>| sort</code> and <code>| limit</code>.
+              </p>
+              <p>
+                The same query runs on ClickHouse and VictoriaLogs without rewriting SQL or LogsQL. Explorer renders charts and tables directly, and <strong>Add to dashboard</strong> prefills a result panel from the active query.
+              </p>
+              <div class="v28-links">
+                <a href="/guide/aggregations/">Aggregations guide &rarr;</a>
+              </div>
+            </div>
+
+            <div class="v28-code">
+              <div class="v28-code-bar"><span>LogchefQL</span><span>ClickHouse &amp; VictoriaLogs</span></div>
+              <pre>{`level=error | count() by service
+
+service=api
+  | p95(duration_ms), avg(duration_ms) by time(5m)
+  | sort desc | limit 20`}</pre>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots.aggregations;
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>{shot.barLeft}</span>
+                    <span class="right">{shot.barRight}</span>
+                  </div>
+                  <div class="frame-media">
+                    {clip ? (
+                      <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                        {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                        <source data-src={clip.mp4} type="video/mp4" />
+                      </video>
+                    ) : (
+                      <>
+                        <picture class="shot-light">
+                          <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                        <picture class="shot-dark">
+                          <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <figcaption>{shot.caption}</figcaption>
+              </figure>
+            );
+          })()}
+        </section>
+
+        <!-- 3. Alerting v2 -->
+        <section class="v28-feature" id="v2.8.0-alerting">
+          <div class="v28-feature-head">
+            <div class="v28-feature-copy">
+              <span class="kicker">03 · Alerting v2</span>
+              <h3>Per-group alerts, backtests, silences and destinations</h3>
+              <p>
+                One rule can now watch every service. Set <strong>Group by</strong> in LogchefQL or native SQL, LogsQL and LogQL queries, and each group fires, notifies and resolves on its own timeline.
+              </p>
+              <p>
+                Replay an unsaved rule over up to 7 days with <strong>Run backtest</strong> before you enable it. Mute maintenance windows with one-off or weekly silences, and route notifications to reusable email, webhook, Slack and PagerDuty destinations through a retrying delivery queue.
+              </p>
+              <div class="v28-links">
+                <a href="/features/alerting/">Alerting documentation &rarr;</a>
+              </div>
+            </div>
+
+            <div class="v28-code">
+              <div class="v28-code-bar"><span>Grouped condition</span><span>Group by: service</span></div>
+              <pre>status_code &gt;= 500 | count() as value by service</pre>
+              <div class="v28-code-divider">Native LogQL grouped alert</div>
+              <pre>{`sum by (service) (
+  count_over_time({app="shop"} |= "error" [5m])
+)`}</pre>
+            </div>
+          </div>
+
+          <div class="v28-facts">
+            <div class="v28-fact">
+              <span class="v28-fact-k">No-data policy</span>
+              <p>Choose <code>zero</code>, <code>no_data</code> or <code>keep</code> when a query returns no rows.</p>
+            </div>
+            <div class="v28-fact">
+              <span class="v28-fact-k">Silences</span>
+              <p>Mute one rule or a whole source for up to 30 days or weekly in any IANA timezone.</p>
+            </div>
+            <div class="v28-fact">
+              <span class="v28-fact-k">Destinations</span>
+              <p>Reusable email, webhook, Slack and PagerDuty targets with one <code>dedup_key</code> per group.</p>
+            </div>
+            <div class="v28-fact">
+              <span class="v28-fact-k">Delivery queue</span>
+              <p>Retries after 30s, 2m, 10m and 30m with every attempt recorded on the history entry.</p>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots['alerting-v2'];
+            const clip = v28Clips[shot.id];
+            const hist = v28Shots['alerting-history'];
+            const histClip = v28Clips[hist.id];
+            const sil = v28Shots['alerting-silences'];
+            const silClip = v28Clips[sil.id];
+            return (
+              <>
+                <figure class="v28-figure">
+                  <div class="frame">
+                    <div class="frame-bar">
+                      <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                      <span>{shot.barLeft}</span>
+                      <span class="right">{shot.barRight}</span>
+                    </div>
+                    <div class="frame-media">
+                      {clip ? (
+                        <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                          {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                          <source data-src={clip.mp4} type="video/mp4" />
+                        </video>
+                      ) : (
+                        <>
+                          <picture class="shot-light">
+                            <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                            <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                          </picture>
+                          <picture class="shot-dark">
+                            <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                            <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                          </picture>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <figcaption>{shot.caption}</figcaption>
+                </figure>
+
+                <div class="v28-pair">
+                  <figure class="v28-figure">
+                    <div class="frame">
+                      <div class="frame-bar">
+                        <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                        <span>{hist.barLeft}</span>
+                        <span class="right">{hist.barRight}</span>
+                      </div>
+                      <div class="frame-media">
+                        {histClip ? (
+                          <video data-autoplay-clip muted loop playsinline preload="none" poster={histClip.poster} width={histClip.width} height={histClip.height} aria-label={hist.alt}>
+                            {histClip.webm && <source data-src={histClip.webm} type="video/webm" />}
+                            <source data-src={histClip.mp4} type="video/mp4" />
+                          </video>
+                        ) : (
+                          <>
+                            <picture class="shot-light">
+                              <source srcset={`/screenshots/${hist.name}-light.avif`} type="image/avif" />
+                              <source srcset={`/screenshots/${hist.name}-light.webp`} type="image/webp" />
+                              <img src={`/screenshots/${hist.name}-light.png`} alt={hist.alt} width={hist.width} height={hist.height} loading="lazy" decoding="async" />
+                            </picture>
+                            <picture class="shot-dark">
+                              <source srcset={`/screenshots/${hist.name}-dark.avif`} type="image/avif" />
+                              <source srcset={`/screenshots/${hist.name}-dark.webp`} type="image/webp" />
+                              <img src={`/screenshots/${hist.name}-dark.png`} alt={hist.alt} width={hist.width} height={hist.height} loading="lazy" decoding="async" />
+                            </picture>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <figcaption>{hist.caption}</figcaption>
+                  </figure>
+
+                  <figure class="v28-figure">
+                    <div class="frame">
+                      <div class="frame-bar">
+                        <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                        <span>{sil.barLeft}</span>
+                        <span class="right">{sil.barRight}</span>
+                      </div>
+                      <div class="frame-media">
+                        {silClip ? (
+                          <video data-autoplay-clip muted loop playsinline preload="none" poster={silClip.poster} width={silClip.width} height={silClip.height} aria-label={sil.alt}>
+                            {silClip.webm && <source data-src={silClip.webm} type="video/webm" />}
+                            <source data-src={silClip.mp4} type="video/mp4" />
+                          </video>
+                        ) : (
+                          <>
+                            <picture class="shot-light">
+                              <source srcset={`/screenshots/${sil.name}-light.avif`} type="image/avif" />
+                              <source srcset={`/screenshots/${sil.name}-light.webp`} type="image/webp" />
+                              <img src={`/screenshots/${sil.name}-light.png`} alt={sil.alt} width={sil.width} height={sil.height} loading="lazy" decoding="async" />
+                            </picture>
+                            <picture class="shot-dark">
+                              <source srcset={`/screenshots/${sil.name}-dark.avif`} type="image/avif" />
+                              <source srcset={`/screenshots/${sil.name}-dark.webp`} type="image/webp" />
+                              <img src={`/screenshots/${sil.name}-dark.png`} alt={sil.alt} width={sil.width} height={sil.height} loading="lazy" decoding="async" />
+                            </picture>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <figcaption>{sil.caption}</figcaption>
+                  </figure>
+                </div>
+              </>
+            );
+          })()}
+        </section>
+
+        <!-- 4. Audit log -->
+        <section class="v28-feature" id="v2.8.0-audit-log">
+          <div class="v28-feature-head is-single">
+            <div class="v28-feature-copy">
+              <span class="kicker">04 · Governance &amp; compliance</span>
+              <h3>Audit log with <code>query.run</code></h3>
+              <p>
+                Logchef records configuration changes, sign-ins, OAuth consent, exports and every query run. Each <code>query.run</code> event stores the actor, authentication method, full query text, time range, rows returned and scanned, duration and outcome across Explorer, dashboards, live tail, log context, CLI, API, MCP and Ask Chef.
+              </p>
+              <p>
+                Global admins inspect events in <strong>Administration &rarr; Audit Log</strong>, fetch NDJSON exports from <code>GET /api/v1/admin/audit-events</code>, filter via <code>logchef audit list</code>, or ship structured JSON log lines off the host.
+              </p>
+              <div class="v28-links">
+                <a href="/operations/audit-log/">Audit Log reference &rarr;</a>
+              </div>
+            </div>
+          </div>
+
+          {(() => {
+            const clip = v28Clips['audit-log'];
+            return clip ? (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>Administration · Audit Log</span>
+                    <span class="right">query.run · NDJSON</span>
+                  </div>
+                  <div class="frame-media">
+                    <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label="Logchef Audit Log showing query.run events with full query text, actor, duration and rows scanned">
+                      {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                      <source data-src={clip.mp4} type="video/mp4" />
+                    </video>
+                  </div>
+                </div>
+              </figure>
+            ) : (
+              <div class="frame">
+                <div class="frame-bar">
+                  <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                  <span>Audit Log · CLI &amp; JSON Stream</span>
+                  <span class="right">query.run · NDJSON</span>
+                </div>
+                <div class="v28-audit-grid">
+                  <div class="v28-audit-pane">
+                    <div class="v28-audit-pane-label">CLI filter</div>
+                    <pre><span class="dim">$</span> <span class="hl">logchef audit list --action query.run --since 24h</span>
+
+<span class="dim">TIME                 ACTOR                AUTH    SOURCE               ROWS   MS</span>
+2026-11-22 17:31:08  maya@acme.io         oauth   Kubernetes Platform    61   15  <span class="ok">ok</span>
+2026-11-22 17:29:44  claude-code (maya)   mcp     App Logs              242   17  <span class="ok">ok</span>
+2026-11-22 17:24:12  oncall-bot           token   Edge Services         500   42  <span class="ok">ok</span></pre>
+                  </div>
+                  <div class="v28-audit-pane">
+                    <div class="v28-audit-pane-label">Structured JSON log line</div>
+                    <pre>{`{
+  "msg": "audit",
+  "action": "query.run",
+  "actor": "maya@acme.io",
+  "auth_method": "oauth_mcp",
+  "source": "Kubernetes Platform",
+  "query": "app=\\"checkout\\" and status>=500",
+  "rows_returned": 61,
+  "rows_scanned": 1450,
+  "duration_ms": 15,
+  "outcome": "success"
+}`}</pre>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </section>
+
+        <!-- 5. Query Activity -->
+        <section class="v28-feature" id="v2.8.0-query-activity">
+          <div class="v28-feature-head is-single">
+            <div class="v28-feature-copy">
+              <span class="kicker">05 · Usage &amp; cost visibility</span>
+              <h3>Query Activity, rebuilt</h3>
+              <p>
+                <strong>Administration &rarr; Query Activity</strong> shows who uses Logchef, which sources are busy or slow, and which repeated query patterns scan the most data. Every number compares against the previous window of equal length, with p50/p95 latency sparklines, scan volume, failure rates and open Schema Advisor findings. Click any source or user to scope the whole page.
+              </p>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots['query-activity'];
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>{shot.barLeft}</span>
+                    <span class="right">{shot.barRight}</span>
+                  </div>
+                  <div class="frame-media">
+                    {clip ? (
+                      <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                        {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                        <source data-src={clip.mp4} type="video/mp4" />
+                      </video>
+                    ) : (
+                      <>
+                        <picture class="shot-light">
+                          <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                        <picture class="shot-dark">
+                          <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <figcaption>{shot.caption}</figcaption>
+              </figure>
+            );
+          })()}
+        </section>
+
+        <!-- 6. Scheduled reports -->
+        <section class="v28-feature" id="v2.8.0-reports">
+          <div class="v28-feature-head is-single">
+            <div class="v28-feature-copy">
+              <span class="kicker">06 · Delivery</span>
+              <h3>Scheduled reports</h3>
+              <p>
+                Email a full dashboard, one dashboard tab, or a saved query every hour, day, week or month in the report's own timezone. Stat panels render as tiles, charts turn into bar tables, and saved queries can attach their rows as CSV. Each run checks the owner's access, and each Logchef recipient's copy locks any panel that recipient cannot view.
+              </p>
+              <div class="v28-links">
+                <a href="/features/scheduled-reports/">Scheduled Reports guide &rarr;</a>
+              </div>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots['scheduled-reports'];
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>{shot.barLeft}</span>
+                    <span class="right">{shot.barRight}</span>
+                  </div>
+                  <div class="frame-media">
+                    {clip ? (
+                      <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                        {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                        <source data-src={clip.mp4} type="video/mp4" />
+                      </video>
+                    ) : (
+                      <>
+                        <picture class="shot-light">
+                          <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                        <picture class="shot-dark">
+                          <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <figcaption>{shot.caption}</figcaption>
+              </figure>
+            );
+          })()}
+        </section>
+
+        <!-- 7. Saved Explorer views -->
+        <section class="v28-feature" id="v2.8.0-saved-views">
+          <div class="v28-feature-head is-single">
+            <div class="v28-feature-copy">
+              <span class="kicker">07 · Explorer workflow</span>
+              <h3>Saved Explorer views</h3>
+              <p>
+                Save a source's visible columns, widths, sort order and display mode, with an optional filter and relative time range, as a personal, team or source view. Set a default per scope, carry your layout in share links, open views from <code>logchef open --view</code>, or declare managed read-only views in provisioning TOML.
+              </p>
+              <div class="v28-links">
+                <a href="/features/saved-views/">Saved Views guide &rarr;</a>
+              </div>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots['saved-views'];
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>{shot.barLeft}</span>
+                    <span class="right">{shot.barRight}</span>
+                  </div>
+                  <div class="frame-media">
+                    {clip ? (
+                      <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                        {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                        <source data-src={clip.mp4} type="video/mp4" />
+                      </video>
+                    ) : (
+                      <>
+                        <picture class="shot-light">
+                          <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                        <picture class="shot-dark">
+                          <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <figcaption>{shot.caption}</figcaption>
+              </figure>
+            );
+          })()}
+        </section>
+
+        <!-- 8. ClickHouse schema advisor -->
+        <section class="v28-feature" id="v2.8.0-schema-advisor">
+          <div class="v28-feature-head">
+            <div class="v28-feature-copy">
+              <span class="kicker">08 · ClickHouse tuning</span>
+              <h3>ClickHouse schema advisor</h3>
+              <p>
+                Logchef records the filter shape of Explorer queries on ClickHouse sources (columns, Map keys and JSON paths, never values). <strong>Run analysis</strong> joins those shapes with table metadata and suggests bloom filter and text indexes, materialized columns, <code>LowCardinality</code>, codecs, and reviews of sorting keys, partition keys and retention.
+              </p>
+              <p>
+                Every finding lists its evidence and suggested DDL. Logchef never executes DDL on your cluster.
+              </p>
+              <div class="v28-links">
+                <a href="/features/schema-advisor/">Schema Advisor guide &rarr;</a>
+              </div>
+            </div>
+
+            <div class="v28-code">
+              <div class="v28-code-bar"><span>CLI</span><span>Run &amp; print DDL</span></div>
+              <pre>{`logchef advisor app-logs --refresh
+logchef advisor app-logs --ddl`}</pre>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots['schema-advisor'];
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    <span>{shot.barLeft}</span>
+                    <span class="right">{shot.barRight}</span>
+                  </div>
+                  <div class="frame-media">
+                    {clip ? (
+                      <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                        {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                        <source data-src={clip.mp4} type="video/mp4" />
+                      </video>
+                    ) : (
+                      <>
+                        <picture class="shot-light">
+                          <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                        <picture class="shot-dark">
+                          <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                          <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                          <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                        </picture>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <figcaption>{shot.caption}</figcaption>
+              </figure>
+            );
+          })()}
+        </section>
+
+        <!-- 9 & 10. Shared dashboard editing + MCP and CLI 0.5.0 -->
+        <section class="v28-feature" id="v2.8.0-mcp-cli">
+          <div class="v28-split-cards">
+            <div class="v28-card" id="v2.8.0-shared-dashboards">
+              <span class="kicker">09 · Team collaboration</span>
+              <h3>Shared dashboard editing</h3>
+              <p>
+                Team owners, admins and editors can edit a shared dashboard whenever they hold edit rights on every team its query panels use. Only the creator and global admins can delete it.
+              </p>
+              <div class="v28-links">
+                <a href="/features/dashboards/">Dashboards guide &rarr;</a>
+              </div>
+            </div>
+
+            <div class="v28-card">
+              <span class="kicker">10 · Agents &amp; terminal</span>
+              <h3>22 MCP tools and CLI 0.5.0</h3>
+              <p>
+                MCP agents query Loki, run aggregations via <code>query_logchefql</code>, list saved views with <code>list_saved_views</code>, and inspect alert groups, silences and deliveries. CLI 0.5.0 adds <code>advisor</code>, <code>audit list</code>, <code>reports</code>, <code>views list</code>, <code>open --view</code>, native LogQL through <code>logchef sql</code>, and aggregation tables.
+              </p>
+              <div class="v28-code">
+                <pre>{`claude mcp add --transport http --client-id logchef-mcp logchef https://logchef.example.com/mcp
+logchef query 'level=error | count() by service' --since 1h
+logchef sql '{service_name="payments-api"} |= "gateway"' --since 1h`}</pre>
+              </div>
+              <div class="v28-links">
+                <a href="/integration/mcp-server/">MCP server &rarr;</a>
+                <a href="/integration/cli/">CLI 0.5.0 &rarr;</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 11. LogchefQL Playground -->
+        <section class="v28-feature" id="v2.8.0-playground">
+          <div class="v28-feature-head is-single">
+            <div class="v28-feature-copy">
+              <span class="kicker">11 · Interactive compiler</span>
+              <h3>LogchefQL Playground</h3>
+              <p>
+                Test any LogchefQL filter or aggregation in your browser and compare the compiled ClickHouse SQL, VictoriaLogs LogsQL and Grafana Loki LogQL side by side. Runs locally in WebAssembly with shareable URLs and zero backend setup.
+              </p>
+              <div class="v28-links">
+                <a href="/playground/">Open the Playground &rarr;</a>
+              </div>
+            </div>
+          </div>
+
+          {(() => {
+            const shot = v28Shots.playground;
+            const clip = v28Clips[shot.id];
+            return (
+              <figure class="v28-figure">
+                <a href="/playground/" class="frame-link">
+                  <div class="frame">
+                    <div class="frame-bar">
+                      <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                      <span>{shot.barLeft}</span>
+                      <span class="right">{shot.barRight}</span>
+                    </div>
+                    <div class="frame-media">
+                      {clip ? (
+                        <video data-autoplay-clip muted loop playsinline preload="none" poster={clip.poster} width={clip.width} height={clip.height} aria-label={shot.alt}>
+                          {clip.webm && <source data-src={clip.webm} type="video/webm" />}
+                          <source data-src={clip.mp4} type="video/mp4" />
+                        </video>
+                      ) : (
+                        <>
+                          <picture class="shot-light">
+                            <source srcset={`/screenshots/${shot.name}-light.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${shot.name}-light.webp`} type="image/webp" />
+                            <img src={`/screenshots/${shot.name}-light.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                          </picture>
+                          <picture class="shot-dark">
+                            <source srcset={`/screenshots/${shot.name}-dark.avif`} type="image/avif" />
+                            <source srcset={`/screenshots/${shot.name}-dark.webp`} type="image/webp" />
+                            <img src={`/screenshots/${shot.name}-dark.png`} alt={shot.alt} width={shot.width} height={shot.height} loading="lazy" decoding="async" />
+                          </picture>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </a>
+                <figcaption>{shot.caption}</figcaption>
+              </figure>
+            );
+          })()}
+        </section>
+
       </div>
 
-      <div class="change-section">
-        <div class="change-type changed">Changed</div>
-        <ul class="change-list">
-          <li><strong>Query Activity</strong>: Adoption, hot and slow sources, and costly query patterns, each compared with the prior window, with latency percentiles, scan cost and failure rates.</li>
-          <li><strong>Shared dashboard editing</strong>: Team owners, admins and editors can edit a dashboard when they have edit rights on every team its query panels use.</li>
-          <li><strong>Alert evaluation</strong>: Rules run on the background job runner at their own frequency, and one replica evaluates each tick.</li>
-          <li><strong>Explorer header filters</strong>: A column filter adds a condition to the LogchefQL query and reruns it.</li>
-        </ul>
-      </div>
+      <!-- ===================== TRY IT STRIP ===================== -->
+      <section class="v28-try" id="v2.8.0-try" aria-label="Try Logchef v2.8.0">
+        <div class="v28-try-top">
+          <div>
+            <span class="kicker">Try v2.8.0</span>
+            <h3>Run it on your own logs in one command</h3>
+          </div>
+          <div class="v28-try-actions">
+            <a href="https://demo.logchef.app" class="btn btn-primary" target="_blank" rel="noopener">Live demo &rarr;</a>
+            <a href="/playground/" class="btn btn-secondary">Playground</a>
+            <a href="/getting-started/quickstart/" class="btn btn-secondary">Docs</a>
+          </div>
+        </div>
+        <div class="v28-try-term">
+          <div class="v28-try-term-bar">
+            <span>Docker · ghcr.io/mr-karan/logchef:v2.8.0</span>
+            <button type="button" class="v28-copy-btn" data-copy-target="v28-docker-cmd">Copy</button>
+          </div>
+          <pre id="v28-docker-cmd">{dockerRunCmd}</pre>
+        </div>
+      </section>
 
-      <div class="change-section">
-        <div class="change-type removed">Removed</div>
-        <ul class="change-list">
-          <li><code>recipient_user_ids</code> and <code>webhook_urls</code> in alert requests, <code>alerts.evaluation_interval</code>, <code>POST /api/v1/admin/settings/test-webhook</code> and <code>GET /api/v1/admin/query-activity</code>.</li>
-        </ul>
-      </div>
+      <!-- ===================== UPGRADING & FULL DETAILS ===================== -->
+      <div class="v28-reference" id="v2.8.0-upgrading">
+        <div class="v28-ref-head">
+          <span class="kicker">Upgrade &amp; reference</span>
+          <h3>Before you upgrade to v2.8.0</h3>
+        </div>
 
-      <div class="change-section">
-        <div class="change-type fixed">Fixed</div>
-        <ul class="change-list">
-          <li>Live tail frees its slot as soon as the client disconnects, on every backend.</li>
-          <li>A dashboard of 4 or more panels with caching off no longer rejects one of its own panels.</li>
-          <li>Dashboard charts color HTTP status classes by meaning, leave gaps in unstacked areas, and keep value-axis labels distinct.</li>
-          <li>MCP <code>translate_logchefql</code> and <code>query_logchefql</code> default to UTC when no timezone is sent.</li>
-        </ul>
+        <aside class="upgrade-note">
+          <strong>This release requires downtime.</strong> Back up the metadata database, then stop every old replica before the first new one starts. Rolling upgrades are not supported: an old binary writes alert columns that no longer exist. Startup runs 18 migrations on each store (SQLite <code>000042</code> to <code>000059</code>, Postgres <code>000016</code> to <code>000033</code>). Treat them as forward-only: the alert migrations move each rule's targets into destinations and cannot be undone, so rolling back means restoring the backup.
+          <ol class="upgrade-steps">
+            <li>Remove <code>alerts.evaluation_interval</code> from config. Keep at least one replica with both <code>jobs.enabled = true</code> and <code>alerts.enabled = true</code>.</li>
+            <li>Review <code>[audit]</code> limits: <code>retention_days</code> (default 30) and <code>max_rows</code> (default 1,000,000), which each <code>query.run</code> event counts toward.</li>
+            <li>Verify SMTP in <strong>Administration &rarr; System Settings &rarr; Alerts</strong> if you send alert or report email.</li>
+            <li>Reload open Logchef tabs, reissue explicitly scoped API tokens that need the new scopes, run <code>logchef auth</code> again for CLI views, and sign MCP clients in again for <code>list_saved_views</code>.</li>
+            <li>Migrated webhooks stay on payload v1 with at-least-once delivery; deduplicate on <code>Logchef-Delivery-Id</code> and migrate receivers to v2 when ready.</li>
+          </ol>
+        </aside>
+
+        <div class="change-section">
+          <div class="change-type breaking">Breaking changes</div>
+          <ul class="change-list">
+            <li><strong>No rolling upgrades</strong>: Stop every old replica before starting v2.8.0.</li>
+            <li><strong>Alert API</strong>: Create or update requests containing <code>recipient_user_ids</code> or <code>webhook_urls</code> (even empty arrays) answer <code>400</code>. Create a destination at <code>POST /api/v1/notification-destinations</code> and pass its ID in <code>destination_ids</code>.</li>
+            <li><strong>Alert frequency</strong>: <code>frequency_seconds</code> below 10 answers <code>400</code>. Existing rules below 10 seconds run every 10 seconds.</li>
+            <li><strong>Webhook test route removed</strong>: <code>POST /api/v1/admin/settings/test-webhook</code> is replaced by <code>POST /api/v1/notification-destinations/test</code>; inspect <code>data.ok</code> because HTTP 200 can report a failed delivery.</li>
+            <li><strong>Config removed</strong>: <code>alerts.evaluation_interval</code> (and <code>LOGCHEF_ALERTS__EVALUATION_INTERVAL</code>) is removed.</li>
+            <li><strong>Grouped notifications</strong>: Grouped rules send one notification per group to each destination type. Webhooks send <code>Logchef-Delivery-Id</code> with at-least-once delivery.</li>
+            <li><strong>Query Activity API</strong>: <code>GET /api/v1/admin/query-activity</code> is removed; use <code>GET /api/v1/admin/query-stats</code> with <code>account</code>, <code>source_id</code> and <code>user_id</code>.</li>
+            <li><strong>New token scopes</strong>: <code>saved_views:read</code>, <code>saved_views:write</code>, <code>destinations:read</code>, <code>destinations:write</code>, <code>reports:read</code>, <code>reports:write</code> and <code>audit:read</code>. Tokens with explicit scope lists need reissuing; full-access tokens are unaffected.</li>
+            <li><strong>Team source links</strong>: Linking a source you cannot access fails as source not found. Global admins and provisioning are unaffected.</li>
+            <li><strong>Provisioning export</strong>: Custom headers on VictoriaLogs and Loki sources export as <code>header_secret_refs</code> environment variable names; provisioning refuses to start when a referenced variable is unset or empty.</li>
+          </ul>
+        </div>
+
+        <div class="change-section">
+          <div class="change-type security">Security</div>
+          <ul class="change-list">
+            <li><strong>Team source links need access</strong>: A team admin can link only a source they can already access. Before, a team admin could link any source and query its logs.</li>
+            <li><strong>No header values in exports</strong>: Provisioning export names an environment variable for each custom header of a VictoriaLogs or Loki source instead of writing its value.</li>
+            <li><strong>Quieter webhook failures</strong>: A failed delivery no longer writes the receiver's response body to the server log.</li>
+          </ul>
+        </div>
+
+        <div class="change-section">
+          <div class="change-type fixed">Fixed</div>
+          <ul class="change-list">
+            <li>Live tail frees its slot as soon as the client disconnects, on every backend.</li>
+            <li>A dashboard of 4 or more panels with caching off no longer rejects one of its own panels.</li>
+            <li>Dashboard charts color HTTP status classes by meaning, leave gaps in unstacked areas, and keep value-axis labels distinct.</li>
+            <li>MCP <code>translate_logchefql</code> and <code>query_logchefql</code> default to UTC when no timezone is sent.</li>
+          </ul>
+        </div>
+
+        <div class="contributors">
+          <strong>Contributors:</strong> Thanks to <a href="https://github.com/sujay2306" target="_blank" rel="noopener">@sujay2306</a> for requiring source access before a team admin can link a source to a team (<a href="https://github.com/mr-karan/logchef/pull/279" target="_blank" rel="noopener">#279</a>). Full details in <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md#280---2026-11-22" target="_blank" rel="noopener">CHANGELOG.md</a>.
+        </div>
       </div>
     </article>
 
@@ -1809,4 +3295,54 @@ const unreleasedShots = [
     </article>
   </main>
   </div>
+
+  <script>
+    // Copy button for the v2.8.0 Docker quick-start command
+    document.querySelectorAll<HTMLButtonElement>('[data-copy-target]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.copyTarget;
+        const el = id ? document.getElementById(id) : null;
+        if (!el) return;
+        navigator.clipboard?.writeText(el.textContent ?? '');
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = prev || 'Copy'; }, 2000);
+      });
+    });
+
+    // Lazy autoplay for video clips when added to v28Clips; respects prefers-reduced-motion
+    const clips = document.querySelectorAll<HTMLVideoElement>('video[data-autoplay-clip]');
+    if (clips.length > 0) {
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const hydrate = (video: HTMLVideoElement) => {
+        if (video.dataset.hydrated) return;
+        video.querySelectorAll<HTMLSourceElement>('source[data-src]').forEach(s => {
+          s.src = s.dataset.src || '';
+        });
+        video.load();
+        video.dataset.hydrated = '1';
+      };
+
+      if (reduced) {
+        clips.forEach(video => {
+          video.controls = true;
+          video.removeAttribute('loop');
+          hydrate(video);
+        });
+      } else {
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            const video = entry.target as HTMLVideoElement;
+            if (entry.isIntersecting) {
+              hydrate(video);
+              video.play().catch(() => {});
+            } else {
+              video.pause();
+            }
+          });
+        }, { rootMargin: '120px 0px', threshold: 0.2 });
+        clips.forEach(video => io.observe(video));
+      }
+    }
+  </script>
 </BaseLayout>
