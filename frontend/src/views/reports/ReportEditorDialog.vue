@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Eye, Send, X } from "lucide-vue-next";
+import { Eye, LockKeyhole, Send, X } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +15,7 @@ import type { Report, ReportInput, ReportRangeAnchor, ReportRecipient, ReportRec
 import { REPORT_TIME_RANGES, isCalendarRange, savedQueryVariables, splitValues } from "@/utils/reportSchedule";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useAuthStore } from "@/stores/auth";
+import { useMetaStore } from "@/stores/meta";
 
 const props = defineProps<{
   /** The report to edit; null creates one. */
@@ -32,6 +33,7 @@ const emit = defineEmits<{ history: [report: Report] }>();
 const { t } = useI18n();
 const store = useReportsStore();
 const authStore = useAuthStore();
+const metaStore = useMetaStore();
 
 // A new report starts in the zone the viewer reads times in.
 const defaultZone: string = usePreferencesStore().zone;
@@ -239,7 +241,9 @@ const missingVariable = computed(() => declared.value.some((v) => !v.optional &&
 const hasSource = computed(() => (isDashboard.value ? dashboardId.value !== null : savedQueryId.value !== null));
 const canSave = computed(() => !!input.value.name && hasSource.value && maxRows.value >= 5 && maxRows.value <= 100 && !missingVariable.value && recipientsLoaded.value && recipients.value.length > 0);
 const saving = computed(() => store.isLoadingOperation("saveReport"));
-const readOnly = computed(() => !!current.value && !current.value.can_edit);
+// A read-only demo refuses Save, Preview and Send test: each writes or sends.
+const demoReadOnly = computed(() => metaStore.demoReadOnly);
+const readOnly = computed(() => demoReadOnly.value || (!!current.value && !current.value.can_edit));
 
 async function save(): Promise<Report | null> {
   if (!canSave.value) return null;
@@ -440,18 +444,23 @@ function warningText(code: string): string {
         <DialogFooter class="gap-2 sm:justify-between">
           <div class="flex flex-wrap gap-2">
             <template v-if="current">
-              <Button type="button" variant="outline" :disabled="readOnly || previewing || (dirty && !canSave)" @click="preview">
-                <Eye class="mr-2 h-4 w-4" />{{ t("reports.preview") }}
-              </Button>
-              <Button type="button" variant="outline" :disabled="readOnly || sending || (dirty && !canSave)" @click="sendTest">
-                <Send class="mr-2 h-4 w-4" />{{ t("reports.sendTest") }}
-              </Button>
+              <template v-if="!demoReadOnly">
+                <Button type="button" variant="outline" :disabled="readOnly || previewing || (dirty && !canSave)" @click="preview">
+                  <Eye class="mr-2 h-4 w-4" />{{ t("reports.preview") }}
+                </Button>
+                <Button type="button" variant="outline" :disabled="readOnly || sending || (dirty && !canSave)" @click="sendTest">
+                  <Send class="mr-2 h-4 w-4" />{{ t("reports.sendTest") }}
+                </Button>
+              </template>
               <Button type="button" variant="ghost" @click="emit('history', current)">{{ t("reports.history") }}</Button>
             </template>
           </div>
           <div class="flex gap-2">
             <Button type="button" variant="outline" @click="open = false">{{ t("ui.close") }}</Button>
-            <Button type="submit" :disabled="readOnly || !canSave || !dirty || saving">{{ current ? t("ui.save") : t("reports.create") }}</Button>
+            <Button v-if="demoReadOnly" type="button" variant="outline" class="gap-1.5" disabled>
+              <LockKeyhole class="h-4 w-4" />{{ t("ui.readOnlyDemo") }}
+            </Button>
+            <Button v-else type="submit" :disabled="readOnly || !canSave || !dirty || saving">{{ current ? t("ui.save") : t("reports.create") }}</Button>
           </div>
         </DialogFooter>
       </form>

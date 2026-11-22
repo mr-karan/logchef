@@ -439,7 +439,8 @@ Rejections return HTTP 429 and increment the `logchef_rate_limit_rejections_tota
 
 For an internet-facing showcase, Logchef can make its metadata control plane
 read-only while keeping authentication, source reads, LogchefQL/native queries,
-histograms, AI query generation, and live exploration available:
+windowed search, histograms, AI query generation, Ask Chef, alert test queries
+and backtests, and live exploration available:
 
 ```toml
 [demo]

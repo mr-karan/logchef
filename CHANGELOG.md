@@ -377,6 +377,11 @@ before you upgrade.
   with a `WHERE` but no time condition. It now warns only on ClickHouse SQL
   that uses no time macro and names no timestamp column in `WHERE` or
   `PREWHERE`.
+- A read-only demo (`[demo] read_only = true`) allows the alert **Test
+  query** and **Run backtest**, Ask Chef and windowed search, which read logs
+  and write nothing. Before, each failed with "This public demo is
+  read-only". The report editor opens read-only there, since Save, Preview
+  and Send test each write or send.
 
 ### Security
 
