@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { AlertCircle, KeyRound, Loader2 } from 'lucide-vue-next'
+import { AlertCircle, Info, KeyRound, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
 import { prefillEmptyLoginFields } from '@/utils/demoCredentials'
@@ -69,6 +69,8 @@ const errorMessage = computed(() => {
   return Object.hasOwn(messages, code) ? messages[code] : t('pages.unexpectedError')
 })
 
+const sessionEnded = computed(() => route.query.session_ended !== undefined)
+
 async function handleLogin() {
   try {
     isLoggingIn.value = true
@@ -91,7 +93,8 @@ const redirectsToSso = computed(() =>
   oidcEnabled.value &&
   !localAuthEnabled.value &&
   route.query.error === undefined &&
-  route.query.logged_out === undefined
+  route.query.logged_out === undefined &&
+  !sessionEnded.value
 )
 
 watch(redirectsToSso, (redirects) => {
@@ -145,6 +148,11 @@ async function handleLocalLogin() {
               {{ errorMessage }}
             </AlertDescription>
           </div>
+        </Alert>
+
+        <Alert v-else-if="sessionEnded">
+          <Info class="h-4 w-4" />
+          <AlertDescription>{{ t('pages.loginSessionEnded') }}</AlertDescription>
         </Alert>
 
         <div v-if="localAuthEnabled && showDemoCredentials"

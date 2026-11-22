@@ -4,7 +4,7 @@ import type { RequestOptions } from "./apiUtils";
 import type { APIErrorResponse } from "@/api/types";
 import { basePath } from "@/utils/basePath";
 
-let unauthorizedHandler: ((options: { toast: boolean }) => Promise<APIErrorResponse>) | undefined;
+let unauthorizedHandler: ((options: { announce: boolean }) => Promise<APIErrorResponse>) | undefined;
 let reportedMissingUnauthorizedHandler = false;
 let forbiddenHandler: (() => void) | undefined;
 
@@ -12,7 +12,7 @@ export function setUnauthorizedHandler(handler: NonNullable<typeof unauthorizedH
   unauthorizedHandler = handler;
 }
 
-export function handleUnauthorized(options: { toast: boolean }): Promise<APIErrorResponse> | undefined {
+export function handleUnauthorized(options: { announce: boolean }): Promise<APIErrorResponse> | undefined {
   if (unauthorizedHandler) return unauthorizedHandler(options);
   if (import.meta.env.DEV && !reportedMissingUnauthorizedHandler) {
     reportedMissingUnauthorizedHandler = true;
@@ -77,8 +77,8 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401) {
       const isInitialSessionCheck = error.config?.url === "/me" &&
-        !sessionStorage.getItem("hadPreviousSession");
-      const expiration = handleUnauthorized({ toast: !isInitialSessionCheck });
+        !localStorage.getItem("hadPreviousSession");
+      const expiration = handleUnauthorized({ announce: !isInitialSessionCheck });
       if (expiration) {
         const expired = await expiration;
         if (error.config?.signal?.aborted) throw new DOMException("Request canceled", "AbortError");
