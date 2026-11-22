@@ -479,6 +479,10 @@ func (p *ClickHouseProvider) GetFieldValues(ctx context.Context, source *models.
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
 	}
+	filter, err := fieldValuesFilter(req.QueryText)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(req.TimestampField) == "" {
 		req.TimestampField = source.MetaTSField
 	}
@@ -497,7 +501,7 @@ func (p *ClickHouseProvider) GetFieldValues(ctx context.Context, source *models.
 		Timezone:       req.Timezone,
 		Limit:          req.Limit,
 		Timeout:        req.Timeout,
-		LogchefQL:      req.QueryText,
+		LogchefQL:      filter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get field values: %w", err)
@@ -520,9 +524,24 @@ func (p *ClickHouseProvider) GetFieldValues(ctx context.Context, source *models.
 	}, nil
 }
 
+// fieldValuesFilter reads a field-values filter as LogchefQL, which ClickHouse
+// does whatever query_language the request names, and keeps the part in front
+// of an aggregation pipe.
+func fieldValuesFilter(query string) (string, error) {
+	filter, perr := logchefql.WithoutAggregation(query)
+	if perr != nil {
+		return "", &ValidationError{Field: "query", Message: "invalid filter: " + perr.Message}
+	}
+	return filter, nil
+}
+
 func (p *ClickHouseProvider) GetAllFieldValues(ctx context.Context, source *models.Source, req AllFieldValuesRequest) (AllFieldValuesResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
+	}
+	filter, err := fieldValuesFilter(req.QueryText)
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(req.TimestampField) == "" {
 		req.TimestampField = source.MetaTSField
@@ -540,7 +559,7 @@ func (p *ClickHouseProvider) GetAllFieldValues(ctx context.Context, source *mode
 		Timezone:       req.Timezone,
 		Limit:          req.Limit,
 		Timeout:        req.Timeout,
-		LogchefQL:      req.QueryText,
+		LogchefQL:      filter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get field values: %w", err)
