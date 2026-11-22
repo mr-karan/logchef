@@ -85,6 +85,10 @@ const isLoadingHistory = computed(() => {
   return alertHistoryStore.isLoadingOperation(`loadHistory-${alertId.value}`);
 });
 
+const isLoadingInstances = computed(() => {
+  return alertHistoryStore.isLoadingOperation(`loadInstances-${alertId.value}`);
+});
+
 function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outline" | "secondary" {
   switch (severity) {
     case "critical":
@@ -306,7 +310,8 @@ watch([alertId, currentTab], ([id, tab]) => {
             <CardTitle>{{ t('alerts.groups') }}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p v-if="!instances.length" class="text-sm text-muted-foreground">{{ t('alerts.noGroupFiring') }}</p>
+            <LoadingState v-if="isLoadingInstances" :label="t('ui.loading')" />
+            <p v-else-if="!instances.length" class="text-sm text-muted-foreground">{{ t('alerts.noGroupFiring') }}</p>
             <Table v-else>
               <TableHeader>
                 <TableRow>
