@@ -53,7 +53,7 @@ defineProps<{
         <p class="text-xs text-muted-foreground mt-1">
           {{ form.editor_mode === 'condition'
             ? t('ui.writeASimpleFilterConditionTheTimeFilterIsAutoApplied')
-            : t('alerts.nativeQueryHint', { language: nativeEditorLabel }) }}
+            : t(form.group_by.trim() ? 'alerts.nativeQueryHintGrouped' : 'alerts.nativeQueryHint', { language: nativeEditorLabel }) }}
         </p>
       </div>
       <!-- Query Type Toggle -->

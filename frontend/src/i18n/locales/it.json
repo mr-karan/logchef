@@ -718,6 +718,7 @@
   "time.searchRanges": "Cerca intervalli rapidi",
   "time.noRanges": "Nessun intervallo corrispondente",
   "alerts.nativeQueryHint": "Scrivi una query {language} che restituisca un solo valore numerico.",
+  "alerts.nativeQueryHintGrouped": "Scrivi una query {language} che restituisca una riga per gruppo: le colonne di Raggruppa per e un valore numerico.",
   "alerts.aggregateCount": "Conta i log corrispondenti",
   "alerts.aggregateSum": "Somma di un campo",
   "alerts.aggregateAverage": "Media di un campo",

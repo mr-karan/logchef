@@ -718,6 +718,7 @@
   "time.searchRanges": "搜尋快速時間範圍",
   "time.noRanges": "沒有符合的時間範圍",
   "alerts.nativeQueryHint": "編寫傳回單一數值的 {language} 查詢。",
+  "alerts.nativeQueryHintGrouped": "編寫每個分組傳回一列的 {language} 查詢：包含「分組依據」中的欄位和一個數值。",
   "alerts.aggregateCount": "符合日誌筆數",
   "alerts.aggregateSum": "欄位總和",
   "alerts.aggregateAverage": "欄位平均值",

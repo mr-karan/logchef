@@ -718,6 +718,7 @@
   "time.searchRanges": "Buscar períodos rápidos",
   "time.noRanges": "Nenhum período correspondente",
   "alerts.nativeQueryHint": "Escreva uma consulta {language} que retorne um único valor numérico.",
+  "alerts.nativeQueryHintGrouped": "Escreva uma consulta {language} que retorne uma linha por grupo: as colunas de Agrupar por e um valor numérico.",
   "alerts.aggregateCount": "Contar logs correspondentes",
   "alerts.aggregateSum": "Soma de um campo",
   "alerts.aggregateAverage": "Média de um campo",

@@ -718,6 +718,7 @@
   "time.searchRanges": "期間プリセットを検索",
   "time.noRanges": "一致する期間がありません",
   "alerts.nativeQueryHint": "単一の数値を返す {language} クエリを入力してください。",
+  "alerts.nativeQueryHintGrouped": "グループごとに 1 行を返す {language} クエリを入力してください。各行に「グループ化」の列と数値を含めます。",
   "alerts.aggregateCount": "一致するログの件数",
   "alerts.aggregateSum": "フィールドの合計",
   "alerts.aggregateAverage": "フィールドの平均",

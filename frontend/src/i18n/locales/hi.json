@@ -718,6 +718,7 @@
   "time.searchRanges": "त्वरित समय सीमा खोजें",
   "time.noRanges": "कोई मेल खाती समय सीमा नहीं",
   "alerts.nativeQueryHint": "एक संख्या लौटाने वाली {language} क्वेरी लिखें।",
+  "alerts.nativeQueryHintGrouped": "ऐसी {language} क्वेरी लिखें जो हर समूह के लिए एक पंक्ति लौटाए: \"इसके अनुसार समूह\" के कॉलम और एक संख्या।",
   "alerts.aggregateCount": "मिलते लॉग की संख्या",
   "alerts.aggregateSum": "फ़ील्ड का योग",
   "alerts.aggregateAverage": "फ़ील्ड का औसत",

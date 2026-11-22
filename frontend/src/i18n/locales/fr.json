@@ -718,6 +718,7 @@
   "time.searchRanges": "Rechercher une période rapide",
   "time.noRanges": "Aucune période correspondante",
   "alerts.nativeQueryHint": "Écrivez une requête {language} qui renvoie une seule valeur numérique.",
+  "alerts.nativeQueryHintGrouped": "Écrivez une requête {language} qui renvoie une ligne par groupe : les colonnes de Grouper par et une valeur numérique.",
   "alerts.aggregateCount": "Compter les journaux correspondants",
   "alerts.aggregateSum": "Somme d’un champ",
   "alerts.aggregateAverage": "Moyenne d’un champ",
