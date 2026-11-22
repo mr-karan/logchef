@@ -248,11 +248,7 @@ func (s *Server) sendFieldValuesError(ctx context.Context, c fiber.Ctx, sourceID
 	if datasource.IsValidationError(err) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 	}
-	if _, ok := errors.AsType[*datasource.UpstreamError](err); ok {
-		return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
-	}
-	s.log.Error("failed to get field values", append([]any{"error", err, "source_id", sourceID}, logArgs...)...)
-	return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+	return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
 }
 
 func fieldValuesLimit(limit int) int {
