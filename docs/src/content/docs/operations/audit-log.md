@@ -137,7 +137,7 @@ and the source name as `target_label`. A failed query has `outcome`
 | `detail` key | Meaning |
 |--------------|---------|
 | `query` | The query text as sent, up to 8 KiB. LogchefQL is recorded as LogchefQL, not the SQL it compiles to |
-| `language` | `clickhouse-sql`, `logchefql` or `logsql` |
+| `language` | `clickhouse-sql`, `logchefql`, `logsql` or `logql` |
 | `mode` | `buffered`, `stream`, `windowed`, `tail`, `context`, `mcp` or `ask_chef` |
 | `tool` | The MCP tool that read the logs, for `mcp` and `ask_chef` |
 | `fields` | The fields whose values a field value tool read |
