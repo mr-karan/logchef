@@ -21,7 +21,7 @@ Explorer as it is.
 
 | Part | Applies to |
 |------|------------|
-| Columns and widths | Table mode. Listed columns show in that order, with the timestamp column kept first; every other column is hidden |
+| Columns and widths | Table mode, on log rows. Listed columns show in that order, with the timestamp column kept first; every other column is hidden |
 | Sort | Table mode. Orders the rows the query returned, in the browser. It never changes the query's `ORDER BY` |
 | Display mode | Table, compact or JSON |
 | Filter | A LogchefQL query that fills an empty editor |
@@ -131,7 +131,15 @@ the view's columns is in a result, the table shows its automatic layout for
 that result and returns to the view's layout when a result has them. When a result
 with rows lacks a column or sort column of the active view, the picker shows a
 warning mark. Its tooltip names the columns, for example "Not in this result:
-user_agent". An aggregation result has its own columns and shows no mark.
+user_agent".
+
+A view's columns apply to log rows only. An aggregation or metric result has
+its own columns, so the table shows all of them in its automatic layout and
+the picker shows no mark. That covers a LogchefQL aggregation and a native
+one, such as a ClickHouse `GROUP BY`, a LogsQL `stats` pipe or a LogQL metric
+query. A result counts as log rows when it has the source's timestamp column
+and, except on Loki, only columns the source schema lists. The view's sort
+still applies to the columns the result has.
 
 **Remove missing columns** in the row menu saves the view without those names.
 A sort left with no entry is dropped.

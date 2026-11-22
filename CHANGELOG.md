@@ -382,6 +382,11 @@ before you upgrade.
   and write nothing. Before, each failed with "This public demo is
   read-only". The report editor opens read-only there, since Save, Preview
   and Send test each write or send.
+- A saved view's column list applies to log rows only. Before, a view that
+  named a group key, such as `app`, hid every other column of an aggregation
+  or metric result: a LogQL `sum by (app) (count_over_time(...))` showed only
+  `app`, without `time` and `value`. ClickHouse `GROUP BY`, LogsQL `stats`
+  and LogchefQL aggregation results now show all their columns.
 
 ### Security
 

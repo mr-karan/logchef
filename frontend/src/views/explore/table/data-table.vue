@@ -47,6 +47,7 @@ interface Props {
     sourceId: string
     teamId: number | null
     viewSeed?: TableViewSeed | null // The saved view the layout and sort start from
+    logRows?: boolean // Whether the result holds log rows, the only results a view's columns apply to
     layoutResetToken?: number // A change discards the view's working copy and seeds from the view again
     source?: LogContextSource | null
     displayMode?: 'table' | 'compact'
@@ -66,6 +67,7 @@ const props = withDefaults(defineProps<Props>(), {
     regexHighlights: () => ({}),
     activeMode: 'logchefql',
     filteredColumns: () => [],
+    logRows: true,
     isLoading: false // Default isLoading to false
 })
 
@@ -127,6 +129,7 @@ const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableS
     severityField: severityFieldName,
     seed: () => props.viewSeed,
     sorting,
+    logRows: () => props.logRows,
 })
 
 function cellTitle(value: unknown): string {
