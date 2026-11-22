@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-22
+
+Fixes found while recording the v2.8.0 launch videos. No migrations: upgrade
+in place from v2.8.0.
+
 ### Fixed
 
 - Email delivery works with a display-name SMTP From address such as
@@ -2555,7 +2560,9 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/mr-karan/logchef/compare/v2.8.0...v2.8.1
+[2.8.0]: https://github.com/mr-karan/logchef/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/mr-karan/logchef/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/mr-karan/logchef/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/mr-karan/logchef/compare/v2.5.0...v2.6.0
