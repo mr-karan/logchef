@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.8.0] - 2026-11-XX
+## [2.8.0] - 2026-11-22
 
 Logchef reads Grafana Loki as a third backend, LogchefQL counts and groups,
 and alerts fire per group. Queries are now on the record: the audit log
@@ -75,7 +75,7 @@ before you upgrade.
   sorting keys, partition keys and retention. Each finding shows its evidence
   and any suggested DDL. Logchef never runs the DDL.
 - **MCP and CLI.** MCP clients query Loki, run aggregations, list saved views
-  and see alert groups, silences and deliveries. The next CLI release adds
+  and see alert groups, silences and deliveries. CLI 0.5.0 adds
   `logchef advisor`, `logchef audit list`, `logchef reports`, `logchef views
   list`, `logchef open --view`, LogQL through `logchef sql`, and aggregation
   tables.
