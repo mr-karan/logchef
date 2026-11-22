@@ -211,7 +211,30 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 
 	var result *models.QueryResult
 	if pager.metric != nil {
-		result = metricResult(pager.metric, limit)
+		start, end := *req.StartTime, *req.EndTime
+		result, err = metricResult(pager.metric, start, end, limit)
+		if err != nil {
+			return nil, err
+		}
+		// Loki's range splitter can round both evaluations outside a short
+		// window. Evaluate the unchanged expression once at its start, which
+		// is where an unsplit range starts sampling.
+		untilNextStep := mod(-start.UnixNano(), step.Nanoseconds())
+		at := start.Truncate(time.Millisecond)
+		if at.Before(start) {
+			at = at.Add(time.Millisecond)
+		}
+		if len(result.Logs) == 0 && end.Sub(start) < time.Duration(untilNextStep) && !at.After(end) {
+			page, err := p.fetchMetricInstant(ctx, conn, query, at, budget-pager.bytesRead)
+			if err != nil {
+				return nil, err
+			}
+			pager.record(page)
+			result, err = metricResult(page, start, end, limit)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if stepRaised {
 			result.Warnings = append(result.Warnings, models.QueryWarning{
 				Code:    "STEP_RAISED",
@@ -263,7 +286,7 @@ func (lp *logPager) run(ctx context.Context) error {
 				return nil
 			}
 			if retried {
-				return &datasource.ValidationError{Field: "query", Message: "The response exceeds the size limit. Narrow the query or the time range"}
+				return queryResponseTooLarge()
 			}
 			retried = true
 			lp.pageSize = max(1, want/10)
@@ -272,10 +295,7 @@ func (lp *logPager) run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		lp.bytesRead += int64(page.size)
-		lp.summary.ExecTime += page.summary.ExecTime
-		lp.summary.TotalLinesProcessed += page.summary.TotalLinesProcessed
-		lp.summary.TotalBytesProcessed += page.summary.TotalBytesProcessed
+		lp.record(page)
 		if page.resultType == "matrix" {
 			if !first {
 				return &datasource.UpstreamError{Kind: datasource.UpstreamUnavailable, Message: "Loki changed the result type between pages"}
@@ -308,6 +328,13 @@ func (lp *logPager) run(ctx context.Context) error {
 		b.advance(entries, lp.entries)
 		lp.end = b.ts + 1
 	}
+}
+
+func (lp *logPager) record(page *rangePage) {
+	lp.bytesRead += int64(page.size)
+	lp.summary.ExecTime += page.summary.ExecTime
+	lp.summary.TotalLinesProcessed += page.summary.TotalLinesProcessed
+	lp.summary.TotalBytesProcessed += page.summary.TotalBytesProcessed
 }
 
 // pageBoundary is the oldest timestamp read so far. The next page ends one
@@ -423,26 +450,68 @@ func (e logEntry) row() map[string]any {
 	return row
 }
 
-// metricResult writes each sample as a row of value, time and the series
-// labels. value comes first, because alert evaluation reads the first column.
-func metricResult(page *rangePage, limit int) *models.QueryResult {
+func (p *Provider) fetchMetricInstant(ctx context.Context, conn models.LokiConnectionInfo, query string, at time.Time, budget int64) (*rangePage, error) {
+	if budget <= 0 {
+		return nil, queryResponseTooLarge()
+	}
+	body, err := p.get(ctx, conn, "/loki/api/v1/query", lokiParams{"query": {query}, "time": {nanos(at)}}, budget)
+	if errors.Is(err, errBodyTooLarge) {
+		return nil, queryResponseTooLarge()
+	}
+	if err != nil {
+		return nil, err
+	}
+	var resp queryRangeResponse
+	if err := decodeBody(body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Data.ResultType != "vector" {
+		return nil, &datasource.UpstreamError{Kind: datasource.UpstreamUnavailable, Message: fmt.Sprintf("Loki returned a %q result where a vector was expected", resp.Data.ResultType)}
+	}
+	var vector []lokiSample
+	if err := decodeBody(resp.Data.Result, &vector); err != nil {
+		return nil, err
+	}
+	page := &rangePage{summary: resp.Data.Stats.Summary, size: len(body), matrix: make([]lokiSeries, 0, len(vector))}
+	for _, sample := range vector {
+		page.matrix = append(page.matrix, lokiSeries{Metric: sample.Metric, Values: [][2]json.RawMessage{sample.Value}})
+	}
+	return page, nil
+}
+
+func queryResponseTooLarge() error {
+	return &datasource.ValidationError{Field: "query", Message: "The response exceeds the size limit. Narrow the query or the time range"}
+}
+
+// metricResult keeps only evaluation times within the requested window. Loki's
+// splitter can expand a metric range to step boundaries. Filter before limiting
+// rows so those extra evaluations cannot displace an in-range sample.
+func metricResult(page *rangePage, start, end time.Time, limit int) (*models.QueryResult, error) {
 	series := slices.Clone(page.matrix)
 	slices.SortFunc(series, func(a, b lokiSeries) int { return strings.Compare(labelString(a.Metric), labelString(b.Metric)) })
 	names := map[string]struct{}{}
 	var rows []map[string]any
 	truncated := false
+samples:
 	for _, s := range series {
 		for _, sample := range s.Values {
+			at, err := parseSampleTime(sample[0])
+			if err != nil {
+				return nil, &datasource.UpstreamError{Kind: datasource.UpstreamUnavailable, Message: "Loki sent a metric timestamp that could not be read", Err: err}
+			}
+			if at.Before(start) || at.After(end) {
+				continue
+			}
 			if len(rows) == limit {
 				truncated = true
-				break
+				break samples
 			}
 			row := make(map[string]any, len(s.Metric)+2)
 			for name, value := range s.Metric {
 				row[name] = value
 				names[name] = struct{}{}
 			}
-			row["time"] = sampleTime(sample[0])
+			row["time"] = at.Format(time.RFC3339Nano)
 			row["value"] = sampleValue(sample[1])
 			rows = append(rows, row)
 		}
@@ -456,24 +525,26 @@ func metricResult(page *rangePage, limit int) *models.QueryResult {
 	if truncated {
 		result.Stats.TruncatedReason = "row_limit"
 	}
-	return result
+	return result, nil
 }
 
-// sampleTime converts Loki's unix seconds, such as 1794811158.985, to RFC
-// 3339 in UTC without going through a float.
-func sampleTime(raw json.RawMessage) string {
+// parseSampleTime reads Loki's Unix seconds without rounding through a float.
+func parseSampleTime(raw json.RawMessage) (time.Time, error) {
 	text := string(raw)
 	secText, fracText, _ := strings.Cut(text, ".")
 	sec, err := strconv.ParseInt(secText, 10, 64)
 	if err != nil {
-		return text
+		return time.Time{}, err
 	}
 	fracText = (fracText + "000000000")[:9]
 	nsec, err := strconv.ParseInt(fracText, 10, 64)
 	if err != nil {
-		return text
+		return time.Time{}, err
 	}
-	return time.Unix(sec, nsec).UTC().Format(time.RFC3339Nano)
+	if strings.HasPrefix(secText, "-") {
+		nsec = -nsec
+	}
+	return time.Unix(sec, nsec).UTC(), nil
 }
 
 func sampleValue(raw json.RawMessage) string {

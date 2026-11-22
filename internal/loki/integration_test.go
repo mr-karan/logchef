@@ -241,6 +241,83 @@ func TestIntegrationQueryLogs(t *testing.T) {
 	})
 }
 
+func TestIntegrationMetricQueryStaysWithinRequestedRange(t *testing.T) {
+	url := integrationURL(t)
+	tenant := "logchef-" + newRunID(t)
+	p := testProvider()
+	t.Cleanup(func() { _ = p.Close() })
+	source := testSource(t, models.LokiConnectionInfo{BaseURL: url, TenantID: tenant})
+	hour := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+
+	t.Run("short unaligned range", func(t *testing.T) {
+		start := hour.Add(17*time.Minute + 123*time.Millisecond)
+		end := hour.Add(26 * time.Minute)
+		result, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{
+			RawQuery: "vector(1)", StartTime: &start, EndTime: &end, Step: time.Hour,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Logs) != 1 || result.Logs[0]["time"] != start.Format(time.RFC3339Nano) || result.Logs[0]["value"] != "1" {
+			t.Fatalf("want one sample at %s, got %v", start, result.Logs)
+		}
+	})
+
+	t.Run("aligned endpoints are inclusive", func(t *testing.T) {
+		end := hour.Add(time.Hour)
+		result, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{
+			RawQuery: "vector(1)", StartTime: &hour, EndTime: &end, Step: time.Hour, Limit: 2,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Logs) != 2 || result.Logs[0]["time"] != hour.Format(time.RFC3339Nano) || result.Logs[1]["time"] != end.Format(time.RFC3339Nano) {
+			t.Fatalf("want samples at %s and %s, got %v", hour, end, result.Logs)
+		}
+	})
+
+	t.Run("unaligned range retains in-range samples", func(t *testing.T) {
+		start := hour.Add(-time.Hour + 17*time.Minute)
+		end := hour.Add(time.Hour + 26*time.Minute)
+		result, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{
+			RawQuery: "vector(1)", StartTime: &start, EndTime: &end, Step: time.Hour, Limit: 3,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := len(result.Logs); n < 2 || n > 3 || result.Stats.Truncation != models.TruncationNone {
+			t.Fatalf("want two or three in-range evaluations without truncation, got %v (%+v)", result.Logs, result.Stats)
+		}
+		for _, row := range result.Logs {
+			at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(row["time"]))
+			if err != nil || at.Before(start) || at.After(end) || row["value"] != "1" {
+				t.Fatalf("sample outside [%s, %s] or wrong value: %v", start, end, row)
+			}
+		}
+	})
+
+	t.Run("lookback still reads logs before the display window", func(t *testing.T) {
+		start := hour.Add(17 * time.Minute)
+		end := start.Add(9 * time.Minute)
+		selector := `{service_name="metric-window"}`
+		push(t, url, tenant, []pushStream{{
+			Stream: map[string]string{"service_name": "metric-window"},
+			Values: [][2]string{{nanos(start.Add(-time.Minute)), "inside the lookback"}},
+		}})
+		lookbackStart := start.Add(-2 * time.Minute)
+		waitForRows(t, p, source, datasource.QueryRequest{RawQuery: selector, StartTime: &lookbackStart, EndTime: &start, Limit: 1}, 1)
+		result, err := p.QueryLogs(t.Context(), source, datasource.QueryRequest{
+			RawQuery: "sum(count_over_time(" + selector + "[5m]))", StartTime: &start, EndTime: &end, Step: time.Hour,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Logs) != 1 || result.Logs[0]["time"] != start.Format(time.RFC3339Nano) || result.Logs[0]["value"] != "1" {
+			t.Fatalf("want one sample at %s counting the earlier log, got %v", start, result.Logs)
+		}
+	})
+}
+
 // A LogchefQL query and the LogQL a person would write for it return the
 // same rows.
 func TestIntegrationLogchefQL(t *testing.T) {
