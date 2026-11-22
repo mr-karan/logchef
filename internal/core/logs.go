@@ -6,6 +6,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -50,10 +51,29 @@ type FieldValuesResult = datasource.FieldValuesResult
 type AllFieldValuesParams = datasource.AllFieldValuesRequest
 type AllFieldValuesResult = datasource.AllFieldValuesResult
 
+// fieldValuesFilter is the part of a LogchefQL query that field values read:
+// the sidebar stays open on an aggregated query, and its values come from
+// the logs that the filter in front of the pipe matches.
+func fieldValuesFilter(language models.QueryLanguage, query string) (string, error) {
+	if models.NormalizeQueryLanguage(language) != models.QueryLanguageLogchefQL {
+		return query, nil
+	}
+	filter, perr := logchefql.WithoutAggregation(query)
+	if perr != nil {
+		return "", &QueryRequestError{Message: "invalid filter: " + perr.Message}
+	}
+	return filter, nil
+}
+
 func GetFieldValues(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, params FieldValuesParams) (*FieldValuesResult, error) {
 	if _, err := ValidateTimezone(params.Timezone); err != nil {
 		return nil, err
 	}
+	filter, err := fieldValuesFilter(params.Language, params.QueryText)
+	if err != nil {
+		return nil, err
+	}
+	params.QueryText = filter
 	result, err := ds.GetFieldValues(ctx, src.SourceID(), params)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {
@@ -68,6 +88,11 @@ func GetAllFieldValues(ctx context.Context, ds *datasource.Service, src access.A
 	if _, err := ValidateTimezone(params.Timezone); err != nil {
 		return nil, err
 	}
+	filter, err := fieldValuesFilter(params.Language, params.QueryText)
+	if err != nil {
+		return nil, err
+	}
+	params.QueryText = filter
 	result, err := ds.GetAllFieldValues(ctx, src.SourceID(), params)
 	if err != nil {
 		if errors.Is(err, models.ErrNotFound) {

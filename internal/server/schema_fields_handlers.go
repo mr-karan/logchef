@@ -138,28 +138,7 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 		QueryText: filterQuery,
 	})
 	if err != nil {
-		// Check if the error was due to context cancellation (client disconnected)
-		if ctx.Err() == context.Canceled {
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", core.FieldValuesTimeout)
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-		}
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are not supported for this source type yet", models.ValidationErrorType)
-		}
-		if datasource.IsValidationError(err) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
-		}
-		if _, ok := errors.AsType[*datasource.UpstreamError](err); ok {
-			return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
-		}
-		s.log.Error("failed to get field values", "error", err, "source_id", sourceID, "field", fieldName)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+		return s.sendFieldValuesError(ctx, c, sourceID, err, "field", fieldName)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
@@ -241,31 +220,39 @@ func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 		QueryText: filterQuery,
 	})
 	if err != nil {
-		// Check if the error was due to context cancellation (client disconnected)
-		if ctx.Err() == context.Canceled {
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", core.FieldValuesTimeout)
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-		}
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are not supported for this source type yet", models.ValidationErrorType)
-		}
-		if datasource.IsValidationError(err) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
-		}
-		if _, ok := errors.AsType[*datasource.UpstreamError](err); ok {
-			return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
-		}
-		s.log.Error("failed to get field values", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
+		return s.sendFieldValuesError(ctx, c, sourceID, err)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+// sendFieldValuesError answers a failed field values request. ctx is the
+// request's timeout context; logArgs name the field, if any, in the log.
+func (s *Server) sendFieldValuesError(ctx context.Context, c fiber.Ctx, sourceID models.SourceID, err error, logArgs ...any) error {
+	if ctx.Err() == context.Canceled {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		s.log.Warn("field values request timed out", append([]any{"source_id", sourceID, "timeout", core.FieldValuesTimeout}, logArgs...)...)
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, core.ErrSourceNotFound) {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	}
+	if reqErr, ok := errors.AsType[*core.QueryRequestError](err); ok {
+		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
+	}
+	if errors.Is(err, datasource.ErrOperationNotSupported) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Field values are not supported for this source type yet", models.ValidationErrorType)
+	}
+	if datasource.IsValidationError(err) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
+	}
+	if _, ok := errors.AsType[*datasource.UpstreamError](err); ok {
+		return s.sendQueryError(c, sourceID, err, "Failed to get field values", "Field values")
+	}
+	s.log.Error("failed to get field values", append([]any{"error", err, "source_id", sourceID}, logArgs...)...)
+	return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
 }
 
 func fieldValuesLimit(limit int) int {

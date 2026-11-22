@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Logchef <logchef@example.com>`. Before, the whole value went into
   `MAIL FROM`, so strict servers refused every alert, report and test email.
   The From setting now refuses a value that is not an email address.
+- The field sidebar shows values after a LogchefQL aggregation such as
+  `level=error | count() by service`, counted over the filter in front of
+  the pipe. Before, every field failed to load with HTTP 500 on ClickHouse
+  and VictoriaLogs sources. A malformed field-value filter is now a 400.
 
 ## [2.8.0] - 2026-11-22
 
