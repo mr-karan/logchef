@@ -120,6 +120,17 @@ describe('AlertDetail route changes', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/alerts/1?tab=history'))
   })
 
+  it('shows the groups as loading until they arrive', async () => {
+    await loadFirstHistory()
+    const groupsCard = () => [...host.querySelectorAll('[data-slot="card"]')].find(card => card.textContent?.startsWith('Groups'))
+    expect(groupsCard()?.textContent).not.toContain('No group is firing.')
+    expect(groupsCard()?.querySelector('[data-slot="loading-state"]')).not.toBeNull()
+
+    request('/alerts/1/instances').succeed([])
+    await vi.waitFor(() => expect(groupsCard()?.textContent).toContain('No group is firing.'))
+    expect(groupsCard()?.querySelector('[data-slot="loading-state"]')).toBeNull()
+  })
+
   it('lists the groups and resolves one by its key', async () => {
     await loadFirstHistory()
     request('/alerts/1/instances').succeed([
