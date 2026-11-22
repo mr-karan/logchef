@@ -118,7 +118,7 @@ Findings suggest bloom filter indexes, text indexes on ClickHouse 26.8 or later,
 
 The [MCP server](/integration/mcp-server) now has 22 read-only tools. Agents can query Loki sources, run aggregations through `query_logchefql`, list saved views, and see alert groups, silences and deliveries. Our [MCP launch post](/blog/ai-agents-query-logs-mcp-logchef) shows an agent working through an incident.
 
-The next CLI release adds `logchef advisor`, `logchef audit list`, `logchef reports`, `logchef views list` and `logchef open --view`. It also runs LogQL through `logchef sql` and prints aggregations as tables:
+CLI 0.5.0 adds `logchef advisor`, `logchef audit list`, `logchef reports`, `logchef views list` and `logchef open --view`. It also runs LogQL through `logchef sql` and prints aggregations as tables:
 
 ```bash
 logchef query 'level=error | count() by service' --since 1h
