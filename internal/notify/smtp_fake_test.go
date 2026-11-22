@@ -20,6 +20,7 @@ type fakeSMTP struct {
 	dropAfterData bool
 	rcpts         []string // every RCPT the server saw
 	received      []string // the recipient of every message whose DATA ended
+	messages      []string // the content of every message whose DATA ended
 	wg            sync.WaitGroup
 }
 
@@ -66,6 +67,10 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 		case strings.HasPrefix(cmd, "EHLO"), strings.HasPrefix(cmd, "HELO"):
 			reply("250 fake")
 		case strings.HasPrefix(cmd, "MAIL"):
+			if !validReversePath(line) {
+				reply("501 5.5.4 Syntax error in parameters or arguments (invalid FROM parameter)")
+				continue
+			}
 			reply("250 ok")
 		case strings.HasPrefix(cmd, "RCPT"):
 			rcpt = strings.Trim(strings.TrimSpace(line[strings.Index(line, ":")+1:]), "<>")
@@ -80,6 +85,7 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 			}
 		case cmd == "DATA":
 			reply("354 go ahead")
+			var msg strings.Builder
 			for {
 				body, err := r.ReadString('\n')
 				if err != nil {
@@ -88,9 +94,11 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 				if body == ".\r\n" {
 					break
 				}
+				msg.WriteString(body)
 			}
 			f.mu.Lock()
 			f.received = append(f.received, rcpt)
+			f.messages = append(f.messages, msg.String())
 			drop := f.dropAfterData
 			f.mu.Unlock()
 			if drop {
@@ -104,6 +112,23 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 			reply("250 ok")
 		}
 	}
+}
+
+// validReversePath reports whether a MAIL command names a bare address, as a
+// strict server such as Mailpit requires: "MAIL FROM:<a@b>", never a display
+// name inside the brackets.
+func validReversePath(line string) bool {
+	_, arg, _ := strings.Cut(line, ":")
+	fields := strings.Fields(arg)
+	if len(fields) == 0 {
+		return false
+	}
+	path, ok := strings.CutPrefix(fields[0], "<")
+	if !ok {
+		return false
+	}
+	path, ok = strings.CutSuffix(path, ">")
+	return ok && !strings.ContainsAny(path, "<>") && strings.Contains(path, "@")
 }
 
 func (f *fakeSMTP) snapshot() (rcpts, received []string) {

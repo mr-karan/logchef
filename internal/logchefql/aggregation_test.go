@@ -281,3 +281,22 @@ func TestPinTimeWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestWithoutAggregation(t *testing.T) {
+	for query, want := range map[string]string{
+		"level=error | count() by service":             "level=error",
+		`msg="a|b" and x=1 |  p95(duration) | limit 5`: `msg="a|b" and x=1`,
+		"| count()":                 "",
+		"level=error":               "level=error",
+		"level=error | service msg": "level=error | service msg",
+		"":                          "",
+	} {
+		got, err := WithoutAggregation(query)
+		if err != nil || got != want {
+			t.Errorf("WithoutAggregation(%q) = %q, %v, want %q", query, got, err, want)
+		}
+	}
+	if _, err := WithoutAggregation("x="); err == nil {
+		t.Error("WithoutAggregation(\"x=\") succeeded, want the parse error")
+	}
+}

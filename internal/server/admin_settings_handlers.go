@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net/mail"
 	"net/url"
 	"slices"
 	"strconv"
@@ -395,8 +396,11 @@ func validateSMTPSecurity(value string) error {
 }
 
 func validateEmailAddress(value string) error {
-	if value != "" && !strings.Contains(value, "@") {
-		return fmt.Errorf("must be a valid email address")
+	if value == "" {
+		return nil
+	}
+	if _, err := mail.ParseAddress(value); err != nil {
+		return fmt.Errorf("must be an email address, such as logchef@example.com or Logchef <logchef@example.com>")
 	}
 	return nil
 }
