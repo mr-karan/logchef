@@ -251,10 +251,10 @@ describe("useTeamsStore", () => {
     });
 
     it.each([
-      { code: undefined, errorType: "NetworkError", message: "Network unavailable" },
-      { code: 401, errorType: "AuthenticationError", message: "Session expired" },
-      { code: 500, errorType: "GeneralError", message: "Server failed" },
-    ])("shows one toast for a current $errorType", async ({ code, errorType, message }) => {
+      { code: undefined, errorType: "NetworkError", message: "Network unavailable", toasts: 1 },
+      { code: 401, errorType: "AuthenticationError", message: "Session expired", toasts: 0 },
+      { code: 500, errorType: "GeneralError", message: "Server failed", toasts: 1 },
+    ])("shows $toasts toast for a current $errorType", async ({ code, errorType, message, toasts }) => {
       const router = createRouter({
         history: createMemoryHistory(),
         routes: [{ path: "/login", name: "Login", component: { template: "<div />" } }],
@@ -269,7 +269,7 @@ describe("useTeamsStore", () => {
 
       expect(result.success).toBe(false);
       expect(teams.error?.error_type).toBe(errorType);
-      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledTimes(toasts);
       expect(forbidden).not.toHaveBeenCalled();
     });
 

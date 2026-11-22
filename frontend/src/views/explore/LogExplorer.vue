@@ -291,13 +291,11 @@ const regexHighlights = computed(() => {
   return highlights;
 });
 
-// Adds a filter from a table cell or an expanded row to the LogchefQL query.
+// Adds a filter from a table cell or an expanded row to the LogchefQL query and runs it.
 const handleDrillDown = (data: { column: string; value: unknown; operator: FilterOperator }) => {
   if (activeMode.value !== "logchefql") return;
   logchefQuery.value = appendCondition(logchefQuery.value ?? "", buildCondition(data.column, data.operator, data.value));
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
+  nav.run();
 };
 
 // An aggregated result shows its own view in place of the log rows.
@@ -305,7 +303,7 @@ const aggregation = computed(() => runs.results?.aggregation ?? null);
 
 const handleAddGroupCondition = (field: string, value: unknown) => handleDrillDown({ column: field, value, operator: "=" });
 
-// Header filters edit the query like the cell menu, then rerun it.
+// Header filters edit the query like the cell menu, and run it.
 const columnFilters = computed(() => activeMode.value === "logchefql" ? filteredColumns(logchefQuery.value ?? "") : []);
 
 const handleApplyColumnFilter = (data: { column: string; operator: FilterOperator; value: string | number }) => {
@@ -320,13 +318,11 @@ const handleClearColumnFilter = (column: string) => {
   nav.run();
 };
 
-// Projects a nested field as an extra column; top-level columns are shown by the table itself.
+// Projects a nested field as an extra column and runs the query; top-level columns are shown by the table itself.
 const handleAddColumn = (data: { field: string; shownColumns: string[] }) => {
   if (activeMode.value !== "logchefql") return;
   logchefQuery.value = addSelectField(logchefQuery.value ?? "", data.field, data.shownColumns);
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
+  nav.run();
 };
 
 // Event Handlers for QueryEditor
@@ -719,8 +715,8 @@ const appendLogsqlExpression = (query: string, expression: string) => {
   return `${nextBase} ${pipeSection}`;
 };
 
-// Handle adding a field filter from the sidebar
-const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!=') => {
+// Adds a field filter from the sidebar to the query and runs it.
+const handleAddFieldFilter = async (field: string, value: string, operator: '=' | '!=') => {
   if (!supportsLogchefQL.value) {
     const exactFilter = `${field}:=${formatLogsqlValue(value)}`;
     const filterExpression = operator === '!=' ? `NOT ${exactFilter}` : exactFilter;
@@ -729,12 +725,10 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
     exploreStore.setNativeQuery(appendLogsqlExpression(currentQuery, filterExpression));
 
     if (activeMode.value !== 'native') {
-      changeMode('native');
+      await changeMode('native');
     }
 
-    nextTick(() => {
-      queryEditorRef.value?.focus(true);
-    });
+    nav.run();
     return;
   }
 
@@ -743,13 +737,10 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
   
   // Switch to LogchefQL mode if not already
   if (activeMode.value !== 'logchefql') {
-    changeMode('logchefql');
+    await changeMode('logchefql');
   }
-  
-  // Focus the editor
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
+
+  nav.run();
 };
 
 // Handle field name click from sidebar - inserts field name into query

@@ -81,7 +81,10 @@ const isLoading = computed(() => store.isLoadingOperation("loadDashboard"));
 const isSaving = computed(() => store.isLoadingOperation("saveDashboard"));
 const isEnteringEdit = computed(() => store.isLoadingOperation("enterEdit"));
 const dashboard = computed(() => store.current);
-const notFound = ref(false);
+// Why the last load left nothing to show: the server has no such dashboard, or the read failed.
+const loadFailure = ref<"notFound" | "failed" | null>(null);
+// Each load claims a generation; a load that a newer one replaced must not decide what shows.
+let loadGeneration = 0;
 
 const isEditing = computed(() => store.isEditing);
 function reloadPage() {
@@ -605,12 +608,14 @@ function setupRefreshTimer() {
 watch(() => store.refreshIntervalMs, setupRefreshTimer, { immediate: true });
 
 async function load() {
-  notFound.value = false;
+  const generation = ++loadGeneration;
+  loadFailure.value = null;
   // The tab comes first, so the first refresh runs the tab in the URL and no other.
   store.setActiveTab(queryTab());
   const result = await store.loadDashboard(dashboardId.value);
+  if (generation !== loadGeneration) return;
   if (!result.success || !store.current) {
-    notFound.value = true;
+    loadFailure.value = result.error?.error_type === "NotFoundError" ? "notFound" : "failed";
     return;
   }
   await addSeededPanel();
@@ -662,7 +667,7 @@ onMounted(() => {
   if (!Number.isNaN(dashboardId.value)) {
     void load();
   } else {
-    notFound.value = true;
+    loadFailure.value = "notFound";
   }
 });
 
@@ -851,14 +856,18 @@ onBeforeRouteUpdate((to, from) => {
       <Button variant="outline" size="sm" @click="reloadPage">{{ t('pages.reloadPage') }}</Button>
     </div>
 
-    <!-- Not found -->
     <div
-      v-if="notFound"
+      v-if="loadFailure"
       class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
     >
       <LayoutDashboard class="h-8 w-8 text-muted-foreground" />
-      <p class='text-sm text-muted-foreground'>{{ t('ui.dashboardNotFoundOrYouDonTHaveAccess') }}</p>
-      <Button variant='outline' size="sm" @click="router.push('/dashboards')">{{ t('ui.backToDashboards') }}</Button>
+      <p class='text-sm text-muted-foreground'>
+        {{ loadFailure === 'notFound' ? t('ui.dashboardNotFoundOrYouDonTHaveAccess') : t('ui.failedToLoad') }}
+      </p>
+      <div class="flex gap-2">
+        <Button v-if="loadFailure === 'failed'" size="sm" @click="load">{{ t('ui.retry') }}</Button>
+        <Button variant='outline' size="sm" @click="router.push('/dashboards')">{{ t('ui.backToDashboards') }}</Button>
+      </div>
     </div>
 
     <!-- Corrupt dashboard: the stored panels fail validation and nothing renders. -->

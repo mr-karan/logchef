@@ -120,6 +120,42 @@ describe('AlertDetail route changes', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/alerts/1?tab=history'))
   })
 
+  it('shows the groups as loading until they arrive', async () => {
+    await loadFirstHistory()
+    const groupsCard = () => [...host.querySelectorAll('[data-slot="card"]')].find(card => card.textContent?.startsWith('Groups'))
+    expect(groupsCard()?.textContent).not.toContain('No group is firing.')
+    expect(groupsCard()?.querySelector('[data-slot="loading-state"]')).not.toBeNull()
+
+    request('/alerts/1/instances').succeed([])
+    await vi.waitFor(() => expect(groupsCard()?.textContent).toContain('No group is firing.'))
+    expect(groupsCard()?.querySelector('[data-slot="loading-state"]')).toBeNull()
+  })
+
+  it.each([
+    { card: 'Groups', path: '/alerts/1/instances', empty: 'No group is firing.', loaded: 'service=checkout', data: [
+      { alert_id: 1, group_key: '["checkout"]', group: { service: 'checkout' }, state: 'firing', value: 12, state_since: '2026-01-01T00:00:00Z' },
+    ] },
+    { card: 'Alert History', path: '/alerts/1/history', empty: 'No history yet', loaded: 'Retried history', data: history(1, 'Retried history') },
+  ])('shows the $card load failure with a retry', async ({ card, path, empty, loaded, data }) => {
+    await vi.waitFor(() => expect(network.requests.some(r => r.config.url === '/alerts/1')).toBe(true))
+    request('/alerts/1').succeed(alert(1))
+    await vi.waitFor(() => expect(network.requests.some(r => r.config.url?.startsWith(path))).toBe(true))
+    request(path).respond(500, { status: 'error', message: 'store unavailable', error_type: 'DatabaseError' })
+    const cardEl = () => [...host.querySelectorAll('[data-slot="card"]')].find(el => el.textContent?.startsWith(card))
+    await vi.waitFor(() => expect(cardEl()?.textContent).toContain('store unavailable'))
+    expect(cardEl()?.textContent).toContain('Failed to load')
+    expect(cardEl()?.textContent).not.toContain(empty)
+
+    const before = network.requests.filter(r => r.config.url?.startsWith(path)).length
+    const retry = [...(cardEl()?.querySelectorAll('button') ?? [])].find(button => button.textContent?.trim() === 'Retry')
+    if (!retry) throw new Error(`Missing retry in ${card}`)
+    retry.click()
+    await vi.waitFor(() => expect(network.requests.filter(r => r.config.url?.startsWith(path))).toHaveLength(before + 1))
+    network.requests.filter(r => r.config.url?.startsWith(path)).at(-1)?.succeed(data)
+    await vi.waitFor(() => expect(cardEl()?.textContent).toContain(loaded))
+    expect(cardEl()?.textContent).not.toContain('store unavailable')
+  })
+
   it('lists the groups and resolves one by its key', async () => {
     await loadFirstHistory()
     request('/alerts/1/instances').succeed([
