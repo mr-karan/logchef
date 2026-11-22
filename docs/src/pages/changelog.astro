@@ -829,11 +829,35 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
+    <article class="version" id="v2.8.2">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.8.2">v2.8.2</a>
+        <span class="version-date">Nov 23, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.2" class="version-link" target="_blank" rel="noopener">Release notes &rarr;</a>
+      </div>
+
+      <p class="release-intro">
+        Fixes for rough edges found while recording the v2.8.0 launch videos. No migrations: upgrade in place from v2.8.0 or v2.8.1.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>Choosing a value in the Explorer field sidebar, a filter from a table cell or expanded row, or a group of an aggregation result now runs the query, so results never sit stale under a changed query.</li>
+          <li>Choosing <strong>No view</strong> returns the Explorer to the source's default columns, widths and sort, and drops the view's filter and time range if you have not edited the query.</li>
+          <li>An alert rule's Groups card shows a loading state instead of "No group is firing." while it loads, and the Groups and History cards show load errors with a Retry.</li>
+          <li>The sign-in page says "Your session ended. Sign in again." when a session has ended, for example because the same user signed in elsewhere.</li>
+          <li>A dashboard says "not found" only when it is missing. Other load failures show <strong>Failed to load</strong> with a Retry.</li>
+          <li>Field values on a ClickHouse source answer 400 instead of 500 for a filter the request cannot run, such as an unknown column.</li>
+        </ul>
+      </div>
+    </article>
+
     <article class="version" id="v2.8.1">
       <div class="version-header">
         <a class="version-tag" href="#v2.8.1">v2.8.1</a>
         <span class="version-date">Nov 22, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.1" class="version-link" target="_blank" rel="noopener">Release notes &rarr;</a>
       </div>
 

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-11-23
+
+Fixes for rough edges found while recording the v2.8.0 launch videos. No
+migrations: upgrade in place from v2.8.0 or v2.8.1.
+
 ### Fixed
 
 - Choosing a value in the Explorer field sidebar, a filter from a table cell
@@ -2589,7 +2594,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.1...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.2...HEAD
+[2.8.2]: https://github.com/mr-karan/logchef/compare/v2.8.1...v2.8.2
 [2.8.1]: https://github.com/mr-karan/logchef/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/mr-karan/logchef/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/mr-karan/logchef/compare/v2.6.1...v2.7.0
