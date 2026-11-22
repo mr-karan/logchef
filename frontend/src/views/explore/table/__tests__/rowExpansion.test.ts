@@ -75,3 +75,37 @@ it('filters, excludes and adds columns from nested keys in the expanded row', as
     host.remove()
   }
 })
+
+// A long message column makes the table far wider than the viewport. The
+// detail panel spans the whole table, so it pins itself to the visible width
+// to keep the Fields/JSON switch and Show Context on screen.
+it('keeps the expanded row controls within the visible width of a wide table', async () => {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp(DataTable, {
+    columns: [{ name: 'timestamp', type: 'DateTime' }, { name: 'msg', type: 'String' }],
+    data: [{ timestamp: '2026-01-01T00:00:00Z', msg: 'x'.repeat(4000) }],
+    sourceId: 'expansion-width-test',
+    teamId: null,
+  })
+  app.use(createPinia())
+  app.use(i18n)
+  try {
+    app.mount(host)
+    await nextTick()
+    const container = host.querySelector<HTMLElement>('.overflow-auto')
+    if (!container) throw new Error('Scroll container was not rendered')
+    Object.defineProperty(container, 'clientWidth', { value: 600, configurable: true })
+    container.dispatchEvent(new Event('scroll'))
+    host.querySelector<HTMLTableRowElement>('tbody tr')?.click()
+    await vi.waitFor(() => {
+      const panel = host.querySelector<HTMLElement>('.expanded-json-row td > div')
+      expect(panel?.style.width).toBe('600px')
+      expect(panel?.classList).toContain('sticky')
+      expect(panel?.classList).toContain('left-0')
+    })
+  } finally {
+    app.unmount()
+    host.remove()
+  }
+})

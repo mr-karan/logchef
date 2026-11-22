@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `level=error | count() by service`, counted over the filter in front of
   the pipe. Before, every field failed to load with HTTP 500 on ClickHouse
   and VictoriaLogs sources. A malformed field-value filter is now a 400.
+- An expanded Explorer table row keeps its Fields/JSON switch and Show
+  Context within the visible width, down to phone width. Before, a long
+  column pushed them off screen to the right of the table. The table header
+  also stays pinned while the rows scroll.
 
 ## [2.8.0] - 2026-11-22
 
