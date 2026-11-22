@@ -30,7 +30,7 @@ import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
 import { useSavedViewsStore } from "@/stores/savedViews";
-import type { SavedViewDefinition, SavedViewLayout } from "@/lib/savedViewLayout";
+import { isLogRowResult, type SavedViewDefinition, type SavedViewLayout } from "@/lib/savedViewLayout";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useQuery } from "@/composables/useQuery";
 import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
@@ -1179,6 +1179,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     v-bind="displayMode === 'table' ? {
                       filteredColumns: columnFilters,
                       viewSeed: savedViews.activeSeed,
+                      logRows: isLogRowResult(runs.results, sourcesStore.currentSourceDetails),
                       layoutResetToken: savedViews.layoutResetToken,
                       onWorkingLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(savedViews.activeViewId, layout),
                       onTableLayout: (layout: SavedViewLayout) => savedViews.reportTableLayout(null, layout),

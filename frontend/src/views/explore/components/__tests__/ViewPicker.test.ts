@@ -20,6 +20,13 @@ vi.mock("@/stores/exploreRuns", async () => {
   return { useExploreRuns: () => runs.state };
 });
 
+// The source on screen: a ClickHouse table whose schema the picker checks a result against.
+vi.mock("@/stores/sources", () => ({
+  useSourcesStore: () => ({
+    currentSourceDetails: { source_type: "clickhouse", _meta_ts_field: "timestamp", columns: ["timestamp", "msg", "level"].map(name => ({ name, type: "String" })) },
+  }),
+}));
+
 let unmount: (() => void) | null = null;
 
 afterEach(() => {
@@ -163,6 +170,10 @@ it("warns when a result with rows lacks a view column and names it", async () =>
   await nextTick();
   expect(mark()).toBeNull();
   runs.state.results = result(["count"], 3, { kind: "count" });
+  await nextTick();
+  expect(mark()).toBeNull();
+  // A native aggregate is no log rows either, even with the timestamp name for its bucket.
+  runs.state.results = result(["timestamp", "level", "c"], 3);
   await nextTick();
   expect(mark()).toBeNull();
 });

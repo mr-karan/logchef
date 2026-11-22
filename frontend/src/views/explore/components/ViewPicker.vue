@@ -28,7 +28,8 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useExploreStore } from '@/stores/explore'
 import { useExploreRuns } from '@/stores/exploreRuns'
-import { missingViewColumns } from '@/lib/savedViewLayout'
+import { useSourcesStore } from '@/stores/sources'
+import { isLogRowResult, missingViewColumns } from '@/lib/savedViewLayout'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import ManageViewsDialog from './ManageViewsDialog.vue'
 import { useSavedViewsStore, type DisplayMode } from '@/stores/savedViews'
@@ -44,11 +45,12 @@ const auth = useAuthStore()
 const teams = useTeamsStore()
 const explore = useExploreStore()
 const runs = useExploreRuns()
+const sources = useSourcesStore()
 
 // An aggregation has its own columns, so only a result of log rows is compared with a view.
 const resultColumns = computed(() => {
   const results = runs.results
-  return results && !results.aggregation && results.rows.length > 0 ? results.columns.map(column => column.name) : null
+  return results && isLogRowResult(results, sources.currentSourceDetails) && results.rows.length > 0 ? results.columns.map(column => column.name) : null
 })
 const missingColumns = computed(() => store.activeView && resultColumns.value ? missingViewColumns(store.activeView.definition, resultColumns.value) : [])
 const missingTitle = computed(() => `${t('explore.viewMissingColumns')}: ${missingColumns.value.join(', ')}`)

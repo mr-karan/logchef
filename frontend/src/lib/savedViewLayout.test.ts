@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isLogRowResult,
   layoutHasResultColumn,
   missingViewColumns,
   seedColumnLayout,
@@ -111,5 +112,45 @@ describe('missing view columns', () => {
 
   it('drops a part that has no entry left', () => {
     expect(withoutColumns(definition, ['timestamp', 'level', 'msg', 'host'])).toEqual({ version: 1, filter: 'level="error"' })
+  })
+})
+
+describe('isLogRowResult', () => {
+  // Columns as the dev stack's sources and queries return them.
+  const schema = (names: string[]) => names.map(name => ({ name, type: 'String' }))
+  const result = (names: string[], aggregation: unknown = null) => ({ columns: names.map(name => ({ name })), aggregation })
+  const clickhouse = { source_type: 'clickhouse', _meta_ts_field: 'timestamp', columns: schema(['timestamp', 'host', 'method', 'status']) }
+  const victorialogs = { source_type: 'victorialogs', _meta_ts_field: '_time', columns: schema(['_time', '_msg', '_stream', 'level', 'service']) }
+  const loki = { source_type: 'loki', _meta_ts_field: '_time', columns: schema(['_time', '_msg']) }
+
+  it('takes rows of the source columns with its timestamp as log rows', () => {
+    expect(isLogRowResult(result(['timestamp', 'host', 'method', 'status']), clickhouse)).toBe(true)
+    expect(isLogRowResult(result(['_time', '_msg', '_stream', 'level', 'service']), victorialogs)).toBe(true)
+  })
+
+  it('takes Loki rows with labels, metadata and parsed fields outside its schema as log rows', () => {
+    expect(isLogRowResult(result(['_time', '_msg', 'detected_level', 'service_name', 'trace_id', 'status']), loki)).toBe(true)
+  })
+
+  it('rejects a LogchefQL aggregation', () => {
+    expect(isLogRowResult(result(['timestamp', 'host'], { kind: 'count' }), clickhouse)).toBe(false)
+  })
+
+  it('rejects a Loki metric result, which has time and value but no _time', () => {
+    expect(isLogRowResult(result(['value', 'time', 'app']), loki)).toBe(false)
+  })
+
+  it('rejects an aggregate that keeps the timestamp name for its bucket', () => {
+    expect(isLogRowResult(result(['timestamp', 'host', 'c']), clickhouse)).toBe(false)
+    expect(isLogRowResult(result(['_time', 'hits', 'service']), victorialogs)).toBe(false)
+  })
+
+  it('rejects an aggregate without the timestamp', () => {
+    expect(isLogRowResult(result(['hits', 'service']), victorialogs)).toBe(false)
+  })
+
+  it('skips the schema check while the schema is unknown, and rejects a result with no source', () => {
+    expect(isLogRowResult(result(['timestamp', 'extra']), { ...clickhouse, columns: [] })).toBe(true)
+    expect(isLogRowResult(result(['timestamp']), null)).toBe(false)
   })
 })

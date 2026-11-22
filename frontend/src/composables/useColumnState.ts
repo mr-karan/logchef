@@ -63,6 +63,9 @@ interface ColumnStateOptions {
   seed?: MaybeRefOrGetter<TableViewSeed | null | undefined>
   // The table's sort. Seeded and stored with the working copy only.
   sorting?: Ref<SortingState>
+  // Whether the result holds log rows. A view's columns apply to log rows
+  // only; any other result shows the automatic layout.
+  logRows?: MaybeRefOrGetter<boolean>
 }
 
 export function useColumnState(options: ColumnStateOptions) {
@@ -225,7 +228,7 @@ export function useColumnState(options: ColumnStateOptions) {
   }
 
   // Merges a new result into the working copy. A view that sets columns hides
-  // every result column it does not name.
+  // every result column of log rows it does not name.
   function reconcileViewState(view: TableViewSeed) {
     if (!toValue(options.columns).length) return
     if (!view.definition.columns) {
@@ -241,7 +244,7 @@ export function useColumnState(options: ColumnStateOptions) {
     initializeState('reconcile')
     const unordered = columnIds.value.filter(id => !columnOrder.value.includes(id))
     if (unordered.length) columnOrder.value = timestampFirst([...columnOrder.value, ...unordered])
-    if (layoutHasResultColumn(currentLayout(), columnIds.value)) return
+    if (toValue(options.logRows) !== false && layoutHasResultColumn(currentLayout(), columnIds.value)) return
     stashedViewLayout.value = currentLayout()
     applyLayout({
       columnOrder: timestampFirst(defaultOrder.value?.order ?? columnIds.value),
@@ -278,6 +281,7 @@ export function useColumnState(options: ColumnStateOptions) {
     defaultOrder: defaultOrder.value,
     storageKey: storageKey.value,
     seedIdentity: seedIdentity.value,
+    logRows: toValue(options.logRows),
     sourceType: toValue(options.source)?.source_type,
     timestampField: toValue(options.timestampField),
     severityField: toValue(options.severityField),
