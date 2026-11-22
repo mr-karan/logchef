@@ -379,6 +379,26 @@ func PinTimeWindow(query, window string) string {
 	return query
 }
 
+// WithoutAggregation returns the filter of a query in front of its
+// aggregation pipe: `level=error | count() by service` gives `level=error`,
+// and a bare `| count()` gives "". A query without an aggregation comes back
+// unchanged.
+func WithoutAggregation(query string) (string, *ParseError) {
+	if strings.TrimSpace(query) == "" {
+		return query, nil
+	}
+	pq, err := ParseLogchefQL(query)
+	if err != nil {
+		return "", convertParticipleError(query, err)
+	}
+	if pq.Aggregate == nil {
+		return query, nil
+	}
+	// Only blanks separate the pipe from the first aggregate.
+	head := query[:pq.Aggregate.Pos.Offset]
+	return strings.TrimSpace(head[:strings.LastIndex(head, "|")]), nil
+}
+
 // AggregationOf returns the aggregation of a parsed query, or nil.
 func AggregationOf(ast ASTNode) *AggregationNode {
 	if q, ok := ast.(*QueryNode); ok {

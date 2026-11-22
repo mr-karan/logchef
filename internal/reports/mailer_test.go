@@ -88,7 +88,14 @@ func (f *fakeSMTP) session(conn net.Conn) {
 		case strings.HasPrefix(cmd, "EHLO"), strings.HasPrefix(cmd, "HELO"):
 			ok = reply("250 fake")
 		case strings.HasPrefix(cmd, "MAIL FROM"):
-			ok = reply("250 ok")
+			// A strict server such as Mailpit refuses a display name in
+			// the reverse path.
+			_, path, _ := strings.Cut(strings.TrimSpace(line), ":")
+			if _, err := mail.ParseAddress(path); err != nil || strings.Count(path, "<") != 1 || strings.Contains(path, " ") {
+				ok = reply("501 5.5.4 Syntax error in parameters or arguments (invalid FROM parameter)")
+			} else {
+				ok = reply("250 ok")
+			}
 		case strings.HasPrefix(cmd, "RCPT TO"):
 			ok = reply(f.rcpt)
 		case cmd == "DATA":

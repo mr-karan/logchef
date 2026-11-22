@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -191,6 +192,10 @@ func TestLogchefQLAggregationPaths(t *testing.T) {
 	var gotQuery string
 	vl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.FormValue("query")
+		if r.URL.Path == "/select/logsql/field_values" {
+			_, _ = io.WriteString(w, `{"values":[{"value":"api","hits":3}]}`)
+			return
+		}
 		// VictoriaLogs leaves out a key whose value is empty.
 		_, _ = io.WriteString(w, "{\"__lc_v0\":\"3\",\"service\":\"api\"}\n{\"__lc_v0\":\"1\"}\n")
 	}))
@@ -205,6 +210,13 @@ func TestLogchefQLAggregationPaths(t *testing.T) {
 	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/logchefql/query", user, s.handleLogchefQLQuery)
 	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/logchefql/translate", user, s.handleLogchefQLTranslate)
 	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/logs/windowed", user, s.handleWindowedQuery)
+	asUser := func(c fiber.Ctx) error {
+		c.Locals("user", user)
+		c.Locals("auth_method", "session")
+		return c.Next()
+	}
+	app.Get("/teams/:teamID/sources/:sourceID/fields/values", asUser, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetAllFieldValues)
+	app.Get("/teams/:teamID/sources/:sourceID/fields/:fieldName/values", asUser, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetFieldValues)
 	app.Post("/validate", s.handleLogchefQLValidate)
 	timeRange := `"start_time":"2026-09-01T00:00:00Z","end_time":"2026-09-01T01:00:00Z","timezone":"UTC"`
 
@@ -279,6 +291,44 @@ func TestLogchefQLAggregationPaths(t *testing.T) {
 		}
 		if _, present := data["aggregation"]; present {
 			t.Fatalf("aggregation present on a failed compile: %v", data)
+		}
+	})
+
+	// The field sidebar stays open on an aggregated query, so its values
+	// come from the filter in front of the pipe.
+	fieldValues := func(t *testing.T, path, query string) (int, map[string]any) {
+		t.Helper()
+		gotQuery = ""
+		params := url.Values{"type": {"String"}, "start_time": {"2026-09-01T00:00:00Z"}, "end_time": {"2026-09-01T01:00:00Z"}, "query_language": {"logchefql"}, "query": {query}}
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, base+path+"?"+params.Encode(), http.NoBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, body
+	}
+	for _, path := range []string{"/fields/service/values", "/fields/values"} {
+		t.Run("field values "+path+" use the filter of an aggregation", func(t *testing.T) {
+			status, body := fieldValues(t, path, "x=1 | count() by service")
+			if status != http.StatusOK || !strings.HasPrefix(gotQuery, "x:=1") || strings.Contains(gotQuery, "stats") {
+				t.Fatalf("status=%d body=%v VictoriaLogs query=%q, want 200 over the filter", status, body, gotQuery)
+			}
+		})
+	}
+	t.Run("field values of a bare aggregation read every log", func(t *testing.T) {
+		status, body := fieldValues(t, "/fields/service/values", "| count() by service")
+		if status != http.StatusOK || gotQuery != "*" {
+			t.Fatalf("status=%d body=%v VictoriaLogs query=%q, want 200 over *", status, body, gotQuery)
+		}
+	})
+	t.Run("field values refuse a malformed filter as a bad request", func(t *testing.T) {
+		status, body := fieldValues(t, "/fields/service/values", "x=")
+		if status != http.StatusBadRequest || gotQuery != "" {
+			t.Fatalf("status=%d body=%v VictoriaLogs query=%q, want 400 and no backend request", status, body, gotQuery)
 		}
 	})
 

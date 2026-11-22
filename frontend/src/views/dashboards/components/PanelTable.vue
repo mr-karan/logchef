@@ -17,7 +17,7 @@ import type { ConfirmedColumn, ColumnFormat, TableRule } from "@/api/dashboards"
 import { isExact } from "@/utils/exactNumber";
 import { formatNumber } from "@/utils/numberFormat";
 import { formattedTableCell, tableRuleColor, paletteStyle } from "@/utils/panelPresentation";
-import { frameWithKinds, type PanelFrame } from "@/utils/panelFrame";
+import { frameWithKinds, guessedTimeKinds, type PanelFrame } from "@/utils/panelFrame";
 
 const { t } = useI18n();
 
@@ -36,7 +36,7 @@ interface Props {
 const preferences = usePreferencesStore();
 const props = defineProps<Props>();
 const emit = defineEmits<{ (e: "cell-click", column: string, value: unknown): void }>();
-const typedFrame = computed(() => frameWithKinds(props.frame, props.kinds));
+const typedFrame = computed(() => frameWithKinds(props.frame, { ...guessedTimeKinds(props.frame), ...props.kinds }));
 const rows = computed(() => typedFrame.value.rows);
 
 // Rendering every row unbounded means a saved row limit of e.g. 100k turns

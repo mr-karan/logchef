@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-22
+
+Fixes found while recording the v2.8.0 launch videos. No migrations: upgrade
+in place from v2.8.0.
+
+### Fixed
+
+- Email delivery works with a display-name SMTP From address such as
+  `Logchef <logchef@example.com>`. Before, the whole value went into
+  `MAIL FROM`, so strict servers refused every alert, report and test email.
+  The From setting now refuses a value that is not an email address.
+- The field sidebar shows values after a LogchefQL aggregation such as
+  `level=error | count() by service`, counted over the filter in front of
+  the pipe. Before, every field failed to load with HTTP 500 on ClickHouse
+  and VictoriaLogs sources. A malformed field-value filter is now a 400.
+- An expanded Explorer table row keeps its Fields/JSON switch and Show
+  Context within the visible width, down to phone width. Before, a long
+  column pushed them off screen to the right of the table. The table header
+  also stays pinned while the rows scroll.
+- Dashboard table panels show time columns in one format and in the
+  viewer's zone on every backend. Before, a VictoriaLogs table printed raw
+  UTC ISO times and a Loki table printed local times with nanosecond digits.
+
 ## [2.8.0] - 2026-11-22
 
 Logchef reads Grafana Loki as a third backend, LogchefQL counts and groups,
@@ -2537,7 +2560,9 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/mr-karan/logchef/compare/v2.8.0...v2.8.1
+[2.8.0]: https://github.com/mr-karan/logchef/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/mr-karan/logchef/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/mr-karan/logchef/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/mr-karan/logchef/compare/v2.5.0...v2.6.0

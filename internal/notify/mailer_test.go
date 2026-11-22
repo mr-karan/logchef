@@ -52,3 +52,47 @@ func TestMailerKeepsHeadersOnOneLine(t *testing.T) {
 		t.Errorf("body = %q", body)
 	}
 }
+
+// TestMailerSendsDisplayNameFrom: a From setting with a display name puts the
+// bare address in MAIL FROM, which a strict server requires, and keeps the
+// name in the From header. Both send paths are covered: Send (the test email)
+// and SendMessage (alert and report emails).
+func TestMailerSendsDisplayNameFrom(t *testing.T) {
+	server := startFakeSMTP(t)
+	opts := server.options()
+	opts.From = "Logchef <logchef@shop.example>"
+
+	if err := NewMailer(opts).Send(t.Context(), "oncall@example.com", MailMessage{Subject: "test", Text: "body"}); err != nil {
+		t.Fatalf("Send = %v", err)
+	}
+	sender := fixedMailerSender(opts)
+	if err := sender.Send(t.Context(), emailDestination(), "oncall@example.com", 1, Message{Title: "alert", Text: "body"}); err != nil {
+		t.Fatalf("EmailSender.Send = %v", err)
+	}
+
+	server.mu.Lock()
+	messages := append([]string(nil), server.messages...)
+	server.mu.Unlock()
+	if len(messages) != 2 {
+		t.Fatalf("server received %d messages, want 2", len(messages))
+	}
+	for _, message := range messages {
+		if !strings.Contains(message, "From: \"Logchef\" <logchef@shop.example>\r\n") {
+			t.Errorf("message headers lack the display-name From: %q", message)
+		}
+	}
+}
+
+func TestMailerRefusesAFromThatIsNotAnAddress(t *testing.T) {
+	server := startFakeSMTP(t)
+	opts := server.options()
+	opts.From = "Logchef <not an address"
+	err := NewMailer(opts).SendMessage(t.Context(), "oncall@example.com", []byte("Subject: x\r\n\r\nbody"))
+	sendErr, ok := errors.AsType[*SendError](err)
+	if !ok || sendErr.Class != SendPermanent || !errors.Is(err, ErrSMTPFromInvalid) {
+		t.Fatalf("SendMessage = %v, want a permanent ErrSMTPFromInvalid", err)
+	}
+	if rcpts, _ := server.snapshot(); len(rcpts) != 0 {
+		t.Errorf("server saw recipients %v, want no session", rcpts)
+	}
+}
