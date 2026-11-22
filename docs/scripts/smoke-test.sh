@@ -90,6 +90,12 @@ assert_contains "$llms_body" "/llms.txt" "# Logchef"
 # --- A couple of representative docs pages -----------------------------------
 assert_status "/getting-started/quickstart/" 200 >/dev/null
 assert_status "/integration/cli/" 200 >/dev/null
+playground_body="$(assert_status "/playground/" 200)"
+assert_contains "$playground_body" "/playground/" "LogchefQL Playground" "VictoriaLogs"
+wasm_body="$(assert_status "/playground-runtime/compiler.wasm" 200)"
+if [[ "$(od -An -N4 -tx1 "$wasm_body" | tr -d ' ')" != "0061736d" ]]; then
+  bad "Playground compiler is missing the WebAssembly header"
+fi
 
 echo
 if [[ "$fail" -ne 0 ]]; then

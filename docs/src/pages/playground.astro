@@ -1,0 +1,40 @@
+---
+import examples from "../components/playground/compiled.json";
+import BaseLayout from '../layouts/BaseLayout.astro';
+import '../components/playground/playground.css';
+const engines = [
+  ['clickhouse', 'ClickHouse', 'SQL'],
+  ['victorialogs', 'VictoriaLogs', 'LogsQL'],
+  ['loki', 'Grafana Loki', 'LogQL'],
+];
+const first = examples[0];
+---
+<BaseLayout title="LogchefQL Playground | Compare SQL, LogsQL and LogQL" description="Compile a LogchefQL filter or aggregation in your browser. Compare ClickHouse SQL, VictoriaLogs LogsQL examples and Grafana Loki LogQL side by side.">
+  <main class="playground">
+    <header>
+      <a href="/guide/search-syntax">LogchefQL syntax ↗</a>
+      <h1>LogchefQL Playground</h1>
+      <p>Write one query. See what ClickHouse, VictoriaLogs and Grafana Loki receive.</p>
+    </header>
+    <section class="editor" aria-label="Query editor">
+      <div class="bar"><label for="query">LogchefQL</label><button id="share" disabled>Copy share link</button></div>
+      <div class="input-wrap">
+        <pre id="highlight" aria-hidden="true"></pre>
+        <textarea id="query" rows="2" spellcheck="false" autocapitalize="off" maxlength="8192" readonly>{first.query}</textarea>
+      </div>
+      <div class="chips" aria-label="Example queries">{examples.map(({label,query}) => <button data-query={query} aria-pressed={query === first.query} disabled>{label}</button>)}</div>
+    </section>
+    <noscript>Enable JavaScript to edit the query. The examples below show the compiler’s output.</noscript>
+    <div class="wires" aria-hidden="true"><i></i></div>
+    <div class="outputs">{engines.map(([key,name,language]) =>
+      <section class="engine" data-engine={key}>
+        <div class="bar"><div><small>{language}</small><h2>{name}</h2></div><button class="copy" aria-label={'Copy '+name+' query'} disabled>Copy</button></div>
+        <pre>{first.result[key].query}</pre>
+      </section>
+    )}</div>
+    <div class="foot"><span id="status" role="status">Precompiled example</span><a href="https://demo.logchef.app">Run it for real on demo.logchef.app ↗</a></div>
+    <details><summary>Which source settings does the compiler use?</summary><p>ClickHouse reads logs.events over the first hour of January 1, 2026 (UTC), with timestamp as the time column and a 100-row limit. VictoriaLogs uses _time. Loki parses JSON and treats service_name and level as stream labels. The default time bucket is five minutes. Editing compiles locally and does not run a database query.</p></details>
+    <details><summary>Worked example: count errors by service</summary><p><code>{examples[3].query}</code></p>{engines.map(([key,name]) => <div><strong>{name}</strong><pre>{examples[3].result[key].query ?? examples[3].result[key].error.message}</pre></div>)}</details>
+  </main>
+  <script>import '../components/playground/editor.js';</script>
+</BaseLayout>

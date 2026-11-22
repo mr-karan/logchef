@@ -67,3 +67,7 @@ docs/marketing/
 # Nix
 .direnv/
 result
+
+/docs/public/playground-runtime/compiler.wasm
+/docs/public/playground-runtime/wasm_exec.js
+/docs/src/components/playground/compiled.json
