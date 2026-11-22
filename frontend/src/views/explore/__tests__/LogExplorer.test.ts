@@ -56,7 +56,7 @@ describe("LogExplorer", () => {
     document.body.innerHTML = "";
   });
 
-  async function mountExplorer(location: Record<string, string>, views = noViews) {
+  async function mountExplorer(location: Record<string, string>, views = noViews, result = logs) {
     vi.spyOn(teamsApi, "getTeam").mockImplementation(id => ok({ ...team, id, created_by: "1" }));
     vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team]) as never);
     vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source]) as never);
@@ -66,7 +66,7 @@ describe("LogExplorer", () => {
       data: { field_name: fieldName, field_type: fieldType, is_low_cardinality: true, values: [{ value: "1", count: 4 }, { value: "2", count: 3 }], total_distinct: 2 },
     }));
     vi.spyOn(savedViewsApi, "list").mockReturnValue(ok(views) as never);
-    const query = vi.spyOn(logchefqlApi, "query").mockImplementation(() => ok(logs) as never);
+    const query = vi.spyOn(logchefqlApi, "query").mockImplementation(() => ok(result) as never);
     vi.spyOn(logchefqlApi, "validate").mockReturnValue(ok({ valid: true }) as never);
     vi.spyOn(exploreApi, "getHistogramData").mockReturnValue(ok({ data: [], granularity: "1m" }) as never);
     vi.spyOn(metaApi, "getMeta").mockReturnValue(ok({ version: "test" }) as never);
@@ -130,6 +130,20 @@ describe("LogExplorer", () => {
     filter.click();
     await expectRun(query, router, "status=500 and host=2");
   });
+
+  it("runs the query when a nested field in an expanded row is added as a column", async () => {
+    const nested = {
+      ...logs,
+      logs: logs.logs.map(row => ({ ...row, attrs: { user: "ann" } })),
+      columns: [...logs.columns, { name: "attrs", type: "Map(String, String)" }],
+    };
+    const { host, query, router } = await mountExplorer({ q: "status=500", t: "7d" }, noViews, nested);
+    host.querySelector<HTMLTableRowElement>("tbody tr")?.click();
+    await vi.waitFor(() => expect(host.querySelector('button[aria-label="Add as column: attrs.user"]')).not.toBeNull());
+    host.querySelector<HTMLButtonElement>('button[aria-label="Add as column: attrs.user"]')?.click();
+    await expectRun(query, router, "status=500 | timestamp host attrs attrs.user");
+  });
+
   // A view made from the layout with no view: that layout hides host too.
   const hostlessView: SavedView = {
     id: 12, source_id: 3, scope: "personal", name: "errors", description: "",
