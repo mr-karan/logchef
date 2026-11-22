@@ -57,6 +57,14 @@ The step is the dashboard bucket size when there is one, raised to at least
 no effect. When a metric query's step is raised, the result says "Step raised
 to N seconds to stay within Loki's limit of 11,000 points".
 
+Loki can align metric evaluations to step boundaries when it splits a
+range query. Logchef shows the evaluations inside the selected range,
+including either endpoint. If the range contains no step boundary and Loki
+returns no in-range evaluation, Logchef evaluates the expression once at the
+start of the range. The LogQL lookback still applies at each evaluation. For
+example, `count_over_time({app="api"}[5m])` can count logs from before the
+selected start.
+
 ### Variables and macros
 
 Request variables work in LogQL outside quoted strings. Inside a string,

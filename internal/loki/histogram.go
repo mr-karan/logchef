@@ -407,7 +407,7 @@ func (h histogramRun) fetch(ctx context.Context, path string, params lokiParams,
 // histogramSample reads one [unix seconds, "count"] pair. The time is a
 // multiple of a millisecond, so it is read as text, not through a float.
 func histogramSample(value [2]json.RawMessage) (histogramPoint, error) {
-	at, err := time.Parse(time.RFC3339Nano, sampleTime(value[0]))
+	at, err := parseSampleTime(value[0])
 	if err != nil {
 		return histogramPoint{}, histogramDecodeError(err)
 	}
