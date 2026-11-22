@@ -24,3 +24,20 @@ it('matches a time rule against the timestamp the table shows, and a number rule
   expect(host.querySelector<HTMLElement>('tbody td:last-child')?.style.backgroundColor).toBe('var(--panel-blue-background)');
  } finally {app.unmount();}
 });
+
+// Tables side by side on one dashboard: VictoriaLogs LogsQL (no column types,
+// trailing zeros dropped) and Loki LogchefQL (_time typed DateTime, nanosecond
+// values). All show _time the same way, in the viewer's zone.
+it('shows time columns of every backend in one format and in the viewer zone', async () => {
+ const victoria=resultFrame({columns:[{name:'_time',type:'DateTime'},{name:'_msg',type:'String'}],rows:[{_time:'2026-11-22T11:50:41.138Z',_msg:'a'}],untyped:true});
+ const loki=resultFrame({columns:[{name:'_time',type:'DateTime'},{name:'_msg',type:'String'}],rows:[{_time:'2026-11-22T11:51:33.544385024Z',_msg:'b'}]});
+ const trimmed=resultFrame({columns:[{name:'_time',type:'DateTime'}],rows:[{_time:'2026-11-22T11:52:00.1Z'}],untyped:true});
+ localStorage.setItem('logchef_user_preferences', JSON.stringify({ timezone: 'utc' }));
+ const host=document.createElement('div');
+ const app=createApp({render:()=>[h(PanelTable,{frame:victoria}),h(PanelTable,{frame:loki}),h(PanelTable,{frame:trimmed})]}).use(createPinia()).use(i18n);
+ try {
+  app.mount(host);await nextTick();
+  const times=[...host.querySelectorAll('tbody tr td:first-child')].map(td=>td.textContent?.trim());
+  expect(times).toEqual(['2026-11-22 11:50:41.138','2026-11-22 11:51:33.544','2026-11-22 11:52:00.100']);
+ } finally {app.unmount();localStorage.removeItem('logchef_user_preferences');}
+});
