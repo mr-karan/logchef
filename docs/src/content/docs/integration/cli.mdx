@@ -794,6 +794,24 @@ logchef reports run 4 --all    # send to every recipient now
 
 `run <id>` starts a manual run and returns at once with its ID; follow it with `reports runs`. Only the owner and global admins start one. A report allows one manual run per minute, and a run while another is in flight is refused.
 
+### Audit
+
+The `audit list` command filters [audit events](/operations/audit-log/#from-the-cli), including the `query.run` event of every query. It needs a global admin's API token with the `audit:read` scope.
+
+```bash
+logchef audit list --action query.run --since 24h
+logchef audit list --target source:7 --output jsonl
+```
+
+### Advisor
+
+The `advisor` command prints a ClickHouse source's [schema advisor](/features/schema-advisor/) report. It needs a global admin's API token with `sources:read`.
+
+```bash
+logchef advisor app-logs --refresh
+logchef advisor 7 --ddl
+```
+
 ### Saved Queries
 
 The `saved-queries` command lists and runs saved queries from the Logchef web UI. You can pass a saved-query ID, exact name, or an explorer URL copied from the browser.
