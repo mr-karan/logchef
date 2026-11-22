@@ -2,7 +2,7 @@
 title: Development Setup
 head:
   - tag: title
-    content: "Logchef Local Development Setup | Logchef"
+    content: "Local Development Setup | Logchef"
 description: "Set up a local Logchef development environment with Go, Bun, and Docker. Run the backend and frontend, then test your changes before contributing."
 ---
 

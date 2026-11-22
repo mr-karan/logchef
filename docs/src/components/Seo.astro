@@ -59,13 +59,13 @@ const jsonLd = {
       license: "https://www.gnu.org/licenses/agpl-3.0.html",
       operatingSystem: "Linux, macOS, Windows",
       description:
-        "Open-source, self-hosted log exploration and alerting UI that connects to existing ClickHouse or VictoriaLogs data without owning ingestion or forcing a schema.",
+        "Open-source, self-hosted log exploration and alerting UI that connects to existing ClickHouse, VictoriaLogs or Grafana Loki data without owning ingestion or forcing a schema.",
       featureList: [
-        "Query ClickHouse and VictoriaLogs sources from one UI",
-        "LogchefQL, native ClickHouse SQL, and LogsQL queries",
+        "Query ClickHouse, VictoriaLogs and Grafana Loki sources from one UI",
+        "LogchefQL, native ClickHouse SQL, LogsQL and LogQL queries",
         "Live tail (stream logs in real time)",
         "Dashboards with time-series, stat, and table panels",
-        "Alerting via email and webhooks",
+        "Alerting via email, webhooks, Slack and PagerDuty",
         "Command-line interface",
       ],
       screenshot: new URL("/screenshots/hero-light.png", siteUrl).toString(),

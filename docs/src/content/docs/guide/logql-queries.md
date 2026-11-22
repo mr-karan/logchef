@@ -2,7 +2,7 @@
 title: LogQL Queries
 head:
   - tag: title
-    content: "Loki LogQL Queries in Logchef | Logchef"
+    content: "Grafana Loki LogQL Queries | Logchef"
 description: Use native LogQL in Logchef against Grafana Loki, with common query patterns, how LogchefQL compiles to LogQL, and what Loki cannot express.
 ---
 

@@ -1,8 +1,8 @@
 ---
 title: "Log Dashboards Without Grafana"
-description: "Logchef dashboards chart the log queries you already run over ClickHouse and VictoriaLogs: stats, time series, breakdowns and tables on one grid, with no extra service."
+description: "Logchef dashboards chart the log queries you already run over ClickHouse, VictoriaLogs and Grafana Loki: stats, time series, breakdowns and tables on one grid, with no extra service."
 pubDate: 2026-11-18
-tags: ["dashboards", "clickhouse", "victorialogs", "observability", "logs"]
+tags: ["dashboards", "clickhouse", "victorialogs", "loki", "observability", "logs"]
 author: "Logchef Team"
 ---
 
@@ -16,7 +16,7 @@ Logchef has dashboards built in. A dashboard is a grid of panels. Each panel is 
 
 ## Four panel types
 
-Every panel picks its own team, source and query language (LogchefQL, ClickHouse SQL, or LogsQL for a VictoriaLogs source), and renders as one of:
+Every panel picks its own team, source and query language (LogchefQL, ClickHouse SQL, LogsQL for a VictoriaLogs source, or LogQL for a Grafana Loki source), and renders as one of:
 
 - **Time series**: a line, area or bar chart. Bars can be stacked or grouped.
 - **Stat**: one value, reduced from a result column with `last`, `first`, `sum`, `avg`, `min` or `max`.
@@ -74,9 +74,9 @@ A dashboard can hold up to 10 tabs. Only the tab on screen runs its queries, so 
 
 Any panel can pin its own range and bucket size. On that weekly tab each panel sets the calendar range `today-6d` (today and the six days before it in the viewer's timezone) with `24h` buckets, so each bar is one calendar day. Chips in the panel header show which range and bucket size actually ran. If a fixed bucket size would produce more than 1,000 buckets, Logchef raises it to the next size that fits and the chip turns amber to say so.
 
-## ClickHouse and VictoriaLogs on one dashboard
+## ClickHouse, VictoriaLogs and Loki on one dashboard
 
-Because each panel picks its own source, one dashboard can put a ClickHouse time series next to a VictoriaLogs stat. LogchefQL compiles to SQL or LogsQL depending on the panel's source, and you can switch a single VictoriaLogs panel to native LogsQL:
+Because each panel picks its own source, one dashboard can put a ClickHouse time series next to a VictoriaLogs stat or a Grafana Loki table. LogchefQL compiles to SQL, LogsQL or LogQL depending on the panel's source, and you can switch a single VictoriaLogs panel to native LogsQL:
 
 ```text
 level:error | stats by (service) count() as errors | sort by (errors desc)
@@ -86,13 +86,21 @@ level:error | stats by (service) count() as errors | sort by (errors desc)
 
 VictoriaLogs returns every field as text, so you confirm column kinds in the builder (`duration_ms` is a number, `_time` is a time). ClickHouse types are read directly.
 
+A Loki panel takes LogchefQL or native LogQL. In result mode, a LogQL metric query returns `value`, `time` and one column per label, so it charts like any other result:
+
+```text
+sum by (level) (count_over_time({service_name=~".+"} [{{__interval}}]))
+```
+
+`{{__interval}}` follows the panel's bucket size. LogchefQL aggregation pipes don't run on Loki, so write the metric query in LogQL. The [Grafana Loki tutorial](/tutorials/loki) covers Loki panels.
+
 ## Access and load
 
 Panels run through the same team-scoped query endpoints the explorer uses. A dashboard adds no new path to log data: if a viewer can't query a panel's source in the explorer, that panel shows a locked state and the rest of the dashboard loads normally.
 
 Auto-refresh (30 seconds, 1 minute or 5 minutes) makes a wall screen useful and expensive: *N* panels open by *M* viewers is up to *N×M* queries per cycle. Each dashboard has a cache TTL, 10 minutes by default, backed by a shared server-side cache. The first viewer fills it and everyone else in that window gets the stored result. Set the TTL to `0` to always query live. Explorer queries are never cached.
 
-Editing is a drag-and-drop grid with a panel builder that shows a live preview. If a teammate saves the same dashboard while you edit it, Logchef asks whether to save yours as a copy, overwrite theirs, or load the latest.
+Editing is a drag-and-drop grid with a panel builder that shows a live preview. The creator and global admins can edit a dashboard, and so can a team owner, admin or editor of every team its query panels use. If a teammate saves the same dashboard while you edit it, Logchef asks whether to save yours as a copy, overwrite theirs, or load the latest.
 
 When nobody is watching the screen, **Schedule report** in the dashboard toolbar emails a dashboard, or one tab of it, on an hourly, daily, weekly or monthly schedule. See [scheduled reports](/features/scheduled-reports) for how each panel type renders in the email.
 
@@ -100,12 +108,12 @@ When nobody is watching the screen, **Schedule report** in the dashboard toolbar
 
 Some limits, so you can decide whether this replaces Grafana for you or sits next to it:
 
-- Panels query ClickHouse and VictoriaLogs log sources. There is no Prometheus or other metrics data source. Logchef's own Prometheus metrics still need a metrics tool, and the repo ships a [Grafana dashboard](https://github.com/mr-karan/logchef/tree/main/dashboards) for exactly that.
+- Panels query ClickHouse, VictoriaLogs and Grafana Loki log sources. There is no Prometheus or other metrics data source. Logchef's own Prometheus metrics still need a metrics tool, and the repo ships a [Grafana dashboard](https://github.com/mr-karan/logchef/tree/main/dashboards) for exactly that.
 - A dashboard holds up to 24 panels across its tabs.
-- There are no per-dashboard sharing roles yet. Anyone signed in can view a dashboard, and only its creator or a global admin can edit or delete it. Source access is still enforced on every panel query.
+- There are no per-dashboard sharing roles yet. The creator, global admins and members of the teams a dashboard's panels use can view it, and only the creator or a global admin can delete it. Source access is still enforced on every panel query.
 - Grouped histograms return the top 10 series and fold the rest into **other**. Group by service, host or severity, not request IDs.
 - On VictoriaLogs, day-sized count buckets use one fixed UTC offset, so a range that crosses a daylight-saving change shows a notice. ClickHouse panels follow the change.
 
 ## Try it
 
-Dashboards need no configuration. Tabs, stat comparisons, thresholds, table rules and per-panel ranges shipped in v2.7.0. Charting LogchefQL aggregations from **Add to dashboard** and emailing dashboards as scheduled reports are on `main` and land in the next release. The [dashboard docs](/features/dashboards) cover every panel option, and the [gallery](/features/dashboard-gallery) has three example dashboards with copyable queries. The scripts that build its data and dashboards are in [`dev/gallery`](https://github.com/mr-karan/logchef/tree/main/dev/gallery). Source, issues and the Docker quick-start are at [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef).
+Dashboards need no configuration. Tabs, stat comparisons, thresholds, table rules and per-panel ranges shipped in v2.7.0. Loki panels, charting LogchefQL aggregations from **Add to dashboard**, team editing and emailing dashboards as scheduled reports shipped in [v2.8.0](/blog/logchef-2-8-grafana-loki-ui-log-analytics). The [dashboard docs](/features/dashboards) cover every panel option, and the [gallery](/features/dashboard-gallery) has three example dashboards with copyable queries. The scripts that build its data and dashboards are in [`dev/gallery`](https://github.com/mr-karan/logchef/tree/main/dev/gallery). Source, issues and the Docker quick-start are at [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef).

@@ -1,5 +1,8 @@
 ---
 title: Logchef vs Grafana Loki
+head:
+  - tag: title
+    content: "Logchef vs Grafana Loki"
 description: "Logchef vs Grafana Loki: run Logchef as a log UI over the Loki you already have, with LogQL and LogchefQL, or move logs to ClickHouse or VictoriaLogs."
 ---
 

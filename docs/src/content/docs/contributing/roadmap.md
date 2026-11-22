@@ -2,7 +2,7 @@
 title: Roadmap
 head:
   - tag: title
-    content: "Logchef Log Analytics Roadmap | Logchef"
+    content: "Log Analytics Roadmap | Logchef"
 description: "Explore the Logchef roadmap for self-hosted log analytics. See shipped capabilities, current development, and planned improvements to log investigations."
 ---
 

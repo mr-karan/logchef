@@ -83,6 +83,8 @@ Each VictoriaLogs source supports two query languages, switchable per query.
 
 Two details matter here. The `~` operator is a literal, case-insensitive substring match: Logchef escapes regex characters in your text, so `_msg ~ "user[1]"` searches for the literal `user[1]`. And a projection such as `service = "api" | _msg service` becomes a LogsQL `fields` pipe with the timestamp field always included first, so results never lose their time column.
 
+Since v2.8.0, LogchefQL also counts and groups. The [aggregation pipe](/guide/aggregations) `level=error | count() by service` compiles to `level:="error" | stats by (service) count()` plus a `sort` by the count, and the Explorer shows the result as a table or a chart.
+
 **Native LogsQL** is there when you need VictoriaLogs pipes such as `stats`, `facets`, `unpack_json`, or `fields`. Anything valid in LogsQL runs unchanged:
 
 ```text
@@ -116,25 +118,25 @@ Filter-only queries use windowed search. Queries with pipes keep the standard pa
 
 Queries in either language can be saved to your library or to a shared [collection](/features/collections), so the gateway-timeout query is one click away for whoever is on call.
 
-[Dashboards](/features/dashboards) support time series, stat, breakdown, and table panels on VictoriaLogs. Each panel picks its own team and source, so one dashboard can put a VictoriaLogs error rate next to a ClickHouse-backed request table. A team can have sources of both types, and the same LogchefQL filter works on either.
+[Dashboards](/features/dashboards) support time series, stat, breakdown, and table panels on VictoriaLogs. Each panel picks its own team and source, so one dashboard can put a VictoriaLogs error rate next to a ClickHouse-backed request table. A team can have sources of any type, and the same LogchefQL filter works on each.
 
-Alerts come in two modes. **Condition mode** takes a LogchefQL filter, and Logchef compiles it to LogsQL and wraps it in a `stats` query:
-
-```text
-level = "error" and service = "payments"
-```
-
-**Native mode** takes LogsQL that returns one numeric value named `value`:
+[Alerts](/features/alerting) come in two modes. **Condition mode** takes a LogchefQL filter and an aggregate such as `count`. Logchef stores the rule as one LogchefQL aggregation and compiles it to LogsQL at every evaluation:
 
 ```text
-level:="error" service:="payments" | stats count() as value
+level = "error" | count() as value by service
 ```
 
-Logchef evaluates it through VictoriaLogs' `stats_query` endpoint and prepends a `_time:` filter built from the alert's lookback, such as `_time:5m`. If your query already sets its own time window, Logchef leaves it alone rather than stacking a second filter on top. Notifications go out over email or webhook.
+**Native mode** takes LogsQL that returns a numeric `value`, one row per group:
+
+```text
+level:="error" | stats by (service) count() as value
+```
+
+Logchef evaluates it through VictoriaLogs' `stats_query` endpoint and applies the alert's lookback window, so the query holds only the filter and the stats. With **Group by** set to `service`, each service fires and resolves on its own. Notifications go to reusable email, webhook, Slack and PagerDuty destinations.
 
 ## What this doesn't do
 
-Logchef does not ingest logs. You keep shipping to VictoriaLogs with Vector, Fluent Bit, or whatever you use today. Two features are still ClickHouse-only: log context (jumping from a row to the logs around it) and exporting a full result set to CSV or NDJSON. `null` comparisons in LogchefQL are rejected on VictoriaLogs sources rather than guessed. And if you are debugging VictoriaLogs itself (ingestion, storage, retention), vmui is still the right tool.
+Logchef does not ingest logs. You keep shipping to VictoriaLogs with Vector, Fluent Bit, or whatever you use today. Two features are not available on VictoriaLogs: log context (jumping from a row to the logs around it) and exporting a full result set to CSV or NDJSON. `null` comparisons in LogchefQL are rejected on VictoriaLogs sources rather than guessed. And if you are debugging VictoriaLogs itself (ingestion, storage, retention), vmui is still the right tool.
 
 ## Try it
 
