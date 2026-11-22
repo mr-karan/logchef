@@ -436,6 +436,12 @@ func TestClickHouseFieldValuesWithoutQueryLanguage(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unknown column is a bad request", func(t *testing.T) {
+		status, body := fieldValues(t, "/fields/service/values", "nosuch=error")
+		if message, _ := body["message"].(string); status != http.StatusBadRequest || !strings.Contains(message, "nosuch") {
+			t.Fatalf("status=%d body=%v, want 400 naming the column", status, body)
+		}
+	})
 
 	wantService := map[string]any{
 		"field_name": "service", "field_type": "LowCardinality(String)", "is_low_cardinality": true,
