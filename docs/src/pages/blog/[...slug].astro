@@ -276,6 +276,16 @@ const jsonLd = {
       border: 1px solid var(--color-border); margin-top: 1.6rem;
     }
 
+    /* Release clips */
+    .prose :global(.post-clip) { margin: 1.6rem 0 0; }
+    .prose :global(.post-clip video) {
+      display: block; width: 100%; height: auto; border-radius: 12px;
+      border: 1px solid var(--color-border); background: var(--color-surface);
+    }
+    .prose :global(.post-clip figcaption) {
+      margin-top: 0.6rem; font-size: 0.85rem; color: var(--color-text-dim);
+    }
+
     /* ---- Article footer ---- */
     .post-footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--color-border); }
 
