@@ -842,9 +842,9 @@ const unreleasedShots = [
               <span class="sep" aria-hidden="true"></span>
               <span class="what">One query, three engines</span>
             </div>
-            <h2 class="v28-title">Search Grafana Loki, count with LogchefQL, alert per service, and audit every query.</h2>
+            <h2 class="v28-title">Search Grafana Loki, count with LogchefQL, alert per service, and see who queried what.</h2>
             <p class="v28-sub">
-              <strong>Grafana Loki joins ClickHouse and VictoriaLogs as a third backend.</strong>&#32;LogchefQL now counts and charts across sources, alert rules fire and resolve per group with backtests and silences, and the audit log records every query run with its full text.
+              <strong>Grafana Loki joins ClickHouse and VictoriaLogs as a third backend.</strong>&#32;LogchefQL now counts and charts ClickHouse and VictoriaLogs logs, alert rules fire and resolve per group with backtests and silences, and the audit log records query runs with their full text.
             </p>
           </div>
 
@@ -1265,7 +1265,7 @@ service=api
               <span class="kicker">04 · Governance &amp; compliance</span>
               <h3>Audit log with <code>query.run</code></h3>
               <p>
-                Logchef records configuration changes, sign-ins, OAuth consent, exports and every query run. Each <code>query.run</code> event stores the actor, authentication method, full query text, time range, rows returned and scanned, duration and outcome across Explorer, dashboards, live tail, log context, CLI, API, MCP and Ask Chef.
+                Logchef records configuration changes, sign-ins, OAuth consent, exports and query runs. Each <code>query.run</code> event stores the actor, authentication method, full query text, time range, rows returned and scanned, duration and outcome across Explorer, dashboards, live tail, log context, CLI, API, MCP and Ask Chef. The histogram and the field sidebar do not record events yet.
               </p>
               <p>
                 Global admins inspect events in <strong>Administration &rarr; Audit Log</strong>, fetch NDJSON exports from <code>GET /api/v1/admin/audit-events</code>, filter via <code>logchef audit list</code>, or ship structured JSON log lines off the host.
