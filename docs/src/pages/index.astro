@@ -1,6 +1,24 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
+
+// Read the star count once at build time so the button stays static and
+// themed. If GitHub is unreachable, the button renders without a count.
+let stars: string | null = null;
+try {
+  const res = await fetch('https://api.github.com/repos/mr-karan/logchef', {
+    headers: { Accept: 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (res.ok) {
+    const count = (await res.json()).stargazers_count;
+    if (typeof count === 'number') {
+      stars = count >= 1000 ? `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(count);
+    }
+  }
+} catch {
+  stars = null;
+}
 ---
 
 <BaseLayout
@@ -106,8 +124,27 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
     .hero-actions {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
     }
-    .gh-stars { display: inline-flex; align-items: center; margin-left: 0.25rem; }
-    .gh-stars img { height: 20px; }
+    .btn-github { padding-right: 0.55rem; }
+    .btn-github .gh-count {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      margin-left: 0.25rem; padding: 0.15rem 0.5rem; border-radius: 6px;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      font-family: var(--font-mono); font-size: 0.8rem; color: var(--color-text-dim);
+    }
+    .btn-github .gh-count svg { width: 13px; height: 13px; }
+    .hero-new {
+      display: inline-flex; align-items: center; gap: 0.6rem; margin-top: 1.1rem;
+      font-size: 0.9rem; color: var(--color-text-muted); text-decoration: none;
+    }
+    .hero-new .hero-new-tag { flex: none; white-space: nowrap; }
+    .hero-new svg { flex: none; }
+    .hero-new:hover { color: var(--color-text); text-decoration: none; }
+    .hero-new .hero-new-tag {
+      font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.02em;
+      padding: 0.1rem 0.45rem; border-radius: 999px;
+      color: var(--color-accent); border: 1px solid var(--color-border-strong);
+    }
+    .hero-new svg { width: 14px; height: 14px; }
 
     /* Product proof bar. Each claim gets a category and a concrete value so
        this reads as product architecture rather than a row of keywords. */
@@ -657,7 +694,6 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
       .hero-grid { gap: 2rem; margin-bottom: 2.5rem; }
       .hero-visual { min-height: 235px; }
       .hero-actions .btn { flex-basis: 100%; }
-      .hero-actions .gh-stars { width: 100%; margin-left: 0; }
       .proof-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .proof-item { padding: 0.8rem; }
       .proof-item:nth-child(3),
@@ -691,14 +727,14 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
       <div class="hero-grid">
         <div class="hero-copy">
           <div class="eyebrow">
-            <span class="kicker">Logchef 2.0</span>
+            <span class="kicker">Logchef 2.8</span>
             <span class="sep" aria-hidden="true"></span>
-            <span class="what">VictoriaLogs is here</span>
+            <span class="what">Grafana Loki is here</span>
           </div>
 
           <h1 class="hero-title">
             <span>Open-source log analytics</span>
-            <span>for ClickHouse &amp; VictoriaLogs</span>
+            <span>for ClickHouse, VictoriaLogs &amp; Loki</span>
           </h1>
 
           <p class="hero-desc">
@@ -719,13 +755,24 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
                 <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
               </svg>
             </a>
-            <a href="/playground/" class="btn btn-secondary">Try the LogchefQL Playground</a>
-            <span class="gh-stars">
-              <a href="https://github.com/mr-karan/logchef" target="_blank" rel="noopener">
-                <img src="https://img.shields.io/github/stars/mr-karan/logchef?style=social" alt="Logchef GitHub stars" width="110" height="20" />
-              </a>
-            </span>
+            <a href="https://github.com/mr-karan/logchef" class="btn btn-secondary btn-github" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+              </svg>
+              GitHub
+              {stars && (
+                <span class="gh-count" aria-label={`${stars} stars`}>
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                  {stars}
+                </span>
+              )}
+            </a>
           </div>
+          <a href="/playground/" class="hero-new">
+            <span class="hero-new-tag">New in v2.8</span>
+            <span>Try the LogchefQL Playground: one query, three engines</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
         </div>
 
         <div class="hero-visual" aria-hidden="true">
@@ -758,7 +805,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
           </span>
           <span class="proof-copy">
             <span class="proof-label">Backends</span>
-            <span class="proof-value">ClickHouse + VictoriaLogs</span>
+            <span class="proof-value">ClickHouse · VictoriaLogs · Loki</span>
           </span>
         </div>
         <div class="proof-item">
