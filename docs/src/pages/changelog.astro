@@ -9,7 +9,7 @@ const unreleasedShots = [
 ];
 ---
 
-<BaseLayout title="Logchef Release Notes and Changelog" description="Logchef release notes and version history: VictoriaLogs, dashboards, live tail, the CLI, and every change, version by version." activeNav="changelog">
+<BaseLayout title="Logchef Release Notes and Changelog" description="Logchef release notes and version history: Grafana Loki, VictoriaLogs, dashboards, alerting, the audit log, the CLI, and every change, version by version." activeNav="changelog">
   <style>
     .cl-wrap { position: relative; overflow: clip; }
     .cl-wrap .bg-glow {
@@ -163,11 +163,87 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
+    <article class="version" id="v2.8.0">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.8.0">v2.8.0</a>
+        <span class="version-date">Nov 22, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p class="release-kicker">Loki, aggregations, and queries on the record</p>
+      <p class="release-intro">
+        <strong>Logchef reads Grafana Loki as a third backend, LogchefQL counts and groups, and alerts fire per group.</strong> The audit log records each query run with its full text, and Query Activity shows who uses Logchef, which sources are slow and which query patterns cost the most. Scheduled reports, saved Explorer views, shared dashboard editing and a ClickHouse schema advisor complete the release. Read the <a href="/blog/logchef-2-8-grafana-loki-ui-log-analytics/">release post</a>.
+      </p>
+
+      <ul class="release-highlights">
+        <li><strong>Grafana Loki</strong>Search with LogchefQL or native LogQL, with the histogram, field sidebar, live tail, log context, dashboards, alerts, the CLI and MCP.</li>
+        <li><strong>LogchefQL aggregations</strong><code>level=error | count() by service</code> runs on ClickHouse and VictoriaLogs, as a table, a chart or a dashboard panel.</li>
+        <li><strong>Alerting v2</strong>Per-group alerts, a no-data policy, silences, backtests, and reusable email, webhook, Slack and PagerDuty destinations.</li>
+        <li><strong>Queries on the record</strong>A <code>query.run</code> audit event for each query run, including live tail, log context, MCP and Ask Chef, and a rebuilt Query Activity page.</li>
+      </ul>
+
+      <aside class="upgrade-note">
+        <strong>Before upgrading:</strong> back up the metadata database, then stop every old replica before the first new one starts. Alerting v2 does not support a rolling upgrade. Startup runs 18 migrations on each store (SQLite 000042 to 000059, Postgres 000016 to 000033), and the alert migrations cannot be undone: rolling back means restoring the backup. Alert requests drop <code>recipient_user_ids</code> and <code>webhook_urls</code> for <code>destination_ids</code>, <code>alerts.evaluation_interval</code> is removed, and tokens with explicit scope lists need reissuing for the new scopes. The <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md#upgrade-notes">CHANGELOG</a> lists every upgrade note.
+      </aside>
+
+      <div class="change-section">
+        <div class="change-type security">Security</div>
+        <ul class="change-list">
+          <li><strong>Team source links need access</strong>: A team admin can link only a source they can already access. Before, a team admin could link any source and query its logs.</li>
+          <li><strong>No header values in exports</strong>: Provisioning export names an environment variable for each custom header of a VictoriaLogs or Loki source instead of writing its value.</li>
+          <li><strong>Quieter webhook failures</strong>: A failed delivery no longer writes the receiver's response body to the server log.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">Added</div>
+        <ul class="change-list">
+          <li><strong>Grafana Loki sources</strong>: A base URL, an optional tenant, a default stream selector and a parser. LogchefQL compiles to LogQL, and the LogQL tab runs native LogQL. A Loki source gives its teams the whole tenant.</li>
+          <li><strong>LogchefQL aggregations</strong>: <code>count</code>, <code>count_distinct</code>, <code>sum</code>, <code>avg</code>, <code>min</code>, <code>max</code> and <code>p50</code> to <code>p99</code>, with up to 5 <code>by</code> keys, a time bucket, <code>| sort</code> and <code>| limit</code>. <strong>Add to dashboard</strong> starts a panel from the query.</li>
+          <li><strong>Per-group alerts</strong>: <strong>Group by</strong> in condition and native mode. Each group fires, notifies and resolves on its own.</li>
+          <li><strong>No data, silences and backtests</strong>: Decide what an empty result means, mute notifications for maintenance windows, and replay an unsaved rule over up to 7 days.</li>
+          <li><strong>Notification destinations and a delivery queue</strong>: Reusable email, webhook, Slack and PagerDuty destinations. Retries after 30 seconds, 2, 10 and 30 minutes, with every attempt recorded.</li>
+          <li><strong>Audit log</strong>: Configuration changes, sign-ins, OAuth consent, exports and query runs, in Administration, the API, <code>logchef audit list</code> and JSON log lines.</li>
+          <li><strong>Scheduled reports</strong>: Email a dashboard, a dashboard tab or a saved query on a schedule, with per-recipient panel locking.</li>
+          <li><strong>Saved Explorer views</strong>: Columns, sort, display mode and optional query defaults as personal, team or source views, with defaults and shareable links.</li>
+          <li><strong>ClickHouse schema advisor</strong>: Index, column, codec, key and retention suggestions from real query shapes, with evidence and DDL that Logchef never runs.</li>
+          <li><strong>MCP and CLI</strong>: MCP queries Loki, runs aggregations and lists saved views. CLI 0.5.0 adds <code>advisor</code>, <code>audit list</code>, <code>reports</code>, <code>views list</code> and <code>open --view</code>.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">Changed</div>
+        <ul class="change-list">
+          <li><strong>Query Activity</strong>: Adoption, hot and slow sources, and costly query patterns, each compared with the prior window, with latency percentiles, scan cost and failure rates.</li>
+          <li><strong>Shared dashboard editing</strong>: Team owners, admins and editors can edit a dashboard when they have edit rights on every team its query panels use.</li>
+          <li><strong>Alert evaluation</strong>: Rules run on the background job runner at their own frequency, and one replica evaluates each tick.</li>
+          <li><strong>Explorer header filters</strong>: A column filter adds a condition to the LogchefQL query and reruns it.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type removed">Removed</div>
+        <ul class="change-list">
+          <li><code>recipient_user_ids</code> and <code>webhook_urls</code> in alert requests, <code>alerts.evaluation_interval</code>, <code>POST /api/v1/admin/settings/test-webhook</code> and <code>GET /api/v1/admin/query-activity</code>.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>Live tail frees its slot as soon as the client disconnects, on every backend.</li>
+          <li>A dashboard of 4 or more panels with caching off no longer rejects one of its own panels.</li>
+          <li>Dashboard charts color HTTP status classes by meaning, leave gaps in unstacked areas, and keep value-axis labels distinct.</li>
+          <li>MCP <code>translate_logchefql</code> and <code>query_logchefql</code> default to UTC when no timezone is sent.</li>
+        </ul>
+      </div>
+    </article>
+
     <article class="version" id="v2.7.0">
       <div class="version-header">
         <a class="version-tag" href="#v2.7.0">v2.7.0</a>
         <span class="version-date">Nov 15, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.7.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

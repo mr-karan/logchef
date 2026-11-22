@@ -1,5 +1,8 @@
 ---
 title: Logchef vs Elasticsearch and Kibana
+head:
+  - tag: title
+    content: "Logchef vs Elasticsearch and Kibana"
 description: "Logchef vs Elasticsearch and Kibana (ELK): an open-source Kibana alternative for logs in ClickHouse, VictoriaLogs or Loki. Licenses, paid tiers and trade-offs."
 ---
 

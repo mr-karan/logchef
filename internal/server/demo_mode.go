@@ -14,7 +14,18 @@ const publicDemoReadOnlyMessage = "This public demo is read-only. Explore dashbo
 // #nosec G101 -- HTTP header name, not a credential value
 const demoProvisioningTokenHeader = "X-Logchef-Demo-Provisioning-Token"
 
-var publicDemoQueryPath = regexp.MustCompile(`^/api/v1/teams/[^/]+/sources/[^/]+/(?:logs/(?:query|histogram|context)|logs/query/[^/]+/cancel|generate-sql|logchefql/(?:query|translate|validate))$`)
+var publicDemoQueryPath = regexp.MustCompile(`^/api/v1/teams/[^/]+/sources/[^/]+/(?:logs/(?:query|histogram|context|windowed)|logs/query/[^/]+/cancel|generate-sql|logchefql/(?:query|translate|validate))$`)
+
+// These POST routes read logs and answer in the response, writing no rows and
+// sending nothing: an alert's test query and backtest run the unsaved rule,
+// and an Ask Chef turn calls read-only tools and the AI provider, as
+// generate-sql does. Report preview stays blocked: it stores the report's
+// preview cooldown.
+var publicDemoReadPaths = map[string]bool{
+	"/api/v1/alerts/test":     true,
+	"/api/v1/alerts/backtest": true,
+	"/api/v1/ask-chef/turns":  true,
+}
 
 // OAuth consent and Connected apps revocation change only the visitor's own
 // grants, so a read-only demo can still connect an MCP host. Both routes are
@@ -49,7 +60,7 @@ func (s *Server) enforceDemoReadOnly(c fiber.Ctx) error {
 		return c.Next()
 	case fiber.MethodPost:
 		path := c.Path()
-		if path == "/api/v1/auth/local/login" || path == "/api/v1/auth/logout" ||
+		if path == "/api/v1/auth/local/login" || path == "/api/v1/auth/logout" || publicDemoReadPaths[path] ||
 			publicDemoQueryPath.MatchString(path) || publicDemoOAuthDecisionPath.MatchString(path) {
 			return c.Next()
 		}

@@ -1,5 +1,8 @@
 ---
 title: Logchef vs Grafana for ClickHouse and VictoriaLogs logs
+head:
+  - tag: title
+    content: "Logchef vs Grafana for ClickHouse and VictoriaLogs logs"
 description: "Logchef vs Grafana with the ClickHouse and VictoriaLogs data source plugins: what a log-first UI adds, where Grafana fits better, and how to run both."
 ---
 

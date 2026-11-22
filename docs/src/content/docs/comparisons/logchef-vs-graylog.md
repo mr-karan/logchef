@@ -1,5 +1,8 @@
 ---
 title: Logchef vs Graylog
+head:
+  - tag: title
+    content: "Logchef vs Graylog"
 description: "Logchef vs Graylog: an open-source Graylog alternative for logs in ClickHouse, VictoriaLogs or Loki. Compare licenses, Graylog Open limits, storage and queries."
 ---
 

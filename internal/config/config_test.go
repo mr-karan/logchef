@@ -813,8 +813,8 @@ func TestLoad_AuditDefaultsAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := cfg.Audit; got.RetentionDays != 365 || got.MaxRows != 1_000_000 || !got.LogEvents {
-		t.Errorf("audit defaults = %+v, want 365 days, 1000000 rows, log_events on", got)
+	if got := cfg.Audit; got.RetentionDays != 30 || got.MaxRows != 1_000_000 || !got.LogEvents {
+		t.Errorf("audit defaults = %+v, want 30 days, 1000000 rows, log_events on", got)
 	}
 
 	cfg, err = Load(writeConfig(t, "\n[audit]\nretention_days = 0\nmax_rows = 0\nlog_events = false\n"))
@@ -829,7 +829,7 @@ func TestLoad_AuditDefaultsAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := cfg.Audit; got.RetentionDays != 365 || got.MaxRows != 1_000_000 {
+	if got := cfg.Audit; got.RetentionDays != 30 || got.MaxRows != 1_000_000 {
 		t.Errorf("negative audit bounds = %+v, want the defaults", got)
 	}
 }

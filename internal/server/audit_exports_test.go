@@ -2,16 +2,20 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -21,20 +25,28 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// exportAuditEnv is an audit env with a ClickHouse source that nothing
-// listens for: the client connects lazily, so a query that starts fails,
-// and a test can tell whether the export reached the query.
+// exportAuditEnv is an audit env with a ClickHouse source at a fixed
+// address. newExportAuditEnv points it at an address that nothing listens
+// on: the client connects lazily, so a query that starts fails, and a test
+// can tell whether the export reached the query.
 type exportAuditEnv struct {
 	*auditRouteEnv
 	streamPath, jobPath string
+	sourceID            models.SourceID
 }
 
-// newExportAuditEnv adds the export config, the source and its ClickHouse
-// client before the server starts; options run after, so they can change
-// the export config.
 func newExportAuditEnv(t *testing.T, options ...auditEnvOption) *exportAuditEnv {
 	t.Helper()
+	return newExportAuditEnvAt(t, "127.0.0.1:1", options...)
+}
+
+// newExportAuditEnvAt adds the export config, the source at host and its
+// ClickHouse client before the server starts; options run after, so they
+// can change the export config.
+func newExportAuditEnvAt(t *testing.T, host string, options ...auditEnvOption) *exportAuditEnv {
+	t.Helper()
 	var base string
+	var sourceID models.SourceID
 	withSource := func(s *auditEnvSetup) {
 		s.opts.Config.Export = config.ExportConfig{
 			MaxRows: 100, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
@@ -44,7 +56,7 @@ func newExportAuditEnv(t *testing.T, options ...auditEnvOption) *exportAuditEnv 
 		t.Cleanup(func() { _ = manager.Close() })
 		ctx := context.Background()
 		source := &models.Source{Name: "export-audit", SourceType: models.SourceTypeClickHouse,
-			Connection: models.ConnectionInfo{Host: "127.0.0.1:1", Database: "default", TableName: "logs"}}
+			Connection: models.ConnectionInfo{Host: host, Database: "default", TableName: "logs"}}
 		if err := s.db.CreateSource(ctx, source); err != nil {
 			t.Fatal(err)
 		}
@@ -59,10 +71,11 @@ func newExportAuditEnv(t *testing.T, options ...auditEnvOption) *exportAuditEnv 
 			t.Fatal(err)
 		}
 		s.opts.ClickHouse = manager
+		sourceID = source.ID
 		base = fmt.Sprintf("/api/v1/teams/%d/sources/%d", team.ID, source.ID)
 	}
 	e := newAuditRouteEnv(t, append([]auditEnvOption{withSource}, options...)...)
-	return &exportAuditEnv{auditRouteEnv: e, streamPath: base + "/logs/export", jobPath: base + "/exports"}
+	return &exportAuditEnv{auditRouteEnv: e, streamPath: base + "/logs/export", jobPath: base + "/exports", sourceID: sourceID}
 }
 
 // jobSpyStore fails every audit insert, like auditDownStore, and records the
@@ -139,42 +152,175 @@ func TestAuditExportsFailClosed(t *testing.T) {
 	}
 }
 
-// An export records the query as a digest: a literal inside it reaches
-// neither the row nor the log line.
-func TestAuditExportRecordsQueryDigest(t *testing.T) {
+// An export records its full query and time range on create, and how it
+// ended on complete, under the same target.
+func TestAuditExportRecordsQueryAndCompletion(t *testing.T) {
 	t.Parallel()
 	e := newExportAuditEnv(t, withAuditLogLines())
-	const sentinel = "SENTINEL-session-7f3a"
-	query := `SELECT * FROM default.logs WHERE session_id = '` + sentinel + `'`
-	sum := sha256.Sum256([]byte(query))
-	body, err := json.Marshal(map[string]any{"raw_sql": query, "format": "ndjson", "limit": 500})
+	query := `SELECT * FROM default.logs WHERE session_id = 'session-7f3a'`
+	body, err := json.Marshal(map[string]any{"raw_sql": query, "format": "ndjson", "limit": 500,
+		"start_time": "2026-09-01T00:00:00Z", "end_time": "2026-09-01T01:00:00Z"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for _, tc := range []struct {
-		path, mode, targetType string
-		status                 int
+		path, mode string
+		status     int
 	}{
-		{e.streamPath, "stream", "source", http.StatusOK},
-		{e.jobPath, "job", "log_export", http.StatusAccepted},
+		{e.streamPath, "stream", http.StatusOK},
+		{e.jobPath, "job", http.StatusAccepted},
 	} {
 		e.reset()
 		wantStatus(t, e.do(http.MethodPost, tc.path, string(body), e.cookie), tc.status)
-		ev := e.only()
-		checkActorAndTarget(t, ev, string(audit.LogExportCreate), e.admin, tc.targetType, ev.TargetID)
-		if ev.Status != tc.status || detailOf(t, ev)["mode"] != tc.mode || ev.SourceID == nil || ev.TeamID == nil {
-			t.Errorf("%s: event status %d detail %s source %v team %v", tc.mode, ev.Status, ev.Detail, ev.SourceID, ev.TeamID)
+		// The ClickHouse client finds no server, so the export fails after
+		// its create event; a job fails in the background.
+		events := e.waitForEvents(2)
+		create, complete := events[0], events[1]
+		checkActorAndTarget(t, create, string(audit.LogExportCreate), e.admin, "log_export", create.TargetID)
+		if create.TargetLabel != "export-audit" || complete.TargetLabel != "export-audit" {
+			t.Errorf("%s: target labels %q and %q, want the source name", tc.mode, create.TargetLabel, complete.TargetLabel)
 		}
-		c := changesOf(t, ev)
-		digest, _ := c["query"]["to"].(map[string]any)
-		if c["language"]["to"] != string(models.QueryLanguageClickHouseSQL) || c["format"]["to"] != "ndjson" || c["row_limit"]["to"] != float64(100) ||
-			digest["sha256"] != hex.EncodeToString(sum[:]) || digest["bytes"] != float64(len(query)) {
-			t.Errorf("%s: changes %s", tc.mode, ev.Changes)
+		if create.TargetID == "" || create.Status != tc.status || detailOf(t, create)["mode"] != tc.mode || create.SourceID == nil || create.TeamID == nil {
+			t.Errorf("%s: create target %q status %d detail %s", tc.mode, create.TargetID, create.Status, create.Detail)
 		}
-		if strings.Contains(string(ev.Changes)+string(ev.Detail)+auditLogLines(e.logs.String()), sentinel) {
-			t.Errorf("%s: the query literal reached the event or its log line", tc.mode)
+		c := changesOf(t, create)
+		if c["query"]["to"] != query || c["language"]["to"] != string(models.QueryLanguageClickHouseSQL) || c["format"]["to"] != "ndjson" ||
+			c["row_limit"]["to"] != float64(100) || c["time_from"]["to"] != "2026-09-01T00:00:00Z" || c["time_to"]["to"] != "2026-09-01T01:00:00Z" {
+			t.Errorf("%s: changes %s", tc.mode, create.Changes)
 		}
+		if !strings.Contains(auditLogLines(e.logs.String()), "session-7f3a") {
+			t.Errorf("%s: the audit log line does not carry the query", tc.mode)
+		}
+		if complete.Action != string(audit.LogExportComplete) || complete.TargetType != "log_export" || complete.TargetID != create.TargetID ||
+			complete.ActorID == nil || *complete.ActorID != e.admin.ID || complete.Outcome != models.AuditOutcomeFailure || complete.Reason == "" {
+			t.Errorf("%s: complete event %+v", tc.mode, complete)
+		}
+		if d := detailOf(t, complete); d["rows_exported"] != float64(0) || d["bytes_written"] == nil || d["duration_ms"] == nil {
+			t.Errorf("%s: complete detail %s", tc.mode, complete.Detail)
+		}
+	}
+}
+
+// A completed export records its rows and bytes. It needs a ClickHouse
+// server.
+func TestAuditExportCompleteCountsRows(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	e := newExportAuditEnvAt(t, addr)
+	body := `{"raw_sql":"SELECT number FROM numbers(5)","format":"ndjson"}`
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{{e.streamPath, http.StatusOK}, {e.jobPath, http.StatusAccepted}} {
+		e.reset()
+		resp := e.do(http.MethodPost, tc.path, body, e.cookie)
+		wantStatus(t, resp, tc.status)
+		complete := e.waitForEvents(2)[1]
+		d := detailOf(t, complete)
+		if complete.Action != string(audit.LogExportComplete) || complete.Outcome != models.AuditOutcomeSuccess || d["rows_exported"] != float64(5) {
+			t.Errorf("%s: complete %s %s detail %s", tc.path, complete.Action, complete.Outcome, complete.Detail)
+		}
+		bytes, _ := d["bytes_written"].(float64)
+		if tc.status == http.StatusOK && int(bytes) != len(resp.body) {
+			t.Errorf("stream: bytes_written %v, the client read %d", d["bytes_written"], len(resp.body))
+		}
+		if bytes <= 0 {
+			t.Errorf("%s: bytes_written %v", tc.path, d["bytes_written"])
+		}
+	}
+}
+
+// A download records the artifact it served, once: a response that holds the
+// file's first byte records it, and a Range request that resumes the
+// download records nothing.
+func TestAuditExportDownloadRecordsOncePerDownload(t *testing.T) {
+	t.Parallel()
+	e := newExportAuditEnv(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "export.csv")
+	content := "number\n" + strings.Repeat("0123456789\n", 20)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	job := &models.ExportJob{ID: uuid.NewString(), SourceID: e.sourceID, CreatedBy: e.admin.ID, Status: models.ExportJobStatusPending,
+		Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+	if err := e.db.CreateExportJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.CompleteExportJob(ctx, job.ID, "logchef-export.csv", path, 20, int64(len(content)), now); err != nil {
+		t.Fatal(err)
+	}
+	download := e.jobPath + "/" + job.ID + "/download"
+
+	get := func(rangeHeader string, wantStatus int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, download, http.NoBody)
+		req.AddCookie(e.cookie)
+		if rangeHeader != "" {
+			req.Header.Set(fiber.HeaderRange, rangeHeader)
+		}
+		resp, err := e.s.app.Test(req, fiber.TestConfig{Timeout: 10 * time.Second, FailOnTimeout: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != wantStatus {
+			t.Fatalf("GET with Range %q: status %d, want %d", rangeHeader, resp.StatusCode, wantStatus)
+		}
+	}
+
+	get("", http.StatusOK)
+	ev := e.only()
+	checkActorAndTarget(t, ev, string(audit.LogExportDownload), e.admin, "log_export", job.ID)
+	if ev.TargetLabel != "export-audit" {
+		t.Errorf("download target label %q, want the source name", ev.TargetLabel)
+	}
+	d := detailOf(t, ev)
+	if d["format"] != "csv" || d["file_name"] != "logchef-export.csv" || d["rows_exported"] != float64(20) ||
+		d["bytes_written"] != float64(len(content)) || d["created_by"] != float64(e.admin.ID) {
+		t.Errorf("download detail %s", ev.Detail)
+	}
+
+	for _, tc := range []struct {
+		rangeHeader string
+		events      int
+	}{
+		{"bytes=100-", 0},
+		{"bytes=-10", 0},
+		{"bytes=0-0", 1},
+		{"bytes=0-3", 1},
+		// A suffix range longer than the file serves all of it.
+		{"bytes=-999999999", 1},
+	} {
+		e.reset()
+		get(tc.rangeHeader, http.StatusPartialContent)
+		if got := e.events(); len(got) != tc.events {
+			t.Errorf("Range %q recorded %d events, want %d", tc.rangeHeader, len(got), tc.events)
+		}
+	}
+}
+
+// waitForEvents waits for n stored events, for an event that a background
+// export records after the request returned.
+func (e *auditRouteEnv) waitForEvents(n int) []models.AuditEvent {
+	e.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got := e.events()
+		if len(got) >= n {
+			if len(got) > n {
+				e.t.Fatalf("stored %d events, want %d: %+v", len(got), n, got)
+			}
+			return got
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("stored %d events after 10s, want %d: %+v", len(got), n, got)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

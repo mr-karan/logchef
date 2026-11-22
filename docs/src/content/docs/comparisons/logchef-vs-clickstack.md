@@ -1,5 +1,8 @@
 ---
 title: Logchef vs ClickStack
+head:
+  - tag: title
+    content: "Logchef vs ClickStack"
 description: "Logchef vs ClickStack (formerly HyperDX): a log UI for the ClickHouse, VictoriaLogs or Loki you already run, compared with ClickHouse's observability stack."
 ---
 
@@ -56,7 +59,7 @@ Logchef is a single binary that embeds its web UI. It stores users, teams, saved
 
 ### Access control
 
-Logchef's access model is part of the open source build. Users sign in with OIDC or a local email and password. Admins add sources to teams, and a user can query only the sources of their teams. Service tokens carry their own scopes for automation. An [audit log](/operations/audit-log/) records configuration changes, sign-ins, and data exports for global admins.
+Logchef's access model is part of the open source build. Users sign in with OIDC or a local email and password. Admins add sources to teams, and a user can query only the sources of their teams. Service tokens carry their own scopes for automation. An [audit log](/operations/audit-log/) records configuration changes, sign-ins, queries, and data exports for global admins.
 
 In open source ClickStack you create an account on first visit, per the [getting started guide](https://clickhouse.com/docs/clickstack/getting-started/oss). ClickStack's RBAC docs describe Admin, Member, and ReadOnly roles plus custom roles for a service that "authenticates through ClickHouse Cloud". We found no equivalent role documentation for the open source deployment.
 

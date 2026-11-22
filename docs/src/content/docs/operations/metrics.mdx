@@ -27,7 +27,7 @@ Logchef emits metrics across several categories:
 - **Authentication Metrics**: Login attempts and session management
 - **Authorization Metrics**: Access control failures and patterns
 - **ClickHouse Metrics**: Database connection and operation health
-- **Audit Metrics**: Audit events stored, failed and limited
+- **Audit Metrics**: Audit events stored, failed, limited and dropped
 - **Schema Advisor Metrics**: Query shapes recorded and schema analyses run
 - **Report Metrics**: Scheduled report runs, panels and deliveries
 - **Job Runner Metrics**: Background job runs, their duration and lag
@@ -126,13 +126,14 @@ per-user or per-source labels.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_audit_events_total` | Audit events by result: `stored` (inserted), `failed` (the insert failed; the `audit` log line has the event) or `limited` (the failed sign-in bound kept it out of the table) | Counter | `result` |
+| `logchef_audit_events_total` | Audit events by result: `stored` (inserted), `failed` (the insert failed; the `audit` log line has the event), `limited` (the failed sign-in bound kept it out of the table) or `dropped` (a full query queue lost a `query.run` event) | Counter | `result` |
 | `logchef_audit_redactions_total` | Values the audit serializer replaced with `[redacted]` | Counter | - |
 | `logchef_audit_unstaged_total` | Events whose handler staged no target or no fields. Above zero means a route is missing its audit fields | Counter | - |
 
 **Key Use Cases:**
 - Alert on `increase(logchef_audit_events_total{result="failed"}[5m]) > 0`: events are reaching only the log line
 - A rising `limited` count is a burst of failed sign-ins, such as credential stuffing
+- Alert on `increase(logchef_audit_events_total{result="dropped"}[5m]) > 0`: the query queue is full and `query.run` events are lost
 
 ## Schema Advisor Metrics
 

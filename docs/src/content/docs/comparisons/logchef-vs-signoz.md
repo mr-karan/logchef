@@ -1,5 +1,8 @@
 ---
 title: Logchef vs SigNoz
+head:
+  - tag: title
+    content: "Logchef vs SigNoz"
 description: "Logchef vs SigNoz: a log-only UI for your own ClickHouse, VictoriaLogs or Loki, compared with SigNoz's OpenTelemetry-native logs, metrics, and traces."
 ---
 

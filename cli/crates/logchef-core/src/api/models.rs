@@ -123,7 +123,7 @@ impl Source {
 
     pub fn target_ref(&self) -> Option<String> {
         match self.source_type.as_str() {
-            "victorialogs" => self
+            "victorialogs" | "loki" => self
                 .connection
                 .as_ref()
                 .and_then(|c| c.base_url.as_ref())
@@ -135,6 +135,7 @@ impl Source {
     pub fn source_type_label(&self) -> &'static str {
         match self.source_type.as_str() {
             "victorialogs" => "VictoriaLogs",
+            "loki" => "Loki",
             _ => "ClickHouse",
         }
     }
@@ -746,6 +747,26 @@ impl CollectionQueryContent {
 /// milliseconds, so it rounds rather than rejecting the response.
 fn whole_millis<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64, D::Error> {
     Ok(f64::deserialize(deserializer)?.round() as i64)
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn loki_source_displays_its_backend_and_target() {
+        let source: Source = serde_json::from_value(json!({
+            "id": 1,
+            "name": "Platform logs",
+            "source_type": "loki",
+            "connection": {"base_url": "http://loki:3100"}
+        }))
+        .unwrap();
+
+        assert_eq!(source.source_type_label(), "Loki");
+        assert_eq!(source.target_ref().as_deref(), Some("http://loki:3100"));
+    }
 }
 
 #[cfg(test)]

@@ -20,6 +20,7 @@ const { t } = useI18n();
 
 interface AiSqlDialogProps {
   open: boolean
+  language: string
   isGenerating: boolean
   error: string | null
   generatedSql: string | null
@@ -94,10 +95,10 @@ const copyToClipboard = async (text: string) => {
       <DialogHeader class="border-b pb-4">
         <DialogTitle class="flex items-center gap-3">
           <Wand2 class="h-6 w-6 text-purple-600" />
-          <span class='text-xl font-semibold text-foreground'>{{ t('ui.generateSQL') }}</span>
+          <span class='text-xl font-semibold text-foreground'>{{ t('ui.generateQuery', { language }) }}</span>
         </DialogTitle>
         <DialogDescription class="text-muted-foreground mt-2">
-          {{ t('ui.describeTheDataYouWantToRetrieveInNaturalLanguageAndI') }}
+          {{ t('ui.generateQueryDescription', { language }) }}
         </DialogDescription>
       </DialogHeader>
 
@@ -156,7 +157,7 @@ const copyToClipboard = async (text: string) => {
         <!-- Generated SQL Section -->
         <div class="space-y-3">
           <div class="flex items-center gap-2">
-            <span class='text-sm font-medium text-foreground'>{{ t('ui.generatedSQL') }}</span>
+            <span class='text-sm font-medium text-foreground'>{{ t('ui.generatedQuery', { language }) }}</span>
             <div v-if="isGenerating" class="flex items-center gap-2 text-xs text-muted-foreground">
               <div class="w-3 h-3 border-2 border-border border-t-purple-500 rounded-full animate-spin"></div>
               {{ t('ui.generating') }}
@@ -175,7 +176,7 @@ const copyToClipboard = async (text: string) => {
             <!-- Empty State -->
             <div v-else-if="!generatedSql && !error" class="p-8 text-center text-muted-foreground">
               <Wand2 class="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p class='text-sm'>{{ t('ui.yourGeneratedSQLWillAppearHere') }}</p>
+              <p class='text-sm'>{{ t('ui.generatedQueryPlaceholder', { language }) }}</p>
             </div>
 
             <!-- Generated SQL Display -->
@@ -221,7 +222,7 @@ const copyToClipboard = async (text: string) => {
           >
             <Wand2 v-if="!isGenerating" class="h-4 w-4 mr-2" />
             <div v-if="isGenerating" class="w-4 h-4 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin mr-2"></div>
-            {{ isGenerating ? t('ui.generating') : (generatedSql ? t('ui.regenerate') : t('ui.generateSQL')) }}
+            {{ isGenerating ? t('ui.generating') : (generatedSql ? t('ui.regenerate') : t('ui.generateQuery', { language })) }}
           </Button>
 
           <Button

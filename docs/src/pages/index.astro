@@ -5,7 +5,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
 
 <BaseLayout
   title="Open Source Log Analytics for Your Stack | Logchef"
-  description="Search, live tail, dashboards, and alerts for logs stored in ClickHouse or VictoriaLogs. One open-source, self-hosted binary with no new log storage layer."
+  description="Search, live tail, dashboards, and alerts for logs stored in ClickHouse, VictoriaLogs or Grafana Loki. One open-source, self-hosted binary with no new log storage layer."
   activeNav="home"
 >
   <style>
@@ -719,6 +719,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
                 <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
               </svg>
             </a>
+            <a href="/playground/" class="btn btn-secondary">Try the LogchefQL Playground</a>
             <span class="gh-stars">
               <a href="https://github.com/mr-karan/logchef" target="_blank" rel="noopener">
                 <img src="https://img.shields.io/github/stars/mr-karan/logchef?style=social" alt="Logchef GitHub stars" width="110" height="20" />
@@ -932,7 +933,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
         <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         <p>
           <strong>Your backend stays the source of truth.</strong>&#32;
-          Logchef queries ClickHouse and VictoriaLogs directly. There is no re-ingestion,
+          Logchef queries ClickHouse, VictoriaLogs and Grafana Loki directly. There is no re-ingestion,
           duplicate storage, or schema migration.
           <a href="/guide/search-syntax/">Learn LogchefQL search syntax</a>.
         </p>
@@ -1261,7 +1262,7 @@ import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
       <div class="section-head">
         <span class="kicker">Deployment</span>
         <h2 class="section-title">One binary. Up in minutes.</h2>
-        <p class="section-desc">Logchef itself has no runtime dependencies. Start with the bundled local demo stack, or download the binary and configure it for the ClickHouse or VictoriaLogs backend you already run.</p>
+        <p class="section-desc">Logchef itself has no runtime dependencies. Start with the bundled local demo stack, or download the binary and configure it for the ClickHouse, VictoriaLogs or Loki backend you already run.</p>
       </div>
 
       <div class="term">

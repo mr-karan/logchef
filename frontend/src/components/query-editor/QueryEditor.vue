@@ -32,17 +32,16 @@
           </TabsList>
         </Tabs>
 
-        <!-- Generate SQL: SQL mode only. Ask Chef in the top bar is the assistant for searching. -->
         <TooltipProvider v-if="supportsAiAssistant && activeMode === 'clickhouse-sql'">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="showAiDialog = true">
                 <Wand2 class="h-3.5 w-3.5 text-purple-600" />
-                <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.generateSQL') }}</span>
+                <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.generateQuery', { language: nativeEditorLabel }) }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{{ t('ui.generateSQLUsingNaturalLanguage') }}</p>
+              <p>{{ t('ui.generateQueryUsingNaturalLanguage', { language: nativeEditorLabel }) }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -355,9 +354,9 @@
     @update:open="showVariablesConfig = $event"
   />
 
-  <!-- AI SQL Assistant Dialog -->
   <AiSqlDialog
     :open="showAiDialog"
+    :language="nativeEditorLabel"
     :is-generating="isGeneratingAi"
     :error="aiError"
     :generated-sql="generatedSql"

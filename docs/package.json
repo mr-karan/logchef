@@ -3,9 +3,9 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "build": "astro build",
+    "dev": "bash scripts/build-playground.sh && astro dev",
+    "start": "bash scripts/build-playground.sh && astro dev",
+    "build": "bash scripts/build-playground.sh && astro build",
     "preview": "astro preview",
     "astro": "astro",
     "crawl-qa": "node ./scripts/crawl-qa.mjs dist"

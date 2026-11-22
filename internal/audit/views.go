@@ -281,14 +281,16 @@ func UserFields(u *models.User) *Fields {
 }
 
 // LogExportFields records an export: the query language, the format, the
-// row limit that applies, and the query as a digest, so a literal inside it
-// never reaches the event.
-func LogExportFields(language models.QueryLanguage, format string, rowLimit int, query string) *Fields {
+// row limit that applies, the query in full and the time range as sent, so
+// an admin can tell which data left the server.
+func LogExportFields(language models.QueryLanguage, format string, rowLimit int, query, timeFrom, timeTo string) *Fields {
 	return NewFields().
 		Set("language", language).
 		Set("format", format).
 		Set("row_limit", rowLimit).
-		Digest("query", query)
+		Query("query", query).
+		Set("time_from", timeFrom).
+		Set("time_to", timeTo)
 }
 
 // SchemaAdvisorDismissalFields records a dismissed schema advisor finding:

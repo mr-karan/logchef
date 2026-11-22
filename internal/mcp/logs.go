@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -37,7 +38,7 @@ type GetLogHistogramParams struct {
 	SourceID     int    `json:"source_id" jsonschema:"The ID of the source to generate histogram for"`
 	StartTime    string `json:"start_time,omitempty" jsonschema:"Inclusive start time (RFC3339)"`
 	EndTime      string `json:"end_time,omitempty" jsonschema:"End time (RFC3339)"`
-	RawSQL       string `json:"raw_sql" jsonschema:"Executable datasource-native query of log rows for histogram generation. Use translate_logchefql on a filter first and pass its full_sql for ClickHouse or generated_query for VictoriaLogs. Never pass the translation of a query with an aggregation pipe (| count() ...): translate the filter before the pipe instead."`
+	RawSQL       string `json:"raw_sql" jsonschema:"Datasource-native log query for histogram generation: ClickHouse SQL, VictoriaLogs LogsQL or Loki LogQL. Use translate_logchefql on a filter first and pass its full_sql for ClickHouse or generated_query for VictoriaLogs and Loki. Translate the filter before any aggregation pipe. For Loki pass a LogQL log query, not a metric expression."`
 	Window       string `json:"window,omitempty" jsonschema:"Time window for histogram buckets (e.g. 1m 5m 1h 1d). Defaults to 1m."`
 	GroupBy      string `json:"group_by,omitempty" jsonschema:"Optional field to group histogram data by (e.g. severity_text or service_name)"`
 	Timezone     string `json:"timezone,omitempty" jsonschema:"Timezone for histogram timestamps (default UTC)"`
@@ -83,7 +84,7 @@ type SavedQueryResult struct {
 // --- Handlers ---
 
 // query_logs returns flexible log data, so it uses a typed handler.
-func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args QueryLogsParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleQueryLogs(ctx context.Context, req mcp.CallToolRequest, args QueryLogsParams) (*mcp.CallToolResult, error) {
 	if args.Limit < 0 {
 		args.Limit = 0
 	}
@@ -95,6 +96,9 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 	if err != nil {
 		return t.errorResult(t.storeError("query logs", err)), nil
 	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: args.RawSQL, Limit: args.Limit})
+	defer func() { read.end(recover()) }()
+	read.From, read.To = rfc3339Window(args.StartTime, args.EndTime)
 	var result *models.QueryResult
 	var queryID string
 	err = t.admit(ctx, QueryClassPreview, src, args.RawSQL, func(ctx context.Context, id string) error {
@@ -110,8 +114,10 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 		return runErr
 	})
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.queryError("query logs", err)), nil
 	}
+	read.Rows = int64(len(result.Logs))
 
 	return mcp.NewToolResultStructuredOnly(QueryResult{
 		Logs: result.Logs, Columns: core.ResultColumns(nil, result), Stats: result.Stats, QueryID: queryID,
@@ -148,10 +154,17 @@ func (t *tools) sourceSchema(ctx context.Context, teamID, sourceID int) ([]model
 }
 
 // get_log_histogram returns flexible histogram data, so it uses a typed handler.
-func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest, args GetLogHistogramParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleGetLogHistogram(ctx context.Context, req mcp.CallToolRequest, args GetLogHistogramParams) (*mcp.CallToolResult, error) {
 	src, err := t.authorizeSource(ctx, args.TeamID, args.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
 		return t.errorResult(t.storeError("get log histogram", err)), nil
+	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: args.RawSQL})
+	defer func() { read.end(recover()) }()
+	read.From, read.To = rfc3339Window(args.StartTime, args.EndTime)
+	if strings.TrimSpace(args.RawSQL) == "" {
+		read.Err = &core.QueryRequestError{Message: "raw_sql parameter is required"}
+		return t.errorResult(t.queryError("get log histogram", read.Err)), nil
 	}
 	var histogram *core.HistogramResponse
 	err = t.admit(ctx, QueryClassHistogram, src, args.RawSQL, func(ctx context.Context, _ string) error {
@@ -168,8 +181,10 @@ func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest
 		return runErr
 	})
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.queryError("get log histogram", err)), nil
 	}
+	read.Rows = int64(len(histogram.Data))
 
 	return mcp.NewToolResultStructuredOnly(HistogramResult{Granularity: histogram.Granularity, Data: histogram.Data, Notice: histogram.Notice}), nil
 }

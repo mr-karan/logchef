@@ -7,7 +7,7 @@ import starlightLlmsTxt from "starlight-llms-txt";
 const siteUrl = "https://logchef.app";
 const ogImage = `${siteUrl}/screenshots/hero-light.png`;
 const siteDescription =
-  "Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of existing log backends (ClickHouse and VictoriaLogs). Query with LogchefQL, native SQL, or LogsQL, build dashboards, set up alerting, and manage access, all from a single binary.";
+  "Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of existing log backends (ClickHouse, VictoriaLogs and Grafana Loki). Query with LogchefQL, native SQL, LogsQL or LogQL, build dashboards, set up alerting, and manage access, all from a single binary.";
 
 // https://astro.build/config
 export default defineConfig({
@@ -45,19 +45,20 @@ export default defineConfig({
         // Generates /llms.txt + /llms-full.txt from the docs content at build time.
         starlightLlmsTxt({
           description: siteDescription,
-          details: `Logchef supports two datasource backends with different query languages:
+          details: `Logchef supports three datasource backends with different query languages:
 
 - **ClickHouse** sources: query with LogchefQL (Logchef's own simplified filter syntax) or native ClickHouse SQL.
-- **VictoriaLogs** sources: query with LogsQL.
+- **VictoriaLogs** sources: query with LogchefQL or LogsQL.
+- **Grafana Loki** sources: query with LogchefQL or LogQL.
 
 Key areas of the docs:
 
 - Getting Started: install, configure, and understand the architecture.
-- Querying Logs: LogchefQL syntax, SQL examples, the query interface, and the field sidebar.
-- Features: collections/saved queries, dashboards, alerting, AI SQL generation, the ClickHouse schema advisor, user management, service tokens, and declarative provisioning.
+- Querying Logs: LogchefQL syntax and aggregations, SQL examples, LogsQL and LogQL queries, time macros, the query interface, and the field sidebar.
+- Features: collections/saved queries, saved views, dashboards, alerting, scheduled reports, AI SQL generation, the ClickHouse schema advisor, user management, service tokens, and declarative provisioning.
 - Integration: CLI, MCP server (for AI assistants), and schema design guidance.
-- Tutorials: connecting VictoriaLogs, ingesting via Vector/OTEL, and a worked NGINX logs example.
-- Operations: database backends (SQLite vs Postgres), reverse proxy and subpath setup, and the Prometheus metrics reference.`,
+- Tutorials: connecting VictoriaLogs and Grafana Loki, ingesting via Vector/OTEL, and a worked NGINX logs example.
+- Operations: database backends (SQLite vs Postgres), reverse proxy and subpath setup, the Prometheus metrics reference, and the audit log.`,
           optionalLinks: [
             {
               label: "GitHub repository",
@@ -182,6 +183,7 @@ Key areas of the docs:
             { label: "Query Interface", link: "/user-guide/query-interface" },
             { label: "Command Palette", link: "/features/command-palette" },
             { label: "LogchefQL Syntax", link: "/guide/search-syntax" },
+            { label: "LogchefQL Playground", link: "/playground/" },
             { label: "LogchefQL Aggregations", link: "/guide/aggregations" },
             { label: "SQL Examples", link: "/guide/examples" },
             { label: "LogsQL Queries", link: "/guide/logsql-queries" },

@@ -1,4 +1,5 @@
 import type { ColumnSizingState, ColumnVisibilityState, SortingState } from '@tanstack/vue-table'
+import type { Source } from '@/api/sources'
 
 // The saved view definition, as the server stores it (RFC 0007).
 export interface SavedViewColumn {
@@ -99,6 +100,29 @@ export function tableLayoutToDefinition(layout: TableColumnLayout, sorting: Sort
     ...(columns.length ? { columns } : {}),
     ...(sort.length ? { sort } : {}),
   }
+}
+
+/**
+ * Whether a result holds log rows, the only results a view's columns apply
+ * to. An aggregation or metric result has its own columns, and a view that
+ * names one of them, such as a group key, must not hide the rest.
+ *
+ * Log rows carry the source's timestamp column, which a Loki metric result
+ * (time and value) lacks. They also hold only columns the source schema
+ * lists, which catches a ClickHouse or LogsQL aggregate that keeps the
+ * timestamp name for its time bucket. Loki skips that check: its schema lists
+ * labels and detected fields, but its rows also carry structured metadata and
+ * parsed fields.
+ */
+export function isLogRowResult(
+  result: { columns: readonly { name: string }[]; aggregation: unknown },
+  source: Pick<Source, 'source_type' | '_meta_ts_field' | 'columns'> | null | undefined,
+): boolean {
+  if (result.aggregation || !source) return false
+  const names = result.columns.map(column => column.name)
+  if (!names.includes(source._meta_ts_field)) return false
+  const schema = new Set((source.columns ?? []).map(column => column.name))
+  return source.source_type === 'loki' || schema.size === 0 || names.every(name => schema.has(name))
 }
 
 /** Whether a result shows at least one of the layout's visible columns. */

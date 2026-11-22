@@ -39,6 +39,16 @@ func TestEnforceDemoReadOnly(t *testing.T) {
 		{name: "connected apps collection DELETE is blocked", method: http.MethodDelete, path: "/api/v1/me/connected-apps", want: http.StatusForbidden},
 		{name: "connected app subpath DELETE is blocked", method: http.MethodDelete, path: "/api/v1/me/connected-apps/7/x", want: http.StatusForbidden},
 		{name: "exports stay blocked", method: http.MethodPost, path: "/api/v1/teams/1/sources/5/logs/export", want: http.StatusForbidden},
+		{name: "windowed search remains available", method: http.MethodPost, path: "/api/v1/teams/1/sources/5/logs/windowed", want: http.StatusNoContent},
+		{name: "alert test query remains available", method: http.MethodPost, path: "/api/v1/alerts/test", want: http.StatusNoContent},
+		{name: "alert backtest remains available", method: http.MethodPost, path: "/api/v1/alerts/backtest", want: http.StatusNoContent},
+		{name: "Ask Chef turn remains available", method: http.MethodPost, path: "/api/v1/ask-chef/turns", want: http.StatusNoContent},
+		{name: "alert create is blocked", method: http.MethodPost, path: "/api/v1/alerts", want: http.StatusForbidden},
+		{name: "alert resolve is blocked", method: http.MethodPost, path: "/api/v1/alerts/7/resolve", want: http.StatusForbidden},
+		{name: "alert backtest with a longer path is blocked", method: http.MethodPost, path: "/api/v1/alerts/backtest/x", want: http.StatusForbidden},
+		{name: "report preview stays blocked", method: http.MethodPost, path: "/api/v1/reports/3/preview", want: http.StatusForbidden},
+		{name: "report run stays blocked", method: http.MethodPost, path: "/api/v1/reports/3/run", want: http.StatusForbidden},
+		{name: "destination test stays blocked", method: http.MethodPost, path: "/api/v1/notification-destinations/test", want: http.StatusForbidden},
 	}
 
 	for _, tt := range tests {

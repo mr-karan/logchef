@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -79,7 +80,7 @@ type FieldValue struct {
 
 // --- Handlers ---
 
-func (t *tools) handleCompareWindows(ctx context.Context, _ mcp.CallToolRequest, params CompareWindowsParams) (CompareWindowsResult, error) {
+func (t *tools) handleCompareWindows(ctx context.Context, req mcp.CallToolRequest, params CompareWindowsParams) (CompareWindowsResult, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 100
@@ -88,7 +89,15 @@ func (t *tools) handleCompareWindows(ctx context.Context, _ mcp.CallToolRequest,
 		limit = 500
 	}
 
-	run1, err := t.runLogchefQL(ctx, params.TeamID, params.SourceID, core.LogchefQLQueryRequest{
+	src, err := t.authorizeSource(ctx, params.TeamID, params.SourceID, models.TokenScopeLogsRead)
+	if err != nil {
+		return CompareWindowsResult{}, t.storeError("logchefql query failed", err)
+	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: params.Query, Language: models.QueryLanguageLogchefQL, Limit: limit})
+	defer func() { read.end(recover()) }()
+	read.From, read.To = windowsSpan(params)
+
+	run1, err := t.runLogchefQL(ctx, src, core.LogchefQLQueryRequest{
 		Query:     params.Query,
 		Limit:     limit,
 		StartTime: params.Window1Start,
@@ -96,10 +105,12 @@ func (t *tools) handleCompareWindows(ctx context.Context, _ mcp.CallToolRequest,
 		Timezone:  params.Timezone,
 	})
 	if err != nil {
-		return CompareWindowsResult{}, fmt.Errorf("window 1: %w", err)
+		read.Err = err
+		return CompareWindowsResult{}, fmt.Errorf("window 1: %w", t.queryError("logchefql query failed", err))
 	}
+	read.Rows = int64(len(run1.result.Logs))
 
-	run2, err := t.runLogchefQL(ctx, params.TeamID, params.SourceID, core.LogchefQLQueryRequest{
+	run2, err := t.runLogchefQL(ctx, src, core.LogchefQLQueryRequest{
 		Query:     params.Query,
 		Limit:     limit,
 		StartTime: params.Window2Start,
@@ -107,8 +118,10 @@ func (t *tools) handleCompareWindows(ctx context.Context, _ mcp.CallToolRequest,
 		Timezone:  params.Timezone,
 	})
 	if err != nil {
-		return CompareWindowsResult{}, fmt.Errorf("window 2: %w", err)
+		read.Err = err
+		return CompareWindowsResult{}, fmt.Errorf("window 2: %w", t.queryError("logchefql query failed", err))
 	}
+	read.Rows += int64(len(run2.result.Logs))
 
 	count1 := len(run1.result.Logs)
 	count2 := len(run2.result.Logs)
@@ -137,6 +150,24 @@ func (t *tools) handleCompareWindows(ctx context.Context, _ mcp.CallToolRequest,
 	}, nil
 }
 
+// windowsSpan is the time range that covers both windows of a
+// compare_windows call, nil unless both are valid.
+func windowsSpan(params CompareWindowsParams) (from, to *time.Time) {
+	from1, to1 := logchefQLWindow(params.Window1Start, params.Window1End, params.Timezone)
+	from2, to2 := logchefQLWindow(params.Window2Start, params.Window2End, params.Timezone)
+	if from1 == nil || from2 == nil {
+		return nil, nil
+	}
+	from, to = from1, to1
+	if from2.Before(*from) {
+		from = from2
+	}
+	if to2.After(*to) {
+		to = to2
+	}
+	return from, to
+}
+
 const (
 	// maxTopValuesFields caps the distinct fields one top_values call reads.
 	maxTopValuesFields = 20
@@ -144,7 +175,7 @@ const (
 	topValuesWorkers = 4
 )
 
-func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, params TopValuesParams) (TopValuesResult, error) {
+func (t *tools) handleTopValues(ctx context.Context, req mcp.CallToolRequest, params TopValuesParams) (TopValuesResult, error) {
 	fields := uniqueFields(params.Fields)
 	if len(fields) == 0 {
 		return TopValuesResult{}, fmt.Errorf("at least one field is required")
@@ -165,15 +196,22 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 	if err != nil {
 		return TopValuesResult{}, t.storeError("top values", err)
 	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: params.Query, Language: models.QueryLanguageLogchefQL, Limit: limit, Fields: fields})
+	defer func() { read.end(recover()) }()
 	start, end, err := parseTimeRange(params.StartTime, params.EndTime)
 	if err != nil {
+		read.Err = err
 		return TopValuesResult{}, t.storeError("top values", err)
 	}
+	read.From, read.To = &start, &end
 
 	// The whole operation (schema plus every field query) holds one
 	// preview admission slot, and at most topValuesWorkers field queries
 	// run at once inside it.
 	fieldResults := make([]FieldTopValues, len(fields))
+	// fieldErrs keeps each field's error for the query.run event; the
+	// result shows it to the caller as text.
+	fieldErrs := make([]error, len(fields))
 	err = t.admit(ctx, QueryClassPreview, src, "top_values: "+strings.Join(fields, ", "), func(ctx context.Context, _ string) error {
 		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
 			return t.queryError("top values", err)
@@ -194,6 +232,7 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 			fieldType, ok := fieldTypes[fieldName]
 			if !ok {
 				fieldResults[i].Error = "field is not in the source schema"
+				fieldErrs[i] = fmt.Errorf("%w: field %q is not in the source schema", errInvalidArgument, fieldName)
 				continue
 			}
 			wg.Go(func() {
@@ -203,6 +242,7 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 				if err != nil {
 					// One failed field does not fail the others.
 					fieldResults[i].Error = err.Error()
+					fieldErrs[i] = err
 					return
 				}
 				values := make([]FieldValue, len(resp.Values))
@@ -216,12 +256,37 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 		return nil
 	})
 	if err != nil {
+		read.Err = err
 		if _, ok := errors.AsType[*admissionError](err); ok {
 			return TopValuesResult{}, t.queryError("top values", err)
 		}
 		return TopValuesResult{}, err
 	}
+	for _, f := range fieldResults {
+		read.Rows += int64(len(f.Values))
+	}
+	read.Err = topValuesFailure(ctx, fieldErrs)
 	return TopValuesResult{Fields: fieldResults}, nil
+}
+
+// topValuesFailure is the error the query.run event of a top_values call
+// records: the context's error when the call was cancelled or timed out,
+// otherwise the first field error when every queried field failed. Partial
+// results are a success.
+func topValuesFailure(ctx context.Context, fieldErrs []error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var first error
+	for _, err := range fieldErrs {
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // uniqueFields drops empty and repeated field names and keeps the order.

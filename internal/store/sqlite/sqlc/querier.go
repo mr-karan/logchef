@@ -49,6 +49,7 @@ type Querier interface {
 	ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (OauthAuthRequest, error)
 	// Rotation claim. Exactly one concurrent caller gets the row.
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
+	CountActiveUsersByAccountType(ctx context.Context) ([]CountActiveUsersByAccountTypeRow, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
 	// Instance counts of the given alerts, one row per (alert, state).
@@ -70,6 +71,9 @@ type Querier interface {
 	// user has delegated edit rights on that query. A pin grants nothing.
 	CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error)
 	CountTeamNotificationDestinations(ctx context.Context, teamID sql.NullInt64) (int64, error)
+	// Queries from since to until, both inclusive, that no single shape stands
+	// for: the 'unanalyzed' and 'overflow' rows.
+	CountUnanalyzedQueryShapes(ctx context.Context, arg CountUnanalyzedQueryShapesParams) (int64, error)
 	// Count active sessions for a user
 	CountUserSessions(ctx context.Context, arg CountUserSessionsParams) (int64, error)
 	// API Tokens
@@ -249,13 +253,17 @@ type Querier interface {
 	// Get a team ID that the user belongs to and that has access to the source
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
 	HoldJob(ctx context.Context, arg HoldJobParams) (int64, error)
+	// Query failure stats daily rollup ---------------------------------------------
+	// Upsert one failed query run into the non-pruned daily failure rollup.
+	IncrementQueryFailureStats(ctx context.Context, arg IncrementQueryFailureStatsParams) error
 	// Query shape stats daily rollup (RFC 0010) ------------------------------------
-	// Add one increment to a shape's daily row: sum the three counters and keep
+	// Add one increment to a shape's daily row: sum the counters and keep
 	// the larger max_lookback_s (a NULL lookback never replaces a known one).
 	IncrementQueryShapeStats(ctx context.Context, arg IncrementQueryShapeStatsParams) error
 	// Query stats daily rollup -----------------------------------------------------
-	// Upsert one executed query into the non-pruned daily rollup: add 1 to
-	// query_count and the given duration to total_duration_ms for the composite key.
+	// Upsert one successful query run into the non-pruned daily rollup: add 1 to
+	// query_count, and its duration, scan and returned rows to their totals. The
+	// latency_* arguments are the run's histogram: 1 in its bucket, 0 elsewhere.
 	IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
@@ -336,12 +344,6 @@ type Querier interface {
 	ListOpenAlertGroupHistoryIDs(ctx context.Context, arg ListOpenAlertGroupHistoryIDsParams) ([]int64, error)
 	// Every open episode of the alert, newest first.
 	ListOpenAlertHistory(ctx context.Context, alertID int64) ([]AlertHistory, error)
-	// Most recent query_history rows across all users, newest first, enriched with
-	// the executing user's email and the source's display name. LEFT JOIN on
-	// sources so history survives a deleted source (source_name is NULL then).
-	// Backs the admin recent-activity view; the table is capped per user, so this
-	// is a recent window, not all-time analytics.
-	ListQueryActivity(ctx context.Context, limit int64) ([]ListQueryActivityRow, error)
 	// List one user's recent history, newest first.
 	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
 	// A source's analyzed shapes from `since` to `until`, both inclusive, summed
@@ -366,6 +368,8 @@ type Querier interface {
 	// source, personal first, then team, then source, each by name.
 	ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error)
 	ListSchemaAdvisorDismissals(ctx context.Context, sourceID int64) ([]SchemaAdvisorDismissal, error)
+	ListSchemaAdvisorDismissalsBySources(ctx context.Context, sourceIds []int64) ([]SchemaAdvisorDismissal, error)
+	ListSchemaAdvisorReportsBySources(ctx context.Context, sourceIds []int64) ([]SchemaAdvisorReport, error)
 	// List service principals
 	ListServiceAccounts(ctx context.Context) ([]User, error)
 	// Every pin in a shared collection, oldest first, with the query's creator and
@@ -425,6 +429,24 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	PruneQueryShapeStats(ctx context.Context, bucketDate string) error
 	PruneReportRuns(ctx context.Context, arg PruneReportRunsParams) error
+	// Cost per source per current-window day, by source and day.
+	QueryCostBySourceDay(ctx context.Context, arg QueryCostBySourceDayParams) ([]QueryCostBySourceDayRow, error)
+	// The first day with a recorded cost or failure: when collection began. ''
+	// before any.
+	QueryCostCollectedSince(ctx context.Context) (string, error)
+	// The cost reads below are as the Query Activity reads above. Days written
+	// before cost collection began have zero cost and add nothing.
+	// Cost totals of the current window (is_current) and the prior one. A window
+	// without rows has no row.
+	QueryCostSummary(ctx context.Context, arg QueryCostSummaryParams) ([]QueryCostSummaryRow, error)
+	// Current-window query counts per account type, honoring the source and user
+	// filters. account_type is '' for queries of deleted users.
+	QueryCountsByAccountType(ctx context.Context, arg QueryCountsByAccountTypeParams) ([]QueryCountsByAccountTypeRow, error)
+	// The failure reads take the filters of the Query Activity reads above.
+	// Failed runs per reason in both windows, most current failures first.
+	QueryFailuresByReason(ctx context.Context, arg QueryFailuresByReasonParams) ([]QueryFailuresByReasonRow, error)
+	// Current-window failed runs per source.
+	QueryFailuresBySource(ctx context.Context, arg QueryFailuresBySourceParams) ([]QueryFailuresBySourceRow, error)
 	// Totals over every rollup row of a source from `since` to `until`, both
 	// inclusive, not only the rows
 	// that ListQueryShapeStats returns. filtered_days counts the days with a
@@ -432,8 +454,23 @@ type Querier interface {
 	// 'overflow' rows, is '[]'. lookback_rows is 0 when no row has a lookback,
 	// and then max_lookback_s means nothing.
 	QueryShapeCoverage(ctx context.Context, arg QueryShapeCoverageParams) (QueryShapeCoverageRow, error)
-	// Per-day total query count over rollup rows on/after `since`, ascending by day.
-	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
+	// Per-day query count and distinct users over both windows, ascending.
+	QueryStatsByDay(ctx context.Context, arg QueryStatsByDayParams) ([]QueryStatsByDayRow, error)
+	// Current-window query count per language, most used first.
+	QueryStatsByLanguage(ctx context.Context, arg QueryStatsByLanguageParams) ([]QueryStatsByLanguageRow, error)
+	// Sources with a current-window query of the selected account type, by
+	// current total duration desc. service_query_count ignores the account type.
+	// team_id is the lowest team that links the source now, 0 when none does:
+	// the rollup's team_id records where a query ran, not who has the source.
+	QueryStatsBySource(ctx context.Context, arg QueryStatsBySourceParams) ([]QueryStatsBySourceRow, error)
+	// Users with a current-window query, by current query count desc.
+	QueryStatsByUser(ctx context.Context, arg QueryStatsByUserParams) ([]QueryStatsByUserRow, error)
+	// The Query Activity reads below take one window from prior_since to until,
+	// both inclusive, and count a row as current when bucket_date >= since. An
+	// empty account_type and a zero source_id or user_id select everything. A
+	// user row that is gone has no account type, so its queries count only when
+	// account_type is empty.
+	QueryStatsSummary(ctx context.Context, arg QueryStatsSummaryParams) (QueryStatsSummaryRow, error)
 	ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error)
 	RecordDestinationDelivery(ctx context.Context, arg RecordDestinationDeliveryParams) error
 	// After a manual resolve of one group: the rule is firing while any group
@@ -496,13 +533,15 @@ type Querier interface {
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)
-	// Top sources by total query count over rollup rows on/after `since`, with the
-	// source display name (LEFT JOIN so a deleted source yields ''), and integer
-	// average duration (0 when count is 0).
-	TopSourcesByQueries(ctx context.Context, arg TopSourcesByQueriesParams) ([]TopSourcesByQueriesRow, error)
-	// Top users by total query count over rollup rows on/after `since`, joined to
-	// users for the email.
-	TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error)
+	// The source and user pairs with the most current-window failed runs.
+	TopQueryFailures(ctx context.Context, arg TopQueryFailuresParams) ([]TopQueryFailuresRow, error)
+	// Analyzed shapes with a current-window query, across sources unless
+	// source_id is set, by current total duration desc. Dates are as in the
+	// Query Activity reads above. lookback_rows is 0 when no current row has a
+	// lookback, and then max_lookback_s means nothing. scanned_count counts the
+	// current queries recorded since scan collection began, the ones rows_read
+	// and bytes_read cover.
+	TopQueryShapes(ctx context.Context, arg TopQueryShapesParams) ([]TopQueryShapesRow, error)
 	TouchAlertEvaluated(ctx context.Context, id int64) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
 	// Update a query share's last access time

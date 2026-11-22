@@ -33,7 +33,7 @@ vi.mock("@/api/sources", () => ({
   sourcesApi: { listAllSourcesForAdmin: () => ok([{ id: 7, name: "app logs" }]) },
 }));
 vi.mock("@/api/teams", () => ({
-  teamsApi: { listAllTeams: () => ok([]) },
+  teamsApi: { listAllTeams: () => ok([{ id: 2, name: "payments" }]) },
 }));
 
 const { default: AuditLog } = await import("../AuditLog.vue");
@@ -169,6 +169,61 @@ describe("AuditLog", () => {
     const row = root.querySelector<HTMLElement>("[data-audit-row]");
     expect(row?.textContent).toContain("old logs");
     expect(row?.querySelector("a")).toBeNull();
+  });
+
+  it("shows a query run's text, range and result with its source and team by name", async () => {
+    const query = "SELECT * FROM logs WHERE service = 'api'";
+    pages.push({
+      events: [event({
+        action: "query.run",
+        target_label: "",
+        team_id: 2,
+        http_method: "POST",
+        route: "/api/v1/teams/:teamID/sources/:sourceID/logs/query",
+        changes: {},
+        detail: { query, language: "clickhouse-sql", mode: "stream", time_from: "2026-11-15T09:00:00Z", time_to: "2026-11-15T10:00:00Z", rows_returned: 1200, bytes_read: 2048, duration_ms: 35 },
+      })],
+      next_cursor: "",
+    });
+    const { root } = await render("/admin/audit-log");
+    const row = root.querySelector<HTMLElement>("[data-audit-row]");
+    expect(row?.textContent).toContain("app logs");
+
+    row?.click();
+    await flush();
+    const detail = root.querySelector<HTMLElement>("[data-audit-detail]");
+    expect(detail?.querySelector("pre")?.textContent).toBe(query);
+    const summary = detail?.querySelector<HTMLElement>("[data-audit-query]")?.textContent ?? "";
+    expect(summary).toContain("Time range");
+    expect(summary).toContain("1,200");
+    expect(summary).toContain("Bytes read2 KiB");
+    expect(summary).toContain("35 ms");
+    expect(detail?.textContent).toContain("payments");
+    expect(detail?.textContent).not.toContain("No field changes");
+    // The query shows once, in the block, not again in the detail list.
+    expect(detail?.textContent?.split(query)).toHaveLength(2);
+  });
+
+  it("shows an export's query from its create fields and a download's file", async () => {
+    pages.push({
+      events: [
+        event({ id: "c", action: "log_export.create", target_type: "log_export", target_id: "job-1", target_label: "", changes: { query: { to: "SELECT 1" }, format: { to: "csv" } }, detail: { mode: "job" } }),
+        event({ id: "d", action: "log_export.download", target_type: "log_export", target_id: "job-1", target_label: "", changes: {}, detail: { file_name: "logchef.csv", rows_exported: 3, bytes_written: 12 } }),
+      ],
+      next_cursor: "",
+    });
+    const { root } = await render("/admin/audit-log");
+    const rows = root.querySelectorAll<HTMLElement>("[data-audit-row]");
+    rows.forEach((row) => row.click());
+    await flush();
+    const [create, download] = [...root.querySelectorAll<HTMLElement>("[data-audit-detail]")];
+    expect(create.querySelector("pre")?.textContent).toBe("SELECT 1");
+    expect(create.textContent).toContain("format");
+    expect(download.querySelector("pre")).toBeNull();
+    expect(download.querySelector("[data-audit-query]")?.textContent).toContain("Bytes written12 B");
+    expect(download.textContent).toContain("logchef.csv");
+    expect(download.textContent).not.toContain("No field changes");
+    expect(download.querySelector<HTMLAnchorElement>("a[href*='target_id=job-1']")).not.toBeNull();
   });
 
   it("loads the next page with the cursor and the same time range", async () => {

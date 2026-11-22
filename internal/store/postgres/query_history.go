@@ -85,117 +85,33 @@ func (s *Store) ListQueryHistory(ctx context.Context, userID models.UserID, limi
 	return history, nil
 }
 
-// ListQueryActivity returns the most recent query_history rows across all
-// users, newest first, capped at limit, enriched with user email and source
-// name. Because query_history is capped per user, this is a recent window
-// rather than all-time analytics.
-func (s *Store) ListQueryActivity(ctx context.Context, limit int) ([]models.QueryActivityRecord, error) {
-	rows, err := s.q.ListQueryActivity(ctx, int32(limit)) //nolint:gosec // G115: limit is a small bounded window size
-	if err != nil {
-		s.log.Error("failed to list query activity", "error", err)
-		return nil, fmt.Errorf("error listing query activity: %w", err)
-	}
-
-	records := make([]models.QueryActivityRecord, 0, len(rows))
-	for i := range rows {
-		r := rows[i]
-		records = append(records, models.QueryActivityRecord{
-			ID:            r.ID,
-			UserID:        models.UserID(r.UserID),
-			UserEmail:     r.UserEmail,
-			TeamID:        models.TeamID(r.TeamID),
-			SourceID:      models.SourceID(r.SourceID),
-			SourceName:    r.SourceName.String,
-			QueryText:     r.QueryText,
-			QueryLanguage: models.QueryLanguage(r.QueryLanguage),
-			DurationMs:    r.DurationMs,
-			RowCount:      r.RowCount,
-			CreatedAt:     r.CreatedAt.Time,
-		})
-	}
-	return records, nil
-}
-
-// IncrementQueryStats upserts one executed query into the non-pruned
-// query_stats_daily rollup, adding 1 to query_count and durationMs to
-// total_duration_ms for the composite key.
-func (s *Store) IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error {
+// IncrementQueryStats upserts one successful query run into the non-pruned
+// query_stats_daily rollup.
+func (s *Store) IncrementQueryStats(ctx context.Context, inc models.QueryStatsIncrement) error {
+	h := models.LatencyHistogramOf(inc.DurationMs)
 	if err := s.q.IncrementQueryStats(ctx, sqlc.IncrementQueryStatsParams{
-		BucketDate:      bucketDateParam(bucketDate),
-		UserID:          int64(userID),
-		TeamID:          int64(teamID),
-		SourceID:        int64(sourceID),
-		QueryLanguage:   string(models.NormalizeQueryLanguage(language)),
-		TotalDurationMs: durationMs,
+		BucketDate:      bucketDateParam(inc.BucketDate),
+		UserID:          int64(inc.UserID),
+		TeamID:          int64(inc.TeamID),
+		SourceID:        int64(inc.SourceID),
+		QueryLanguage:   string(models.NormalizeQueryLanguage(inc.Language)),
+		TotalDurationMs: inc.DurationMs,
+		RowsRead:        inc.RowsRead,
+		BytesRead:       inc.BytesRead,
+		RowsReturned:    inc.RowsReturned,
+		LatencyLe100ms:  h[0],
+		LatencyLe250ms:  h[1],
+		LatencyLe500ms:  h[2],
+		LatencyLe1s:     h[3],
+		LatencyLe2500ms: h[4],
+		LatencyLe5s:     h[5],
+		LatencyLe10s:    h[6],
+		LatencyLe30s:    h[7],
+		LatencyLe60s:    h[8],
+		LatencyGt60s:    h[9],
 	}); err != nil {
-		s.log.Error("failed to increment query stats", "error", err, "user_id", userID, "source_id", sourceID)
+		s.log.Error("failed to increment query stats", "error", err, "user_id", inc.UserID, "source_id", inc.SourceID)
 		return fmt.Errorf("error incrementing query stats: %w", err)
 	}
 	return nil
-}
-
-// TopSourcesByQueries returns sources ordered by total query count desc (capped
-// at limit) over rollup rows with bucket_date >= since.
-func (s *Store) TopSourcesByQueries(ctx context.Context, since string, limit int) ([]models.SourceQueryStat, error) {
-	rows, err := s.q.TopSourcesByQueries(ctx, sqlc.TopSourcesByQueriesParams{
-		BucketDate: bucketDateParam(since),
-		Limit:      int32(limit), //nolint:gosec // G115: limit is a small bounded top-N size
-	})
-	if err != nil {
-		s.log.Error("failed to list top sources by queries", "error", err)
-		return nil, fmt.Errorf("error listing top sources by queries: %w", err)
-	}
-	out := make([]models.SourceQueryStat, 0, len(rows))
-	for i := range rows {
-		r := rows[i]
-		out = append(out, models.SourceQueryStat{
-			SourceID:      r.SourceID,
-			SourceName:    r.SourceName,
-			QueryCount:    r.QueryCount,
-			AvgDurationMs: r.AvgDurationMs,
-		})
-	}
-	return out, nil
-}
-
-// TopUsersByQueries returns users ordered by total query count desc (capped at
-// limit) over rollup rows with bucket_date >= since.
-func (s *Store) TopUsersByQueries(ctx context.Context, since string, limit int) ([]models.UserQueryStat, error) {
-	rows, err := s.q.TopUsersByQueries(ctx, sqlc.TopUsersByQueriesParams{
-		BucketDate: bucketDateParam(since),
-		Limit:      int32(limit), //nolint:gosec // G115: limit is a small bounded top-N size
-	})
-	if err != nil {
-		s.log.Error("failed to list top users by queries", "error", err)
-		return nil, fmt.Errorf("error listing top users by queries: %w", err)
-	}
-	out := make([]models.UserQueryStat, 0, len(rows))
-	for i := range rows {
-		r := rows[i]
-		out = append(out, models.UserQueryStat{
-			UserID:     models.UserID(r.UserID),
-			UserEmail:  r.UserEmail,
-			QueryCount: r.QueryCount,
-		})
-	}
-	return out, nil
-}
-
-// QueryVolumeByDay returns per-day total query counts (ascending by date) over
-// rollup rows with bucket_date >= since.
-func (s *Store) QueryVolumeByDay(ctx context.Context, since string) ([]models.DailyQueryVolume, error) {
-	rows, err := s.q.QueryVolumeByDay(ctx, bucketDateParam(since))
-	if err != nil {
-		s.log.Error("failed to list query volume by day", "error", err)
-		return nil, fmt.Errorf("error listing query volume by day: %w", err)
-	}
-	out := make([]models.DailyQueryVolume, 0, len(rows))
-	for i := range rows {
-		r := rows[i]
-		out = append(out, models.DailyQueryVolume{
-			Date:       r.BucketDate.Time.Format("2006-01-02"),
-			QueryCount: r.QueryCount,
-		})
-	}
-	return out, nil
 }

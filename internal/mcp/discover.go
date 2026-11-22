@@ -27,7 +27,7 @@ type GetAllFieldDimensionsParams struct {
 // --- Handlers ---
 
 // get_all_field_dimensions returns dynamic data, so it uses a typed handler.
-func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolRequest, params GetAllFieldDimensionsParams) (*mcp.CallToolResult, error) {
+func (t *tools) handleGetAllFieldDimensions(ctx context.Context, req mcp.CallToolRequest, params GetAllFieldDimensionsParams) (*mcp.CallToolResult, error) {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 10
@@ -45,10 +45,14 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 	if err != nil {
 		return t.errorResult(t.storeError("get all field dimensions failed", err)), nil
 	}
+	read := t.startRead(ctx, req, ReadCall{Source: src, Query: params.Query, Language: models.QueryLanguageLogchefQL, Limit: limit})
+	defer func() { read.end(recover()) }()
 	startTime, endTime, err := parseTimeRange(params.StartTime, params.EndTime)
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.storeError("get all field dimensions failed", err)), nil
 	}
+	read.From, read.To = &startTime, &endTime
 	var result map[string]*core.FieldValuesResult
 	err = t.admit(ctx, QueryClassPreview, src, "get_all_field_dimensions", func(ctx context.Context, _ string) error {
 		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
@@ -68,7 +72,11 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 		return err
 	})
 	if err != nil {
+		read.Err = err
 		return t.errorResult(t.queryError("get all field dimensions failed", err)), nil
+	}
+	for _, field := range result {
+		read.Rows += int64(len(field.Values))
 	}
 	return jsonTextResult(result)
 }

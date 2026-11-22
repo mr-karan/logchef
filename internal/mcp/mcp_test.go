@@ -32,6 +32,8 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+var errAdmissionRefused = errors.New("too many active preview queries for this user")
+
 // admissions is the test's AdmitQuery. It records admissions and can refuse.
 type admissions struct {
 	mu       sync.Mutex
@@ -44,7 +46,7 @@ func (a *admissions) admit(_ QueryClass, _ access.AuthorizedSource, _ string, _ 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.refuse {
-		return "", nil, errors.New("too many active preview queries for this user")
+		return "", nil, errAdmissionRefused
 	}
 	a.active++
 	a.admitted++
@@ -61,6 +63,41 @@ func (a *admissions) counts() (active, admitted int) {
 	return a.active, a.admitted
 }
 
+// reads is the test's StartRead. It keeps each read and how it ended.
+type reads struct {
+	mu    sync.Mutex
+	calls []*recordedRead
+}
+
+type recordedRead struct {
+	ReadCall
+	ReadResult
+	finished int
+}
+
+func (r *reads) start(_ context.Context, call ReadCall) func(ReadResult) {
+	rec := &recordedRead{ReadCall: call}
+	r.mu.Lock()
+	r.calls = append(r.calls, rec)
+	r.mu.Unlock()
+	return func(res ReadResult) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		rec.ReadResult = res
+		rec.finished++
+	}
+}
+
+func (r *reads) recorded() []recordedRead {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]recordedRead, len(r.calls))
+	for i, rec := range r.calls {
+		out[i] = *rec
+	}
+	return out
+}
+
 // world is a real SQLite store with users, teams and sources:
 //   - member belongs to team, which has source.
 //   - team also has nothing else; otherTeam has otherSource and no member.
@@ -70,6 +107,7 @@ type world struct {
 	ds          *datasource.Service
 	cfg         *config.Config
 	admits      *admissions
+	reads       *reads
 	member      *models.User
 	admin       *models.User
 	outsider    *models.User
@@ -95,7 +133,7 @@ func newWorld(t *testing.T) *world {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	w := &world{db: db, admits: &admissions{}}
+	w := &world{db: db, admits: &admissions{}, reads: &reads{}}
 	w.cfg = &config.Config{
 		Query:  config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 500, DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 60, MCPCallTimeoutSeconds: 60},
 		Alerts: config.AlertsConfig{Enabled: true},
@@ -168,7 +206,7 @@ func (w *world) join(t *testing.T, team models.TeamID, user models.UserID) {
 }
 
 func (w *world) deps() Deps {
-	return Deps{DB: w.db, Datasources: w.ds, Config: w.cfg, Version: "test", Log: discardLogger(), Admit: w.admits.admit}
+	return Deps{DB: w.db, Datasources: w.ds, Config: w.cfg, Version: "test", Log: discardLogger(), Admit: w.admits.admit, StartRead: w.reads.start}
 }
 
 func (w *world) server() *server.MCPServer { return newMCPServer(w.deps()) }
