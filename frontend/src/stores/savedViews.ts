@@ -244,8 +244,16 @@ export const useSavedViewsStore = defineStore("savedViews", () => {
     return parsed.success ? parsed.data : null;
   }
 
-  /** Makes a view, or no view, active and remembers the pick for this team and source. A pick ends a shared layout. */
+  /**
+   * Makes a view, or no view, active and remembers the pick for this team and
+   * source. A pick ends a shared layout. Leaving a view or a shared layout for
+   * no view discards the stored layout, so the table shows the default one.
+   */
   function pick(viewId: number | null) {
+    if (viewId === null && activeSeed.value && suffix.value) {
+      writeStorage(`logchef-tableState-${suffix.value}`, undefined);
+      storageVersion.value++;
+    }
     sharedSeed.value = null;
     activeViewId.value = viewId;
     tableLayout.value = null;
