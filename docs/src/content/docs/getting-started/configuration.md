@@ -2,7 +2,7 @@
 title: Configuration
 head:
   - tag: title
-    content: "Logchef Server Configuration | Logchef"
+    content: "Server Configuration Reference | Logchef"
 description: Configure Logchef's server, authentication, and runtime settings using a TOML file and LOGCHEF_ environment variable overrides.
 ---
 

@@ -1,8 +1,8 @@
 ---
 title: "Let Your AI Agent Query Your Logs"
-description: "Logchef serves an MCP endpoint at /mcp. Connect Claude Code, Codex, Cursor, Claude.ai or ChatGPT with OAuth and let the agent read schemas, run LogchefQL and investigate errors in ClickHouse and VictoriaLogs."
+description: "Logchef serves an MCP endpoint at /mcp. Connect Claude Code, Codex, Cursor, Claude.ai or ChatGPT with OAuth and let the agent read schemas, run LogchefQL and investigate errors in ClickHouse, VictoriaLogs and Grafana Loki."
 pubDate: 2026-11-18
-tags: ["mcp", "ai", "agents", "clickhouse", "victorialogs", "logs"]
+tags: ["mcp", "ai", "agents", "clickhouse", "victorialogs", "loki", "logs"]
 author: "Logchef Team"
 ---
 
@@ -63,11 +63,11 @@ To check the connection, ask the agent to call `get_teams`. It returns the teams
 
 ## What the agent gets
 
-The endpoint exposes 21 tools, all read-only. They fall into a few groups:
+The endpoint exposes 22 tools, all read-only. They fall into a few groups:
 
 - **Discovery:** `get_profile`, `get_teams`, `get_meta`, `get_sources`, `get_team_sources`, `get_source_schema`. The agent finds the right source and reads its columns before it writes a query, so it doesn't guess field names.
-- **Querying:** `query_logs` runs SQL on ClickHouse sources or LogsQL on VictoriaLogs sources. `get_log_histogram` returns volume over time, and `get_log_context` returns the lines before and after a timestamp.
-- **LogchefQL:** `query_logchefql`, `translate_logchefql` and `validate_logchefql`. The agent can write one filter language for both backends and see the generated SQL or LogsQL before it runs anything.
+- **Querying:** `query_logs` runs SQL on ClickHouse sources, LogsQL on VictoriaLogs sources and LogQL on Grafana Loki sources. `get_log_histogram` returns volume over time, and `get_log_context` returns the lines before and after a timestamp.
+- **LogchefQL:** `query_logchefql`, `translate_logchefql` and `validate_logchefql`. The agent can write one filter language for all three backends and see the generated SQL, LogsQL or LogQL before it runs anything.
 - **Investigation:** `get_field_values`, `get_all_field_dimensions`, `top_values`, `compare_windows` and `open_investigation`.
 - **Saved work and alerts:** `list_saved_queries`, `get_saved_query`, `list_saved_views`, `list_alerts`, `get_alert_history`.
 
@@ -85,7 +85,7 @@ severity_text="ERROR" and service_name="checkout" | count() by time(1m)
 
 Then `compare_windows` runs the same filter over 01:00 to 01:40 and 01:40 to 02:20, and `top_values` shows which hosts, error messages or status codes changed between them. The agent looks at the actual lines with `get_log_context` around the first failure. What comes back is real rows from your logs, not a guess based on the stack trace you chose to paste.
 
-The same aggregation text compiles to ClickHouse SQL on a ClickHouse source and to LogsQL on a VictoriaLogs source, so the agent doesn't need to know which backend holds a given team's logs. For SQL that a filter can't express, `query_logs` takes `raw_sql`, and it accepts the same [time macros](/guide/time-macros) and `{{name}}` variables that dashboard panels use.
+The same aggregation text compiles to ClickHouse SQL on a ClickHouse source and to LogsQL on a VictoriaLogs source, so the agent doesn't need to know which backend holds a given team's logs. Loki sources take LogchefQL filters but not aggregation pipes. On Loki the agent counts with a LogQL metric query through `query_logs` instead. For SQL that a filter can't express, `query_logs` takes `raw_sql`, and it accepts the same [time macros](/guide/time-macros) and `{{name}}` variables that dashboard panels use.
 
 Two prompts are included for clients that surface them. `investigate_error_spike` takes a `team_id`, a `source_id` and an optional `time_range` (last hour by default), and walks through schema discovery, error volume, patterns, a timeline and root cause. `investigate_alert` takes an `alert_id`, reads the alert's configuration and history, and pulls the matching logs.
 
@@ -103,6 +103,7 @@ The agent acts as you, and with less reach than you have in the web UI.
 - **Team membership only.** An OAuth token sees the teams you belong to and the sources linked to them. This applies to admins too: an admin's web session can open any team, but an admin's agent token can't.
 - **Scoped.** The consent page requests eight read scopes (`profile:read`, `teams:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read`, `alerts:read`, `saved_views:read`). A tool that needs a scope the token doesn't hold doesn't appear in the tool list.
 - **Bounded.** One tool call ends after `query.mcp_call_timeout_seconds` (default 60, capped by `query.max_timeout_seconds`), and the per-user and global concurrency limits from the web UI apply. `query_logs` returns at most 100 rows per call, and `stats.truncation` tells the agent whether rows were cut, so it knows when it's looking at a sample.
+- **Audited.** Since v2.8.0, each tool call that reads logs records a `query.run` event in the [audit log](/operations/audit-log), with your user, the OAuth client and the full query text.
 - **Separate credentials.** `/mcp` accepts only Logchef OAuth tokens issued for it. API tokens, service tokens, browser cookies and CLI tokens get `401`, and an MCP token gets `401` at `/api`.
 
 To cut an agent off, open **Settings → Connected apps** and remove it. Its next request fails.
@@ -113,7 +114,7 @@ Some things are out of scope. There are no admin tools, no write tools, and no t
 
 ## Try it
 
-Logchef is a single binary with SQLite for metadata. Your logs stay in ClickHouse or VictoriaLogs. Enable `[auth.oauth]`, add the server to your agent, and ask it what broke.
+Logchef is a single binary with SQLite for metadata. Your logs stay in ClickHouse, VictoriaLogs or Grafana Loki. Enable `[auth.oauth]`, add the server to your agent, and ask it what broke.
 
 - Source and releases: [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef)
 - MCP reference: [logchef.app/integration/mcp-server](https://logchef.app/integration/mcp-server)

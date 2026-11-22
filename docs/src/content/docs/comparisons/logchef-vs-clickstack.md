@@ -1,5 +1,8 @@
 ---
 title: Logchef vs ClickStack
+head:
+  - tag: title
+    content: "Logchef vs ClickStack"
 description: "Logchef vs ClickStack (formerly HyperDX): a log UI for the ClickHouse, VictoriaLogs or Loki you already run, compared with ClickHouse's observability stack."
 ---
 

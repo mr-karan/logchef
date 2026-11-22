@@ -1,5 +1,8 @@
 ---
 title: Logchef vs OpenObserve
+head:
+  - tag: title
+    content: "Logchef vs OpenObserve"
 description: "Logchef vs OpenObserve (O2): an open-source alternative for logs already in ClickHouse, VictoriaLogs or Loki. Storage, SSO, RBAC and query languages."
 ---
 
