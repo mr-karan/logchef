@@ -29,6 +29,7 @@ import { activeSilencesFor, groupMatchers } from "@/utils/alertSilences";
 import { useIntervalFn, useNow } from "@vueuse/core";
 import type { AlertSilenceRequest } from "@/api/silences";
 import { EmptyState, LoadingState } from "@/components/layout";
+import ErrorAlert from "@/components/ui/ErrorAlert.vue";
 import type { Alert, AlertHistoryEntry, AlertInstance, UpdateAlertRequest } from "@/api/alerts";
 import { formatAlertGroup } from "@/utils/alertGroups";
 
@@ -84,6 +85,9 @@ const instances = computed(() => {
 const isLoadingHistory = computed(() => {
   return alertHistoryStore.isLoadingOperation(`loadHistory-${alertId.value}`);
 });
+
+const historyError = computed(() => alertHistoryStore.currentAlertId === alertId.value ? alertHistoryStore.historyError : null);
+const instancesError = computed(() => alertHistoryStore.currentAlertId === alertId.value ? alertHistoryStore.instancesError : null);
 
 const isLoadingInstances = computed(() => {
   return alertHistoryStore.isLoadingOperation(`loadInstances-${alertId.value}`);
@@ -311,6 +315,13 @@ watch([alertId, currentTab], ([id, tab]) => {
           </CardHeader>
           <CardContent>
             <LoadingState v-if="isLoadingInstances" :label="t('ui.loading')" />
+            <ErrorAlert
+              v-else-if="instancesError"
+              :error="instancesError"
+              :title="t('ui.failedToLoad')"
+              :retry-label="t('ui.retry')"
+              @retry="alertHistoryStore.loadInstances(alertId)"
+            />
             <p v-else-if="!instances.length" class="text-sm text-muted-foreground">{{ t('alerts.noGroupFiring') }}</p>
             <Table v-else>
               <TableHeader>
@@ -362,6 +373,13 @@ watch([alertId, currentTab], ([id, tab]) => {
           <CardContent>
             <!-- Loading State -->
             <LoadingState v-if="isLoadingHistory" :label="t('ui.loadingHistory')" />
+            <ErrorAlert
+              v-else-if="historyError"
+              :error="historyError"
+              :title="t('ui.failedToLoad')"
+              :retry-label="t('ui.retry')"
+              @retry="alertHistoryStore.loadHistory(alertId)"
+            />
 
             <!-- Empty State -->
             <EmptyState
