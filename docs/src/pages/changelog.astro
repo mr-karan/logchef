@@ -14,15 +14,25 @@ interface ReleaseClip {
   height: number;
 }
 
+const clip = (key: string): ReleaseClip => ({
+  webm: `/releases/v2.8.0/${key}.webm`,
+  mp4: `/releases/v2.8.0/${key}.mp4`,
+  poster: `/releases/v2.8.0/${key}.png`,
+  width: 1280,
+  height: 720,
+});
+
 const v28Clips: Record<string, ReleaseClip> = {
-  // Example:
-  // 'loki-explorer': {
-  //   webm: '/releases/v2.8.0/loki-explorer.webm',
-  //   mp4: '/releases/v2.8.0/loki-explorer.mp4',
-  //   poster: '/releases/v2.8.0/loki-explorer-poster.png',
-  //   width: 1600,
-  //   height: 1000,
-  // },
+  hero: clip('hero'),
+  'loki-explorer': clip('loki-explorer'),
+  aggregations: clip('aggregations'),
+  'alerting-v2': clip('alerting-v2'),
+  'audit-log': clip('audit-log'),
+  'query-activity': clip('query-activity'),
+  'scheduled-reports': clip('scheduled-reports'),
+  'saved-views': clip('saved-views'),
+  'schema-advisor': clip('schema-advisor'),
+  playground: clip('playground'),
 };
 
 interface ShowcaseShot {
