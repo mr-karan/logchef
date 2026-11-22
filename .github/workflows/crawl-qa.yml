@@ -30,6 +30,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
