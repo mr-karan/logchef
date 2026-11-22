@@ -251,15 +251,13 @@ describe("streamSSE", () => {
   it("runs the session-expired flow once on a 401", async () => {
     const push = vi.spyOn(router, "push").mockResolvedValue(undefined);
     const clearState = vi.spyOn(useAuthStore(), "clearState");
-    const toast = vi.spyOn(errorHandler, "showErrorToast").mockImplementation(() => {});
     failWith(401, JSON.stringify({ status: "error", message: "session expired", error_type: "AuthenticationError" }));
 
     await expect(streamSSE("/s", request(), () => {})).rejects.toMatchObject({ status: 401 });
 
     expect(clearState).toHaveBeenCalledTimes(1);
-    expect(toast).toHaveBeenCalledTimes(1);
     expect(push).toHaveBeenCalledTimes(1);
-    expect(push.mock.calls[0][0]).toMatchObject({ name: "Login", replace: true });
+    expect(push.mock.calls[0][0]).toMatchObject({ name: "Login", query: { session_ended: "1" }, replace: true });
   });
 
   it("does not run the session-expired flow on other errors", async () => {
@@ -277,10 +275,10 @@ describe("expireSession", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    { toast: true, path: "/explore", notifications: 1 },
-    { toast: false, path: "/explore", notifications: 0 },
-    { toast: true, path: "/auth/login", notifications: 0 },
-  ])("expires the session with toast=$toast at $path", ({ toast, path, notifications }) => {
+    { announce: true, path: "/explore", query: { session_ended: "1" } },
+    { announce: false, path: "/explore", query: {} },
+    { announce: true, path: "/auth/login", query: null },
+  ])("expires the session with announce=$announce at $path", ({ announce, path, query }) => {
     const previousPath = window.location.href;
     window.history.replaceState(null, "", path);
     try {
@@ -288,15 +286,15 @@ describe("expireSession", () => {
       const clearState = vi.spyOn(useAuthStore(), "clearState");
       const showErrorToast = vi.spyOn(errorHandler, "showErrorToast").mockImplementation(() => {});
 
-      expireSession({ toast });
+      expireSession({ announce });
 
-      expect(showErrorToast).toHaveBeenCalledTimes(notifications);
-      if (path === "/auth/login") {
+      expect(showErrorToast).not.toHaveBeenCalled();
+      if (query === null) {
         expect(clearState).not.toHaveBeenCalled();
         expect(push).not.toHaveBeenCalled();
       } else {
         expect(clearState).toHaveBeenCalledTimes(1);
-        expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location }, replace: true });
+        expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location, ...query }, replace: true });
       }
     } finally {
       window.history.replaceState(null, "", previousPath);
@@ -328,13 +326,11 @@ describe.each(callers)("$name stream errors", ({ run, label }) => {
   it("expires the session once on a 401", async () => {
     const push = vi.spyOn(router, "push").mockResolvedValue(undefined);
     const clearState = vi.spyOn(useAuthStore(), "clearState");
-    const toast = vi.spyOn(errorHandler, "showErrorToast").mockImplementation(() => {});
     failWith(401, JSON.stringify({ status: "error", message: "session expired", error_type: "AuthenticationError" }));
 
     await expect(run(new AbortController().signal)).rejects.toThrow("session expired");
 
     expect(clearState).toHaveBeenCalledTimes(1);
-    expect(toast).toHaveBeenCalledTimes(1);
-    expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location }, replace: true });
+    expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location, session_ended: "1" }, replace: true });
   });
 });

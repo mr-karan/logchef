@@ -298,11 +298,14 @@ export function useExplorerNavigator() {
 
   /**
    * Makes a view, or no view, active and records it in the URL. The query on
-   * screen stays; an empty editor takes the view's filter and runs it.
+   * screen stays; an empty editor takes the view's filter and runs it. No
+   * view drops the view's filter and range unless the query was edited.
    */
   function selectView(viewId: number | null) {
+    const left = savedViews.activeView?.definition
     savedViews.pick(viewId)
     if (status.value !== 'ready' || !shown) return
+    if (viewId === null && left && explore.clearViewQuery(left)) return rerun()
     const filter = savedViews.activeView?.definition.filter
     if (filter !== undefined && explore.fillViewFilter(filter)) return rerun()
     const query = { ...shown }

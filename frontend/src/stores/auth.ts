@@ -51,7 +51,7 @@ export const useAuthStore = defineStore("auth", () => {
               state.data.value.user = response.user;
               state.data.value.session = response.session;
               // Mark that we've had a successful session for future reference
-              sessionStorage.setItem("hadPreviousSession", "true");
+              localStorage.setItem("hadPreviousSession", "true");
             }
           },
           onError: () => {
@@ -80,7 +80,7 @@ export const useAuthStore = defineStore("auth", () => {
     // On manual logout, we should also clear the session flag
     // but we don't do this on auth failures to distinguish between first visit and actual expiry
     if (state.data.value.isInitialized) {
-      sessionStorage.removeItem("hadPreviousSession");
+      localStorage.removeItem("hadPreviousSession");
     }
   }
 
@@ -116,7 +116,7 @@ export const useAuthStore = defineStore("auth", () => {
               state.data.value.user = response.user;
               state.data.value.session = response.session;
               state.data.value.isInitialized = true;
-              sessionStorage.setItem("hadPreviousSession", "true");
+              localStorage.setItem("hadPreviousSession", "true");
             }
           },
         });

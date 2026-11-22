@@ -197,7 +197,7 @@ jobs:
       - name: Server responses against ClickHouse
         run: >-
           go test -race -gcflags='modernc.org/...=-d=checkptr=0' ./internal/server -count=1
-          -run '^(TestClickHouseQueryFailureResponses|TestClickHouseResourceFailureResponses|TestClickHousePreviewClientDisconnect|TestClickHousePreviewContextCancellation|TestExportQueriesClickHouse|TestExportJobCancelledAtShutdown|TestViewActivityCapResponseClickHouse)$'
+          -run '^(TestClickHouseQueryFailureResponses|TestClickHouseResourceFailureResponses|TestClickHousePreviewClientDisconnect|TestClickHousePreviewContextCancellation|TestExportQueriesClickHouse|TestExportJobCancelledAtShutdown|TestViewActivityCapResponseClickHouse|TestClickHouseFieldValuesWithoutQueryLanguage)$'
 
   lint:
     runs-on: ubuntu-latest

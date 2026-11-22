@@ -11,6 +11,8 @@ interface AlertHistoryState {
   instances: AlertInstance[];
   currentAlertId: number | null;
   limit: number;
+  historyError: string | null;
+  instancesError: string | null;
 }
 
 export const useAlertHistoryStore = defineStore("alertHistory", () => {
@@ -19,11 +21,15 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     instances: [],
     currentAlertId: null,
     limit: 100,
+    historyError: null,
+    instancesError: null,
   });
 
   const entries = computed(() => state.data.value.entries);
   const instances = computed(() => state.data.value.instances);
   const currentAlertId = computed(() => state.data.value.currentAlertId);
+  const historyError = computed(() => state.data.value.historyError);
+  const instancesError = computed(() => state.data.value.instancesError);
 
   let historyRequestId = 0;
   const historyLoads = createLatestRequests({
@@ -44,6 +50,8 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       instanceLoads.cancelAll();
       state.data.value.entries = [];
       state.data.value.instances = [];
+      state.data.value.historyError = null;
+      state.data.value.instancesError = null;
     }
     state.data.value.currentAlertId = alertId;
   }
@@ -65,6 +73,10 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       operationKey: `loadHistory-${alertId}`,
       onSuccess: (response) => {
         state.data.value.entries = response ?? [];
+        state.data.value.historyError = null;
+      },
+      onError: (error) => {
+        state.data.value.historyError = error.message;
       },
       defaultData: [],
       showToast: false,
@@ -83,6 +95,10 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       operationKey: `loadInstances-${alertId}`,
       onSuccess: (response) => {
         state.data.value.instances = response ?? [];
+        state.data.value.instancesError = null;
+      },
+      onError: (error) => {
+        state.data.value.instancesError = error.message;
       },
       defaultData: [],
       showToast: false,
@@ -118,6 +134,8 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     entries,
     instances,
     currentAlertId,
+    historyError,
+    instancesError,
     isLoadingOperation: state.isLoadingOperation,
     loadHistory,
     loadInstances,

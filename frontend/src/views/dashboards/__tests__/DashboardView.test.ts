@@ -678,3 +678,86 @@ describe("DashboardView tabs", () => {
     expect(shownTab()).toBeUndefined();
   });
 });
+
+describe("DashboardView load outcome", () => {
+  let app: App;
+  let host: HTMLDivElement;
+  let router: Router;
+
+  async function open(url: string) {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    router = createRouter({ history: createMemoryHistory(), routes: [
+      { path: "/dashboards/:id", component: DashboardView },
+      { path: "/dashboards", component: { template: "<div>Dashboard list</div>" } },
+    ] });
+    await router.push(url);
+    app = createApp(defineComponent({ template: "<router-view />" }));
+    app.use(createPinia()).use(i18n).use(router).mount(host);
+    await settle();
+  }
+
+  function heading() {
+    return host.querySelector("h1")?.textContent?.trim();
+  }
+
+  function retryButton() {
+    return [...host.querySelectorAll("button")].find((element) => element.textContent?.trim() === "Retry");
+  }
+
+  beforeEach(() => {
+    api.get.mockReset();
+    api.post.mockReset();
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  });
+
+  afterEach(() => {
+    app.unmount();
+    host.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the next dashboard when the read of the one left behind finishes first", async () => {
+    let finishFirst!: () => void;
+    let finishSecond!: () => void;
+    api.get.mockImplementation((url: string) => new Promise((resolve) => {
+      const id = Number(url.split("/").pop());
+      const respond = () => resolve({ status: "success", data: { ...dashboard, id, name: `Dashboard ${id}` } });
+      if (id === 1) finishFirst = respond;
+      else finishSecond = respond;
+    }));
+    await open("/dashboards/1");
+    await router.push("/dashboards/2");
+    await settle();
+
+    finishFirst();
+    await settle();
+    finishSecond();
+    await settle();
+
+    expect(heading()).toBe("Dashboard 2");
+    expect(host.textContent).not.toContain("Dashboard not found");
+  });
+
+  it("offers a retry when the read fails for a reason other than a missing dashboard", async () => {
+    api.get.mockRejectedValueOnce({ status: "error", error_type: "NetworkError", message: "Request failed with status code 502" });
+    await open("/dashboards/1");
+
+    expect(host.textContent).not.toContain("Dashboard not found");
+    expect(host.textContent).toContain("Failed to load");
+    api.get.mockResolvedValue({ status: "success", data: dashboard });
+    retryButton()!.click();
+    await settle();
+
+    expect(heading()).toBe("My dashboard");
+    expect(retryButton()).toBeUndefined();
+  });
+
+  it("says the dashboard is missing when the server answers 404", async () => {
+    api.get.mockRejectedValue({ status: "error", error_type: "NotFoundError", message: "Dashboard not found" });
+    await open("/dashboards/1");
+
+    expect(host.textContent).toContain("Dashboard not found or you don't have access.");
+    expect(retryButton()).toBeUndefined();
+  });
+});

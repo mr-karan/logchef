@@ -299,6 +299,10 @@ export function useColumnState(options: ColumnStateOptions) {
       else reconcileViewState(view)
     } else {
       stashedViewLayout.value = null
+      // The sort with no view is not stored; leaving a view drops its sort.
+      if (switched && previous?.seedIdentity && options.sorting) {
+        options.sorting.value = [{ id: toValue(options.timestampField), desc: true }]
+      }
       initializeState(!previous || switched ? 'restore' : 'reconcile')
     }
     applied = { key: current.storageKey, view }
