@@ -1,0 +1,8 @@
+[
+  { "label": "Service errors", "query": "level=\"error\" and status>=500" },
+  { "label": "Contains text", "query": "message~\"timeout\"" },
+  { "label": "JSON path", "query": "log_attributes.http.method=\"POST\"" },
+  { "label": "Count by service", "query": "level=\"error\" | count() by service" },
+  { "label": "Five-minute buckets", "query": "level=\"error\" | count() by time(5m), service" },
+  { "label": "Top services", "query": "level=\"error\" | count() as errors by service | sort errors desc | limit 5" }
+]

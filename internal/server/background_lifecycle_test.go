@@ -408,7 +408,7 @@ func TestQueryHistoryBackpressure(t *testing.T) {
 	before := runtime.NumGoroutine()
 	start := time.Now()
 	for range 512 {
-		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.enqueueQueryRecord(historyOnlyRecord(user, team.ID, source))
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("history submission blocked for %s", elapsed)
@@ -430,7 +430,7 @@ func TestHistoryDrainsOnShutdown(t *testing.T) {
 	}()
 	<-ready
 	for range 64 {
-		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.enqueueQueryRecord(historyOnlyRecord(user, team.ID, source))
 	}
 	go func() { <-srv.baseCtx.Done(); close(release) }()
 	if err := srv.Shutdown(context.Background()); err != nil {
@@ -444,7 +444,7 @@ func TestHistoryDrainsOnShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(entries) != 64 {
-		t.Errorf("persisted %d of 64 queued entries, dropped=%d", len(entries), srv.historyDropped.Load())
+		t.Errorf("persisted %d of 64 queued entries, dropped=%d", len(entries), srv.queryRecordsDropped.Load())
 	}
 }
 
@@ -481,10 +481,10 @@ func TestHistoryShutdownCountsUndrainedEntries(t *testing.T) {
 	}()
 	<-ready
 	for range 64 {
-		srv.recordQueryHistory(user, team.ID, source, nil, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+		srv.enqueueQueryRecord(historyOnlyRecord(user, team.ID, source))
 	}
 	deadline := time.Now().Add(time.Second)
-	for len(srv.historyQueue) == 64 && time.Now().Before(deadline) {
+	for len(srv.queryRecords) == 64 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -503,8 +503,17 @@ func TestHistoryShutdownCountsUndrainedEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dropped := srv.historyDropped.Load()
+	dropped := srv.queryRecordsDropped.Load()
 	if dropped == 0 || uint64(len(entries))+dropped != 64 {
 		t.Errorf("persisted=%d dropped=%d, want all 64 accounted for with drops", len(entries), dropped)
 	}
+}
+
+// historyOnlyRecord is a finished query with a history row and no audit
+// event, as a run without an authenticated actor queues it.
+func historyOnlyRecord(user *models.User, teamID models.TeamID, source *models.Source) queryRecord {
+	return queryRecord{history: &models.QueryHistory{
+		UserID: user.ID, TeamID: teamID, SourceID: source.ID, QueryText: "SELECT 1",
+		QueryLanguage: models.QueryLanguageClickHouseSQL, DurationMs: 1, RowCount: 1,
+	}}
 }

@@ -61,9 +61,10 @@ func (r *shapeRecorder) admit(sourceID models.SourceID, hash string) bool {
 	return true
 }
 
-// recordQueryShape adds a recorded query to query_shape_stats_daily. A
+// recordQueryShape adds a successful run to query_shape_stats_daily. A
 // failure is logged and counted; it never fails the query.
-func (s *Server) recordQueryShape(parent context.Context, now time.Time, entry *models.QueryHistory) {
+func (s *Server) recordQueryShape(parent context.Context, now time.Time, usage *queryUsage) {
+	entry := usage.run
 	// Only ClickHouse sources have a schema to tune, and only LogchefQL and
 	// ClickHouse SQL are analyzed.
 	if entry.SourceTable == "" {
@@ -76,7 +77,7 @@ func (s *Server) recordQueryShape(parent context.Context, now time.Time, entry *
 	ctx, cancel := context.WithTimeout(parent, time.Second)
 	defer cancel()
 	day := now.UTC().Format(time.DateOnly)
-	usage := models.QueryShapeUsage{
+	shapeUsage := models.QueryShapeUsage{
 		QueryLanguage:      language,
 		ShapeHash:          models.ShapeHashUnanalyzed,
 		Shape:              models.FilterShape{},
@@ -99,12 +100,13 @@ func (s *Server) recordQueryShape(parent context.Context, now time.Time, entry *
 			metrics.RecordQueryShape("error")
 			return
 		}
-		usage.ShapeHash, usage.Shape, result = hash, shape, "analyzed"
+		shapeUsage.ShapeHash, shapeUsage.Shape, result = hash, shape, "analyzed"
 		if !s.shapes.admit(entry.SourceID, hash) {
-			usage.ShapeHash, usage.Shape, result = models.ShapeHashOverflow, models.FilterShape{}, "overflow"
+			shapeUsage.ShapeHash, shapeUsage.Shape, result = models.ShapeHashOverflow, models.FilterShape{}, "overflow"
 		}
 	}
-	if err := s.store.IncrementQueryShapeStats(ctx, models.QueryShapeIncrement{BucketDate: day, SourceID: entry.SourceID, Usage: usage}); err != nil {
+	inc := models.QueryShapeIncrement{BucketDate: day, SourceID: entry.SourceID, Usage: shapeUsage, RowsRead: usage.rowsRead, BytesRead: usage.bytesRead}
+	if err := s.store.IncrementQueryShapeStats(ctx, inc); err != nil {
 		s.log.Warn("failed to record query shape", "error", err, "source_id", entry.SourceID)
 		result = "error"
 	}

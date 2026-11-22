@@ -445,7 +445,7 @@ it('retains the complete automatic order through subset results and reloads', as
 const viewKey = 'logchef-viewState-7-source-a'
 
 function setupView(seed: TableViewSeed | null, columns: ColumnDef<Record<string, unknown>>[] = [{ id: 'message' }, { id: 'timestamp' }, { id: 'status' }]) {
-  const input = reactive<{ columns: ColumnDef<Record<string, unknown>>[], seed: TableViewSeed | null }>({ columns, seed })
+  const input = reactive<{ columns: ColumnDef<Record<string, unknown>>[], seed: TableViewSeed | null, logRows: boolean }>({ columns, seed, logRows: true })
   const sorting = ref<SortingState>([])
   const scope = effectScope()
   scopes.push(scope)
@@ -459,6 +459,7 @@ function setupView(seed: TableViewSeed | null, columns: ColumnDef<Record<string,
     severityField: 'severity',
     seed: () => input.seed,
     sorting,
+    logRows: () => input.logRows,
   }))
   if (!state) throw new Error('Column state scope did not run')
   return { input, sorting, ...state }
@@ -538,6 +539,24 @@ describe('useColumnState with a view seed', () => {
     await nextTick()
     expect(state.columnVisibility.value).toMatchObject({ timestamp: false, status: true, message: true })
     expect(state.columnSizing.value).toEqual({ status: 120 })
+  })
+
+  it('shows every column of a result that is not log rows, even one the view names, without storing it', async () => {
+    const state = setupView(view(1, { columns: [{ name: 'app' }] }))
+    await persist()
+    const stored = localStorage.getItem(viewKey)
+    state.input.logRows = false
+    state.input.columns = [{ id: 'app' }, { id: 'time' }, { id: 'value' }]
+    await nextTick()
+    expect(state.columnVisibility.value).toMatchObject({ app: true, time: true, value: true })
+    expect(state.workingLayout.value?.columns).toEqual([{ name: 'app' }])
+    await persist()
+    expect(localStorage.getItem(viewKey)).toBe(stored)
+
+    state.input.logRows = true
+    state.input.columns = [{ id: 'message' }, { id: 'timestamp' }, { id: 'app' }]
+    await nextTick()
+    expect(state.columnVisibility.value).toMatchObject({ app: true, message: false, timestamp: false })
   })
 
   it('starts a view without columns from the layout with no view, and leaves the sort alone without a sort', () => {

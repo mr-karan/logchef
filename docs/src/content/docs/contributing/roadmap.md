@@ -2,7 +2,7 @@
 title: Roadmap
 head:
   - tag: title
-    content: "Logchef Log Analytics Roadmap | Logchef"
+    content: "Log Analytics Roadmap | Logchef"
 description: "Explore the Logchef roadmap for self-hosted log analytics. See shipped capabilities, current development, and planned improvements to log investigations."
 ---
 
@@ -11,7 +11,10 @@ committed direction, not dated promises. Timelines shift as we learn.
 
 ## Recently shipped
 
-- **Grafana Loki as a datasource** (unreleased): LogchefQL compiles to LogQL, with a native LogQL editor, the histogram, field sidebar, live tail, log context, dashboards, alerts, the CLI and MCP. See [Using Grafana Loki with Logchef](/tutorials/loki).
+- **Grafana Loki as a datasource** (v2.8): LogchefQL compiles to LogQL, with a native LogQL editor, the histogram, field sidebar, live tail, log context, dashboards, alerts, the CLI and MCP. See [Using Grafana Loki with Logchef](/tutorials/loki).
+- **LogchefQL aggregations** (v2.8): `level=error | count() by service` counts, groups and computes percentiles on ClickHouse and VictoriaLogs, as a table or a chart. See [aggregations](/guide/aggregations).
+- **Alerting v2** (v2.8): per-group alerts, no-data policies, silences, backtests, and reusable email, webhook, Slack and PagerDuty destinations. See [alerting](/features/alerting).
+- **Audit log and Query Activity** (v2.8): every query run is recorded with its full text, and Query Activity shows adoption, busy and slow sources, and costly query patterns.
 - **Dashboards v2** (v2.7): panels run SQL and LogsQL as written and draw the result as stats with comparisons and sparklines, line, area and bar charts, toplists, pies, or tables with rules and formats. Dashboards gain tabs, free panel sizes, per-panel ranges and bucket sizes, thresholds, and built-in time macros. See [dashboards](/features/dashboards).
 - **Dashboards** (v2.0): grids of panels with a shared time range and auto-refresh. Panels can mix ClickHouse and VictoriaLogs sources.
 - **VictoriaLogs as a first-class datasource** (v2.0): LogchefQL compiles to LogsQL as well as ClickHouse SQL, with a native LogsQL editor and a capability-driven UI that adapts to what each backend supports.

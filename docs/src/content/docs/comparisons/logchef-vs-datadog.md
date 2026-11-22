@@ -1,5 +1,8 @@
 ---
 title: Logchef vs Datadog Log Management
+head:
+  - tag: title
+    content: "Logchef vs Datadog Log Management"
 description: "Logchef as a self-hosted, open source Datadog alternative for logs: what it replaces in Datadog Log Management, what it does not, and how billing works."
 ---
 

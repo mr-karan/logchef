@@ -208,6 +208,7 @@ func newWorld(t *testing.T) *world {
 		Admit: func(_ mcp.QueryClass, _ access.AuthorizedSource, _ string, _ context.CancelFunc) (string, func(), error) {
 			return "q-test", func() {}, nil
 		},
+		StartRead: func(context.Context, mcp.ReadCall) func(mcp.ReadResult) { return func(mcp.ReadResult) {} },
 	}
 	return w
 }

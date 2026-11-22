@@ -25,6 +25,7 @@ import { formatErrorMessage, hasShownErrorToast, isCanceledError, showErrorToast
 import type { User } from "@/types";
 import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import { usePreferencesStore } from "@/stores/preferences";
+import { formatNumber } from "@/utils/numberFormat";
 import { epochMs, formatInZone, resolveWindow, toRfc3339, type TimeWindow } from "@/utils/timeWindow";
 import { decodeWindowFromUrl, encodeWindowForUrl } from "@/utils/timeWindowCodec";
 
@@ -33,6 +34,8 @@ import { decodeWindowFromUrl, encodeWindowForUrl } from "@/utils/timeWindowCodec
 const FILTER_KEYS = ["action", "actor_id", "outcome", "target_type", "target_id", "order"] as const;
 const WINDOW_KEYS = ["t", "time", "start", "end", "start_time", "end_time"] as const;
 const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "7d" };
+// Events that read log data. Their rows show the query and its result.
+const DATA_ACTIONS = ["query.run", "log_export.create", "log_export.complete", "log_export.download"];
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -48,8 +51,10 @@ const error = ref<string | null>(null);
 const lookupError = ref<string | null>(null);
 const expanded = ref(new Set<string>());
 const users = ref<User[]>([]);
-const sourceIds = ref(new Set<number>());
-const teamIds = ref(new Set<number>());
+// Names by ID of the sources and teams that still exist. An event names its
+// source and team by ID, and only these get a link.
+const sourceNames = ref(new Map<number, string>());
+const teamNames = ref(new Map<number, string>());
 const seenActions = ref(new Set<string>());
 // The filters of the loaded pages, so Load more and Download read the same
 // range. Null while a load is pending or after it failed, so Download then
@@ -192,13 +197,13 @@ async function download() {
   }
 }
 
-function lookupIds<T extends { id: number }>(response: APIResponse<T[]>): Set<number> {
+function lookupNames<T extends { id: number; name: string }>(response: APIResponse<T[]>): Map<number, string> {
   if (!isSuccessResponse(response)) throw response;
-  return new Set((response.data ?? []).map((item) => item.id));
+  return new Map((response.data ?? []).map((item) => [item.id, item.name]));
 }
 
-// Users fill the actor filter; sources and teams decide which targets still
-// exist and so get a link.
+// Users fill the actor filter; sources and teams name the events and decide
+// which targets still exist and so get a link.
 async function loadLookups() {
   try {
     const [usersResponse, sourcesResponse, teamsResponse] = await Promise.all([
@@ -208,8 +213,8 @@ async function loadLookups() {
     ]);
     if (!isSuccessResponse(usersResponse)) throw usersResponse;
     users.value = usersResponse.data ?? [];
-    sourceIds.value = lookupIds(sourcesResponse);
-    teamIds.value = lookupIds(teamsResponse);
+    sourceNames.value = lookupNames(sourcesResponse);
+    teamNames.value = lookupNames(teamsResponse);
   } catch (err: unknown) {
     lookupError.value = formatErrorMessage(err, t("admin.auditLookupFailed"));
   }
@@ -231,18 +236,27 @@ onMounted(loadLookups);
 const { search, rows } = useTableSearchSort(events, {
   searchKeys: ["actor_label", "action", "target_label"],
 });
-const displayRows = computed(() => rows.value.map((event) => ({ event, link: targetLink(event) })));
+const displayRows = computed(() =>
+  rows.value.map((event) => ({
+    event,
+    link: targetLink(event),
+    summary: dataSummary(event),
+    changes: withoutQuery(event, event.changes),
+    detail: withoutQuery(event, event.detail),
+  })),
+);
 
 const actorItems = computed(() => [
   { value: "", label: t("admin.auditAnyActor") },
   ...users.value.map((user) => ({ value: String(user.id), label: user.email, sublabel: user.full_name })),
 ]);
 
-// Suggests every action seen so far and its resource, so typing "source."
-// selects all source events. The server owns the list of actions.
+// Suggests the data actions, every action seen so far and its resource, so
+// typing "source." selects all source events. The server owns the list of
+// actions.
 const actionSuggestions = computed(() => {
   const suggestions = new Set<string>();
-  for (const action of seenActions.value) {
+  for (const action of [...DATA_ACTIONS, ...seenActions.value]) {
     const dot = action.indexOf(".");
     if (dot > 0) suggestions.add(action.slice(0, dot + 1));
     suggestions.add(action);
@@ -260,20 +274,74 @@ function actorLabel(event: AuditEvent): string {
   return event.actor_label || event.actor_type;
 }
 
+function nameOf(names: Map<number, string>, id: number | null): string {
+  if (id === null) return "";
+  return names.get(id) ?? `#${id}`;
+}
+
 function targetLabel(event: AuditEvent): string {
-  return event.target_label || event.target_id;
+  if (event.target_label) return event.target_label;
+  const id = Number(event.target_id);
+  if (event.target_type === "source" && sourceNames.value.has(id)) return nameOf(sourceNames.value, id);
+  if (event.target_type === "team" && teamNames.value.has(id)) return nameOf(teamNames.value, id);
+  return event.target_id;
 }
 
 function targetLink(event: AuditEvent): RouteLocationRaw | null {
   const id = Number(event.target_id);
   if (!Number.isInteger(id)) return null;
-  if (event.target_type === "source" && sourceIds.value.has(id)) {
+  if (event.target_type === "source" && sourceNames.value.has(id)) {
     return { name: "EditSource", params: { sourceId: id } };
   }
-  if (event.target_type === "team" && teamIds.value.has(id)) {
+  if (event.target_type === "team" && teamNames.value.has(id)) {
     return { name: "TeamSettings", params: { id } };
   }
   return null;
+}
+
+// A create records its fields as changes and other events as detail; a data
+// event's facts can be in either.
+function recorded(event: AuditEvent, key: string): unknown {
+  if (event.detail && key in event.detail) return event.detail[key];
+  const change = event.changes?.[key];
+  return change && "to" in change ? change.to : undefined;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+interface DataSummary {
+  query: string;
+  stats: { label: string; value: string }[];
+}
+
+// The query, the time range and the result of a query or export event.
+function dataSummary(event: AuditEvent): DataSummary | null {
+  if (!DATA_ACTIONS.includes(event.action)) return null;
+  const query = recorded(event, "query");
+  const from = recorded(event, "time_from");
+  const to = recorded(event, "time_to");
+  const rows = asNumber(recorded(event, "rows_returned") ?? recorded(event, "rows_exported"));
+  const bytesRead = asNumber(recorded(event, "bytes_read"));
+  const bytesWritten = asNumber(recorded(event, "bytes_written"));
+  const size = (bytes: number | null) => (bytes === null ? "" : formatNumber(bytes, { unit: "bytes" }, { locale: locale.value }).text);
+  const duration = asNumber(recorded(event, "duration_ms"));
+  const time = (value: unknown) => (typeof value === "string" && value ? formatTime(value) : "…");
+  const stats = [
+    { label: t("admin.auditTimeRange"), value: from || to ? `${time(from)} → ${time(to)}` : "" },
+    { label: t("admin.auditRows"), value: rows === null ? "" : formatNumber(rows, {}, { locale: locale.value }).text },
+    { label: t("admin.auditBytesRead"), value: size(bytesRead) },
+    { label: t("admin.auditBytesWritten"), value: size(bytesWritten) },
+    { label: t("admin.auditDuration"), value: duration === null ? "" : formatNumber(duration, { unit: "duration_ms" }, { locale: locale.value }).text },
+  ].filter((stat) => stat.value);
+  return { query: typeof query === "string" ? query : "", stats };
+}
+
+// The changes and detail without the query that the summary already shows.
+function withoutQuery<T>(event: AuditEvent, fields: Record<string, T>): Record<string, T> {
+  if (!dataSummary(event)?.query) return fields;
+  return Object.fromEntries(Object.entries(fields).filter(([key]) => key !== "query"));
 }
 
 function historyLink(event: AuditEvent): RouteLocationRaw {
@@ -295,6 +363,8 @@ function toggleRow(id: string) {
 function eventDetails(event: AuditEvent): { label: string; value: string }[] {
   return [
     { label: t("admin.auditReason"), value: event.reason },
+    { label: t("admin.auditSource"), value: nameOf(sourceNames.value, event.source_id) },
+    { label: t("admin.auditTeam"), value: nameOf(teamNames.value, event.team_id) },
     { label: t("admin.auditRoute"), value: [event.http_method, event.route].filter(Boolean).join(" ") },
     { label: t("admin.auditStatus"), value: event.status ? String(event.status) : "" },
     { label: t("admin.auditAuthMethod"), value: event.auth_method },
@@ -427,7 +497,7 @@ const COLUMN_COUNT = 7;
               </TableRow>
             </TableHeader>
             <TableBody>
-              <template v-for="{ event, link } in displayRows" :key="event.id">
+              <template v-for="{ event, link, summary, changes, detail } in displayRows" :key="event.id">
                 <TableRow class="cursor-pointer" data-audit-row @click="toggleRow(event.id)">
                   <TableCell class="w-8 text-muted-foreground">
                     <component :is="expanded.has(event.id) ? ChevronDown : ChevronRight" class="h-4 w-4" />
@@ -459,12 +529,26 @@ const COLUMN_COUNT = 7;
                 </TableRow>
                 <TableRow v-if="expanded.has(event.id)" class="bg-muted/30 hover:bg-muted/30" data-audit-detail>
                   <TableCell :colspan="COLUMN_COUNT" class="whitespace-normal px-10 py-4">
+                    <div v-if="summary" class="mb-4 space-y-2" data-audit-query>
+                      <template v-if="summary.query">
+                        <h3 class="text-xs font-semibold uppercase text-muted-foreground">{{ t('admin.auditQuery') }}</h3>
+                        <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-background p-3 font-mono text-xs">{{ summary.query }}</pre>
+                      </template>
+                      <dl v-if="summary.stats.length" class="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                        <div v-for="stat in summary.stats" :key="stat.label" class="flex items-baseline gap-2">
+                          <dt class="text-xs text-muted-foreground">{{ stat.label }}</dt>
+                          <dd class="font-mono text-xs tabular-nums">{{ stat.value }}</dd>
+                        </div>
+                      </dl>
+                    </div>
                     <div class="grid gap-6 lg:grid-cols-2">
                       <div class="space-y-2">
-                        <h3 class="text-xs font-semibold uppercase text-muted-foreground">{{ t('admin.auditChanges') }}</h3>
-                        <p v-if="!Object.keys(event.changes ?? {}).length" class="text-sm text-muted-foreground">{{ t('admin.auditNoChanges') }}</p>
-                        <dl v-else class="space-y-1 text-sm">
-                          <div v-for="(change, field) in event.changes" :key="field" class="flex flex-wrap items-baseline gap-2">
+                        <template v-if="Object.keys(changes).length || !summary">
+                          <h3 class="text-xs font-semibold uppercase text-muted-foreground">{{ t('admin.auditChanges') }}</h3>
+                          <p v-if="!Object.keys(changes).length" class="text-sm text-muted-foreground">{{ t('admin.auditNoChanges') }}</p>
+                        </template>
+                        <dl v-if="Object.keys(changes).length" class="space-y-1 text-sm">
+                          <div v-for="(change, field) in changes" :key="field" class="flex flex-wrap items-baseline gap-2">
                             <dt class="font-mono text-xs font-medium">{{ field }}</dt>
                             <dd class="flex flex-wrap items-baseline gap-2 font-mono text-xs">
                               <span v-if="'from' in change" class="text-destructive line-through">{{ formatValue(change.from) }}</span>
@@ -473,10 +557,10 @@ const COLUMN_COUNT = 7;
                             </dd>
                           </div>
                         </dl>
-                        <template v-if="Object.keys(event.detail ?? {}).length">
+                        <template v-if="Object.keys(detail).length">
                           <h3 class="pt-2 text-xs font-semibold uppercase text-muted-foreground">{{ t('admin.auditDetail') }}</h3>
                           <dl class="space-y-1 text-sm">
-                            <div v-for="(value, key) in event.detail" :key="key" class="flex flex-wrap items-baseline gap-2">
+                            <div v-for="(value, key) in detail" :key="key" class="flex flex-wrap items-baseline gap-2">
                               <dt class="font-mono text-xs font-medium">{{ key }}</dt>
                               <dd class="font-mono text-xs">{{ formatValue(value) }}</dd>
                             </div>

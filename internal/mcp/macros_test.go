@@ -9,6 +9,22 @@ import (
 	"testing"
 )
 
+func TestHistogramToolNamesItsQueryArgument(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	_, url := newFieldBackend(t)
+	source := w.victoriaLogsSource(t, url)
+	s := w.server()
+	for _, raw := range []string{"", " \t"} {
+		result := callTool(t, s, session(w.member), "get_log_histogram", map[string]any{
+			"team_id": w.team, "source_id": source.ID, "raw_sql": raw,
+		})
+		if !result.IsError || !strings.Contains(result.text(), "raw_sql parameter is required") {
+			t.Fatalf("want an error naming raw_sql, got %q", result.text())
+		}
+	}
+}
+
 // A query copied from a panel runs through the MCP tools: the tool passes the
 // range, timezone, interval and variables, and the backend gets the rendered
 // query.

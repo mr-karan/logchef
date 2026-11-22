@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,8 +103,8 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		if err := tx.CreateExportJob(ctx, job); err != nil {
 			return err
 		}
-		auditSet(c, audit.ExportJobTarget(job, teamID), nil,
-			audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, s.exportRowLimit(req.Limit), req.RawSQL))
+		auditSet(c, audit.ExportJobTarget(job, teamID, exp.source.Name), nil,
+			audit.LogExportFields(models.QueryLanguageClickHouseSQL, format, s.exportRowLimit(req.Limit), req.RawSQL, req.StartTime, req.EndTime))
 		batch = s.audit.Batch(tx)
 		auditErr = s.addRouteEvent(ctx, c, batch, fiber.StatusAccepted)
 		return auditErr
@@ -121,15 +123,17 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	}
 	batch.Publish(ctx)
 	markAuditRecorded(c)
+	done := s.newExportCompletion(c, audit.ExportJobTarget(job, teamID, exp.source.Name))
 
 	runReq := req
 	runReq.Format = format
 	if !s.startBackgroundTask(func() {
-		s.runExportJob(queryCtx, job.ID, cancel, teamID, sourceID, user.Email, runReq)
+		s.runExportJob(queryCtx, job.ID, cancel, teamID, sourceID, user.Email, runReq, done)
 	}) {
 		cancel()
 		queryTracker.RemoveQuery(job.ID)
 		s.failExportJob(queryCtx, job.ID, "", "export cancelled")
+		s.recordExportComplete(done, context.Canceled, 0, 0)
 		return SendErrorWithType(c, fiber.StatusServiceUnavailable, "Server is shutting down", models.GeneralErrorType)
 	}
 
@@ -160,7 +164,15 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	auditTarget(c, audit.ExportJobTarget(job, src.TeamID()))
+	// The source name only labels the event, so a failed lookup does not
+	// block the download.
+	sourceName := ""
+	if source, err := s.store.GetSource(c.Context(), src.SourceID()); err != nil {
+		s.log.Warn("failed to get source name for export download event", "error", err, "source_id", src.SourceID())
+	} else {
+		sourceName = source.Name
+	}
+	auditTarget(c, audit.ExportJobTarget(job, src.TeamID(), sourceName))
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
 	}
@@ -184,7 +196,8 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 		_ = s.store.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
-	if _, err := os.Stat(job.FilePath); err != nil {
+	info, err := os.Stat(job.FilePath)
+	if err != nil {
 		s.log.Error("failed to stat export artifact", "error", err, "job_id", job.ID, "path", job.FilePath)
 		if errors.Is(err, os.ErrNotExist) {
 			_ = s.store.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
@@ -192,11 +205,52 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
 
+	// One download is one event: a Range request that resumes it records
+	// none.
+	if !servesFirstByte(c.Get(fiber.HeaderRange), info.Size()) {
+		auditNoChange(c)
+	}
+	auditDetail(c, "format", job.Format)
+	auditDetail(c, "file_name", job.FileName)
+	auditDetail(c, "rows_exported", job.RowsExported)
+	auditDetail(c, "bytes_written", job.BytesWritten)
+	auditDetail(c, "created_by", job.CreatedBy)
+
 	// Download would disable byte ranges, and Attachment appends a second charset
 	// to text/csv. Set the header directly and let SendFile pick the type.
 	c.Set(fiber.HeaderContentDisposition, mime.FormatMediaType("attachment", map[string]string{"filename": job.FileName}))
 	// Accept byte ranges so interrupted downloads of large exports can resume.
 	return c.SendFile(job.FilePath, fiber.SendFile{ByteRange: true})
+}
+
+// servesFirstByte says whether the response to a request with this Range
+// header holds the first byte of a file of size bytes. A missing or
+// unparseable header serves the whole file, and a request for several ranges
+// counts by its smallest start.
+func servesFirstByte(rangeHeader string, size int64) bool {
+	specs, ok := strings.CutPrefix(strings.TrimSpace(rangeHeader), "bytes=")
+	if !ok {
+		return true
+	}
+	for spec := range strings.SplitSeq(specs, ",") {
+		first, last, ok := strings.Cut(strings.TrimSpace(spec), "-")
+		if !ok {
+			return true
+		}
+		var start int64
+		var err error
+		if first == "" {
+			var suffix int64
+			suffix, err = strconv.ParseInt(last, 10, 64)
+			start = max(size-suffix, 0)
+		} else {
+			start, err = strconv.ParseInt(first, 10, 64)
+		}
+		if err != nil || start == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // authorizeExportJob writes the error response and returns false on failure; the caller must then return nil.
@@ -234,13 +288,26 @@ func (s *Server) authorizeExportJob(c fiber.Ctx, src access.AuthorizedSource) (*
 }
 
 // runExportJob releases its pre-admitted query slot when the pipeline exits.
-func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req models.CreateExportJobRequest) {
+// It records log_export.complete when it exits.
+func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req models.CreateExportJobRequest, done exportCompletion) {
 	defer cancel()
 	defer queryTracker.RemoveQuery(jobID)
 	var filePath string
 	var tmpFile *os.File
 	complete := false
-	defer func() { s.finishExportJob(queryCtx, jobID, tmpFile, filePath, complete, recover()) }()
+	var (
+		runErr error // the query error, when the query failed
+		rows   int
+		size   int64
+	)
+	defer func() {
+		s.finishExportJob(queryCtx, jobID, tmpFile, filePath, complete, recover())
+		var err error
+		if !complete {
+			err = cmp.Or(runErr, queryCtx.Err(), errExportIncomplete)
+		}
+		s.recordExportComplete(done, err, rows, size)
+	}()
 	runningCtx, runningCancel := context.WithTimeout(queryCtx, time.Second)
 	err := s.store.UpdateExportJobRunning(runningCtx, jobID)
 	runningCancel()
@@ -256,6 +323,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	}
 	processedSQL, err := core.RenderSourceSQL(source, req)
 	if err != nil {
+		runErr = &core.QueryRequestError{Message: err.Error()}
 		s.failExportJob(queryCtx, jobID, "", err.Error())
 		return
 	}
@@ -271,6 +339,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	qb := client.QueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
 	if err != nil {
+		runErr = &core.QueryRequestError{Message: err.Error()}
 		s.failExportJob(queryCtx, jobID, "", fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
@@ -295,6 +364,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 			level = slog.LevelDebug
 		}
 		s.log.Log(queryCtx, level, "failed to execute export job", "error", err, "source_id", sourceID, "job_id", jobID)
+		runErr = err
 		_ = tmpFile.Close()
 		s.failExportJob(queryCtx, jobID, filePath, exportFailureMessage(err))
 		return
@@ -328,7 +398,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 		return
 	}
 
-	complete = true
+	complete, rows, size = true, stats.RowsReturned, info.Size()
 	s.log.Info("query.export.job.complete",
 		"user", userEmail,
 		"team_id", teamID,

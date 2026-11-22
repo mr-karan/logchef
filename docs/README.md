@@ -49,17 +49,17 @@ Welcome to the Logchef documentation! This guide will help you understand, insta
 
 This documentation is built using [Starlight](https://starlight.astro.build), a documentation framework powered by Astro.
 
-To run the documentation locally:
+Run these commands from the `docs` directory with Bun and the Go version in `go.mod`. The dev server and production build compile the LogchefQL Playground and its examples.
 
 ```bash
 # Install dependencies
-npm install
+bun install --frozen-lockfile
 
 # Start the development server
-npm run dev
+bun run dev
 
 # Build the documentation
-npm run build
+bun run build
 ```
 
 The development server will start at `localhost:4321`.

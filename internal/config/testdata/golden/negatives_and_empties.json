@@ -156,7 +156,7 @@
     "ProvisioningToken": ""
   },
   "Audit": {
-    "RetentionDays": 365,
+    "RetentionDays": 30,
     "MaxRows": 1000000,
     "LogEvents": true
   },

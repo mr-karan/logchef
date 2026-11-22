@@ -86,7 +86,7 @@ func newAggregationTestServer(t *testing.T, provider datasource.Provider, source
 	s.config.DashboardCache.MaxConcurrentFills = 1
 	s.dashCache = cache.New(cache.Config{Enabled: true, MaxEntryBytes: 4096, MaxBytes: 16384})
 	t.Cleanup(s.dashCache.Close)
-	s.historyQueue = make(chan *models.QueryHistory, 16)
+	s.queryRecords = make(chan queryRecord, 16)
 	s.datasources = datasource.NewService(s.store, s.log)
 	s.datasources.Register(provider)
 	source := &models.Source{Name: "aggregation-" + string(sourceType), SourceType: sourceType, MetaTSField: "_time"}

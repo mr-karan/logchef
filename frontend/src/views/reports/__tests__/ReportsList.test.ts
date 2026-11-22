@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   },
   savedQueries: { list: vi.fn() },
   dashboards: { list: vi.fn(), get: vi.fn() },
+  meta: { demoReadOnly: false },
 }));
 
 vi.mock("@/api/reports", async (importOriginal) => {
@@ -26,6 +27,7 @@ vi.mock("@/api/dashboards", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/dashboards")>();
   return { ...actual, dashboardsApi: mocks.dashboards };
 });
+vi.mock("@/stores/meta", () => ({ useMetaStore: () => mocks.meta }));
 vi.mock("@/stores/auth", () => ({ useAuthStore: () => ({ user: { id: "1", role: "member", full_name: "Owner", email: "owner@example.com" } }) }));
 
 import ReportsList from "../ReportsList.vue";
@@ -92,6 +94,7 @@ describe("ReportsList", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.meta.demoReadOnly = false;
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     mocks.savedQueries.list.mockResolvedValue({ status: "success", data: [savedQuery] });
     mocks.reports.create.mockImplementation(async (input: ReportInput) => ({ status: "success", data: report(input) }));
@@ -250,6 +253,23 @@ describe("ReportsList", () => {
     button(i18n.global.t("ui.save")).click();
     await settle();
     expect(mocks.reports.update.mock.calls.map((c) => [c[0], (c[1] as ReportInput).name])).toEqual([[1, "A changed"], [2, "B edited"]]);
+  });
+
+  it("opens a report read-only on a read-only demo, with no button that writes or sends", async () => {
+    mocks.meta.demoReadOnly = true;
+    const base = { source: { kind: "saved_query" as const, saved_query_id: 5 }, schedule: { frequency: "daily" as const, hour: 9, minute: 0 }, timezone: "UTC", time_range: "24h", range_anchor: "send_time" as const, variables: {}, max_rows: 25, skip_if_empty: false, attach_csv: false };
+    await mount("/reports", [report({ ...base, name: "Daily 5xx" }, 1)]);
+    host.querySelector<HTMLButtonElement>(`[data-report-id="1"] button[aria-label="${i18n.global.t("ui.edit")}"]`)!.click();
+    await settle();
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>("#report-name")!.value).toBe("Daily 5xx"));
+
+    expect(button(i18n.global.t("ui.readOnlyDemo")).disabled).toBe(true);
+    expect(document.querySelector("#report-name")!.closest("fieldset")!.disabled).toBe(true);
+    const labels = [...document.querySelectorAll("button")].map((b) => b.textContent?.trim());
+    for (const label of ["reports.preview", "reports.sendTest", "ui.save"]) expect(labels).not.toContain(i18n.global.t(label));
+    button(i18n.global.t("reports.history")).click();
+    await settle();
+    expect(mocks.reports.runs).toHaveBeenCalled();
   });
 
   it("shows each report's next run, soonest first when sorted", async () => {
