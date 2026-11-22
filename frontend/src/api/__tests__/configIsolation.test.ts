@@ -21,9 +21,9 @@ describe('API dependency direction', () => {
     const { expireSession } = await import('../session')
     const handler = vi.fn().mockResolvedValue({ status: 'error', message: 'expired' })
     setUnauthorizedHandler(handler)
-    const result = expireSession({ toast: true })
+    const result = expireSession({ announce: true })
     expect(result).toBeUndefined()
-    expect(handler).toHaveBeenCalledExactlyOnceWith({ toast: true })
+    expect(handler).toHaveBeenCalledExactlyOnceWith({ announce: true })
   })
 
   it('imports and dispatches a 401 without loading the auth store or router', async () => {
@@ -35,7 +35,7 @@ describe('API dependency direction', () => {
     api.defaults.adapter = async () => { throw { response: { status: 401 }, config: { url: '/teams' } } }
     try {
       await expect(api.get('/teams')).rejects.toEqual(sessionError)
-      expect(handler).toHaveBeenCalledWith({ toast: true })
+      expect(handler).toHaveBeenCalledWith({ announce: true })
     } finally {
       api.defaults.adapter = originalAdapter
     }

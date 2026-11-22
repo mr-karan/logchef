@@ -42,6 +42,16 @@ describe('login error messages', () => {
     expect(await renderLogin('')).not.toContain('Authentication Error')
   })
 
+  it('says the session ended when the app sent the user here for that', async () => {
+    const html = await renderLogin('?redirect=/logs/explore&session_ended=1')
+    expect(html).toContain('Your session ended. Sign in again.')
+    expect(html).not.toContain('Authentication Error')
+  })
+
+  it('says nothing about a session on a first visit', async () => {
+    expect(await renderLogin('?redirect=/logs/explore')).not.toContain('Your session ended')
+  })
+
   it('uses the generic message for repeated error parameters', async () => {
     expect(await renderLogin('?error=unauthorized&error=user_inactive'))
       .toContain('An unexpected error occurred')
@@ -84,8 +94,45 @@ describe('SSO auto-redirect', () => {
     ['SSO is disabled', '', { oidc: false, local: true }],
     ['the callback failed', '?error=access_denied', { oidc: true, local: false }],
     ['the user just logged out', '?logged_out=1', { oidc: true, local: false }],
+    ['the session ended', '?session_ended=1', { oidc: true, local: false }],
   ])('shows the page when %s', async (_case, query, auth) => {
     const startLogin = await mountLogin(query, auth)
     expect(startLogin).not.toHaveBeenCalled()
+  })
+})
+
+describe('signing in again after the session ended', () => {
+  it('returns to the page the user was on', async () => {
+    vi.mocked(metaApi.getMeta).mockResolvedValue({
+      status: 'success',
+      data: { version: 'test', oidc_enabled: false, local_auth_enabled: true },
+    } as never)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/auth/login', name: 'Login', component: Login },
+        { path: '/:pathMatch(.*)*', component: { render: () => null } },
+      ],
+    })
+    await router.push('/auth/login?redirect=%2Fsettings%2Fprofile%3Ftab%3Dtokens&session_ended=1')
+    const pinia = createPinia()
+    const app = createApp(Login).use(pinia).use(router).use(i18n)
+    vi.spyOn(useAuthStore(pinia), 'localLogin').mockResolvedValue({ success: true } as never)
+    const root = document.createElement('div')
+    app.mount(root)
+    try {
+      await vi.waitFor(() => expect(root.querySelector('form')).not.toBeNull())
+      const email = root.querySelector<HTMLInputElement>('#login-email')!
+      const password = root.querySelector<HTMLInputElement>('#login-password')!
+      email.value = 'user@example.com'
+      email.dispatchEvent(new Event('input'))
+      password.value = 'secret'
+      password.dispatchEvent(new Event('input'))
+      await nextTick()
+      root.querySelector('form')!.dispatchEvent(new Event('submit'))
+      await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/settings/profile?tab=tokens'))
+    } finally {
+      app.unmount()
+    }
   })
 })
