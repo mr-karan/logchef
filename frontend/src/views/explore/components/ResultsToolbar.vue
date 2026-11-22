@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { ChevronUp, ChevronDown, Rows4, TerminalSquare, Download, Braces, Zap } from 'lucide-vue-next'
 import { useExploreRuns } from '@/stores/exploreRuns'
+import { getNativeQueryLanguageForSource } from '@/lib/queryMetadata'
 import { truncationMessage } from '@/utils/truncation'
 import GroupBySelector from './GroupBySelector.vue'
 import StreamPicker from './StreamPicker.vue'
@@ -55,6 +56,13 @@ const runs = useExploreRuns()
 
 const queryStats = computed(() => runs.results?.stats)
 const isHistogramEligible = computed(() => runs.isHistogramEligible)
+const isMetricResult = computed(() => {
+  const run = runs.shown
+  if (run?.query.mode !== 'native' || getNativeQueryLanguageForSource(run.source) !== 'logql') return false
+  // Loki's metric frame starts with value and time. Its log frame starts with _time and _msg.
+  const columns = run.results?.columns
+  return columns?.[0]?.name === 'value' && columns[1]?.name === 'time'
+})
 
 const formattedQueryTime = computed(() => {
   const executionTimeMs = queryStats.value?.execution_time_ms
@@ -97,7 +105,7 @@ const warningText = computed(() => {
       <div class="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-muted-foreground">
         <span v-if="isLoading" class='animate-pulse'>{{ t('ui.loading') }}</span>
         <template v-else>
-          <span v-if="aggregated" class="font-medium text-foreground">{{ t('explore.rowCount', { count: logsCount.toLocaleString() }, logsCount) }}</span>
+          <span v-if="aggregated || isMetricResult" class="font-medium text-foreground">{{ t('explore.rowCount', { count: logsCount.toLocaleString() }, logsCount) }}</span>
           <template v-else>
             <span class="font-medium text-foreground">{{ logsCount.toLocaleString() }}</span>
             <span>{{ t('ui.logs') }}</span>
