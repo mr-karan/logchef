@@ -2,7 +2,7 @@ import { createApp, h, nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import type { QueryStats } from "@/api/explore";
+import type { ColumnInfo, QueryStats } from "@/api/explore";
 import type { WindowedEvent, WindowedRequest } from "@/api/windowed";
 import { createWindowedSession } from "@/stores/exploreWindowed";
 import ResultsToolbar from "../ResultsToolbar.vue";
@@ -16,8 +16,16 @@ vi.mock("@/api/windowed", async (importOriginal) => ({
 }));
 
 let stats: QueryStats | null = null;
+let nativeColumns: ColumnInfo[] | null = null;
 vi.mock("@/stores/exploreRuns", () => ({
   useExploreRuns: () => ({
+    get shown() {
+      return nativeColumns && {
+        source: { source_type: "loki" },
+        query: { mode: "native" },
+        results: { columns: nativeColumns },
+      };
+    },
     get results() {
       return stats ? { rows: [], columns: [], stats, warnings: [], sql: "", compilation: null } : null;
     },
@@ -32,6 +40,7 @@ afterEach(() => {
   unmount?.();
   unmount = null;
   stats = null;
+  nativeColumns = null;
   document.body.innerHTML = "";
 });
 
@@ -54,6 +63,24 @@ async function mount(props: Record<string, unknown>) {
   await nextTick();
   return { host, added };
 }
+
+it("calls native Loki metric samples rows", async () => {
+  nativeColumns = [{ name: "value", type: "String" }, { name: "time", type: "DateTime" }];
+  const { host } = await mount({ logsCount: 2 });
+
+  expect(host.textContent).toContain("2 rows");
+});
+
+it("keeps the log count for a Loki stream with time and value labels", async () => {
+  nativeColumns = [
+    { name: "_time", type: "DateTime" }, { name: "_msg", type: "String" },
+    { name: "time", type: "String" }, { name: "value", type: "String" },
+  ];
+  const { host } = await mount({ logsCount: 2 });
+
+  expect(host.textContent).not.toContain("2 rows");
+  expect(host.textContent).toContain("logs");
+});
 
 it("offers each unfiltered sort key as a one-click filter", async () => {
   const { host, added } = await mount({ fastFilterFields: ["namespace", "job_name"], canAddFastFilter: true });
