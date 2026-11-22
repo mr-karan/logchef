@@ -57,7 +57,7 @@ export async function streamSSE(
     if (!response.ok) {
       const apiError = await readAPIError(response, request.label);
       if (signal.aborted) return "aborted";
-      if (response.status === 401) expireSession({ toast: true });
+      if (response.status === 401) expireSession({ announce: true });
       throw new StreamHTTPError(response.status, apiError);
     }
     if (!response.body) throw new Error(`${request.label} returned no stream`);

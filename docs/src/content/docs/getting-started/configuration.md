@@ -340,6 +340,8 @@ api_token_secret = "your-secret-key-minimum-32-characters-long"
 
 **Note:** Session duration, concurrent session limits, and default token expiry are managed via the Admin Settings UI under Authentication settings.
 
+The concurrent session limit (`auth.max_concurrent_sessions`) defaults to 1, so signing in on a second browser or device ends the first session. The browser whose session ended returns to the sign-in page with the message "Your session ended. Sign in again." and, after signing in, goes back to the page it was on.
+
 ## Logging
 
 Configure application logging:
