@@ -328,3 +328,5 @@ In SQL mode, your query executes exactly as written. Time range and limit contro
 - See [Query Examples](/guide/examples) for LogchefQL patterns applied to real scenarios
 - Review the [Query Interface](/user-guide/query-interface) for time controls and result views
 - Try the [Field Values Sidebar](/features/field-sidebar) to build filters without typing
+
+[Try this syntax in the LogchefQL Playground](/playground/) to compare the output for all three backends.

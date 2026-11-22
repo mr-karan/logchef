@@ -260,3 +260,5 @@ whole tenant.
 - [Search Syntax](/guide/search-syntax) for the full LogchefQL reference
 - [Alerting](/features/alerting) to evaluate a LogQL metric query on a schedule
 - [Dashboards](/features/dashboards) for LogQL panels
+
+Use the [LogchefQL Playground](/playground/) to see how a LogchefQL filter becomes a Loki stream selector and pipeline.

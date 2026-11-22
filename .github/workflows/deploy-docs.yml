@@ -6,6 +6,13 @@ on:
     branches: ["main"]
     paths:
       - "docs/**"
+      - "cmd/logchefql-wasm/**"
+      - "internal/logchefql/**"
+      - "internal/queryescape/**"
+      - "internal/template/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/deploy-docs.yml"
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -32,6 +39,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:

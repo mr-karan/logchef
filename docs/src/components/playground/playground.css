@@ -1,0 +1,52 @@
+.playground {
+  width: min(1200px, 100%); margin: auto; padding: 7.2rem clamp(1rem,4vw,3rem) 5rem;
+}
+.playground header { margin-bottom: 2rem; }
+.playground header a, .playground small, .playground label { font: 500 .83rem var(--font-mono); }
+.playground h1 { font-size: clamp(2.2rem,5vw,4rem); line-height: 1.1; letter-spacing: -.06em; margin: .7rem 0; }
+.playground header p { color: var(--color-text-secondary); font-size: clamp(1rem,2vw,1.2rem); }
+.playground .editor, .playground .engine { background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: .8rem; overflow: hidden; }
+.playground .editor { border-top: 3px solid var(--color-accent); }
+.playground .bar, .playground .foot { display: flex; gap: .8rem; justify-content: space-between; align-items: center; }
+.playground .bar { padding: .85rem 1rem; }
+.playground button { background: var(--color-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border-strong); border-radius: .4rem; font: 500 .78rem var(--font-sans); padding: .4rem .65rem; cursor: pointer; }
+.playground button:hover, .playground button[aria-pressed=true] { color: var(--color-accent-soft); border-color: var(--color-accent); }
+.playground button:disabled { cursor: default; }
+.playground .input-wrap { position: relative; background: var(--color-bg); border-block: 1px solid var(--color-border); }
+.playground #highlight, .playground textarea {
+  box-sizing: border-box; display: block; margin: 0; padding: 1rem; width: 100%; height: 6rem; border: none;
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; font: 400 1.05rem/1.6 var(--font-mono); letter-spacing: normal;
+}
+.playground textarea { position: relative; background: transparent; resize: none; color: var(--color-text); caret-color: var(--color-text); }
+.playground #highlight { position: absolute; inset: 0; pointer-events: none; }
+.playground .enhanced textarea { color: transparent; }
+.playground .literal { color: var(--color-accent-soft); }
+.playground .keyword { color: var(--color-purple); }
+.playground .chips { display: flex; flex-wrap: wrap; gap: .4rem; padding: .8rem 1rem; }
+.playground .wires { height: 2.25rem; position: relative; margin: 0 calc((100% - 2rem)/6); }
+.playground .wires::before { content: ''; position: absolute; inset: 50% 0 0; border: 1px solid var(--color-border-strong); border-bottom: 0; border-radius: .45rem .45rem 0 0; }
+.playground .wires i { display: block; height: 100%; border-left: 1px solid var(--color-border-strong); margin-left: 50%; }
+.playground .outputs { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; }
+.playground .engine { --signal: #eab308; }
+.playground [data-engine=victorialogs] { --signal: #22b482; }
+.playground [data-engine=loki] { --signal: #ec8845; }
+.playground .engine .bar { border-bottom: 1px solid var(--color-border); }
+.playground small { display: flex; gap: .45rem; align-items: center; color: var(--color-text-secondary); }
+.playground small::before { content: ''; width: .55rem; height: .55rem; background: var(--signal); border-radius: 50%; }
+.playground h2 { font-size: 1.15rem; margin: .2rem 0 0; }
+.playground .engine pre, .playground details pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; margin: 0; font: .83rem/1.65 var(--font-mono); }
+.playground .engine[data-error] pre { color: var(--color-text-secondary); }
+.playground .foot { padding: 1rem 0 1.8rem; font-size: .85rem; flex-wrap: wrap; }
+.playground #status { color: var(--color-text-secondary); }
+.playground details { border-top: 1px solid var(--color-border); padding: 1rem 0; }
+.playground summary { cursor: pointer; font-weight: 550; }
+.playground details p { max-width: 75ch; margin: 1rem 0; }
+@media (max-width: 780px) {
+  .playground { padding-top: 5.5rem; }
+  .playground .outputs { grid-template-columns: 1fr; }
+  .playground .wires { height: 1rem; }
+  .playground .wires::before { display: none; }
+}
+@media (forced-colors: active) {
+  .playground .enhanced textarea { color: CanvasText; background: Canvas; }
+}

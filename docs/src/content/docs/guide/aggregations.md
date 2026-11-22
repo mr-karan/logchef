@@ -338,3 +338,5 @@ limit are checked when the query compiles.
 - [Search Syntax](/guide/search-syntax): the filter part of a query
 - [Dashboards](/features/dashboards#chart-a-logchefql-aggregation): chart an aggregation in a panel
 - [Logchef CLI](/integration/cli#aggregate-with-logchefql): aggregate from the terminal
+
+[Try this syntax in the LogchefQL Playground](/playground/) to compare the output for all three backends.

@@ -367,3 +367,7 @@ build-docker-arm:
 #     tmux split-window -v 'just run-backend; exec bash'
 #     tmux select-pane -t 0
 #     tmux -2 attach-session -d -t logchef-dev
+
+# Build the browser compiler and precompile examples for the docs site.
+build-playground:
+    bash docs/scripts/build-playground.sh
