@@ -318,13 +318,11 @@ const handleClearColumnFilter = (column: string) => {
   nav.run();
 };
 
-// Projects a nested field as an extra column; top-level columns are shown by the table itself.
+// Projects a nested field as an extra column and runs the query; top-level columns are shown by the table itself.
 const handleAddColumn = (data: { field: string; shownColumns: string[] }) => {
   if (activeMode.value !== "logchefql") return;
   logchefQuery.value = addSelectField(logchefQuery.value ?? "", data.field, data.shownColumns);
-  nextTick(() => {
-    queryEditorRef.value?.focus(true);
-  });
+  nav.run();
 };
 
 // Event Handlers for QueryEditor
