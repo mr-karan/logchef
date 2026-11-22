@@ -180,6 +180,27 @@ export function suggestKind(values: unknown[]): ColumnKind {
 
 const timeFormats = new Map<string, Intl.DateTimeFormat>();
 
+// The fraction digits of a time cell: n for a DateTime64(n) column, as the
+// Explorer shows, and milliseconds for any other, so Loki's nanoseconds line
+// up with VictoriaLogs' milliseconds. An untyped column always shows them,
+// because VictoriaLogs drops trailing zeros and a whole second has none.
+function timeFraction(value: string, backendType: string | null): string {
+  const fraction = value.match(/\.(\d+)/)?.[1] ?? "";
+  if (!fraction && backendType !== null) return "";
+  const declared = backendType?.match(/DateTime64\(\s*(\d)/)?.[1];
+  const precision = declared === undefined ? 3 : Number(declared);
+  return fraction.padEnd(precision, "0").slice(0, precision);
+}
+
+// Times for the untyped columns of a LogsQL or LogQL result whose values are
+// all timestamps, which the Explorer and the chart builder detect the same way.
+export function guessedTimeKinds(frame: PanelFrame): Record<string, ConfirmedColumn> {
+  const sample = frame.rawRows.slice(0, 100);
+  return Object.fromEntries(frame.columns
+    .filter((c) => c.backendType === null && suggestKind(sample.map((r) => r[c.name])) === "time")
+    .map((c) => [c.name, { kind: "time", confidence: "confirmed" }]));
+}
+
 export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"): string {
   if (value === null || value === undefined) return "";
   if (isExact(value)) {
@@ -194,7 +215,7 @@ export function frameCellText(value: unknown, column?: FrameColumn, zone = "UTC"
       timeFormats.set(zone, formatter);
     }
     const parts = new Map(formatter.formatToParts(new Date(value)).map((p) => [p.type, p.value]));
-    const fraction = value.match(/\.(\d+)/)?.[1];
+    const fraction = timeFraction(value, column.backendType);
     return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")} ${parts.get("hour")}:${parts.get("minute")}:${parts.get("second")}${fraction ? "." + fraction : ""}`;
   }
   if (typeof value === "object") return JSON.stringify(value);
