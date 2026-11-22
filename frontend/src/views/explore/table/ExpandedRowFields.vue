@@ -74,7 +74,7 @@ function canFilterField(field: string): boolean {
       :key="item.field"
       data-field-row
       role="listitem"
-      class="group/field grid grid-cols-[minmax(10rem,18rem)_1fr_auto] items-start gap-3 rounded px-2 py-0.5 hover:bg-muted/50"
+      class="group/field grid grid-cols-[minmax(6rem,min(18rem,30%))_1fr_auto] items-start gap-3 rounded px-2 py-0.5 hover:bg-muted/50"
     >
       <span
         class="truncate text-sky-700 dark:text-sky-400"

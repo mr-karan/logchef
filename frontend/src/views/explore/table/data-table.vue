@@ -789,8 +789,11 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
 
                                 <tr v-if="row.getIsExpanded()" class="expanded-json-row">
                                     <td :colspan="visibleLeafColumns.length + 1" class="p-0">
-                                        <div class="p-3 bg-muted/30 border-y border-y-primary/40">
-                                            <div class="flex items-center justify-between mb-2 gap-2">
+                                        <!-- The cell spans the whole table, which a long column makes wider
+                                             than the viewport: pin the panel to the visible width. -->
+                                        <div class="sticky left-0 p-3 bg-muted/30 border-y border-y-primary/40"
+                                            :style="viewportWidth ? { width: `${viewportWidth}px` } : undefined">
+                                            <div class="flex flex-wrap items-center justify-between mb-2 gap-2">
                                                 <!-- Collapse hint -->
                                                 <button 
                                                     class="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
@@ -870,8 +873,9 @@ const wrapLines = useLocalStorage('logchef.explore.wrapLines', false)
     border: 1px solid hsl(var(--border) / 0.7);
     /* Add subtle outer border */
     border-radius: 6px;
-    overflow: hidden;
-    /* Keep rounded corners */
+    /* Clip to the rounded corners. Unlike hidden, clip makes no scroll
+       container, so sticky content sticks to the scrolling wrapper. */
+    overflow: clip;
 }
 
 /* Add proper cell borders */
