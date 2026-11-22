@@ -8,7 +8,7 @@ import { metaApi } from "@/api/meta";
 import { sourcesApi, type Source } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
 import { exploreApi } from "@/api/explore";
-import { savedViewsApi } from "@/api/savedViews";
+import { savedViewsApi, type SavedView, type SavedViewList } from "@/api/savedViews";
 import { useAuthStore } from "@/stores/auth";
 import { useExploreRuns } from "@/stores/exploreRuns";
 import { contextRouterGuard } from "@/router/contextGuard";
@@ -37,13 +37,15 @@ const source: Source = {
   columns: [{ name: "timestamp", type: "DateTime64(3)" }, { name: "host", type: "Int64" }],
 };
 const logs = {
-  logs: [{ timestamp: "2026-11-22 11:09:23.182", host: 2 }],
+  logs: [{ timestamp: "2026-11-22 11:09:23.182", host: 2 }, { timestamp: "2026-11-22 11:08:41.182", host: 1 }],
   columns: [{ name: "timestamp", type: "DateTime64(3)" }, { name: "host", type: "Int64" }],
   stats: { execution_time_ms: 1, rows_read: 1, bytes_read: 0 },
   generated_sql: "SELECT 1",
 };
 
-describe("LogExplorer filters", () => {
+const noViews: SavedViewList = { views: [], default_view_id: null };
+
+describe("LogExplorer", () => {
   let unmount: (() => void) | undefined;
 
   afterEach(() => {
@@ -54,7 +56,7 @@ describe("LogExplorer filters", () => {
     document.body.innerHTML = "";
   });
 
-  async function mountExplorer(q: string) {
+  async function mountExplorer(location: Record<string, string>, views = noViews) {
     vi.spyOn(teamsApi, "getTeam").mockImplementation(id => ok({ ...team, id, created_by: "1" }));
     vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team]) as never);
     vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source]) as never);
@@ -63,7 +65,7 @@ describe("LogExplorer filters", () => {
       status: "success",
       data: { field_name: fieldName, field_type: fieldType, is_low_cardinality: true, values: [{ value: "1", count: 4 }, { value: "2", count: 3 }], total_distinct: 2 },
     }));
-    vi.spyOn(savedViewsApi, "list").mockReturnValue(ok({ views: [], default_view_id: null }) as never);
+    vi.spyOn(savedViewsApi, "list").mockReturnValue(ok(views) as never);
     const query = vi.spyOn(logchefqlApi, "query").mockImplementation(() => ok(logs) as never);
     vi.spyOn(logchefqlApi, "validate").mockReturnValue(ok({ valid: true }) as never);
     vi.spyOn(exploreApi, "getHistogramData").mockReturnValue(ok({ data: [], granularity: "1m" }) as never);
@@ -78,7 +80,7 @@ describe("LogExplorer filters", () => {
     await useAuthStore().initialize();
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/logs/explore", name: "LogExplorer", component: LogExplorer }] });
     router.beforeEach(contextRouterGuard);
-    await router.push({ path: "/logs/explore", query: { team: "1", source: "3", q, t: "7d" } });
+    await router.push({ path: "/logs/explore", query: { team: "1", source: "3", ...location } });
     const host = document.createElement("div");
     document.body.appendChild(host);
     const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router).use(i18n);
@@ -107,19 +109,19 @@ describe("LogExplorer filters", () => {
   }
 
   it("runs the query when a sidebar value is included", async () => {
-    const { host, query, router } = await mountExplorer("status=500");
+    const { host, query, router } = await mountExplorer({ q: "status=500", t: "7d" });
     (await sidebarValue(host, "include")).click();
     await expectRun(query, router, "status=500 and host=2");
   });
 
   it("runs the query when a sidebar value is excluded", async () => {
-    const { host, query, router } = await mountExplorer("status=500");
+    const { host, query, router } = await mountExplorer({ q: "status=500", t: "7d" });
     (await sidebarValue(host, "exclude")).click();
     await expectRun(query, router, "status=500 and host!=2");
   });
 
   it("runs the query when a value in an expanded row is filtered", async () => {
-    const { host, query, router } = await mountExplorer("status=500");
+    const { host, query, router } = await mountExplorer({ q: "status=500", t: "7d" });
     host.querySelector<HTMLTableRowElement>("tbody tr")?.click();
     await vi.waitFor(() => expect(host.querySelector("[data-field-row]")).not.toBeNull());
     const row = [...host.querySelectorAll<HTMLElement>("[data-field-row]")].find(element => element.querySelector("span")?.textContent === "host");
@@ -127,5 +129,65 @@ describe("LogExplorer filters", () => {
     if (!filter) throw new Error("Missing expanded row filter button");
     filter.click();
     await expectRun(query, router, "status=500 and host=2");
+  });
+  // A view made from the layout with no view: that layout hides host too.
+  const hostlessView: SavedView = {
+    id: 12, source_id: 3, scope: "personal", name: "errors", description: "",
+    definition: { version: 1, columns: [{ name: "timestamp", width: 300 }], sort: [{ column: "host", desc: false }], filter: "status=500", time_range: "3d" },
+    is_default: false, managed: false, revision: 1, created_at: "", updated_at: "", can_edit: true, can_set_default: true,
+  };
+
+  function storeHostlessLayout() {
+    localStorage.setItem("logchef-tableState-1-3", JSON.stringify({
+      columnOrder: ["timestamp", "host"], orderSource: "explicit", columnClasses: {}, columnSizing: { timestamp: 300 },
+      columnVisibility: { timestamp: true, host: false }, visibilityVersion: 2, sizingVersion: 1,
+    }));
+  }
+
+  async function chooseNoView(host: HTMLElement) {
+    const trigger = host.querySelector<HTMLElement>("[data-testid=view-picker]");
+    if (!trigger) throw new Error("Missing view picker");
+    trigger.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }));
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(document.body.querySelector("[role=menuitem]")).not.toBeNull());
+    const noView = [...document.body.querySelectorAll<HTMLElement>("[role=menuitem]")].find(item => item.textContent?.trim() === "No view");
+    if (!noView) throw new Error("Missing No view item");
+    noView.click();
+  }
+
+  const headers = (host: HTMLElement) => [...host.querySelectorAll("thead th")].map(th => th.textContent?.trim()).filter(Boolean);
+  const width = (host: HTMLElement, column: string) => [...host.querySelectorAll<HTMLElement>("thead th")].find(th => th.textContent?.trim() === column)?.style.width;
+  const hostColumn = (host: HTMLElement) => [...host.querySelectorAll("tbody tr")].map(tr => tr.textContent).join("|");
+
+  it("returns to the default layout and drops the view's filter and range on No view", async () => {
+    storeHostlessLayout();
+    const { host, query, router } = await mountExplorer({ view: "12" }, { views: [hostlessView], default_view_id: null });
+    expect(lastQuery(query)).toBe("status=500");
+    expect(router.currentRoute.value.query).toMatchObject({ view: "12", q: "status=500", t: "3d" });
+    expect(headers(host)).toEqual(["timestamp"]);
+    expect(width(host, "timestamp")).toBe("300px");
+
+    await chooseNoView(host);
+
+    await expectRun(query, router, "");
+    expect(router.currentRoute.value.query.view).toBeUndefined();
+    expect(router.currentRoute.value.query.t).toBe("15m");
+    await vi.waitFor(() => expect(headers(host)).toEqual(["timestamp", "host"]));
+    expect(width(host, "timestamp")).not.toBe("300px");
+    // Newest first, not the view's host order.
+    expect(hostColumn(host).indexOf("11:09:23")).toBeLessThan(hostColumn(host).indexOf("11:08:41"));
+  });
+
+  it("keeps an edited query on No view", async () => {
+    const { host, query, router } = await mountExplorer({ view: "12" }, { views: [hostlessView], default_view_id: null });
+    (await sidebarValue(host, "include")).click();
+    await expectRun(query, router, "status=500 and host=2");
+    const runs = query.mock.calls.length;
+
+    await chooseNoView(host);
+
+    await vi.waitFor(() => expect(router.currentRoute.value.query.view).toBeUndefined());
+    expect(router.currentRoute.value.query).toMatchObject({ q: "status=500 and host=2", t: "3d" });
+    expect(query.mock.calls.length).toBe(runs);
   });
 });
