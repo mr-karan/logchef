@@ -387,6 +387,9 @@ before you upgrade.
   or metric result: a LogQL `sum by (app) (count_over_time(...))` showed only
   `app`, without `time` and `value`. ClickHouse `GROUP BY`, LogsQL `stats`
   and LogchefQL aggregation results now show all their columns.
+- A native alert rule with **Group by** set asks for one row per group with
+  the Group by columns and a numeric value, instead of a single numeric
+  value.
 
 ### Security
 

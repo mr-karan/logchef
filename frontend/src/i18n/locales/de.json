@@ -718,6 +718,7 @@
   "time.searchRanges": "Schnellauswahl durchsuchen",
   "time.noRanges": "Keine passenden Zeiträume",
   "alerts.nativeQueryHint": "Eine {language}-Abfrage schreiben, die einen einzelnen Zahlenwert liefert.",
+  "alerts.nativeQueryHintGrouped": "Eine {language}-Abfrage schreiben, die je Gruppe eine Zeile liefert: die Spalten aus „Gruppieren nach“ und einen Zahlenwert.",
   "alerts.aggregateCount": "Passende Logs zählen",
   "alerts.aggregateSum": "Summe eines Feldes",
   "alerts.aggregateAverage": "Mittelwert eines Feldes",

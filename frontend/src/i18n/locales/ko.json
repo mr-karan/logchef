@@ -718,6 +718,7 @@
   "time.searchRanges": "빠른 범위 검색",
   "time.noRanges": "일치하는 범위 없음",
   "alerts.nativeQueryHint": "단일 숫자 값을 반환하는 {language} 쿼리를 작성하세요.",
+  "alerts.nativeQueryHintGrouped": "그룹마다 한 행을 반환하는 {language} 쿼리를 작성하세요. 각 행에는 그룹화 기준 열과 숫자 값이 있어야 합니다.",
   "alerts.aggregateCount": "일치하는 로그 수",
   "alerts.aggregateSum": "필드 합계",
   "alerts.aggregateAverage": "필드 평균",

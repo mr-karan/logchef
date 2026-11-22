@@ -718,6 +718,7 @@
   "time.searchRanges": "Buscar intervalos rápidos",
   "time.noRanges": "No hay intervalos coincidentes",
   "alerts.nativeQueryHint": "Escribe una consulta {language} que devuelva un único valor numérico.",
+  "alerts.nativeQueryHintGrouped": "Escribe una consulta {language} que devuelva una fila por grupo: las columnas de Agrupar por y un valor numérico.",
   "alerts.aggregateCount": "Contar registros coincidentes",
   "alerts.aggregateSum": "Suma de un campo",
   "alerts.aggregateAverage": "Promedio de un campo",

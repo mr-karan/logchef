@@ -716,6 +716,7 @@
   "time.searchRanges": "搜索快捷时间范围",
   "time.noRanges": "没有匹配的时间范围",
   "alerts.nativeQueryHint": "编写返回单个数值的 {language} 查询。",
+  "alerts.nativeQueryHintGrouped": "编写每个分组返回一行的 {language} 查询：包含“分组依据”中的列和一个数值。",
   "alerts.aggregateCount": "匹配日志数量",
   "alerts.aggregateSum": "字段总和",
   "alerts.aggregateAverage": "字段平均值",

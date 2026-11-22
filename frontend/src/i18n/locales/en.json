@@ -716,6 +716,7 @@
   "time.searchRanges": "Search quick ranges",
   "time.noRanges": "No matching ranges",
   "alerts.nativeQueryHint": "Write a {language} query that returns a single numeric value.",
+  "alerts.nativeQueryHintGrouped": "Write a {language} query that returns one row per group: the Group by columns and a numeric value.",
   "alerts.aggregateCount": "Count matching logs",
   "alerts.aggregateSum": "Sum of a field",
   "alerts.aggregateAverage": "Average of a field",
