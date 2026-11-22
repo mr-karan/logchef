@@ -55,3 +55,31 @@ func TestSettingsBaseURLsRequireAbsoluteHTTPURL(t *testing.T) {
 		})
 	}
 }
+
+// TestSettingsEmailAddressesMustParse: the From and Reply-To settings take a
+// bare address or one with a display name, and refuse a value the mailer
+// could not send with.
+func TestSettingsEmailAddressesMustParse(t *testing.T) {
+	s := newAuthzTestServer(t)
+	admin := mkTestUser(t, s.store, "mail-admin@example.com", models.UserRoleAdmin)
+	auth := withSession(sessionCookie(t, s.store, admin))
+	for _, key := range []string{"alerts.smtp_from", "alerts.smtp_reply_to"} {
+		for _, tc := range []struct {
+			value  string
+			status int
+		}{
+			{"logchef@shop.example", http.StatusOK},
+			{"Logchef <logchef@shop.example>", http.StatusOK},
+			{"", http.StatusOK},
+			{"Logchef <logchef@shop.example", http.StatusBadRequest},
+			{"logchef@", http.StatusBadRequest},
+			{"not an address", http.StatusBadRequest},
+		} {
+			body := fmt.Sprintf(`{"value":%q,"value_type":"string","category":"alerts"}`, tc.value)
+			resp := doAuthzRequest(t, s, http.MethodPut, "/api/v1/admin/settings/"+key, body, auth)
+			if resp.status != tc.status {
+				t.Errorf("PUT %s %q status = %d, want %d", key, tc.value, resp.status, tc.status)
+			}
+		}
+	}
+}

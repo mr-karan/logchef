@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Email delivery works with a display-name SMTP From address such as
+  `Logchef <logchef@example.com>`. Before, the whole value went into
+  `MAIL FROM`, so strict servers refused every alert, report and test email.
+  The From setting now refuses a value that is not an email address.
+
 ## [2.8.0] - 2026-11-22
 
 Logchef reads Grafana Loki as a third backend, LogchefQL counts and groups,
