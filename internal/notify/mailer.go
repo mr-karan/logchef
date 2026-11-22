@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strings"
@@ -28,8 +29,10 @@ const (
 var (
 	// ErrSMTPNotConfigured means the SMTP host, port or from address is not set.
 	ErrSMTPNotConfigured = errors.New("smtp is not configured")
-	errSMTPTLS           = errors.New("smtp TLS failed")
-	errSMTPAuth          = errors.New("smtp authentication failed")
+	// ErrSMTPFromInvalid means the from setting does not parse as an address.
+	ErrSMTPFromInvalid = errors.New("smtp_from is not an email address")
+	errSMTPTLS         = errors.New("smtp TLS failed")
+	errSMTPAuth        = errors.New("smtp authentication failed")
 )
 
 // SendClass says what a failed send means for a retry.
@@ -85,6 +88,17 @@ func MailerOptionsFromSettings(ctx context.Context, settings store.SettingGetter
 	}
 }
 
+// FromAddress parses the from setting, a bare address or one with a display
+// name such as "Logchef <logchef@example.com>". The SMTP envelope takes its
+// Address, the From header the whole value.
+func (o MailerOptions) FromAddress() (*mail.Address, error) {
+	from, err := mail.ParseAddress(strings.TrimSpace(o.From))
+	if err != nil {
+		return nil, ErrSMTPFromInvalid
+	}
+	return from, nil
+}
+
 // Mailer sends one message to one address through the instance SMTP
 // settings. It never retries.
 type Mailer struct {
@@ -92,7 +106,9 @@ type Mailer struct {
 	port          int
 	username      string
 	password      string
-	from          string
+	rawFrom       string
+	from          *mail.Address
+	fromErr       error
 	replyTo       string
 	security      string
 	timeout       time.Duration
@@ -116,12 +132,15 @@ func NewMailer(opts MailerOptions) *Mailer {
 	if timeout <= 0 {
 		timeout = DefaultSMTPTimeout
 	}
+	from, fromErr := opts.FromAddress()
 	return &Mailer{
 		host:          strings.TrimSpace(opts.Host),
 		port:          opts.Port,
 		username:      strings.TrimSpace(opts.Username),
 		password:      opts.Password,
-		from:          strings.TrimSpace(opts.From),
+		rawFrom:       strings.TrimSpace(opts.From),
+		from:          from,
+		fromErr:       fromErr,
 		replyTo:       strings.TrimSpace(opts.ReplyTo),
 		security:      security,
 		timeout:       timeout,
@@ -131,7 +150,7 @@ func NewMailer(opts MailerOptions) *Mailer {
 
 // Configured reports whether host, port and from are set.
 func (s *Mailer) Configured() bool {
-	return s.host != "" && s.port != 0 && s.from != ""
+	return s.host != "" && s.port != 0 && s.rawFrom != ""
 }
 
 // Send delivers a plain-text message to one address. The error never
@@ -139,6 +158,9 @@ func (s *Mailer) Configured() bool {
 func (s *Mailer) Send(ctx context.Context, to string, msg MailMessage) error {
 	if !s.Configured() {
 		return ErrSMTPNotConfigured
+	}
+	if s.fromErr != nil {
+		return s.fromErr
 	}
 	if err := s.deliver(ctx, to, s.message(to, msg)); err != nil {
 		return sanitizeSMTPError(err)
@@ -151,7 +173,7 @@ func (s *Mailer) Send(ctx context.Context, to string, msg MailMessage) error {
 // cannot add a header.
 func (s *Mailer) message(to string, msg MailMessage) []byte {
 	headers := []string{
-		"From: " + oneLine(s.from),
+		"From: " + oneLine(s.fromHeader()),
 		"To: " + oneLine(to),
 		"Subject: " + oneLine(msg.Subject),
 		"MIME-Version: 1.0",
@@ -161,6 +183,13 @@ func (s *Mailer) message(to string, msg MailMessage) []byte {
 		headers = append(headers, "Reply-To: "+oneLine(s.replyTo))
 	}
 	return []byte(strings.Join(headers, "\r\n") + "\r\n\r\n" + msg.Text)
+}
+
+func (s *Mailer) fromHeader() string {
+	if s.from == nil {
+		return s.rawFrom
+	}
+	return s.from.String()
 }
 
 func oneLine(value string) string {
@@ -177,15 +206,18 @@ func oneLine(value string) string {
 // returns, so a caller that retries on SendTransient never sends a second
 // copy.
 func (s *Mailer) SendMessage(ctx context.Context, to string, message []byte) error {
-	if s.host == "" || s.port == 0 || s.from == "" {
+	if !s.Configured() {
 		return &SendError{Class: SendPermanent, Err: ErrSMTPNotConfigured}
+	}
+	if s.fromErr != nil {
+		return &SendError{Class: SendPermanent, Err: s.fromErr}
 	}
 	client, err := s.connect(ctx)
 	if err != nil {
 		return classifyBeforeDataEnd(err)
 	}
 	defer client.Close()
-	if err := client.Mail(s.from); err != nil {
+	if err := client.Mail(s.from.Address); err != nil {
 		return classifyBeforeDataEnd(err)
 	}
 	if err := client.Rcpt(to); err != nil {
@@ -228,7 +260,7 @@ func (s *Mailer) deliver(ctx context.Context, recipient string, message []byte) 
 	}
 	defer client.Close()
 
-	if err := client.Mail(s.from); err != nil {
+	if err := client.Mail(s.from.Address); err != nil {
 		return err
 	}
 	if err := client.Rcpt(recipient); err != nil {

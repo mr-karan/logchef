@@ -3,7 +3,6 @@ package reports
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/mail"
 	"time"
 
@@ -67,9 +66,9 @@ func (m *SMTPMailer) Send(ctx context.Context, to mail.Address, msg MailMessage)
 	if opts.Host == "" || opts.Port == 0 || opts.From == "" {
 		return &MailError{Class: MailPermanent, Err: ErrMailNotConfigured}
 	}
-	from, err := mail.ParseAddress(opts.From)
+	from, err := opts.FromAddress()
 	if err != nil {
-		return &MailError{Class: MailPermanent, Err: fmt.Errorf("smtp_from is not an email address")}
+		return &MailError{Class: MailPermanent, Err: err}
 	}
 	raw, err := BuildMessage(Message{From: *from, To: to, Subject: msg.Subject, Date: msg.Date, Text: msg.Text, HTML: msg.HTML, Attachments: msg.Attachments})
 	if err != nil {
