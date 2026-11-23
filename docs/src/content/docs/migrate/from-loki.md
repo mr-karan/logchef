@@ -39,8 +39,8 @@ service_name="payments-api" and status>=500
 What you give up compared with moving the data: exports, windowed search, the
 source activity chart and LogchefQL aggregations are not available on Loki,
 content search is still Loki's chunk scan, and a Loki source gives a team the
-whole tenant. See [Using Grafana Loki with Logchef](/tutorials/loki) for the
-setup and every difference, and [LogQL Queries](/guide/logql-queries) for the
+whole tenant. See [Using Grafana Loki with Logchef](/tutorials/loki/) for the
+setup and every difference, and [LogQL Queries](/guide/logql-queries/) for the
 query mapping.
 
 Move the data when you need indexed content search, SQL analytics,
@@ -67,7 +67,7 @@ if you're still on Promtail you're likely re-pointing a shipper either way.
 Alloy, Vector, Fluent Bit, and the OpenTelemetry Collector can all tail the
 same sources Promtail did (files, journald, Kubernetes pod logs); only the
 output changes to a ClickHouse sink instead of Loki's push API. See [Shipping
-Logs with Vector](/integration/vector) for working source/sink configs.
+Logs with Vector](/integration/vector/) for working source/sink configs.
 
 ### Shortcut: keep your shipper, target VictoriaLogs
 
@@ -77,7 +77,7 @@ general-purpose analytical database, and it accepts logs through several
 [ingestion protocols](https://docs.victoriametrics.com/victorialogs/data-ingestion/vector/)
 including one Vector's `loki` sink can be adapted for. That gets you Logchef
 as your query UI without redesigning around ClickHouse columns first. See
-[Using VictoriaLogs with Logchef](/tutorials/victorialogs).
+[Using VictoriaLogs with Logchef](/tutorials/victorialogs/).
 
 ## The model shift: labels + chunks → columns
 
@@ -106,7 +106,7 @@ That last row is the biggest practical difference: Loki parses `json` or
 `logfmt` out of the line on every query. In a ClickHouse+Logchef setup, you
 parse once during ingestion and query the already-structured field —
 cheaper per query, at the cost of deciding the schema up front. See [Schema
-Design](/integration/schema-design) for guidance on which fields to promote
+Design](/integration/schema-design/) for guidance on which fields to promote
 to columns.
 
 ## Query translation: LogQL → LogchefQL / SQL
@@ -124,21 +124,21 @@ Assume your Vector/Alloy pipeline parses the log line at ingestion, writing
 
 For fields you chose to keep unflattened in `log_attributes` rather than
 promoting to columns, the same filters work with [dot
-notation](/guide/search-syntax#nested-field-access):
+notation](/guide/search-syntax/#nested-field-access):
 `log_attributes.status_code>=500`.
 
 There's no LogchefQL equivalent to a bare `rate()` metric query — that's a
-job for [SQL mode](/guide/search-syntax#native-mode) or a [dashboard time
-series panel](/features/dashboards), both of which replace the role Grafana
+job for [SQL mode](/guide/search-syntax/#native-mode) or a [dashboard time
+series panel](/features/dashboards/), both of which replace the role Grafana
 Explore's metric-query view played for Loki.
 
 ## Live tailing
 
 Grafana Explore's live-tail view for Loki has a direct analog: Logchef's
-explorer has its own [Live toggle](/tutorials/victorialogs#live-tail). On
+explorer has its own [Live toggle](/tutorials/victorialogs/#live-tail). On
 VictoriaLogs sources it proxies the backend's native tail stream; on
 ClickHouse it polls on an interval, since ClickHouse has no native log-tail
-API. On a Loki source it [polls `query_range`](/tutorials/loki#live-tail)
+API. On a Loki source it [polls `query_range`](/tutorials/loki/#live-tail)
 every 2 seconds.
 
 ## What you gain
@@ -179,9 +179,9 @@ every 2 seconds.
 
 ## Next steps
 
-- [Schema Design](/integration/schema-design) for the ClickHouse table shape
-- [Shipping Logs with Vector](/integration/vector) for the ingestion pipeline
-- [Search Syntax](/guide/search-syntax) and [Query Examples](/guide/examples) for the full LogchefQL reference
-- [Dashboards](/features/dashboards) for the time-series view that replaces Grafana Explore's metric queries
-- [Using VictoriaLogs with Logchef](/tutorials/victorialogs) if you'd rather keep a label-oriented backend
-- [Using Grafana Loki with Logchef](/tutorials/loki) if you keep Loki
+- [Schema Design](/integration/schema-design/) for the ClickHouse table shape
+- [Shipping Logs with Vector](/integration/vector/) for the ingestion pipeline
+- [Search Syntax](/guide/search-syntax/) and [Query Examples](/guide/examples/) for the full LogchefQL reference
+- [Dashboards](/features/dashboards/) for the time-series view that replaces Grafana Explore's metric queries
+- [Using VictoriaLogs with Logchef](/tutorials/victorialogs/) if you'd rather keep a label-oriented backend
+- [Using Grafana Loki with Logchef](/tutorials/loki/) if you keep Loki

@@ -77,7 +77,7 @@ workflows in another, and remain a regular member elsewhere. Collection roles
 delegate ownership of shared queries without granting access to the underlying
 log source.
 
-For automation, [service accounts and scoped tokens](/features/service-tokens)
+For automation, [service accounts and scoped tokens](/features/service-tokens/)
 add two independent checks. The token must allow the requested action, and the
 service account must belong to a team that can access the source. The strictest
 layer wins.
@@ -90,7 +90,7 @@ This produces a few important guarantees:
 - Team admins can manage members and source assignments without becoming global admins.
 - Scoped service tokens can be limited by both action and source access.
 - Teams, memberships, and source assignments can be reconciled from
-  [version-controlled provisioning](/getting-started/provisioning).
+  [version-controlled provisioning](/getting-started/provisioning/).
 
 ## Access Control Flow
 
@@ -121,6 +121,6 @@ This produces a few important guarantees:
 
 ## Next steps
 
-- Manage teams and sources as code with [Declarative Provisioning](/getting-started/provisioning)
-- Set up non-login automation access with [Service Tokens](/features/service-tokens)
-- Share queries across a team with [Collections](/features/collections)
+- Manage teams and sources as code with [Declarative Provisioning](/getting-started/provisioning/)
+- Set up non-login automation access with [Service Tokens](/features/service-tokens/)
+- Share queries across a team with [Collections](/features/collections/)

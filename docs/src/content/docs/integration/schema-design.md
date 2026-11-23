@@ -114,6 +114,6 @@ Remember, you are **not required** to use Logchef's schemas. Logchef can connect
 
 ## Next steps
 
-- See [Shipping Logs with Vector](/integration/vector) to ship logs into a table with this schema
-- Follow [Shipping NGINX Logs to ClickHouse](/tutorials/nginx-logs) for a purpose-built schema example
-- Review [Search Syntax](/guide/search-syntax) for how LogchefQL maps to Map and JSON columns
+- See [Shipping Logs with Vector](/integration/vector/) to ship logs into a table with this schema
+- Follow [Shipping NGINX Logs to ClickHouse](/tutorials/nginx-logs/) for a purpose-built schema example
+- Review [Search Syntax](/guide/search-syntax/) for how LogchefQL maps to Map and JSON columns

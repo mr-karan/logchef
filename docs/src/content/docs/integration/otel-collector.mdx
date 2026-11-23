@@ -129,9 +129,9 @@ ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
-This maps cleanly onto Logchef's [OpenTelemetry schema](/integration/schema-design): `Timestamp` is the required time column, `SeverityText`/`ServiceName` are `LowCardinality` for fast filtering, and `ResourceAttributes`/`LogAttributes` are `Map` columns for flexible key-value data. Resource-level fields like `k8s.pod.name` or `deployment.environment.name` land in `ResourceAttributes`; per-record fields set by instrumentation land in `LogAttributes`.
+This maps cleanly onto Logchef's [OpenTelemetry schema](/integration/schema-design/): `Timestamp` is the required time column, `SeverityText`/`ServiceName` are `LowCardinality` for fast filtering, and `ResourceAttributes`/`LogAttributes` are `Map` columns for flexible key-value data. Resource-level fields like `k8s.pod.name` or `deployment.environment.name` land in `ResourceAttributes`; per-record fields set by instrumentation land in `LogAttributes`.
 
-If you'd rather use Logchef's `log_attributes`/`namespace`/`body` naming instead of the exporter's PascalCase columns, either pre-create the table yourself (set `create_schema: false`) using the schema from [Schema Design](/integration/schema-design), or add a `transform` processor to rename fields before export.
+If you'd rather use Logchef's `log_attributes`/`namespace`/`body` naming instead of the exporter's PascalCase columns, either pre-create the table yourself (set `create_schema: false`) using the schema from [Schema Design](/integration/schema-design/), or add a `transform` processor to rename fields before export.
 
 ## Parsing Existing Text Logs
 
@@ -194,10 +194,10 @@ ResourceAttributes."k8s.namespace.name"="payments" and Body~"timeout"
 LogAttributes.http_status_code>=500
 ```
 
-See [Search Syntax](/guide/search-syntax) for the full dot-notation reference on `Map` columns, and [Query Examples](/guide/examples) for more.
+See [Search Syntax](/guide/search-syntax/) for the full dot-notation reference on `Map` columns, and [Query Examples](/guide/examples/) for more.
 
 ## Next steps
 
-- Collecting logs from a Kubernetes cluster? See [Kubernetes Logs](/integration/kubernetes)
-- Prefer a lighter-weight agent? See [Shipping Logs with Vector](/integration/vector)
-- Review [Schema Design](/integration/schema-design) for field types, codecs, and indexing choices
+- Collecting logs from a Kubernetes cluster? See [Kubernetes Logs](/integration/kubernetes/)
+- Prefer a lighter-weight agent? See [Shipping Logs with Vector](/integration/vector/)
+- Review [Schema Design](/integration/schema-design/) for field types, codecs, and indexing choices

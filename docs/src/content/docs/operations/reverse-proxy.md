@@ -129,7 +129,7 @@ A blank page means that the proxy does not remove the subpath.
 
 ### CLI
 
-[Logchef OAuth](/getting-started/configuration#logchef-oauth) does not support a subpath, because `server.public_url` must be an origin only. For the browser sign-in of the CLI (`logchef auth`) and for the `/mcp` endpoint, serve Logchef on its own domain.
+[Logchef OAuth](/getting-started/configuration/#logchef-oauth) does not support a subpath, because `server.public_url` must be an origin only. For the browser sign-in of the CLI (`logchef auth`) and for the `/mcp` endpoint, serve Logchef on its own domain.
 
 Under a subpath, use an [API token](/integration/cli/#api-token-authentication) and include the subpath in the server URL:
 
@@ -139,7 +139,7 @@ logchef --server https://example.com/logchef --token "$LOGCHEF_AUTH_TOKEN" whoam
 
 ## OAuth and MCP
 
-When [Logchef OAuth](/getting-started/configuration#logchef-oauth) is on and one host serves everything, the proxy must pass these paths to Logchef without a rewrite:
+When [Logchef OAuth](/getting-started/configuration/#logchef-oauth) is on and one host serves everything, the proxy must pass these paths to Logchef without a rewrite:
 
 - `/oauth/*`
 - `/.well-known/oauth-authorization-server`
@@ -162,7 +162,7 @@ frontend_url = "https://logchef.example.com"
 enabled = true
 ```
 
-`public_url` is the API host. It is the OAuth issuer, and it serves the tokens and `/mcp`. `browser_url` is the UI host. It serves the pages where the user signs in and approves. Refer to [Split deployments](/getting-started/configuration#split-deployments) for the full list of what each setting controls.
+`public_url` is the API host. It is the OAuth issuer, and it serves the tokens and `/mcp`. `browser_url` is the UI host. It serves the pages where the user signs in and approves. Refer to [Split deployments](/getting-started/configuration/#split-deployments) for the full list of what each setting controls.
 
 The **UI host** (`logchef.example.com`) must pass these paths to Logchef. The SSO proxy sits in front of them:
 
@@ -193,4 +193,4 @@ Caddy and Traefik stream the events without extra configuration.
 
 To make the proxy's `X-Forwarded-For` header available for client-IP features such
 as per-IP rate limiting, set `server.trusted_proxies` to the proxy's address.
-Refer to [Configuration](/getting-started/configuration#server-settings).
+Refer to [Configuration](/getting-started/configuration/#server-settings).

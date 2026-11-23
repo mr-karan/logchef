@@ -41,7 +41,7 @@ In practice, most teams migrating off ELK replace the shipper with
 [Vector](https://vector.dev) or the OpenTelemetry Collector, since both ship a
 native ClickHouse sink and can read from the same sources (files, journald,
 Docker/Kubernetes container logs, syslog) that Filebeat and Logstash do. See
-[Shipping Logs with Vector](/integration/vector) for working configs — the
+[Shipping Logs with Vector](/integration/vector/) for working configs — the
 `[sources]` blocks (file, docker_logs, journald) are close analogs to Filebeat
 inputs; only the `[sinks.clickhouse]` block is new.
 
@@ -53,7 +53,7 @@ so a Filebeat or Logstash output aimed at an Elasticsearch bulk API can often
 be re-pointed at VictoriaLogs with a URL and auth change, no shipper
 replacement required. You get Logchef as your query UI immediately and can
 migrate the ingestion side later. See [Using VictoriaLogs with
-Logchef](/tutorials/victorialogs).
+Logchef](/tutorials/victorialogs/).
 
 ## Schema mapping: ECS fields → ClickHouse columns
 
@@ -66,7 +66,7 @@ ClickHouse has no equivalent to a dynamic mapping, so you decide up front
 which of those nested fields become real columns and which stay as flexible
 attributes.
 
-Logchef's [built-in OpenTelemetry schema](/integration/schema-design) is a
+Logchef's [built-in OpenTelemetry schema](/integration/schema-design/) is a
 reasonable default target:
 
 | ECS field | Logchef/ClickHouse column | Notes |
@@ -80,7 +80,7 @@ reasonable default target:
 You don't have to flatten everything: fields you'd rather keep exactly as ECS
 shaped them (`http.response.status_code`, `user.id`, …) can stay inside
 `log_attributes` and be queried with [dot
-notation](/guide/search-syntax#nested-field-access), including the quoted
+notation](/guide/search-syntax/#nested-field-access), including the quoted
 form for keys that contain a literal dot, e.g. `log_attributes."http.response.status_code"`.
 Only promote a field to its own column when you filter or aggregate on it
 constantly — that's what earns it an index.
@@ -90,7 +90,7 @@ constantly — that's what earns it an index.
 Kibana's default query language (KQL) is deliberately filter-only — per
 [Elastic's own KQL docs](https://www.elastic.co/guide/en/kibana/current/kuery-query.html),
 it has no role in aggregating or sorting, that's left to Lens/visualizations.
-[LogchefQL](/guide/search-syntax) plays the same narrow role: fast filtering,
+[LogchefQL](/guide/search-syntax/) plays the same narrow role: fast filtering,
 with SQL mode for aggregations.
 
 Assuming ECS fields were flattened into `severity_text`, `service_name`, and a
@@ -107,8 +107,8 @@ Assuming ECS fields were flattened into `severity_text`, `service_name`, and a
 
 If you instead kept those fields nested in `log_attributes` rather than
 flattening them, the same filters work with dot notation:
-`log_attributes."log.level"="error"`. See [Search Syntax](/guide/search-syntax)
-for the full operator set, and [Query Examples](/guide/examples) for more
+`log_attributes."log.level"="error"`. See [Search Syntax](/guide/search-syntax/)
+for the full operator set, and [Query Examples](/guide/examples/) for more
 worked patterns.
 
 For anything KQL can't express — aggregations, `GROUP BY`, joins — switch to
@@ -121,7 +121,7 @@ aggregation in Kibana.
   functions, and joins are plain ClickHouse SQL — no Painless scripting or a
   separate visualization builder to learn.
 - **Columnar compression.** ClickHouse's columnar storage with codecs like
-  `ZSTD` and `DoubleDelta` (see [Schema Design](/integration/schema-design))
+  `ZSTD` and `DoubleDelta` (see [Schema Design](/integration/schema-design/))
   is generally more storage-efficient for log-shaped data than Elasticsearch's
   inverted-index-plus-doc-values model, though the exact ratio depends
   heavily on your schema and data.
@@ -156,12 +156,12 @@ on them:
 - **Dynamic mapping.** Elasticsearch infers a mapping from whatever JSON you
   send it. ClickHouse wants you to decide the schema (or route the unknown
   parts into a `Map`/`JSON` column) up front — see [Schema
-  Design](/integration/schema-design) for how to do that without over-committing
+  Design](/integration/schema-design/) for how to do that without over-committing
   to columns you don't need yet.
 
 ## Next steps
 
-- [Schema Design](/integration/schema-design) for the ClickHouse table shape
-- [Shipping Logs with Vector](/integration/vector) for the ingestion pipeline
-- [Search Syntax](/guide/search-syntax) and [Query Examples](/guide/examples) for the full LogchefQL reference
-- [Using VictoriaLogs with Logchef](/tutorials/victorialogs) if you'd rather target VictoriaLogs than ClickHouse
+- [Schema Design](/integration/schema-design/) for the ClickHouse table shape
+- [Shipping Logs with Vector](/integration/vector/) for the ingestion pipeline
+- [Search Syntax](/guide/search-syntax/) and [Query Examples](/guide/examples/) for the full LogchefQL reference
+- [Using VictoriaLogs with Logchef](/tutorials/victorialogs/) if you'd rather target VictoriaLogs than ClickHouse

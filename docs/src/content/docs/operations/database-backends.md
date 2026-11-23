@@ -123,7 +123,7 @@ makes multi-replica serving work.
 ## Development
 
 The dev stack ships a Postgres 17 service. See the
-[development setup](/contributing/setup) and run against it with:
+[development setup](/contributing/setup/) and run against it with:
 
 ```bash
 LOGCHEF_DATABASE__DRIVER=postgres \

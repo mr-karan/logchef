@@ -123,7 +123,7 @@ The CLI supports two authentication methods: browser sign-in through Logchef OAu
 
 ### Server Prerequisite (Logchef OAuth)
 
-Browser sign-in needs [Logchef OAuth](/getting-started/configuration#logchef-oauth) on the server:
+Browser sign-in needs [Logchef OAuth](/getting-started/configuration/#logchef-oauth) on the server:
 
 ```toml
 [server]
@@ -223,7 +223,7 @@ logchef config set auth.token "logchef_1_abc123..."
 ```
 
 Generate API tokens from the Logchef web UI under your profile settings, or see
-[Service Tokens](/features/service-tokens) for non-login automation accounts.
+[Service Tokens](/features/service-tokens/) for non-login automation accounts.
 
 ## Command Reference
 
@@ -325,7 +325,7 @@ logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
 
 #### Aggregate with LogchefQL
 
-An [aggregation pipe](/guide/aggregations) after the filter counts and summarizes the
+An [aggregation pipe](/guide/aggregations/) after the filter counts and summarizes the
 matching logs instead of printing them:
 
 ```bash
@@ -471,7 +471,7 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 :::
 
 :::note[Time macros and variables]
-A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros). With no time flag the window is the configured default range. `{{__interval}}` and `{{__interval_s}}` need `--interval`, and the server refuses the query without it. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
+A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros/). With no time flag the window is the configured default range. `{{__interval}}` and `{{__interval_s}}` need `--interval`, and the server refuses the query without it. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
 :::
 
 :::note[Auto-injected time predicate]
@@ -1425,7 +1425,7 @@ done
 
 ## Next steps
 
-- Learn the filter syntax the `query` command accepts in [Search Syntax](/guide/search-syntax)
+- Learn the filter syntax the `query` command accepts in [Search Syntax](/guide/search-syntax/)
 - Query a VictoriaLogs source end to end in the [VictoriaLogs tutorial](/tutorials/victorialogs/)
-- Connect an AI assistant to the same data with the [MCP Server](/integration/mcp-server)
+- Connect an AI assistant to the same data with the [MCP Server](/integration/mcp-server/)
 - Enable browser sign-in on the server with [Logchef OAuth](/getting-started/configuration/#logchef-oauth)

@@ -146,7 +146,7 @@ subjects:
     namespace: observability
 ```
 
-See [OpenTelemetry Collector](/integration/otel-collector) for the full `clickhouseexporter` reference and the `otel_logs` schema this creates.
+See [OpenTelemetry Collector](/integration/otel-collector/) for the full `clickhouseexporter` reference and the `otel_logs` schema this creates.
 
 </TabItem>
 <TabItem label="Vector">
@@ -208,7 +208,7 @@ compression = "gzip"
 skip_unknown_fields = true
 ```
 
-This targets the same `logs` table from [Shipping Logs with Vector](/integration/vector) — reuse that table's `CREATE TABLE` statement.
+This targets the same `logs` table from [Shipping Logs with Vector](/integration/vector/) — reuse that table's `CREATE TABLE` statement.
 
 ### DaemonSet
 
@@ -245,10 +245,10 @@ namespace="payments" and severity_text="ERROR"
 log_attributes.k8s.container.name="checkout" and body~"panic"
 ```
 
-If you used the OpenTelemetry Collector's default `otel_logs` schema instead, query the `ResourceAttributes`/`LogAttributes` columns as described in [OpenTelemetry Collector](/integration/otel-collector).
+If you used the OpenTelemetry Collector's default `otel_logs` schema instead, query the `ResourceAttributes`/`LogAttributes` columns as described in [OpenTelemetry Collector](/integration/otel-collector/).
 
 ## Next steps
 
-- See the full `clickhouseexporter` config and schema in [OpenTelemetry Collector](/integration/otel-collector)
-- Shipping from plain Docker hosts instead of Kubernetes? See [Docker Logs](/integration/docker)
-- Review [Search Syntax](/guide/search-syntax) for the full operator reference
+- See the full `clickhouseexporter` config and schema in [OpenTelemetry Collector](/integration/otel-collector/)
+- Shipping from plain Docker hosts instead of Kubernetes? See [Docker Logs](/integration/docker/)
+- Review [Search Syntax](/guide/search-syntax/) for the full operator reference

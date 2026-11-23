@@ -226,6 +226,6 @@ lsof -i :8123
 
 ## Next Steps
 
-- Review the [Architecture Overview](/core/architecture) to understand the codebase
-- See [Roadmap](/contributing/roadmap) for upcoming features
+- Review the [Architecture Overview](/core/architecture/) to understand the codebase
+- See [Roadmap](/contributing/roadmap/) for upcoming features
 - Read the main [CONTRIBUTING.md](https://github.com/mr-karan/logchef/blob/main/CONTRIBUTING.md) for contribution guidelines

@@ -10,7 +10,7 @@ that gets logs there.
 
 ## Quick Start
 
-If you're using the [Docker quick start](/getting-started/quickstart), Vector is
+If you're using the [Docker quick start](/getting-started/quickstart/), Vector is
 already included and configured: demo syslog data flows into ClickHouse
 automatically. Skip to [Adapting for Real Sources](#adapting-for-real-sources)
 when you're ready to ship your own logs, or add the
@@ -30,7 +30,7 @@ For a standalone setup, you need three things:
 
 ## Create the ClickHouse Table
 
-Logchef works with any ClickHouse table that has a timestamp column, but the built-in [OpenTelemetry schema](/integration/schema-design) gives you the best experience: severity filtering, service grouping, and flexible `log_attributes` all work out of the box.
+Logchef works with any ClickHouse table that has a timestamp column, but the built-in [OpenTelemetry schema](/integration/schema-design/) gives you the best experience: severity filtering, service grouping, and flexible `log_attributes` all work out of the box.
 
 Create the table:
 
@@ -57,7 +57,7 @@ TTL toDateTime(timestamp) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
-See [Schema Design](/integration/schema-design) for details on field types, codecs, and indexing choices.
+See [Schema Design](/integration/schema-design/) for details on field types, codecs, and indexing choices.
 
 ## Configure Vector
 
@@ -188,7 +188,7 @@ curl --fail --data-urlencode 'query=namespace:="syslog"' \
 ```
 
 Then add a VictoriaLogs source in Logchef with timestamp field `_time` and
-severity field `severity_text`. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs)
+severity field `severity_text`. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs/)
 for source authentication, tenancy, immutable scope, and query modes.
 
 ## Adapting for Real Sources
@@ -382,4 +382,4 @@ service_name="my-app" and body~"connection refused"
 log_attributes.container.name="api-server"
 ```
 
-See [Search Syntax](/guide/search-syntax) and [Query Examples](/guide/examples) for more.
+See [Search Syntax](/guide/search-syntax/) and [Query Examples](/guide/examples/) for more.

@@ -6,7 +6,7 @@ head:
 description: "Filter logs with LogchefQL using field comparisons, logical operators, and text search. Query ClickHouse or VictoriaLogs without writing native queries."
 ---
 
-**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL, and to count and summarize them with an [aggregation pipe](/guide/aggregations).
+**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL, and to count and summarize them with an [aggregation pipe](/guide/aggregations/).
 
 LogchefQL is the quick-filter language shared across supported datasources:
 
@@ -142,7 +142,7 @@ service="api" | timestamp log_attributes.user_id log_attributes.endpoint
 The selected fields appear as columns in the result set, making it easy to focus on the data you need.
 
 A pipe whose first item is a function call, such as `| count() by service`,
-is an aggregation and not a field list. [Aggregations](/guide/aggregations)
+is an aggregation and not a field list. [Aggregations](/guide/aggregations/)
 has the syntax. `| count` without parentheses still selects the field named
 `count`.
 
@@ -291,7 +291,7 @@ Compiles to:
 
 A few constructs cannot be written in LogQL and are rejected on Loki: ordering
 comparisons on `_msg`, an `or` that joins `_msg` to another field, `null`
-comparisons and aggregation pipes. See [LogQL Queries](/guide/logql-queries#how-logchefql-compiles-to-logql)
+comparisons and aggregation pipes. See [LogQL Queries](/guide/logql-queries/#how-logchefql-compiles-to-logql)
 for the full mapping.
 
 ## Native Mode
@@ -304,7 +304,7 @@ For advanced queries that go beyond LogchefQL's capabilities, you can switch to 
 
 Native mode gives you direct access to backend-specific capabilities, including:
 
-- Aggregations that a LogchefQL [aggregation pipe](/guide/aggregations) does not cover, such as arithmetic between aggregates or a filter on an aggregated value
+- Aggregations that a LogchefQL [aggregation pipe](/guide/aggregations/) does not cover, such as arithmetic between aggregates or a filter on an aggregated value
 - VictoriaLogs-specific LogsQL pipes and processing operators
 - LogQL parsers, line formatting and metric queries on Loki
 - Subqueries
@@ -324,9 +324,9 @@ In SQL mode, your query executes exactly as written. Time range and limit contro
 
 ## Next steps
 
-- Count, sum and take percentiles with [Aggregations](/guide/aggregations)
-- See [Query Examples](/guide/examples) for LogchefQL patterns applied to real scenarios
-- Review the [Query Interface](/user-guide/query-interface) for time controls and result views
-- Try the [Field Values Sidebar](/features/field-sidebar) to build filters without typing
+- Count, sum and take percentiles with [Aggregations](/guide/aggregations/)
+- See [Query Examples](/guide/examples/) for LogchefQL patterns applied to real scenarios
+- Review the [Query Interface](/user-guide/query-interface/) for time controls and result views
+- Try the [Field Values Sidebar](/features/field-sidebar/) to build filters without typing
 
 [Try this syntax in the LogchefQL Playground](/playground/) to compare the output for all three backends.

@@ -47,7 +47,7 @@ Loki sources also work in saved queries, dashboards, alerts, AI query generation
 <figcaption>A LogchefQL filter on a Grafana Loki source: the histogram, the field sidebar, the compiled LogQL, log context and live tail.</figcaption>
 </figure>
 
-One rule matters before you link a Loki source to a team: the team gets the whole tenant. Native LogQL can name any stream, so the default selector is a convenience, not a boundary. The [Grafana Loki tutorial](/tutorials/loki) covers setup and every difference, and [LogQL Queries](/guide/logql-queries) has the full LogchefQL mapping. Exports, windowed search and LogchefQL aggregations are not available on Loki yet.
+One rule matters before you link a Loki source to a team: the team gets the whole tenant. Native LogQL can name any stream, so the default selector is a convenience, not a boundary. The [Grafana Loki tutorial](/tutorials/loki/) covers setup and every difference, and [LogQL Queries](/guide/logql-queries/) has the full LogchefQL mapping. Exports, windowed search and LogchefQL aggregations are not available on Loki yet.
 
 ## LogchefQL counts and groups
 
@@ -63,7 +63,7 @@ service=api | p95(duration_ms), avg(duration_ms) by time(5m)
 
 The functions are `count`, `count_distinct`, `sum`, `avg`, `min`, `max` and the approximate percentiles `p50` to `p99`, with up to 5 `by` keys and optional `| sort` and `| limit` stages. The same text compiles to ClickHouse SQL on a ClickHouse source and to a LogsQL `stats` pipe on a VictoriaLogs source.
 
-The Explorer shows the result as a table or a chart. **Add to dashboard** opens the panel builder on a dashboard you can edit, with a result panel filled in from the query. The [Aggregations](/guide/aggregations) page covers the syntax, the limits and the differences between backends.
+The Explorer shows the result as a table or a chart. **Add to dashboard** opens the panel builder on a dashboard you can edit, with a result panel filled in from the query. The [Aggregations](/guide/aggregations/) page covers the syntax, the limits and the differences between backends.
 
 <figure class="post-clip">
 <video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/aggregations.png" width="1280" height="720" aria-label="A pipe after the filter counts and groups, shown as a table, as a chart, then added to a dashboard.">
@@ -91,7 +91,7 @@ The rest of alerting changed with it:
 - **Destinations.** Email, webhook, Slack and PagerDuty targets are reusable destinations, private, shared with a team, or global. PagerDuty gets one `dedup_key` per group, so a resolve closes the incident its trigger opened.
 - **Delivery queue.** Notifications retry after 30 seconds, 2, 10 and 30 minutes, and each history entry lists its deliveries with their state and last error.
 
-Rules also run on a background job runner, so several replicas on Postgres no longer each evaluate every rule. The [Alerting](/features/alerting) page covers all of it, including the upgrade from 2.7.
+Rules also run on a background job runner, so several replicas on Postgres no longer each evaluate every rule. The [Alerting](/features/alerting/) page covers all of it, including the upgrade from 2.7.
 
 <figure class="post-clip">
 <video controls muted loop playsinline preload="none" poster="/releases/v2.8.0/alerting-v2.png" width="1280" height="720" aria-label="One rule grouped by region, backtested over 24 hours, with each group firing and silenced on its own.">
@@ -113,7 +113,7 @@ Global admins browse events in **Administration → Audit Log**, read them throu
 logchef audit list --action query.run --since 24h
 ```
 
-Each event is also written as a JSON log line, so you can ship it off the host for longer retention. Credentials are recorded only as "changed". The [Audit Log](/operations/audit-log) page lists every action and the retention settings.
+Each event is also written as a JSON log line, so you can ship it off the host for longer retention. Credentials are recorded only as "changed". The [Audit Log](/operations/audit-log/) page lists every action and the retention settings.
 
 **Administration → Query Activity** is rebuilt on top of the same data. It answers three questions: who uses Logchef, which sources are busy or slow, and which repeated query patterns cost the most. Every number compares with the window of the same length before it, with latency percentiles, scan cost and failure rates. Click a source or a user to scope the whole page to it.
 
@@ -134,19 +134,19 @@ Each event is also written as a JSON log line, so you can ship it off the host f
 
 ## Reports, views and shared dashboards
 
-- **Scheduled reports.** Email a dashboard, one dashboard tab or a saved query every hour, day, week or month. Charts become bar tables in the email, and a saved query can attach its rows as CSV. Each run checks the owner's access, and each Logchef recipient's copy locks the panels that recipient can't see. See [Scheduled Reports](/features/scheduled-reports).
-- **Saved Explorer views.** Save a source's columns, widths, sort and display mode, with an optional filter and time range, as a personal, team or source view. Each scope can set a default, and a share link carries your layout. See [Saved Views](/features/saved-views).
-- **Shared dashboard editing.** Team owners, admins and editors can now edit a dashboard when they have edit rights on every team its query panels use. Only the creator and global admins can delete it. See [Dashboards](/features/dashboards).
+- **Scheduled reports.** Email a dashboard, one dashboard tab or a saved query every hour, day, week or month. Charts become bar tables in the email, and a saved query can attach its rows as CSV. Each run checks the owner's access, and each Logchef recipient's copy locks the panels that recipient can't see. See [Scheduled Reports](/features/scheduled-reports/).
+- **Saved Explorer views.** Save a source's columns, widths, sort and display mode, with an optional filter and time range, as a personal, team or source view. Each scope can set a default, and a share link carries your layout. See [Saved Views](/features/saved-views/).
+- **Shared dashboard editing.** Team owners, admins and editors can now edit a dashboard when they have edit rights on every team its query panels use. Only the creator and global admins can delete it. See [Dashboards](/features/dashboards/).
 
 ## A schema advisor for ClickHouse
 
 ClickHouse rewards a table that fits its queries, and it is hard to know which queries you actually run. Logchef records the filter shape of each Explorer query on a ClickHouse source: the columns, Map keys and JSON paths, never the values. A global admin presses **Run analysis** on Source Inspection, and the advisor joins those shapes with the table's metadata.
 
-Findings suggest bloom filter indexes, text indexes on ClickHouse 26.8 or later, materialized columns for frequently queried Map keys or JSON paths, `LowCardinality`, and codecs. Each finding shows its evidence, its expected benefit and cost, and any suggested DDL. Logchef never runs the DDL. You review it and apply it yourself. See [Schema Advisor](/features/schema-advisor).
+Findings suggest bloom filter indexes, text indexes on ClickHouse 26.8 or later, materialized columns for frequently queried Map keys or JSON paths, `LowCardinality`, and codecs. Each finding shows its evidence, its expected benefit and cost, and any suggested DDL. Logchef never runs the DDL. You review it and apply it yourself. See [Schema Advisor](/features/schema-advisor/).
 
 ## MCP and the CLI
 
-The [MCP server](/integration/mcp-server) now has 22 read-only tools. Agents can query Loki sources, run aggregations through `query_logchefql`, list saved views, and see alert groups, silences and deliveries. Our [MCP launch post](/blog/ai-agents-query-logs-mcp-logchef) shows an agent working through an incident.
+The [MCP server](/integration/mcp-server/) now has 22 read-only tools. Agents can query Loki sources, run aggregations through `query_logchefql`, list saved views, and see alert groups, silences and deliveries. Our [MCP launch post](/blog/ai-agents-query-logs-mcp-logchef/) shows an agent working through an incident.
 
 CLI 0.5.0 adds `logchef advisor`, `logchef audit list`, `logchef reports`, `logchef views list` and `logchef open --view`. It also runs LogQL through `logchef sql` and prints aggregations as tables:
 
@@ -155,7 +155,7 @@ logchef query 'level=error | count() by service' --since 1h
 logchef sql '{service_name="payments-api"} |= "gateway"' --since 1h
 ```
 
-See the [CLI reference](/integration/cli).
+See the [CLI reference](/integration/cli/).
 
 ## Upgrading
 
@@ -172,8 +172,8 @@ The [upgrade notes](https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md#u
 ## Try it
 
 - Live demo: [demo.logchef.app](https://demo.logchef.app)
-- Install: the [quick start](/getting-started/quickstart), or the image `ghcr.io/mr-karan/logchef:v2.8.0`
-- Loki: the [Grafana Loki tutorial](/tutorials/loki)
+- Install: the [quick start](/getting-started/quickstart/), or the image `ghcr.io/mr-karan/logchef:v2.8.0`
+- Loki: the [Grafana Loki tutorial](/tutorials/loki/)
 - Source, issues and releases: [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef)
 
-If you're new here, three earlier posts cover the parts this release builds on: [letting an AI agent query your logs over MCP](/blog/ai-agents-query-logs-mcp-logchef), [log dashboards without Grafana](/blog/log-dashboards-clickhouse-logchef), and [a team UI for VictoriaLogs](/blog/victorialogs-ui-logchef).
+If you're new here, three earlier posts cover the parts this release builds on: [letting an AI agent query your logs over MCP](/blog/ai-agents-query-logs-mcp-logchef/), [log dashboards without Grafana](/blog/log-dashboards-clickhouse-logchef/), and [a team UI for VictoriaLogs](/blog/victorialogs-ui-logchef/).

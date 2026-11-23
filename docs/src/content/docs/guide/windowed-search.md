@@ -42,7 +42,7 @@ defaults. Sources without the optimizer keep the standard 24-hour schema lookbac
 Fields absent from the recent schema interval can be missing from the field list.
 
 This block belongs under a VictoriaLogs source's connection in
-[provisioning](/getting-started/provisioning):
+[provisioning](/getting-started/provisioning/):
 
 ```toml
 [sources.connection.optimizer]

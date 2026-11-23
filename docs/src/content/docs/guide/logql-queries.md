@@ -12,8 +12,8 @@ own language. This page covers how native LogQL runs in Logchef, common
 patterns, and how LogchefQL compiles to LogQL.
 
 For connecting a Loki source, see [Using Grafana Loki with
-Logchef](/tutorials/loki). For the LogchefQL reference, see [Search
-Syntax](/guide/search-syntax).
+Logchef](/tutorials/loki/). For the LogchefQL reference, see [Search
+Syntax](/guide/search-syntax/).
 
 The examples run on the dev stack's "Loki Demo" source (`dev/ingest-loki.sh`):
 streams labelled `service_name`, `env` and `level`, JSON lines with `message`,
@@ -172,7 +172,7 @@ max(max_over_time({service_name="payments-api"} | json | unwrap duration_ms | __
 | Field value counts | Log query |
 | Alerts | Metric query |
 
-The [field sidebar](/features/field-sidebar#loki) preloads stream label values
+The [field sidebar](/features/field-sidebar/#loki) preloads stream label values
 from the index using the query's leading selector. If there is no leading
 selector, as with a metric query, it uses the source's default selector.
 
@@ -249,7 +249,7 @@ Each of these returns an error that names the construct:
 - A field name that is not a valid Loki label name after dots become `_`, or
   that is a LogQL keyword such as `by`, `json`, `keep`, `drop`, `offset` or
   `pattern`.
-- A [LogchefQL aggregation](/guide/aggregations) pipe. Write a LogQL metric
+- A [LogchefQL aggregation](/guide/aggregations/) pipe. Write a LogQL metric
   query instead.
 
 ## Tenant and selector
@@ -264,9 +264,9 @@ whole tenant.
 
 ## Next steps
 
-- [Using Grafana Loki with Logchef](/tutorials/loki) to connect a source
-- [Search Syntax](/guide/search-syntax) for the full LogchefQL reference
-- [Alerting](/features/alerting) to evaluate a LogQL metric query on a schedule
-- [Dashboards](/features/dashboards) for LogQL panels
+- [Using Grafana Loki with Logchef](/tutorials/loki/) to connect a source
+- [Search Syntax](/guide/search-syntax/) for the full LogchefQL reference
+- [Alerting](/features/alerting/) to evaluate a LogQL metric query on a schedule
+- [Dashboards](/features/dashboards/) for LogQL panels
 
 Use the [LogchefQL Playground](/playground/) to see how a LogchefQL filter becomes a Loki stream selector and pipeline.

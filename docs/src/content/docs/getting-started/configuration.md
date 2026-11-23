@@ -81,7 +81,7 @@ a `0.0.0.0/0` wildcard fail startup.
 :::
 
 To run Logchef under a subpath such as `https://example.com/logchef/`, refer to
-[Reverse Proxy](/operations/reverse-proxy#under-a-subpath).
+[Reverse Proxy](/operations/reverse-proxy/#under-a-subpath).
 
 ## Database Configuration
 
@@ -136,7 +136,7 @@ restart it.
 
 ### Logchef OAuth
 
-Logchef OAuth lets the [Logchef CLI](/integration/cli) and AI assistants sign in with a browser consent, instead of a copied API token. The same server also serves the [MCP endpoint](/integration/mcp-server) at `/mcp`. OAuth is **off by default**. When it is off, no OAuth route, metadata, or `/mcp` endpoint exists.
+Logchef OAuth lets the [Logchef CLI](/integration/cli/) and AI assistants sign in with a browser consent, instead of a copied API token. The same server also serves the [MCP endpoint](/integration/mcp-server/) at `/mcp`. OAuth is **off by default**. When it is off, no OAuth route, metadata, or `/mcp` endpoint exists.
 
 Users still sign in to Logchef with OIDC or local login. OAuth adds a consent step on top. Logchef OAuth does not replace your SSO provider.
 
@@ -156,7 +156,7 @@ When OAuth is off, `/mcp` and every unknown `/.well-known/*` path return `404`.
 
 Logchef refuses to start when OAuth is on and `public_url` is missing or invalid. It must be an origin with `https`. Plain `http` is allowed only for `localhost`, `127.0.0.1`, and `::1`. A path (a subpath deployment) is not supported with OAuth. Set `public_url` to the address that users and agents type in a browser or an MCP client. A mismatch makes sign-in fail, because the issuer must equal the address the client uses. If browsers and agents use different hosts, refer to [Split deployments](#split-deployments).
 
-Behind a reverse proxy, the proxy must forward `/oauth/*`, `/.well-known/oauth-*`, and `/mcp` to Logchef. Refer to [Reverse Proxy](/operations/reverse-proxy).
+Behind a reverse proxy, the proxy must forward `/oauth/*`, `/.well-known/oauth-*`, and `/mcp` to Logchef. Refer to [Reverse Proxy](/operations/reverse-proxy/).
 
 #### Built-in clients
 
@@ -196,7 +196,7 @@ redirect_uris = ["https://www.cursor.com/agents/mcp/oauth/callback"]
 | `name` | Name shown on the consent page. |
 | `redirect_uris` | Exact callback URLs. Each must be an absolute `https` URL without a fragment. Matching is exact. |
 
-Hosted clients are public clients. They use PKCE, and they have no client secret. They can get tokens for `/mcp` only. Refer to [Agent Setup](/integration/agent-setup) for the host-side steps.
+Hosted clients are public clients. They use PKCE, and they have no client secret. They can get tokens for `/mcp` only. Refer to [Agent Setup](/integration/agent-setup/) for the host-side steps.
 
 To let a browser-based MCP tool call `/mcp` from another origin, list that origin in `auth.oauth.mcp_allowed_origins`. Requests with no `Origin` header, such as those from desktop clients, are always allowed.
 
@@ -232,7 +232,7 @@ Environment variables: `LOGCHEF_SERVER__PUBLIC_URL`, `LOGCHEF_SERVER__BROWSER_UR
 
 `browser_url` must follow the same rules as `public_url`: an origin only, with `https` (or `http` on a loopback host). Logchef checks it only when OAuth is enabled. If `browser_url` is unset, one host serves everything, and `public_url` is used for the browser pages too.
 
-The user's browser goes to the UI host to sign in and approve. The CLI or agent talks to the API host for tokens and tool calls. A request for `/oauth/authorize` on the API host is answered with a redirect to the consent page on the UI host. For the paths that each host must pass, refer to [Reverse Proxy](/operations/reverse-proxy#split-ui-and-api-hosts).
+The user's browser goes to the UI host to sign in and approve. The CLI or agent talks to the API host for tokens and tool calls. A request for `/oauth/authorize` on the API host is answered with a redirect to the consent page on the UI host. For the paths that each host must pass, refer to [Reverse Proxy](/operations/reverse-proxy/#split-ui-and-api-hosts).
 
 #### What users can do
 
@@ -389,7 +389,7 @@ default_ttl = "720h"
 max_query_text_bytes = 1048576
 ```
 
-`query.mcp_call_timeout_seconds` ends one whole [MCP](/integration/mcp-server) tool call. It also frees the query slot of a call that a client abandoned. The effective value is never above `query.max_timeout_seconds`. The HTTP API is not affected. Environment variable: `LOGCHEF_QUERY__MCP_CALL_TIMEOUT_SECONDS`.
+`query.mcp_call_timeout_seconds` ends one whole [MCP](/integration/mcp-server/) tool call. It also frees the query slot of a call that a client abandoned. The effective value is never above `query.max_timeout_seconds`. The HTTP API is not affected. Environment variable: `LOGCHEF_QUERY__MCP_CALL_TIMEOUT_SECONDS`.
 
 The UI uses preview limits for Run and export limits for Download.
 
@@ -723,7 +723,7 @@ webhook_allowed_hosts = ["receiver.example.internal", "127.0.0.1"]
 
 **Note:** After first boot, manage all other alert settings via **Administration → System Settings → Alerts**.
 
-For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
+For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting/).
 
 ### Scheduled report recipients
 

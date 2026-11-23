@@ -2,17 +2,17 @@
 title: LogsQL Queries
 head:
   - tag: title
-    content: "VictoriaLogs LogsQL Queries | Logchef"
-description: Use native LogsQL in Logchef against VictoriaLogs — common query patterns, how LogchefQL compiles to LogsQL, and tenancy/scope behavior.
+    content: "LogsQL Query Examples for VictoriaLogs | Logchef"
+description: "LogsQL query examples for VictoriaLogs: common filter and pipe patterns, how LogchefQL compiles to LogsQL, and how tenancy scopes each query in Logchef."
 ---
 
 VictoriaLogs sources in Logchef support two query languages: **LogchefQL** (Logchef's shared quick-filter syntax, also used on ClickHouse sources) and native **LogsQL** (VictoriaLogs' own query language). This page focuses on LogsQL: how native mode behaves in Logchef, useful query patterns, and exactly how LogchefQL is compiled down to LogsQL.
 
-For the full LogchefQL syntax reference, see [Search Syntax](/guide/search-syntax). For a wider tour of what Logchef adds on top of VictoriaLogs, see [VictoriaLogs Explorer](/tutorials/victorialogs-explorer).
+For the full LogchefQL syntax reference, see [Search Syntax](/guide/search-syntax/). For a wider tour of what Logchef adds on top of VictoriaLogs, see [VictoriaLogs Explorer](/tutorials/victorialogs-explorer/).
 
 ## Native LogsQL mode
 
-For large sources, [windowed search](/guide/windowed-search) returns filter-only
+For large sources, [windowed search](/guide/windowed-search/) returns filter-only
 queries in pages, newest first. Queries with pipes keep the standard execution path.
 
 Switch a VictoriaLogs source's query editor to native mode to write LogsQL directly. A few things behave differently from LogchefQL mode:
@@ -104,7 +104,7 @@ A few details worth knowing:
 
 - **`~` and `!~` are literal, case-insensitive substring matches, not arbitrary regex.** LogchefQL escapes any regex-special characters in your search text and wraps it in `(?i)`, so `body ~ "user[1]"` looks for the literal text `user[1]`, not a regex character class. If you need a real regex, write it directly in native LogsQL.
 - **The pipe operator (`field1 field2 ...`) becomes a LogsQL `fields` pipe**, and the source's configured timestamp field is always included first even if you didn't ask for it, so timestamps never silently disappear from projected results.
-- **An [aggregation pipe](/guide/aggregations) becomes a `stats` pipe.** Values get internal names such as `__lc_v0`, and Logchef writes the result under the names of the LogchefQL query.
+- **An [aggregation pipe](/guide/aggregations/) becomes a `stats` pipe.** Values get internal names such as `__lc_v0`, and Logchef writes the result under the names of the LogchefQL query.
 - **`null` comparisons aren't supported** for VictoriaLogs — LogchefQL's translator rejects them rather than guessing at LogsQL's handling of missing fields.
 
 ## Tenancy and scope behavior
@@ -120,7 +120,7 @@ This scope can't be bypassed from the query editor — it's applied server-side 
 
 ## Next steps
 
-- [VictoriaLogs Explorer](/tutorials/victorialogs-explorer) — what Logchef adds on top of VictoriaLogs' vmui
-- [Using VictoriaLogs with Logchef](/tutorials/victorialogs) — connect a source and configure ingestion
-- [Search Syntax](/guide/search-syntax) — the full LogchefQL reference
-- [Alerting](/features/alerting) — evaluate a LogsQL query on a schedule
+- [VictoriaLogs Explorer](/tutorials/victorialogs-explorer/) — what Logchef adds on top of VictoriaLogs' vmui
+- [Using VictoriaLogs with Logchef](/tutorials/victorialogs/) — connect a source and configure ingestion
+- [Search Syntax](/guide/search-syntax/) — the full LogchefQL reference
+- [Alerting](/features/alerting/) — evaluate a LogsQL query on a schedule
