@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS nginxdb.access_logs (
     
     INDEX idx_timestamp timestamp TYPE minmax GRANULARITY 3,
     INDEX idx_status status TYPE set(100) GRANULARITY 4,
-    INDEX idx_request_uri request_uri TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1,
+    INDEX idx_request_uri request_uri TYPE text(tokenizer = splitByNonAlpha),
     INDEX idx_user_agent http_user_agent TYPE bloom_filter(0.01) GRANULARITY 1
 )
 ENGINE = MergeTree()

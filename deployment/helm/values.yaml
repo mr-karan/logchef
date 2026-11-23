@@ -248,7 +248,7 @@ clickhouse:
   enabled: true
   # Empty uses a release-specific name. Set logchef when upgrading legacy installs.
   name: ""
-  image: clickhouse/clickhouse-server:24.8.4
+  image: clickhouse/clickhouse-server:26.8.2.7
   cluster:
     name: logchef
     shards: 1
@@ -304,7 +304,7 @@ clickhouse:
         INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
         INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
         INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-        INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+        INDEX idx_body body TYPE text(tokenizer = splitByNonAlpha)
     )
     ENGINE = MergeTree()
     PARTITION BY toDate(timestamp)

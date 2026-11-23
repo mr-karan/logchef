@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS default.http
     `bytes` UInt32 CODEC(ZSTD(1)),
     INDEX idx_method method TYPE set(100) GRANULARITY 4,
     INDEX idx_status status TYPE minmax GRANULARITY 4,
-    INDEX idx_referer referer TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    INDEX idx_referer referer TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS default.syslogs
     INDEX idx_lvl lvl TYPE set(100) GRANULARITY 4,
     INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    INDEX idx_body body TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree()
 PARTITION BY toDate(timestamp)

@@ -133,6 +133,8 @@ This maps cleanly onto Logchef's [OpenTelemetry schema](/integration/schema-desi
 
 If you'd rather use Logchef's `log_attributes`/`namespace`/`body` naming instead of the exporter's PascalCase columns, either pre-create the table yourself (set `create_schema: false`) using the schema from [Schema Design](/integration/schema-design/), or add a `transform` processor to rename fields before export.
 
+The exporter indexes `lower(Body)` with `tokenbf_v1`, which ClickHouse deprecates. If you pre-create the table, index `Body` with `TYPE text(tokenizer = splitByNonAlpha)` instead.
+
 ## Parsing Existing Text Logs
 
 If your services write plain-text or JSON log files rather than emitting OTLP directly, use the `filelog` receiver with parsing operators to turn them into log records first:

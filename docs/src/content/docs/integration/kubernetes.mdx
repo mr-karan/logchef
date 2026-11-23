@@ -14,7 +14,7 @@ Two common agents do this well: the **OpenTelemetry Collector** (if you already 
 
 ## Prerequisites
 
-- ClickHouse server reachable from the cluster
+- ClickHouse, reachable from the cluster. Logchef's built-in schema needs 26.8 or later for its text index. Older versions work with tables you create yourself.
 - A Logchef instance (for querying)
 - Cluster admin access to create a DaemonSet, ServiceAccount, and ClusterRole
 
