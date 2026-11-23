@@ -237,6 +237,7 @@ Key areas of the docs:
           label: "Comparisons",
           items: [
             { label: "Overview", link: "/comparisons/" },
+            { label: "VictoriaLogs vs ClickHouse", link: "/comparisons/victorialogs-vs-clickhouse/" },
             { label: "Logchef vs ClickStack", link: "/comparisons/logchef-vs-clickstack/" },
             { label: "Logchef vs SigNoz", link: "/comparisons/logchef-vs-signoz/" },
             { label: "Logchef vs Grafana Loki", link: "/comparisons/logchef-vs-grafana-loki/" },
