@@ -13,6 +13,12 @@ one for others. Each page below compares architecture, licensing, features
 and cost model, links its sources, and says plainly when the other tool is
 the better choice.
 
+## Choosing a log store
+
+- [VictoriaLogs vs ClickHouse for logs](/comparisons/victorialogs-vs-clickhouse/):
+  schema, ingestion, LogsQL vs SQL, full-text search, retention and
+  clustering, and how Logchef reads both.
+
 ## Observability stacks on ClickHouse
 
 - [Logchef vs ClickStack](/comparisons/logchef-vs-clickstack/): ClickHouse's
