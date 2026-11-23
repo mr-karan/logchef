@@ -29,7 +29,7 @@ The consent page shows the client name, the address the browser returns to, and 
 
 These credentials get `401` at `/mcp`:
 
-- API tokens, including [service tokens](/features/service-tokens).
+- API tokens, including [service tokens](/features/service-tokens/).
 - Browser session cookies.
 - OAuth tokens issued for the CLI. Those tokens work only for `/api`.
 
@@ -38,12 +38,12 @@ An OAuth token for `/mcp` gets `401` at `/api`. The two are separate audiences.
 To revoke an assistant, open **Settings → Connected apps** in the Logchef web UI and remove it. The next request from that assistant fails.
 
 <Aside type="note">
-The endpoint exists only when an operator has enabled OAuth. Without it, `/mcp` and unknown `/.well-known/*` paths return `404`. Refer to [Logchef OAuth](/getting-started/configuration#logchef-oauth) for the server settings.
+The endpoint exists only when an operator has enabled OAuth. Without it, `/mcp` and unknown `/.well-known/*` paths return `404`. Refer to [Logchef OAuth](/getting-started/configuration/#logchef-oauth) for the server settings.
 </Aside>
 
 ## Connect a client
 
-Each client has its own setup steps. Refer to [Agent Setup](/integration/agent-setup) for Claude Code, Codex, Cursor, Claude.ai, Claude Desktop, and ChatGPT.
+Each client has its own setup steps. Refer to [Agent Setup](/integration/agent-setup/) for Claude Code, Codex, Cursor, Claude.ai, Claude Desktop, and ChatGPT.
 
 ## What an assistant can see
 
@@ -86,7 +86,7 @@ Logs are untrusted text. A log line can contain instructions aimed at an assista
 | `get_log_context` | Log entries before and after a timestamp |
 
 `query_logs` takes `start_time`, `end_time`, `timezone`, `interval` and
-`variables` next to `raw_sql`, so a query that uses [time macros](/guide/time-macros)
+`variables` next to `raw_sql`, so a query that uses [time macros](/guide/time-macros/)
 or `{{name}}` variables runs as it does in a dashboard panel.
 `get_log_histogram` takes `variables` too, and its `window` is the bucket size
 that `{{__interval}}` renders. A macro whose input is missing fails the call
@@ -112,7 +112,7 @@ row's stream labels".
 
 #### Aggregations
 
-`query_logchefql` runs an [aggregation pipe](/guide/aggregations), such as
+`query_logchefql` runs an [aggregation pipe](/guide/aggregations/), such as
 `severity_text=ERROR | count() by service` or
 `service=api | p95(duration_ms), avg(duration_ms) by time(5m)`, so an
 assistant can count and group without writing SQL or LogsQL for one backend.
@@ -165,7 +165,7 @@ These capabilities are not part of the endpoint:
 
 - **Administration.** There are no tools to manage teams, users, sources, or API tokens.
 - **Writes.** There are no tools to create, change, or delete saved queries, saved views, collections, or alerts.
-- **AI query generation.** The assistant that you connect writes the query. Logchef's own [AI SQL assistant](/features/ai-sql-generation) is part of the web UI only.
+- **AI query generation.** The assistant that you connect writes the query. Logchef's own [AI SQL assistant](/features/ai-sql-generation/) is part of the web UI only.
 - **Query telemetry.** There is no tool for ClickHouse `system.query_log`.
 
 ## Resources
@@ -203,6 +203,6 @@ The panel is one self-contained page. It has no access to external networks. It 
 
 ## Next steps
 
-- Set up your client: [Agent Setup](/integration/agent-setup)
-- Enable the endpoint on your server: [Logchef OAuth](/getting-started/configuration#logchef-oauth)
-- Prefer a terminal workflow? See the [Logchef CLI](/integration/cli)
+- Set up your client: [Agent Setup](/integration/agent-setup/)
+- Enable the endpoint on your server: [Logchef OAuth](/getting-started/configuration/#logchef-oauth)
+- Prefer a terminal workflow? See the [Logchef CLI](/integration/cli/)

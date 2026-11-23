@@ -57,7 +57,7 @@ name = "ChatGPT"
 redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
 ```
 
-Then add a custom connector with the URL `https://logchef.example.com/mcp` and the client ID `claude` or `chatgpt`, with no client secret. These clients are public and use PKCE. For hosted agents, Logchef must be reachable from the internet over HTTPS. The [Agent Setup](/integration/agent-setup) page has the steps for each client, including Cursor's `mcp.json`.
+Then add a custom connector with the URL `https://logchef.example.com/mcp` and the client ID `claude` or `chatgpt`, with no client secret. These clients are public and use PKCE. For hosted agents, Logchef must be reachable from the internet over HTTPS. The [Agent Setup](/integration/agent-setup/) page has the steps for each client, including Cursor's `mcp.json`.
 
 To check the connection, ask the agent to call `get_teams`. It returns the teams you belong to.
 
@@ -85,7 +85,7 @@ severity_text="ERROR" and service_name="checkout" | count() by time(1m)
 
 Then `compare_windows` runs the same filter over 01:00 to 01:40 and 01:40 to 02:20, and `top_values` shows which hosts, error messages or status codes changed between them. The agent looks at the actual lines with `get_log_context` around the first failure. What comes back is real rows from your logs, not a guess based on the stack trace you chose to paste.
 
-The same aggregation text compiles to ClickHouse SQL on a ClickHouse source and to LogsQL on a VictoriaLogs source, so the agent doesn't need to know which backend holds a given team's logs. Loki sources take LogchefQL filters but not aggregation pipes. On Loki the agent counts with a LogQL metric query through `query_logs` instead. For SQL that a filter can't express, `query_logs` takes `raw_sql`, and it accepts the same [time macros](/guide/time-macros) and `{{name}}` variables that dashboard panels use.
+The same aggregation text compiles to ClickHouse SQL on a ClickHouse source and to LogsQL on a VictoriaLogs source, so the agent doesn't need to know which backend holds a given team's logs. Loki sources take LogchefQL filters but not aggregation pipes. On Loki the agent counts with a LogQL metric query through `query_logs` instead. For SQL that a filter can't express, `query_logs` takes `raw_sql`, and it accepts the same [time macros](/guide/time-macros/) and `{{name}}` variables that dashboard panels use.
 
 Two prompts are included for clients that surface them. `investigate_error_spike` takes a `team_id`, a `source_id` and an optional `time_range` (last hour by default), and walks through schema discovery, error volume, patterns, a timeline and root cause. `investigate_alert` takes an `alert_id`, reads the alert's configuration and history, and pulls the matching logs.
 
@@ -103,7 +103,7 @@ The agent acts as you, and with less reach than you have in the web UI.
 - **Team membership only.** An OAuth token sees the teams you belong to and the sources linked to them. This applies to admins too: an admin's web session can open any team, but an admin's agent token can't.
 - **Scoped.** The consent page requests eight read scopes (`profile:read`, `teams:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read`, `alerts:read`, `saved_views:read`). A tool that needs a scope the token doesn't hold doesn't appear in the tool list.
 - **Bounded.** One tool call ends after `query.mcp_call_timeout_seconds` (default 60, capped by `query.max_timeout_seconds`), and the per-user and global concurrency limits from the web UI apply. `query_logs` returns at most 100 rows per call, and `stats.truncation` tells the agent whether rows were cut, so it knows when it's looking at a sample.
-- **Audited.** Since v2.8.0, each tool call that reads logs records a `query.run` event in the [audit log](/operations/audit-log), with your user, the OAuth client and the full query text.
+- **Audited.** Since v2.8.0, each tool call that reads logs records a `query.run` event in the [audit log](/operations/audit-log/), with your user, the OAuth client and the full query text.
 - **Separate credentials.** `/mcp` accepts only Logchef OAuth tokens issued for it. API tokens, service tokens, browser cookies and CLI tokens get `401`, and an MCP token gets `401` at `/api`.
 
 To cut an agent off, open **Settings → Connected apps** and remove it. Its next request fails.

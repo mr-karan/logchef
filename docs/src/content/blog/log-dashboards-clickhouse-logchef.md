@@ -27,7 +27,7 @@ Panels run in one of two modes. **Count mode** uses the same histogram endpoint 
 
 ## Start from a query you already have
 
-The quickest path starts in the explorer. Run a LogchefQL [aggregation](/guide/aggregations), click **Add to dashboard**, and choose a dashboard you can edit:
+The quickest path starts in the explorer. Run a LogchefQL [aggregation](/guide/aggregations/), click **Add to dashboard**, and choose a dashboard you can edit:
 
 ```text
 service=api | p95(duration_ms) by time, service
@@ -35,7 +35,7 @@ service=api | p95(duration_ms) by time, service
 
 The builder reads the result columns and suggests roles: `time` becomes X, the value becomes Y, and `service` becomes the series. A bare `time` key follows the panel's bucket size, so the chart rescales when you change the time picker. Empty buckets are filled with 0 for `count` and left as gaps for other functions, so a quiet hour doesn't look like a latency drop to zero.
 
-For anything LogchefQL doesn't express, write SQL. A ClickHouse SQL panel follows the time picker when it uses the [time macros](/guide/time-macros):
+For anything LogchefQL doesn't express, write SQL. A ClickHouse SQL panel follows the time picker when it uses the [time macros](/guide/time-macros/):
 
 ```sql
 SELECT count() AS n FROM default.http WHERE {{__time_filter}}
@@ -45,7 +45,7 @@ A SQL panel without the macros keeps the window its own `WHERE` clause sets, and
 
 ## Stats that answer "compared with what"
 
-A bare number on a wall screen invites the next question: is that more than usual? A stat panel can compare its value with the previous row and draw a sparkline under it. This query from the [dashboard gallery](/features/dashboard-gallery) returns one row per whole hour of p95 latency:
+A bare number on a wall screen invites the next question: is that more than usual? A stat panel can compare its value with the previous row and draw a sparkline under it. This query from the [dashboard gallery](/features/dashboard-gallery/) returns one row per whole hour of p95 latency:
 
 ```sql
 SELECT toStartOfHour(timestamp, {{__timezone}}) AS hour,
@@ -66,7 +66,7 @@ Number formats cover scale, decimals, prefix and suffix, so 52,900,000 can read 
 
 ## Tabs and per-panel time
 
-One dashboard often needs two views of time. The [API health example](/features/dashboard-gallery) opens on the last 24 hours, and its second tab answers "how does this week look".
+One dashboard often needs two views of time. The [API health example](/features/dashboard-gallery/) opens on the last 24 hours, and its second tab answers "how does this week look".
 
 ![The Last 7 days tab: stats for yesterday, requests per day with value labels, requests by region as a donut, daily p95 latency by service, and the routes with the most 5xx responses](/screenshots/dashboard-api-health-week-light.png)
 
@@ -92,7 +92,7 @@ A Loki panel takes LogchefQL or native LogQL. In result mode, a LogQL metric que
 sum by (level) (count_over_time({service_name=~".+"} [{{__interval}}]))
 ```
 
-`{{__interval}}` follows the panel's bucket size. LogchefQL aggregation pipes don't run on Loki, so write the metric query in LogQL. The [Grafana Loki tutorial](/tutorials/loki) covers Loki panels.
+`{{__interval}}` follows the panel's bucket size. LogchefQL aggregation pipes don't run on Loki, so write the metric query in LogQL. The [Grafana Loki tutorial](/tutorials/loki/) covers Loki panels.
 
 ## Access and load
 
@@ -102,7 +102,7 @@ Auto-refresh (30 seconds, 1 minute or 5 minutes) makes a wall screen useful and 
 
 Editing is a drag-and-drop grid with a panel builder that shows a live preview. The creator and global admins can edit a dashboard, and so can a team owner, admin or editor of every team its query panels use. If a teammate saves the same dashboard while you edit it, Logchef asks whether to save yours as a copy, overwrite theirs, or load the latest.
 
-When nobody is watching the screen, **Schedule report** in the dashboard toolbar emails a dashboard, or one tab of it, on an hourly, daily, weekly or monthly schedule. See [scheduled reports](/features/scheduled-reports) for how each panel type renders in the email.
+When nobody is watching the screen, **Schedule report** in the dashboard toolbar emails a dashboard, or one tab of it, on an hourly, daily, weekly or monthly schedule. See [scheduled reports](/features/scheduled-reports/) for how each panel type renders in the email.
 
 ## What this doesn't do
 
@@ -116,4 +116,4 @@ Some limits, so you can decide whether this replaces Grafana for you or sits nex
 
 ## Try it
 
-Dashboards need no configuration. Tabs, stat comparisons, thresholds, table rules and per-panel ranges shipped in v2.7.0. Loki panels, charting LogchefQL aggregations from **Add to dashboard**, team editing and emailing dashboards as scheduled reports shipped in [v2.8.0](/blog/logchef-2-8-grafana-loki-ui-log-analytics). The [dashboard docs](/features/dashboards) cover every panel option, and the [gallery](/features/dashboard-gallery) has three example dashboards with copyable queries. The scripts that build its data and dashboards are in [`dev/gallery`](https://github.com/mr-karan/logchef/tree/main/dev/gallery). Source, issues and the Docker quick-start are at [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef).
+Dashboards need no configuration. Tabs, stat comparisons, thresholds, table rules and per-panel ranges shipped in v2.7.0. Loki panels, charting LogchefQL aggregations from **Add to dashboard**, team editing and emailing dashboards as scheduled reports shipped in [v2.8.0](/blog/logchef-2-8-grafana-loki-ui-log-analytics/). The [dashboard docs](/features/dashboards/) cover every panel option, and the [gallery](/features/dashboard-gallery/) has three example dashboards with copyable queries. The scripts that build its data and dashboards are in [`dev/gallery`](https://github.com/mr-karan/logchef/tree/main/dev/gallery). Source, issues and the Docker quick-start are at [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef).

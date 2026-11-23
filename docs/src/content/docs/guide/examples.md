@@ -586,10 +586,10 @@ trace_id!="" and span_id!="" and level="error"
    - Finally, add free-text search terms with the `~` operator
 
 7. **Aggregate with a Pipe**
-   - `level=error | count() by service` counts and groups without SQL. See [Aggregations](/guide/aggregations). Use SQL mode for ratios, joins and subqueries
+   - `level=error | count() by service` counts and groups without SQL. See [Aggregations](/guide/aggregations/). Use SQL mode for ratios, joins and subqueries
 
 ## Next steps
 
-- Read the full [Search Syntax](/guide/search-syntax) reference for every operator
-- Save queries you use often to a [Collection](/features/collections) for your team
-- See the [Query Interface](/user-guide/query-interface) guide for time controls and result views
+- Read the full [Search Syntax](/guide/search-syntax/) reference for every operator
+- Save queries you use often to a [Collection](/features/collections/) for your team
+- See the [Query Interface](/user-guide/query-interface/) guide for time controls and result views

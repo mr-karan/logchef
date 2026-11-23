@@ -15,11 +15,11 @@ usually need only a sink/output change, not a rewrite.
 These guides walk through that move from the two most common log stacks:
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin:1.5rem 0;">
-  <a href="/migrate/from-elasticsearch" style="display:block;padding:1rem 1.25rem;border:1px solid var(--sl-color-hairline);border-radius:0.5rem;text-decoration:none;">
+  <a href="/migrate/from-elasticsearch/" style="display:block;padding:1rem 1.25rem;border:1px solid var(--sl-color-hairline);border-radius:0.5rem;text-decoration:none;">
     <strong>From Elasticsearch</strong>
     <p style="margin:0.35rem 0 0;color:var(--sl-color-gray-3);">Move off Elasticsearch/Kibana: re-point Logstash/Beats/Vector at ClickHouse, map ECS fields, translate KQL to LogchefQL and SQL.</p>
   </a>
-  <a href="/migrate/from-loki" style="display:block;padding:1rem 1.25rem;border:1px solid var(--sl-color-hairline);border-radius:0.5rem;text-decoration:none;">
+  <a href="/migrate/from-loki/" style="display:block;padding:1rem 1.25rem;border:1px solid var(--sl-color-hairline);border-radius:0.5rem;text-decoration:none;">
     <strong>From Loki</strong>
     <p style="margin:0.35rem 0 0;color:var(--sl-color-gray-3);">Move off Loki/Grafana: re-point Promtail/Alloy at ClickHouse, turn labels into columns, translate LogQL to LogchefQL and SQL.</p>
   </a>
@@ -30,17 +30,17 @@ These guides walk through that move from the two most common log stacks:
 - **Ingestion**: your shipper's *output* changes (to a ClickHouse sink, or an
   Elasticsearch-compatible/native endpoint for VictoriaLogs). The *input* side
   — tailing files, scraping Kubernetes pod logs, receiving syslog — usually
-  doesn't need to change. See [Shipping Logs with Vector](/integration/vector).
+  doesn't need to change. See [Shipping Logs with Vector](/integration/vector/).
 - **Schema**: instead of a dynamic mapping (Elasticsearch) or a label set
   (Loki), you define columns up front, with a `Map` or `JSON` column for
-  free-form attributes. See [Schema Design](/integration/schema-design).
-- **Query language**: you write [LogchefQL](/guide/search-syntax) for everyday
+  free-form attributes. See [Schema Design](/integration/schema-design/).
+- **Query language**: you write [LogchefQL](/guide/search-syntax/) for everyday
   filtering (it compiles to SQL or LogsQL depending on the source), and drop
   into native SQL or LogsQL for aggregations the quick-filter syntax doesn't
   cover.
-- **The UI**: log explorer, [field sidebar](/features/field-sidebar),
-  [dashboards](/features/dashboards), [alerting](/features/alerting), and
-  [saved queries/collections](/features/collections) replace Kibana Discover
+- **The UI**: log explorer, [field sidebar](/features/field-sidebar/),
+  [dashboards](/features/dashboards/), [alerting](/features/alerting/), and
+  [saved queries/collections](/features/collections/) replace Kibana Discover
   or Grafana Explore for logs specifically. Logchef doesn't replace Grafana
   for metrics or Kibana for full-text search products — it's scoped to log
   analytics.
@@ -57,12 +57,12 @@ only where they land.
 
 Both guides assume you're moving log storage to **ClickHouse**. If you'd
 rather keep a label-oriented, VictoriaMetrics-style backend, Logchef also
-supports [VictoriaLogs](/tutorials/victorialogs) as a datasource — closer in
+supports [VictoriaLogs](/tutorials/victorialogs/) as a datasource — closer in
 shape to Loki, but queried through LogsQL instead of LogQL.
 
 ## Next steps
 
-- [From Elasticsearch](/migrate/from-elasticsearch)
-- [From Loki](/migrate/from-loki)
-- [Schema Design](/integration/schema-design) for the ClickHouse table shape
-- [Shipping Logs with Vector](/integration/vector) for the ingestion side
+- [From Elasticsearch](/migrate/from-elasticsearch/)
+- [From Loki](/migrate/from-loki/)
+- [Schema Design](/integration/schema-design/) for the ClickHouse table shape
+- [Shipping Logs with Vector](/integration/vector/) for the ingestion side

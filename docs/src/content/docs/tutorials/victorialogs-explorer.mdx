@@ -5,7 +5,7 @@ description: What Logchef adds on top of VictoriaLogs' vmui — shared search, d
 
 VictoriaLogs ships its own UI, [vmui](https://docs.victoriametrics.com/victorialogs/querying/#web-ui), for running LogsQL queries. Logchef is not a replacement for VictoriaLogs — it's a query-first log explorer that sits in front of it (and, for other sources, in front of ClickHouse) with a shared workflow: search syntax, saved queries, alerting, and access control that work the same way regardless of which backend a source points to.
 
-This page covers what Logchef adds on top of a VictoriaLogs instance, and when reaching for vmui directly still makes sense. For an ingestion-to-first-query setup, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs). For LogsQL query patterns, see [LogsQL Queries](/guide/logsql-queries).
+This page covers what Logchef adds on top of a VictoriaLogs instance, and when reaching for vmui directly still makes sense. For an ingestion-to-first-query setup, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs/). For LogsQL query patterns, see [LogsQL Queries](/guide/logsql-queries/).
 
 ## What Logchef adds
 
@@ -28,11 +28,11 @@ service = "payments" and status_code >= 500
 
 ### Saved queries and collections
 
-Queries (LogchefQL or native LogsQL) can be saved to your Library and organized into [collections](/features/collections) shared across a team. vmui has no equivalent — queries there live in the browser URL/history only.
+Queries (LogchefQL or native LogsQL) can be saved to your Library and organized into [collections](/features/collections/) shared across a team. vmui has no equivalent — queries there live in the browser URL/history only.
 
 ### Dashboards across backends
 
-[Dashboards](/features/dashboards) combine time series, stat, breakdown, and
+[Dashboards](/features/dashboards/) combine time series, stat, breakdown, and
 table panels under one time range and refresh interval. Each panel chooses its
 own team and source, so one dashboard can place a VictoriaLogs error rate next
 to a ClickHouse-backed request table without routing either dataset through a
@@ -42,14 +42,14 @@ shaping.
 
 ### AI query generation
 
-When the [AI assistant](/features/ai-sql-generation) is configured, it generates
+When the [AI assistant](/features/ai-sql-generation/) is configured, it generates
 the language selected in the explorer: LogchefQL in the shared filter mode or
 LogsQL in native mode. The source determines the target language; the model is
 not asked to guess which backend it is querying.
 
 ### Alerting
 
-Logchef can evaluate a VictoriaLogs LogsQL or LogchefQL-condition query on a schedule and fire email or webhook notifications when a threshold is crossed. See [Alerting](/features/alerting) and the VictoriaLogs-specific notes in [Using VictoriaLogs with Logchef](/tutorials/victorialogs#alerting). vmui has no built-in alerting; this is normally left to VictoriaMetrics' vmalert with a separate rules file.
+Logchef can evaluate a VictoriaLogs LogsQL or LogchefQL-condition query on a schedule and fire email or webhook notifications when a threshold is crossed. See [Alerting](/features/alerting/) and the VictoriaLogs-specific notes in [Using VictoriaLogs with Logchef](/tutorials/victorialogs/#alerting). vmui has no built-in alerting; this is normally left to VictoriaMetrics' vmalert with a separate rules file.
 
 ### RBAC and teams
 
@@ -99,7 +99,7 @@ provide totals and histogram coverage after an incomplete first page. Results
 can arrive before the full-range counts finish. Queries with pipes keep the
 standard query path.
 
-See [VictoriaLogs windowed search](/guide/windowed-search) for source settings,
+See [VictoriaLogs windowed search](/guide/windowed-search/) for source settings,
 provisioning, stream selection, count coverage, and pagination limits.
 
 ## Known gaps on VictoriaLogs sources
@@ -109,12 +109,12 @@ A handful of Logchef features only work against ClickHouse sources today:
 - **Log context** ("jump to surrounding logs" from a result row).
 - **Exports / downloads** — streaming a full result set to CSV or NDJSON.
 
-Everything else described on this page and in [Using VictoriaLogs with Logchef](/tutorials/victorialogs) — explore, histograms, field values, saved queries, collections, dashboards, AI-assisted queries, live tail, and alerting — is available for VictoriaLogs sources.
+Everything else described on this page and in [Using VictoriaLogs with Logchef](/tutorials/victorialogs/) — explore, histograms, field values, saved queries, collections, dashboards, AI-assisted queries, live tail, and alerting — is available for VictoriaLogs sources.
 
 ## Next steps
 
-- [Using VictoriaLogs with Logchef](/tutorials/victorialogs) — connect a source and set up ingestion
-- [LogsQL Queries](/guide/logsql-queries) — native LogsQL patterns and how LogchefQL compiles to LogsQL
-- [Search Syntax](/guide/search-syntax) — the full LogchefQL reference
-- [Alerting](/features/alerting) — set up scheduled alerts
-- [Collections & Saved Queries](/features/collections) — share queries across a team
+- [Using VictoriaLogs with Logchef](/tutorials/victorialogs/) — connect a source and set up ingestion
+- [LogsQL Queries](/guide/logsql-queries/) — native LogsQL patterns and how LogchefQL compiles to LogsQL
+- [Search Syntax](/guide/search-syntax/) — the full LogchefQL reference
+- [Alerting](/features/alerting/) — set up scheduled alerts
+- [Collections & Saved Queries](/features/collections/) — share queries across a team

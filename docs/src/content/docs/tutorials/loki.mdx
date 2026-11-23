@@ -11,7 +11,7 @@ VictoriaLogs. You keep Loki and its shippers as they are, and point Logchef at
 Loki's HTTP API. Logchef does not write to Loki and does not use Loki's ruler.
 
 This page covers connecting a Loki source and what each Logchef feature does on
-it. For the query language itself, see [LogQL Queries](/guide/logql-queries).
+it. For the query language itself, see [LogQL Queries](/guide/logql-queries/).
 
 ## What works
 
@@ -26,9 +26,9 @@ it. For the query language itself, see [LogQL Queries](/guide/logql-queries).
 - The **CLI** (`logchef query`, `sql`, `explain`, `tail`, `histogram`) and the
   **MCP server**.
 
-Not available on Loki: exports, [windowed search](/guide/windowed-search), the
+Not available on Loki: exports, [windowed search](/guide/windowed-search/), the
 source activity chart, extra stream filters and
-[LogchefQL aggregations](/guide/aggregations). See
+[LogchefQL aggregations](/guide/aggregations/). See
 [Known gaps](#known-gaps).
 
 Logchef targets Loki 3.x and is tested against `grafana/loki:3.7.6`. Loki 3.0
@@ -69,7 +69,7 @@ just run-backend        # provisions the "Loki Demo" source for Dev Team
 `just dev-ingest-logs` also starts a Vector pipeline (`dev/loki.toml`) that
 keeps pushing entries with `service_name="loki-vector"`.
 
-The examples on this page and on [LogQL Queries](/guide/logql-queries) run on
+The examples on this page and on [LogQL Queries](/guide/logql-queries/) run on
 that seed.
 
 To try Loki outside the repo, start it with the repo's config and push one
@@ -170,7 +170,7 @@ _msg~"gateway"
 Logchef compiles it to LogQL with the source selector first. A condition on a
 stream label joins the selector, so `level="error"` becomes
 `{service_name=~".+", level="error"} | json | drop __error__, __error_details__`
-on the dev source. [LogQL Queries](/guide/logql-queries#how-logchefql-compiles-to-logql)
+on the dev source. [LogQL Queries](/guide/logql-queries/#how-logchefql-compiles-to-logql)
 lists every mapping and the constructs that Loki cannot express.
 
 **LogQL** runs as written in the **LogQL** tab. Logchef adds no selector,
@@ -263,7 +263,7 @@ Paging asks Loki for `offset + limit` entries and drops the first `offset`, so
 a page that would read past `max_entries_per_query` is refused.
 
 The MCP tool `get_log_context` requires the row's complete stream label set in
-`stream_labels`. See the [MCP tool reference](/integration/mcp-server#log-context-on-loki)
+`stream_labels`. See the [MCP tool reference](/integration/mcp-server/#log-context-on-loki)
 for how to build the request.
 
 ## Dashboards
@@ -328,11 +328,11 @@ The MCP server's `query_logs`, `query_logchefql`, `get_field_values`,
 
 ## Provisioning
 
-Declare a Loki source in the [provisioning TOML](/getting-started/provisioning#loki-sources).
+Declare a Loki source in the [provisioning TOML](/getting-started/provisioning/#loki-sources).
 Provisioning export writes each non-empty custom header as a
 `header_secret_refs` entry. It keeps any declared environment variable name
 and generates a name for headers without one. Set the referenced variables
-before applying the [exported configuration](/getting-started/provisioning#export-current-state).
+before applying the [exported configuration](/getting-started/provisioning/#export-current-state).
 
 ## Errors
 
@@ -362,7 +362,7 @@ gets Loki's 400 naming both numbers.
 
 ## Next steps
 
-- [LogQL Queries](/guide/logql-queries) for native LogQL in Logchef and the
+- [LogQL Queries](/guide/logql-queries/) for native LogQL in Logchef and the
   LogchefQL mapping
-- [From Loki](/migrate/from-loki) to compare keeping Loki with moving off it
-- [Alerting](/features/alerting) and [Dashboards](/features/dashboards)
+- [From Loki](/migrate/from-loki/) to compare keeping Loki with moving off it
+- [Alerting](/features/alerting/) and [Dashboards](/features/dashboards/)

@@ -6,7 +6,7 @@ head:
 description: "Connect VictoriaLogs to Logchef, ingest sample logs, and search with LogchefQL or native LogsQL. Configure alerts for your self-hosted log backend."
 ---
 
-Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared Logchef experience for everyday workflows, with raw LogsQL available when you want VictoriaLogs-native pipes directly. This page covers connecting a source and day-to-day usage; for what Logchef adds on top of VictoriaLogs' own UI, see [VictoriaLogs Explorer](/tutorials/victorialogs-explorer).
+Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared Logchef experience for everyday workflows, with raw LogsQL available when you want VictoriaLogs-native pipes directly. This page covers connecting a source and day-to-day usage; for what Logchef adds on top of VictoriaLogs' own UI, see [VictoriaLogs Explorer](/tutorials/victorialogs-explorer/).
 
 ## What Works Well
 
@@ -100,7 +100,7 @@ See the official VictoriaLogs docs for more ingestion patterns:
 
 For a large source, enable **Windowed search** in the source form before saving.
 This also bounds initial field discovery to five minutes by default. See
-[VictoriaLogs windowed search](/guide/windowed-search) for settings and limits.
+[VictoriaLogs windowed search](/guide/windowed-search/) for settings and limits.
 
 As a global admin, open **Sources**, choose **Add Source**, select
 **VictoriaLogs**, and configure:
@@ -202,7 +202,7 @@ breakdown, and table. A useful first dashboard for the sample data above is:
 Dashboard time series, stat, and breakdown panels derive counts from histogram
 data. Use a filter in those panels; VictoriaLogs pipes are ignored by the hits
 API used to build them. A table panel executes the full native LogsQL query, so
-it can use pipes such as `fields` or `unpack_json`. See [Dashboards](/features/dashboards)
+it can use pipes such as `fields` or `unpack_json`. See [Dashboards](/features/dashboards/)
 for the complete panel and caching behavior.
 
 ## Live Tail
@@ -227,7 +227,7 @@ source is scoped to.
 
 ## AI-assisted queries
 
-When [AI query generation](/features/ai-sql-generation) is enabled, the assistant
+When [AI query generation](/features/ai-sql-generation/) is enabled, the assistant
 uses the selected source and editor mode to choose the output language. It
 generates LogchefQL in LogchefQL mode and VictoriaLogs LogsQL in native mode.
 The generated query should still be reviewed before running it over a wide time
@@ -329,8 +329,8 @@ Avoid highly-cardinal request-specific fields as stream fields.
 
 ## Next Steps
 
-- See [VictoriaLogs Explorer](/tutorials/victorialogs-explorer) for what Logchef adds on top of VictoriaLogs' own vmui UI
-- Read [LogsQL Queries](/guide/logsql-queries) for native LogsQL patterns and how LogchefQL compiles to LogsQL
-- Review the [Query Interface](/user-guide/query-interface)
-- Review the [Search Syntax](/guide/search-syntax)
-- Review [Alerting](/features/alerting)
+- See [VictoriaLogs Explorer](/tutorials/victorialogs-explorer/) for what Logchef adds on top of VictoriaLogs' own vmui UI
+- Read [LogsQL Queries](/guide/logsql-queries/) for native LogsQL patterns and how LogchefQL compiles to LogsQL
+- Review the [Query Interface](/user-guide/query-interface/)
+- Review the [Search Syntax](/guide/search-syntax/)
+- Review [Alerting](/features/alerting/)

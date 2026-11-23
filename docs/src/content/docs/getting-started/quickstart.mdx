@@ -2,8 +2,8 @@
 title: Quick Start
 head:
   - tag: title
-    content: "Self-Hosted Log Analytics Quick Start | Logchef"
-description: "Install self-hosted Logchef with Docker or a binary, connect a ClickHouse or VictoriaLogs source, and run your first log search in the web UI."
+    content: "Logchef Quick Start: Docker or Single Binary | Logchef"
+description: "Run Logchef with Docker or a single binary, connect a ClickHouse or VictoriaLogs source, and search your logs in the web UI with LogchefQL or SQL."
 ---
 
 This guide will help you get Logchef up and running quickly. We'll cover installation, basic setup, and how to make your first log query.
@@ -38,7 +38,7 @@ This will start:
 After starting, you can access the Logchef UI at `http://localhost:8125`.
 
 The compose file demonstrates the ClickHouse path. The
-[VictoriaLogs tutorial](/tutorials/victorialogs) includes a one-command local
+[VictoriaLogs tutorial](/tutorials/victorialogs/) includes a one-command local
 VictoriaLogs server and a JSON-line ingestion example if you want to try the new
 datasource alongside it.
 
@@ -149,7 +149,7 @@ at logs that already exist in ClickHouse or VictoriaLogs.
 #### VictoriaLogs
 
 For a local VictoriaLogs instance, first ingest the sample from the
-[end-to-end VictoriaLogs example](/tutorials/victorialogs#end-to-end-local-example).
+[end-to-end VictoriaLogs example](/tutorials/victorialogs/#end-to-end-local-example).
 Then choose **VictoriaLogs** in the Add Source form and use:
 
 ```text
@@ -219,17 +219,17 @@ env:="demo" AND level:="error" | fields _time, service, level, _msg
 5. Add panels from either ClickHouse or VictoriaLogs, arrange the grid, and save
 
 Every panel follows one dashboard time range and refresh interval. See
-[Dashboards](/features/dashboards) for a VictoriaLogs example, native LogsQL
+[Dashboards](/features/dashboards/) for a VictoriaLogs example, native LogsQL
 behavior, permissions, and result caching.
 
 ## Next Steps
 
-- Learn more about the [search syntax](/guide/search-syntax)
-- Explore [advanced querying examples](/guide/examples)
-- Set up [Vector integration](/integration/vector) for your own logs
-- Connect [VictoriaLogs end to end](/tutorials/victorialogs)
-- Build a mixed-source [dashboard](/features/dashboards)
-- Learn about [user management](/core/user-management)
+- Learn more about the [search syntax](/guide/search-syntax/)
+- Explore [advanced querying examples](/guide/examples/)
+- Set up [Vector integration](/integration/vector/) for your own logs
+- Connect [VictoriaLogs end to end](/tutorials/victorialogs/)
+- Build a mixed-source [dashboard](/features/dashboards/)
+- Learn about [user management](/core/user-management/)
 
 ## Explore your next workflow
 

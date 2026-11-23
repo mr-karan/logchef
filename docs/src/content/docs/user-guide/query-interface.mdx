@@ -31,7 +31,7 @@ LogchefQL compiles to the backend's native query language before execution:
 - ClickHouse sources compile to SQL
 - VictoriaLogs sources compile to LogsQL
 
-See [Search Syntax](/guide/search-syntax) for the full reference.
+See [Search Syntax](/guide/search-syntax/) for the full reference.
 
 ### Editor help
 
@@ -52,7 +52,7 @@ The editor checks and completes queries as you type:
 ![LogchefQL value suggestions for the service field, with counts](/screenshots/editor-values-light.png)
 
 To jump to another source or run a query there without leaving the page, use
-the [command palette](/features/command-palette) (**Cmd/Ctrl+K**).
+the [command palette](/features/command-palette/) (**Cmd/Ctrl+K**).
 
 ## Native Mode
 
@@ -81,7 +81,7 @@ service:="api" level:="error" | fields _time, _msg, service, level
 
 Switch between modes using the **LogchefQL / SQL** tabs for ClickHouse or the **LogchefQL / LogsQL** tabs for VictoriaLogs.
 
-If you are running VictoriaLogs specifically, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).
+If you are running VictoriaLogs specifically, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs/).
 
 ## Time Controls
 
@@ -109,7 +109,7 @@ Click **Live** to stream matching rows as they arrive, instead of running one-sh
 queries. Live tail is available in LogchefQL mode on any source, and in native mode
 on VictoriaLogs sources (LogsQL); it is not available for raw ClickHouse SQL. While
 a tail is running, the time range and row limit are controlled by the stream, not
-the toolbar. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs) for how
+the toolbar. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs/) for how
 tailing differs between backends.
 
 **Limitations:** on ClickHouse sources, live tail polls rather than subscribes, with
@@ -248,7 +248,7 @@ unquoted or inside ordinary string quotes. Template values inside identifier,
 heredoc, or raw string quotes are rejected. LogchefQL variables require a single
 value.
 
-Names that start with `__` are reserved for [time macros](/guide/time-macros).
+Names that start with `__` are reserved for [time macros](/guide/time-macros/).
 SQL and LogsQL queries can use `{{__time_filter}}`, `{{__from}}`, `{{__to}}`,
 `{{__interval}}` and `{{__timezone}}` to follow the time picker. Logchef fills
 them from the selected range, so they never appear as input fields. A new
@@ -260,10 +260,10 @@ The editor dropdown shows your 10 most recent queries per source. Click any to r
 
 ## Saved Queries
 
-Save frequently used queries to your team's collection via the **Save** button. Saved queries preserve the time range, variables, and mode. See [Collections & Saved Queries](/features/collections) for roles and sharing.
+Save frequently used queries to your team's collection via the **Save** button. Saved queries preserve the time range, variables, and mode. See [Collections & Saved Queries](/features/collections/) for roles and sharing.
 
 ## Next steps
 
-- Pin saved queries to a shared [Dashboard](/features/dashboards)
-- Explore fields visually with the [Field Values Sidebar](/features/field-sidebar)
-- Set up [Alerting](/features/alerting) on a query instead of watching it manually
+- Pin saved queries to a shared [Dashboard](/features/dashboards/)
+- Explore fields visually with the [Field Values Sidebar](/features/field-sidebar/)
+- Set up [Alerting](/features/alerting/) on a query instead of watching it manually

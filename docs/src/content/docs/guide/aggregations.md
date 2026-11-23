@@ -19,9 +19,9 @@ so you do not need the native language of either backend for a count, a sum,
 an average, a percentile or a group-by.
 
 An aggregation runs in the [Explorer](#in-the-explorer), in dashboard panels
-in [result mode](/features/dashboards#chart-a-logchefql-aggregation), in the
-[CLI](/integration/cli#aggregate-with-logchefql) and through
-[MCP](/integration/mcp-server#aggregations).
+in [result mode](/features/dashboards/#chart-a-logchefql-aggregation), in the
+[CLI](/integration/cli/#aggregate-with-logchefql) and through
+[MCP](/integration/mcp-server/#aggregations).
 
 ## Syntax
 
@@ -35,7 +35,7 @@ in [result mode](/features/dashboards#chart-a-logchefql-aggregation), in the
 - Function names and the words `as`, `by`, `sort`, `limit`, `asc` and `desc`
   are case-insensitive, as `and` and `or` are.
 - A pipe is an aggregation only when its first item is a function call. A pipe
-  of plain field names still [selects fields](/guide/search-syntax#pipe-operator-custom-select).
+  of plain field names still [selects fields](/guide/search-syntax/#pipe-operator-custom-select).
   `| count` selects the field named `count`, and `x=1 | limit` selects the
   field named `limit`.
 
@@ -73,7 +73,7 @@ return null. Keep number functions to fields that hold numbers. The
   `30m`, `1h`, `2h`, `3h`, `6h`, `12h` and `24h`.
 - A bare `time` key takes the bucket size from the request. The Explorer sends
   the bucket size of its histogram, and a dashboard panel sends its
-  [bucket size](/features/dashboards#bucket-size). The CLI and MCP send none
+  [bucket size](/features/dashboards/#bucket-size). The CLI and MCP send none
   unless you pass `--interval` or `interval`, and the query then fails with
   "this query buckets by time, so the request needs an interval".
 - A query can have one time key. Its position in `by` does not matter: the
@@ -246,7 +246,7 @@ A ClickHouse query that passes a bound fails and returns no rows, since a
 partial aggregate would be wrong in every row. VictoriaLogs has no per-query
 bound on groups or memory. The row limit, the query timeout and the
 VictoriaLogs server's own settings are the only bounds there. The memory
-setting is in the [configuration reference](/getting-started/configuration#query-settings).
+setting is in the [configuration reference](/getting-started/configuration/#query-settings).
 
 ## Backend differences
 
@@ -335,8 +335,8 @@ limit are checked when the query compiles.
 
 ## Next steps
 
-- [Search Syntax](/guide/search-syntax): the filter part of a query
-- [Dashboards](/features/dashboards#chart-a-logchefql-aggregation): chart an aggregation in a panel
-- [Logchef CLI](/integration/cli#aggregate-with-logchefql): aggregate from the terminal
+- [Search Syntax](/guide/search-syntax/): the filter part of a query
+- [Dashboards](/features/dashboards/#chart-a-logchefql-aggregation): chart an aggregation in a panel
+- [Logchef CLI](/integration/cli/#aggregate-with-logchefql): aggregate from the terminal
 
 [Try this syntax in the LogchefQL Playground](/playground/) to compare the output for all three backends.

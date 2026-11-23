@@ -9,7 +9,7 @@ description: Connect Claude Code, Codex, Cursor, Claude.ai, and ChatGPT to Logch
 An agent can use Logchef in two ways:
 
 - **The CLI.** The agent runs `logchef` commands in a terminal. Refer to [Run the preview](#run-the-preview).
-- **The MCP endpoint.** The agent calls tools over the [Model Context Protocol](/integration/mcp-server). Refer to [Connect over MCP](#connect-over-mcp).
+- **The MCP endpoint.** The agent calls tools over the [Model Context Protocol](/integration/mcp-server/). Refer to [Connect over MCP](#connect-over-mcp).
 
 ## Run the preview
 
@@ -25,7 +25,7 @@ The command prints:
 
 - The instance it resolved (from `--context`, `--server`, or your current context). With no server configured, commands show the placeholder `<your-logchef-url>`.
 - The results of [`logchef doctor`](/integration/cli/#doctor): config, connectivity, token, and defaults.
-- The steps to run: sign in with `logchef auth`, verify with `logchef doctor --json`, and read the version-matched guide with `logchef skills get core`. If the server does not offer [Logchef OAuth](/getting-started/configuration#logchef-oauth), the sign-in step tells you to set `LOGCHEF_AUTH_TOKEN` to an API token instead.
+- The steps to run: sign in with `logchef auth`, verify with `logchef doctor --json`, and read the version-matched guide with `logchef skills get core`. If the server does not offer [Logchef OAuth](/getting-started/configuration/#logchef-oauth), the sign-in step tells you to set `LOGCHEF_AUTH_TOKEN` to an API token instead.
 
 The server URL must be a plain `http` or `https` URL. The command rejects URLs that contain a username, password, query string, or fragment.
 
@@ -63,7 +63,7 @@ Logchef serves MCP at `https://logchef.example.com/mcp`. Replace the host with y
 
 Before you start:
 
-- The Logchef operator must enable OAuth. Refer to [Logchef OAuth](/getting-started/configuration#logchef-oauth).
+- The Logchef operator must enable OAuth. Refer to [Logchef OAuth](/getting-started/configuration/#logchef-oauth).
 - The instance must be reachable from the machine that runs the agent. For Claude.ai and ChatGPT, it must be reachable from the internet over HTTPS.
 
 Every agent connects with a client ID that Logchef knows:
@@ -159,4 +159,4 @@ Logchef does not support dynamic client registration or client ID metadata docum
 
 Ask the agent to call `get_teams`. It returns the teams you belong to. To remove access, open **Settings → Connected apps** in Logchef.
 
-The agent can use the tools that the [MCP Server](/integration/mcp-server#available-tools) page lists.
+The agent can use the tools that the [MCP Server](/integration/mcp-server/#available-tools) page lists.

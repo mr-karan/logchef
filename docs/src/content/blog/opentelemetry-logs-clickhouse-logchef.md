@@ -105,7 +105,7 @@ database = "default"
 table = "logs"
 ```
 
-Either way, the point is the same: **Logchef doesn't require its own schema.** It connects to any ClickHouse table with a timestamp column, auto-detects the columns, and adapts its query interface to them, so the real `otel_logs` table the Collector already created for you works as-is. You can even declare it via [provisioning](/getting-started/provisioning) config with `table_name = "otel_logs"` and skip the UI setup entirely.
+Either way, the point is the same: **Logchef doesn't require its own schema.** It connects to any ClickHouse table with a timestamp column, auto-detects the columns, and adapts its query interface to them, so the real `otel_logs` table the Collector already created for you works as-is. You can even declare it via [provisioning](/getting-started/provisioning/) config with `table_name = "otel_logs"` and skip the UI setup entirely.
 
 ## Querying it: LogchefQL over Map columns
 

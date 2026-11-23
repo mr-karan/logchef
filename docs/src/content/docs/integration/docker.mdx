@@ -45,7 +45,7 @@ TTL toDateTime(timestamp) + INTERVAL 30 DAY
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
-This is Logchef's [OpenTelemetry schema](/integration/schema-design) — see that page for field and codec details.
+This is Logchef's [OpenTelemetry schema](/integration/schema-design/) — see that page for field and codec details.
 
 ## Configure Vector
 
@@ -241,6 +241,6 @@ namespace:="docker" AND severity_text:="ERROR" | fields _time, service_name, _ms
 
 ## Next steps
 
-- Running in Kubernetes instead of plain Docker? See [Kubernetes Logs](/integration/kubernetes)
-- Already run an OpenTelemetry pipeline? See [OpenTelemetry Collector](/integration/otel-collector)
-- Review [Schema Design](/integration/schema-design) and [Search Syntax](/guide/search-syntax) for more
+- Running in Kubernetes instead of plain Docker? See [Kubernetes Logs](/integration/kubernetes/)
+- Already run an OpenTelemetry pipeline? See [OpenTelemetry Collector](/integration/otel-collector/)
+- Review [Schema Design](/integration/schema-design/) and [Search Syntax](/guide/search-syntax/) for more

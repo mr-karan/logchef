@@ -199,7 +199,7 @@ names the field, such as `loki connection.selector: selector is required`.
 `selector` is required. `auth.mode` is `none` (the default), `basic` or
 `bearer`. `parser` is empty, `json` or `logfmt`. `limits` and `headers` are
 optional, and `Authorization` and `X-Scope-OrgID` are reserved header names.
-See [Using Grafana Loki with Logchef](/tutorials/loki#add-the-source) for what
+See [Using Grafana Loki with Logchef](/tutorials/loki/#add-the-source) for what
 each field means.
 
 `base_url`, `tenant_id`, `selector` and `principal` are the source's identity.

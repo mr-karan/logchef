@@ -2,8 +2,8 @@
 title: Logchef vs Grafana Loki
 head:
   - tag: title
-    content: "Logchef vs Grafana Loki"
-description: "Logchef vs Grafana Loki: run Logchef as a log UI over the Loki you already have, with LogQL and LogchefQL, or move logs to ClickHouse or VictoriaLogs."
+    content: "Loki vs ClickHouse and VictoriaLogs: Logchef vs Grafana Loki"
+description: "Loki vs ClickHouse for logs: label-indexed chunks vs columnar search. Run Logchef as a UI over your Loki, or move logs to ClickHouse or VictoriaLogs."
 ---
 
 Grafana Loki is a log storage backend. It indexes labels, keeps log lines in object storage, and you query it with LogQL, usually from Grafana. Logchef is a query UI that stores no logs. It reads ClickHouse, VictoriaLogs, or Loki, so there are two ways to use it if you run Loki:

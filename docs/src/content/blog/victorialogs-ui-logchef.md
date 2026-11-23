@@ -83,7 +83,7 @@ Each VictoriaLogs source supports two query languages, switchable per query.
 
 Two details matter here. The `~` operator is a literal, case-insensitive substring match: Logchef escapes regex characters in your text, so `_msg ~ "user[1]"` searches for the literal `user[1]`. And a projection such as `service = "api" | _msg service` becomes a LogsQL `fields` pipe with the timestamp field always included first, so results never lose their time column.
 
-Since v2.8.0, LogchefQL also counts and groups. The [aggregation pipe](/guide/aggregations) `level=error | count() by service` compiles to `level:="error" | stats by (service) count()` plus a `sort` by the count, and the Explorer shows the result as a table or a chart.
+Since v2.8.0, LogchefQL also counts and groups. The [aggregation pipe](/guide/aggregations/) `level=error | count() by service` compiles to `level:="error" | stats by (service) count()` plus a `sort` by the count, and the Explorer shows the result as a table or a chart.
 
 **Native LogsQL** is there when you need VictoriaLogs pipes such as `stats`, `facets`, `unpack_json`, or `fields`. Anything valid in LogsQL runs unchanged:
 
@@ -116,11 +116,11 @@ Filter-only queries use windowed search. Queries with pipes keep the standard pa
 
 ## Saved queries, dashboards, and alerts
 
-Queries in either language can be saved to your library or to a shared [collection](/features/collections), so the gateway-timeout query is one click away for whoever is on call.
+Queries in either language can be saved to your library or to a shared [collection](/features/collections/), so the gateway-timeout query is one click away for whoever is on call.
 
-[Dashboards](/features/dashboards) support time series, stat, breakdown, and table panels on VictoriaLogs. Each panel picks its own team and source, so one dashboard can put a VictoriaLogs error rate next to a ClickHouse-backed request table. A team can have sources of any type, and the same LogchefQL filter works on each.
+[Dashboards](/features/dashboards/) support time series, stat, breakdown, and table panels on VictoriaLogs. Each panel picks its own team and source, so one dashboard can put a VictoriaLogs error rate next to a ClickHouse-backed request table. A team can have sources of any type, and the same LogchefQL filter works on each.
 
-[Alerts](/features/alerting) come in two modes. **Condition mode** takes a LogchefQL filter and an aggregate such as `count`. Logchef stores the rule as one LogchefQL aggregation and compiles it to LogsQL at every evaluation:
+[Alerts](/features/alerting/) come in two modes. **Condition mode** takes a LogchefQL filter and an aggregate such as `count`. Logchef stores the rule as one LogchefQL aggregation and compiles it to LogsQL at every evaluation:
 
 ```text
 level = "error" | count() as value by service
