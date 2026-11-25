@@ -3,7 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use super::{ApiResponse, Client, Data};
+use super::{ApiResponse, Client, Data, null_as_default};
 use crate::error::Result;
 
 /// The header that names the newest dashboard panel schema the client reads.
@@ -16,7 +16,7 @@ pub struct DashboardSummary {
     pub id: i64,
     pub name: String,
     pub panel_count: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub panel_types: Vec<String>,
     pub tab_count: i64,
     pub can_edit: bool,
@@ -34,6 +34,6 @@ impl Client {
             .send(|| self.http.get(&url).header(DASHBOARD_SCHEMA_HEADER, "2"))
             .await?;
         let response: ApiResponse<serde_json::Value> = self.handle_response(response).await?;
-        Data::parse(response.data)
+        Ok(Data::new(response.data))
     }
 }

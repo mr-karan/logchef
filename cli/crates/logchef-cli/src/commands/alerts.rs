@@ -1,18 +1,25 @@
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
 use logchef_core::api::{Alert, AlertTestResult, BacktestResult};
 use logchef_core::cache::Cache;
+use logchef_core::timerange::resolve_timezone;
 use std::collections::BTreeMap;
 use std::io::Read;
 
 use crate::cli::GlobalArgs;
 use crate::commands::resolve_source_id;
+use crate::commands::sql::wall_clock_to_utc;
 use crate::session;
 use crate::ui;
 
 /// The server stops a backtest after 60 seconds; the request outlives it.
 const BACKTEST_TIMEOUT_SECS: u64 = 75;
+
+/// The shortest and longest range the server replays.
+const BACKTEST_MIN_RANGE_SECS: i64 = 3600;
+const BACKTEST_MAX_RANGE_SECS: i64 = 7 * 24 * 3600;
 
 #[derive(Args)]
 #[command(after_help = "EXAMPLES:
@@ -26,6 +33,9 @@ const BACKTEST_TIMEOUT_SECS: u64 = 75;
   # Replay a rule over the past day, evaluating every 5 minutes, from stdin
   cat rule.json | logchef alerts backtest -f - --range 24h --frequency 300
 
+  # Replay one past window, in the effective timezone
+  logchef alerts backtest -f rule.json --from '2026-11-24 09:00:00' --to '2026-11-24 15:00:00'
+
 A request file holds the JSON body of POST /api/v1/alerts/test, such as
 {\"source_id\": 2, \"query_language\": \"logchefql\",
  \"query\": \"level=\\\"error\\\" | count() as value by service\",
@@ -34,8 +44,10 @@ A native ClickHouse rule sets \"query_language\": \"clickhouse-sql\" and reads i
 window from {{__time_filter}}.
 A missing source_id comes from -S (or the default source). backtest also
 needs frequency_seconds and range_seconds, from the request or from
---frequency and --range. test and backtest are dry runs: they save nothing
-and notify no one.")]
+--frequency and --range (or --from and --to). A backtest evaluates at most
+120 times, so a long range reads only part of it when the step outgrows the
+lookback; replay a shorter window to read all of it. test and backtest are
+dry runs: they save nothing and notify no one.")]
 pub struct AlertsArgs {
     #[command(subcommand)]
     command: AlertsCommand,
@@ -93,8 +105,23 @@ struct BacktestArgs {
     test: TestArgs,
 
     /// The past range to replay; sets range_seconds
-    #[arg(long)]
+    #[arg(long, conflicts_with = "from")]
     range: Option<Range>,
+
+    /// When the replayed range ends (default now); sets end_time.
+    /// YYYY-MM-DD HH:MM:SS is wall-clock in the effective timezone; an
+    /// RFC3339 instant needs none.
+    #[arg(long, conflicts_with = "from")]
+    end: Option<String>,
+
+    /// Start of the window to replay, in the same forms as --end. With --to,
+    /// sets end_time and range_seconds (1h to 7d).
+    #[arg(long, requires = "to")]
+    from: Option<String>,
+
+    /// End of the window to replay, in the same forms as --end.
+    #[arg(long, requires = "from")]
+    to: Option<String>,
 
     /// Seconds between evaluations; sets frequency_seconds
     #[arg(long)]
@@ -160,7 +187,7 @@ async fn list(args: ListArgs, global: GlobalArgs) -> Result<()> {
         .context("Failed to list alert rules")?;
     match args.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&alerts.raw)?),
-        OutputFormat::Text => print!("{}", render_alerts(&alerts.parsed)),
+        OutputFormat::Text => print!("{}", render_alerts(&alerts.parse()?)),
     }
     Ok(())
 }
@@ -177,10 +204,11 @@ async fn test(args: TestArgs, global: GlobalArgs) -> Result<()> {
     match args.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result.raw)?),
         OutputFormat::Text => {
-            for warning in &result.parsed.warnings {
+            let result = result.parse()?;
+            for warning in &result.warnings {
                 eprintln!("Warning: {warning}");
             }
-            print!("{}", render_test(&result.parsed));
+            print!("{}", render_test(&result));
         }
     }
     Ok(())
@@ -192,6 +220,24 @@ async fn backtest(args: BacktestArgs, global: GlobalArgs) -> Result<()> {
         ctx.timeout_secs.max(BACKTEST_TIMEOUT_SECS)
     })?;
     let mut request = read_request(&args.test, &s).await?;
+    let instant = |value: &str| {
+        wall_clock_to_utc(value, resolve_timezone(s.ctx.defaults.timezone.as_deref()))
+            .with_context(|| format!("Invalid time '{value}'"))
+    };
+    let window = match (&args.from, &args.to, &args.end) {
+        (Some(from), Some(to), _) => {
+            let (from, to) = (instant(from)?, instant(to)?);
+            Some((to, Some(window_seconds(from, to)?)))
+        }
+        (_, _, Some(end)) => Some((instant(end)?, None)),
+        _ => None,
+    };
+    if let Some((end, range_seconds)) = window {
+        request["end_time"] = end.to_rfc3339_opts(SecondsFormat::Secs, true).into();
+        if let Some(range_seconds) = range_seconds {
+            request["range_seconds"] = range_seconds.into();
+        }
+    }
     if let Some(range) = args.range {
         request["range_seconds"] = range.seconds().into();
     }
@@ -205,9 +251,59 @@ async fn backtest(args: BacktestArgs, global: GlobalArgs) -> Result<()> {
         .context("Failed to backtest the alert rule")?;
     match args.test.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result.raw)?),
-        OutputFormat::Text => print!("{}", render_backtest(&result.parsed)),
+        OutputFormat::Text => {
+            let result = result.parse()?;
+            for warning in backtest_warnings(&result) {
+                eprintln!("warning: {warning}");
+            }
+            let rule = RuleShape {
+                lookback_seconds: request["lookback_seconds"].as_i64(),
+                lowest_matters: matches!(
+                    request["threshold_operator"].as_str(),
+                    Some("lt" | "lte")
+                ),
+            };
+            print!("{}", render_backtest(&result, &rule));
+        }
     }
     Ok(())
+}
+
+/// The span from `from` to `to` in seconds, when it is one the server
+/// replays.
+fn window_seconds(from: DateTime<Utc>, to: DateTime<Utc>) -> Result<i64> {
+    let seconds = (to - from).num_seconds();
+    if seconds <= 0 {
+        bail!("--to must be after --from");
+    }
+    if !(BACKTEST_MIN_RANGE_SECS..=BACKTEST_MAX_RANGE_SECS).contains(&seconds) {
+        bail!(
+            "--from to --to spans {}; a backtest replays 1h to 7d. Pick a window in that span.",
+            duration(seconds)
+        );
+    }
+    Ok(seconds)
+}
+
+/// The server's warnings. An older server sends none, so a range the
+/// evaluations read only part of gets one here.
+fn backtest_warnings(result: &BacktestResult) -> Vec<String> {
+    if !result.warnings.is_empty() || result.coverage >= 1.0 {
+        return result.warnings.clone();
+    }
+    vec![format!(
+        "the evaluations read {} of the range, so an episode shorter than the {} step can be \
+         missed. Replay a shorter window with --from/--to to read all of it.",
+        percent(result.coverage),
+        duration(result.step_seconds)
+    )]
+}
+
+/// What the backtest table needs from the request: the server echoes neither.
+struct RuleShape {
+    lookback_seconds: Option<i64>,
+    /// A `lt` or `lte` rule breaches on its lowest value.
+    lowest_matters: bool,
 }
 
 /// Reads the JSON request object from the file or stdin, and fills a missing
@@ -330,29 +426,36 @@ fn render_test(result: &AlertTestResult) -> String {
     out
 }
 
-fn render_backtest(result: &BacktestResult) -> String {
+fn render_backtest(result: &BacktestResult, rule: &RuleShape) -> String {
     let summary = &result.summary;
+    let lookback = rule
+        .lookback_seconds
+        .map_or(String::new(), |s| format!(" (lookback {})", duration(s)));
+    let whole_result = match summary.empty_result_episodes {
+        0 => String::new(),
+        n => format!(" ({n} whole-result no-data episodes, not in the groups table)"),
+    };
     let mut out = format!(
-        "Range:            {} to {} UTC, {} evaluations every {}\n\
-         Episodes:         {}\n\
+        "Range:            {} to {} UTC\n\
+         Evaluated {} times, every {}{lookback}: coverage {} of the range\n\
+         Episodes:         {}{whole_result}\n\
          Notifications:    {}\n\
          Firing time:      {}\n\
          Breaching evals:  {}\n\
          No-data evals:    {}\n\
          Errors:           {}\n\
-         Coverage:         {:.1}%\n\
          Partial:          {}\n",
         result.start.format("%Y-%m-%d %H:%M"),
         result.end.format("%Y-%m-%d %H:%M"),
         result.evaluations,
         duration(result.step_seconds),
+        percent(result.coverage),
         summary.episodes,
         summary.notifications,
         duration(summary.firing_seconds),
         summary.breaching_evaluations,
         summary.no_data_evaluations,
         summary.errors,
-        result.coverage * 100.0,
         if result.partial {
             "yes, the server stopped the replay at its deadline"
         } else {
@@ -369,24 +472,34 @@ fn render_backtest(result: &BacktestResult) -> String {
         0 => String::new(),
         n => format!(", {n} more not listed"),
     };
+    // An older server sends no min_value; its table keeps MAX.
+    let lowest = rule.lowest_matters && result.groups.iter().any(|g| g.min_value.is_some());
     out.push_str(&format!(
-        "\nTop groups ({}{omitted}):\n{:<50} {:<9} {:<10} MAX\n{}\n",
+        "\nTop groups ({}{omitted}):\n{:<50} {:<9} {:<10} {}\n{}\n",
         result.groups.len(),
         "GROUP",
         "EPISODES",
         "BREACHING",
+        if lowest { "MIN" } else { "MAX" },
         "-".repeat(80)
     ));
     for g in &result.groups {
+        let value = if lowest { g.min_value } else { g.max_value };
         out.push_str(&format!(
             "{:<50} {:<9} {:<10} {}\n",
             ui::truncate(&group(&g.group), 50),
             g.episodes,
             g.breaching_evaluations,
-            g.max_value.map_or("-".to_owned(), |v| v.to_string())
+            value.map_or("-".to_owned(), |v| v.to_string())
         ));
     }
     out
+}
+
+/// A 0 to 1 share as a whole percent, rounded down so only a whole range
+/// reads 100%.
+fn percent(share: f64) -> String {
+    format!("{}%", (share * 100.0).floor())
 }
 
 fn group(labels: &BTreeMap<String, String>) -> String {

@@ -51,7 +51,7 @@ pub async fn run(args: DestinationsArgs, global: GlobalArgs) -> Result<()> {
         .context("Failed to list notification destinations")?;
     match args.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&destinations.raw)?),
-        OutputFormat::Text => print!("{}", render(&destinations.parsed)),
+        OutputFormat::Text => print!("{}", render(&destinations.parse()?)),
     }
     Ok(())
 }

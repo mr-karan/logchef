@@ -686,3 +686,34 @@ fn an_unnamed_denied_scope_on_an_older_server_points_reports_to_an_api_token() {
     );
     assert!(!err.contains("destinations:read"), "{err}");
 }
+
+/// No sign-in can hold a report scope, so the error gives the API-token fix
+/// once and never says to sign in again.
+#[test]
+fn a_scope_no_sign_in_can_hold_points_to_an_api_token_once() {
+    let server = FakeServer::start(true);
+    server.stub(
+        "GET",
+        "/api/v1/reports",
+        scope_denied(
+            r#"Bearer error="insufficient_scope", scope="reports:read""#,
+            "A Logchef OAuth sign-in cannot hold the reports:read scope. Use an API token that has it.",
+        ),
+    );
+    let home = TestHome::new("scope-reports-oauth");
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({ "oauth": server.issue_grant(false) }),
+    ));
+
+    let mut cmd = home.logchef();
+    cmd.args(["reports", "list"]);
+    let out = run(cmd);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(!err.to_lowercase().contains("sign in again"), "{err}");
+    assert!(!err.contains("logchef auth --context"), "{err}");
+    assert_eq!(err.matches("sign-in cannot").count(), 1, "{err}");
+    assert_eq!(err.matches("LOGCHEF_AUTH_TOKEN").count(), 1, "{err}");
+    assert!(err.contains("reports:read"), "{err}");
+}

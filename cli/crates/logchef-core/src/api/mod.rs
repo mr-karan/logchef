@@ -9,16 +9,27 @@ pub use models::*;
 pub use reports::*;
 
 use crate::auth::{self, SavedCredential};
-use crate::error::{Error, Result};
+use crate::error::{Error, INSUFFICIENT_SCOPE, Result};
 use reqwest::Client as HttpClient;
 use reqwest::header::{
     AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT, WWW_AUTHENTICATE,
 };
 use reqwest::{RequestBuilder, Response, StatusCode};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::debug;
+
+/// Reads `null` as the empty value: servers up to v2.8.2 send an empty list
+/// or map as `null`.
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 const USER_AGENT_VALUE: &str = concat!("logchef-cli/", env!("CARGO_PKG_VERSION"));
 
@@ -221,29 +232,31 @@ impl Client {
     /// A saved OAuth sign-in keeps the scopes it was granted across refreshes,
     /// so it gets a read scope the server added later only by signing in
     /// again. It never holds another scope, and an API token never gains one,
-    /// so those need a new API token.
+    /// so those need a new API token. For a sign-in the server's message is
+    /// left out: it says the same, or on servers before v2.8.2 names an API
+    /// token the caller does not use.
     async fn scope_error(&self, scope: Option<String>, api_error: ApiErrorResponse) -> Error {
-        let message = api_error.message.trim_end_matches('.').to_owned();
         let needs = scope
             .as_ref()
             .map_or("the scope this command needs".to_owned(), |s| {
                 format!("the {s} scope")
             });
-        let fix = match &self.credential {
+        let message = match &self.credential {
             Credential::OAuth(state) => {
                 let saved = state.lock().await.saved.clone();
                 if let Some(reason) = sign_in_lacks(&saved, scope.as_deref()).await {
                     return Error::auth_required(&saved.context, reason);
                 }
                 format!(
-                    "A `logchef auth` sign-in cannot hold {needs}: pass an API token that has it with --token or LOGCHEF_AUTH_TOKEN"
+                    "A `logchef auth` sign-in cannot hold {needs}. Pass an API token that has it with --token or LOGCHEF_AUTH_TOKEN."
                 )
             }
             Credential::Bearer(_) | Credential::None => format!(
-                "Create a new API token with {needs}: a token cannot gain scopes after it is created"
+                "{}. Create a new API token with {needs}: a token cannot gain scopes after it is created",
+                api_error.message.trim_end_matches('.')
             ),
         };
-        Error::api_with_type(Some(403), format!("{message}. {fix}"), api_error.error_type)
+        Error::api_with_type(Some(403), message, Some(INSUFFICIENT_SCOPE.to_owned()))
     }
 
     pub async fn get_meta(&self) -> Result<MetaResponse> {

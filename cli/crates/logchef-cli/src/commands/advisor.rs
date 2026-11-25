@@ -137,16 +137,23 @@ async fn resolve(client: &Client, source: &str) -> logchef_core::Result<i64> {
 /// generic 403 hint (team/source access, sign in again) would mislead, so
 /// the error is replaced.
 fn explain_forbidden(err: logchef_core::Error) -> anyhow::Error {
+    let scope_denied = err.is_scope_denied();
     match err {
         logchef_core::Error::Api {
             status: Some(403),
             message,
             ..
         } => anyhow!(
-            "The server refused the schema advisor: {message}\n\
+            "The server refused the schema advisor{}\n\
              It needs a global admin's API token with the sources:read scope (or *). \
              A `logchef auth` sign-in cannot reach admin routes. Create one on your Profile page, \
-             then pass it with --token or LOGCHEF_AUTH_TOKEN."
+             then pass it with --token or LOGCHEF_AUTH_TOKEN.",
+            // A missing scope's message says what the advice below says.
+            if scope_denied {
+                ".".to_owned()
+            } else {
+                format!(": {message}")
+            }
         ),
         other => anyhow::Error::new(other).context("Failed to read the schema advisor report"),
     }

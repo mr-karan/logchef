@@ -77,7 +77,7 @@ async fn list(args: ListArgs, global: GlobalArgs) -> Result<()> {
         .context("Failed to list silences")?;
     match args.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&silences.raw)?),
-        OutputFormat::Text => print!("{}", render(&silences.parsed)),
+        OutputFormat::Text => print!("{}", render(&silences.parse()?)),
     }
     Ok(())
 }

@@ -169,16 +169,23 @@ fn parse_target(value: &str) -> Result<(Option<String>, Option<String>)> {
 /// generic 403 hint (team/source access, sign in again) would mislead, so the
 /// error is replaced.
 fn explain_forbidden(err: logchef_core::Error) -> anyhow::Error {
+    let scope_denied = err.is_scope_denied();
     match err {
         logchef_core::Error::Api {
             status: Some(403),
             message,
             ..
         } => anyhow!(
-            "The server refused the audit log: {message}\n\
+            "The server refused the audit log{}\n\
              Reading it needs a global admin's API token with the audit:read scope (or *). \
              A `logchef auth` sign-in cannot read it. Create one on your Profile page, \
-             then pass it with --token or LOGCHEF_AUTH_TOKEN."
+             then pass it with --token or LOGCHEF_AUTH_TOKEN.",
+            // A missing scope's message says what the advice below says.
+            if scope_denied {
+                ".".to_owned()
+            } else {
+                format!(": {message}")
+            }
         ),
         other => anyhow::Error::new(other).context("Failed to list audit events"),
     }
