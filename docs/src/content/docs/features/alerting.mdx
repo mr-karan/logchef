@@ -455,9 +455,10 @@ long it fired, a state strip, the groups with the most breaching evaluations,
 and "Evaluated 96 of 1,440 ticks, covering 33% of the range" when the step is
 longer than the lookback.
 
-The evaluation instants are multiples of the step since the Unix epoch, so the
-same request reads the same instants whenever it runs. Through the API,
-`end_time` replays the range that ends at a past moment, such as an incident.
+A backtest that ends now ends at the latest multiple of the step since the
+Unix epoch, so a rerun reads the same instants whenever it runs. Through the
+API, `end_time` replays the range that ends at a past moment, such as an
+incident, with the last evaluation at that moment.
 
 **Read the coverage.** The 120-evaluation budget reads the whole range only
 when the range is at most 120 times the lookback: 10 hours for a 5-minute

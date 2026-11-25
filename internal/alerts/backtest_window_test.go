@@ -9,21 +9,25 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// Two requests within one step read the same instants, so whether a burst is
-// caught never depends on the second the request was made.
+// Two replays that end now, asked within one step, read the same instants,
+// so whether a burst is caught never depends on the second asked. An end the
+// caller chose is evaluated as given.
 func TestBacktestAlignsInstants(t *testing.T) {
-	rule := ungroupedRule(true)
-	var first, second []time.Time
-	if _, err := Backtest(t.Context(), rule, backtestEnd.Add(13*time.Minute+5*time.Second), 86400, seriesQuery(make([]float64, 200), &first)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Backtest(t.Context(), rule, backtestEnd.Add(23*time.Minute+50*time.Second), 86400, seriesQuery(make([]float64, 200), &second)); err != nil {
-		t.Fatal(err)
-	}
 	// 24h at a 60s frequency steps every 720s, and 10:12 is a multiple of it.
 	want := backtestEnd.Add(12 * time.Minute)
-	if len(first) != 120 || !first[119].Equal(want) || !second[119].Equal(want) || !first[0].Equal(second[0]) {
-		t.Fatalf("last instants %s and %s, want both %s", first[len(first)-1], second[len(second)-1], want)
+	for _, asked := range []time.Duration{13*time.Minute + 5*time.Second, 23*time.Minute + 50*time.Second} {
+		if got := AlignBacktestEnd(backtestEnd.Add(asked), 60, 86400); !got.Equal(want) {
+			t.Errorf("end asked at +%s aligned to %s, want %s", asked, got, want)
+		}
+	}
+
+	chosen := backtestEnd.Add(13*time.Minute + 5*time.Second)
+	var ats []time.Time
+	if _, err := Backtest(t.Context(), ungroupedRule(true), chosen, 86400, seriesQuery(make([]float64, 200), &ats)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ats) != 120 || !ats[119].Equal(chosen) {
+		t.Fatalf("last instant %s, want the chosen end %s", ats[len(ats)-1], chosen)
 	}
 }
 
