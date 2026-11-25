@@ -142,7 +142,7 @@ assistant can count and group without writing SQL or LogsQL for one backend.
 | Tool | Description |
 |------|-------------|
 | `get_field_values` | Top distinct values for one field in a time range, optionally over the logs a LogchefQL `query` matches |
-| `get_all_field_dimensions` | Top values for every filterable field in one call, optionally filtered by `query`. On ClickHouse it leaves out log-body columns (`msg`, `message`, `body`, `log`, `_msg`, `raw` and similar), whose values are whole log lines; ask `get_field_values` for one by name. On Loki, reads values for up to 30 stream labels from the index using the stream selector, without counts |
+| `get_all_field_dimensions` | Top values for every filterable field in one call, optionally filtered by `query`. On ClickHouse it leaves out log-body columns (`msg`, `message`, `body`, `log`, `_msg`, `raw` and similar), whose values are whole log lines; ask `get_field_values` for one by name. A field whose query timed out or failed is listed with an `error` and empty values: its values are unknown, not absent. On Loki, reads values for up to 30 stream labels from the index using the stream selector, without counts |
 | `top_values` | Top values for several fields in one call (up to 20 fields), optionally filtered by `query` |
 | `compare_windows` | Run the same LogchefQL filter in two time windows and compare the samples |
 | `open_investigation` | Open the [investigation panel](#investigation-panel) |

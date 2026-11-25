@@ -232,9 +232,11 @@ API token that has `alerts:write`). The CLI does not create rules.
   reads in full only up to 120 times the lookback (10h for 5m). `7d` steps
   about every 84 minutes and reports `coverage` below 1: zero episodes there
   means unknown. Replay known incident windows with `--from`/`--to`.
-- Pick a threshold from data, not a guess: count the rule's filter per
-  lookback window over 7 days (`'<filter> | count() as value by time(15m)'
-  -s 7d -l 1000`) and set it above the normal peaks.
+- Pick a threshold from data, not a guess: count the rule's filter in
+  windows as long as its lookback over 7 days, and set it above the normal
+  peaks. A longer bucket overstates: `by time(15m)` is about 3 times a 5m
+  lookback's count. `by time(5m)` allows 3 days per run (1,000 buckets); the
+  exact 7-day ClickHouse SQL is in `logchef skills get setup`.
 
 ## When to use the web UI instead
 

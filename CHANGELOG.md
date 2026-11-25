@@ -73,8 +73,18 @@ destinations, and get errors that say what to do.
   a new sign-in, and the `insufficient_scope` challenge carries `scope=`.
   The CLI turns it into the command to run, or into a hint to use an API
   token with the scope.
-- `logchef sql --dry-run` fills `{{__time_filter}}`, `{{__from}}` and
-  `{{__to}}` the way the server does on a ClickHouse source.
+- `logchef sql --dry-run` fills `{{__time_filter}}`, `{{__from}}`, `{{__to}}`,
+  `{{__timezone}}`, and with `--interval` `{{__interval}}` and
+  `{{__interval_s}}`, the way the server does on a ClickHouse source.
+- `logchef alerts backtest` prints the replayed range in the effective
+  timezone and names it, lists each firing or no-data episode's start and end
+  (up to 20), and rounds coverage as the server's warning does, so the two
+  agree.
+- `get_all_field_dimensions` and `GET .../fields/values` list a ClickHouse
+  field whose query timed out or failed with an `error` and empty values.
+  Before, the field was left out, as if it did not exist.
+- CLI messages that ask for an API token say where to create one: the user
+  menu > Profile > API tokens (`/settings/profile`).
 - A backtest that ends now ends at a multiple of the step since the Unix
   epoch, so a rerun reads the same windows and catches the same bursts. One
   with `end_time` evaluates at that instant.
@@ -110,6 +120,14 @@ destinations, and get errors that say what to do.
 - A 403 for a scope no OAuth sign-in can hold, such as `reports:read`, told an
   OAuth caller to sign in again. It now says to use an API token, and the CLI
   prints that once.
+- A ClickHouse query that failed with an error such as an invalid `WITH FILL`
+  (code 475), an ambiguous identifier or a cyclic alias answered only "Failed
+  to query logs". These diagnostics now come back as a 400 with ClickHouse's
+  message, and any other ClickHouse error adds its code, such as "Failed to
+  query logs (ClickHouse error code 49)", without the message, which can name
+  a server.
+- `logchef alerts test` on an ungrouped rule got `"samples": null`; the server
+  now sends an empty list.
 
 
 ## [2.8.2] - 2026-11-23
