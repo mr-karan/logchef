@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
-import { Plus, Search, Shield, User2, Users, X } from "lucide-vue-next";
+import { Pencil, Plus, Search, Shield, User2, Users, X } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
@@ -37,6 +37,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useTeamsStore } from "@/stores/teams";
 import { useUsersStore } from "@/stores/users";
 import { useTableSearchSort } from "@/composables/useTableSearchSort";
+import { useTeamRoles } from "@/composables/useTeamRoles";
 import { formatDate } from "@/utils/format";
 import AddUser from "./AddUser.vue";
 import UserDetailDrawer from "./UserDetailDrawer.vue";
@@ -50,8 +51,12 @@ const authStore = useAuthStore();
 const usersStore = useUsersStore();
 const teamsStore = useTeamsStore();
 const { isLoading } = storeToRefs(usersStore);
+const { roleLabel } = useTeamRoles();
 
 const allMemberships = ref<TeamMembershipSummary[]>([]);
+// Until memberships load, every user would look teamless: views that depend
+// on them show this status instead of an empty list.
+const membershipsStatus = ref<"loading" | "loaded" | "error">("loading");
 const roleFilter = ref<"all" | "admin" | "member">("all");
 const teamFilter = ref<string>("all");
 const statusFilter = ref<"all" | "active" | "inactive">("all");
@@ -83,19 +88,6 @@ const membershipsByUserId = computed(() => {
 
 function userMemberships(userId: string | number): TeamMembershipSummary[] {
   return membershipsByUserId.value.get(String(userId)) ?? [];
-}
-
-function translateTeamRole(role: string): string {
-  switch (role) {
-    case "admin":
-      return t("access.roleAdmin");
-    case "editor":
-      return t("access.roleEditor");
-    case "member":
-      return t("access.roleMember");
-    default:
-      return role;
-  }
 }
 
 const sortedTeamsForFilter = computed(() =>
@@ -220,10 +212,14 @@ async function loadMemberships() {
     const response = await teamsApi.listAllMemberships();
     if (isSuccessResponse(response) && Array.isArray(response.data)) {
       allMemberships.value = response.data;
+      membershipsStatus.value = "loaded";
+      return;
     }
+    console.error("Failed to load team memberships:", response);
   } catch (error) {
     console.error("Failed to load team memberships:", error);
   }
+  membershipsStatus.value = "error";
 }
 
 async function handleMembershipsChanged() {
@@ -300,7 +296,7 @@ onMounted(async () => {
           </SelectContent>
         </Select>
 
-        <Select v-model="teamFilter">
+        <Select v-model="teamFilter" :disabled="membershipsStatus !== 'loaded'">
           <SelectTrigger class="w-[175px]" :aria-label="t('access.filterTeam')" data-testid="people-filter-team">
             <span class="truncate">
               <span class="text-muted-foreground">{{ t("access.filterTeam") }}: </span>
@@ -386,7 +382,7 @@ onMounted(async () => {
                   {{ t("access.lastLogin") }}
                 </SortHeader>
               </TableHead>
-              <TableHead class="w-[52px] text-right">{{ t("ui.actions") }}</TableHead>
+              <TableHead class="w-[88px] text-right">{{ t("ui.actions") }}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -415,8 +411,18 @@ onMounted(async () => {
                 </Badge>
               </TableCell>
               <TableCell>
+                <span
+                  v-if="membershipsStatus === 'error'"
+                  class="text-sm text-destructive"
+                  data-testid="people-teams-error"
+                >
+                  {{ t("access.teamMembershipsLoadFailed") }}
+                </span>
+                <span v-else-if="membershipsStatus === 'loading'" class="text-sm text-muted-foreground">
+                  …
+                </span>
                 <div
-                  v-if="userMemberships(user.id).length > 0"
+                  v-else-if="userMemberships(user.id).length > 0"
                   class="flex flex-wrap items-center gap-1"
                 >
                   <Badge
@@ -425,7 +431,7 @@ onMounted(async () => {
                     variant="secondary"
                     class="font-normal"
                   >
-                    {{ membership.team_name }} · {{ translateTeamRole(membership.role).toLowerCase() }}
+                    {{ membership.team_name }} · {{ roleLabel(membership.role).toLowerCase() }}
                   </Badge>
                   <Badge
                     v-if="userMemberships(user.id).length > MAX_VISIBLE_TEAM_CHIPS"
@@ -434,7 +440,7 @@ onMounted(async () => {
                     :title="
                       userMemberships(user.id)
                         .slice(MAX_VISIBLE_TEAM_CHIPS)
-                        .map((m) => `${m.team_name} · ${translateTeamRole(m.role).toLowerCase()}`)
+                        .map((m) => `${m.team_name} · ${roleLabel(m.role).toLowerCase()}`)
                         .join(', ')
                     "
                   >
@@ -457,11 +463,25 @@ onMounted(async () => {
               <TableCell class="text-sm text-muted-foreground">
                 {{ formatDate(user.last_login_at) }}
               </TableCell>
-              <TableCell class="text-right">
-                <RowActionsMenu
-                  v-if="canDeleteUser(user)"
-                  @delete="handleDelete(user)"
-                />
+              <TableCell class="text-right" @click.stop>
+                <div class="flex items-center justify-end gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    class="h-8 w-8"
+                    :title="t('ui.edit')"
+                    :aria-label="`${t('ui.edit')}: ${user.full_name || user.email}`"
+                    :data-testid="`people-edit-${user.id}`"
+                    @click="openUserDrawer(user)"
+                  >
+                    <Pencil class="h-4 w-4" />
+                  </Button>
+                  <RowActionsMenu
+                    v-if="canDeleteUser(user)"
+                    @delete="handleDelete(user)"
+                  />
+                </div>
               </TableCell>
             </TableRow>
           </TableBody>
@@ -474,10 +494,12 @@ onMounted(async () => {
       :user="selectedUser"
       :memberships="selectedUserMemberships"
       :all-memberships="allMemberships"
+      :memberships-status="membershipsStatus"
       :all-teams="teamsStore.adminTeams"
       :active-global-admin-count="activeGlobalAdminCount"
       @update:open="handleDrawerOpenChange"
       @memberships-changed="handleMembershipsChanged"
+      @retry-memberships="loadMemberships"
       @user-deleted="handleUserDeleted"
     />
 

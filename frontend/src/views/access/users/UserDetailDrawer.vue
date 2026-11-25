@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,11 +24,16 @@ import {
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import type { User } from "@/types";
 import type { TeamMembershipSummary, TeamWithMemberCount } from "@/api/teams";
+import {
+  isTeamRole,
+  usePendingConfirm,
+  useTeamRoles,
+  type TeamRole,
+} from "@/composables/useTeamRoles";
 import { useAuthStore } from "@/stores/auth";
 import { useTeamsStore } from "@/stores/teams";
 import { useUsersStore } from "@/stores/users";
 
-type TeamRole = "admin" | "editor" | "member";
 type GlobalRole = "admin" | "member";
 type UserStatus = "active" | "inactive";
 
@@ -36,6 +42,7 @@ const props = defineProps<{
   user: User | null;
   memberships: TeamMembershipSummary[];
   allMemberships: TeamMembershipSummary[];
+  membershipsStatus: "loading" | "loaded" | "error";
   allTeams: TeamWithMemberCount[];
   activeGlobalAdminCount: number;
 }>();
@@ -43,13 +50,23 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "update:open", value: boolean): void;
   (e: "memberships-changed"): void;
+  (e: "retry-memberships"): void;
   (e: "user-deleted"): void;
 }>();
 
 const { t } = useI18n();
+const router = useRouter();
 const authStore = useAuthStore();
 const usersStore = useUsersStore();
 const teamsStore = useTeamsStore();
+const { roleChangeConfirm, removeMemberConfirm } = useTeamRoles();
+const {
+  pending: pendingConfirm,
+  open: confirmOpen,
+  request: openConfirm,
+  confirm: handleConfirm,
+  cancel: handleCancelConfirm,
+} = usePendingConfirm();
 
 const isEditingName = ref(false);
 const draftName = ref("");
@@ -57,17 +74,6 @@ const addTeamId = ref("");
 const addTeamRole = ref<TeamRole>("member");
 const isAddingToTeam = ref(false);
 const selectResetKey = ref(0);
-
-interface PendingConfirm {
-  title: string;
-  description: string;
-  confirmText: string;
-  destructive?: boolean;
-  onConfirm: () => Promise<void>;
-}
-
-const pendingConfirm = ref<PendingConfirm | null>(null);
-const confirmOpen = ref(false);
 
 watch(
   () => [props.open, props.user?.id] as const,
@@ -130,20 +136,17 @@ function isTeamRowBusy(teamId: number): boolean {
   );
 }
 
-function openConfirm(config: PendingConfirm) {
-  pendingConfirm.value = config;
-  confirmOpen.value = true;
-}
-
-async function handleConfirm() {
-  const action = pendingConfirm.value?.onConfirm;
-  pendingConfirm.value = null;
-  if (action) await action();
-}
-
-function handleCancelConfirm() {
-  pendingConfirm.value = null;
+function resetSelects() {
   selectResetKey.value++;
+}
+
+// Changing your own role or status can drop the global admin role that this
+// page requires.
+async function refreshSelf() {
+  await authStore.refreshSession();
+  if (authStore.user?.role !== "admin" || authStore.user.status !== "active") {
+    await router.replace("/");
+  }
 }
 
 function startEditName() {
@@ -168,11 +171,10 @@ async function saveName() {
 async function applyGlobalRole(role: GlobalRole) {
   if (!props.user) return;
   const result = await usersStore.updateUser(String(props.user.id), { role });
-  if (result.success && isSelf.value) {
-    await authStore.initialize();
-  }
   if (!result.success) {
-    selectResetKey.value++;
+    resetSelects();
+  } else if (isSelf.value) {
+    await refreshSelf();
   }
 }
 
@@ -188,6 +190,7 @@ function onGlobalRoleChange(value: unknown) {
       confirmText: t("access.demoteSelfConfirm"),
       destructive: true,
       onConfirm: () => applyGlobalRole(nextRole),
+      onCancel: resetSelects,
     });
     return;
   }
@@ -198,11 +201,10 @@ function onGlobalRoleChange(value: unknown) {
 async function applyStatus(status: UserStatus) {
   if (!props.user) return;
   const result = await usersStore.updateUser(String(props.user.id), { status });
-  if (result.success && isSelf.value && status === "inactive") {
-    await authStore.initialize();
-  }
   if (!result.success) {
-    selectResetKey.value++;
+    resetSelects();
+  } else if (isSelf.value) {
+    await refreshSelf();
   }
 }
 
@@ -218,6 +220,7 @@ function onStatusChange(value: unknown) {
       confirmText: t("access.deactivateSelfConfirm"),
       destructive: true,
       onConfirm: () => applyStatus(nextStatus),
+      onCancel: resetSelects,
     });
     return;
   }
@@ -231,75 +234,44 @@ async function applyTeamRole(teamId: number, role: TeamRole) {
   if (result.success) {
     emit("memberships-changed");
   } else {
-    selectResetKey.value++;
+    resetSelects();
   }
 }
 
 function onTeamRoleChange(membership: TeamMembershipSummary, value: unknown) {
-  if (!props.user || (value !== "admin" && value !== "editor" && value !== "member")) return;
-  const nextRole: TeamRole = value;
-  if (nextRole === membership.role) return;
-
-  const warnings: string[] = [];
-  const demotingFromAdmin = membership.role === "admin" && nextRole !== "admin";
-  if (demotingFromAdmin && isLastTeamAdmin(membership.team_id, Number(props.user.id))) {
-    warnings.push(
-      t("access.lastTeamAdminDemoteWarning", {
-        name: props.user.full_name || props.user.email,
-        team: membership.team_name,
-      }),
-    );
-  }
-  if (demotingFromAdmin && isSelf.value) {
-    warnings.push(t("access.selfTeamDemoteWarning", { team: membership.team_name }));
-  }
-  if (membership.team_managed) {
-    warnings.push(t("access.managedTeamChangeWarning", { team: membership.team_name }));
-  }
-
-  if (warnings.length > 0) {
-    openConfirm({
-      title: t("access.changeTeamRoleTitle"),
-      description: warnings.join(" "),
-      confirmText: t("access.changeTeamRoleConfirm"),
-      destructive: demotingFromAdmin,
-      onConfirm: () => applyTeamRole(membership.team_id, nextRole),
-    });
+  if (!props.user || !isTeamRole(value) || value === membership.role) return;
+  const apply = () => applyTeamRole(membership.team_id, value);
+  const dialog = roleChangeConfirm({
+    memberName: props.user.full_name || props.user.email,
+    teamName: membership.team_name,
+    from: membership.role,
+    to: value,
+    isLastAdmin: isLastTeamAdmin(membership.team_id, Number(props.user.id)),
+    isSelf: isSelf.value,
+    managed: membership.team_managed,
+  });
+  if (!dialog) {
+    void apply();
     return;
   }
-
-  void applyTeamRole(membership.team_id, nextRole);
+  openConfirm({ ...dialog, onConfirm: apply, onCancel: resetSelects });
 }
 
 function askRemoveFromTeam(membership: TeamMembershipSummary) {
   if (!props.user) return;
-  const userName = props.user.full_name || props.user.email;
-  const parts = [
-    t("access.removeMemberConfirmation", {
-      name: userName,
-      team: membership.team_name,
-    }),
-  ];
-  if (membership.role === "admin" && isLastTeamAdmin(membership.team_id, Number(props.user.id))) {
-    parts.push(
-      t("access.lastTeamAdminRemoveWarning", {
-        name: userName,
-        team: membership.team_name,
-      }),
-    );
-  }
-  if (membership.team_managed) {
-    parts.push(t("access.managedTeamChangeWarning", { team: membership.team_name }));
-  }
-
+  const userId = Number(props.user.id);
   openConfirm({
-    title: t("access.removeMemberTitle"),
-    description: parts.join(" "),
-    confirmText: t("access.removeFromTeam"),
-    destructive: true,
+    ...removeMemberConfirm({
+      memberName: props.user.full_name || props.user.email,
+      teamName: membership.team_name,
+      role: membership.role,
+      isLastAdmin: isLastTeamAdmin(membership.team_id, userId),
+      // A global admin keeps access to every team.
+      removesOwnAccess: false,
+      managed: membership.team_managed,
+    }),
     onConfirm: async () => {
-      if (!props.user) return;
-      const result = await teamsStore.removeTeamMember(membership.team_id, Number(props.user.id));
+      const result = await teamsStore.removeTeamMember(membership.team_id, userId);
       if (result.success) {
         emit("memberships-changed");
       }
@@ -489,7 +461,22 @@ function askDeleteUser() {
               {{ t("routes.teams") }}
             </h4>
 
-            <p v-if="memberships.length === 0" class="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+            <div
+              v-if="membershipsStatus === 'error'"
+              class="flex items-center justify-between gap-2 rounded-md border border-destructive/40 px-3 py-3 text-sm text-destructive"
+              data-testid="drawer-teams-error"
+            >
+              <span>{{ t("access.teamMembershipsLoadFailed") }}</span>
+              <Button type="button" variant="outline" size="sm" class="h-7" @click="emit('retry-memberships')">
+                {{ t("ui.retry") }}
+              </Button>
+            </div>
+
+            <p v-else-if="membershipsStatus === 'loading'" class="px-1 text-sm text-muted-foreground">
+              {{ t("access.loadingTeams") }}
+            </p>
+
+            <p v-else-if="memberships.length === 0" class="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
               {{ t("access.notInAnyTeamsYet") }}
             </p>
 
@@ -558,8 +545,10 @@ function askDeleteUser() {
               </div>
             </div>
 
-            <!-- Add to team -->
-            <div v-if="availableTeamItems.length > 0" class="flex items-center gap-2 pt-1">
+            <div
+              v-if="membershipsStatus === 'loaded' && availableTeamItems.length > 0"
+              class="flex items-center gap-2 pt-1"
+            >
               <div class="min-w-0 flex-1">
                 <SearchableSelect
                   v-model="addTeamId"
