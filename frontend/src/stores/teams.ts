@@ -328,6 +328,42 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
+  async function updateTeamMemberRole(
+    teamId: number,
+    userId: number,
+    role: "admin" | "member" | "editor"
+  ) {
+    if (!teamId || !userId) {
+      return state.handleError(
+        {
+          status: "error",
+          message: "Invalid team or user ID",
+          error_type: "ValidationError",
+        } as APIErrorResponse,
+        `updateTeamMemberRole-${teamId}-${userId}`
+      );
+    }
+
+    return await state.callApi({
+      apiCall: () => teamsApi.addTeamMember(teamId, { user_id: userId, role }),
+      successMessage: i18n.global.t("access.memberRoleUpdated"),
+      operationKey: `updateTeamMemberRole-${teamId}-${userId}`,
+      onSuccess: async () => {
+        const cached = state.data.value.teamMembersMap[teamId];
+        if (cached) {
+          state.data.value.teamMembersMap[teamId] = cached.map((m) =>
+            Number(m.user_id) === Number(userId) ? { ...m, role } : m
+          );
+        }
+
+        const currentUserId = authStore.user?.id;
+        if (currentUserId && Number(userId) === Number(currentUserId)) {
+          await loadUserTeams();
+        }
+      },
+    });
+  }
+
   async function removeTeamMember(teamId: number, userId: number) {
     // Validate parameters
     if (!teamId || !userId) {
@@ -486,6 +522,7 @@ export const useTeamsStore = defineStore("teams", () => {
     deleteTeam,
     listTeamMembers,
     addTeamMember,
+    updateTeamMemberRole,
     removeTeamMember,
     listTeamSources,
     addTeamSource,
