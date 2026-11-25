@@ -371,12 +371,12 @@ export const useTeamsStore = defineStore("teams", () => {
   ) {
     const uniqueIds = [...new Set(userIds)].filter((id) => Number.isFinite(id) && id > 0);
     if (!teamId || uniqueIds.length === 0) {
-      return { success: false, added: 0, failed: 0 };
+      return { success: false, added: 0, failed: 0, failedIds: [] };
     }
 
     return await state.withLoading(`addTeamMember-${teamId}`, async () => {
       let added = 0;
-      let failed = 0;
+      const failedIds: number[] = [];
       let lastError: APIErrorResponse | undefined;
 
       for (const userId of uniqueIds) {
@@ -385,14 +385,15 @@ export const useTeamsStore = defineStore("teams", () => {
           if (isSuccessResponse(response)) {
             added++;
           } else {
-            failed++;
+            failedIds.push(userId);
             lastError = response;
           }
         } catch (err) {
-          failed++;
+          failedIds.push(userId);
           lastError = err as APIErrorResponse;
         }
       }
+      const failed = failedIds.length;
 
       if (added > 0) {
         const membersRes = await listTeamMembers(teamId);
@@ -412,14 +413,14 @@ export const useTeamsStore = defineStore("teams", () => {
       const { toast } = useToast();
       if (added > 0 && failed === 0) {
         toast({ title: i18n.global.t("access.membersAddedCount", { count: added }, added) });
-        return { success: true, added, failed };
+        return { success: true, added, failed, failedIds };
       }
       if (added > 0 && failed > 0) {
         toast({
           title: i18n.global.t("access.membersAddPartialFailure", { added, failed }),
           variant: "destructive",
         });
-        return { success: false, added, failed, error: lastError };
+        return { success: false, added, failed, failedIds, error: lastError };
       }
 
       return {
@@ -429,6 +430,7 @@ export const useTeamsStore = defineStore("teams", () => {
         ),
         added,
         failed,
+        failedIds,
       };
     });
   }

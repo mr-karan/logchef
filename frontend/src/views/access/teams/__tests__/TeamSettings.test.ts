@@ -30,6 +30,10 @@ const server = {
   ] as User[],
   members,
   removeMemberFails: false,
+  failAddUserIds: [] as number[],
+  // A team member viewing the page instead of the global admin.
+  viewerId: null as number | null,
+  sources: {} as Record<number, unknown[]>,
   requests,
   calls,
   heldTeamId: 0,
@@ -45,10 +49,17 @@ function respond(method: string, url: string, body?: unknown): Envelope {
   server.calls.push({ method, url, body });
   const ok = (data: unknown): Envelope => ({ status: "success", data });
   if (url === "/meta") return ok({ version: "test", http_server_timeout: "30s", max_query_limit: 1000 });
+  const viewer = server.users.find((u) => Number(u.id) === server.viewerId);
   if (url === "/me") return ok({
-    user: { id: "99", role: "admin", email: "admin@example.com", full_name: "Admin", status: "active", account_type: "human", created_at: "", updated_at: "" },
-    session: { id: "test", user_id: "99", expires_at: "", created_at: "" },
+    user: viewer ?? { id: "99", role: "admin", email: "admin@example.com", full_name: "Admin", status: "active", account_type: "human", created_at: "", updated_at: "" },
+    session: { id: "test", user_id: viewer?.id ?? "99", expires_at: "", created_at: "" },
   });
+  if (url === "/me/teams" && viewer) {
+    return ok(server.teams.flatMap((team) => {
+      const membership = (server.members[team.id] ?? []).find((m) => m.user_id === Number(viewer.id));
+      return membership ? [{ ...team, role: membership.role }] : [];
+    }));
+  }
   if (url === "/admin/teams" || url === "/me/teams") return ok(server.teams);
   if (url === "/users") return ok(server.users);
   if (url === "/admin/sources") return ok([]);
@@ -56,9 +67,12 @@ function respond(method: string, url: string, body?: unknown): Envelope {
   if (!match) throw new Error(`unexpected request ${method} ${url}`);
   const teamId = Number(match[1]);
   if (!match[2]) return ok(server.teams.find((t) => t.id === teamId));
-  if (match[2] === "/sources") return ok([]);
+  if (match[2] === "/sources") return ok(server.sources[teamId] ?? []);
   if (method === "post") {
     const payload = body as { user_id: number; role: "admin" | "editor" | "member" };
+    if (server.failAddUserIds.includes(payload.user_id)) {
+      return { status: "error", message: "add rejected", error_type: "GeneralError" };
+    }
     const list = server.members[teamId] ?? [];
     const existing = list.find((m) => m.user_id === payload.user_id);
     if (existing) {
@@ -81,7 +95,7 @@ function respond(method: string, url: string, body?: unknown): Envelope {
       ? { status: "error", message: "member removal rejected", error_type: "ValidationError" }
       : ok({ message: "ok" });
   }
-  return ok(server.members[teamId] ?? []);
+  return ok((server.members[teamId] ?? []).map((m) => ({ ...m })));
 }
 
 vi.mock("@/api/apiUtils", () => ({
@@ -151,6 +165,9 @@ describe("TeamSettings", () => {
       2: [member(2, 20, "b@example.com", "admin")],
     };
     server.removeMemberFails = false;
+    server.failAddUserIds = [];
+    server.viewerId = null;
+    server.sources = {};
     server.heldTeamId = 0;
     server.requests = [];
     server.calls = [];
@@ -300,6 +317,35 @@ describe("TeamSettings", () => {
     ]);
   });
 
+  it("keeps only the users that failed selected after a partial add, so a retry does not resend the others", async () => {
+    server.failAddUserIds = [12];
+    host.querySelector<HTMLButtonElement>('[data-testid="add-members-trigger"]')?.click();
+    await settle();
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-option-11"]')?.click();
+    document.querySelector<HTMLButtonElement>('[data-testid="add-member-option-12"]')?.click();
+    await settle();
+
+    document.querySelector<HTMLButtonElement>('[data-testid="add-members-submit"]')?.click();
+    await settle();
+
+    expect(server.members[1].map((m) => m.user_id)).toEqual([10, 11]);
+    const dialog = document.querySelector("[role=dialog]");
+    expect(dialog?.textContent).toContain("Dan D");
+    expect(dialog?.textContent).not.toContain("Carol C");
+    const submit = document.querySelector<HTMLButtonElement>('[data-testid="add-members-submit"]');
+    expect(submit?.textContent).toContain("Add 1 member");
+
+    server.failAddUserIds = [];
+    server.calls = [];
+    submit?.click();
+    await settle();
+
+    expect(server.calls.filter((c) => c.method === "post").map((c) => c.body)).toEqual([
+      { user_id: 12, role: "member" },
+    ]);
+    expect(document.querySelector('[data-testid="add-members-submit"]')).toBeNull();
+  });
+
   it("navigates to People with ?user=<id> from RowActionsMenu and renders the accurate role legend", async () => {
     const legend = host.querySelector('[data-testid="team-role-legend"]')?.textContent ?? "";
     expect(legend).toContain("Admin");
@@ -313,5 +359,96 @@ describe("TeamSettings", () => {
 
     expect(router.currentRoute.value.name).toBe("ManageUsers");
     expect(router.currentRoute.value.query.user).toBe("10");
+  });
+});
+
+describe("TeamSettings for a team admin who is not a global admin", () => {
+  let host: HTMLDivElement;
+  let app: App;
+  let router: Router;
+
+  beforeEach(async () => {
+    localStorage.clear();
+    toasts.length = 0;
+    server.calls = [];
+    server.requests = [];
+    server.heldTeamId = 0;
+    server.viewerId = 10;
+    server.members = {
+      1: [member(1, 10, "a@example.com", "admin")],
+      2: [member(2, 20, "b@example.com", "admin"), member(2, 10, "a@example.com", "member")],
+    };
+    const source = { id: 5, name: "events", source_type: "victorialogs", description: "", created_at: "", connection: {} };
+    server.sources = { 1: [source], 2: [source] };
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: { template: "<div>Home</div>" } },
+        { path: "/admin/teams/:id", name: "TeamSettings", component: TeamSettings },
+        { path: "/admin/teams", name: "Teams", component: { template: "<div />" } },
+      ],
+    });
+    app = createApp(defineComponent({ template: "<router-view />" }));
+    const pinia = createPinia();
+    app.use(pinia);
+    await useAuthStore(pinia).initialize();
+    app.use(i18n);
+    app.use(router);
+    await router.push("/admin/teams/1");
+    app.mount(host);
+    await settle();
+  });
+
+  afterEach(() => {
+    app.unmount();
+    host.remove();
+  });
+
+  function clickTab(label: string) {
+    const tab = [...host.querySelectorAll<HTMLElement>("[role=tab]")].find((el) => el.textContent?.trim() === label);
+    if (!tab) throw new Error(`tab ${label} not found`);
+    tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  }
+
+  it("hides member, source and settings changes on a team they only belong to", async () => {
+    await router.push("/admin/teams/2");
+    await settle();
+
+    expect(host.querySelector('[data-testid="add-members-trigger"]')).toBeNull();
+    expect(host.querySelector('[data-testid="member-role-select-20"]')).toBeNull();
+
+    clickTab("Sources");
+    await settle();
+    expect(host.textContent).toContain("events");
+    expect(host.textContent).not.toContain("Add source");
+    expect(host.querySelector('[data-testid="remove-source-5"]')).toBeNull();
+
+    clickTab("Settings");
+    await settle();
+    expect(host.querySelector('[data-testid="team-settings-save"]')).toBeNull();
+    expect(host.querySelector<HTMLInputElement>("input#name")?.disabled).toBe(true);
+  });
+
+  it("can still manage sources on the team they administer", async () => {
+    clickTab("Sources");
+    await settle();
+    expect(host.querySelector('[data-testid="remove-source-5"]')).not.toBeNull();
+  });
+
+  it("leaves the page after demoting themselves from their only admin team", async () => {
+    const trigger = host.querySelector<HTMLButtonElement>('[data-testid="member-role-select-10"]');
+    if (!trigger) throw new Error("inline role select not rendered");
+    await chooseSelectOption(trigger, "Member");
+
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>("[role=alertdialog] button")].find(
+      (b) => b.textContent?.trim() === "Change role",
+    );
+    confirm?.click();
+    await settle();
+
+    expect(server.calls.some((c) => c.method === "put" && c.url === "/teams/1/members/10")).toBe(true);
+    expect(router.currentRoute.value.path).toBe("/");
   });
 });
