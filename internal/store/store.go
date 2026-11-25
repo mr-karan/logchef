@@ -655,6 +655,9 @@ type TeamStore interface {
 	UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
 	ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
+	// ListAllTeamMemberships returns every membership in every team, ordered
+	// by team name (case-insensitive), team ID, then user ID.
+	ListAllTeamMemberships(ctx context.Context) ([]*models.TeamMembershipSummary, error)
 
 	AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error
 	RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error

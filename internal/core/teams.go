@@ -1,15 +1,12 @@
 package core
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/core/access"
@@ -506,90 +503,6 @@ func ListTeamsForUser(ctx context.Context, db store.StoreOps, userID models.User
 	// The adapter maps to models.UserTeamDetails (role + member count); this
 	// wrapper exists so callers depend on core, not the store directly.
 	return db.ListTeamsForUser(ctx, userID)
-}
-
-// ListAdminUserTeams returns all teams a user belongs to along with their role,
-// member count, and whether each team is managed by provisioning config.
-func ListAdminUserTeams(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.AdminUserTeam, error) {
-	teams, err := db.ListTeamsForUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing teams for user: %w", err)
-	}
-	if len(teams) == 0 {
-		return []*models.AdminUserTeam{}, nil
-	}
-
-	managedTeams, err := db.ListManagedTeams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error listing managed teams: %w", err)
-	}
-	managedIDs := make(map[models.TeamID]bool, len(managedTeams))
-	for _, mt := range managedTeams {
-		managedIDs[mt.ID] = true
-	}
-
-	result := make([]*models.AdminUserTeam, 0, len(teams))
-	for _, team := range teams {
-		result = append(result, &models.AdminUserTeam{
-			ID:          team.ID,
-			Name:        team.Name,
-			Description: team.Description,
-			CreatedAt:   team.CreatedAt,
-			UpdatedAt:   team.UpdatedAt,
-			MemberCount: team.MemberCount,
-			Role:        team.Role,
-			Managed:     managedIDs[team.ID],
-		})
-	}
-	slices.SortFunc(result, func(a, b *models.AdminUserTeam) int {
-		if c := cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.ID, b.ID)
-	})
-	return result, nil
-}
-
-// ListAllTeamMemberships returns all team memberships across all teams so admin
-// list views can show every user's teams without N+1 HTTP requests.
-func ListAllTeamMemberships(ctx context.Context, db store.StoreOps) ([]*models.TeamMembershipSummary, error) {
-	teams, err := db.ListTeams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error listing teams: %w", err)
-	}
-
-	memberships := make([]*models.TeamMembershipSummary, 0)
-	for _, team := range teams {
-		if team.MemberCount == 0 {
-			continue
-		}
-		members, err := db.ListTeamMembersWithDetails(ctx, team.ID)
-		if err != nil {
-			return nil, fmt.Errorf("error listing members for team %d: %w", team.ID, err)
-		}
-		for _, member := range members {
-			memberships = append(memberships, &models.TeamMembershipSummary{
-				TeamID:      team.ID,
-				TeamName:    team.Name,
-				TeamManaged: team.Managed,
-				UserID:      member.UserID,
-				Role:        member.Role,
-				AccountType: member.AccountType,
-				CreatedAt:   member.CreatedAt,
-			})
-		}
-	}
-
-	slices.SortFunc(memberships, func(a, b *models.TeamMembershipSummary) int {
-		if c := cmp.Compare(strings.ToLower(a.TeamName), strings.ToLower(b.TeamName)); c != 0 {
-			return c
-		}
-		if c := cmp.Compare(a.TeamID, b.TeamID); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.UserID, b.UserID)
-	})
-	return memberships, nil
 }
 
 // --- Utility Functions ---

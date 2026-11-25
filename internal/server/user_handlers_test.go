@@ -420,7 +420,6 @@ func TestAdminAccountHandlersRejectMissingUsers(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/users/999999"},
-		{http.MethodGet, "/users/999999/teams"},
 		{http.MethodPut, "/users/999999"},
 		{http.MethodDelete, "/users/999999"},
 		{http.MethodGet, "/service-accounts/999999/tokens"},
@@ -448,95 +447,6 @@ func TestAdminAccountHandlersRejectMissingUsers(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestAdminListUserTeamsHTTP(t *testing.T) {
-	ctx := context.Background()
-	s := newAuthzTestServer(t)
-	admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
-	member := mkTestUser(t, s.store, "alice@example.com", models.UserRoleMember)
-	svc, err := core.CreateServiceAccount(ctx, s.store, s.log, "CI Bot")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	alpha := &models.Team{Name: "Alpha"}
-	beta := &models.Team{Name: "Beta"}
-	for _, team := range []*models.Team{alpha, beta} {
-		if err := s.store.CreateTeam(ctx, team); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.store.SetTeamManaged(ctx, beta.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.AddTeamMember(ctx, alpha.ID, member.ID, models.TeamRoleAdmin); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.store.AddTeamMember(ctx, beta.ID, member.ID, models.TeamRoleEditor); err != nil {
-		t.Fatal(err)
-	}
-
-	cookie := sessionCookie(t, s.store, admin)
-	path := fmt.Sprintf("/api/v1/admin/users/%d/teams", member.ID)
-
-	t.Run("session returns teams with roles and managed flag", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, path, http.NoBody)
-		req.AddCookie(cookie)
-		resp, err := s.app.Test(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d, want 200", resp.StatusCode)
-		}
-		var envelope struct {
-			Status string                 `json:"status"`
-			Data   []models.AdminUserTeam `json:"data"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-			t.Fatal(err)
-		}
-		if len(envelope.Data) != 2 {
-			t.Fatalf("got %d teams, want 2: %+v", len(envelope.Data), envelope.Data)
-		}
-		if envelope.Data[0].Name != "Alpha" || envelope.Data[0].Role != models.TeamRoleAdmin || envelope.Data[0].Managed {
-			t.Errorf("first team = %+v, want Alpha/admin/unmanaged", envelope.Data[0])
-		}
-		if envelope.Data[1].Name != "Beta" || envelope.Data[1].Role != models.TeamRoleEditor || !envelope.Data[1].Managed {
-			t.Errorf("second team = %+v, want Beta/editor/managed", envelope.Data[1])
-		}
-	})
-
-	t.Run("rejects service account ID with 404", func(t *testing.T) {
-		resp := doAuthzRequest(t, s, http.MethodGet, fmt.Sprintf("/api/v1/admin/users/%d/teams", svc.ID), "", withSession(cookie))
-		if resp.status != http.StatusNotFound {
-			t.Fatalf("status = %d (%q), want 404", resp.status, resp.message)
-		}
-	})
-
-	t.Run("rejects invalid user ID with 400", func(t *testing.T) {
-		resp := doAuthzRequest(t, s, http.MethodGet, "/api/v1/admin/users/not-a-number/teams", "", withSession(cookie))
-		if resp.status != http.StatusBadRequest {
-			t.Fatalf("status = %d (%q), want 400", resp.status, resp.message)
-		}
-	})
-
-	t.Run("auth and token scope checks", func(t *testing.T) {
-		memberResp := doAuthzRequest(t, s, http.MethodGet, path, "", withSession(sessionCookie(t, s.store, member)))
-		if memberResp.status != http.StatusForbidden {
-			t.Errorf("non-admin status = %d, want 403", memberResp.status)
-		}
-		wrongScope := doAuthzRequest(t, s, http.MethodGet, path, "", withBearer(apiToken(t, s, admin, models.TokenScopeUsersRead)))
-		if wrongScope.status != http.StatusForbidden {
-			t.Errorf("missing teams:read status = %d, want 403", wrongScope.status)
-		}
-		okScope := doAuthzRequest(t, s, http.MethodGet, path, "", withBearer(apiToken(t, s, admin, models.TokenScopeTeamsRead)))
-		if okScope.status != http.StatusOK {
-			t.Errorf("teams:read status = %d (%q), want 200", okScope.status, okScope.message)
-		}
-	})
 }
 
 func TestAdminListAllTeamMembershipsHTTP(t *testing.T) {

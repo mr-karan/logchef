@@ -24,17 +24,6 @@ export interface UserTeamMembership {
   role: "admin" | "member" | "editor";
 }
 
-export interface AdminUserTeam {
-  id: number;
-  name: string;
-  description?: string;
-  created_at: string;
-  updated_at: string;
-  member_count: number;
-  role: "admin" | "member" | "editor";
-  managed: boolean;
-}
-
 export interface TeamMembershipSummary {
   team_id: number;
   team_name: string;
@@ -84,8 +73,6 @@ export const teamsApi = {
   listAllTeams: (options?: RequestOptions) => apiClient.get<TeamWithMemberCount[]>("/admin/teams", options),
   listAllMemberships: (options?: RequestOptions) =>
     apiClient.get<TeamMembershipSummary[]>("/admin/team-memberships", options),
-  listUserTeamsByAdmin: (userId: string | number, options?: RequestOptions) =>
-    apiClient.get<AdminUserTeam[]>(`/admin/users/${userId}/teams`, options),
   getTeam: (id: number, options?: RequestOptions) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`, options),
   createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>

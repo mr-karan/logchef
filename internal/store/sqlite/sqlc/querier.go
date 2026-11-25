@@ -307,6 +307,8 @@ type Querier interface {
 	// surface only. The handler MUST authorize the caller as a global admin before
 	// calling this. Rows the caller cannot run are marked non-runnable in Go.
 	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
+	// List every team membership with its team, for admin views of all users
+	ListAllTeamMemberships(ctx context.Context) ([]ListAllTeamMembershipsRow, error)
 	// Oldest first, with the same filters as ListAuditEventsDesc.
 	ListAuditEventsAsc(ctx context.Context, arg ListAuditEventsAscParams) ([]AuditEvent, error)
 	// Newest first. An empty text argument or a NULL ID argument disables its
