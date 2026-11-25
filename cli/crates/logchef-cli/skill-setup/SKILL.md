@@ -3,8 +3,9 @@ name: logchef-setup
 description: >-
   Set up Logchef observability for an application from its own repository:
   find the app's production team and log source, measure its live log volume
-  and noise, and propose saved queries, a collection, saved views, alert rules
-  with thresholds taken from real data, silences and scheduled reports. Runs a
+  and noise, and propose saved queries, a collection, saved views, an overview
+  dashboard, alert rules with thresholds taken from real data, silences and
+  scheduled reports. Runs a
   read-only discovery, shows a preview, asks for confirmation, and only then
   creates what was confirmed. Use when someone asks to add Logchef alerts,
   dashboards, saved queries or log monitoring for a service, or to onboard an
@@ -16,8 +17,9 @@ description: >-
 
 You are in the repository of one application. The goal is a small, high-signal
 Logchef setup for that application in production: a few saved queries and
-views for daily use, one collection that groups them, two to five alert rules
-whose thresholds come from real data, and optional silences and scheduled
+views for daily use, one collection that groups them, one overview dashboard,
+two to five alert rules whose thresholds come from real data, and optional
+silences and scheduled
 reports.
 
 Work in four phases. **Discovery and Step 1 are read-only. Create nothing until
@@ -73,7 +75,8 @@ token as `LOGCHEF_AUTH_TOKEN` (the CLI uses it too), made under
 ```text
 profile:read teams:read sources:read logs:read saved_queries:read
 collections:read alerts:read saved_views:read destinations:read
-alerts:write saved_queries:write collections:write saved_views:write
+dashboards:read alerts:write saved_queries:write collections:write
+saved_views:write dashboards:write
 ```
 
 Add `destinations:write` only to create a destination, and `reports:read
@@ -144,14 +147,20 @@ curl -sS --fail-with-body -H "Authorization: Bearer $LOGCHEF_AUTH_TOKEN" \
      CLI's `logchef collections` lists saved queries, not collections.
    - Silences: `logchef silences list -S <source>` (MCP `list_alert_silences`).
    - Destinations: `logchef destinations list` (MCP `list_destinations`).
+   - Dashboards: `logchef dashboards list` (MCP `list_dashboards`, and
+     `get_dashboard` for one dashboard's panels), or `GET /dashboards` with the
+     header `X-Logchef-Dashboard-Schema: 2`. A list entry has the name, panel
+     count, panel kinds and tab count; a dashboard you see is one you created
+     or one with a panel on a team you belong to.
    - Scheduled reports, with a token that has `reports:read`:
      `logchef reports list`.
 
 ## Discovery 3: design
 
 Propose a small set, every item backed by evidence from Discovery 2: usually
-three to six saved queries, one or two views, two to five alerts, and at most
-two reports. Skip anything an existing item covers and say so.
+three to six saved queries, one or two views, one dashboard, two to five
+alerts, and at most two reports. Skip anything an existing item covers and say
+so.
 
 ### Saved queries and the collection
 
@@ -166,6 +175,97 @@ A view sets the Explorer layout: columns, sort, display mode, and optionally a
 LogchefQL filter and a relative time range (`m`, `h`, `d` or `w`). For example
 "<app> live" (key columns, newest first, the app filter, `1h`) and
 "<app> errors".
+
+### Overview dashboard
+
+One dashboard per app, six to eight panels on one or two tabs, each panel
+answering a question someone asks during an incident: how many errors, how
+many 5xx, is volume normal, which host or task is failing, which error, which
+route is slow. Count mode charts a filter as a histogram; result mode runs a
+LogchefQL aggregation (or native SQL) and charts its rows. Every panel names
+its `team_id` and `source_id`; a dashboard is visible to its creator, global
+admins and the members of any team its panels name.
+
+Here, team 3 and source 7 stand for the IDs from Discovery 1, and the filters
+for the app filter and fields from Discovery 2. The body of
+`POST /api/v1/dashboards` (`dashboard.json`):
+
+```json
+{
+  "name": "checkout-api overview",
+  "description": "Errors, 5xx, volume and slow routes of checkout-api in production",
+  "panels": {
+    "version": 2,
+    "default_time_range": "24h",
+    "tabs": [
+      {"id": "main", "title": "Overview", "layout": [
+        {"id": "errors", "x": 0, "y": 0, "w": 3, "h": 2},
+        {"id": "http-5xx", "x": 3, "y": 0, "w": 3, "h": 2},
+        {"id": "volume-by-level", "x": 6, "y": 0, "w": 6, "h": 4},
+        {"id": "errors-by-host", "x": 0, "y": 2, "w": 6, "h": 4}
+      ]},
+      {"id": "errors-tab", "title": "Errors", "layout": [
+        {"id": "top-errors", "x": 0, "y": 0, "w": 6, "h": 6},
+        {"id": "slow-routes", "x": 6, "y": 0, "w": 6, "h": 6}
+      ]}
+    ],
+    "panels": [
+      {"id": "errors", "kind": "query", "title": "Errors", "team_id": 3, "source_id": 7,
+       "query": {"mode": "count", "language": "logchefql", "text": "service=\"checkout-api\" and level=\"error\""},
+       "viz": {"type": "stat"}},
+      {"id": "http-5xx", "kind": "query", "title": "5xx responses", "team_id": 3, "source_id": 7,
+       "query": {"mode": "count", "language": "logchefql", "text": "service=\"checkout-api\" and status>=500"},
+       "viz": {"type": "stat"}},
+      {"id": "volume-by-level", "kind": "query", "title": "Log volume by level", "team_id": 3, "source_id": 7,
+       "query": {"mode": "count", "language": "logchefql", "text": "service=\"checkout-api\"", "group_by": "level"},
+       "viz": {"type": "chart", "mark": "bar", "stack": "stacked"}},
+      {"id": "errors-by-host", "kind": "query", "title": "Errors by host", "team_id": 3, "source_id": 7,
+       "query": {"mode": "count", "language": "logchefql", "text": "service=\"checkout-api\" and level=\"error\"", "group_by": "host"},
+       "viz": {"type": "chart", "mark": "line"}},
+      {"id": "top-errors", "kind": "query", "title": "Top error messages", "team_id": 3, "source_id": 7,
+       "query": {"mode": "result", "language": "logchefql", "text": "service=\"checkout-api\" and level=\"error\" | count() as errors by msg | sort errors desc | limit 10"},
+       "viz": {"type": "toplist", "label": "msg", "value": "errors"}},
+      {"id": "slow-routes", "kind": "query", "title": "Slowest routes (p95 ms)", "team_id": 3, "source_id": 7,
+       "query": {"mode": "result", "language": "logchefql", "text": "service=\"checkout-api\" | p95(duration_ms) as p95_ms, count() as requests by route | sort p95_ms desc | limit 20", "limit": 20},
+       "viz": {"type": "table"}}
+    ]
+  }
+}
+```
+
+Create it with both headers. `X-Logchef-Dashboard-Schema: 2` makes the
+response a schema 2 blob, and `X-Logchef-Dashboard-Features` must list every
+feature the body uses, or the response marks the dashboard as one this client
+cannot edit:
+
+```bash
+curl -sS --fail-with-body -X POST "$LOGCHEF_SERVER_URL/api/v1/dashboards" \
+  -H "Authorization: Bearer $LOGCHEF_AUTH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "X-Logchef-Dashboard-Schema: 2" \
+  -H "X-Logchef-Dashboard-Features: result_charts,tabs" \
+  --data-binary @"$TMP/dashboard.json"
+```
+
+The features this body uses are `tabs` (more than one tab) and
+`result_charts` (a chart, pie or toplist in result mode). Others: a stat in
+result mode or a `reduce` other than `sum` is `result_frames`; a fixed
+`query.interval`, a `query.range` or a calendar `default_time_range` is
+`panel_time`; a width outside 2, 3, 4, 6, 8, 9 and 12, or a height above 6, is
+`free_grid`; `viz.format` is `formats`; thresholds are `thresholds`. The
+response's `panels.features` is the list the server computed: if it names a
+feature your header left out, add it to the header before any later save.
+
+- A dashboard holds at most 24 panels and 10 tabs. The grid is 12 columns
+  wide; a panel is 2 to 12 columns wide and 1 to 12 rows high, and each layout
+  entry's `id` names one panel.
+- Count mode takes a LogchefQL filter without a pipe, and `group_by` names a
+  low-cardinality field. A pie or toplist in count mode needs `group_by`; a
+  table needs result mode.
+- In result mode a stat needs `viz.value`, a chart `viz.x` and `viz.y`, and a
+  pie or toplist `viz.label` and `viz.value`, naming result columns.
+- Check each panel query first with `logchef query '<text>' -s 24h`, and
+  `logchef explain` for warnings.
 
 ### Alert rules
 
@@ -251,7 +351,7 @@ minutes. Holidays need `once` silences.
 ### Scheduled reports (optional)
 
 One or two email digests at most, such as a daily error summary for the team,
-backed by one of the saved queries or a dashboard:
+backed by one of the saved queries or by the overview dashboard:
 
 ```json
 {
@@ -268,6 +368,9 @@ backed by one of the saved queries or a dashboard:
 }
 ```
 
+- For the dashboard, `"source": {"kind": "dashboard", "dashboard_id": <id>,
+  "tab_id": "main"}` emails one tab; leave out `tab_id` for every tab.
+  `attach_csv` and `variables` are for a saved query only.
 - `schedule` holds only the fields its frequency uses: `weekdays` for weekly,
   `day_of_month` (1 to 28) for monthly, no `hour` for hourly.
 - `range_anchor` `day_start` ends the range at the start of the send day in
@@ -285,9 +388,11 @@ Show one report, then stop:
 
 1. The team, source, backend and app filter, and how you identified them.
 2. Existing items, and what you are not duplicating.
-3. A table for each kind (saved queries, collection, views, alerts, silences,
-   reports): name, exact query or definition, settings, why it matters, and
-   its evidence.
+3. A table for each kind (saved queries, collection, views, dashboard
+   panels, alerts, silences, reports): name, exact query or definition,
+   settings, why it matters, and its evidence. For the dashboard, show each
+   tab and panel with its query, mode and visualization, and the features
+   header.
 4. For each alert: mode, exact `query`, lookback, frequency, operator and
    threshold, severity, group_by, no-data policy, labels, the 7-day baseline
    (p50, p95, p99, max), and the test and backtest results (episodes,
@@ -314,7 +419,9 @@ Ask, briefly and in one message:
    personal or team scope (team scope needs a team admin or editor, source
    scope a global admin).
 6. **Activation**: create the alerts active, or inactive for a one-day trial.
-7. **Reports**: recipients and schedule, if any.
+7. **Dashboard**: create it, and which teams its panels name (that decides
+   who sees it).
+8. **Reports**: recipients and schedule, and whether one emails the dashboard.
 
 Wait for an explicit yes that names the items. "Looks good" without a list is
 not a yes.
@@ -343,20 +450,26 @@ chat or the shell history.
    `description`, `scope` and `definition`:
    `{"version": 1, "columns": [{"name": "..."}], "sort": [{"column": "<timestamp column>", "desc": true}], "display_mode": "table", "filter": "<logchefql>", "time_range": "1h"}`.
    Unknown keys are refused.
-5. **Alerts**: `POST /alerts` with `source_id`, `name`, `description` and the
+5. **Dashboard**: `POST /dashboards` with the body and both headers shown
+   above. Check that the response's `panels.features` adds nothing to your
+   header, and open `/dashboards/<id>` to check it renders.
+6. **Alerts**: `POST /alerts` with `source_id`, `name`, `description` and the
    fields above.
-6. **Silences**: `POST /alert-silences` with `source_id`, `alert_id`,
+7. **Silences**: `POST /alert-silences` with `source_id`, `alert_id`,
    optional `matchers`, `comment`, `schedule_kind` (`once` or `weekly`) and
    `weekly` or `starts_at` and `ends_at`.
-7. **Reports**: `POST /reports`, then `POST /reports/<id>/preview` and show
-   what it returns. If the user wants changes, `POST /reports/<id>/pause`
-   until they are made.
+8. **Reports**: `POST /reports`, with the dashboard's ID when a report emails
+   it, then `POST /reports/<id>/preview` and show what it returns. If the user
+   wants changes, `POST /reports/<id>/pause` until they are made.
 
 Then list each kind again to verify, and report the created IDs, names and
 links, and anything skipped.
 
 Without a token, give the same plan as web UI steps: the Library for saved
-queries and the collection, **Save as new view** in the Explorer, **Alerts →
+queries and the collection, **Save as new view** in the Explorer,
+**Dashboards** (choose **Edit**, then add each panel in the panel builder
+with its team, source, query and visualization, and add the second tab),
+**Alerts →
 New Alert** (press **Test** and **Run backtest** before saving), the
 **Silences** and **Destinations** tabs, and **Reports** with **Preview**.
 

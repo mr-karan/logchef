@@ -801,6 +801,15 @@ logchef destinations list
 logchef destinations list --output json
 ```
 
+### Dashboards
+
+`dashboards list` lists the dashboards you can see: those you created and those with a panel on one of your teams. Each row has the ID, name, panel count, tab count, panel kinds, whether you can edit it and when it changed. It reads no panels. Create and edit dashboards in the web UI. A sign-in made before the server offered `dashboards:read` must run `logchef auth` again.
+
+```bash
+logchef dashboards list
+logchef dashboards list --output json
+```
+
 ### Reports
 
 The `reports` command lists [scheduled reports](/features/scheduled-reports/), reads their run history, and sends one now. Create and edit reports in the web UI.

@@ -29,6 +29,15 @@ destinations, and get errors that say what to do.
 - `logchef doctor` reports the read scopes that a `logchef auth` sign-in
   lacks.
 - `logchef find --concurrency` sets how many sources are searched at once.
+- `dashboards:read` is an OAuth scope, with the MCP tools `list_dashboards`
+  and `get_dashboard` and the CLI command `logchef dashboards list`. An OAuth
+  caller sees the dashboards its user sees as a team member, with panels on
+  sources it cannot reach locked; an admin's OAuth token gets no admin
+  bypass. A client connected before this release must sign in again to get
+  the scope.
+- The `logchef-setup` skill proposes and creates one overview dashboard per
+  app, and a scheduled report can email it. A test checks the skill's
+  example dashboard against the schema 2 validator and its features header.
 - The `logchef-setup` skill, also bundled as `logchef skills get setup`,
   walks a coding agent through setting up Logchef for an app from its
   repository: it finds the production source, measures volume and noise,
