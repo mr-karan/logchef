@@ -70,6 +70,12 @@ function respond(method: string, url: string, body?: unknown): Envelope {
     }
     return ok({ message: "Team member added successfully" });
   }
+  if (method === "put" && match[3]) {
+    const existing = (server.members[teamId] ?? []).find((m) => m.user_id === Number(match[3]));
+    if (!existing) return { status: "error", message: "User is not a member of this team", error_type: "NotFoundError" };
+    existing.role = (body as { role: "admin" | "editor" | "member" }).role;
+    return ok({ message: "Team member role updated" });
+  }
   if (method === "delete") {
     return server.removeMemberFails
       ? { status: "error", message: "member removal rejected", error_type: "ValidationError" }
@@ -219,15 +225,30 @@ describe("TeamSettings", () => {
     expect(toasts.filter((t) => t.kind === "error")).toHaveLength(1);
   });
 
-  it("changes a team member's role inline and calls POST /teams/:id/members with the new role", async () => {
+  it("changes a team member's role inline with PUT /teams/:id/members/:userId", async () => {
     const trigger = host.querySelector<HTMLButtonElement>('[data-testid="member-role-select-10"]');
     if (!trigger) throw new Error("inline role select not rendered");
 
     await chooseSelectOption(trigger, "Editor");
 
-    const postCall = server.calls.find((c) => c.method === "post" && c.url === "/teams/1/members");
-    expect(postCall?.body).toEqual({ user_id: 10, role: "editor" });
+    const putCall = server.calls.find((c) => c.method === "put" && c.url === "/teams/1/members/10");
+    expect(putCall?.body).toEqual({ role: "editor" });
+    expect(server.calls.some((c) => c.method === "post")).toBe(false);
     expect(toasts.some((t) => t.message === "Team role updated")).toBe(true);
+  });
+
+  it("does not re-add a member another admin removed when their role changes", async () => {
+    const trigger = host.querySelector<HTMLButtonElement>('[data-testid="member-role-select-10"]');
+    if (!trigger) throw new Error("inline role select not rendered");
+    server.members[1] = [];
+
+    await chooseSelectOption(trigger, "Editor");
+
+    expect(server.calls.some((c) => c.method === "put" && c.url === "/teams/1/members/10")).toBe(true);
+    expect(server.calls.some((c) => c.method === "post")).toBe(false);
+    expect(server.members[1]).toEqual([]);
+    expect(toasts.filter((t) => t.kind === "error")).toHaveLength(1);
+    expect(host.querySelector('[data-testid="member-role-select-10"]')?.textContent?.trim()).toBe("Member");
   });
 
   it("asks with a ConfirmDialog before demoting the last team admin or changing a role on a managed team", async () => {
@@ -243,7 +264,7 @@ describe("TeamSettings", () => {
     expect(dialog).not.toBeNull();
     expect(dialog?.textContent).toContain("last team admin");
     expect(dialog?.textContent).toContain("provisioning");
-    expect(server.calls.some((c) => c.method === "post" && c.url === "/teams/2/members")).toBe(false);
+    expect(server.calls.some((c) => c.method === "put" && c.url === "/teams/2/members/20")).toBe(false);
 
     const confirm = [...(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
       (b) => b.textContent?.trim() === "Change role",
@@ -251,8 +272,8 @@ describe("TeamSettings", () => {
     confirm?.click();
     await settle();
 
-    const postCall = server.calls.find((c) => c.method === "post" && c.url === "/teams/2/members");
-    expect(postCall?.body).toEqual({ user_id: 20, role: "member" });
+    const putCall = server.calls.find((c) => c.method === "put" && c.url === "/teams/2/members/20");
+    expect(putCall?.body).toEqual({ role: "member" });
   });
 
   it("adds multiple members at once with one shared role", async () => {

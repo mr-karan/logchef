@@ -36,6 +36,8 @@ var (
 	// Define team/source errors here temporarily for IsNotFoundError, or reference from other files.
 	// Ideally, these would live in teams.go and source.go respectively.
 	ErrTeamNotFound = errors.New("team not found")
+	// ErrTeamMemberNotFound is returned when a user is not a member of the team.
+	ErrTeamMemberNotFound = errors.New("team member not found")
 )
 
 // --- User Validation Functions ---

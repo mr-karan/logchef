@@ -119,7 +119,7 @@ before the change records nothing, except a failed sign-in.
 | Setting | `setting.update`, `setting.delete`, `setting.test` | A system setting changes, or the test email or webhook is sent |
 | Source | `source.create`, `source.update`, `source.delete` | A source changes |
 | Team | `team.create`, `team.update`, `team.delete` | A team changes |
-| Team member | `team_member.add`, `team_member.remove` | A user joins or leaves a team. A role change is a `team_member.add` with a `role` diff |
+| Team member | `team_member.add`, `team_member.update`, `team_member.remove` | A user joins or leaves a team, or their team role changes (`team_member.update`, with a `role` diff). Adding an existing member with another role is a `team_member.add` with a `role` diff |
 | Team source | `team_source.link`, `team_source.unlink` | A source is linked to or unlinked from a team |
 | User | `user.create`, `user.update`, `user.delete` | A user changes. Role and status are in `changes` |
 

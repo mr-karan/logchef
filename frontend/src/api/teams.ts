@@ -85,6 +85,8 @@ export const teamsApi = {
     apiClient.get<TeamMember[]>(`/teams/${teamId}/members`, options),
   addTeamMember: (teamId: number, data: AddTeamMemberRequest) =>
     apiClient.post<TeamMember>(`/teams/${teamId}/members`, data),
+  updateTeamMemberRole: (teamId: number, userId: number, role: AddTeamMemberRequest["role"]) =>
+    apiClient.put<{ message: string }>(`/teams/${teamId}/members/${userId}`, { role }),
   removeTeamMember: (teamId: number, userId: number) =>
     apiClient.delete<{ message: string }>(`/teams/${teamId}/members/${userId}`),
 

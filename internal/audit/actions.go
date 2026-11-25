@@ -83,6 +83,7 @@ const (
 	TeamDelete Action = "team.delete"
 
 	TeamMemberAdd    Action = "team_member.add"
+	TeamMemberUpdate Action = "team_member.update"
 	TeamMemberRemove Action = "team_member.remove"
 
 	TeamSourceLink   Action = "team_source.link"
@@ -158,7 +159,7 @@ var registrations = []struct {
 	{SettingUpdate, true}, {SettingDelete, true}, {SettingTest, false},
 	{SourceCreate, true}, {SourceUpdate, true}, {SourceDelete, true},
 	{TeamCreate, true}, {TeamUpdate, true}, {TeamDelete, true},
-	{TeamMemberAdd, true}, {TeamMemberRemove, true},
+	{TeamMemberAdd, true}, {TeamMemberUpdate, true}, {TeamMemberRemove, true},
 	{TeamSourceLink, true}, {TeamSourceUnlink, true},
 	{UserCreate, true}, {UserUpdate, true}, {UserDelete, true},
 	{SavedViewCreate, true}, {SavedViewUpdate, true}, {SavedViewDelete, true}, {SavedViewSetDefault, true}, {SavedViewClearDefault, true},
