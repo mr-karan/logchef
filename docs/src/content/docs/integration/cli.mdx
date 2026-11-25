@@ -374,7 +374,7 @@ logchef sql 'level:="error" | fields _time, _msg, service'
 | `--interval` | | Bucket size for the `{{__interval}}` and `{{__interval_s}}` macros: `1s` to `24h` | |
 | `--var` | | Value for a `{{name}}` placeholder (`NAME=VALUE`, or `NAME:number=VALUE`, `NAME:date=VALUE`). Repeatable | |
 | `--timeout` | | Query timeout in seconds | 30 |
-| `--limit` | | Request row limit. A smaller `LIMIT` in the query wins | (from config) |
+| `--limit` | `-l` | Request row limit. A smaller `LIMIT` in the query wins | (from config) |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `csv`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
@@ -494,6 +494,8 @@ logchef explain 'level="error" and service="api"' -t production -S app-logs
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--since` | `-s` | Compile over the window that ends now, such as `1h` | the context's `since` for an aggregation |
+| `--from`, `--to` | | Compile over an absolute window | |
 | `--interval` | | Bucket size of a bare `by time` key in an aggregation | |
 | `--output` | | Output format (`text`, `json`, `jsonl`) | `text` |
 
@@ -515,10 +517,9 @@ compiles an aggregation over the default `since` range of the context.
 
 When a query translates but may not match what it says, `explain` prints a
 warning on stderr (and a `warnings` array with `--output json`). The main
-case: a dotted path on a String column reads JSON with `JSONExtractString`,
-which returns an empty string for a JSON number, so `msg.latency_ms > "500"`
-or `p95(msg.latency_ms)` misses every numeric value. Use `logchef sql` with
-`JSONExtractFloat` for those.
+case: a dotted path on a String column reads JSON as text, so
+`msg.latency_ms > "500"` with a quoted number compares text and `"1000"` sorts
+before `"500"`. Write the number without quotes to compare numbers.
 
 :::tip[`explain` vs `--explain`/`--show-sql`]
 `explain` is a translate-and-validate step that **never executes**. The `--explain` / `--show-sql` flags on `query` and `sql` trace the generated backend query on stderr but **still run** it. Use `explain` when you only want to see or check the query; use the flags when you want the results and the query.
@@ -780,9 +781,11 @@ logchef alerts list -t production -S app-logs
 ```bash
 logchef alerts test -f rule.json -S app-logs
 logchef alerts backtest -f rule.json -S app-logs --range 24h --frequency 60
+logchef alerts backtest -f rule.json -S app-logs --frequency 60 \
+  --from '2026-01-15 09:00:00' --to '2026-01-15 13:00:00'
 ```
 
-`test` runs the rule once over its lookback and prints the value, whether it meets the threshold, the group samples and any warnings. `backtest` replays it over the range through the same group, no-data and forget rules as live evaluation, and prints the episodes, notifications, firing time, coverage and the groups that breached most. `--range` takes `1h`, `6h`, `24h` or `7d`; `--frequency` sets the seconds between evaluations. A backtest runs at most 120 evaluations, so over `7d` it steps about every 84 minutes: read the coverage, and run `24h` too. One backtest runs per user at a time. A ClickHouse SQL rule must read its window from `{{__time_filter}}` to be backtested. `--output json` prints the server's result as is.
+`test` runs the rule once over its lookback and prints the value, whether it meets the threshold, the group samples and any warnings. `backtest` replays it over the range through the same group, no-data and forget rules as live evaluation, and prints the episodes, notifications, firing time, coverage and the groups that breached most. `--range` takes `1h`, `6h`, `24h` or `7d`; `--frequency` sets the seconds between evaluations. `--end` replays the range that ends at a past time, and `--from` with `--to` replays exactly that window (1 hour to 7 days), in RFC 3339 or `'YYYY-MM-DD HH:MM:SS'` in the effective timezone. A backtest runs at most 120 evaluations, so it reads the whole range only up to 120 times the lookback (10 hours for 5 minutes). The output shows the step and the coverage on their own line, and the server's warnings on stderr: below 100% an episode shorter than the step can be missed, so replay incident windows with `--from`/`--to`. For an `lt` or `lte` rule the groups table shows each group's lowest value. One backtest runs per user at a time. A ClickHouse SQL rule must read its window from `{{__time_filter}}` to be backtested. `--output json` prints the server's result as is.
 
 ### Silences
 

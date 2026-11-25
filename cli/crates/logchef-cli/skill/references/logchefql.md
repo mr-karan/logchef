@@ -86,22 +86,26 @@ Discover what's available first with `logchef schema` (columns) and
 ### JSON inside a String column
 
 On ClickHouse, a dotted path on a **String** column (for example a `msg` column
-that holds a JSON body) compiles to `JSONExtractString(msg, 'key')`. That
-returns the value only when the JSON value is a string. **A JSON number comes
-back as an empty string.** So:
+that holds a JSON body) compiles to `JSONExtractString(msg, 'key')`, which
+returns the JSON value as text, a number included (`400` comes back as
+`"400"`). So:
 
-- `msg.level="error"` works when `level` is a JSON string.
-- `msg.latency_ms>500` is an error (a number compared with text).
-- `msg.latency_ms>"500"` compares text, and `p95(msg.latency_ms)`,
-  `sum`, `avg`, `min` and `max` skip every numeric value. Both translate, so
-  `logchef explain` prints a warning for them.
+- `msg.level="error"` and `msg.status=400` compare the text and match.
+- `msg.latency_ms>500`, with the number unquoted, compares numbers: it compiles
+  to `toFloat64OrNull(JSONExtractString(msg, 'latency_ms')) > 500`.
+- `msg.latency_ms>"500"`, with the number quoted, compares text, so `"1000"`
+  sorts before `"500"`. `logchef explain` warns about it; drop the quotes.
+- `p95(msg.latency_ms)`, `sum`, `avg`, `min` and `max` parse the text as a
+  number and work.
 
-For a numeric JSON value, use native SQL with `JSONExtractFloat` or
-`JSONExtractInt`:
+Find the keys an app writes, including nested groups such as `engine.error`,
+with native SQL:
 
 ```bash
-logchef sql "SELECT quantile(0.95)(JSONExtractFloat(msg, 'latency_ms')) AS p95
-  FROM logs.app WHERE job_name = 'api'" -s 1h
+logchef sql "SELECT arrayJoin(JSONExtractKeys(assumeNotNull(msg))) AS key, count() AS n
+  FROM logs.app WHERE service = 'api' GROUP BY key ORDER BY n DESC LIMIT 30" -s 1h
+logchef sql "SELECT arrayJoin(JSONExtractKeys(assumeNotNull(msg), 'engine')) AS key, count() AS n
+  FROM logs.app WHERE service = 'api' GROUP BY key ORDER BY n DESC LIMIT 30" -s 1h
 ```
 
 Map and native JSON columns keep their types and are not affected.

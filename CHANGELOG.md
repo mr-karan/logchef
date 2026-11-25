@@ -23,9 +23,13 @@ destinations, and get errors that say what to do.
   receiver URL or key. A client connected before this release must sign in
   again to get it.
 - LogchefQL translation returns `warnings`. A dotted path on a String column
-  used as a number (`msg.latency_ms > "500"`, `p95(msg.latency_ms)`) gets one:
-  `JSONExtractString` returns an empty string for a JSON number. `logchef
-  explain` and the MCP `translate_logchefql` tool show it.
+  ordered against a quoted number (`msg.latency_ms > "500"`) gets one:
+  `JSONExtractString` returns a JSON number as text, so the comparison orders
+  text. `logchef explain` and the MCP `translate_logchefql` tool show it.
+- On a dotted path on a String column, an unquoted number compares as a number
+  in an ordering (`msg.latency_ms > 500` reads
+  `toFloat64OrNull(JSONExtractString(...))`) and as text with `=` and `!=`
+  (`msg.status = 400` matches the JSON number 400). Before, both were refused.
 - `logchef doctor` reports the read scopes that a `logchef auth` sign-in
   lacks.
 - `logchef find --concurrency` sets how many sources are searched at once.
@@ -44,6 +48,19 @@ destinations, and get errors that say what to do.
   proposes saved queries, a collection, views, alert rules backtested on real
   data, silences and scheduled reports, and creates only what the user
   confirms.
+- Alert backtests replay a past window: `end_time` in `POST /alerts/backtest`
+  and MCP `backtest_alert`, and `--end` or `--from`/`--to` in `logchef alerts
+  backtest`. The result carries `warnings` that say how much of the range the
+  120-evaluation budget reads, `summary.empty_result_episodes` for a grouped
+  rule's whole-result no-data episodes, and each group's `min_value`.
+- MCP `backtest_alert` returns only the evaluations where the status changed
+  unless `include_series` is set. MCP `get_alert_history` takes `limit`
+  (default 20, at most 100), `since` and `status`, and states the rule's query
+  once instead of in every episode.
+- The alert test warns about a ClickHouse query that reads the current time,
+  which a backtest refuses, and about a value column not named `value`.
+- `logchef explain` takes `-s`/`--since` or `--from`/`--to`, and `logchef sql`
+  takes `-l` for its row limit.
 
 ### Changed
 
@@ -58,6 +75,16 @@ destinations, and get errors that say what to do.
   token with the scope.
 - `logchef sql --dry-run` fills `{{__time_filter}}`, `{{__from}}` and
   `{{__to}}` the way the server does on a ClickHouse source.
+- Backtest evaluation instants are multiples of the step since the Unix epoch,
+  so a rerun reads the same windows and catches the same bursts.
+- The alert test lists the groups closest to firing first, lowest for `lt`
+  and `lte` and highest for `gt` and `gte`, and `value` is the first one's.
+- `get_all_field_dimensions` and the field sidebar leave out log-body columns
+  (`msg`, `message`, `body`, `log`, `_msg`, `raw` and similar) on ClickHouse:
+  their top values are whole log lines and cost a distinct count over every
+  body. A field asked for by name still returns its values.
+- MCP `get_alert_history` returns `{"alert": ..., "history": [...]}` instead of
+  a bare list.
 
 ### Fixed
 
@@ -72,6 +99,17 @@ destinations, and get errors that say what to do.
   `SELECT ... FROM (SELECT ... FROM table) HAVING ...`, which failed with
   `Missing columns: '_timestamp'`. The filter now goes into the subquery that
   reads the table.
+- `logchef alerts test` and `alerts backtest` crashed on `"warnings": null`
+  from servers up to v2.8.2, in text and `--output json`. The CLI reads null
+  lists as empty and prints JSON without parsing it, and the server now sends
+  an empty list.
+- A NULL value in a ClickHouse SQL rule, such as `max()` over no row, failed
+  the evaluation, so a firing group kept firing. It is now no data and follows
+  the no-data policy.
+- A 403 for a scope no OAuth sign-in can hold, such as `reports:read`, told an
+  OAuth caller to sign in again. It now says to use an API token, and the CLI
+  prints that once.
+
 
 ## [2.8.2] - 2026-11-23
 

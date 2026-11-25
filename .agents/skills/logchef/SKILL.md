@@ -68,16 +68,16 @@ source resolve, and prints a fix hint for each problem.
 | `logchef schema -t <team> -S <src>` | Table columns and types. |
 | `logchef fields [<field>]` | Field discovery: no arg lists fields; a field name lists observed values. |
 | `logchef query '<logchefql>'` | **Primary search.** LogchefQL, translated server-side for either backend. |
-| `logchef explain '<query>'` | Show the generated ClickHouse SQL / LogsQL / LogQL **without running it**. Validate + preview. Warnings (stderr, or `warnings` in `--output json`) flag a query that translates but may not match, such as a JSON number read as text from a String column. |
+| `logchef explain '<query>'` | Show the generated ClickHouse SQL / LogsQL / LogQL **without running it**. Validate + preview. Warnings (stderr, or `warnings` in `--output json`) flag a query that translates but may not match, such as `msg.latency_ms > "500"`, which compares JSON text. `-s`/`--from`/`--to` compile it over that window. |
 | `logchef histogram '<query>'` | Counts-over-time buckets. Cheap way to find spikes without pulling rows. |
-| `logchef sql '<native>'` (alias `native`) | Raw **ClickHouse SQL** on CH sources, raw **LogsQL** on VictoriaLogs sources, raw **LogQL** on Loki sources (the window rides in the request; `--since` defaults to the context's `since`). `--var k=v` fills `{{k}}`; `--interval 24h` and the time flags fill the `{{__…}}` time macros of a dashboard panel's query. |
+| `logchef sql '<native>'` (alias `native`) | Raw **ClickHouse SQL** on CH sources, raw **LogsQL** on VictoriaLogs sources, raw **LogQL** on Loki sources (the window rides in the request; `--since` defaults to the context's `since`). `--var k=v` fills `{{k}}`; `--interval 24h` and the time flags fill the `{{__…}}` time macros of a dashboard panel's query. `-l` caps the rows. A `FROM (subquery)` gets the time filter inside the subquery, and `--dry-run` prints the SQL with the time macros filled in. |
 | `logchef tail '<logchefql>'` | Live follow — native server streaming (SSE), works for both backends; `--poll` for the polling fallback. |
 | `logchef find '<pattern>'` | Which sources contain a service / host / message pattern (ClickHouse **and** VictoriaLogs). Searches 4 sources at once (`--concurrency`), skips one that takes longer than `--timeout` (30 s) and names every skipped source on stderr; matches always print. Narrow with `-t` on a server with many sources. |
 | `logchef collections` / `logchef saved-queries` | List/run saved queries (by name, id, or explorer URL; `--var k=v`). |
 | `logchef open [query]` | Open a query in the web explorer — carries the query (`--sql` for native), `--since` or `--from/--to`, `--limit`, and `--view <id\|name>` for a saved view; `--print` just prints the URL. |
 | `logchef views list` | Saved Explorer views of a source (personal, team, source): id, name, scope, default mark, and the parts each sets (columns, sort, display mode, filter, time range). `--output json` for the raw list. Read-only. |
 | `logchef alerts list [-S <src>]` | Alert rules you can see, of every source or one: id, name, severity, state and group counts, threshold, lookback and frequency. Read-only. |
-| `logchef alerts test -f <file\|->` / `alerts backtest -f <file\|-> --range 24h --frequency 60` | Check an **unsaved** rule (the JSON body of `POST /api/v1/alerts/test`; a missing `source_id` comes from `-S`). `test` runs it once over its lookback: value, threshold met, group samples, warnings. `backtest` replays it over `1h`/`6h`/`24h`/`7d`: episodes, notifications, firing time, coverage, top groups. Both save nothing and notify no one; a `logchef auth` sign-in can run them. One backtest per user at a time. See "Alert rules" below. |
+| `logchef alerts test -f <file\|->` / `alerts backtest -f <file\|-> --range 24h --frequency 60` | Check an **unsaved** rule (the JSON body of `POST /api/v1/alerts/test`; a missing `source_id` comes from `-S`). `test` runs it once over its lookback: value, threshold met, group samples, warnings. `backtest` replays it over `1h`/`6h`/`24h`/`7d`, or a past window with `--from`/`--to` or `--end`: episodes, notifications, firing time, coverage, top groups. It reads at most 120 evaluations, so check the coverage line: below 100% it can miss short episodes, and replaying a shorter window reads all of it. Both save nothing and notify no one; a `logchef auth` sign-in can run them. One backtest per user at a time. See "Alert rules" below. |
 | `logchef silences list -S <src>` | A source's silences: rule (or all rules), matchers, once/weekly schedule, active now. Read-only. |
 | `logchef destinations list` | Notification destinations you may put on a rule (id for `destination_ids`, name, type, scope, team, active). A sign-in never sees recipients, URLs or keys. Read-only. |
 | `logchef dashboards list` | Dashboards you can see (yours, and those with a panel on your teams): id, name, panel and tab counts, panel kinds, editable, last change. No panels. Read-only. |
@@ -228,8 +228,10 @@ API token that has `alerts:write`). The CLI does not create rules.
   lookback. Group columns go in `group_by`; at most 100 rows per evaluation.
 - `no_data_policy`: `zero` (default) compares an empty result with 0, `no_data`
   reports a group that stops reporting, `keep` keeps the state.
-- Backtest bounds: 1 hour to 7 days, at most 120 evaluations, so `7d` steps
-  about every 84 minutes and reports `coverage` below 1. Run `24h` as well.
+- Backtest bounds: 1 hour to 7 days, at most 120 evaluations, so a range
+  reads in full only up to 120 times the lookback (10h for 5m). `7d` steps
+  about every 84 minutes and reports `coverage` below 1: zero episodes there
+  means unknown. Replay known incident windows with `--from`/`--to`.
 - Pick a threshold from data, not a guess: count the rule's filter per
   lookback window over 7 days (`'<filter> | count() as value by time(15m)'
   -s 7d -l 1000`) and set it above the normal peaks.

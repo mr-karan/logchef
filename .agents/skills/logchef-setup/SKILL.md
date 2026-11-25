@@ -35,6 +35,8 @@ the user confirms in Step 2.**
   Logchef item. If one should change, say so and let the user do it.
 - **Leave the repository alone.** Keep scratch files (JSON request bodies) in
   one `mktemp -d` directory outside the repository and delete it at the end.
+  If a rule you follow forbids deleting files, give the user the exact
+  `rm -r <dir>` command instead. Never write unredacted log samples to disk.
 - **Secrets stay in the environment.** Never ask for a token or webhook URL in
   chat and never print one. Use only environment variables such as
   `$LOGCHEF_SERVER_URL`, `$LOGCHEF_AUTH_TOKEN` and `$WEBHOOK_URL`.
@@ -120,11 +122,15 @@ curl -sS --fail-with-body -H "Authorization: Bearer $LOGCHEF_AUTH_TOKEN" \
    plain lines, appear, and write filters that cover each.
 2. **Samples.** Ten to twenty recent rows, then ten to twenty error rows.
    Find where level, status, latency and error text live.
-3. **JSON inside a String column.** On ClickHouse, `msg.level` on a String
-   column reads JSON with `JSONExtractString`, which returns an empty string
-   for a JSON number. Run `logchef explain` (MCP `translate_logchefql`) on every
-   filter: a warning means the query translates but misses numeric values. Use
-   native SQL with `JSONExtractFloat` for those.
+3. **JSON inside a String column.** On ClickHouse, `msg.status` on a String
+   column reads JSON with `JSONExtractString`, which returns a JSON number as
+   text: `msg.status=400` matches, `msg.latency_ms>500` (unquoted) compares
+   numbers, aggregates such as `p95(msg.latency_ms)` work, and only
+   `msg.latency_ms>"500"` (quoted) compares text. Run `logchef explain` (MCP
+   `translate_logchefql`) on every filter and act on its warnings. List the
+   keys an app writes, nested groups such as `engine.error` included, with
+   `SELECT arrayJoin(JSONExtractKeys(assumeNotNull(msg), 'engine')) AS key,
+   count() FROM <table> WHERE <app filter> GROUP BY key` in `logchef sql`.
 4. **Volume and noise over 24 hours and 7 days**, aggregates only:
    - Logs and errors over time: `'<app filter> | count() as value by
      time(15m)' -s 7d -l 1000`. A `by time()` pipe allows at most 1,000
@@ -139,7 +145,8 @@ curl -sS --fail-with-body -H "Authorization: Bearer $LOGCHEF_AUTH_TOKEN" \
      business hours differ from off-hours.
 5. **Existing items for this source**, so nothing is duplicated:
    - Alert rules: `logchef alerts list -S <source>` (MCP `list_alerts`), and
-     `get_alert_history` for related ones.
+     `get_alert_history` for related ones (20 newest episodes by default;
+     narrow it with `limit`, `since` and `status`).
    - Saved queries: `logchef saved-queries` (MCP `list_saved_queries`).
    - Saved views: `logchef views list -t <team> -S <source>`
      (MCP `list_saved_views`).
@@ -325,16 +332,39 @@ directory, then:
 logchef alerts test -f rule.json -S <source>
 logchef alerts backtest -f rule.json -S <source> --range 24h --frequency 60
 logchef alerts backtest -f rule.json -S <source> --range 7d --frequency 60
+# Replay a known incident window in full
+logchef alerts backtest -f rule.json -S <source> --frequency 60 \
+  --from '2026-01-15 09:00:00' --to '2026-01-15 13:00:00'
 ```
 
 Over MCP, use `test_alert` and `backtest_alert` with `team_id` and
-`source_id`. A backtest runs at most 120 evaluations, so over 7 days it steps
-about every 84 minutes and reports `coverage` below 1: trust the 24-hour run
-for timing and the 7-day run for how often the rule fires. One backtest runs
-per user at a time; a second gets 429. A 422 on ClickHouse SQL means the query
-lacks `{{__time_filter}}` or reads the current time. Aim for zero to three
-episodes in a healthy week; if a rule fires more, raise the threshold,
-lengthen the lookback or narrow the filter, and show the trade-off.
+`source_id`; `backtest_alert` takes `end_time` for a past window, and returns
+only the evaluations where the status changed unless `include_series` is set.
+
+**Read `coverage` before trusting a result.** A backtest runs at most 120
+evaluations, so it reads the whole range only when the range is at most 120
+times the lookback: 10 hours for a 5m lookback. Over 24 hours a 5m rule is
+evaluated every 12 minutes and reads 42% of the range; over 7 days, every 84
+minutes and 6%. The result's `warnings` say so. Zero episodes at low coverage
+means unknown, not quiet: an incident shorter than the step can fall between
+two windows. So:
+
+- Replay each known incident window, or the busiest hours from Discovery 2,
+  with `--from`/`--to` (MCP `end_time` and `range_seconds`) at coverage 1.
+- Use the 7-day run for how often the rule fires, and cross-check its bursts
+  with the exact count per window in `logchef sql` or `query ... by time(5m)`.
+- For a grouped rule, `summary.episodes` includes `empty_result_episodes`,
+  the episodes of the whole result having no rows, which belong to no group.
+
+The test response lists the groups closest to firing first, the lowest value
+for `lt`/`lte` and the highest for `gt`/`gte`, and the backtest groups carry
+`min_value` and `max_value`. A SQL NULL value, such as `max()` over no row, is
+no data and follows the no-data policy. One backtest runs per user at a time;
+a second gets 429. A 422 on ClickHouse SQL, or a test warning, means the query
+lacks `{{__time_filter}}` or reads the current time (`now()`, `today()`). Aim
+for zero to three episodes in a healthy week at coverage 1 on the replayed
+windows; if a rule fires more, raise the threshold, lengthen the lookback or
+narrow the filter, and show the trade-off.
 
 ### Silences
 
@@ -475,4 +505,5 @@ New Alert** (press **Test** and **Run backtest** before saving), the
 
 Finish with what was created, what was skipped and why, and what the user
 still needs to do, such as revoking the API token. Delete the scratch
-directory.
+directory, or, where deleting files is not allowed, give the user the
+`rm -r <dir>` command.
