@@ -2,7 +2,7 @@
 import { useI18n } from "vue-i18n";
 
 import { ref, computed, watch } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Link } from 'lucide-vue-next';
+import { ChevronDown, Save, PlusCircle, BookMarked, Link } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
@@ -11,9 +11,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/composables/useToast';
@@ -167,7 +164,7 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
     <DropdownMenuContent class="w-64" align="end">
       <DropdownMenuItem v-if="canSaveQuery" @click="handleSave">
         <Save class="w-4 h-4 mr-2" />
-        <span>{{ isEditingExistingQuery ? t('ui.updateCurrentQuery') : t('ui.saveCurrentQueryToCollection') }}</span>
+        <span>{{ isEditingExistingQuery ? t('ui.updateCurrentQuery') : t('library.saveQueryAction') }}</span>
       </DropdownMenuItem>
       <DropdownMenuItem v-if="canSaveQuery && isEditingExistingQuery" @click="handleRequestSaveAsNew">
         <PlusCircle class="w-4 h-4 mr-2" />
@@ -176,13 +173,11 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
 
       <DropdownMenuSeparator v-if="canSaveQuery" />
 
-      <DropdownMenuLabel v-if="hasQueries">{{ t('ui.loadFromCollection') }}</DropdownMenuLabel>
-      <DropdownMenuSub v-if="hasQueries">
-        <DropdownMenuSubTrigger>
-          <ListTree class="w-4 h-4 mr-2" />
-          <span>{{ t('queries.select', { count: queries.length }) }}</span>
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent class="max-h-96 overflow-y-auto">
+      <template v-if="hasQueries">
+        <DropdownMenuLabel class="text-xs text-muted-foreground">
+          {{ t('library.savedQueriesCount', { count: queries.length }) }}
+        </DropdownMenuLabel>
+        <div class="max-h-60 overflow-y-auto">
           <DropdownMenuItem
             v-for="query in queries"
             :key="query.id"
@@ -193,6 +188,7 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
               <span class="truncate" :title="query.name">{{ query.name }}</span>
             </div>
             <button
+              type="button"
               @click="(e) => copyCollectionUrl(e, query)"
               class="p-0.5 rounded hover:bg-muted transition-colors flex-shrink-0"
               :title="t('ui.copyShareLink')"
@@ -200,14 +196,13 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
               <Link class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
             </button>
           </DropdownMenuItem>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-
-      <DropdownMenuSeparator v-if="hasQueries" />
+        </div>
+        <DropdownMenuSeparator />
+      </template>
 
       <DropdownMenuItem @click="navigateToCollectionsView">
         <BookMarked class="w-4 h-4 mr-2" />
-        <span>{{ t('ui.viewAllCollections') }}</span>
+        <span>{{ t('library.openLibrary') }}</span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
