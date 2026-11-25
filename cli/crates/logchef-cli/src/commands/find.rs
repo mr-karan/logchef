@@ -1,10 +1,14 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, QueryResponse, SqlQueryRequest, Team};
+use logchef_core::api::{Client, Column, QueryResponse, Source, SqlQueryRequest, Team};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::timerange::resolve_timezone;
 use serde::Serialize;
+use std::future::Future;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::task::JoinSet;
 
 use crate::cli::GlobalArgs;
 use crate::session;
@@ -25,7 +29,14 @@ const SAMPLE_VALUE_TRUNCATE: usize = 80;
   logchef find payment-gateway -t platform --since 7d
 
   # Just the match counts, no per-column samples, as JSON
-  logchef find nginx --no-samples --output jsonl")]
+  logchef find nginx --no-samples --output jsonl
+
+  # Search many sources faster, giving each at most 10 seconds
+  logchef find checkout-api --concurrency 8 --timeout 10
+
+A source that fails or takes longer than --timeout is skipped and named on
+stderr; the matches from the other sources still print. The command fails
+only when no source could be searched.")]
 pub struct FindArgs {
     /// Service, job, host, or message pattern to search for.
     pattern: String,
@@ -50,9 +61,14 @@ pub struct FindArgs {
     #[arg(long, default_value = "10")]
     limit: usize,
 
-    /// Query timeout in seconds per source.
+    /// Seconds each source may take, from its schema read to its samples.
+    /// A source that takes longer is skipped and named.
     #[arg(long, default_value = "30")]
     timeout: u32,
+
+    /// How many sources to search at once.
+    #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u16).range(1..=32))]
+    concurrency: u16,
 
     /// Skip the per-column sample fetch. Useful when you only need the
     /// match-count summary.
@@ -98,165 +114,325 @@ struct SampleValue {
     count: Option<i64>,
 }
 
+/// Why a team or source was not searched.
+#[derive(Debug, PartialEq)]
+enum Skip {
+    TimedOut,
+    Failed(String),
+}
+
+/// A team or source that was not searched.
+struct Skipped {
+    what: String,
+    why: Skip,
+}
+
+/// What every source probe searches for.
+struct Search {
+    pattern: String,
+    since: String,
+    candidates: Vec<String>,
+    query_timeout: u32,
+    samples: bool,
+    timezone: String,
+}
+
 pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
     let s = session::authed(&config, &global)?;
-    let (client, ctx) = (&s.client, &s.ctx);
+    let mut cache = Cache::new(&s.ctx.server_url);
+    let timezone = resolve_timezone(s.ctx.defaults.timezone.as_deref()).to_string();
+    let client = Arc::new(s.client);
+    let teams = resolve_teams(&client, &mut cache, args.team.as_deref()).await?;
+    let search = Arc::new(Search {
+        pattern: args.pattern.clone(),
+        since: args.since.clone(),
+        candidates: if args.columns.is_empty() {
+            DEFAULT_COLUMNS.iter().map(|c| c.to_string()).collect()
+        } else {
+            args.columns.clone()
+        },
+        query_timeout: args.timeout,
+        samples: !args.no_samples,
+        timezone,
+    });
+    let concurrency = usize::from(args.concurrency);
+    let deadline = Duration::from_secs(u64::from(args.timeout));
+    let progress = ui::stderr_human(global.quiet);
+    let mut skipped = Vec::new();
 
-    let mut cache = Cache::new(&ctx.server_url);
-    let teams = resolve_teams(client, &mut cache, args.team.as_deref()).await?;
-    let candidates = if args.columns.is_empty() {
-        DEFAULT_COLUMNS
-            .iter()
-            .map(|column| column.to_string())
-            .collect()
-    } else {
-        args.columns.clone()
-    };
-
-    let mut results = Vec::new();
-    let mut skipped = 0usize;
-    for team in teams {
-        let sources = client
-            .list_sources(team.id)
-            .await
-            .with_context(|| format!("Failed to list sources for team {}", team.id))?;
-
-        for source in sources {
-            if !source_matches_filter(&source, args.source.as_deref()) {
-                continue;
-            }
-
-            // VictoriaLogs sources have no ClickHouse-style `db.table` ref, so
-            // they took the old `table_ref()` early-`continue` and were skipped
-            // entirely. Branch on the engine instead: use the `db.table` for
-            // ClickHouse and the base_url (falling back to the source name) as
-            // the display target for VictoriaLogs.
-            let is_vl = source.source_type.eq_ignore_ascii_case("victorialogs");
-            let target = if is_vl {
-                source.target_ref().unwrap_or_else(|| source.name.clone())
-            } else {
-                match source.table_ref() {
-                    Some(table) => table,
-                    None => continue,
-                }
-            };
-
-            let schema = match client.get_schema(team.id, source.id).await {
-                Ok(schema) => schema,
-                Err(err) => {
-                    tracing::debug!(
-                        team = team.id,
-                        source = source.id,
-                        "skipping source: get_schema failed: {err:#}"
-                    );
-                    skipped += 1;
-                    continue;
-                }
-            };
-            let searchable = matching_columns(&schema, &candidates);
-            if searchable.is_empty() {
-                continue;
-            }
-
-            let timestamp_field = source
-                .meta_ts_field
-                .as_deref()
-                .filter(|field| !field.trim().is_empty())
-                .unwrap_or("_timestamp");
-            // Count matches through the same `/logs/query` path for both
-            // engines (raw ClickHouse SQL vs. raw LogsQL); only the query text
-            // differs by engine.
-            let count_query = if is_vl {
-                vl_find_query(&searchable, &args.pattern, &args.since)
-            } else {
-                find_sql(
-                    &target,
-                    timestamp_field,
-                    &searchable,
-                    &args.pattern,
-                    &args.since,
-                )
-            };
-            let request = SqlQueryRequest {
-                variables: Vec::new(),
-                query_text: count_query,
-                limit: Some(1),
-                timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
-                start_time: None,
-                end_time: None,
-                interval: None,
-                query_timeout: Some(args.timeout),
-            };
-            let response = match client.query_sql(team.id, source.id, &request).await {
-                Ok(response) => response,
-                Err(err) => {
-                    tracing::debug!(
-                        team = team.id,
-                        source = source.id,
-                        "skipping source: query failed: {err:#}"
-                    );
-                    skipped += 1;
-                    continue;
-                }
-            };
-            let matches = response
-                .entries()
-                .first()
-                .and_then(|entry| entry.get("matches"))
-                .and_then(json_to_i64)
-                .unwrap_or(0);
-
-            if matches > 0 {
-                let samples = if args.no_samples {
-                    Vec::new()
-                } else if is_vl {
-                    vl_fetch_samples(
-                        client,
-                        team.id,
-                        source.id,
-                        &searchable,
-                        &args.pattern,
-                        &args.since,
-                        args.timeout,
-                    )
+    let listed = run_bounded(
+        teams,
+        concurrency,
+        deadline,
+        |team: Team| {
+            let client = Arc::clone(&client);
+            async move {
+                client
+                    .list_sources(team.id)
                     .await
-                } else {
-                    fetch_samples(
-                        client,
-                        team.id,
-                        source.id,
-                        &target,
-                        timestamp_field,
-                        &searchable,
-                        &schema,
-                        &args.pattern,
-                        &args.since,
-                        args.timeout,
-                    )
-                    .await
-                };
-                results.push(FindResult {
-                    team_id: team.id,
-                    team_name: team.name.clone(),
-                    source_id: source.id,
-                    source_name: source.name.clone(),
-                    table: target,
-                    matches,
-                    columns: searchable,
-                    lookback: args.since.clone(),
-                    samples,
-                });
+                    .map_err(|err| format!("{err:#}"))
             }
+        },
+        |_, _, _, _| {},
+    )
+    .await;
+    let mut targets = Vec::new();
+    for (team, outcome) in listed {
+        match outcome {
+            Ok(sources) => targets.extend(
+                sources
+                    .into_iter()
+                    .filter(|source| source_matches_filter(source, args.source.as_deref()))
+                    .map(|source| (team.clone(), source)),
+            ),
+            Err(why) => skipped.push(Skipped {
+                what: format!("team {} ({})", team.id, team.name),
+                why,
+            }),
         }
     }
 
-    results.sort_by_key(|r| std::cmp::Reverse(r.matches));
+    let probed = run_bounded(
+        targets,
+        concurrency,
+        deadline,
+        |(team, source): (Team, Source)| {
+            let client = Arc::clone(&client);
+            let search = Arc::clone(&search);
+            async move {
+                probe_source(&client, &team, &source, &search)
+                    .await
+                    .map_err(|err| format!("{err:#}"))
+            }
+        },
+        |done, total, (team, source), outcome| {
+            if !progress {
+                return;
+            }
+            if let Err(why) = outcome {
+                eprintln!(
+                    "\r\x1b[K  skipped {}: {}",
+                    source_label(team, source),
+                    describe(why, deadline)
+                );
+            }
+            eprint!("\r\x1b[Ksearching {done}/{total} sources…");
+        },
+    )
+    .await;
+    if progress {
+        eprint!("\r\x1b[K");
+    }
+
+    let searched = probed.iter().filter(|(_, outcome)| outcome.is_ok()).count();
+    let mut results = Vec::new();
+    for ((team, source), outcome) in probed {
+        match outcome {
+            Ok(Some(result)) => results.push(result),
+            Ok(None) => {}
+            Err(why) => skipped.push(Skipped {
+                what: source_label(&team, &source),
+                why,
+            }),
+        }
+    }
+    results.sort_by_key(|r| (std::cmp::Reverse(r.matches), r.team_id, r.source_id));
     results.truncate(args.limit);
-    print_results(&results, &args.output, skipped)
+    print_results(&results, &args.output)?;
+    report_skipped(&skipped, deadline);
+    if searched == 0 && !skipped.is_empty() {
+        anyhow::bail!("No source could be searched: every one was skipped (see above)");
+    }
+    Ok(())
 }
 
-fn print_results(results: &[FindResult], output: &OutputFormat, skipped: usize) -> Result<()> {
+fn source_label(team: &Team, source: &Source) -> String {
+    format!("source {} {} (team {})", source.id, source.name, team.id)
+}
+
+fn describe(skip: &Skip, deadline: Duration) -> String {
+    match skip {
+        Skip::TimedOut => format!("timed out after {}s", deadline.as_secs()),
+        Skip::Failed(err) => err.lines().next().unwrap_or_default().to_string(),
+    }
+}
+
+fn report_skipped(skipped: &[Skipped], deadline: Duration) {
+    if skipped.is_empty() {
+        return;
+    }
+    eprintln!(
+        "Skipped {} (raise --timeout for slow sources):",
+        if skipped.len() == 1 {
+            "1 team or source".to_string()
+        } else {
+            format!("{} teams or sources", skipped.len())
+        }
+    );
+    for skip in skipped {
+        eprintln!("  {}: {}", skip.what, describe(&skip.why, deadline));
+    }
+}
+
+/// Runs `probe` on every item, at most `concurrency` at once, and stops each
+/// after `deadline`. `on_done` sees each outcome as it finishes, with the
+/// number finished and the total. Returns the outcomes in finishing order.
+async fn run_bounded<T, R, F, Fut>(
+    items: Vec<T>,
+    concurrency: usize,
+    deadline: Duration,
+    probe: F,
+    mut on_done: impl FnMut(usize, usize, &T, &Result<R, Skip>),
+) -> Vec<(T, Result<R, Skip>)>
+where
+    T: Clone + Send + 'static,
+    R: Send + 'static,
+    F: Fn(T) -> Fut,
+    Fut: Future<Output = Result<R, String>> + Send + 'static,
+{
+    let total = items.len();
+    let mut pending = items.into_iter();
+    let mut running = JoinSet::new();
+    let start = |running: &mut JoinSet<_>, item: T| {
+        let work = probe(item.clone());
+        running.spawn(async move {
+            let outcome = match tokio::time::timeout(deadline, work).await {
+                Ok(Ok(found)) => Ok(found),
+                Ok(Err(err)) => Err(Skip::Failed(err)),
+                Err(_) => Err(Skip::TimedOut),
+            };
+            (item, outcome)
+        });
+    };
+    for item in pending.by_ref().take(concurrency.max(1)) {
+        start(&mut running, item);
+    }
+    let mut finished = Vec::with_capacity(total);
+    while let Some(joined) = running.join_next().await {
+        let (item, outcome) = joined.expect("a find probe panicked");
+        on_done(finished.len() + 1, total, &item, &outcome);
+        finished.push((item, outcome));
+        if let Some(item) = pending.next() {
+            start(&mut running, item);
+        }
+    }
+    finished
+}
+
+/// Counts the matches in one source and, when there are any, fetches samples.
+/// `None` when the source has no searchable column or no match.
+async fn probe_source(
+    client: &Client,
+    team: &Team,
+    source: &Source,
+    search: &Search,
+) -> Result<Option<FindResult>> {
+    // VictoriaLogs sources have no ClickHouse-style `db.table` ref: use the
+    // base_url (falling back to the source name) as the display target.
+    let is_vl = source.source_type.eq_ignore_ascii_case("victorialogs");
+    let target = if is_vl {
+        source.target_ref().unwrap_or_else(|| source.name.clone())
+    } else {
+        match source.table_ref() {
+            Some(table) => table,
+            None => return Ok(None),
+        }
+    };
+
+    let schema = client
+        .get_schema(team.id, source.id)
+        .await
+        .context("Failed to read the schema")?;
+    let searchable = matching_columns(&schema, &search.candidates);
+    if searchable.is_empty() {
+        return Ok(None);
+    }
+
+    let timestamp_field = source
+        .meta_ts_field
+        .as_deref()
+        .filter(|field| !field.trim().is_empty())
+        .unwrap_or("_timestamp");
+    // Count matches through the same `/logs/query` path for both engines;
+    // only the query text differs.
+    let count_query = if is_vl {
+        vl_find_query(&searchable, &search.pattern, &search.since)
+    } else {
+        find_sql(
+            &target,
+            timestamp_field,
+            &searchable,
+            &search.pattern,
+            &search.since,
+        )
+    };
+    let request = SqlQueryRequest {
+        variables: Vec::new(),
+        query_text: count_query,
+        limit: Some(1),
+        timezone: Some(search.timezone.clone()),
+        start_time: None,
+        end_time: None,
+        interval: None,
+        query_timeout: Some(search.query_timeout),
+    };
+    let response = client
+        .query_sql(team.id, source.id, &request)
+        .await
+        .context("Failed to count matches")?;
+    let matches = response
+        .entries()
+        .first()
+        .and_then(|entry| entry.get("matches"))
+        .and_then(json_to_i64)
+        .unwrap_or(0);
+    if matches <= 0 {
+        return Ok(None);
+    }
+
+    let samples = if !search.samples {
+        Vec::new()
+    } else if is_vl {
+        vl_fetch_samples(
+            client,
+            team.id,
+            source.id,
+            &searchable,
+            &search.pattern,
+            &search.since,
+            search.query_timeout,
+        )
+        .await
+    } else {
+        fetch_samples(
+            client,
+            team.id,
+            source.id,
+            &target,
+            timestamp_field,
+            &searchable,
+            &schema,
+            &search.pattern,
+            &search.since,
+            search.query_timeout,
+        )
+        .await
+    };
+    Ok(Some(FindResult {
+        team_id: team.id,
+        team_name: team.name.clone(),
+        source_id: source.id,
+        source_name: source.name.clone(),
+        table: target,
+        matches,
+        columns: searchable,
+        lookback: search.since.clone(),
+        samples,
+    }))
+}
+
+fn print_results(results: &[FindResult], output: &OutputFormat) -> Result<()> {
     match output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(results)?),
         OutputFormat::Jsonl => {
@@ -291,13 +467,6 @@ fn print_results(results: &[FindResult], output: &OutputFormat, skipped: usize) 
                         println!("  ↳ {}: {}", sample.column, rendered);
                     }
                 }
-            }
-            if skipped > 0 {
-                eprintln!(
-                    "({} source{} skipped due to errors — rerun with --debug for details)",
-                    skipped,
-                    if skipped == 1 { "" } else { "s" }
-                );
             }
         }
     }
@@ -336,7 +505,7 @@ async fn resolve_teams(
         .collect())
 }
 
-fn source_matches_filter(source: &logchef_core::api::Source, filter: Option<&str>) -> bool {
+fn source_matches_filter(source: &Source, filter: Option<&str>) -> bool {
     let Some(filter) = filter else {
         return true;
     };
@@ -711,6 +880,77 @@ fn json_to_i64(value: &serde_json::Value) -> Option<i64> {
 mod tests {
     use super::*;
     use logchef_core::api::Source;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn run_bounded_keeps_at_most_concurrency_probes_running() {
+        let running = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut seen = Vec::new();
+        let finished = run_bounded(
+            (0..10).collect(),
+            3,
+            Duration::from_secs(5),
+            |i: i32| {
+                let (running, peak) = (Arc::clone(&running), Arc::clone(&peak));
+                async move {
+                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    running.fetch_sub(1, Ordering::SeqCst);
+                    Ok::<_, String>(i * 2)
+                }
+            },
+            |done, total, _, _| seen.push((done, total)),
+        )
+        .await;
+        assert_eq!(peak.load(Ordering::SeqCst), 3);
+        let mut doubled: Vec<i32> = finished.into_iter().map(|(_, r)| r.unwrap()).collect();
+        doubled.sort();
+        assert_eq!(doubled, (0..10).map(|i| i * 2).collect::<Vec<_>>());
+        assert_eq!(seen, (1..=10).map(|done| (done, 10)).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn run_bounded_skips_a_slow_or_failing_probe_and_keeps_the_rest() {
+        let started = std::time::Instant::now();
+        let finished = run_bounded(
+            vec!["slow", "bad", "ok"],
+            4,
+            Duration::from_millis(100),
+            |name: &'static str| async move {
+                match name {
+                    "slow" => {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        Ok(0)
+                    }
+                    "bad" => Err("Failed to read the schema: HTTP 500".to_string()),
+                    _ => Ok(7),
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .await;
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let outcome = |name| &finished.iter().find(|(n, _)| *n == name).unwrap().1;
+        assert_eq!(outcome("slow"), &Err(Skip::TimedOut));
+        assert_eq!(
+            outcome("bad"),
+            &Err(Skip::Failed("Failed to read the schema: HTTP 500".into()))
+        );
+        assert_eq!(outcome("ok"), &Ok(7));
+    }
+
+    #[test]
+    fn a_skip_names_its_cause() {
+        let deadline = Duration::from_secs(30);
+        assert_eq!(describe(&Skip::TimedOut, deadline), "timed out after 30s");
+        assert_eq!(
+            describe(&Skip::Failed("API error: boom\nmore".into()), deadline),
+            "API error: boom"
+        );
+    }
 
     #[test]
     fn builds_find_sql() {

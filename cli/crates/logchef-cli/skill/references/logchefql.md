@@ -44,7 +44,10 @@ field filter for anything wider.
 
 Because `~` is substring (not regex/tokenized), `msg~"time"` also matches
 `"timeout"` and `"lifetime"`. Narrow with a more specific substring or combine
-with `=` on another field.
+with `=` on another field. In an alert or a count this matters more than in a
+search: `msg~"error"` also counts `"no error"`, `"error_count=0"` and
+`"errors: []"`. Sample the matches (`-l 20`) before you trust a count, and
+prefer `=` on a level field over `~` on the message.
 
 ## Values
 
@@ -79,6 +82,29 @@ logchef query 'log_attributes."user.name"="alice"' -s 15m
 
 Discover what's available first with `logchef schema` (columns) and
 `logchef fields <field>` (observed values) rather than guessing.
+
+### JSON inside a String column
+
+On ClickHouse, a dotted path on a **String** column (for example a `msg` column
+that holds a JSON body) compiles to `JSONExtractString(msg, 'key')`. That
+returns the value only when the JSON value is a string. **A JSON number comes
+back as an empty string.** So:
+
+- `msg.level="error"` works when `level` is a JSON string.
+- `msg.latency_ms>500` is an error (a number compared with text).
+- `msg.latency_ms>"500"` compares text, and `p95(msg.latency_ms)`,
+  `sum`, `avg`, `min` and `max` skip every numeric value. Both translate, so
+  `logchef explain` prints a warning for them.
+
+For a numeric JSON value, use native SQL with `JSONExtractFloat` or
+`JSONExtractInt`:
+
+```bash
+logchef sql "SELECT quantile(0.95)(JSONExtractFloat(msg, 'latency_ms')) AS p95
+  FROM logs.app WHERE job_name = 'api'" -s 1h
+```
+
+Map and native JSON columns keep their types and are not affected.
 
 ## Selecting columns — the `|` pipe
 
@@ -115,6 +141,15 @@ logchef query '| count() by time' -s 1h --interval 5m
   `p95_log_duration`), the key path as written, `time`. Rename with `as`.
 - `| sort <column> [asc|desc]` and `| limit N` (1 to 10000) follow the
   aggregation. `limit` is rejected with `time` and a field key together.
+- **At most 1,000 time buckets** over the range: `by time(5m)` over `-s 7d` is
+  2,016 buckets and fails with an error that names the smallest window that
+  fits (`15m` for 7 days, `5m` for 3 days, `1m` for 16 hours).
+- **Rows are cut at the row limit**, the smallest of the query's `| limit`,
+  `-l` and the server maximum. `query` defaults to `-l 100`, so a grouped time
+  series (`by time(15m), service`: buckets times groups rows) is cut silently
+  unless you raise it: `-l 1000` or more. Check `stats.truncation` in
+  `--output json`. The MCP `query_logchefql` tool caps the limit at 500, so
+  use a longer bucket there.
 - Default order: grouped results by the first value, descending; time series
   by `time`, ascending.
 - Output: `text` and `table` print the result columns; `json`/`jsonl` print

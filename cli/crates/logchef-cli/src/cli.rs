@@ -3,9 +3,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    advisor, agent, audit, auth, collections, completions, config, doctor, explain, fields, find,
-    histogram, history, open, query, reports, saved_queries, schema, skills, sources, sql, tail,
-    teams, views, whoami,
+    advisor, agent, alerts, audit, auth, collections, completions, config, destinations, doctor,
+    explain, fields, find, histogram, history, open, query, reports, saved_queries, schema,
+    silences, skills, sources, sql, tail, teams, views, whoami,
 };
 
 const LONG_ABOUT: &str = "\
@@ -26,6 +26,7 @@ command by what you want to do:
   fields     Discover a source's fields, or the observed values of one field.
   find       Locate which source holds a given service, host, or message.
   tail       Follow matching logs live.
+  alerts     List alert rules, and test or backtest a rule before saving it.
 
 Set a default team and source once (`logchef config set team …` /
 `… set source …`) so you can drop -t/-S. Every data command supports
@@ -124,6 +125,15 @@ enum Commands {
     #[command(about = "List scheduled reports and their runs, and send one now")]
     Reports(reports::ReportsArgs),
 
+    #[command(about = "List alert rules, and test or backtest a rule without saving it")]
+    Alerts(alerts::AlertsArgs),
+
+    #[command(about = "List the alert silences of a source")]
+    Silences(silences::SilencesArgs),
+
+    #[command(about = "List notification destinations")]
+    Destinations(destinations::DestinationsArgs),
+
     #[command(about = "Find sources that contain a service, job, host, or message pattern")]
     Find(find::FindArgs),
 
@@ -213,6 +223,9 @@ impl Cli {
             Some(Commands::Views(args)) => views::run(args, global).await,
             Some(Commands::Audit(args)) => audit::run(args, global).await,
             Some(Commands::Reports(args)) => reports::run(args, global).await,
+            Some(Commands::Alerts(args)) => alerts::run(args, global).await,
+            Some(Commands::Silences(args)) => silences::run(args, global).await,
+            Some(Commands::Destinations(args)) => destinations::run(args, global).await,
             Some(Commands::Find(args)) => find::run(args, global).await,
             Some(Commands::Tail(args)) => tail::run(args, global).await,
             Some(Commands::Teams(args)) => teams::run(args, global).await,

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PAT: &str = "logchef_test_pat";
 pub const CODE: &str = "test-code";
-pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read";
+pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read destinations:read";
 
 /// An isolated HOME with a fake browser launcher on PATH. Any attempt to open
 /// a browser writes to `browser_log`.
@@ -115,6 +115,23 @@ pub fn run(mut cmd: Command) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
+        .unwrap();
+    wait_with_timeout(child, Duration::from_secs(30))
+}
+
+/// Runs a command with `input` on its stdin, failing the test if it hangs.
+pub fn run_with_stdin(mut cmd: Command, input: &str) -> Output {
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
         .unwrap();
     wait_with_timeout(child, Duration::from_secs(30))
 }
@@ -257,6 +274,61 @@ pub struct ServerState {
     pub translate_responses: std::collections::VecDeque<serde_json::Value>,
     /// The status and body of the live-tail endpoint on source 2.
     pub tail_response: Option<(u16, serde_json::Value)>,
+    /// Replies that take precedence over the built-in routes, keyed by method
+    /// and path without the query.
+    pub stubs: HashMap<(String, String), Stub>,
+    /// Every request the server received, in order.
+    pub requests: Vec<Recorded>,
+}
+
+/// A canned reply for one method and path.
+#[derive(Clone, Default)]
+pub struct Stub {
+    pub status: u16,
+    pub body: serde_json::Value,
+    pub headers: Vec<(String, String)>,
+    /// Holds the reply this long.
+    pub delay: Duration,
+}
+
+impl Stub {
+    pub fn json(status: u16, body: serde_json::Value) -> Self {
+        Self {
+            status,
+            body,
+            ..Default::default()
+        }
+    }
+
+    /// A `{"status":"success","data":...}` reply.
+    pub fn data(data: serde_json::Value) -> Self {
+        Self::json(200, serde_json::json!({"status": "success", "data": data}))
+    }
+
+    pub fn header(mut self, name: &str, value: &str) -> Self {
+        self.headers.push((name.to_string(), value.to_string()));
+        self
+    }
+
+    pub fn delay(mut self, delay: Duration) -> Self {
+        self.delay = delay;
+        self
+    }
+}
+
+/// A request as the server received it.
+#[derive(Clone, Debug)]
+pub struct Recorded {
+    pub method: String,
+    /// The path with its query string.
+    pub path: String,
+    pub body: String,
+}
+
+impl Recorded {
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.body).unwrap()
+    }
 }
 
 pub struct FakeServer {
@@ -287,6 +359,24 @@ impl FakeServer {
 
     pub fn state(&self) -> std::sync::MutexGuard<'_, ServerState> {
         self.state.lock().unwrap()
+    }
+
+    /// Answers `method path` (path without the query) with `stub`.
+    pub fn stub(&self, method: &str, path: &str, stub: Stub) {
+        self.state()
+            .stubs
+            .insert((method.to_string(), path.to_string()), stub);
+    }
+
+    /// The requests received for `method path`, matching the path without
+    /// the query.
+    pub fn requests_to(&self, method: &str, path: &str) -> Vec<Recorded> {
+        self.state()
+            .requests
+            .iter()
+            .filter(|r| r.method == method && r.path.split('?').next() == Some(path))
+            .cloned()
+            .collect()
     }
 
     /// Issues a grant directly, as if a login had completed, and returns the
@@ -376,11 +466,20 @@ fn read_request(stream: &mut TcpStream) -> Option<Request> {
     })
 }
 
-fn respond(stream: &mut TcpStream, status: u16, body: &serde_json::Value) {
+fn respond(
+    stream: &mut TcpStream,
+    status: u16,
+    headers: &[(String, String)],
+    body: &serde_json::Value,
+) {
     let body = body.to_string();
+    let extra: String = headers
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}\r\n"))
+        .collect();
     let _ = write!(
         stream,
-        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
 }
@@ -389,11 +488,26 @@ fn handle(mut stream: TcpStream, base: &str, state: &Mutex<ServerState>) {
     let Some(req) = read_request(&mut stream) else {
         return;
     };
+    let stub = {
+        let mut s = state.lock().unwrap();
+        s.requests.push(Recorded {
+            method: req.method.clone(),
+            path: req.path.clone(),
+            body: req.body.clone(),
+        });
+        let path = req.path.split('?').next().unwrap_or_default().to_string();
+        s.stubs.get(&(req.method.clone(), path)).cloned()
+    };
+    if let Some(stub) = stub {
+        std::thread::sleep(stub.delay);
+        respond(&mut stream, stub.status, &stub.headers, &stub.body);
+        return;
+    }
     let form: HashMap<String, String> = url::form_urlencoded::parse(req.body.as_bytes())
         .into_owned()
         .collect();
     let (status, body) = route(&req, &form, base, state);
-    respond(&mut stream, status, &body);
+    respond(&mut stream, status, &[], &body);
 }
 
 fn oauth_error(error: &str) -> (u16, serde_json::Value) {

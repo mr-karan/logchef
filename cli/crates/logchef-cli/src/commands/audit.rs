@@ -7,6 +7,7 @@ use logchef_core::api::{AuditEvent, AuditEventFilter};
 use crate::cli::GlobalArgs;
 use crate::commands::parse_lookback;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
 #[command(after_help = "EXAMPLES:
@@ -200,9 +201,9 @@ fn render_table(events: &[AuditEvent]) -> String {
         out.push_str(&format!(
             "{:<24} {:<30} {:<28} {:<30} {:<8} {}\n",
             event.occurred_at.format("%Y-%m-%d %H:%M:%S%.3f"),
-            truncate(&actor(event), 30),
-            truncate(&event.action, 28),
-            truncate(&target(event), 30),
+            ui::truncate(&actor(event), 30),
+            ui::truncate(&event.action, 28),
+            ui::truncate(&target(event), 30),
             event.outcome,
             event.ip,
         ));
@@ -232,15 +233,6 @@ fn target(event: &AuditEvent) -> String {
         &event.target_label
     };
     format!("{}:{}", event.target_type, name)
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_owned();
-    }
-    let mut out: String = value.chars().take(width - 1).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]
