@@ -18,6 +18,7 @@ const server = {
   users: [] as User[],
   teams: [] as TeamWithMemberCount[],
   memberships: [] as TeamMembershipSummary[],
+  membershipsFail: false,
   calls: [] as ApiCall[],
 };
 
@@ -34,7 +35,11 @@ function respond(method: string, url: string, body?: unknown): Envelope {
   if (url === "/users") return ok([...server.users]);
   if (url === "/admin/teams") return ok([...server.teams]);
   if (url === "/me/teams") return ok([]);
-  if (url === "/admin/team-memberships") return ok([...server.memberships]);
+  if (url === "/admin/team-memberships") {
+    return server.membershipsFail
+      ? { status: "error", message: "database unavailable", error_type: "GeneralError" }
+      : ok([...server.memberships]);
+  }
 
   const userUpdate = url.match(/^\/admin\/users\/(\d+)$/);
   if (userUpdate && method === "put") {
@@ -140,6 +145,7 @@ describe("People (UsersList + UserDetailDrawer)", () => {
     localStorage.clear();
     toasts.length = 0;
     server.calls = [];
+    server.membershipsFail = false;
     server.users = [
       {
         id: "1",
@@ -304,6 +310,19 @@ describe("People (UsersList + UserDetailDrawer)", () => {
 
     const putCall = server.calls.find((c) => c.method === "put" && c.url === "/admin/users/1");
     expect(putCall?.body).toEqual({ role: "member" });
+    // People requires the global admin role the user just gave up.
+    expect(router.currentRoute.value.path).toBe("/");
+  });
+
+  it("opens the drawer from the inline Edit button", async () => {
+    const edit = host.querySelector<HTMLButtonElement>('[data-testid="people-edit-2"]');
+    if (!edit) throw new Error("missing Edit button");
+    expect(edit.getAttribute("aria-label")).toBe("Edit: Bob Member");
+    edit.click();
+    await settle();
+
+    const drawer = document.querySelector('[data-testid="user-detail-drawer"]');
+    expect(drawer?.textContent).toContain("bob@example.com");
   });
 
   it("opens the drawer automatically when navigated with ?user=<id>", async () => {
@@ -333,5 +352,77 @@ describe("People (UsersList + UserDetailDrawer)", () => {
 
     expect(server.calls.some((c) => c.method === "delete" && c.url === "/teams/10/members/2")).toBe(true);
     expect(host.querySelector('[data-testid="people-row-2"]')?.textContent).not.toContain("Crux · member");
+  });
+});
+
+describe("People when team memberships fail to load", () => {
+  let host: HTMLDivElement;
+  let app: App;
+
+  beforeEach(async () => {
+    localStorage.clear();
+    toasts.length = 0;
+    server.calls = [];
+    server.membershipsFail = true;
+    server.memberships = [
+      { team_id: 10, team_name: "Crux", team_managed: false, user_id: 2, role: "admin", created_at: "" },
+    ];
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: "/", component: { template: "<div />" } },
+        { path: "/admin/users", name: "ManageUsers", component: UsersList },
+        { path: "/admin/teams/:id", name: "TeamSettings", component: { template: "<div>Team</div>" } },
+      ],
+    });
+    app = createApp(defineComponent({ template: "<router-view />" }));
+    const pinia = createPinia();
+    app.use(pinia);
+    await useAuthStore(pinia).initialize();
+    app.use(i18n);
+    app.use(router);
+    await router.push("/admin/users");
+    await router.isReady();
+    app.mount(host);
+    await settle();
+  });
+
+  afterEach(() => {
+    app.unmount();
+    host.remove();
+  });
+
+  it("shows a load error instead of claiming users have no teams, and offers no team to add", async () => {
+    const bobRow = host.querySelector<HTMLElement>('[data-testid="people-row-2"]');
+    expect(bobRow?.querySelector('[data-testid="people-teams-error"]')?.textContent).toContain(
+      "Couldn't load team memberships.",
+    );
+    expect(bobRow?.textContent).not.toContain("No teams");
+
+    bobRow?.click();
+    await settle();
+    const drawer = document.querySelector('[data-testid="user-detail-drawer"]');
+    expect(drawer?.querySelector('[data-testid="drawer-teams-error"]')).not.toBeNull();
+    expect(drawer?.textContent).not.toContain("Not a member of any team yet.");
+    expect(drawer?.querySelector('[data-testid="drawer-add-team-submit"]')).toBeNull();
+  });
+
+  it("loads the teams again from the drawer's Retry button", async () => {
+    host.querySelector<HTMLElement>('[data-testid="people-row-2"]')?.click();
+    await settle();
+    server.membershipsFail = false;
+
+    const retry = [...document.querySelectorAll<HTMLButtonElement>('[data-testid="drawer-teams-error"] button')].find(
+      (b) => b.textContent?.trim() === "Retry",
+    );
+    retry?.click();
+    await settle();
+
+    const drawer = document.querySelector('[data-testid="user-detail-drawer"]');
+    expect(drawer?.querySelector('[data-testid="drawer-team-row-10"]')).not.toBeNull();
+    expect(drawer?.querySelector('[data-testid="drawer-add-team-submit"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="people-row-2"]')?.textContent).toContain("Crux · admin");
   });
 });
