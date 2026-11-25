@@ -1,0 +1,462 @@
+use anyhow::{Context, Result, bail};
+use clap::{Args, Subcommand};
+use logchef_core::Config;
+use logchef_core::api::{Alert, AlertTestResult, BacktestResult};
+use logchef_core::cache::Cache;
+use std::collections::BTreeMap;
+use std::io::Read;
+
+use crate::cli::GlobalArgs;
+use crate::commands::resolve_source_id;
+use crate::session;
+use crate::ui;
+
+/// The server stops a backtest after 60 seconds; the request outlives it.
+const BACKTEST_TIMEOUT_SECS: u64 = 75;
+
+#[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # The rules you can see, of every source or of one
+  logchef alerts list
+  logchef alerts list -t platform -S app-logs
+
+  # Evaluate a rule once without saving it
+  logchef alerts test -f rule.json -S app-logs
+
+  # Replay a rule over the past day, evaluating every 5 minutes, from stdin
+  cat rule.json | logchef alerts backtest -f - --range 24h --frequency 300
+
+A request file holds the JSON body of POST /api/v1/alerts/test, such as
+{\"source_id\": 2, \"query_language\": \"logchefql\",
+ \"query\": \"level=\\\"error\\\" | count() as value by service\",
+ \"lookback_seconds\": 300, \"threshold_operator\": \"gt\", \"threshold_value\": 10}.
+A native ClickHouse rule sets \"query_language\": \"clickhouse-sql\" and reads its
+window from {{__time_filter}}.
+A missing source_id comes from -S (or the default source). backtest also
+needs frequency_seconds and range_seconds, from the request or from
+--frequency and --range. test and backtest are dry runs: they save nothing
+and notify no one.")]
+pub struct AlertsArgs {
+    #[command(subcommand)]
+    command: AlertsCommand,
+}
+
+#[derive(Subcommand)]
+enum AlertsCommand {
+    /// List alert rules, of one source or of every source you can see.
+    List(ListArgs),
+    /// Evaluate an unsaved rule once and show the value and samples.
+    Test(TestArgs),
+    /// Replay an unsaved rule over a past range and show what it would have
+    /// sent.
+    Backtest(BacktestArgs),
+}
+
+#[derive(Args)]
+struct SourceArgs {
+    /// Team ID or name, to find a source by name
+    #[arg(long, short = 't')]
+    team: Option<String>,
+
+    /// Source ID or name
+    #[arg(long, short = 'S')]
+    source: Option<String>,
+}
+
+#[derive(Args)]
+struct ListArgs {
+    #[command(flatten)]
+    scope: SourceArgs,
+
+    /// Output format
+    #[arg(long, default_value = "text")]
+    output: OutputFormat,
+}
+
+#[derive(Args)]
+struct TestArgs {
+    #[command(flatten)]
+    scope: SourceArgs,
+
+    /// JSON request body, a file path or - for stdin
+    #[arg(long, short = 'f')]
+    file: String,
+
+    /// Output format
+    #[arg(long, default_value = "text")]
+    output: OutputFormat,
+}
+
+#[derive(Args)]
+struct BacktestArgs {
+    #[command(flatten)]
+    test: TestArgs,
+
+    /// The past range to replay; sets range_seconds
+    #[arg(long)]
+    range: Option<Range>,
+
+    /// Seconds between evaluations; sets frequency_seconds
+    #[arg(long)]
+    frequency: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum Range {
+    #[value(name = "1h")]
+    Hour,
+    #[value(name = "6h")]
+    SixHours,
+    #[value(name = "24h")]
+    Day,
+    #[value(name = "7d")]
+    Week,
+}
+
+impl Range {
+    fn seconds(self) -> u32 {
+        match self {
+            Range::Hour => 3600,
+            Range::SixHours => 6 * 3600,
+            Range::Day => 24 * 3600,
+            Range::Week => 7 * 24 * 3600,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
+}
+
+pub async fn run(args: AlertsArgs, global: GlobalArgs) -> Result<()> {
+    match args.command {
+        AlertsCommand::List(args) => list(args, global).await,
+        AlertsCommand::Test(args) => test(args, global).await,
+        AlertsCommand::Backtest(args) => backtest(args, global).await,
+    }
+}
+
+async fn list(args: ListArgs, global: GlobalArgs) -> Result<()> {
+    let config = Config::load().context("Failed to load config")?;
+    let s = session::authed(&config, &global)?;
+    let source = args
+        .scope
+        .source
+        .or_else(|| s.ctx.defaults.source_with_env());
+    let source_id = match source {
+        Some(source) => {
+            let team = args.scope.team.or_else(|| s.ctx.defaults.team_with_env());
+            let mut cache = Cache::new(&s.ctx.server_url);
+            Some(resolve_source_id(&s.client, &mut cache, team, source).await?)
+        }
+        None => None,
+    };
+    let alerts = s
+        .client
+        .list_alerts(source_id)
+        .await
+        .context("Failed to list alert rules")?;
+    match args.output {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&alerts.raw)?),
+        OutputFormat::Text => print!("{}", render_alerts(&alerts.parsed)),
+    }
+    Ok(())
+}
+
+async fn test(args: TestArgs, global: GlobalArgs) -> Result<()> {
+    let config = Config::load().context("Failed to load config")?;
+    let s = session::authed(&config, &global)?;
+    let request = read_request(&args, &s).await?;
+    let result = s
+        .client
+        .test_alert(&request)
+        .await
+        .context("Failed to test the alert rule")?;
+    match args.output {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result.raw)?),
+        OutputFormat::Text => {
+            for warning in &result.parsed.warnings {
+                eprintln!("Warning: {warning}");
+            }
+            print!("{}", render_test(&result.parsed));
+        }
+    }
+    Ok(())
+}
+
+async fn backtest(args: BacktestArgs, global: GlobalArgs) -> Result<()> {
+    let config = Config::load().context("Failed to load config")?;
+    let s = session::authed_with_timeout(&config, &global, |ctx| {
+        ctx.timeout_secs.max(BACKTEST_TIMEOUT_SECS)
+    })?;
+    let mut request = read_request(&args.test, &s).await?;
+    if let Some(range) = args.range {
+        request["range_seconds"] = range.seconds().into();
+    }
+    if let Some(frequency) = args.frequency {
+        request["frequency_seconds"] = frequency.into();
+    }
+    let result = s
+        .client
+        .backtest_alert(&request)
+        .await
+        .context("Failed to backtest the alert rule")?;
+    match args.test.output {
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result.raw)?),
+        OutputFormat::Text => print!("{}", render_backtest(&result.parsed)),
+    }
+    Ok(())
+}
+
+/// Reads the JSON request object from the file or stdin, and fills a missing
+/// `source_id` from -S or the default source.
+async fn read_request(args: &TestArgs, s: &session::AuthedSession) -> Result<serde_json::Value> {
+    let text = if args.file == "-" {
+        let mut text = String::new();
+        std::io::stdin()
+            .read_to_string(&mut text)
+            .context("Failed to read the request from stdin")?;
+        text
+    } else {
+        std::fs::read_to_string(&args.file)
+            .with_context(|| format!("Failed to read the request file '{}'", args.file))?
+    };
+    let mut request: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("The request in '{}' is not valid JSON", args.file))?;
+    if !request.is_object() {
+        bail!(
+            "The request in '{}' must be a JSON object, the body of POST /api/v1/alerts/test",
+            args.file
+        );
+    }
+    if request.get("source_id").is_none() {
+        let Some(source) = args
+            .scope
+            .source
+            .clone()
+            .or_else(|| s.ctx.defaults.source_with_env())
+        else {
+            bail!(
+                "The request has no source_id. Add it to the request, or pass -S <source> \
+                 (or set a default with `logchef config set source <id|name>`)."
+            );
+        };
+        let team = args
+            .scope
+            .team
+            .clone()
+            .or_else(|| s.ctx.defaults.team_with_env());
+        let mut cache = Cache::new(&s.ctx.server_url);
+        request["source_id"] = resolve_source_id(&s.client, &mut cache, team, source)
+            .await?
+            .into();
+    }
+    Ok(request)
+}
+
+fn render_alerts(alerts: &[Alert]) -> String {
+    if alerts.is_empty() {
+        return "No alert rules found.\n".to_owned();
+    }
+    let mut out = format!(
+        "{:<6} {:<30} {:<9} {:<34} {:<7} {:<30} SOURCE\n{}\n",
+        "ID",
+        "NAME",
+        "SEVERITY",
+        "STATE",
+        "ACTIVE",
+        "THRESHOLD",
+        "-".repeat(126)
+    );
+    for alert in alerts {
+        let state = match &alert.instance_counts {
+            Some(c) => format!(
+                "{} ({} firing, {} no data, {} ok)",
+                alert.last_state, c.firing, c.no_data, c.ok
+            ),
+            None => alert.last_state.clone(),
+        };
+        let threshold = format!(
+            "{} {} over {} every {}",
+            operator(&alert.threshold_operator),
+            alert.threshold_value,
+            duration(alert.lookback_seconds),
+            duration(alert.frequency_seconds)
+        );
+        out.push_str(&format!(
+            "{:<6} {:<30} {:<9} {:<34} {:<7} {:<30} {}\n",
+            alert.id,
+            ui::truncate(&alert.name, 30),
+            alert.severity,
+            ui::truncate(&state, 34),
+            yes_no(alert.is_active),
+            threshold,
+            alert.source_id
+        ));
+    }
+    out
+}
+
+fn render_test(result: &AlertTestResult) -> String {
+    let mut out = format!(
+        "Value:          {}\nThreshold met:  {}\nNo data:        {}\nRows:           {}\nExecution:      {} ms\n",
+        result.value,
+        yes_no(result.threshold_met),
+        yes_no(result.no_data),
+        result.rows_returned,
+        result.execution_time_ms
+    );
+    if result.samples.is_empty() {
+        return out;
+    }
+    out.push_str(&format!(
+        "\nSamples ({} of {} groups):\n{:<50} {:<14} MET\n{}\n",
+        result.samples.len(),
+        result.groups_total.max(result.samples.len() as i64),
+        "GROUP",
+        "VALUE",
+        "-".repeat(70)
+    ));
+    for sample in &result.samples {
+        out.push_str(&format!(
+            "{:<50} {:<14} {}\n",
+            ui::truncate(&group(&sample.group), 50),
+            sample.value,
+            yes_no(sample.threshold_met)
+        ));
+    }
+    out
+}
+
+fn render_backtest(result: &BacktestResult) -> String {
+    let summary = &result.summary;
+    let mut out = format!(
+        "Range:            {} to {} UTC, {} evaluations every {}\n\
+         Episodes:         {}\n\
+         Notifications:    {}\n\
+         Firing time:      {}\n\
+         Breaching evals:  {}\n\
+         No-data evals:    {}\n\
+         Errors:           {}\n\
+         Coverage:         {:.1}%\n\
+         Partial:          {}\n",
+        result.start.format("%Y-%m-%d %H:%M"),
+        result.end.format("%Y-%m-%d %H:%M"),
+        result.evaluations,
+        duration(result.step_seconds),
+        summary.episodes,
+        summary.notifications,
+        duration(summary.firing_seconds),
+        summary.breaching_evaluations,
+        summary.no_data_evaluations,
+        summary.errors,
+        result.coverage * 100.0,
+        if result.partial {
+            "yes, the server stopped the replay at its deadline"
+        } else {
+            "no"
+        },
+    );
+    if let Some(error) = &result.first_error {
+        out.push_str(&format!("First error:      {error}\n"));
+    }
+    if result.groups.is_empty() {
+        return out;
+    }
+    let omitted = match result.groups_omitted {
+        0 => String::new(),
+        n => format!(", {n} more not listed"),
+    };
+    out.push_str(&format!(
+        "\nTop groups ({}{omitted}):\n{:<50} {:<9} {:<10} MAX\n{}\n",
+        result.groups.len(),
+        "GROUP",
+        "EPISODES",
+        "BREACHING",
+        "-".repeat(80)
+    ));
+    for g in &result.groups {
+        out.push_str(&format!(
+            "{:<50} {:<9} {:<10} {}\n",
+            ui::truncate(&group(&g.group), 50),
+            g.episodes,
+            g.breaching_evaluations,
+            g.max_value.map_or("-".to_owned(), |v| v.to_string())
+        ));
+    }
+    out
+}
+
+fn group(labels: &BTreeMap<String, String>) -> String {
+    if labels.is_empty() {
+        return "(all)".to_owned();
+    }
+    labels
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn operator(op: &str) -> &str {
+    match op {
+        "gt" => ">",
+        "gte" => ">=",
+        "lt" => "<",
+        "lte" => "<=",
+        "eq" => "=",
+        "neq" => "!=",
+        other => other,
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+/// `90` → `1m30s`, `3600` → `1h`, `0` → `0s`.
+fn duration(seconds: i64) -> String {
+    let (d, h, m, s) = (
+        seconds / 86_400,
+        seconds % 86_400 / 3600,
+        seconds % 3600 / 60,
+        seconds % 60,
+    );
+    let out: String = [(d, "d"), (h, "h"), (m, "m"), (s, "s")]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, unit)| format!("{n}{unit}"))
+        .collect();
+    if out.is_empty() { "0s".to_owned() } else { out }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durations_read_as_units() {
+        assert_eq!(duration(0), "0s");
+        assert_eq!(duration(90), "1m30s");
+        assert_eq!(duration(3600), "1h");
+        assert_eq!(duration(7 * 86_400 + 60), "7d1m");
+    }
+
+    #[test]
+    fn a_rule_row_shows_state_counts_and_threshold() {
+        let alerts: Vec<Alert> = serde_json::from_value(serde_json::json!([{
+            "id": 4, "source_id": 2, "name": "5xx burst", "severity": "critical",
+            "threshold_operator": "gte", "threshold_value": 2.5, "lookback_seconds": 300,
+            "frequency_seconds": 60, "is_active": true, "last_state": "firing",
+            "instance_counts": {"firing": 2, "no_data": 0, "ok": 5}
+        }]))
+        .unwrap();
+        let text = render_alerts(&alerts);
+        let row = text.lines().nth(2).unwrap();
+        assert!(row.contains("firing (2 firing, 0 no data, 5 ok)"), "{row}");
+        assert!(row.contains(">= 2.5 over 5m every 1m"), "{row}");
+        assert!(row.ends_with(" 2"), "{row}");
+    }
+}

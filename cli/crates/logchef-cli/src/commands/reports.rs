@@ -6,6 +6,7 @@ use logchef_core::api::{Report, ReportRun, ReportSchedule};
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
 #[command(after_help = "EXAMPLES:
@@ -247,11 +248,11 @@ fn render_reports(reports: &[Report]) -> String {
         out.push_str(&format!(
             "{:<6} {:<28} {:<24} {:<36} {:<18} {:<30} {}\n",
             r.id,
-            truncate(&r.name, 28),
-            truncate(&r.source.name, 24),
-            truncate(&format!("{} {}", schedule(&r.schedule), r.timezone), 36),
+            ui::truncate(&r.name, 28),
+            ui::truncate(&r.source.name, 24),
+            ui::truncate(&format!("{} {}", schedule(&r.schedule), r.timezone), 36),
             next,
-            truncate(&last, 30),
+            ui::truncate(&last, 30),
             owner,
         ));
     }
@@ -293,7 +294,7 @@ fn render_runs(runs: &[ReportRun]) -> String {
             minute(&run.started_at),
             run.trigger,
             run.status,
-            truncate(reason, 22),
+            ui::truncate(reason, 22),
             panels,
         ));
     }
@@ -324,15 +325,6 @@ fn schedule(s: &ReportSchedule) -> String {
         "monthly" => format!("monthly day {} {at}", s.day_of_month.unwrap_or(1)),
         other => other.to_owned(),
     }
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_owned();
-    }
-    let mut out: String = value.chars().take(width - 1).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]

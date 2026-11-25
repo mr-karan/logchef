@@ -211,6 +211,43 @@ fn explain_of_a_filter_translates_once() {
 }
 
 #[test]
+fn explain_prints_the_translation_warnings() {
+    let warning = "msg.latency_ms reads a JSON value inside the String column msg with \
+                   JSONExtractString, which returns an empty string for a JSON number, so this \
+                   numeric comparison never matches.";
+    let translated = json!({
+        "valid": true, "generated_query": "x", "generated_query_language": "clickhouse-sql",
+        "warnings": [warning],
+    });
+    let server = FakeServer::start(false);
+    server.state().translate_responses = [translated.clone()].into();
+    let out = logchef(&server, "explain-warn", &["explain", "msg.latency_ms>500"]);
+    assert_success(&out);
+    assert_eq!(stderr(&out), format!("Warning: {warning}\n"));
+    assert!(!stdout(&out).contains("Warning"), "{}", stdout(&out));
+
+    server.state().translate_responses = [translated].into();
+    let out = logchef(
+        &server,
+        "explain-warn-json",
+        &["explain", "msg.latency_ms>500", "--output", "json"],
+    );
+    assert_success(&out);
+    let output: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(output["warnings"], json!([warning]));
+
+    // A server before translate warnings sends none.
+    let out = logchef(
+        &server,
+        "explain-warn-none",
+        &["explain", "level=error", "--output", "json"],
+    );
+    assert_success(&out);
+    let output: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(output["warnings"], json!([]));
+}
+
+#[test]
 fn tail_prints_the_server_denial_and_stops() {
     let server = FakeServer::start(false);
     let message =

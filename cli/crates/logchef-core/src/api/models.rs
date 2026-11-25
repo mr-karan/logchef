@@ -302,6 +302,10 @@ pub struct TranslateResponse {
     pub error: Option<QueryParseError>,
     #[serde(default)]
     pub aggregation: Option<AggregationInfo>,
+    /// Problems with a valid query, such as a comparison that never matches.
+    /// Servers before v2.8.2 send none.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 impl TranslateResponse {

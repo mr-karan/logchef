@@ -72,7 +72,7 @@ fn login_uses_logchef_oauth_and_saves_a_private_context() {
     assert_eq!(oauth["client_id"], "logchef-cli");
     assert_eq!(oauth["access_token"], "access-1");
     assert_eq!(oauth["refresh_token"], "refresh-1");
-    assert_eq!(oauth["scopes"].as_array().unwrap().len(), 8);
+    assert_eq!(oauth["scopes"].as_array().unwrap().len(), 9);
     assert!(config["contexts"]["127.0.0.1"].get("token").is_none());
     assert_eq!(mode(&home.config_path()), 0o600);
     assert_eq!(mode(&home.config_dir()), 0o700);
@@ -464,4 +464,225 @@ fn logout_removes_the_local_grant_even_when_revocation_fails() {
             .get("oauth")
             .is_none()
     );
+}
+
+const VIEWS: &str = "/api/v1/teams/1/sources/1/views";
+
+/// A sign-in from before the server offered `saved_views:read`: refreshes
+/// keep its old scopes, so the server denies the views list.
+fn sign_in_without_saved_views(server: &FakeServer, home: &TestHome) {
+    let mut credential = server.issue_grant(false);
+    credential["scopes"] = READ_SCOPES
+        .split(' ')
+        .filter(|s| !["saved_views:read", "destinations:read"].contains(s))
+        .collect::<Vec<_>>()
+        .into();
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({ "oauth": credential }),
+    ));
+}
+
+fn scope_denied(challenge: &str, message: &str) -> Stub {
+    Stub::json(
+        403,
+        serde_json::json!({"status": "error", "message": message, "error_type": "AuthorizationError"}),
+    )
+    .header("WWW-Authenticate", challenge)
+}
+
+#[test]
+fn a_denied_scope_names_the_scope_and_says_to_sign_in_again() {
+    let server = FakeServer::start(true);
+    server.stub(
+        "GET",
+        VIEWS,
+        scope_denied(
+            r#"Bearer error="insufficient_scope", scope="saved_views:read""#,
+            "This sign-in does not grant the saved_views:read scope. Sign in again to grant it.",
+        ),
+    );
+    let home = TestHome::new("scope-denied");
+    sign_in_without_saved_views(&server, &home);
+
+    let mut cmd = home.logchef();
+    cmd.args(["views", "list", "-t", "1", "-S", "1"]);
+    let out = run(cmd);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("lacks a scope this command needs: it does not grant saved_views:read"),
+        "{err}"
+    );
+    assert!(err.contains("logchef auth --context test"), "{err}");
+
+    let mut cmd = home.logchef();
+    cmd.args(["views", "list", "-t", "1", "-S", "1", "--output", "json"]);
+    let out = run(cmd);
+    assert!(!out.status.success());
+    let error: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(error["error"]["type"], "auth_required");
+    assert_eq!(error["error"]["fix"], "logchef auth --context test");
+}
+
+/// Servers before v2.8.2 name no scope, so the CLI names the read scopes the
+/// sign-in lacks.
+#[test]
+fn an_unnamed_denied_scope_lists_the_read_scopes_the_sign_in_lacks() {
+    let server = FakeServer::start(true);
+    server.stub(
+        "GET",
+        VIEWS,
+        scope_denied(
+            r#"Bearer error="insufficient_scope""#,
+            "API token does not have the required scope",
+        ),
+    );
+    let home = TestHome::new("scope-unnamed");
+    sign_in_without_saved_views(&server, &home);
+
+    let mut cmd = home.logchef();
+    cmd.args(["views", "list", "-t", "1", "-S", "1"]);
+    let out = run(cmd);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("lacks a scope this command needs: it does not grant saved_views:read, destinations:read"),
+        "{err}"
+    );
+    assert!(err.contains("logchef auth --context test"), "{err}");
+}
+
+#[test]
+fn an_api_token_without_the_scope_must_be_reissued() {
+    let server = FakeServer::start(true);
+    server.stub(
+        "GET",
+        VIEWS,
+        scope_denied(
+            r#"Bearer error="insufficient_scope", scope="saved_views:read""#,
+            "API token does not have the required scope saved_views:read",
+        ),
+    );
+    let home = TestHome::new("scope-pat");
+    home.write_config(&config_with(&server.url, serde_json::json!({"token": PAT})));
+
+    let mut cmd = home.logchef();
+    cmd.args(["views", "list", "-t", "1", "-S", "1"]);
+    let out = run(cmd);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("Create a new API token with the saved_views:read scope"),
+        "{err}"
+    );
+    assert!(!err.contains("logchef auth"), "{err}");
+}
+
+#[test]
+fn doctor_reports_read_scopes_the_sign_in_lacks() {
+    let server = FakeServer::start(true);
+    let home = TestHome::new("doctor-scopes");
+    sign_in_without_saved_views(&server, &home);
+
+    let mut cmd = home.logchef();
+    cmd.args(["doctor", "--json"]);
+    let out = run(cmd);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    let checks: Vec<serde_json::Value> = serde_json::from_str(&stdout(&out)).unwrap();
+    let check = checks
+        .iter()
+        .find(|c| c["check"] == "OAuth scopes")
+        .unwrap_or_else(|| panic!("no scope check: {checks:#?}"));
+    assert_eq!(check["status"], "fail");
+    assert_eq!(
+        check["detail"],
+        "this sign-in does not grant saved_views:read, destinations:read"
+    );
+    assert!(
+        check["hint"]
+            .as_str()
+            .unwrap()
+            .contains("logchef auth --context test"),
+        "{check}"
+    );
+
+    // A server older than destinations:read does not offer it, so only
+    // saved_views:read is missing.
+    server.state().scopes_supported = Some(
+        READ_SCOPES
+            .split(' ')
+            .filter(|s| *s != "destinations:read")
+            .map(String::from)
+            .collect(),
+    );
+    let mut cmd = home.logchef();
+    cmd.args(["doctor", "--json"]);
+    let checks: Vec<serde_json::Value> = serde_json::from_str(&stdout(&run(cmd))).unwrap();
+    let check = checks
+        .iter()
+        .find(|c| c["check"] == "OAuth scopes")
+        .unwrap();
+    assert_eq!(
+        check["detail"],
+        "this sign-in does not grant saved_views:read"
+    );
+}
+
+#[test]
+fn doctor_passes_a_sign_in_with_every_read_scope() {
+    let server = FakeServer::start(true);
+    let home = TestHome::new("doctor-scopes-ok");
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({ "oauth": server.issue_grant(false) }),
+    ));
+    let mut cmd = home.logchef();
+    cmd.args(["doctor", "--json"]);
+    let checks: Vec<serde_json::Value> = serde_json::from_str(&stdout(&run(cmd))).unwrap();
+    let check = checks
+        .iter()
+        .find(|c| c["check"] == "OAuth scopes")
+        .unwrap();
+    assert_eq!(check["status"], "ok", "{check}");
+}
+
+/// A server older than destinations:read does not offer it, so a sign-in
+/// that lacks it is not told to sign in again for a scope no sign-in can
+/// hold, such as the reports scopes.
+#[test]
+fn an_unnamed_denied_scope_on_an_older_server_points_reports_to_an_api_token() {
+    let server = FakeServer::start(true);
+    let older: Vec<String> = READ_SCOPES
+        .split(' ')
+        .filter(|s| *s != "destinations:read")
+        .map(String::from)
+        .collect();
+    server.state().scopes_supported = Some(older.clone());
+    server.stub(
+        "GET",
+        "/api/v1/reports",
+        scope_denied(
+            r#"Bearer error="insufficient_scope""#,
+            "API token does not have the required scope",
+        ),
+    );
+    let home = TestHome::new("scope-older-reports");
+    let mut credential = server.issue_grant(false);
+    credential["scopes"] = older.into();
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({ "oauth": credential }),
+    ));
+
+    let mut cmd = home.logchef();
+    cmd.args(["reports", "list"]);
+    let out = run(cmd);
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("It needs an API token with the reports:read scope"),
+        "{err}"
+    );
+    assert!(!err.contains("destinations:read"), "{err}");
 }

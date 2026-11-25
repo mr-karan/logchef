@@ -60,6 +60,7 @@ struct JsonOutput<'a> {
     error: Option<&'a logchef_core::api::QueryParseError>,
     #[serde(skip_serializing_if = "Option::is_none")]
     aggregation: Option<&'a logchef_core::api::AggregationInfo>,
+    warnings: &'a [String],
 }
 
 pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
@@ -125,30 +126,22 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
     let valid = translate.valid && validate.valid;
     let error = validate.error.as_ref().or(translate.error.as_ref());
 
+    let output = JsonOutput {
+        query: &args.query,
+        valid,
+        generated_query: translate.generated_query(),
+        generated_query_language: translate.generated_query_language.as_deref(),
+        error,
+        aggregation: translate.aggregation.as_ref(),
+        warnings: &translate.warnings,
+    };
     match args.output {
-        OutputFormat::Json => {
-            let output = JsonOutput {
-                query: &args.query,
-                valid,
-                generated_query: translate.generated_query(),
-                generated_query_language: translate.generated_query_language.as_deref(),
-                error,
-                aggregation: translate.aggregation.as_ref(),
-            };
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        }
-        OutputFormat::Jsonl => {
-            let output = JsonOutput {
-                query: &args.query,
-                valid,
-                generated_query: translate.generated_query(),
-                generated_query_language: translate.generated_query_language.as_deref(),
-                error,
-                aggregation: translate.aggregation.as_ref(),
-            };
-            println!("{}", serde_json::to_string(&output)?);
-        }
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&output)?),
+        OutputFormat::Jsonl => println!("{}", serde_json::to_string(&output)?),
         OutputFormat::Text => {
+            for warning in &translate.warnings {
+                eprintln!("Warning: {warning}");
+            }
             if valid {
                 println!("Valid: yes");
             } else {
