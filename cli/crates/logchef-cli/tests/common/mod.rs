@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PAT: &str = "logchef_test_pat";
 pub const CODE: &str = "test-code";
-pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read destinations:read";
+pub const READ_SCOPES: &str = "profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read destinations:read dashboards:read";
 
 /// An isolated HOME with a fake browser launcher on PATH. Any attempt to open
 /// a browser writes to `browser_log`.
@@ -322,6 +322,8 @@ pub struct Recorded {
     pub method: String,
     /// The path with its query string.
     pub path: String,
+    /// The headers, by lowercase name.
+    pub headers: HashMap<String, String>,
     pub body: String,
 }
 
@@ -493,6 +495,7 @@ fn handle(mut stream: TcpStream, base: &str, state: &Mutex<ServerState>) {
         s.requests.push(Recorded {
             method: req.method.clone(),
             path: req.path.clone(),
+            headers: req.headers.clone(),
             body: req.body.clone(),
         });
         let path = req.path.split('?').next().unwrap_or_default().to_string();

@@ -226,6 +226,7 @@ func TestScopeMaskPositions(t *testing.T) {
 		models.TokenScopeAlertsRead,
 		models.TokenScopeSavedViewsRead,
 		models.TokenScopeDestinationsRead,
+		models.TokenScopeDashboardsRead,
 	}
 	if len(ReadScopes) != len(want) {
 		t.Fatalf("ReadScopes has %d entries, want %d: pin the new scope's bit here", len(ReadScopes), len(want))

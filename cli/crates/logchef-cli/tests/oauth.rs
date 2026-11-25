@@ -72,7 +72,7 @@ fn login_uses_logchef_oauth_and_saves_a_private_context() {
     assert_eq!(oauth["client_id"], "logchef-cli");
     assert_eq!(oauth["access_token"], "access-1");
     assert_eq!(oauth["refresh_token"], "refresh-1");
-    assert_eq!(oauth["scopes"].as_array().unwrap().len(), 9);
+    assert_eq!(oauth["scopes"].as_array().unwrap().len(), 10);
     assert!(config["contexts"]["127.0.0.1"].get("token").is_none());
     assert_eq!(mode(&home.config_path()), 0o600);
     assert_eq!(mode(&home.config_dir()), 0o700);

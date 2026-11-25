@@ -45,7 +45,7 @@ func (s *Server) sendDashboard(c fiber.Ctx, status int, user *models.User, clien
 // by the panels), newest-updated first. No stored blob is returned. A schema 1
 // client gets the constant compatibility fields on every summary.
 func (s *Server) handleListDashboards(c fiber.Ctx) error {
-	user := currentUser(c)
+	user := core.DashboardViewer(principalFromLocals(c))
 	client, err := dashboardClient(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -104,7 +104,7 @@ func (s *Server) handleCreateDashboard(c fiber.Ctx) error {
 // corrupt row. The response is built in the client's schema with each panel
 // the viewer cannot reach redacted.
 func (s *Server) handleGetDashboard(c fiber.Ctx) error {
-	user := currentUser(c)
+	user := core.DashboardViewer(principalFromLocals(c))
 	client, err := dashboardClient(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)

@@ -20,7 +20,7 @@ pub const CLIENT_ID: &str = "logchef-cli";
 
 /// The read scopes. The CLI asks for each one the server advertises, plus
 /// `offline_access`.
-pub const READ_SCOPES: [&str; 9] = [
+pub const READ_SCOPES: [&str; 10] = [
     "profile:read",
     "teams:read",
     "sources:read",
@@ -30,6 +30,7 @@ pub const READ_SCOPES: [&str; 9] = [
     "alerts:read",
     "saved_views:read",
     "destinations:read",
+    "dashboards:read",
 ];
 const OFFLINE_ACCESS: &str = "offline_access";
 
