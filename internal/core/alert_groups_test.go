@@ -125,11 +125,13 @@ func TestTestAlertQueryGroupedSamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.GroupsTotal != 25 || len(resp.Samples) != models.MaxTestAlertSamples || !resp.ThresholdMet {
-		t.Fatalf("response = groups %d samples %d met %v, want 25 groups, %d samples, met by a group past the listed ones",
+		t.Fatalf("response = groups %d samples %d met %v, want 25 groups, %d samples, met",
 			resp.GroupsTotal, len(resp.Samples), resp.ThresholdMet, models.MaxTestAlertSamples)
 	}
-	if first := resp.Samples[0]; first.Group["service"] != "a" || first.Value != 0 || first.ThresholdMet {
-		t.Errorf("first sample = %+v, want group a, value 0, not met", first)
+	// For gt the highest group comes first, so the listed samples hold the
+	// groups closest to firing, and value is the highest.
+	if first := resp.Samples[0]; first.Group["service"] != "y" || first.Value != 24 || !first.ThresholdMet || resp.Value != 24 {
+		t.Errorf("first sample = %+v, value %v; want group y with 24, met", first, resp.Value)
 	}
 	for _, warning := range resp.Warnings {
 		if strings.Contains(warning, "single numeric value") {

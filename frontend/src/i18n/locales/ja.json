@@ -1389,6 +1389,7 @@
   "alerts.backtestGroupEpisodes": "エピソード",
   "alerts.backtestGroupBreaching": "しきい値を超えた評価",
   "alerts.backtestGroupMax": "最大値",
+  "alerts.backtestGroupMin": "最小値",
   "alerts.backtestGroupsOmitted": "表示されていないグループがあと {count} 件",
   "ui.admin": "管理",
   "routes.adminOverview": "管理概要"

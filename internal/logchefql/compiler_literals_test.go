@@ -64,7 +64,6 @@ func TestNumericLiteralRejectsStringFields(t *testing.T) {
 	}{
 		{"String", "p=123"},
 		{"LowCardinality(Nullable(String))", "p>123"},
-		{"String", "p.trade_id=123"},
 		{"Map(String, String)", "p.trade_id=123"},
 	} {
 		t.Run(tc.columnType+"/"+tc.query, func(t *testing.T) {

@@ -199,9 +199,9 @@ func TestCompareWindowsRejectsAnAggregation(t *testing.T) {
 	}
 }
 
-// translate_logchefql passes on the warning for a JSON number read as text
-// from a String column.
-func TestTranslateLogchefQLWarnsOnJSONNumberInString(t *testing.T) {
+// translate_logchefql passes on the warning for an ordering of a JSON value
+// in a String column against a quoted value, which compares text.
+func TestTranslateLogchefQLWarnsOnJSONTextOrdering(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	manager := clickhouse.NewManager(discardLogger())
@@ -211,13 +211,13 @@ func TestTranslateLogchefQLWarnsOnJSONNumberInString(t *testing.T) {
 	w.link(t, w.team, source.ID)
 
 	result := callTool(t, w.server(), session(w.member), "translate_logchefql", map[string]any{
-		"team_id": w.team, "source_id": source.ID, "query": `service="api" | p95(level.latency_ms)`,
+		"team_id": w.team, "source_id": source.ID, "query": `service="api" and level.latency_ms > "500"`,
 	})
 	var out TranslateResult
 	if err := json.Unmarshal(result.StructuredContent, &out); err != nil || result.IsError {
 		t.Fatalf("translate_logchefql: %v %s", err, result.text())
 	}
-	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "JSONExtractFloat(`level`, 'latency_ms')") {
-		t.Fatalf("warnings = %q, want one naming JSONExtractFloat", out.Warnings)
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "Write the number without quotes") {
+		t.Fatalf("warnings = %q, want one about comparing text", out.Warnings)
 	}
 }

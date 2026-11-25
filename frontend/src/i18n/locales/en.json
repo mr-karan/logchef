@@ -2200,6 +2200,7 @@
   "alerts.backtestGroupEpisodes": "Episodes",
   "alerts.backtestGroupBreaching": "Breaching evaluations",
   "alerts.backtestGroupMax": "Max value",
+  "alerts.backtestGroupMin": "Min value",
   "alerts.backtestGroupsOmitted": "{count} more group not shown | {count} more groups not shown",
   "admin.activeUsers": "Active users",
   "admin.viewDailyValues": "View daily values",

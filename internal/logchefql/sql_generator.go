@@ -34,12 +34,13 @@ func (g *SQLGenerator) warn(message string) {
 	}
 }
 
-// warnJSONNumber notes that field, a JSON path read from a String column as
-// text, is used as a number. JSONExtractString returns "" for a JSON number,
-// so the query translates but quietly misses every numeric value.
-func (g *SQLGenerator) warnJSONNumber(key any, field sqlField, consequence string) {
-	g.warn(fmt.Sprintf("%s reads JSON inside the String column %s with JSONExtractString, which returns an empty string for a JSON number, so %s. For a numeric JSON value use native SQL with %s or JSONExtractInt.",
-		getFieldName(key), field.jsonTextColumn, consequence, strings.Replace(field.sql, "JSONExtractString(", "JSONExtractFloat(", 1)))
+// warnJSONTextOrdering notes an ordering comparison of a JSON path read from
+// a String column with a quoted value: JSONExtractString returns the text of
+// a JSON number, so the comparison orders text and "1000" sorts before "500".
+func (g *SQLGenerator) warnJSONTextOrdering(node *ExpressionNode, field sqlField) {
+	name := getFieldName(node.Key)
+	g.warn(fmt.Sprintf("%s %s %q compares the JSON value inside the String column %s as text, so \"1000\" sorts before \"500\". Write the number without quotes to compare numbers: %s %s %v.",
+		name, node.Operator, node.Value, field.jsonTextColumn, name, node.Operator, node.Value))
 }
 
 // NewSQLGenerator creates a new SQL generator with optional schema
@@ -141,21 +142,26 @@ func (g *SQLGenerator) visitExpression(node *ExpressionNode) (string, *ParseErro
 	if field.sql == "" {
 		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
 	}
-	if _, numeric := node.Value.(NumericLiteral); numeric && g.isStringType(field.columnType) {
-		if field.jsonTextColumn != "" {
+	ordering := slices.Contains([]Operator{OpGT, OpLT, OpGTE, OpLTE}, node.Operator)
+	if number, numeric := node.Value.(NumericLiteral); numeric && g.isStringType(field.columnType) {
+		if field.jsonTextColumn == "" {
 			return "", &ParseError{
-				Code: ErrUnsupportedFeature,
-				Message: fmt.Sprintf("%s is JSON inside the String column %s, read as text, so quote the value to compare a JSON string, or use native SQL with %s for a JSON number",
-					getFieldName(node.Key), field.jsonTextColumn, strings.Replace(field.sql, "JSONExtractString(", "JSONExtractFloat(", 1)),
+				Code:    ErrUnsupportedFeature,
+				Message: "numeric comparisons require a numeric field; quote the value to compare text",
 			}
 		}
-		return "", &ParseError{
-			Code:    ErrUnsupportedFeature,
-			Message: "numeric comparisons require a numeric field; quote the value to compare text",
+		// JSONExtractString returns the text of a JSON number ("400"), so an
+		// ordering compares the parsed number, and any other operator
+		// compares or searches the text.
+		if ordering {
+			parsed := field
+			parsed.sql = "toFloat64OrNull(" + field.sql + ")"
+			return g.generateComparisonExpression(parsed, node.Operator, string(number))
 		}
+		return g.generateComparisonExpression(field, node.Operator, g.formatValue(string(number)))
 	}
-	if field.jsonTextColumn != "" && slices.Contains([]Operator{OpGT, OpLT, OpGTE, OpLTE}, node.Operator) {
-		g.warnJSONNumber(node.Key, field, "this comparison orders text, not numbers")
+	if field.jsonTextColumn != "" && ordering {
+		g.warnJSONTextOrdering(node, field)
 	}
 	return g.generateComparisonExpression(field, node.Operator, g.formatValue(node.Value))
 }
@@ -634,9 +640,6 @@ func (g *SQLGenerator) aggregateExpression(agg Aggregate) (string, *ParseError) 
 			return fmt.Sprintf("uniqExactIf(%s, toString(%s) != '')", field.sql, field.sql), nil
 		}
 		return fmt.Sprintf("uniqExact(%s)", field.sql), nil
-	}
-	if field.jsonTextColumn != "" {
-		g.warnJSONNumber(agg.Field, field, fmt.Sprintf("%s skips every numeric value", agg.Func))
 	}
 	number, err := g.numberExpression(agg, field)
 	if err != nil {

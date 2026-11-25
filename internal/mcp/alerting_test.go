@@ -92,6 +92,23 @@ func TestAlertValidationTools(t *testing.T) {
 	if _, admitted := w.admits.counts(); admitted != 2 {
 		t.Fatalf("admitted %d calls, want 2", admitted)
 	}
+	// Every evaluation fires, so the series holds the one change from ok.
+	if len(replay.Series) != 1 || replay.Series[0].Status != models.BacktestStatusFiring {
+		t.Fatalf("series = %+v, want only the change to firing", replay.Series)
+	}
+
+	backtest["include_series"] = true
+	backtest["end_time"] = time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	result = callTool(t, s, reader, "backtest_alert", backtest)
+	replay = models.BacktestResult{}
+	if err := json.Unmarshal([]byte(result.text()), &replay); err != nil || result.IsError {
+		t.Fatalf("backtest_alert with end_time: %v %s", err, result.text())
+	}
+	if len(replay.Series) != 60 || time.Since(replay.End) < 47*time.Hour {
+		t.Fatalf("series %d points ending %s, want every evaluation of the window two days ago", len(replay.Series), replay.End)
+	}
+	delete(backtest, "include_series")
+	delete(backtest, "end_time")
 
 	backtest["range_seconds"] = 60
 	if result := callTool(t, s, reader, "backtest_alert", backtest); !result.IsError || !strings.Contains(result.text(), "range_seconds must be between") {
@@ -176,5 +193,58 @@ func TestListDestinationsToolHidesConfig(t *testing.T) {
 	}
 	if keys := slices.Sorted(maps.Keys(destinations[0])); !slices.Equal(keys, []string{"id", "is_active", "name", "scope", "type"}) {
 		t.Fatalf("destination keys = %v, want the summary only", keys)
+	}
+}
+
+// get_alert_history returns the newest episodes up to limit, filters by
+// status, and states the rule's query once instead of in every entry.
+func TestGetAlertHistoryFilters(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	alert := &models.Alert{
+		SourceID: w.source.ID, Name: "errors", QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
+		Query: "SELECT count() AS value FROM logs WHERE {{__time_filter}}", LookbackSeconds: 300, ThresholdOperator: models.AlertThresholdGreaterThan,
+		ThresholdValue: 10, FrequencySeconds: 60, Severity: models.AlertSeverityWarning, IsActive: true, LastState: models.AlertStateResolved, CreatedBy: &w.member.ID,
+	}
+	if err := w.db.CreateAlert(t.Context(), alert); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 30 {
+		status, payload := models.AlertStatusTriggered, map[string]any{"annotations": map[string]any{"query": alert.Query, "runbook": "r"}}
+		if i%3 == 0 {
+			status, payload = models.AlertStatusError, map[string]any{"query": alert.Query, "error": "boom"}
+		}
+		if _, err := w.db.InsertAlertHistory(t.Context(), alert.ID, "", nil, status, nil, fmt.Sprintf("entry %d", i), payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	history := func(args map[string]any) map[string]any {
+		t.Helper()
+		args["alert_id"] = alert.ID
+		result := callTool(t, w.server(), session(w.member), "get_alert_history", args)
+		var out map[string]any
+		if err := json.Unmarshal([]byte(result.text()), &out); err != nil || result.IsError {
+			t.Fatalf("get_alert_history %v: %v %s", args, err, result.text())
+		}
+		return out
+	}
+
+	out := history(map[string]any{})
+	entries := out["history"].([]any)
+	if len(entries) != 20 || out["alert"].(map[string]any)["query"] != alert.Query {
+		t.Fatalf("default: %d entries, alert %v; want 20 and the query once", len(entries), out["alert"])
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "__time_filter") || !strings.Contains(string(raw), "runbook") {
+		t.Fatalf("entries repeat the query or lost other payload: %s", raw)
+	}
+	if entries := history(map[string]any{"status": "error", "limit": 5})["history"].([]any); len(entries) != 5 || entries[0].(map[string]any)["status"] != "error" {
+		t.Fatalf("status error, limit 5: %v", entries)
+	}
+	if result := callTool(t, w.server(), session(w.member), "get_alert_history", map[string]any{"alert_id": alert.ID, "limit": 500}); !result.IsError {
+		t.Fatalf("limit 500 accepted: %s", result.text())
 	}
 }

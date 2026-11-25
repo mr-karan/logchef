@@ -188,6 +188,8 @@ export interface BacktestGroup {
   episodes: number;
   breaching_evaluations: number;
   max_value: number | null;
+  /** The value that matters for an lt or lte rule; absent on older servers. */
+  min_value?: number | null;
 }
 
 export interface BacktestResult {

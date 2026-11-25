@@ -220,3 +220,35 @@ func TestLogchefQLConditionDerivesConditionJSON(t *testing.T) {
 		t.Fatalf("rule without a filter: status %d %s, want 400", resp.status, resp.body)
 	}
 }
+
+// The test route puts the group closest to firing first: the lowest value
+// for lt, the highest for gt, and warnings is a list even when empty.
+func TestAlertTestValueAndWarnings(t *testing.T) {
+	upstream := &statsUpstream{}
+	e, sourceID := newConditionRouteEnv(t, upstream)
+	grouped := `level="error" | count() by service`
+	test := func(fields map[string]any) (models.TestAlertQueryResponse, string) {
+		t.Helper()
+		resp := e.do(http.MethodPost, "/api/v1/alerts/test", conditionBody(t, sourceID, fields), e.cookie)
+		wantStatus(t, resp, http.StatusOK)
+		var parsed struct {
+			Data models.TestAlertQueryResponse `json:"data"`
+		}
+		if err := json.Unmarshal(resp.body, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		return parsed.Data, string(resp.body)
+	}
+
+	got, raw := test(map[string]any{"query": grouped, "threshold_operator": "lt", "threshold_value": 5})
+	if got.Value != 2 || got.Samples[0].Group["service"] != "search" || !got.ThresholdMet {
+		t.Fatalf("lt: value %v, first sample %v, want search with 2", got.Value, got.Samples[0])
+	}
+	if !strings.Contains(raw, `"warnings":[]`) {
+		t.Errorf("warnings of a clean test is not an empty list: %s", raw)
+	}
+	if got, _ := test(map[string]any{"query": grouped, "threshold_operator": "gt", "threshold_value": 5}); got.Value != 7 || got.Samples[0].Group["service"] != "checkout" {
+		t.Fatalf("gt: value %v, first sample %v, want checkout with 7", got.Value, got.Samples[0])
+	}
+
+}

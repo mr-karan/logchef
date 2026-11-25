@@ -2200,6 +2200,7 @@
   "alerts.backtestGroupEpisodes": "事件",
   "alerts.backtestGroupBreaching": "超过阈值的评估",
   "alerts.backtestGroupMax": "最大值",
+  "alerts.backtestGroupMin": "最小值",
   "alerts.backtestGroupsOmitted": "还有 {count} 个分组未显示",
   "admin.activeUsers": "活跃用户",
   "admin.viewDailyValues": "查看每日数据",

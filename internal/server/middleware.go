@@ -9,6 +9,7 @@ import (
 
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -284,6 +285,8 @@ func sendInsufficientScope(c fiber.Ctx, user *models.User, err error) error {
 
 func insufficientScopeMessage(viaOAuth bool, scope models.TokenScope) string {
 	switch {
+	case viaOAuth && scope != "" && !slices.Contains(oauth.ReadScopes, scope):
+		return "A Logchef OAuth sign-in cannot hold the " + string(scope) + " scope. Use an API token that has it."
 	case viaOAuth && scope != "":
 		return "This sign-in does not grant the " + string(scope) + " scope. Sign in again to grant it."
 	case viaOAuth:
