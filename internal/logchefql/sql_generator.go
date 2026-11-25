@@ -18,6 +18,28 @@ type SQLGenerator struct {
 	// expression/select field.
 	colTypes      map[string]string
 	defaultMapCol string
+	// warnings are notes about a query that translates but may not do what
+	// it says, in the order found, without repeats.
+	warnings []string
+}
+
+// Warnings returns the notes the generator collected.
+func (g *SQLGenerator) Warnings() []string {
+	return slices.Clone(g.warnings)
+}
+
+func (g *SQLGenerator) warn(message string) {
+	if !slices.Contains(g.warnings, message) {
+		g.warnings = append(g.warnings, message)
+	}
+}
+
+// warnJSONNumber notes that field, a JSON path read from a String column as
+// text, is used as a number. JSONExtractString returns "" for a JSON number,
+// so the query translates but quietly misses every numeric value.
+func (g *SQLGenerator) warnJSONNumber(key any, field sqlField, consequence string) {
+	g.warn(fmt.Sprintf("%s reads JSON inside the String column %s with JSONExtractString, which returns an empty string for a JSON number, so %s. For a numeric JSON value use native SQL with %s or JSONExtractInt.",
+		getFieldName(key), field.jsonTextColumn, consequence, strings.Replace(field.sql, "JSONExtractString(", "JSONExtractFloat(", 1)))
 }
 
 // NewSQLGenerator creates a new SQL generator with optional schema
@@ -120,10 +142,20 @@ func (g *SQLGenerator) visitExpression(node *ExpressionNode) (string, *ParseErro
 		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
 	}
 	if _, numeric := node.Value.(NumericLiteral); numeric && g.isStringType(field.columnType) {
+		if field.jsonTextColumn != "" {
+			return "", &ParseError{
+				Code: ErrUnsupportedFeature,
+				Message: fmt.Sprintf("%s is JSON inside the String column %s, read as text, so quote the value to compare a JSON string, or use native SQL with %s for a JSON number",
+					getFieldName(node.Key), field.jsonTextColumn, strings.Replace(field.sql, "JSONExtractString(", "JSONExtractFloat(", 1)),
+			}
+		}
 		return "", &ParseError{
 			Code:    ErrUnsupportedFeature,
 			Message: "numeric comparisons require a numeric field; quote the value to compare text",
 		}
+	}
+	if field.jsonTextColumn != "" && slices.Contains([]Operator{OpGT, OpLT, OpGTE, OpLTE}, node.Operator) {
+		g.warnJSONNumber(node.Key, field, "this comparison orders text, not numbers")
 	}
 	return g.generateComparisonExpression(field, node.Operator, g.formatValue(node.Value))
 }
@@ -259,6 +291,9 @@ type sqlField struct {
 	sql             string
 	columnType      string
 	resolutionError *ParseError
+	// jsonTextColumn names the String column that a nested path reads with
+	// JSONExtractString. Empty for any other field.
+	jsonTextColumn string
 }
 
 // resolveField is shared by WHERE comparisons and pipe projections.
@@ -287,7 +322,7 @@ func (g *SQLGenerator) resolveField(field any) sqlField {
 			}
 			return sqlField{sql: g.nativeJSONPath(f.Base, f.Path, columnType), columnType: pathType}
 		case columnType == "" || g.isStringType(columnType):
-			return sqlField{sql: g.jsonExtraction(f.Base, f.Path), columnType: "String"}
+			return sqlField{sql: g.jsonExtraction(f.Base, f.Path), columnType: "String", jsonTextColumn: f.Base}
 		default:
 			return sqlField{resolutionError: &ParseError{
 				Code:    ErrUnsupportedFeature,
@@ -599,6 +634,9 @@ func (g *SQLGenerator) aggregateExpression(agg Aggregate) (string, *ParseError) 
 			return fmt.Sprintf("uniqExactIf(%s, toString(%s) != '')", field.sql, field.sql), nil
 		}
 		return fmt.Sprintf("uniqExact(%s)", field.sql), nil
+	}
+	if field.jsonTextColumn != "" {
+		g.warnJSONNumber(agg.Field, field, fmt.Sprintf("%s skips every numeric value", agg.Func))
 	}
 	number, err := g.numberExpression(agg, field)
 	if err != nil {

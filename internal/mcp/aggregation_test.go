@@ -198,3 +198,26 @@ func TestCompareWindowsRejectsAnAggregation(t *testing.T) {
 		t.Fatalf("backend queries = %q, want none", sent)
 	}
 }
+
+// translate_logchefql passes on the warning for a JSON number read as text
+// from a String column.
+func TestTranslateLogchefQLWarnsOnJSONNumberInString(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	manager := clickhouse.NewManager(discardLogger())
+	t.Cleanup(func() { _ = manager.Close() })
+	w.ds.Register(fixedSchemaClickHouse{datasource.NewClickHouseProvider(manager, discardLogger())})
+	source := w.newSource(t, "app_logs")
+	w.link(t, w.team, source.ID)
+
+	result := callTool(t, w.server(), session(w.member), "translate_logchefql", map[string]any{
+		"team_id": w.team, "source_id": source.ID, "query": `service="api" | p95(level.latency_ms)`,
+	})
+	var out TranslateResult
+	if err := json.Unmarshal(result.StructuredContent, &out); err != nil || result.IsError {
+		t.Fatalf("translate_logchefql: %v %s", err, result.text())
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "JSONExtractFloat(`level`, 'latency_ms')") {
+		t.Fatalf("warnings = %q, want one naming JSONExtractFloat", out.Warnings)
+	}
+}

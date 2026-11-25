@@ -210,7 +210,7 @@ func (s *Server) handleGetSourceActivity(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
 	}
 	if errors.Is(err, access.ErrInsufficientScope) {
-		return sendInsufficientScope(c, p.User)
+		return sendInsufficientScope(c, p.User, err)
 	}
 	return s.sendSourceActivity(c, sourceID, activity, err)
 }

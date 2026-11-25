@@ -45,6 +45,7 @@ func (f *fakeTranslateStore) TeamHasSource(context.Context, models.TeamID, model
 type fakeClickHouseCompiler struct {
 	datasource.Provider
 	timeRangeErr error
+	warnings     []string
 }
 
 func (f *fakeClickHouseCompiler) Type() models.SourceType { return models.SourceTypeClickHouse }
@@ -79,6 +80,7 @@ func (f *fakeClickHouseCompiler) CompileLogchefQL(ctx context.Context, source *m
 		Valid:      true,
 		FilterOnly: "1=1",
 		Query:      "1=1",
+		Warnings:   f.warnings,
 	}
 	if req.StartTime == "" || req.EndTime == "" || req.Timezone == "" {
 		return compiled, nil
@@ -91,11 +93,15 @@ func (f *fakeClickHouseCompiler) CompileLogchefQL(ctx context.Context, source *m
 }
 
 func newTranslateTestApp(timeRangeErr error) *fiber.App {
+	return newTranslateTestAppWith(&fakeClickHouseCompiler{timeRangeErr: timeRangeErr})
+}
+
+func newTranslateTestAppWith(compiler *fakeClickHouseCompiler) *fiber.App {
 	source := &models.Source{ID: 1, SourceType: models.SourceTypeClickHouse}
 
 	db := &fakeTranslateStore{source: source}
 	svc := datasource.NewService(db, slog.Default())
-	svc.Register(&fakeClickHouseCompiler{timeRangeErr: timeRangeErr})
+	svc.Register(compiler)
 
 	s := &Server{datasources: svc, store: db, log: slog.Default()}
 
@@ -193,5 +199,23 @@ func TestHandleLogchefQLTranslateWithoutTimeParamsOmitsFullSQL(t *testing.T) {
 	}
 	if _, present := data["full_sql"]; present {
 		t.Fatalf("expected full_sql to be omitted without time params, got data: %v", data)
+	}
+}
+
+// The compiler's warnings reach the response, so an editor or CLI can show
+// a query that translates but may not match.
+func TestHandleLogchefQLTranslateReturnsWarnings(t *testing.T) {
+	t.Parallel()
+
+	warning := "msg.latency_ms reads JSON inside the String column msg"
+	app := newTranslateTestAppWith(&fakeClickHouseCompiler{warnings: []string{warning}})
+	status, body := postTranslate(t, app, map[string]any{"query": `msg.latency_ms > "5"`})
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %v", status, body)
+	}
+	data, _ := body["data"].(map[string]any)
+	warnings, _ := data["warnings"].([]any)
+	if len(warnings) != 1 || warnings[0] != warning {
+		t.Fatalf("warnings = %v, want [%q]", data["warnings"], warning)
 	}
 }

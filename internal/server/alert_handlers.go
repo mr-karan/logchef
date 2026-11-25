@@ -334,7 +334,7 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
 		}
 		if errors.Is(err, access.ErrInsufficientScope) {
-			return sendInsufficientScope(c, p.User)
+			return sendInsufficientScope(c, p.User, err)
 		}
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -410,7 +410,7 @@ func (s *Server) sendBacktestError(c fiber.Ctx, p access.Principal, sourceID mod
 	case errors.Is(err, core.ErrAccessCheck):
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
 	case errors.Is(err, access.ErrInsufficientScope):
-		return sendInsufficientScope(c, p.User)
+		return sendInsufficientScope(c, p.User, err)
 	case errors.Is(err, core.ErrInvalidAlertConfiguration):
 		metrics.RecordAlertBacktest("invalid")
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)

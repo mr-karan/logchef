@@ -43,8 +43,9 @@ func TestAlertQueryForPrincipalDeniesUnauthorizedCallers(t *testing.T) {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
 	ds := newFakeDatasourceService(db, log, nil)
-	readOnly := &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAlertsRead}}
-	writer := &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAlertsWrite}}
+	logsOnly := &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeLogsRead}}
+	writeOnly := &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAlertsWrite}}
+	reader := &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAlertsRead}}
 
 	for _, tc := range []struct {
 		name    string
@@ -53,10 +54,12 @@ func TestAlertQueryForPrincipalDeniesUnauthorizedCallers(t *testing.T) {
 	}{
 		{"non-member", access.SessionPrincipal(outsider), ErrSourceAccessDenied},
 		{"global admin, not a member", access.SessionPrincipal(admin), ErrSourceAccessDenied},
-		{"member token without alerts:write", access.APITokenPrincipal(member, readOnly), access.ErrInsufficientScope},
+		{"member token without alerts scopes", access.APITokenPrincipal(member, logsOnly), access.ErrInsufficientScope},
+		{"member token with only alerts:write", access.APITokenPrincipal(member, writeOnly), access.ErrInsufficientScope},
 		{"unknown auth method", access.Principal{User: member}, access.ErrInsufficientScope},
 		{"member session", access.SessionPrincipal(member), nil},
-		{"member token with alerts:write", access.APITokenPrincipal(member, writer), nil},
+		{"member token with alerts:read", access.APITokenPrincipal(member, reader), nil},
+		{"member OAuth sign-in with alerts:read", access.OAuthPrincipal(member, 1, "logchef-cli", []models.TokenScope{models.TokenScopeAlertsRead}), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := &models.TestAlertQueryRequest{

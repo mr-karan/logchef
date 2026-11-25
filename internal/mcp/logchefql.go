@@ -49,6 +49,7 @@ type TranslateResult struct {
 	Valid                  bool                  `json:"valid" jsonschema:"Whether the LogchefQL expression is valid"`
 	// Aggregation is absent for a query that returns log rows.
 	Aggregation *logchefql.AggregationInfo `json:"aggregation,omitempty" jsonschema:"The result shape and columns when the query aggregates. full_sql and generated_query are then the aggregated query and sql stays the filter"`
+	Warnings    []string                   `json:"warnings,omitempty" jsonschema:"Notes about a query that translates but may not match what it says, such as a JSON number read as text from a String column"`
 }
 
 // logchefQLRun is one executed LogchefQL query and its tracked query ID.
@@ -154,6 +155,7 @@ func (t *tools) handleTranslateLogchefQL(ctx context.Context, _ mcp.CallToolRequ
 		Error:                  translation.Error,
 		Valid:                  translation.Valid,
 		Aggregation:            translation.Aggregation,
+		Warnings:               translation.Warnings,
 	}, nil
 }
 
@@ -192,7 +194,7 @@ func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 	s.AddTool(queryTool, mcp.NewTypedToolHandler(t.handleQueryLogchefQL))
 
 	translateTool := mcp.NewTool("translate_logchefql",
-		mcp.WithDescription("Translate LogchefQL to the source native query language without executing it. sql contains ClickHouse filter conditions. For get_log_histogram, translate the filter without an aggregation pipe and pass its full_sql (ClickHouse) or generated_query (VictoriaLogs); the full_sql of an aggregated query is not a histogram query."),
+		mcp.WithDescription("Translate LogchefQL to the source native query language without executing it. warnings lists queries that translate but may not match what they say. sql contains ClickHouse filter conditions. For get_log_histogram, translate the filter without an aggregation pipe and pass its full_sql (ClickHouse) or generated_query (VictoriaLogs); the full_sql of an aggregated query is not a histogram query."),
 		mcp.WithInputSchema[TranslateLogchefQLParams](),
 		mcp.WithOutputSchema[TranslateResult](),
 		mcp.WithTitleAnnotation("Translate LogchefQL to SQL"),
@@ -201,7 +203,7 @@ func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 	s.AddTool(translateTool, mcp.NewStructuredToolHandler(t.handleTranslateLogchefQL))
 
 	validateTool := mcp.NewTool("validate_logchefql",
-		mcp.WithDescription("Validate a LogchefQL expression for syntax errors without executing it. Returns whether the expression is valid and any error details. Use this before executing queries to catch syntax issues early."),
+		mcp.WithDescription("Validate a LogchefQL expression for syntax errors without executing it. Returns whether the expression is valid and any error details. Use this before executing queries to catch syntax issues early. It does not read the source's column types: translate_logchefql does, and its warnings name a query that translates but may not match, such as a JSON number read as text from a String column."),
 		mcp.WithInputSchema[ValidateLogchefQLParams](),
 		mcp.WithOutputSchema[ValidateResult](),
 		mcp.WithTitleAnnotation("Validate LogchefQL"),
