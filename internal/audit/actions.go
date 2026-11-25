@@ -32,6 +32,7 @@ const (
 
 	CollectionMemberAdd    Action = "collection_member.add"
 	CollectionMemberRemove Action = "collection_member.remove"
+	CollectionMemberUpdate Action = "collection_member.update"
 
 	CollectionTeamAdd    Action = "collection_team.add"
 	CollectionTeamRemove Action = "collection_team.remove"
@@ -138,7 +139,7 @@ var registrations = []struct {
 	{AuditEventExport, false},
 	{CollectionCreate, true}, {CollectionUpdate, true}, {CollectionDelete, true},
 	{CollectionItemAdd, true}, {CollectionItemUpdate, true}, {CollectionItemRemove, true},
-	{CollectionMemberAdd, true}, {CollectionMemberRemove, true},
+	{CollectionMemberAdd, true}, {CollectionMemberUpdate, true}, {CollectionMemberRemove, true},
 	{CollectionTeamAdd, true}, {CollectionTeamRemove, true},
 	{DashboardCreate, true}, {DashboardUpdate, true}, {DashboardDelete, true},
 	// A completion and a download change no object: their detail is the

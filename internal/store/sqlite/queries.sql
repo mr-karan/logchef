@@ -957,6 +957,9 @@ JOIN users u ON u.id = cm.user_id
 WHERE cm.collection_id IN (sqlc.slice(collection_ids)) AND cm.role IN ('owner', 'editor')
 ORDER BY cm.role DESC, u.email ASC;
 
+-- name: UpdateCollectionMemberRole :exec
+UPDATE collection_members SET role = ? WHERE collection_id = ? AND user_id = ?;
+
 -- name: RemoveCollectionMember :exec
 -- Remove a member from a collection
 DELETE FROM collection_members WHERE collection_id = ? AND user_id = ?;

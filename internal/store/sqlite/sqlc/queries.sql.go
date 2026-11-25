@@ -9157,6 +9157,21 @@ func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionPara
 	return err
 }
 
+const updateCollectionMemberRole = `-- name: UpdateCollectionMemberRole :exec
+UPDATE collection_members SET role = ? WHERE collection_id = ? AND user_id = ?
+`
+
+type UpdateCollectionMemberRoleParams struct {
+	Role         string `json:"role"`
+	CollectionID int64  `json:"collection_id"`
+	UserID       int64  `json:"user_id"`
+}
+
+func (q *Queries) UpdateCollectionMemberRole(ctx context.Context, arg UpdateCollectionMemberRoleParams) error {
+	_, err := q.exec(ctx, q.updateCollectionMemberRoleStmt, updateCollectionMemberRole, arg.Role, arg.CollectionID, arg.UserID)
+	return err
+}
+
 const updateDashboard = `-- name: UpdateDashboard :one
 UPDATE dashboards
 SET name = ?,

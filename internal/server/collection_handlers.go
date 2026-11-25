@@ -28,9 +28,11 @@ func mapCollectionError(c fiber.Ctx, err error) (handled bool, sendErr error) {
 		return true, SendErrorWithType(c, fiber.StatusBadRequest, "Role must be 'owner', 'editor', or 'member'", models.ValidationErrorType)
 	case errors.Is(err, core.ErrCollectionTeamNotMember):
 		return true, SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+	case errors.Is(err, core.ErrCollectionMemberNotFound):
+		return true, SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
 	case errors.Is(err, core.ErrTeamNotFound):
 		return true, SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
-	case errors.Is(err, core.ErrLastOwnerRemoval):
+	case errors.Is(err, core.ErrLastOwnerRemoval), errors.Is(err, core.ErrLastOwnerDemotion):
 		return true, SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ValidationErrorType)
 	case errors.Is(err, core.ErrQueryNotFound):
 		return true, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
@@ -187,6 +189,39 @@ func (s *Server) handleAddCollectionMember(c fiber.Ctx) error {
 		auditSet(c, audit.CollectionMemberTarget(id, req.UserID), nil, audit.CollectionMemberFields(added))
 	}
 	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Member added"})
+}
+
+// handleUpdateCollectionMember changes a direct member's role.
+func (s *Server) handleUpdateCollectionMember(c fiber.Ctx) error {
+	user := currentUser(c)
+	id, err := parseCollectionID(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	userIDNum, err := strconv.Atoi(c.Params("userID"))
+	if err != nil || userIDNum <= 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user id", models.ValidationErrorType)
+	}
+	var req struct {
+		Role models.CollectionRole `json:"role"`
+	}
+	if err := c.Bind().Body(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+	target := models.UserID(userIDNum)
+	before, after, err := core.UpdateCollectionMemberRole(c.Context(), s.store, s.log, id, user.ID, target, req.Role)
+	if err != nil {
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
+		}
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	if before.Role == after.Role {
+		auditNoChange(c)
+	} else {
+		auditSet(c, audit.CollectionMemberTarget(id, target), audit.CollectionMemberFields(before), audit.CollectionMemberFields(after))
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Member role updated"})
 }
 
 // handleRemoveCollectionMember drops a member.

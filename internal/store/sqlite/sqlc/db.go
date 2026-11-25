@@ -822,6 +822,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateCollectionStmt, err = db.PrepareContext(ctx, updateCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateCollection: %w", err)
 	}
+	if q.updateCollectionMemberRoleStmt, err = db.PrepareContext(ctx, updateCollectionMemberRole); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateCollectionMemberRole: %w", err)
+	}
 	if q.updateDashboardStmt, err = db.PrepareContext(ctx, updateDashboard); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateDashboard: %w", err)
 	}
@@ -2211,6 +2214,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateCollectionStmt: %w", cerr)
 		}
 	}
+	if q.updateCollectionMemberRoleStmt != nil {
+		if cerr := q.updateCollectionMemberRoleStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateCollectionMemberRoleStmt: %w", cerr)
+		}
+	}
 	if q.updateDashboardStmt != nil {
 		if cerr := q.updateDashboardStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateDashboardStmt: %w", cerr)
@@ -2606,6 +2614,7 @@ type Queries struct {
 	updateAlertHistoryPayloadStmt            *sql.Stmt
 	updateAlertSilenceStmt                   *sql.Stmt
 	updateCollectionStmt                     *sql.Stmt
+	updateCollectionMemberRoleStmt           *sql.Stmt
 	updateDashboardStmt                      *sql.Stmt
 	updateExportJobRunningStmt               *sql.Stmt
 	updateNotificationDestinationStmt        *sql.Stmt
@@ -2896,6 +2905,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateAlertHistoryPayloadStmt:            q.updateAlertHistoryPayloadStmt,
 		updateAlertSilenceStmt:                   q.updateAlertSilenceStmt,
 		updateCollectionStmt:                     q.updateCollectionStmt,
+		updateCollectionMemberRoleStmt:           q.updateCollectionMemberRoleStmt,
 		updateDashboardStmt:                      q.updateDashboardStmt,
 		updateExportJobRunningStmt:               q.updateExportJobRunningStmt,
 		updateNotificationDestinationStmt:        q.updateNotificationDestinationStmt,

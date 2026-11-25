@@ -99,7 +99,7 @@ before the change records nothing, except a failed sign-in.
 | Audit log | `audit_event.export` | An admin downloads events. `detail` holds the filters and the row count |
 | Collection | `collection.create`, `collection.update`, `collection.delete` | A collection changes |
 | Collection item | `collection_item.add`, `collection_item.update`, `collection_item.remove` | A saved query is added to, converted in, or removed from a collection |
-| Collection member | `collection_member.add`, `collection_member.remove` | A user is given or loses access to a collection |
+| Collection member | `collection_member.add`, `collection_member.update`, `collection_member.remove` | A user is given access to a collection, has their role changed, or loses access |
 | Collection team | `collection_team.add`, `collection_team.remove` | A collection is shared with or unshared from a team |
 | Dashboard | `dashboard.create`, `dashboard.update`, `dashboard.delete` | A dashboard changes. A delete also removes the dashboard's scheduled reports, with no `report.delete` of their own: `detail.reports_removed` counts them |
 | Log export | `log_export.create`, `log_export.complete`, `log_export.download` | Logs are exported, streamed (`detail.mode` `stream`) or as a job (`job`), the export ends, and a job's file is downloaded. See [Exports](#exports). Creation fails closed |
