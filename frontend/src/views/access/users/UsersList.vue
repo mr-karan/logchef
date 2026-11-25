@@ -1,283 +1,498 @@
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
-import { onMounted, ref, computed } from 'vue'
-import { storeToRefs } from 'pinia'
-import { Button } from '@/components/ui/button'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { PageHeader, EmptyState, LoadingState, SearchInput, SortHeader, RowActionsMenu } from '@/components/layout'
-import { Plus, Shield, User2, Search, Pencil, Users } from 'lucide-vue-next'
-import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
-import { Input } from '@/components/ui/input'
+import { useI18n } from "vue-i18n";
+import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { storeToRefs } from "pinia";
+import { Plus, Search, Shield, User2, Users, X } from "lucide-vue-next";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/components/ui/table'
-import type { User } from '@/types'
-import { useUsersStore } from '@/stores/users'
-import { useTableSearchSort } from '@/composables/useTableSearchSort'
-import { formatDate } from '@/utils/format'
+  EmptyState,
+  LoadingState,
+  PageHeader,
+  RowActionsMenu,
+  SearchInput,
+  SortHeader,
+} from "@/components/layout";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog'
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
-import AddUser from './AddUser.vue'
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { teamsApi, type TeamMembershipSummary } from "@/api/teams";
+import { isSuccessResponse } from "@/api/types";
+import type { User } from "@/types";
+import { useAuthStore } from "@/stores/auth";
+import { useTeamsStore } from "@/stores/teams";
+import { useUsersStore } from "@/stores/users";
+import { useTableSearchSort } from "@/composables/useTableSearchSort";
+import { formatDate } from "@/utils/format";
+import AddUser from "./AddUser.vue";
+import UserDetailDrawer from "./UserDetailDrawer.vue";
 
-const usersStore = useUsersStore()
-const { t } = useI18n()
-const { isLoading } = storeToRefs(usersStore)
-const showDeleteDialog = ref(false)
-const userToDelete = ref<User | null>(null)
-const showEditDialog = ref(false)
-const userToEdit = ref<User | null>(null)
-const editForm = ref({
-    full_name: '',
-    role: '' as 'admin' | 'member'
-})
+const MAX_VISIBLE_TEAM_CHIPS = 2;
 
-const humanUsers = computed(() => usersStore.users.filter(user => user.account_type !== 'service'))
+const route = useRoute();
+const router = useRouter();
+const { t } = useI18n();
+const authStore = useAuthStore();
+const usersStore = useUsersStore();
+const teamsStore = useTeamsStore();
+const { isLoading } = storeToRefs(usersStore);
+
+const allMemberships = ref<TeamMembershipSummary[]>([]);
+const roleFilter = ref<"all" | "admin" | "member">("all");
+const teamFilter = ref<string>("all");
+const statusFilter = ref<"all" | "active" | "inactive">("all");
+
+const selectedUserId = ref<string | null>(null);
+const drawerOpen = ref(false);
+const showDeleteDialog = ref(false);
+const userToDelete = ref<User | null>(null);
+
+const humanUsers = computed(() =>
+  usersStore.users.filter((user) => user.account_type !== "service"),
+);
+
+const activeGlobalAdminCount = computed(
+  () =>
+    humanUsers.value.filter((user) => user.role === "admin" && user.status === "active").length,
+);
+
+const membershipsByUserId = computed(() => {
+  const map = new Map<string, TeamMembershipSummary[]>();
+  for (const membership of allMemberships.value) {
+    const key = String(membership.user_id);
+    const list = map.get(key) ?? [];
+    list.push(membership);
+    map.set(key, list);
+  }
+  return map;
+});
+
+function userMemberships(userId: string | number): TeamMembershipSummary[] {
+  return membershipsByUserId.value.get(String(userId)) ?? [];
+}
+
+function translateTeamRole(role: string): string {
+  switch (role) {
+    case "admin":
+      return t("access.roleAdmin");
+    case "editor":
+      return t("access.roleEditor");
+    case "member":
+      return t("access.roleMember");
+    default:
+      return role;
+  }
+}
+
+const sortedTeamsForFilter = computed(() =>
+  [...teamsStore.adminTeams].sort((a, b) => a.name.localeCompare(b.name)),
+);
+
+const dropdownFilteredUsers = computed(() =>
+  humanUsers.value.filter((user) => {
+    if (roleFilter.value !== "all" && user.role !== roleFilter.value) return false;
+    if (statusFilter.value !== "all" && user.status !== statusFilter.value) return false;
+    if (teamFilter.value !== "all") {
+      const memberships = userMemberships(user.id);
+      if (teamFilter.value === "__none__") {
+        if (memberships.length > 0) return false;
+      } else {
+        const wantedTeamId = Number(teamFilter.value);
+        if (!memberships.some((m) => m.team_id === wantedTeamId)) return false;
+      }
+    }
+    return true;
+  }),
+);
 
 const {
-    search: searchQuery,
-    rows: filteredUsers,
-    sortKey,
-    sortDir,
-    toggleSort,
-} = useTableSearchSort(humanUsers, {
-    searchKeys: ['full_name', 'email'],
-    sortAccessors: {
-        name: (u) => (u.full_name || '').toLowerCase(),
-        email: (u) => (u.email || '').toLowerCase(),
-        role: (u) => u.role,
-        status: (u) => u.status,
-        created: (u) => new Date(u.created_at),
-    },
-    initialSort: { key: 'name', dir: 'asc' },
-    persistKey: 'users',
-})
+  search: searchQuery,
+  rows: filteredUsers,
+  sortKey,
+  sortDir,
+  toggleSort,
+} = useTableSearchSort(dropdownFilteredUsers, {
+  searchKeys: [
+    "full_name",
+    "email",
+    (u) => userMemberships(u.id).map((m) => `${m.team_name} ${m.role}`).join(" "),
+  ],
+  sortAccessors: {
+    name: (u) => (u.full_name || u.email || "").toLowerCase(),
+    role: (u) => u.role,
+    status: (u) => u.status,
+    lastLogin: (u) => (u.last_login_at ? new Date(u.last_login_at) : new Date(0)),
+  },
+  initialSort: { key: "name", dir: "asc" },
+  persistKey: "users",
+});
 
-const loadUsers = async (forceReload = false) => {
-    await usersStore.loadUsers(forceReload);
+const hasActiveFilters = computed(
+  () =>
+    searchQuery.value.trim() !== "" ||
+    roleFilter.value !== "all" ||
+    teamFilter.value !== "all" ||
+    statusFilter.value !== "all",
+);
+
+function clearFilters() {
+  searchQuery.value = "";
+  roleFilter.value = "all";
+  teamFilter.value = "all";
+  statusFilter.value = "all";
 }
 
-const confirmDelete = async () => {
-    if (!userToDelete.value) return
-    await usersStore.deleteUser(userToDelete.value.id);
-    showDeleteDialog.value = false;
-    userToDelete.value = null;
+const selectedUser = computed(
+  () => humanUsers.value.find((u) => String(u.id) === String(selectedUserId.value)) ?? null,
+);
+
+const selectedUserMemberships = computed(() =>
+  selectedUser.value ? userMemberships(selectedUser.value.id) : [],
+);
+
+function openUserDrawer(user: User) {
+  selectedUserId.value = String(user.id);
+  drawerOpen.value = true;
 }
 
-const handleDelete = (user: User) => {
-    userToDelete.value = user
-    showDeleteDialog.value = true
-}
-
-const toggleUserStatus = async (user: User) => {
-    await usersStore.updateUser(user.id, {
-        status: user.status === 'active' ? 'inactive' : 'active',
-    });
-}
-
-const handleEdit = (user: User) => {
-    userToEdit.value = user
-    editForm.value = {
-        full_name: user.full_name,
-        role: user.role
+function handleDrawerOpenChange(isOpen: boolean) {
+  drawerOpen.value = isOpen;
+  if (!isOpen) {
+    selectedUserId.value = null;
+    if (route.query.user !== undefined) {
+      const nextQuery = { ...route.query };
+      delete nextQuery.user;
+      void router.replace({ query: nextQuery });
     }
-    showEditDialog.value = true
+  }
 }
 
-const confirmEdit = async () => {
-    if (!userToEdit.value) return
-
-    await usersStore.updateUser(userToEdit.value.id.toString(), {
-        full_name: editForm.value.full_name,
-        role: editForm.value.role
-    });
-    showEditDialog.value = false;
-    userToEdit.value = null;
+function handleUserDeleted() {
+  selectedUserId.value = null;
+  drawerOpen.value = false;
+  void loadMemberships();
 }
 
-onMounted(() => {
-    loadUsers();
+function canDeleteUser(user: User): boolean {
+  if (authStore.user && String(user.id) === String(authStore.user.id)) return false;
+  if (user.role === "admin" && user.status === "active" && activeGlobalAdminCount.value <= 1) {
+    return false;
+  }
+  return true;
+}
+
+function handleDelete(user: User) {
+  if (!canDeleteUser(user)) return;
+  userToDelete.value = user;
+  showDeleteDialog.value = true;
+}
+
+async function confirmDelete() {
+  if (!userToDelete.value) return;
+  const deletedId = String(userToDelete.value.id);
+  const result = await usersStore.deleteUser(deletedId);
+  showDeleteDialog.value = false;
+  userToDelete.value = null;
+  if (result.success) {
+    if (selectedUserId.value === deletedId) {
+      handleDrawerOpenChange(false);
+    }
+    await loadMemberships();
+  }
+}
+
+async function loadMemberships() {
+  try {
+    const response = await teamsApi.listAllMemberships();
+    if (isSuccessResponse(response) && Array.isArray(response.data)) {
+      allMemberships.value = response.data;
+    }
+  } catch (error) {
+    console.error("Failed to load team memberships:", error);
+  }
+}
+
+async function handleMembershipsChanged() {
+  await Promise.all([loadMemberships(), teamsStore.loadAdminTeams(true)]);
+}
+
+function syncUserFromQuery() {
+  const queryUser = route.query.user;
+  if (typeof queryUser !== "string" || !queryUser) return;
+  const match = humanUsers.value.find((u) => String(u.id) === queryUser);
+  if (match) {
+    openUserDrawer(match);
+  }
+}
+
+watch(
+  () => [route.query.user, humanUsers.value.length] as const,
+  () => {
+    syncUserFromQuery();
+  },
+);
+
+onMounted(async () => {
+  await Promise.all([
+    usersStore.loadUsers(true),
+    teamsStore.loadAdminTeams(true),
+    loadMemberships(),
+  ]);
+  syncUserFromQuery();
 });
 </script>
 
 <template>
-    <div class="space-y-6">
-        <PageHeader :title="t('routes.users')" :description="t('access.usersDescription')">
-            <template #actions>
-                <AddUser />
-            </template>
-        </PageHeader>
+  <div class="space-y-6">
+    <PageHeader :title="t('admin.navPeople')" :description="t('access.peopleDescription')">
+      <template #actions>
+        <AddUser />
+      </template>
+    </PageHeader>
 
-        <LoadingState v-if="isLoading" :label="t('access.loadingUsers')" />
+    <LoadingState v-if="isLoading && humanUsers.length === 0" :label="t('access.loadingUsers')" />
 
-        <EmptyState
-            v-else-if="humanUsers.length === 0"
-            :icon="Users"
-            :title="t('access.noUsersYet')"
-            :description="t('access.addFirstUser')"
+    <EmptyState
+      v-else-if="humanUsers.length === 0"
+      :icon="Users"
+      :title="t('access.noUsersYet')"
+      :description="t('access.addFirstUser')"
+    >
+      <template #action>
+        <AddUser>
+          <Button size="sm">
+            <Plus class="mr-2 h-4 w-4" />
+            {{ t("access.addUser") }}
+          </Button>
+        </AddUser>
+      </template>
+    </EmptyState>
+
+    <div v-else class="space-y-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <SearchInput v-model="searchQuery" :placeholder="t('access.searchPeople')" />
+
+        <Select v-model="roleFilter">
+          <SelectTrigger class="w-[140px]" :aria-label="t('access.filterRole')" data-testid="people-filter-role">
+            <span class="truncate">
+              <span class="text-muted-foreground">{{ t("access.filterRole") }}: </span>
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{{ t("access.filterAny") }}</SelectItem>
+            <SelectItem value="admin">{{ t("access.roleAdmin") }}</SelectItem>
+            <SelectItem value="member">{{ t("access.roleMember") }}</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select v-model="teamFilter">
+          <SelectTrigger class="w-[175px]" :aria-label="t('access.filterTeam')" data-testid="people-filter-team">
+            <span class="truncate">
+              <span class="text-muted-foreground">{{ t("access.filterTeam") }}: </span>
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{{ t("access.filterAny") }}</SelectItem>
+            <SelectItem value="__none__">{{ t("access.noTeams") }}</SelectItem>
+            <SelectItem
+              v-for="team in sortedTeamsForFilter"
+              :key="team.id"
+              :value="String(team.id)"
+            >
+              {{ team.name }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select v-model="statusFilter">
+          <SelectTrigger class="w-[150px]" :aria-label="t('access.filterStatus')" data-testid="people-filter-status">
+            <span class="truncate">
+              <span class="text-muted-foreground">{{ t("access.filterStatus") }}: </span>
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{{ t("access.filterAny") }}</SelectItem>
+            <SelectItem value="active">{{ t("access.statusActive") }}</SelectItem>
+            <SelectItem value="inactive">{{ t("access.statusInactive") }}</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button
+          v-if="hasActiveFilters"
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="h-9 text-muted-foreground"
+          @click="clearFilters"
         >
-            <template #action>
-                <AddUser>
-                    <Button size="sm">
-                        <Plus class="mr-2 h-4 w-4" />
-                        {{ t('access.addUser') }}
-                    </Button>
-                </AddUser>
-            </template>
-        </EmptyState>
+          <X class="mr-1 h-3.5 w-3.5" />
+          {{ t("access.clearFilters") }}
+        </Button>
+      </div>
 
-        <div v-else class="space-y-4">
-            <SearchInput v-model="searchQuery" :placeholder="t('access.searchUsers')" />
+      <EmptyState
+        v-if="filteredUsers.length === 0"
+        :icon="Search"
+        :title="t('access.noResults')"
+        :description="t('access.noPeopleMatchFilters')"
+        class="rounded-md border"
+      >
+        <template v-if="hasActiveFilters" #action>
+          <Button variant="outline" size="sm" @click="clearFilters">
+            {{ t("access.clearFilters") }}
+          </Button>
+        </template>
+      </EmptyState>
 
-            <EmptyState
-                v-if="filteredUsers.length === 0"
-                :icon="Search"
-                :title="t('access.noResults')"
-                :description="t('access.noUsersMatch', { query: searchQuery })"
-                class="rounded-md border"
-            />
-
-            <div v-else class="rounded-md border">
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>
-                                <SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
-                                    {{ t('ui.name') }}
-                                </SortHeader>
-                            </TableHead>
-                            <TableHead>
-                                <SortHeader column="email" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
-                                    {{ t('ui.email') }}
-                                </SortHeader>
-                            </TableHead>
-                            <TableHead>
-                                <SortHeader column="role" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
-                                    {{ t('ui.role') }}
-                                </SortHeader>
-                            </TableHead>
-                            <TableHead>
-                                <SortHeader column="status" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
-                                    {{ t('ui.status') }}
-                                </SortHeader>
-                            </TableHead>
-                            <TableHead>
-                                <SortHeader column="created" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
-                                    {{ t('access.createdAt') }}
-                                </SortHeader>
-                            </TableHead>
-                            <TableHead>{{ t('access.lastLogin') }}</TableHead>
-                            <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        <TableRow v-for="user in filteredUsers" :key="user.id">
-                            <TableCell>{{ user.full_name }}</TableCell>
-                            <TableCell>{{ user.email }}</TableCell>
-                            <TableCell>
-                                <Badge :variant="user.role === 'admin' ? 'destructive' : 'outline'"
-                                    class="capitalize inline-flex items-center gap-1 font-medium">
-                                    <Shield v-if="user.role === 'admin'" class="h-3 w-3" />
-                                    <User2 v-else class="h-3 w-3" />
-                                    {{ user.role === 'admin' ? t('access.roleAdmin') : t('access.roleMember') }}
-                                </Badge>
-                            </TableCell>
-                            <TableCell>
-                                <div class="flex items-center space-x-2">
-                                    <Switch :model-value="user.status === 'active'"
-                                        :aria-label="t(user.status === 'active' ? 'ui.deactivateUser' : 'ui.activateUser', { name: user.full_name || user.email })"
-                                        @update:model-value="toggleUserStatus(user)" />
-                                    <span>{{ user.status === 'active' ? t('access.statusActive') : t('access.statusInactive') }}</span>
-                                </div>
-                            </TableCell>
-                            <TableCell>{{ formatDate(user.created_at) }}</TableCell>
-                            <TableCell>{{ formatDate(user.last_login_at) }}</TableCell>
-                            <TableCell>
-                                <div class="flex items-center gap-1 justify-end">
-                                    <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('access.editUser')"
-                                        @click="handleEdit(user)">
-                                        <Pencil class="h-4 w-4" />
-                                    </Button>
-                                    <RowActionsMenu @delete="handleDelete(user)" />
-                                </div>
-                            </TableCell>
-                        </TableRow>
-                    </TableBody>
-                </Table>
-            </div>
-        </div>
-
-        <ConfirmDialog
-            :open="showDeleteDialog"
-            :title="t('access.deleteUserTitle')"
-            :description="userToDelete ? t('access.deleteUserConfirmation', { name: userToDelete.full_name }) : undefined"
-            :confirm-text="t('ui.delete')"
-            destructive
-            @update:open="(v) => { if (!v) { showDeleteDialog = false; userToDelete = null } }"
-            @confirm="confirmDelete"
-        />
-
-        <!-- Edit Dialog -->
-        <Dialog :open="showEditDialog" @update:open="showEditDialog = false">
-            <DialogContent class="sm:max-w-[425px]">
-                <DialogHeader>
-                    <DialogTitle>{{ t('access.editUser') }}</DialogTitle>
-                    <DialogDescription>
-                        {{ t('access.editUserDescription') }}
-                    </DialogDescription>
-                </DialogHeader>
-                <div class="grid gap-4 py-4">
-                    <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="name" class="text-right">{{ t('ui.name') }}</Label>
-                        <Input id="name" v-model="editForm.full_name" class="col-span-3" />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="email" class="text-right">{{ t('ui.email') }}</Label>
-                        <Input id="email" type="email" :model-value="userToEdit?.email" disabled class="col-span-3" />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="role" class="text-right">{{ t('ui.role') }}</Label>
-                        <div class="col-span-3 w-full">
-                            <Select v-model="editForm.role">
-                                <SelectTrigger class="w-full">
-                                    <SelectValue :placeholder="t('access.selectRole')" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
-                                    <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
+      <div v-else class="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>
+                <SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                  {{ t("ui.name") }}
+                </SortHeader>
+              </TableHead>
+              <TableHead>
+                <SortHeader column="role" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                  {{ t("access.globalRole") }}
+                </SortHeader>
+              </TableHead>
+              <TableHead>{{ t("routes.teams") }}</TableHead>
+              <TableHead>
+                <SortHeader column="status" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                  {{ t("ui.status") }}
+                </SortHeader>
+              </TableHead>
+              <TableHead>
+                <SortHeader column="lastLogin" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                  {{ t("access.lastLogin") }}
+                </SortHeader>
+              </TableHead>
+              <TableHead class="w-[52px] text-right">{{ t("ui.actions") }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow
+              v-for="user in filteredUsers"
+              :key="user.id"
+              class="cursor-pointer"
+              :class="{ 'bg-accent/50': drawerOpen && String(selectedUserId) === String(user.id) }"
+              :data-testid="`people-row-${user.id}`"
+              @click="openUserDrawer(user)"
+            >
+              <TableCell>
+                <div class="flex flex-col">
+                  <span class="font-medium">{{ user.full_name || user.email }}</span>
+                  <span class="text-xs text-muted-foreground">{{ user.email }}</span>
                 </div>
-                <DialogFooter>
-                    <Button variant="outline" @click="showEditDialog = false">
-                        {{ t('ui.cancel') }}
-                    </Button>
-                    <Button @click="confirmEdit">
-                        {{ t('ui.saveChanges2') }}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+              </TableCell>
+              <TableCell>
+                <Badge
+                  :variant="user.role === 'admin' ? 'destructive' : 'outline'"
+                  class="inline-flex items-center gap-1 font-medium"
+                >
+                  <Shield v-if="user.role === 'admin'" class="h-3 w-3" />
+                  <User2 v-else class="h-3 w-3" />
+                  {{ user.role === "admin" ? t("access.roleAdmin") : t("access.roleMember") }}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                <div
+                  v-if="userMemberships(user.id).length > 0"
+                  class="flex flex-wrap items-center gap-1"
+                >
+                  <Badge
+                    v-for="membership in userMemberships(user.id).slice(0, MAX_VISIBLE_TEAM_CHIPS)"
+                    :key="membership.team_id"
+                    variant="secondary"
+                    class="font-normal"
+                  >
+                    {{ membership.team_name }} · {{ translateTeamRole(membership.role).toLowerCase() }}
+                  </Badge>
+                  <Badge
+                    v-if="userMemberships(user.id).length > MAX_VISIBLE_TEAM_CHIPS"
+                    variant="secondary"
+                    class="font-normal"
+                    :title="
+                      userMemberships(user.id)
+                        .slice(MAX_VISIBLE_TEAM_CHIPS)
+                        .map((m) => `${m.team_name} · ${translateTeamRole(m.role).toLowerCase()}`)
+                        .join(', ')
+                    "
+                  >
+                    +{{ userMemberships(user.id).length - MAX_VISIBLE_TEAM_CHIPS }}
+                  </Badge>
+                </div>
+                <span v-else class="text-sm text-muted-foreground">
+                  {{ t("access.noTeams") }}
+                </span>
+              </TableCell>
+              <TableCell>
+                <span class="inline-flex items-center gap-2 text-sm">
+                  <span
+                    class="h-2 w-2 rounded-full"
+                    :class="user.status === 'active' ? 'bg-emerald-600' : 'bg-muted-foreground/50'"
+                  />
+                  {{ user.status === "active" ? t("access.statusActive") : t("access.statusInactive") }}
+                </span>
+              </TableCell>
+              <TableCell class="text-sm text-muted-foreground">
+                {{ formatDate(user.last_login_at) }}
+              </TableCell>
+              <TableCell class="text-right">
+                <RowActionsMenu
+                  v-if="canDeleteUser(user)"
+                  @delete="handleDelete(user)"
+                />
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
     </div>
+
+    <UserDetailDrawer
+      :open="drawerOpen"
+      :user="selectedUser"
+      :memberships="selectedUserMemberships"
+      :all-memberships="allMemberships"
+      :all-teams="teamsStore.adminTeams"
+      :active-global-admin-count="activeGlobalAdminCount"
+      @update:open="handleDrawerOpenChange"
+      @memberships-changed="handleMembershipsChanged"
+      @user-deleted="handleUserDeleted"
+    />
+
+    <ConfirmDialog
+      :open="showDeleteDialog"
+      :title="t('access.deleteUserTitle')"
+      :description="
+        userToDelete
+          ? t('access.deleteUserConfirmation', { name: userToDelete.full_name || userToDelete.email })
+          : undefined
+      "
+      :confirm-text="t('ui.delete')"
+      destructive
+      @update:open="(v) => { if (!v) { showDeleteDialog = false; userToDelete = null } }"
+      @confirm="confirmDelete"
+    />
+  </div>
 </template>
