@@ -259,7 +259,7 @@ func TestAuthzTokenWithoutLogsReadDeniedOnEveryLogRoute(t *testing.T) {
 	for _, route := range logReadRoutes {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			resp := doAuthzRequest(t, s, route.method, base+route.path, `{}`, withBearer(token))
-			if resp.status != fiber.StatusForbidden || resp.message != "API token does not have the required scope" {
+			if resp.status != fiber.StatusForbidden || resp.message != "API token does not have the required scope logs:read" {
 				t.Fatalf("status %d message %q, want 403 for the missing scope", resp.status, resp.message)
 			}
 		})
@@ -294,7 +294,7 @@ func TestAuthzHTTPErrorPrecedence(t *testing.T) {
 		{"session member", validate(w.team), withSession(sessionCookie(t, s.store, w.member)), fiber.StatusOK, ""},
 		{"non-member without scope", validate(w.team), outsiderNoLogs, fiber.StatusForbidden, "Team membership required"},
 		{"unlinked team without scope", validate(w.bareTeam), noLogs, fiber.StatusForbidden, "Team does not have access to this source"},
-		{"linked team without scope", validate(w.team), noLogs, fiber.StatusForbidden, "API token does not have the required scope"},
+		{"linked team without scope", validate(w.team), noLogs, fiber.StatusForbidden, "API token does not have the required scope logs:read"},
 		{"invalid source id", fmt.Sprintf("/api/v1/teams/%d/sources/x/logchefql/validate", w.team), noLogs, fiber.StatusBadRequest, ""},
 		{"no credentials", validate(w.team), func(*http.Request) {}, fiber.StatusUnauthorized, ""},
 	} {

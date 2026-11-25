@@ -191,3 +191,31 @@ func TestAlertBacktestEvaluationErrors(t *testing.T) {
 		t.Fatalf("first_error = %q", got.result.FirstError)
 	}
 }
+
+// TestAlertValidationNeedsOnlyAlertsRead: test and backtest write nothing and
+// send nothing, so a token with alerts:read runs them and a token without an
+// alerts scope gets 403 naming alerts:read.
+func TestAlertValidationNeedsOnlyAlertsRead(t *testing.T) {
+	upstream := &backtestUpstream{burst: time.Now().Add(-30 * time.Minute)}
+	env := newErrorResponseServer(t, upstream.ServeHTTP)
+	user, err := env.s.store.GetUserByEmail(t.Context(), "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := apiToken(t, env.s, user, models.TokenScopeAlertsRead)
+	logsOnly := apiToken(t, env.s, user, models.TokenScopeLogsRead)
+	rule := fmt.Sprintf(`"source_id":%d,"query_language":"logsql","editor_mode":"native","query":"* | stats count() as value","threshold_operator":"gt","threshold_value":10,"lookback_seconds":60`, env.vlSource)
+
+	for _, route := range []struct{ path, body string }{
+		{"/api/v1/alerts/test", "{" + rule + "}"},
+		{"/api/v1/alerts/backtest", "{" + rule + `,"frequency_seconds":60,"range_seconds":3600}`},
+	} {
+		if got := doAuthzRequest(t, env.s, http.MethodPost, route.path, route.body, withBearer(reader)); got.status != http.StatusOK {
+			t.Errorf("%s with alerts:read: status %d message %q, want 200", route.path, got.status, got.message)
+		}
+		got := doAuthzRequest(t, env.s, http.MethodPost, route.path, route.body, withBearer(logsOnly))
+		if got.status != http.StatusForbidden || got.message != "API token does not have the required scope alerts:read" {
+			t.Errorf("%s without alerts:read: status %d message %q, want 403 naming alerts:read", route.path, got.status, got.message)
+		}
+	}
+}

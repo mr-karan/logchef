@@ -76,11 +76,12 @@ func ListAlertsBySourceForPrincipal(ctx context.Context, db store.StoreOps, p ac
 	return ListAlertsBySource(ctx, db, sourceID)
 }
 
-// TestAlertQueryForPrincipal runs an alert test query. The principal needs
-// alerts:write and must see the source through a team; global admins get no
-// bypass. It returns ErrSourceAccessDenied when the source is not visible.
+// TestAlertQueryForPrincipal runs an alert test query. It writes no state and
+// sends nothing, so the principal needs alerts:read, and must see the source
+// through a team; global admins get no bypass. It returns
+// ErrSourceAccessDenied when the source is not visible.
 func TestAlertQueryForPrincipal(ctx context.Context, db store.StoreOps, ds *datasource.Service, p access.Principal, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
-	if err := p.Require(models.TokenScopeAlertsWrite); err != nil {
+	if err := p.Require(models.TokenScopeAlertsRead); err != nil {
 		return nil, err
 	}
 	if err := requireSourceVisible(ctx, db, p, sourceID); err != nil {
@@ -90,10 +91,10 @@ func TestAlertQueryForPrincipal(ctx context.Context, db store.StoreOps, ds *data
 }
 
 // BacktestAlertForPrincipal replays an unsaved rule over a past range. It
-// authorizes like TestAlertQueryForPrincipal: alerts:write and the source
+// authorizes like TestAlertQueryForPrincipal: alerts:read and the source
 // visible through a team, with no bypass for global admins.
 func BacktestAlertForPrincipal(ctx context.Context, db store.StoreOps, ds *datasource.Service, p access.Principal, sourceID models.SourceID, req *models.BacktestAlertRequest) (*models.BacktestResult, error) {
-	if err := p.Require(models.TokenScopeAlertsWrite); err != nil {
+	if err := p.Require(models.TokenScopeAlertsRead); err != nil {
 		return nil, err
 	}
 	if err := requireSourceVisible(ctx, db, p, sourceID); err != nil {

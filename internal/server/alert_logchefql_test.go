@@ -193,3 +193,30 @@ func TestLogchefQLAlertBacktest(t *testing.T) {
 		}
 	}
 }
+
+// A LogchefQL condition may leave out condition_json: the server takes the
+// filter in front of the aggregation pipe, on create, test and backtest. A
+// rule with no filter still needs one.
+func TestLogchefQLConditionDerivesConditionJSON(t *testing.T) {
+	upstream := &statsUpstream{}
+	e, sourceID := newConditionRouteEnv(t, upstream)
+	noConditionJSON := map[string]any{"condition_json": nil, "query": `level="error" and service="api" | count() by service`}
+
+	resp := e.do(http.MethodPost, "/api/v1/alerts", conditionBody(t, sourceID, noConditionJSON), e.cookie)
+	wantStatus(t, resp, http.StatusCreated)
+	var alert models.Alert
+	created(t, resp, &alert)
+	if want := `level="error" and service="api"`; alert.ConditionJSON != want {
+		t.Fatalf("condition_json = %q, want %q", alert.ConditionJSON, want)
+	}
+
+	wantStatus(t, e.do(http.MethodPost, "/api/v1/alerts/test", conditionBody(t, sourceID, noConditionJSON), e.cookie), http.StatusOK)
+	backtest := maps.Clone(noConditionJSON)
+	backtest["range_seconds"] = 3600
+	wantStatus(t, e.do(http.MethodPost, "/api/v1/alerts/backtest", conditionBody(t, sourceID, backtest), e.cookie), http.StatusOK)
+
+	resp = e.do(http.MethodPost, "/api/v1/alerts/test", conditionBody(t, sourceID, map[string]any{"condition_json": nil, "query": `| count()`}), e.cookie)
+	if resp.status != http.StatusBadRequest || !strings.Contains(string(resp.body), "no filter in front of its aggregation") {
+		t.Fatalf("rule without a filter: status %d %s, want 400", resp.status, resp.body)
+	}
+}

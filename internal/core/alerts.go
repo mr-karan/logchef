@@ -13,6 +13,7 @@ import (
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/jobs"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/template"
@@ -118,11 +119,18 @@ func validateAlertModel(ctx context.Context, db store.StoreOps, ds *datasource.S
 			return fmt.Errorf("query is required for native alerts")
 		}
 	case models.AlertEditorModeCondition:
-		if alert.ConditionJSON == "" {
-			return fmt.Errorf("condition_json is required for condition alerts")
-		}
 		if alert.Query == "" {
 			return fmt.Errorf("query is required for condition alerts")
+		}
+		if alert.ConditionJSON == "" && alert.QueryLanguage == models.QueryLanguageLogchefQL {
+			filter, perr := logchefql.WithoutAggregation(alert.Query)
+			if perr != nil {
+				return perr
+			}
+			alert.ConditionJSON = filter
+		}
+		if alert.ConditionJSON == "" {
+			return fmt.Errorf("condition_json is required for condition alerts whose query has no filter in front of its aggregation")
 		}
 	}
 	if _, ok := validOperators[alert.ThresholdOperator]; !ok {

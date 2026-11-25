@@ -58,6 +58,23 @@ type NotificationDestination struct {
 	UpdatedAt  time.Time         `json:"updated_at"`
 }
 
+// DestinationSummary names a destination without its config or secret hint:
+// no recipient address, user ID or receiver host. It is what an OAuth client
+// sees, enough to pick a destination for a rule.
+type DestinationSummary struct {
+	ID       DestinationID    `json:"id"`
+	Name     string           `json:"name"`
+	Type     DestinationType  `json:"type"`
+	Scope    DestinationScope `json:"scope"`
+	TeamID   *TeamID          `json:"team_id,omitempty"`
+	IsActive bool             `json:"is_active"`
+}
+
+// Summary returns the destination without its config or secret hint.
+func (d *NotificationDestination) Summary() DestinationSummary {
+	return DestinationSummary{ID: d.ID, Name: d.Name, Type: d.Type, Scope: d.Scope, TeamID: d.TeamID, IsActive: d.IsActive}
+}
+
 // DestinationRequest creates or updates a destination. On update a blank
 // Secret keeps the stored one.
 type DestinationRequest struct {

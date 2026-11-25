@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/notify"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -242,6 +243,32 @@ func ListDestinationsForUser(ctx context.Context, db store.StoreOps, user *model
 		return db.ListNotificationDestinations(ctx)
 	}
 	return db.ListUsableNotificationDestinations(ctx, user.ID)
+}
+
+// ListDestinationSummariesForPrincipal lists the destinations the principal
+// may use in a rule, without config or secret hints. Only a global admin's
+// session or token lists every destination; an OAuth principal never does.
+func ListDestinationSummariesForPrincipal(ctx context.Context, db store.StoreOps, p access.Principal) ([]models.DestinationSummary, error) {
+	if err := p.Require(models.TokenScopeDestinationsRead); err != nil {
+		return nil, err
+	}
+	var (
+		list []*models.NotificationDestination
+		err  error
+	)
+	if p.RequireGlobalAdmin() == nil {
+		list, err = db.ListNotificationDestinations(ctx)
+	} else {
+		list, err = db.ListUsableNotificationDestinations(ctx, p.User.ID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]models.DestinationSummary, len(list))
+	for i, d := range list {
+		summaries[i] = d.Summary()
+	}
+	return summaries, nil
 }
 
 // CreateDestination creates a destination owned by the user.

@@ -8,6 +8,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -253,18 +254,45 @@ func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		p := principalFromLocals(c)
 		if err := p.Require(scope); err != nil {
-			return sendInsufficientScope(c, p.User)
+			return sendInsufficientScope(c, p.User, err)
 		}
 		return c.Next()
 	}
 }
 
-func sendInsufficientScope(c fiber.Ctx, user *models.User) error {
+// sendInsufficientScope answers 403 for a credential that lacks a scope. err
+// names the scope when it is an *access.InsufficientScopeError. An OAuth
+// grant keeps the scopes it was approved with, so a sign-in made before a
+// scope existed must sign in again; the message and the RFC 6750 challenge
+// say which scope to request.
+func sendInsufficientScope(c fiber.Ctx, user *models.User, err error) error {
 	metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
-	if c.Locals("auth_method") == "oauth" {
-		c.Set(fiber.HeaderWWWAuthenticate, `Bearer error="insufficient_scope"`)
+	var scope models.TokenScope
+	if scopeErr, ok := errors.AsType[*access.InsufficientScopeError](err); ok {
+		scope = scopeErr.Scope
 	}
-	return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
+	viaOAuth := c.Locals("auth_method") == "oauth"
+	if viaOAuth {
+		challenge := `Bearer error="insufficient_scope"`
+		if scope != "" {
+			challenge += fmt.Sprintf(`, scope=%q`, string(scope))
+		}
+		c.Set(fiber.HeaderWWWAuthenticate, challenge)
+	}
+	return SendErrorWithType(c, fiber.StatusForbidden, insufficientScopeMessage(viaOAuth, scope), models.AuthorizationErrorType)
+}
+
+func insufficientScopeMessage(viaOAuth bool, scope models.TokenScope) string {
+	switch {
+	case viaOAuth && scope != "":
+		return "This sign-in does not grant the " + string(scope) + " scope. Sign in again to grant it."
+	case viaOAuth:
+		return "This sign-in lacks a scope this request needs. Sign in again to grant it."
+	case scope != "":
+		return "API token does not have the required scope " + string(scope)
+	default:
+		return "API token does not have the required scope"
+	}
 }
 
 // requireSourceNotManaged rejects mutations on config-managed sources.
@@ -449,7 +477,7 @@ func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
 			s.log.Warn("Team does not have access to source", "team_id", teamID, "source_id", sourceID)
 			return SendError(c, fiber.StatusForbidden, "Team does not have access to this source")
 		case errors.Is(err, access.ErrInsufficientScope):
-			return sendInsufficientScope(c, p.User)
+			return sendInsufficientScope(c, p.User, err)
 		default:
 			s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
 			return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")

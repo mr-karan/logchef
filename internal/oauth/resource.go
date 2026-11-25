@@ -76,7 +76,7 @@ func (s *Server) MCPResourceMetadataURL() string {
 }
 
 // MCPChallengeScopes is the scope list /mcp advertises in its challenges:
-// the seven read scopes.
+// every read scope.
 func (s *Server) MCPChallengeScopes() string {
 	return strings.Join(scopeStrings(ReadScopes, false), " ")
 }

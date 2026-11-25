@@ -1227,6 +1227,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 		FieldsUsed: translateResult.FieldsUsed,
 		FilterOnly: translateResult.SQL,
 		Query:      translateResult.SQL,
+		Warnings:   translateResult.Warnings,
 	}
 	if translateResult.Aggregation != nil {
 		compiled.Aggregation = translateResult.Aggregation.Info()
