@@ -73,7 +73,7 @@ import {
 } from "@/components/ui/select";
 import { SearchableSelect, type SearchableItem } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
-import type { CollectionItem } from "@/api/collections";
+import type { CollectionItem, CollectionMember, CollectionRole } from "@/api/collections";
 import { canManageLink, canRemoveLink, linkKindForAdd, linkKindForMove, showsLinkToggle } from "@/utils/collectionLinks";
 
 // The selected collection is supplied by the Library shell so this pane can be
@@ -316,6 +316,34 @@ async function handleAddMember() {
     newMemberId.value = "";
     newMemberRole.value = "member";
   }
+}
+
+// The only owner cannot change their own role: the server rejects it, and the
+// collection would be left with nobody to manage it.
+const ownerCount = computed(() => members.value.filter((m) => m.role === "owner").length);
+function isSoleOwner(m: CollectionMember): boolean {
+  return m.role === "owner" && ownerCount.value <= 1;
+}
+
+// Demoting yourself from owner hides this pane's management controls, so it
+// asks first. Every other role change saves straight away.
+const pendingSelfDemotion = ref<CollectionRole | null>(null);
+
+async function handleRoleChange(m: CollectionMember, role: CollectionRole) {
+  if (role === m.role) return;
+  if (isCurrentUser(m.user_id) && m.role === "owner") {
+    pendingSelfDemotion.value = role;
+    return;
+  }
+  await store.updateMemberRole(collectionID.value, m.user_id, role);
+}
+
+async function confirmSelfDemotion() {
+  const role = pendingSelfDemotion.value;
+  const me = members.value.find((m) => isCurrentUser(m.user_id));
+  pendingSelfDemotion.value = null;
+  if (!role || !me) return;
+  await store.updateMemberRole(collectionID.value, me.user_id, role);
 }
 
 function handleRemoveMember(userId: number) {
@@ -675,12 +703,24 @@ async function handleDeleteCollection() {
               </p>
               <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
             </div>
-            <Badge
-              :variant="m.role === 'owner' ? 'secondary' : 'outline'"
-              class="w-16 shrink-0 justify-center capitalize"
+            <Select
+              :model-value="m.role"
+              :disabled="isSoleOwner(m)"
+              @update:model-value="(role) => handleRoleChange(m, role as CollectionRole)"
             >
-              {{ translateCollectionRole(m.role) }}
-            </Badge>
+              <SelectTrigger
+                class="h-8 w-28 shrink-0"
+                :aria-label="t('library.memberRoleFor', { name: m.full_name || m.email || m.user_id })"
+                :title="isSoleOwner(m) ? t('library.soleOwnerRoleLocked') : undefined"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="owner">{{ t('library.roleOwner') }}</SelectItem>
+                <SelectItem value="editor">{{ t('library.roleEditor') }}</SelectItem>
+                <SelectItem value="member">{{ t('library.roleMember') }}</SelectItem>
+              </SelectContent>
+            </Select>
             <div class="flex w-8 shrink-0 justify-center">
               <Button
                 v-if="isOwner && !isCurrentUser(m.user_id)"
@@ -901,6 +941,15 @@ async function handleDeleteCollection() {
       destructive
       @update:open="(v) => { if (!v) pendingMemberRemoval = null }"
       @confirm="confirmMemberRemoval"
+    />
+    <ConfirmDialog
+      :open="pendingSelfDemotion !== null"
+      :title="t('library.demoteSelfTitle')"
+      :description="t('library.demoteSelfDescription')"
+      :confirm-text="t('library.demoteSelfConfirm')"
+      destructive
+      @update:open="(v) => { if (!v) pendingSelfDemotion = null }"
+      @confirm="confirmSelfDemotion"
     />
     <ConfirmDialog
       :open="pendingTeamRemoval !== null"

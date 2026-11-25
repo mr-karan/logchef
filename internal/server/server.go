@@ -476,6 +476,7 @@ func (s *Server) setupRoutes() {
 	collections.Put("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollection).Name(string(audit.CollectionUpdate))
 	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleDeleteCollection).Name(string(audit.CollectionDelete))
 	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionMember).Name(string(audit.CollectionMemberAdd))
+	collections.Put("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollectionMember).Name(string(audit.CollectionMemberUpdate))
 	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionMember).Name(string(audit.CollectionMemberRemove))
 	collections.Post("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionTeam).Name(string(audit.CollectionTeamAdd))
 	collections.Delete("/:collectionID/teams/:teamID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionTeam).Name(string(audit.CollectionTeamRemove))

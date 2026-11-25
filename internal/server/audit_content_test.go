@@ -259,6 +259,8 @@ func TestAuditCollectionEventsRecordEachChangeOnce(t *testing.T) {
 		{http.MethodPut, base, `{"name":"Runbooks v2","description":"on call"}`, http.StatusOK},
 		{http.MethodPost, base + "/members", memberBody, http.StatusCreated},
 		{http.MethodPost, base + "/members", memberBody, http.StatusCreated}, // already a member: no event
+		{http.MethodPut, fmt.Sprintf("%s/members/%d", base, member.ID), `{"role":"member"}`, http.StatusOK},
+		{http.MethodPut, fmt.Sprintf("%s/members/%d", base, member.ID), `{"role":"member"}`, http.StatusOK}, // same role: no event
 		{http.MethodPost, base + "/teams", teamBody, http.StatusCreated},
 		{http.MethodPost, base + "/teams", teamBody, http.StatusCreated}, // already shared: no event
 		{http.MethodPost, base + "/items", itemBody, http.StatusCreated},
@@ -284,7 +286,7 @@ func TestAuditCollectionEventsRecordEachChangeOnce(t *testing.T) {
 		actions = append(actions, ev.Action)
 	}
 	want := []string{
-		"collection.create", "collection.update", "collection_member.add", "collection_team.add",
+		"collection.create", "collection.update", "collection_member.add", "collection_member.update", "collection_team.add",
 		"collection_item.add", "collection_item.update", "collection_item.remove",
 		"collection_team.remove", "collection_member.remove", "collection.delete",
 	}
@@ -298,14 +300,18 @@ func TestAuditCollectionEventsRecordEachChangeOnce(t *testing.T) {
 	if c := changesOf(t, events[2]); c["role"]["to"] != "editor" {
 		t.Errorf("member add = %v", c)
 	}
-	kind := wantChangeKeys(t, events[5], "kind")
+	role := wantChangeKeys(t, events[3], "role")
+	if role["role"]["from"] != "editor" || role["role"]["to"] != "member" {
+		t.Errorf("member role change = %v", role["role"])
+	}
+	kind := wantChangeKeys(t, events[6], "kind")
 	if kind["kind"]["from"] != "pin" || kind["kind"]["to"] != "managed" {
 		t.Errorf("kind change = %v", kind["kind"])
 	}
-	if c := changesOf(t, events[6]); c["kind"]["from"] != "managed" || c["kind"]["to"] != nil {
+	if c := changesOf(t, events[7]); c["kind"]["from"] != "managed" || c["kind"]["to"] != nil {
 		t.Errorf("item remove = %v", c)
 	}
-	if c := changesOf(t, events[9]); c["name"]["from"] != "Runbooks v2" {
+	if c := changesOf(t, events[10]); c["name"]["from"] != "Runbooks v2" {
 		t.Errorf("collection delete = %v", c)
 	}
 }

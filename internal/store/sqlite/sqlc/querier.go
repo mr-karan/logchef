@@ -553,6 +553,7 @@ type Querier interface {
 	UpdateAlertSilence(ctx context.Context, arg UpdateAlertSilenceParams) (AlertSilence, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
+	UpdateCollectionMemberRole(ctx context.Context, arg UpdateCollectionMemberRoleParams) error
 	// Compare-and-swap on the client revision; no row means missing or stale. The
 	// derived columns move with the blob in this one statement.
 	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)

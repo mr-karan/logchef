@@ -125,6 +125,8 @@ export const collectionsApi = {
     apiClient.get<CollectionMember[]>(`/collections/${id}/members`),
   addMember: (id: number, payload: AddCollectionMemberRequest) =>
     apiClient.post<{ message: string }>(`/collections/${id}/members`, payload),
+  updateMemberRole: (id: number, userId: number, role: CollectionRole) =>
+    apiClient.put<{ message: string }>(`/collections/${id}/members/${userId}`, { role }),
   removeMember: (id: number, userId: number) =>
     apiClient.delete<{ message: string }>(`/collections/${id}/members/${userId}`),
 

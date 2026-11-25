@@ -19,6 +19,7 @@ const server = {
   adminTeams: [] as TeamWithMemberCount[],
   teamMembers: {} as Record<number, TeamMember[]>,
   addTeamRequests: [] as number[],
+  roleUpdates: [] as { userId: number; role: string }[],
   removeTeamRequests: [] as number[],
 };
 
@@ -42,6 +43,11 @@ vi.mock("@/api/collections", () => ({
     listItems: () => ok([]),
     listMembers: () => ok([...server.members]),
     listTeams: () => ok([...server.teams]),
+    updateMemberRole: (_id: number, userId: number, role: CollectionMember["role"]) => {
+      server.roleUpdates.push({ userId, role });
+      server.members = server.members.map((m) => (m.user_id === userId ? { ...m, role } : m));
+      return ok({ message: "ok" });
+    },
     addTeam: (_id: number, payload: { team_id: number }) => {
       server.addTeamRequests.push(payload.team_id);
       if (!server.teams.some((t) => t.team_id === payload.team_id)) {
@@ -193,6 +199,7 @@ beforeEach(() => {
   server.adminTeams = [];
   server.teamMembers = {};
   server.addTeamRequests = [];
+  server.roleUpdates = [];
   server.removeTeamRequests = [];
   cachedUserTeams.value = [];
   cachedAdminTeams.value = [];
@@ -347,5 +354,57 @@ describe("CollectionDetailPane team sharing", () => {
     await render();
     await click("Share with team");
     expect(await openPickerOptions()).toEqual(["Project 14", "Created elsewhere"]);
+  });
+});
+
+describe("CollectionDetailPane member roles", () => {
+  const editorRow: CollectionMember = { collection_id: 1, user_id: 7, role: "editor", created_at: "", email: "editor@example.com" };
+  const meAsOwner: CollectionMember = { collection_id: 1, user_id: 10, role: "owner", created_at: "", email: "user@example.com" };
+
+  function roleSelect(name: string): HTMLButtonElement {
+    const trigger = document.body.querySelector<HTMLButtonElement>(`[aria-label="Role for ${name}"]`);
+    if (!trigger) throw new Error(`role select for ${name} not found`);
+    return trigger;
+  }
+
+  async function chooseRole(name: string, label: string) {
+    roleSelect(name).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[role=option]")).not.toBeNull());
+    const option = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((el) => el.textContent?.trim() === label);
+    if (!option) throw new Error(`no option ${label}`);
+    option.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flush();
+  }
+
+  it("lets the owner change a member's role in place", async () => {
+    mockUser.value = user("member");
+    server.members = [ownerRow, editorRow];
+
+    await render();
+    await chooseRole("editor@example.com", "Member");
+
+    expect(server.roleUpdates).toEqual([{ userId: 7, role: "member" }]);
+    expect(roleSelect("editor@example.com").textContent).toContain("Member");
+  });
+
+  it("locks the role of the only owner", async () => {
+    mockUser.value = user("member");
+    server.members = [ownerRow, editorRow];
+
+    await render();
+    expect(roleSelect("owner@example.com").disabled).toBe(true);
+    expect(roleSelect("editor@example.com").disabled).toBe(false);
+  });
+
+  it("asks before an owner demotes themselves", async () => {
+    mockUser.value = user("member");
+    server.members = [ownerRow, meAsOwner];
+
+    await render();
+    await chooseRole("user@example.com", "Editor");
+    expect(server.roleUpdates).toEqual([]);
+
+    await click("Change my role");
+    expect(server.roleUpdates).toEqual([{ userId: 10, role: "editor" }]);
   });
 });

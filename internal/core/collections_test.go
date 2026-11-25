@@ -932,3 +932,78 @@ BEGIN SELECT RAISE(ABORT, 'collection deletion rejected'); END;`)
 		})
 	}
 }
+
+func TestUpdateCollectionMemberRole(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "role-owner@example.com", "Owner")
+	member := newTestUser(t, db, "role-member@example.com", "Member")
+	stranger := newTestUser(t, db, "role-stranger@example.com", "Stranger")
+
+	coll, err := CreateCollection(ctx, db, log, "Roles", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if _, err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("AddCollectionMember: %v", err)
+	}
+
+	// The owner promotes a member to editor.
+	before, after, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleEditor)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if before.Role != models.CollectionRoleMember || after.Role != models.CollectionRoleEditor {
+		t.Errorf("promote before/after = %s/%s, want member/editor", before.Role, after.Role)
+	}
+
+	// Setting the same role again changes nothing.
+	before, after, err = UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleEditor)
+	if err != nil || before.Role != after.Role {
+		t.Errorf("same role = %v, before %s after %s", err, before.Role, after.Role)
+	}
+
+	// An editor cannot change roles.
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, member.ID, owner.ID, models.CollectionRoleMember); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("editor changing a role err = %v, want ErrCollectionForbidden", err)
+	}
+
+	// A user without a direct membership has no role to change.
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, stranger.ID, models.CollectionRoleEditor); !errors.Is(err, ErrCollectionMemberNotFound) {
+		t.Errorf("non-member err = %v, want ErrCollectionMemberNotFound", err)
+	}
+
+	// Unknown roles are rejected.
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRole("bogus")); !errors.Is(err, ErrInvalidCollectionRole) {
+		t.Errorf("bogus role err = %v, want ErrInvalidCollectionRole", err)
+	}
+
+	// The only owner cannot step down.
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, owner.ID, models.CollectionRoleEditor); !errors.Is(err, ErrLastOwnerDemotion) {
+		t.Errorf("last owner demotion err = %v, want ErrLastOwnerDemotion", err)
+	}
+
+	// With a second owner, the first may step down, and then loses the right
+	// to change roles.
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleOwner); err != nil {
+		t.Fatalf("promote to owner: %v", err)
+	}
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, owner.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("owner steps down: %v", err)
+	}
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleEditor); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("former owner changing a role err = %v, want ErrCollectionForbidden", err)
+	}
+
+	// Personal collections have no members to change.
+	personal, err := EnsurePersonalCollection(ctx, db, log, owner)
+	if err != nil {
+		t.Fatalf("EnsurePersonalCollection: %v", err)
+	}
+	if _, _, err := UpdateCollectionMemberRole(ctx, db, log, personal.ID, owner.ID, owner.ID, models.CollectionRoleEditor); !errors.Is(err, ErrPersonalCollectionImmutable) {
+		t.Errorf("personal collection err = %v, want ErrPersonalCollectionImmutable", err)
+	}
+}

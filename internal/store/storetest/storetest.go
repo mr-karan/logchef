@@ -35,6 +35,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("SettingsParsing", func(t *testing.T) { testSettingsParsing(t, ctx, s) })
 	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
+	t.Run("CollectionMemberRoles", func(t *testing.T) { testCollectionMemberRoles(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("CollectionLinks", func(t *testing.T) { testCollectionLinks(t, ctx, s) })
 	t.Run("SavedViews", func(t *testing.T) { testSavedViews(t, ctx, s) })
@@ -455,6 +456,25 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	}
 	if _, err := s.GetCollectionMember(ctx, pc.ID, stranger.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("GetCollectionMember(non-member) err = %v, want ErrNotFound", err)
+	}
+}
+
+// testCollectionMemberRoles covers changing a direct member's role in place.
+func testCollectionMemberRoles(t *testing.T, ctx context.Context, s store.Store) {
+	owner := mkUser(t, ctx, s, "roles-owner@test.dev")
+	member := mkUser(t, ctx, s, "roles-member@test.dev")
+	shared, err := s.CreateCollection(ctx, "Shared", "", false, owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection(shared): %v", err)
+	}
+	if err := s.AddCollectionMember(ctx, shared.ID, member.ID, models.CollectionRoleMember, &owner.ID); err != nil {
+		t.Fatalf("AddCollectionMember: %v", err)
+	}
+	if err := s.UpdateCollectionMemberRole(ctx, shared.ID, member.ID, models.CollectionRoleEditor); err != nil {
+		t.Fatalf("UpdateCollectionMemberRole: %v", err)
+	}
+	if got, err := s.GetCollectionMember(ctx, shared.ID, member.ID); err != nil || got.Role != models.CollectionRoleEditor {
+		t.Errorf("member after role update = %+v / %v, want editor", got, err)
 	}
 }
 
