@@ -471,6 +471,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllSavedQueriesStmt, err = db.PrepareContext(ctx, listAllSavedQueries); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllSavedQueries: %w", err)
 	}
+	if q.listAllTeamMembershipsStmt, err = db.PrepareContext(ctx, listAllTeamMemberships); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllTeamMemberships: %w", err)
+	}
 	if q.listAuditEventsAscStmt, err = db.PrepareContext(ctx, listAuditEventsAsc); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAuditEventsAsc: %w", err)
 	}
@@ -1629,6 +1632,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllSavedQueriesStmt: %w", cerr)
 		}
 	}
+	if q.listAllTeamMembershipsStmt != nil {
+		if cerr := q.listAllTeamMembershipsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllTeamMembershipsStmt: %w", cerr)
+		}
+	}
 	if q.listAuditEventsAscStmt != nil {
 		if cerr := q.listAuditEventsAscStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAuditEventsAscStmt: %w", cerr)
@@ -2497,6 +2505,7 @@ type Queries struct {
 	listAlertsBySourceStmt                   *sql.Stmt
 	listAlertsForUserStmt                    *sql.Stmt
 	listAllSavedQueriesStmt                  *sql.Stmt
+	listAllTeamMembershipsStmt               *sql.Stmt
 	listAuditEventsAscStmt                   *sql.Stmt
 	listAuditEventsDescStmt                  *sql.Stmt
 	listCollectionEditorsStmt                *sql.Stmt
@@ -2788,6 +2797,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAlertsBySourceStmt:                   q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:                    q.listAlertsForUserStmt,
 		listAllSavedQueriesStmt:                  q.listAllSavedQueriesStmt,
+		listAllTeamMembershipsStmt:               q.listAllTeamMembershipsStmt,
 		listAuditEventsAscStmt:                   q.listAuditEventsAscStmt,
 		listAuditEventsDescStmt:                  q.listAuditEventsDescStmt,
 		listCollectionEditorsStmt:                q.listCollectionEditorsStmt,

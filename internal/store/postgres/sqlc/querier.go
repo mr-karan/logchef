@@ -317,6 +317,8 @@ type Querier interface {
 	// List every saved query without a source-access gate. This is only for the
 	// global-admin browse surface; callers must authorize before invoking it.
 	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
+	// List every team membership with its team, for admin views of all users
+	ListAllTeamMemberships(ctx context.Context) ([]ListAllTeamMembershipsRow, error)
 	// Oldest first, with the same filters as ListAuditEventsDesc.
 	ListAuditEventsAsc(ctx context.Context, arg ListAuditEventsAscParams) ([]AuditEvent, error)
 	// Newest first. An empty text argument or a NULL argument disables its
