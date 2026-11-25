@@ -1389,5 +1389,7 @@
   "alerts.backtestGroupEpisodes": "Episoden",
   "alerts.backtestGroupBreaching": "Auswertungen über dem Schwellenwert",
   "alerts.backtestGroupMax": "Höchstwert",
-  "alerts.backtestGroupsOmitted": "{count} weitere Gruppe nicht angezeigt | {count} weitere Gruppen nicht angezeigt"
+  "alerts.backtestGroupsOmitted": "{count} weitere Gruppe nicht angezeigt | {count} weitere Gruppen nicht angezeigt",
+  "ui.admin": "Admin",
+  "routes.adminOverview": "Admin-Übersicht"
 }

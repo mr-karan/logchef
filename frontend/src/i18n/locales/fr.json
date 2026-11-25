@@ -1389,5 +1389,7 @@
   "alerts.backtestGroupEpisodes": "Épisodes",
   "alerts.backtestGroupBreaching": "Évaluations au-delà du seuil",
   "alerts.backtestGroupMax": "Valeur maximale",
-  "alerts.backtestGroupsOmitted": "{count} autre groupe non affiché | {count} autres groupes non affichés"
+  "alerts.backtestGroupsOmitted": "{count} autre groupe non affiché | {count} autres groupes non affichés",
+  "ui.admin": "Administration",
+  "routes.adminOverview": "Vue d’ensemble de l’administration"
 }

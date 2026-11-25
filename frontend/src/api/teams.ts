@@ -9,6 +9,7 @@ export interface Team {
   created_at: string;
   updated_at: string;
   member_count?: number;
+  managed?: boolean;
 }
 
 export type TeamSummary = Pick<Team, "id" | "name"> & Partial<Pick<Team, "description">>;
@@ -21,6 +22,27 @@ export interface UserTeamMembership {
   updated_at: string;
   member_count: number;
   role: "admin" | "member" | "editor";
+}
+
+export interface AdminUserTeam {
+  id: number;
+  name: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+  role: "admin" | "member" | "editor";
+  managed: boolean;
+}
+
+export interface TeamMembershipSummary {
+  team_id: number;
+  team_name: string;
+  team_managed: boolean;
+  user_id: number;
+  role: "admin" | "member" | "editor";
+  account_type?: "human" | "service";
+  created_at: string;
 }
 
 export interface TeamMember {
@@ -60,6 +82,10 @@ export interface TeamWithMemberCount extends Team {
 export const teamsApi = {
   listUserTeams: (options?: RequestOptions) => apiClient.get<UserTeamMembership[]>("/me/teams", options),
   listAllTeams: (options?: RequestOptions) => apiClient.get<TeamWithMemberCount[]>("/admin/teams", options),
+  listAllMemberships: (options?: RequestOptions) =>
+    apiClient.get<TeamMembershipSummary[]>("/admin/team-memberships", options),
+  listUserTeamsByAdmin: (userId: string | number, options?: RequestOptions) =>
+    apiClient.get<AdminUserTeam[]>(`/admin/users/${userId}/teams`, options),
   getTeam: (id: number, options?: RequestOptions) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`, options),
   createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>

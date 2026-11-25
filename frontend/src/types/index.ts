@@ -5,6 +5,7 @@ export interface User {
   role: "admin" | "member";
   status: "active" | "inactive";
   account_type: "human" | "service";
+  managed?: boolean;
   avatar?: string;
   last_login_at?: string;
   last_active_at?: string;

@@ -1389,5 +1389,7 @@
   "alerts.backtestGroupEpisodes": "에피소드",
   "alerts.backtestGroupBreaching": "임계값을 넘은 평가",
   "alerts.backtestGroupMax": "최댓값",
-  "alerts.backtestGroupsOmitted": "표시되지 않은 그룹 {count}개"
+  "alerts.backtestGroupsOmitted": "표시되지 않은 그룹 {count}개",
+  "ui.admin": "관리",
+  "routes.adminOverview": "관리 개요"
 }
