@@ -6,6 +6,7 @@ pub mod auth;
 pub mod collections;
 pub mod completions;
 pub mod config;
+pub mod dashboards;
 pub mod destinations;
 pub mod doctor;
 pub mod explain;

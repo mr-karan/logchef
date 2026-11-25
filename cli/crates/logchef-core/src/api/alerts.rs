@@ -20,7 +20,7 @@ pub struct Data<T> {
 }
 
 impl<T: DeserializeOwned> Data<T> {
-    fn parse(raw: serde_json::Value) -> Result<Self> {
+    pub(super) fn parse(raw: serde_json::Value) -> Result<Self> {
         let parsed = serde_json::from_value(raw.clone())
             .map_err(|e| Error::other(format!("Failed to parse response: {e} (data: {raw})")))?;
         Ok(Self { raw, parsed })

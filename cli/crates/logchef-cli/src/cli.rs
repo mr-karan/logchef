@@ -3,9 +3,9 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    advisor, agent, alerts, audit, auth, collections, completions, config, destinations, doctor,
-    explain, fields, find, histogram, history, open, query, reports, saved_queries, schema,
-    silences, skills, sources, sql, tail, teams, views, whoami,
+    advisor, agent, alerts, audit, auth, collections, completions, config, dashboards,
+    destinations, doctor, explain, fields, find, histogram, history, open, query, reports,
+    saved_queries, schema, silences, skills, sources, sql, tail, teams, views, whoami,
 };
 
 const LONG_ABOUT: &str = "\
@@ -131,6 +131,9 @@ enum Commands {
     #[command(about = "List the alert silences of a source")]
     Silences(silences::SilencesArgs),
 
+    #[command(about = "List the dashboards you can see")]
+    Dashboards(dashboards::DashboardsArgs),
+
     #[command(about = "List notification destinations")]
     Destinations(destinations::DestinationsArgs),
 
@@ -225,6 +228,7 @@ impl Cli {
             Some(Commands::Reports(args)) => reports::run(args, global).await,
             Some(Commands::Alerts(args)) => alerts::run(args, global).await,
             Some(Commands::Silences(args)) => silences::run(args, global).await,
+            Some(Commands::Dashboards(args)) => dashboards::run(args, global).await,
             Some(Commands::Destinations(args)) => destinations::run(args, global).await,
             Some(Commands::Find(args)) => find::run(args, global).await,
             Some(Commands::Tail(args)) => tail::run(args, global).await,

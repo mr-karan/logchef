@@ -3,8 +3,11 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -94,5 +97,61 @@ func TestOAuthListsDestinationSummaries(t *testing.T) {
 	resp = e.apiGet("/api/v1/notification-destinations", e.cliSignIn("alerts:read"))
 	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("WWW-Authenticate") != `Bearer error="insufficient_scope", scope="destinations:read"` {
 		t.Fatalf("without destinations:read: status %d challenge %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
+}
+
+// An OAuth client with dashboards:read lists and reads the dashboards its
+// user sees as a member. An admin's OAuth token gets no admin bypass: it sees
+// the dashboards it created, not other teams' ones, which the admin's
+// session still lists.
+func TestOAuthDashboardsWithoutAdminBypass(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnvWithConfig(t, testOAuthConfig(), models.UserRoleAdmin)
+	other := mkTestUser(t, e.db, "other@example.com", models.UserRoleMember)
+	team, src := mkTestTeam(t, e.db, "teamb", other)
+	create := func(owner *models.User, name string) *models.Dashboard {
+		panels := fmt.Sprintf(`{"version":2,"tabs":[{"id":"main","title":"Main","layout":[{"id":"p","x":0,"y":0,"w":6,"h":2}]}],"panels":[{"id":"p","kind":"query","title":"Errors","team_id":%d,"source_id":%d,"query":{"mode":"count","language":"logchefql","text":"level=\"error\""},"viz":{"type":"stat"}}]}`, team.ID, src.ID)
+		d, err := core.CreateDashboard(t.Context(), e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), owner, &models.CreateDashboardRequest{Name: name, Panels: json.RawMessage(panels)})
+		if err != nil {
+			t.Fatalf("CreateDashboard(%s): %v", name, err)
+		}
+		return d
+	}
+	create(e.user, "admin's own")
+	theirs := create(other, "team b's")
+
+	list := func(req *http.Request) []string {
+		t.Helper()
+		req.Header.Set(models.DashboardSchemaHeader, "2")
+		resp := e.do(req)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list dashboards: status %d", resp.StatusCode)
+		}
+		var body struct {
+			Data []models.DashboardSummary `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, len(body.Data))
+		for i, s := range body.Data {
+			names[i] = s.Name
+		}
+		slices.Sort(names)
+		return names
+	}
+	token := e.cliSignIn("dashboards:read")
+	oauthReq := httptest.NewRequest(http.MethodGet, testIssuer+"/api/v1/dashboards", http.NoBody)
+	oauthReq.Header.Set("Authorization", "Bearer "+token)
+	if got := list(oauthReq); !slices.Equal(got, []string{"admin's own"}) {
+		t.Fatalf("admin OAuth lists %v, want only its own dashboard", got)
+	}
+	sessionReq := httptest.NewRequest(http.MethodGet, testIssuer+"/api/v1/dashboards", http.NoBody)
+	sessionReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: e.session})
+	if got := list(sessionReq); !slices.Equal(got, []string{"admin's own", "team b's"}) {
+		t.Fatalf("admin session lists %v, want every dashboard", got)
+	}
+	if resp := e.apiGet(fmt.Sprintf("/api/v1/dashboards/%d", theirs.ID), token); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("admin OAuth reads another team's dashboard: status %d, want 403", resp.StatusCode)
 	}
 }

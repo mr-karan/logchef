@@ -21,6 +21,7 @@ var ReadScopes = []models.TokenScope{
 	models.TokenScopeAlertsRead,
 	models.TokenScopeSavedViewsRead,
 	models.TokenScopeDestinationsRead,
+	models.TokenScopeDashboardsRead,
 }
 
 // scopeOfflineAccess requests a refresh token. It is not a resource scope.
@@ -36,6 +37,7 @@ var scopeDescriptions = map[models.TokenScope]string{
 	models.TokenScopeAlertsRead:       "Read alerts and alert history in sources you can access",
 	models.TokenScopeSavedViewsRead:   "Read saved Explorer views in sources you can access",
 	models.TokenScopeDestinationsRead: "See the names and types of the notification destinations you can use",
+	models.TokenScopeDashboardsRead:   "See the dashboards you can see and their panels",
 }
 
 var errInvalidScope = errors.New("scope must name only Logchef read scopes and offline_access")

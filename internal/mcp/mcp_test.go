@@ -335,6 +335,7 @@ func TestToolsListFiltersByScope(t *testing.T) {
 		{"saved views only", token(w.member, models.TokenScopeSavedViewsRead), []string{"get_meta", "list_saved_views"}},
 		{"collections only", token(w.member, models.TokenScopeCollectionsRead), []string{"get_meta", "list_collections"}},
 		{"destinations only", token(w.member, models.TokenScopeDestinationsRead), []string{"get_meta", "list_destinations"}},
+		{"dashboards only", token(w.member, models.TokenScopeDashboardsRead), []string{"get_dashboard", "get_meta", "list_dashboards"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := listToolNames(t, s, tc.p)

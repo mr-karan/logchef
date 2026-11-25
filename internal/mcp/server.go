@@ -121,6 +121,7 @@ func newMCPServer(deps Deps) *server.MCPServer {
 	t.addAnalysisTools(s)
 	t.addDiscoverTools(s)
 	t.addAlertingTools(s)
+	t.addDashboardTools(s)
 	t.addResourceTemplates(s)
 	addPrompts(s)
 	return s
@@ -180,6 +181,8 @@ var toolScopes = map[string][]models.TokenScope{
 	"list_alert_silences":      {models.TokenScopeAlertsRead},
 	"list_collections":         {models.TokenScopeCollectionsRead},
 	"list_destinations":        {models.TokenScopeDestinationsRead},
+	"list_dashboards":          {models.TokenScopeDashboardsRead},
+	"get_dashboard":            {models.TokenScopeDashboardsRead},
 	"compare_windows":          {models.TokenScopeLogsRead},
 	"top_values":               {models.TokenScopeSourcesRead, models.TokenScopeLogsRead},
 	"get_all_field_dimensions": {models.TokenScopeLogsRead},
@@ -325,6 +328,7 @@ func knownError(op string, err error) error {
 		errors.Is(err, core.ErrQueryNotFound),
 		errors.Is(err, core.ErrAlertNotFound),
 		errors.Is(err, core.ErrInvalidAlertConfiguration),
+		errors.Is(err, core.ErrDashboardNotFound),
 		errors.Is(err, core.ErrLogchefQLNotSupported),
 		errors.Is(err, models.ErrHistogramBudgetExceeded),
 		errors.Is(err, errAlertsDisabled),

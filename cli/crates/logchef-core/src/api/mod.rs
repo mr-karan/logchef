@@ -1,8 +1,10 @@
 mod alerts;
+mod dashboards;
 mod models;
 mod reports;
 
 pub use alerts::*;
+pub use dashboards::*;
 pub use models::*;
 pub use reports::*;
 
