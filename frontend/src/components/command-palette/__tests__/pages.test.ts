@@ -23,7 +23,7 @@ describe('palette pages', () => {
     const pages = routePages(router)
     expect(pages.map((page) => page.name)).toEqual([
       'LogExplorer', 'Library', 'AlertsOverview', 'AlertCreate', 'AlertSilences', 'NotificationDestinations', 'Dashboards',
-      'ManageUsers', 'ServiceTokens', 'Teams', 'Sources', 'NewSource', 'SourceInspection',
+      'AdminOverview', 'ManageUsers', 'ServiceTokens', 'Teams', 'Sources', 'NewSource', 'SourceInspection',
       'AdminSettings', 'AdminQueryActivity', 'AdminAuditLog', 'Profile', 'Preferences', 'ConnectedApps',
     ])
     for (const page of pages) {

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin Redesign Mocks</title>
+<style>
+:root{--bg:var(--background,#fafafa);--panel:var(--card,#fff);--border-c:var(--border,#e4e4e7);--muted-c:var(--muted-foreground,#71717a);--fg:var(--foreground,#18181b);--acc:var(--primary,#2563eb);--chip:var(--secondary,#f4f4f5);--sel:color-mix(in srgb, var(--primary,#2563eb) 14%, transparent);--warn-c:var(--warning,#b45309);--warnbg:var(--warning-surface,#fffbeb);--danger:var(--destructive,#dc2626)}
+*{box-sizing:border-box}
+body{margin:0;color:var(--fg);font:14px/1.45 var(--font-sans,system-ui,sans-serif)}
+h1{font-size:20px;margin:0 0 4px}
+h2{font-size:15px;margin:32px 0 6px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted-c)}
+p.note{color:var(--muted-c);margin:0 0 12px;max-width:900px}
+.frame{border:1px solid var(--border-c);border-radius:10px;background:var(--panel);overflow:hidden;max-width:1200px}
+.app{display:grid;grid-template-columns:150px 1fr;min-height:430px}
+.side{border-right:1px solid var(--border-c);padding:12px 8px;font-size:13px}
+.side .lbl{color:var(--muted-c);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:14px 8px 6px}
+.side a{display:flex;justify-content:space-between;padding:6px 8px;border-radius:6px;color:inherit;text-decoration:none}
+.side a.on{background:var(--sel);color:var(--fg);font-weight:600}
+.side small{color:var(--muted-c)}
+.main{padding:18px 20px;min-width:0}
+.admingrid{display:grid;grid-template-columns:140px 1fr;gap:16px}
+.subnav{font-size:13px}
+.subnav .g{color:var(--muted-c);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:10px 6px 4px}
+.subnav a{display:block;padding:5px 8px;border-radius:6px;color:inherit;text-decoration:none}
+.subnav a.on{background:var(--chip);font-weight:600}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.hdr .d{color:var(--muted-c);font-size:13px}
+.btn{border:1px solid var(--border-c);background:var(--panel);color:var(--fg);border-radius:6px;padding:6px 10px;font-size:13px;white-space:nowrap}
+.btn.p{background:var(--acc);border-color:var(--acc);color:#fff}
+.btn.danger{color:var(--danger)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-c);margin-bottom:12px}
+.tabs span{padding:6px 10px;font-size:13px;color:var(--muted-c)}
+.tabs span.on{color:var(--fg);border-bottom:2px solid var(--acc);font-weight:600}
+.tools{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.search{flex:1;min-width:160px;border:1px solid var(--border-c);border-radius:6px;padding:6px 10px;color:var(--muted-c)}
+.filter{border:1px solid var(--border-c);border-radius:6px;padding:6px 10px;font-size:13px;color:var(--muted-c)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-weight:500;color:var(--muted-c);padding:8px;border-bottom:1px solid var(--border-c);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--border-c);vertical-align:middle}
+tr.sel td{background:var(--sel)}
+.who b{display:block;font-weight:600}.who span{color:var(--muted-c);font-size:12px}
+.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:1px 8px;font-size:12px;margin:1px 2px 1px 0;white-space:nowrap}
+.chip.r{border:1px solid var(--border-c);background:transparent}
+.sel-ui{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-c);border-radius:6px;padding:3px 8px;font-size:12px;background:var(--panel)}
+.sel-ui::after{content:"▾";color:var(--muted-c)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#16a34a;margin-right:6px}
+.dot.off{background:var(--muted-c)}
+.withdrawer{display:grid;grid-template-columns:1fr 300px;gap:0;margin:-18px -20px;min-height:430px}
+.withdrawer>.l{padding:18px 20px;min-width:0;opacity:.55}
+.drawer{border-left:1px solid var(--border-c);padding:16px;background:var(--panel);box-shadow:-8px 0 24px rgba(0,0,0,.08)}
+.drawer h3{margin:0;font-size:16px}
+.drawer .sub{color:var(--muted-c);font-size:12px;margin-bottom:14px}
+.sec{margin:14px 0 6px;font-size:12px;color:var(--muted-c);text-transform:uppercase;letter-spacing:.05em}
+.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border-c);gap:8px}
+.x{color:var(--muted-c)}
+.banner{background:var(--warnbg);color:var(--warn-c);border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:10px}
+.anno{border-left:3px solid var(--acc);padding:2px 0 2px 10px;margin:10px 0 0;color:var(--muted-c);font-size:13px;max-width:1200px}
+.anno li{margin:2px 0}
+@media (max-width:560px){.app{grid-template-columns:1fr}.side{display:none}.admingrid{grid-template-columns:1fr}.withdrawer{grid-template-columns:1fr}.withdrawer>.l{display:none}}
+</style>
+</head>
+<body>
+<h1>Admin redesign: mocks</h1>
+<p class="note">Three screens. A: one Admin entry in the sidebar with its own grouped section nav. B: People, with a user drawer that edits global role and team roles in place. C: a team page with inline role changes.</p>
+
+<h2>A · Sidebar and admin shell</h2>
+<div class="frame"><div class="app">
+  <nav class="side">
+    <a>Explore</a><a>Library</a><a>Alerts</a><a>Dashboards</a><a>Reports</a>
+    <div class="lbl">Administration</div>
+    <a class="on">Admin <small>›</small></a>
+  </nav>
+  <div class="main"><div class="admingrid">
+    <nav class="subnav">
+      <div class="g">Access</div>
+      <a class="on">People</a><a>Teams</a><a>Service accounts</a>
+      <div class="g">Data</div>
+      <a>Sources</a><a>Source inspection</a>
+      <div class="g">Monitoring</div>
+      <a>Query activity</a><a>Audit log</a>
+      <div class="g">System</div>
+      <a>Settings</a>
+    </nav>
+    <div>
+      <div class="hdr"><div><b style="font-size:17px">Admin overview</b><div class="d">Landing page at /admin</div></div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+        <div class="frame" style="padding:12px"><div class="d" style="color:var(--muted-c)">People</div><b style="font-size:22px">142</b><div style="font-size:12px;color:var(--muted-c)">3 admins · 6 inactive</div></div>
+        <div class="frame" style="padding:12px"><div style="color:var(--muted-c)">Teams</div><b style="font-size:22px">18</b><div style="font-size:12px;color:var(--muted-c)">4 with no admin</div></div>
+        <div class="frame" style="padding:12px"><div style="color:var(--muted-c)">Sources</div><b style="font-size:22px">27</b><div style="font-size:12px;color:var(--muted-c)">1 unreachable</div></div>
+        <div class="frame" style="padding:12px"><div style="color:var(--muted-c)">Service accounts</div><b style="font-size:22px">5</b><div style="font-size:12px;color:var(--muted-c)">9 tokens</div></div>
+      </div>
+    </div>
+  </div></div>
+</div></div>
+<ul class="anno">
+  <li>The sidebar's 7 admin links become one <b>Admin</b> entry. Team admins who aren't global admins see only <b>Teams</b> in the section nav, scoped to their teams.</li>
+  <li>The section nav is a layout under <code>/admin</code>. Existing child routes keep their URLs, so bookmarks and command-palette entries still work.</li>
+  <li>Overview cards are optional, and only counts the existing list endpoints already return. Skip any card that needs a new endpoint.</li>
+</ul>
+
+<h2>B · People, with the user drawer open</h2>
+<div class="frame"><div class="main" style="padding:18px 20px">
+  <div class="withdrawer">
+    <div class="l">
+      <div class="hdr"><div><b style="font-size:17px">People</b><div class="d">Everyone who can sign in, their global role, and their teams.</div></div><span class="btn p">Add user</span></div>
+      <div class="tools"><span class="search">Search name or email…</span><span class="filter">Role: Any ▾</span><span class="filter">Team: Any ▾</span><span class="filter">Status: Active ▾</span></div>
+      <div class="tw"><table>
+        <tr><th>Name ↑</th><th>Global role</th><th>Teams</th><th>Status</th><th>Last login</th></tr>
+        <tr><td class="who"><b>Customer A</b><span>user-a@example.com</span></td><td><span class="chip r">Member</span></td><td><span class="chip">Crux · admin</span><span class="chip">Nomad · member</span></td><td><span class="dot"></span>Active</td><td>2h ago</td></tr>
+        <tr class="sel"><td class="who"><b>Customer B</b><span>user-b@example.com</span></td><td><span class="chip r">Member</span></td><td><span class="chip">Crux · member</span></td><td><span class="dot"></span>Active</td><td>1d ago</td></tr>
+        <tr><td class="who"><b>Customer C</b><span>user-c@example.com</span></td><td><span class="chip r">Admin</span></td><td><span class="chip">Platform · admin</span><span class="chip">+3</span></td><td><span class="dot"></span>Active</td><td>5m ago</td></tr>
+        <tr><td class="who"><b>Customer D</b><span>user-d@example.com</span></td><td><span class="chip r">Member</span></td><td style="color:var(--muted-c)">No teams</td><td><span class="dot off"></span>Inactive</td><td>3mo ago</td></tr>
+      </table></div>
+    </div>
+    <aside class="drawer">
+      <div style="display:flex;justify-content:space-between"><div><h3>Customer B</h3><div class="sub">user-b@example.com · signed in via OIDC</div></div><span class="x">✕</span></div>
+      <div class="sec">Account</div>
+      <div class="row"><span>Global role</span><span class="sel-ui">Member</span></div>
+      <div class="row"><span>Status</span><span class="sel-ui">Active</span></div>
+      <div class="sec">Teams</div>
+      <div class="row"><span>Crux</span><span style="display:flex;gap:8px;align-items:center"><span class="sel-ui">Member</span><span class="x">✕</span></span></div>
+      <div class="row"><span>Nomad <span class="chip" title="Provisioned from config">managed</span></span><span style="display:flex;gap:8px;align-items:center"><span class="sel-ui">Editor</span><span class="x">✕</span></span></div>
+      <div style="display:flex;gap:6px;margin-top:10px"><span class="sel-ui" style="flex:1">Add to team…</span><span class="sel-ui">Member</span><span class="btn">Add</span></div>
+      <div class="sec">Danger zone</div>
+      <span class="btn danger">Delete user</span>
+    </aside>
+  </div>
+</div></div>
+<ul class="anno">
+  <li>Clicking a row opens a right-side drawer (a Sheet), so the list keeps its scroll, search and filters.</li>
+  <li>The Teams column shows each team with the user's role, so an admin can see who is where without opening every team.</li>
+  <li>Changing a role in a drawer select saves right away and shows a toast. Demoting yourself or removing the last admin asks first with a ConfirmDialog.</li>
+  <li>Teams provisioned from config show a <b>managed</b> chip. A role change there sticks only until the next provisioning run, so say so in the confirm text.</li>
+  <li>Service accounts stay on their own page, so People lists humans only.</li>
+</ul>
+
+<h2>C · Team page, roles editable in place</h2>
+<div class="frame"><div class="main">
+  <div class="hdr"><div><b style="font-size:17px">Crux</b><div class="d">Admin › Teams › Crux · 12 members · 4 sources</div></div><span class="btn p">Add members</span></div>
+  <div class="tabs"><span class="on">Members</span><span>Sources</span><span>Settings</span></div>
+  <div class="tools"><span class="search">Search members…</span><span class="filter">Role: Any ▾</span></div>
+  <div class="tw"><table>
+    <tr><th>Member ↑</th><th>Team role</th><th>Added</th><th></th></tr>
+    <tr><td class="who"><b>Customer A</b><span>user-a@example.com</span></td><td><span class="sel-ui">Admin</span></td><td>Mar 2026</td><td class="x">⋯</td></tr>
+    <tr><td class="who"><b>Customer B</b><span>user-b@example.com</span></td><td><span class="sel-ui">Member</span></td><td>Jun 2026</td><td class="x">⋯</td></tr>
+    <tr><td class="who"><b>Customer E</b><span>user-e@example.com</span></td><td><span class="sel-ui">Editor</span></td><td>Oct 2026</td><td class="x">⋯</td></tr>
+  </table></div>
+  <div style="margin-top:12px;font-size:12px;color:var(--muted-c)">Roles: <b>Admin</b> manages members and sources · <b>Editor</b> [wording from the real permission checks] · <b>Member</b> reads and runs.</div>
+</div></div>
+<ul class="anno">
+  <li>The Role column becomes an inline select for team admins and global admins. It calls the existing add-member endpoint with the new role, which already updates in place.</li>
+  <li>"Add members" lets you pick several people at once, with one role for all of them.</li>
+  <li>The row menu (RowActionsMenu) holds "Remove from team" and "View in People".</li>
+  <li>A one-line role legend under the table answers "what can an editor do?" where the question comes up.</li>
+</ul>
+</body>
+</html>
