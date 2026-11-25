@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Read-only tools that let a coding agent set up Logchef for an app: check
+alert rules before a person saves them, see silences, collections and
+destinations, and get errors that say what to do.
+
+### Added
+
+- MCP tools `test_alert`, `backtest_alert`, `list_alert_silences`,
+  `list_collections` and `list_destinations`.
+- CLI commands `logchef alerts list`, `alerts test`, `alerts backtest`,
+  `silences list` and `destinations list`. `test` and `backtest` read the rule
+  as JSON from a file or stdin and save nothing.
+- `destinations:read` is an OAuth scope. An OAuth client, such as `logchef
+  auth` or MCP, lists each destination it may use without its recipients,
+  receiver URL or key. A client connected before this release must sign in
+  again to get it.
+- LogchefQL translation returns `warnings`. A dotted path on a String column
+  used as a number (`msg.latency_ms > "500"`, `p95(msg.latency_ms)`) gets one:
+  `JSONExtractString` returns an empty string for a JSON number. `logchef
+  explain` and the MCP `translate_logchefql` tool show it.
+- `logchef doctor` reports the read scopes that a `logchef auth` sign-in
+  lacks.
+- `logchef find --concurrency` sets how many sources are searched at once.
+- The `logchef-setup` skill, also bundled as `logchef skills get setup`,
+  walks a coding agent through setting up Logchef for an app from its
+  repository: it finds the production source, measures volume and noise,
+  proposes saved queries, a collection, views, alert rules backtested on real
+  data, silences and scheduled reports, and creates only what the user
+  confirms.
+
+### Changed
+
+- `POST /api/v1/alerts/test` and `/alerts/backtest` need `alerts:read`
+  instead of `alerts:write`: they save nothing and send nothing. A token with
+  `alerts:write` and no `alerts:read` can no longer call them.
+- A condition rule may leave out `condition_json`; the server takes the
+  filter in front of the aggregation pipe.
+- A 403 for a missing scope names the scope. For an OAuth caller it asks for
+  a new sign-in, and the `insufficient_scope` challenge carries `scope=`.
+  The CLI turns it into the command to run, or into a hint to use an API
+  token with the scope.
+- `logchef sql --dry-run` fills `{{__time_filter}}`, `{{__from}}` and
+  `{{__to}}` the way the server does on a ClickHouse source.
+
+### Fixed
+
+- `logchef views list` and other commands under a sign-in made before the
+  server ran v2.8.0 failed with "API token does not have the required scope"
+  and no way forward. The error now names `saved_views:read` and the `logchef auth`
+  command to run.
+- `logchef find` without `-t` or `-S` could run for minutes with no output.
+  Each source now has a deadline, a slow or failing source is skipped and
+  named, and the matches from the others print.
+- `logchef sql -s` put the time filter on the outer query of
+  `SELECT ... FROM (SELECT ... FROM table) HAVING ...`, which failed with
+  `Missing columns: '_timestamp'`. The filter now goes into the subquery that
+  reads the table.
+
 ## [2.8.2] - 2026-11-23
 
 Fixes for rough edges found while recording the v2.8.0 launch videos. No

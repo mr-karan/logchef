@@ -55,7 +55,7 @@ The command exits `0` even when a check fails, because a preview reports state. 
 
 ## Use the bundled guide
 
-Point your agent at the CLI instead of copying syntax into prompts. `logchef skills get core` prints usage, LogchefQL, SQL, and LogsQL guidance that matches the installed binary. See [Skills](/integration/cli/#skills).
+Point your agent at the CLI instead of copying syntax into prompts. `logchef skills get core` prints usage, LogchefQL, SQL, and LogsQL guidance that matches the installed binary. To have an agent set up Logchef for an app, run it in the app's repository with `logchef skills get setup`: it finds the app's production source, measures its logs, and proposes saved queries, views, alert rules, silences and reports, then asks before it creates anything. See [Skills](/integration/cli/#skills).
 
 ## Connect over MCP
 
