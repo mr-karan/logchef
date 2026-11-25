@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { onMounted, ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { PageHeader, EmptyState, LoadingState, SearchInput, SortHeader, RowActionsMenu } from '@/components/layout'
 import { Plus, Settings, Search, Users } from 'lucide-vue-next'
@@ -181,10 +182,20 @@ onMounted(() => {
                     <TableBody>
                         <TableRow v-for="team in filteredTeams" :key="team.id">
                             <TableCell>
-                                <router-link :to="{ name: 'TeamSettings', params: { id: String(team.id) } }"
-                                    class="font-medium hover:underline flex items-center gap-2">
-                                    {{ team.name }}
-                                </router-link>
+                                <div class="flex items-center gap-2">
+                                    <router-link :to="{ name: 'TeamSettings', params: { id: String(team.id) } }"
+                                        class="font-medium hover:underline">
+                                        {{ team.name }}
+                                    </router-link>
+                                    <Badge
+                                        v-if="'managed' in team && team.managed"
+                                        variant="outline"
+                                        class="text-[11px] font-normal"
+                                        :title="t('access.provisionedFromConfig')"
+                                    >
+                                        {{ t('access.managed') }}
+                                    </Badge>
+                                </div>
                             </TableCell>
                             <TableCell>
                                 <span v-if="team.description" class="line-clamp-1">{{ team.description }}</span>
@@ -198,8 +209,11 @@ onMounted(() => {
                                         @click="router.push({ name: 'TeamSettings', params: { id: String(team.id) } })">
                                         <Settings class="h-4 w-4" />
                                     </Button>
-                                    <RowActionsMenu v-if="isGlobalAdmin" :delete-label="t('access.deleteTeam')"
-                                        @delete="handleDelete(team)" />
+                                    <RowActionsMenu
+                                        v-if="isGlobalAdmin && !('managed' in team && team.managed)"
+                                        :delete-label="t('access.deleteTeam')"
+                                        @delete="handleDelete(team)"
+                                    />
                                 </div>
                             </TableCell>
                         </TableRow>

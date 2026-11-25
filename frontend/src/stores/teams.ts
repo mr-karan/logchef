@@ -364,6 +364,75 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
+  async function addTeamMembers(
+    teamId: number,
+    userIds: number[],
+    role: "admin" | "member" | "editor"
+  ) {
+    const uniqueIds = [...new Set(userIds)].filter((id) => Number.isFinite(id) && id > 0);
+    if (!teamId || uniqueIds.length === 0) {
+      return { success: false, added: 0, failed: 0 };
+    }
+
+    return await state.withLoading(`addTeamMember-${teamId}`, async () => {
+      let added = 0;
+      let failed = 0;
+      let lastError: APIErrorResponse | undefined;
+
+      for (const userId of uniqueIds) {
+        try {
+          const response = await teamsApi.addTeamMember(teamId, { user_id: userId, role });
+          if (isSuccessResponse(response)) {
+            added++;
+          } else {
+            failed++;
+            lastError = response;
+          }
+        } catch (err) {
+          failed++;
+          lastError = err as APIErrorResponse;
+        }
+      }
+
+      if (added > 0) {
+        const membersRes = await listTeamMembers(teamId);
+        if (membersRes.success && Array.isArray(membersRes.data)) {
+          patchTeam(teamId, () => ({ member_count: membersRes.data!.length }));
+        } else {
+          patchTeam(teamId, (team) => ({ member_count: (team.member_count || 0) + added }));
+        }
+
+        const currentUserId = authStore.user?.id;
+        if (currentUserId && uniqueIds.includes(Number(currentUserId))) {
+          await loadUserTeams();
+        }
+      }
+
+      const { useToast } = await import("@/composables/useToast");
+      const { toast } = useToast();
+      if (added > 0 && failed === 0) {
+        toast({ title: i18n.global.t("access.membersAddedCount", { count: added }, added) });
+        return { success: true, added, failed };
+      }
+      if (added > 0 && failed > 0) {
+        toast({
+          title: i18n.global.t("access.membersAddPartialFailure", { added, failed }),
+          variant: "destructive",
+        });
+        return { success: false, added, failed, error: lastError };
+      }
+
+      return {
+        ...state.handleError(
+          lastError ?? { status: "error", message: "Failed to add team members", error_type: "GeneralError" },
+          `addTeamMember-${teamId}`,
+        ),
+        added,
+        failed,
+      };
+    });
+  }
+
   async function removeTeamMember(teamId: number, userId: number) {
     // Validate parameters
     if (!teamId || !userId) {
@@ -522,6 +591,7 @@ export const useTeamsStore = defineStore("teams", () => {
     deleteTeam,
     listTeamMembers,
     addTeamMember,
+    addTeamMembers,
     updateTeamMemberRole,
     removeTeamMember,
     listTeamSources,
