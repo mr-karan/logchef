@@ -433,7 +433,7 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
 
 <template>
   <Dialog :open="isOpen" @update:open="(val) => !val && handleClose()">
-    <DialogContent class="sm:max-w-[475px]">
+    <DialogContent class="sm:max-w-[475px] max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>
           <span v-if="isEditing" class="flex items-center">
