@@ -103,6 +103,8 @@ pub struct BacktestResult {
     pub partial: bool,
     pub summary: BacktestSummary,
     #[serde(default, deserialize_with = "null_as_default")]
+    pub series: Vec<BacktestPoint>,
+    #[serde(default, deserialize_with = "null_as_default")]
     pub groups: Vec<BacktestGroup>,
     #[serde(default)]
     pub groups_omitted: i64,
@@ -124,6 +126,14 @@ pub struct BacktestSummary {
     /// no-data policy. They belong to no group, and `episodes` counts them.
     #[serde(default)]
     pub empty_result_episodes: i64,
+}
+
+/// The rule after one evaluation of the replay. `status` is `ok`, `firing`,
+/// `no_data` or `error`.
+#[derive(Debug, Deserialize)]
+pub struct BacktestPoint {
+    pub t: DateTime<Utc>,
+    pub status: String,
 }
 
 #[derive(Debug, Deserialize)]

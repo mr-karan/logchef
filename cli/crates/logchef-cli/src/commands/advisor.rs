@@ -2,13 +2,14 @@ use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::{Client, SchemaAdvice, SchemaFinding};
+use logchef_core::auth::API_TOKENS_PAGE;
 use logchef_core::cache::{Identifier, parse_identifier};
 
 use crate::cli::GlobalArgs;
 use crate::session;
 
 #[derive(Args)]
-#[command(after_help = "EXAMPLES:
+#[command(after_help = format!("EXAMPLES:
   # Show the stored report of source 7
   logchef advisor 7
 
@@ -19,8 +20,9 @@ use crate::session;
   logchef advisor 7 --ddl
 
 The schema advisor is for global admins. Use an API token with the
-sources:read scope (pass it with --token or LOGCHEF_AUTH_TOKEN). A
-`logchef auth` sign-in cannot reach admin routes. Logchef never runs the DDL.")]
+sources:read scope (pass it with --token or LOGCHEF_AUTH_TOKEN). Create one
+under {API_TOKENS_PAGE}. A
+`logchef auth` sign-in cannot reach admin routes. Logchef never runs the DDL."))]
 pub struct AdvisorArgs {
     /// Source ID, name or table (database.table). Names are looked up among
     /// all sources.
@@ -146,7 +148,7 @@ fn explain_forbidden(err: logchef_core::Error) -> anyhow::Error {
         } => anyhow!(
             "The server refused the schema advisor{}\n\
              It needs a global admin's API token with the sources:read scope (or *). \
-             A `logchef auth` sign-in cannot reach admin routes. Create one on your Profile page, \
+             A `logchef auth` sign-in cannot reach admin routes. Create one under {API_TOKENS_PAGE}, \
              then pass it with --token or LOGCHEF_AUTH_TOKEN.",
             // A missing scope's message says what the advice below says.
             if scope_denied {
@@ -373,6 +375,14 @@ mod tests {
         assert!(text.contains("sources:read"), "{text}");
         assert!(text.contains("global admin's API token"), "{text}");
         assert!(text.contains("Admin access required"), "{text}");
+        assert_eq!(
+            text.matches(
+                "Create one under your user menu > Profile > API tokens (/settings/profile)"
+            )
+            .count(),
+            1,
+            "{text}"
+        );
         assert_eq!(crate::ui::hint_for_error(&err), None);
     }
 }

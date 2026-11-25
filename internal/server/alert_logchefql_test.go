@@ -247,6 +247,9 @@ func TestAlertTestValueAndWarnings(t *testing.T) {
 	if !strings.Contains(raw, `"warnings":[]`) {
 		t.Errorf("warnings of a clean test is not an empty list: %s", raw)
 	}
+	if _, raw := test(map[string]any{"query": `level="error" | count()`}); !strings.Contains(raw, `"samples":[]`) {
+		t.Errorf("samples of an ungrouped test is not an empty list: %s", raw)
+	}
 	if got, _ := test(map[string]any{"query": grouped, "threshold_operator": "gt", "threshold_value": 5}); got.Value != 7 || got.Samples[0].Group["service"] != "checkout" {
 		t.Fatalf("gt: value %v, first sample %v, want checkout with 7", got.Value, got.Samples[0])
 	}

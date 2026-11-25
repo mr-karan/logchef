@@ -17,6 +17,9 @@ type FieldValuesResult struct {
 	IsLowCardinality bool             `json:"is_low_cardinality"`
 	Values           []FieldValueInfo `json:"values"`
 	TotalDistinct    int64            `json:"total_distinct"`
+	// Error says why a field of GetAllFieldValues was not read, such as a
+	// timeout. Values is then empty and does not mean the field has none.
+	Error string `json:"error,omitempty"`
 }
 
 type FieldValuesRequest struct {

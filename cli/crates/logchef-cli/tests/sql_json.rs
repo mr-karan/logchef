@@ -108,7 +108,7 @@ fn sql_on_a_loki_source_sends_the_default_window() {
     assert_eq!(end - start, chrono::Duration::minutes(15));
 }
 
-fn dry_run(name: &str, source_type: &str, sql: &str) -> String {
+fn dry_run(name: &str, source_type: &str, sql: &str, extra: &[&str]) -> String {
     let server = FakeServer::start(false);
     server.state().source_type = Some(source_type.to_string());
     let home = TestHome::new(name);
@@ -123,6 +123,7 @@ fn dry_run(name: &str, source_type: &str, sql: &str) -> String {
             "--to",
             "2026-11-25 14:30:00",
         ])
+        .args(extra)
         .arg(sql);
     let out = run(cmd);
     assert_success(&out);
@@ -135,7 +136,8 @@ fn dry_run_renders_clickhouse_time_macros_with_the_source_timestamp() {
         dry_run(
             "dry-run-macros",
             "clickhouse",
-            "SELECT count() FROM logs.app WHERE {{__time_filter}} AND t < {{__to}}"
+            "SELECT count() FROM logs.app WHERE {{__time_filter}} AND t < {{__to}}",
+            &[]
         ),
         "SELECT count() FROM logs.app WHERE `timestamp` >= toDateTime64('2026-11-25 08:00:00.000', 3, 'UTC') \
          AND `timestamp` < toDateTime64('2026-11-25 09:00:00.000', 3, 'UTC') \
@@ -146,8 +148,30 @@ fn dry_run_renders_clickhouse_time_macros_with_the_source_timestamp() {
 #[test]
 fn dry_run_keeps_victorialogs_queries_as_written() {
     assert_eq!(
-        dry_run("dry-run-vl", "victorialogs", "error | stats count()"),
-        "error | stats count()\n"
+        dry_run(
+            "dry-run-vl",
+            "victorialogs",
+            "error | stats count() by (_time:{{__interval}})",
+            &["--interval", "1h"]
+        ),
+        "error | stats count() by (_time:{{__interval}})\n"
+    );
+}
+
+#[test]
+fn dry_run_renders_the_interval_and_the_effective_timezone() {
+    assert_eq!(
+        dry_run(
+            "dry-run-interval",
+            "clickhouse",
+            "SELECT toStartOfInterval(timestamp, {{__interval}}, {{__timezone}}) t, \
+             {{__interval_s}} s FROM logs.app GROUP BY t",
+            &["--interval", "15m"]
+        ),
+        "SELECT toStartOfInterval(timestamp, INTERVAL 15 MINUTE, 'Asia/Kolkata') t, \
+         900 s FROM logs.app \
+         WHERE `timestamp` BETWEEN toDateTime('2026-11-25 13:30:00', 'Asia/Kolkata') \
+         AND toDateTime('2026-11-25 14:30:00', 'Asia/Kolkata') GROUP BY t\n"
     );
 }
 

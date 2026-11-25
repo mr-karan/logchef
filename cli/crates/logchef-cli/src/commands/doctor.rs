@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::Client;
+use logchef_core::auth::API_TOKENS_PAGE;
 use logchef_core::config::{Context as CtxConfig, ContextAuth, OAuthCredential};
 use logchef_core::timerange::{parse_timezone, resolve_timezone};
 use serde::Serialize;
@@ -248,7 +249,10 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
                 None => checks.push(Check::warn(
                     "CLI auth",
                     "server does not offer Logchef OAuth sign-in",
-                    "upgrade the server and enable auth.oauth, or use an API token (--token or LOGCHEF_AUTH_TOKEN)",
+                    format!(
+                        "upgrade the server and enable auth.oauth, or use an API token (--token \
+                         or LOGCHEF_AUTH_TOKEN). Create one under {API_TOKENS_PAGE}"
+                    ),
                 )),
             }
             // The CLI (0.x) and server (2.x) are versioned independently, so

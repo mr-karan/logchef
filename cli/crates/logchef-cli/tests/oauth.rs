@@ -203,6 +203,10 @@ fn server_without_oauth_issuer_fails_with_the_fix() {
         "{err}"
     );
     assert!(err.contains("Upgrade the server"), "{err}");
+    assert!(
+        err.contains("Create one under your user menu > Profile > API tokens (/settings/profile)"),
+        "{err}"
+    );
     assert!(err.contains("--token"), "{err}");
     assert!(err.contains("LOGCHEF_AUTH_TOKEN"), "{err}");
     assert!(!home.config_path().exists());
@@ -573,7 +577,10 @@ fn an_api_token_without_the_scope_must_be_reissued() {
     assert!(!out.status.success());
     let err = stderr(&out);
     assert!(
-        err.contains("Create a new API token with the saved_views:read scope"),
+        err.contains(
+            "Create one with the saved_views:read scope under your user menu > Profile > \
+             API tokens (/settings/profile)"
+        ),
         "{err}"
     );
     assert!(!err.contains("logchef auth"), "{err}");
@@ -684,6 +691,12 @@ fn an_unnamed_denied_scope_on_an_older_server_points_reports_to_an_api_token() {
         err.contains("It needs an API token with the reports:read scope"),
         "{err}"
     );
+    assert_eq!(
+        err.matches("Create one under your user menu > Profile > API tokens (/settings/profile)")
+            .count(),
+        1,
+        "{err}"
+    );
     assert!(!err.contains("destinations:read"), "{err}");
 }
 
@@ -715,5 +728,6 @@ fn a_scope_no_sign_in_can_hold_points_to_an_api_token_once() {
     assert!(!err.contains("logchef auth --context"), "{err}");
     assert_eq!(err.matches("sign-in cannot").count(), 1, "{err}");
     assert_eq!(err.matches("LOGCHEF_AUTH_TOKEN").count(), 1, "{err}");
+    assert_eq!(err.matches("/settings/profile").count(), 1, "{err}");
     assert!(err.contains("reports:read"), "{err}");
 }

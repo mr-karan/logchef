@@ -708,7 +708,9 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		ExecutionTimeMs: executionTime.Milliseconds(),
 		RowsReturned:    len(result.Logs),
 		Warnings:        warnings,
-		NoData:          noData,
+		// An ungrouped rule has no groups; the list is empty, never null.
+		Samples: []models.AlertSample{},
+		NoData:  noData,
 	}, nil
 }
 

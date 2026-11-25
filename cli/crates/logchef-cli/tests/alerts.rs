@@ -8,9 +8,17 @@ mod common;
 use common::*;
 use serde_json::{Value, json};
 
+/// Signed in with an API token, in UTC so output does not follow the host's
+/// zone.
 fn signed_in(name: &str, server: &FakeServer) -> TestHome {
+    signed_in_at(name, server, "UTC")
+}
+
+fn signed_in_at(name: &str, server: &FakeServer, timezone: &str) -> TestHome {
     let home = TestHome::new(name);
-    home.write_config(&config_with(&server.url, json!({"token": PAT})));
+    let mut config = config_with(&server.url, json!({"token": PAT}));
+    config["contexts"]["test"]["defaults"]["timezone"] = json!(timezone);
+    home.write_config(&config);
     home
 }
 
@@ -251,7 +259,7 @@ fn alerts_backtest_sets_the_range_and_frequency_and_prints_the_summary() {
     );
     let text = stdout(&out);
     for line in [
-        "Range:            2026-11-24 10:00 to 2026-11-25 10:00 UTC",
+        "Range:            2026-11-24 10:00:00 to 2026-11-25 10:00:00 UTC",
         "Evaluated 120 times, every 5m (lookback 5m): coverage 50% of the range",
         "Episodes:         2",
         "Notifications:    4",
@@ -430,6 +438,38 @@ fn alerts_test_and_backtest_read_null_lists_in_text_and_json() {
     }
 }
 
+/// An ungrouped rule gets no samples: `null` from servers up to v2.8.2.
+#[test]
+fn alerts_test_reads_an_ungrouped_reply_with_null_samples() {
+    let reply = json!({
+        "value": 3, "threshold_met": false, "execution_time_ms": 5, "rows_returned": 1,
+        "warnings": [], "samples": null, "groups_total": 0, "no_data": false
+    });
+    let server = FakeServer::start(false);
+    server.stub("POST", "/api/v1/alerts/test", Stub::data(reply.clone()));
+    let home = signed_in("alerts-test-ungrouped", &server);
+    let mut request = rule();
+    request.as_object_mut().unwrap().remove("group_by");
+
+    let mut cmd = home.logchef();
+    cmd.args(["alerts", "test", "-f", "-", "-S", "2"]);
+    let out = run_with_stdin(cmd, &request.to_string());
+    assert_success(&out);
+    assert_eq!(
+        stdout(&out),
+        "Value:          3\nThreshold met:  no\nNo data:        no\nRows:           1\n\
+         Execution:      5 ms\n"
+    );
+    assert_eq!(stderr(&out), "");
+
+    let mut cmd = home.logchef();
+    cmd.args(["alerts", "test", "-f", "-", "-S", "2", "--output", "json"]);
+    let out = run_with_stdin(cmd, &request.to_string());
+    assert_success(&out);
+    let printed: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(printed, reply);
+}
+
 fn backtest(home: &TestHome, request: &Value, args: &[&str]) -> std::process::Output {
     let mut cmd = home.logchef();
     cmd.args(["alerts", "backtest", "-f", "-", "-S", "2"])
@@ -558,7 +598,7 @@ fn alerts_backtest_rejects_a_window_outside_1h_to_7d_or_mixed_with_range() {
 #[test]
 fn alerts_backtest_prints_the_server_warnings_and_whole_result_episodes() {
     let mut result = backtest_result();
-    result["coverage"] = json!(0.416);
+    result["coverage"] = json!(0.4167);
     result["step_seconds"] = json!(720);
     result["warnings"] = json!(["the evaluations read 42% of the range"]);
     result["summary"]["episodes"] = json!(5);
@@ -571,7 +611,7 @@ fn alerts_backtest_prints_the_server_warnings_and_whole_result_episodes() {
     assert_success(&out);
     let text = stdout(&out);
     for line in [
-        "Evaluated 120 times, every 12m (lookback 5m): coverage 41% of the range",
+        "Evaluated 120 times, every 12m (lookback 5m): coverage 42% of the range",
         "Episodes:         5 (3 whole-result no-data episodes, not in the groups table)",
     ] {
         assert!(text.contains(line), "{line}: {text}");
@@ -659,4 +699,75 @@ fn alerts_backtest_shows_the_lowest_value_of_a_below_threshold_rule() {
         table(&older, &below),
         ("MAX".to_owned(), vec!["40".to_owned()])
     );
+}
+
+fn point(minute: u32, status: &str) -> Value {
+    let t = chrono::DateTime::parse_from_rfc3339("2026-11-24T10:00:00Z").unwrap()
+        + chrono::Duration::minutes(minute.into());
+    json!({"t": t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true), "status": status,
+           "value": null, "firing_groups": u32::from(status == "firing")})
+}
+
+#[test]
+fn alerts_backtest_lists_the_episodes_and_the_range_in_the_effective_timezone() {
+    let mut result = backtest_result();
+    result["series"] = json!([
+        point(0, "ok"),
+        point(5, "firing"),
+        point(10, "error"),
+        point(15, "ok"),
+        point(20, "error"),
+        point(25, "no_data"),
+        point(30, "firing"),
+        point(35, "ok"),
+        point(40, "ok"),
+        point(45, "firing"),
+    ]);
+    let server = FakeServer::start(false);
+    server.stub("POST", "/api/v1/alerts/backtest", Stub::data(result));
+    let home = signed_in_at("alerts-backtest-episodes", &server, "Asia/Kolkata");
+
+    let out = backtest(&home, &rule(), &[]);
+    assert_success(&out);
+    let text = stdout(&out);
+    assert!(
+        text.contains(
+            "Range:            2026-11-24 15:30:00 to 2026-11-25 15:30:00 Asia/Kolkata\n"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "\nFiring or no-data episodes (Asia/Kolkata):\n\
+             2026-11-24 15:35:00 to 2026-11-24 15:45:00\n\
+             2026-11-24 15:55:00 to 2026-11-24 16:05:00\n\
+             2026-11-24 16:15:00 to ongoing at the end of the range\n\n"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn alerts_backtest_lists_at_most_20_episodes() {
+    let mut result = backtest_result();
+    result["series"] = (0..50)
+        .map(|i| point(i * 5, if i % 2 == 0 { "firing" } else { "ok" }))
+        .collect();
+    let server = FakeServer::start(false);
+    server.stub("POST", "/api/v1/alerts/backtest", Stub::data(result));
+    let home = signed_in("alerts-backtest-episodes-cap", &server);
+
+    let out = backtest(&home, &rule(), &[]);
+    assert_success(&out);
+    let text = stdout(&out);
+    let listed: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.starts_with("Firing or no-data episodes"))
+        .skip(1)
+        .take_while(|l| !l.is_empty())
+        .collect();
+    assert_eq!(listed.len(), 21, "{text}");
+    assert_eq!(listed[0], "2026-11-24 10:00:00 to 2026-11-24 10:05:00");
+    assert_eq!(listed[19], "2026-11-24 13:10:00 to 2026-11-24 13:15:00");
+    assert_eq!(listed[20], "... and 5 more");
 }

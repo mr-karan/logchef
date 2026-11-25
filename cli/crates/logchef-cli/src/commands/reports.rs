@@ -3,13 +3,14 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
 use logchef_core::api::{Report, ReportRun, ReportSchedule};
+use logchef_core::auth::API_TOKENS_PAGE;
 
 use crate::cli::GlobalArgs;
 use crate::session;
 use crate::ui;
 
 #[derive(Args)]
-#[command(after_help = "EXAMPLES:
+#[command(after_help = format!("EXAMPLES:
   # Your reports, with their next and last run
   logchef reports list
 
@@ -24,8 +25,9 @@ use crate::ui;
   logchef reports run 4 --all
 
 Reports need an API token with the reports:read scope (reports:write for
-`run`), or *. Pass it with --token or LOGCHEF_AUTH_TOKEN. A `logchef auth`
-sign-in cannot reach reports. Create and edit reports in the web UI.")]
+`run`), or *. Pass it with --token or LOGCHEF_AUTH_TOKEN. Create one under
+{API_TOKENS_PAGE}. A `logchef auth`
+sign-in cannot reach reports. Create and edit reports in the web UI."))]
 pub struct ReportsArgs {
     #[command(subcommand)]
     command: ReportsCommand,
@@ -196,7 +198,7 @@ fn explain(
             anyhow!(
                 "The server refused to {action}{reason}\n\
                  It needs an API token with the {scope} scope (or *). A `logchef auth` sign-in \
-                 cannot reach reports. Create a token on your Profile page, then pass it with \
+                 cannot reach reports. Create one under {API_TOKENS_PAGE}, then pass it with \
                  --token or LOGCHEF_AUTH_TOKEN.{admin}"
             )
         }

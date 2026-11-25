@@ -5,6 +5,9 @@
 
 mod loopback;
 
+/// Where the web UI creates an API token, for messages that ask for one.
+pub const API_TOKENS_PAGE: &str = "your user menu > Profile > API tokens (/settings/profile)";
+
 pub use loopback::{CallbackLimits, CallbackListener, ExpectedCallback, wait_for_code};
 
 use crate::config::{Config, ContextAuth, OAuthCredential, context_lock_path, lock_exclusive};
