@@ -4,7 +4,7 @@ import { createPinia, type Pinia } from "pinia";
 import { i18n } from "@/i18n";
 import type { User } from "@/types";
 import type { Collection, CollectionMember, CollectionTeam } from "@/api/collections";
-import type { Team, TeamWithMemberCount, UserTeamMembership } from "@/api/teams";
+import type { Team, TeamMember, TeamWithMemberCount, UserTeamMembership } from "@/api/teams";
 
 // Only the HTTP API and the auth/teams context are faked; the collections
 // store, permission composable, and pane render for real. The fake API keeps
@@ -17,6 +17,7 @@ const server = {
   // Teams the caller belongs to (/me/teams) and all teams (/admin/teams).
   userTeams: [] as UserTeamMembership[],
   adminTeams: [] as TeamWithMemberCount[],
+  teamMembers: {} as Record<number, TeamMember[]>,
   addTeamRequests: [] as number[],
   removeTeamRequests: [] as number[],
 };
@@ -67,6 +68,7 @@ vi.mock("@/stores/auth", () => ({
 // earlier view loaded, which may be stale relative to the server.
 const cachedUserTeams = ref<UserTeamMembership[]>([]);
 const cachedAdminTeams = ref<TeamWithMemberCount[]>([]);
+const cachedTeamMembers = ref<Record<number, TeamMember[]>>({});
 vi.mock("@/stores/teams", () => ({
   useTeamsStore: () => ({
     get userTeams() { return cachedUserTeams.value; },
@@ -75,6 +77,10 @@ vi.mock("@/stores/teams", () => ({
     loadAdminTeams: async (forceReload = false) => {
       if (!forceReload && cachedAdminTeams.value.length > 0) return;
       cachedAdminTeams.value = [...server.adminTeams];
+    },
+    getTeamMembersByTeamId: (teamId: number) => cachedTeamMembers.value[teamId] ?? [],
+    listTeamMembers: async (teamId: number) => {
+      cachedTeamMembers.value = { ...cachedTeamMembers.value, [teamId]: [...(server.teamMembers[teamId] ?? [])] };
     },
   }),
 }));
@@ -98,6 +104,9 @@ function team(id: number, name: string): Team {
 }
 const userTeam = (id: number, name: string): UserTeamMembership => ({ ...team(id, name), member_count: 1, role: "member" });
 const adminTeam = (id: number, name: string): TeamWithMemberCount => ({ ...team(id, name), member_count: 1 });
+const teamMember = (teamId: number, userId: number, email: string): TeamMember => ({
+  team_id: teamId, user_id: userId, role: "member", created_at: "", updated_at: "", email, full_name: "",
+});
 
 const ownerRow: CollectionMember = { collection_id: 1, user_id: 99, role: "owner", created_at: "", email: "owner@example.com" };
 const project14: CollectionTeam = { collection_id: 1, team_id: 14, team_name: "Project 14", created_at: "" };
@@ -182,10 +191,12 @@ beforeEach(() => {
   server.teams = [project14];
   server.userTeams = [];
   server.adminTeams = [];
+  server.teamMembers = {};
   server.addTeamRequests = [];
   server.removeTeamRequests = [];
   cachedUserTeams.value = [];
   cachedAdminTeams.value = [];
+  cachedTeamMembers.value = {};
 });
 
 afterEach(() => {
@@ -207,8 +218,27 @@ describe("CollectionDetailPane team sharing", () => {
     expect(root.textContent).toContain("Project 14");
     expect(titles).toContain("Share with team");
     expect(titles).toContain("Remove team");
-    // Inviting individual users still needs a user directory.
-    expect(titles).not.toContain("Invite member");
+    expect(titles).toContain("Invite member");
+  });
+
+  it("offers an owner without user-directory access their teams' members to invite", async () => {
+    mockUser.value = user("member");
+    server.userTeams = [userTeam(14, "Project 14"), userTeam(21, "Infrastructure")];
+    server.teamMembers = {
+      14: [teamMember(14, 99, "owner@example.com"), teamMember(14, 7, "editor@example.com")],
+      21: [teamMember(21, 7, "editor@example.com"), teamMember(21, 8, "infra@example.com")],
+    };
+
+    await render();
+    await click("Invite member");
+    const dialog = [...document.body.querySelectorAll<HTMLElement>("[role=dialog]")].find((d) =>
+      d.textContent?.includes("Invite member")
+    );
+    dialog?.querySelector<HTMLButtonElement>("[role=combobox]")?.click();
+    await flush();
+    const options = [...document.body.querySelectorAll<HTMLButtonElement>("button[data-item]")].map((b) => b.textContent?.trim());
+    // Deduplicated across teams, and the existing owner is excluded.
+    expect(options).toEqual(["editor@example.com", "infra@example.com"]);
   });
 
   it("shows a participating global admin the team roster without share controls", async () => {

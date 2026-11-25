@@ -168,11 +168,11 @@ function scheduleReport(queryId: number) {
 function hasItemActions(item: CollectionItem): boolean {
   return canScheduleItem(item) || (canCurate.value && (canMoveItem(item) || canConvertItem(item) || canRemoveItem(item)));
 }
-// Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
-// invite UI from owners who lack that role since the dropdown can't be
-// populated without it.
+// Listing users (`/api/v1/users`) requires admin or any-team-admin. Other
+// owners pick from the members of their own teams, which any team member may
+// list.
 const canListUsers = computed(() => isGlobalAdmin.value || isAnyTeamAdmin.value);
-const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !collection.value?.is_personal);
+const canInviteMembers = computed(() => isOwner.value && !collection.value?.is_personal);
 // Team shares are managed by actual collection owners only: the server rejects
 // global admins who do not own the collection, so canManageCollection's admin
 // bypass must not apply. Owners need no user directory to share with a team.
@@ -193,10 +193,21 @@ const showAddMember = ref(false);
 const newMemberId = ref("");
 const newMemberRole = ref<"owner" | "editor" | "member">("member");
 
-// Users available for invite: all users minus current members
+// Users available for invite, minus current members: the user directory when
+// the caller may list it, otherwise everyone in the caller's teams.
 const availableUsers = computed(() => {
   const memberIds = new Set(members.value.map((m) => String(m.user_id)));
-  return (usersStore.users ?? []).filter((u) => !memberIds.has(String(u.id)));
+  const candidates = new Map<string, { id: number | string; email: string; full_name?: string }>();
+  if (canListUsers.value) {
+    for (const u of usersStore.users ?? []) candidates.set(String(u.id), u);
+  } else {
+    for (const team of teamsStore.userTeams) {
+      for (const m of teamsStore.getTeamMembersByTeamId(team.id)) {
+        candidates.set(String(m.user_id), { id: m.user_id, email: m.email, full_name: m.full_name });
+      }
+    }
+  }
+  return [...candidates.values()].filter((u) => !memberIds.has(String(u.id)));
 });
 const availableUserItems = computed<SearchableItem[]>(() =>
   availableUsers.value.map((u) => ({
@@ -250,13 +261,16 @@ async function load() {
 onMounted(load);
 watch(collectionID, load);
 
-// Load users only when the invite dialog opens, and only if the caller can
-// list users. Guards against 403 spam when a non-team-admin owner opens it.
+// Load invite candidates when the dialog opens. Owners who cannot list users
+// get their teams' members instead, reloaded on every open like team shares.
 watch(showAddMember, async (isOpen) => {
-  if (!isOpen || !canListUsers.value) return;
-  if (!usersStore.users.length) {
-    await usersStore.loadUsers();
+  if (!isOpen) return;
+  if (canListUsers.value) {
+    if (!usersStore.users.length) await usersStore.loadUsers();
+    return;
   }
+  await teamsStore.loadUserTeams();
+  await Promise.all(teamsStore.userTeams.map((team) => teamsStore.listTeamMembers(team.id)));
 });
 
 // Reload candidates on every open: team membership can change in another
