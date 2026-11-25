@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -670,7 +671,12 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}
 
 	if len(tempAlert.GroupBy) > 0 {
-		return groupedTestResponse(tempAlert, source.MetaTSField, result, executionTime)
+		resp, err := groupedTestResponse(tempAlert, source.MetaTSField, result, executionTime)
+		if err != nil {
+			return nil, err
+		}
+		resp.Warnings = append(resp.Warnings, ruleShapeWarnings(source, tempAlert, result)...)
+		return resp, nil
 	}
 
 	// No sample is not an error, so surface a warning, otherwise the user
@@ -681,7 +687,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
 	}
 	var value float64
-	var warnings []string
+	warnings := []string{}
 	var thresholdMet bool
 	noData := len(samples) == 0
 	if noData {
@@ -694,6 +700,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 
 	// Generate additional warnings
 	warnings = append(warnings, generateQueryWarnings(tempAlert, source.MetaTSField, executionTime, result, false)...)
+	warnings = append(warnings, ruleShapeWarnings(source, tempAlert, result)...)
 
 	return &models.TestAlertQueryResponse{
 		Value:           value,
@@ -743,6 +750,14 @@ func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Servic
 	if req.LookbackSeconds <= 0 {
 		return nil, fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
 	}
+	now := time.Now().UTC()
+	end := now
+	if req.EndTime != nil {
+		if req.EndTime.After(now) {
+			return nil, fmt.Errorf("%w: end_time %s is in the future", ErrInvalidAlertConfiguration, req.EndTime.UTC().Format(time.RFC3339))
+		}
+		end = req.EndTime.UTC()
+	}
 	alert := unsavedAlert(sourceID, &req.TestAlertQueryRequest, req.FrequencySeconds)
 	if err := validateAlertModel(ctx, db, ds, sourceID, alert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
@@ -780,7 +795,7 @@ func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Servic
 			QueryTimeout:    &timeout,
 		})
 	}
-	return alerts.Backtest(ctx, rule, time.Now().UTC().Truncate(time.Second), req.RangeSeconds, query)
+	return alerts.Backtest(ctx, rule, end, req.RangeSeconds, query)
 }
 
 // groupedTestResponse reads the samples the scheduler would read. A result
@@ -793,9 +808,11 @@ func groupedTestResponse(alert *models.Alert, timestampColumn string, result *mo
 	resp := &models.TestAlertQueryResponse{
 		ExecutionTimeMs: executionTime.Milliseconds(),
 		RowsReturned:    len(result.Logs),
+		Warnings:        []string{},
 		Samples:         make([]models.AlertSample, 0, min(len(samples), models.MaxTestAlertSamples)),
 		GroupsTotal:     len(samples),
 	}
+	sortWorstFirst(samples, alert.ThresholdOperator)
 	for i, sample := range samples {
 		met := util.CompareAlertThreshold(sample.Value, alert.ThresholdValue, alert.ThresholdOperator)
 		resp.ThresholdMet = resp.ThresholdMet || met
@@ -813,6 +830,62 @@ func groupedTestResponse(alert *models.Alert, timestampColumn string, result *mo
 	}
 	resp.Warnings = append(resp.Warnings, generateQueryWarnings(alert, timestampColumn, executionTime, result, true)...)
 	return resp, nil
+}
+
+// sortWorstFirst orders the groups so the one closest to firing comes first:
+// the lowest value for lt and lte, the highest for gt and gte. Equality
+// operators keep the query's order.
+func sortWorstFirst(samples []alerts.Sample, op models.AlertThresholdOperator) {
+	switch op {
+	case models.AlertThresholdLessThan, models.AlertThresholdLessThanOrEqual:
+		slices.SortStableFunc(samples, func(a, b alerts.Sample) int { return cmp.Compare(a.Value, b.Value) })
+	case models.AlertThresholdGreaterThan, models.AlertThresholdGreaterThanOrEqual:
+		slices.SortStableFunc(samples, func(a, b alerts.Sample) int { return cmp.Compare(b.Value, a.Value) })
+	case models.AlertThresholdEqual, models.AlertThresholdNotEqual:
+	}
+}
+
+// ruleShapeWarnings flags a native ClickHouse rule that runs but misbehaves
+// elsewhere: a query that reads the current time cannot be backtested and
+// reads the wrong window when an evaluation runs late, and a result without a
+// column named value reads its value from whichever column comes first. The
+// VictoriaLogs and Loki providers name the value column themselves.
+func ruleShapeWarnings(source *models.Source, alert *models.Alert, result *models.QueryResult) []string {
+	if alert.EditorMode != models.AlertEditorModeNative || alert.QueryLanguage != models.QueryLanguageClickHouseSQL {
+		return nil
+	}
+	var warnings []string
+	if !lacksTimeFilter(alert, source.MetaTSField) {
+		if replayErr, ok := errors.AsType[*datasource.ReplayError](datasource.CheckAlertReplayable(source, alert.QueryLanguage, alert.Query)); ok {
+			warnings = append(warnings, "The rule cannot be backtested: "+replayErr.Reason)
+		}
+	}
+	if column := ruleValueColumn(result, alert.GroupBy); column != "" && column != "value" {
+		warnings = append(warnings, fmt.Sprintf("The rule reads its value from the column %q. Return the value as the first column and name it value (AS value), so the rule reads the column you mean.", column))
+	}
+	return warnings
+}
+
+// ruleValueColumn is the result column the rule reads its value from. An
+// ungrouped rule reads the first column; a grouped one reads value when the
+// result has it, else the first column that is not a group column.
+func ruleValueColumn(result *models.QueryResult, groupBy []string) string {
+	if len(result.Columns) == 0 {
+		return ""
+	}
+	if len(groupBy) == 0 {
+		return result.Columns[0].Name
+	}
+	first := ""
+	for _, column := range result.Columns {
+		if column.Name == "value" {
+			return column.Name
+		}
+		if first == "" && !slices.Contains(groupBy, column.Name) {
+			first = column.Name
+		}
+	}
+	return first
 }
 
 // noRowsThresholdMet reports whether a result without rows meets the

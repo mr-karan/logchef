@@ -362,8 +362,23 @@ func isFilterableColumnType(colType string) bool {
 	return false
 }
 
+// logBodyColumns are the names that conventionally hold a whole log line. The
+// top values of such a column are raw log lines, which can carry personal
+// data, and counting them reads every body in the window, so a listing of
+// every field leaves them out. GetFieldDistinctValues still reads one by name.
+var logBodyColumns = map[string]struct{}{
+	"msg": {}, "message": {}, "body": {}, "log": {}, "_msg": {}, "raw": {},
+	"raw_log": {}, "raw_message": {}, "log_message": {}, "log_body": {},
+}
+
+func isLogBodyColumn(name string) bool {
+	_, ok := logBodyColumns[strings.ToLower(name)]
+	return ok
+}
+
 // GetAllFilterableFieldValues retrieves distinct values for all filterable fields within a time range.
-// Filterable fields include: LowCardinality, String, Nullable(String), and Enum types.
+// Filterable fields include: LowCardinality, String, Nullable(String), and Enum types, except
+// the log-body columns (msg, message, body and the like).
 // This is useful for populating a field sidebar with filterable values.
 // For String fields, a shorter timeout is used to gracefully handle high cardinality columns.
 // IMPORTANT: Time range is required to avoid scanning entire tables.
@@ -399,7 +414,7 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 		}
 
 		// Check if this column type is suitable for distinct value queries
-		if !isFilterableColumnType(col.Type) {
+		if !isFilterableColumnType(col.Type) || isLogBodyColumn(col.Name) {
 			continue
 		}
 

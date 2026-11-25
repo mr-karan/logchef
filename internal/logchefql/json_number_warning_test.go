@@ -6,9 +6,11 @@ import (
 )
 
 // A nested path on a String column is read with JSONExtractString, which
-// returns "" for a JSON number. Using such a path as a number translates, so
-// the translation says what it will quietly miss.
-func TestJSONNumberInStringWarnings(t *testing.T) {
+// returns the text of a JSON number ("400"; checked on ClickHouse 23.7, 24.1
+// and 26.8). A number therefore compares as text with = and != and as a
+// parsed number in an ordering, an aggregate parses the text, and only an
+// ordering against a quoted value compares text, which gets a warning.
+func TestJSONNumberInString(t *testing.T) {
 	schema := &Schema{Columns: []ColumnInfo{
 		{Name: "msg", Type: "String"},
 		{Name: "body", Type: "LowCardinality(Nullable(String))"},
@@ -16,51 +18,54 @@ func TestJSONNumberInStringWarnings(t *testing.T) {
 		{Name: "duration_ms", Type: "UInt64"},
 	}}
 	for _, tc := range []struct {
-		query string
-		want  []string // substrings of the single warning; nil means no warning
+		query   string
+		sql     string // a substring of the translation
+		warning string // a substring of the single warning; "" means none
 	}{
-		{`msg.latency_ms > "500"`, []string{"msg.latency_ms", "String column msg", "orders text", "JSONExtractFloat(`msg`, 'latency_ms')"}},
-		{`body.latency_ms <= "5"`, []string{"body.latency_ms", "String column body", "JSONExtractFloat(`body`, 'latency_ms')"}},
-		{`msg.level = "error" | p95(msg.latency_ms) by msg.service`, []string{"p95 skips every numeric value"}},
-		{`| avg(msg.latency_ms)`, []string{"avg skips every numeric value"}},
-		{`msg.level = "error"`, nil},
-		{`msg.level ~ "err"`, nil},
-		{`| count_distinct(msg.user) by msg.service`, nil},
-		{`duration_ms > 500 | p95(duration_ms)`, nil},
-		{`attrs.latency > "5"`, nil},
+		{`msg.status = 400`, "JSONExtractString(`msg`, 'status') = '400'", ""},
+		{`msg.status != 400`, "JSONExtractString(`msg`, 'status') != '400'", ""},
+		{`msg.status ~ 40`, "positionCaseInsensitive(JSONExtractString(`msg`, 'status'), '40') > 0", ""},
+		{`msg.latency_ms > 500`, "toFloat64OrNull(JSONExtractString(`msg`, 'latency_ms')) > 500", ""},
+		{`body.latency_ms <= 5`, "toFloat64OrNull(JSONExtractString(`body`, 'latency_ms')) <= 5", ""},
+		{`msg.status = "400"`, "JSONExtractString(`msg`, 'status') = '400'", ""},
+		{`msg.latency_ms > "500"`, "JSONExtractString(`msg`, 'latency_ms') > '500'", `as text, so "1000" sorts before "500". Write the number without quotes to compare numbers: msg.latency_ms > 500.`},
+		{`| p95(msg.latency_ms)`, "toFloat64OrNull(JSONExtractString(`msg`, 'latency_ms'))", ""},
+		{`duration_ms > 500`, "`duration_ms` > 500", ""},
+		{`attrs.latency > "5"`, "`attrs`['latency'] > '5'", ""},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			result := TranslateWithOptions(tc.query, schema, TranslateOptions{AllowAggregation: true})
 			if !result.Valid {
 				t.Fatalf("translate failed: %v", result.Error)
 			}
-			if tc.want == nil {
-				if len(result.Warnings) != 0 {
-					t.Fatalf("warnings = %q, want none", result.Warnings)
+			translated := result.SQL
+			if result.Aggregation != nil {
+				query, err := BuildAggregationQuery(result, "logs.app", "ts", "{{__time_filter}}")
+				if err != nil {
+					t.Fatal(err)
 				}
-				return
+				translated = query
 			}
-			if len(result.Warnings) != 1 {
-				t.Fatalf("warnings = %q, want one", result.Warnings)
+			if !strings.Contains(translated, tc.sql) {
+				t.Errorf("translation %q does not contain %q", translated, tc.sql)
 			}
-			for _, part := range tc.want {
-				if !strings.Contains(result.Warnings[0], part) {
-					t.Errorf("warning %q does not contain %q", result.Warnings[0], part)
-				}
+			switch {
+			case tc.warning == "" && len(result.Warnings) != 0:
+				t.Errorf("warnings = %q, want none", result.Warnings)
+			case tc.warning != "" && (len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], tc.warning)):
+				t.Errorf("warnings = %q, want one containing %q", result.Warnings, tc.warning)
 			}
 		})
 	}
 
-	// The same path used twice warns once.
-	result := TranslateWithOptions(`msg.latency_ms > "5" and msg.latency_ms < "9"`, schema, TranslateOptions{})
+	// The same comparison twice warns once.
+	result := TranslateWithOptions(`msg.latency_ms > "5" and msg.latency_ms > "5"`, schema, TranslateOptions{})
 	if len(result.Warnings) != 1 {
-		t.Fatalf("repeated path: warnings = %q, want one", result.Warnings)
+		t.Fatalf("repeated comparison: warnings = %q, want one", result.Warnings)
 	}
 
-	// A numeric literal against the path is an error that names both fixes:
-	// quoting for a JSON string, native SQL for a JSON number.
-	result = Translate(`msg.latency_ms > 500`, schema)
-	if result.Valid || result.Error == nil || !strings.Contains(result.Error.Message, "JSONExtractFloat(`msg`, 'latency_ms')") || !strings.Contains(result.Error.Message, "quote the value") {
-		t.Fatalf("numeric literal: valid=%v error=%v, want an error naming quoting and JSONExtractFloat", result.Valid, result.Error)
+	// A number against a plain String column is still an error.
+	if result := Translate(`msg = 400`, schema); result.Valid {
+		t.Fatalf("msg = 400 on a String column translated to %q, want an error", result.SQL)
 	}
 }

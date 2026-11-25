@@ -83,7 +83,7 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, req mcp.CallToo
 
 func (t *tools) addDiscoverTools(s *server.MCPServer) {
 	dimensionsTool := mcp.NewTool("get_all_field_dimensions",
-		mcp.WithDescription("Get top values for all LowCardinality fields in one call. Returns a map of field names to their top values with counts. Counts every log in the window unless query filters them. Much faster than calling get_field_values for each field individually. Use this for initial source exploration to understand what dimensions exist."),
+		mcp.WithDescription("Get top values for every filterable field in one call: LowCardinality, String, Enum and number columns, except log-body columns such as msg, message and body, whose values are whole log lines (ask get_field_values for one by name). Returns a map of field names to their top values with counts. Counts every log in the window unless query filters them. Much faster than calling get_field_values for each field individually. Use this for initial source exploration to understand what dimensions exist."),
 		mcp.WithInputSchema[GetAllFieldDimensionsParams](),
 		mcp.WithTitleAnnotation("Get All Field Dimensions"),
 		readOnlyTool,

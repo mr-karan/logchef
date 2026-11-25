@@ -219,3 +219,27 @@ func TestAlertValidationNeedsOnlyAlertsRead(t *testing.T) {
 		}
 	}
 }
+
+// TestAlertBacktestEndTime replays a past window that holds a burst, at full
+// coverage, and refuses an end in the future.
+func TestAlertBacktestEndTime(t *testing.T) {
+	burst := time.Now().Add(-5 * time.Hour).Truncate(time.Minute)
+	upstream := &backtestUpstream{burst: burst}
+	env := newErrorResponseServer(t, upstream.ServeHTTP)
+	body := func(end time.Time) string {
+		return fmt.Sprintf(`{"source_id":%d,"query_language":"logsql","editor_mode":"native","query":"* | stats count() as value","threshold_operator":"gt","threshold_value":10,"lookback_seconds":60,"frequency_seconds":60,"range_seconds":3600,"end_time":%q}`, env.vlSource, end.UTC().Format(time.RFC3339))
+	}
+
+	got := postBacktest(t, env.s, env.cookie, body(burst.Add(30*time.Minute)))
+	if got.status != http.StatusOK {
+		t.Fatalf("status=%d message=%q", got.status, got.message)
+	}
+	r := got.result
+	if !r.End.Equal(burst.Add(30*time.Minute)) || r.Coverage != 1 || r.Summary.Episodes != 1 || r.Summary.FiringSeconds != 5*60 {
+		t.Fatalf("end=%s coverage=%v summary=%+v, want the burst window replayed in full", r.End, r.Coverage, r.Summary)
+	}
+
+	if got := postBacktest(t, env.s, env.cookie, body(time.Now().Add(time.Hour))); got.status != http.StatusBadRequest || !strings.Contains(got.message, "in the future") {
+		t.Fatalf("future end_time: status=%d message=%q, want 400", got.status, got.message)
+	}
+}

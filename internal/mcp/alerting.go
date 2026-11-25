@@ -30,9 +30,11 @@ type AlertRuleParams struct {
 // BacktestAlertParams is an unsaved alert rule and the past range to replay.
 type BacktestAlertParams struct {
 	AlertRuleParams
-	FrequencySeconds int   `json:"frequency_seconds" jsonschema:"Seconds between evaluations, at least 10"`
-	RangeSeconds     int   `json:"range_seconds" jsonschema:"How far back to replay: 3600 to 604800 seconds. The replay runs at most 120 evaluations, so a long range steps by range/120 and reports coverage"`
-	NotifyOnResolve  *bool `json:"notify_on_resolve,omitempty" jsonschema:"Count resolved notifications. Defaults to true"`
+	FrequencySeconds int    `json:"frequency_seconds" jsonschema:"Seconds between evaluations, at least 10"`
+	RangeSeconds     int    `json:"range_seconds" jsonschema:"How far back to replay: 3600 to 604800 seconds. The replay runs at most 120 evaluations, so a long range steps by range/120 and reports coverage"`
+	NotifyOnResolve  *bool  `json:"notify_on_resolve,omitempty" jsonschema:"Count resolved notifications. Defaults to true"`
+	EndTime          string `json:"end_time,omitempty" jsonschema:"RFC3339 end of the replayed range, to replay a past window such as an incident; default now. A window of at most 120 times the lookback is read in full"`
+	IncludeSeries    bool   `json:"include_series,omitempty" jsonschema:"Return every evaluation in series. By default series holds only the evaluations where the status changed"`
 }
 
 type ListAlertSilencesParams struct {
@@ -71,7 +73,7 @@ func (t *tools) addAlertingTools(s *server.MCPServer) {
 	s.AddTool(testTool, mcp.NewTypedToolHandler(t.handleTestAlert))
 
 	backtestTool := mcp.NewTool("backtest_alert",
-		mcp.WithDescription("Replay an unsaved alert rule over a past range through the same group, no-data and forget rules as live evaluation, to see when it would have fired. Returns episodes, notifications, firing time, breaching evaluations, coverage, a per-evaluation series and the groups that breached most. Saves nothing, sends nothing and ignores silences. One backtest runs per user at a time. ClickHouse SQL must read its window from {{__time_filter}}."),
+		mcp.WithDescription("Replay an unsaved alert rule over a past range through the same group, no-data and forget rules as live evaluation, to see when it would have fired. Returns episodes, notifications, firing time, breaching evaluations, the groups that breached most, the evaluations where the status changed (every evaluation with include_series), coverage, step_seconds and warnings. At most 120 evaluations run, so a range longer than 120 times the lookback has coverage below 1 and can miss short episodes: read coverage before trusting zero episodes, and replay a shorter window with end_time. Saves nothing, sends nothing and ignores silences. One backtest runs per user at a time. ClickHouse SQL must read its window from {{__time_filter}}."),
 		mcp.WithInputSchema[BacktestAlertParams](),
 		mcp.WithTitleAnnotation("Backtest Alert Rule"),
 		readOnlyTool,
@@ -142,6 +144,13 @@ func (t *tools) handleBacktestAlert(ctx context.Context, _ mcp.CallToolRequest, 
 		RangeSeconds:          params.RangeSeconds,
 		NotifyOnResolve:       params.NotifyOnResolve,
 	}
+	if params.EndTime != "" {
+		end, err := time.Parse(time.RFC3339, params.EndTime)
+		if err != nil {
+			return t.errorResult(fmt.Errorf("%s: %w: end_time must be an RFC3339 time: %w", op, errInvalidArgument, err)), nil
+		}
+		req.EndTime = &end
+	}
 	var result *models.BacktestResult
 	err = t.admit(ctx, QueryClassBacktest, src, req.Query, func(ctx context.Context, _ string) error {
 		var runErr error
@@ -154,7 +163,25 @@ func (t *tools) handleBacktestAlert(ctx context.Context, _ mcp.CallToolRequest, 
 	if result.FirstErr != nil {
 		result.FirstError = t.queryError("alert evaluation", result.FirstErr).Error()
 	}
+	if !params.IncludeSeries {
+		result.Series = statusChanges(result.Series)
+	}
 	return jsonTextResult(result)
+}
+
+// statusChanges keeps the evaluations whose status differs from the one
+// before, the first compared with ok, so a quiet replay costs a caller a few
+// points instead of up to 120.
+func statusChanges(series []models.BacktestPoint) []models.BacktestPoint {
+	changes := []models.BacktestPoint{}
+	previous := models.BacktestStatusOK
+	for _, point := range series {
+		if point.Status != previous {
+			changes = append(changes, point)
+			previous = point.Status
+		}
+	}
+	return changes
 }
 
 func (t *tools) handleListAlertSilences(ctx context.Context, _ mcp.CallToolRequest, params ListAlertSilencesParams) (*mcp.CallToolResult, error) {

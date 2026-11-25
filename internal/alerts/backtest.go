@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -32,7 +34,9 @@ func BacktestStep(frequencySeconds, rangeSeconds int) int {
 	return max(frequencySeconds, perEvaluation)
 }
 
-// Backtest replays rule over the rangeSeconds that end at end. It runs query
+// Backtest replays rule over the rangeSeconds that end at end, moved back to a
+// multiple of the step since the Unix epoch so the same request always reads
+// the same instants. It runs query
 // once per step, oldest first, each at its own instant, and feeds the samples
 // through Transition with an in-memory set of instances, so grouping, the
 // no-data policy and the forget rule behave as they do live. It writes and
@@ -45,6 +49,7 @@ func BacktestStep(frequencySeconds, rangeSeconds int) int {
 func Backtest(ctx context.Context, rule BacktestRule, end time.Time, rangeSeconds int, query BacktestQuery) (*models.BacktestResult, error) {
 	rule.Grouped = len(rule.GroupBy) > 0
 	step := BacktestStep(rule.FrequencySeconds, rangeSeconds)
+	end = time.Unix(end.Unix()-end.Unix()%int64(step), 0).UTC()
 	start := end.Add(-time.Duration(rangeSeconds) * time.Second)
 	r := replay{
 		rule:      rule,
@@ -59,6 +64,7 @@ func Backtest(ctx context.Context, rule BacktestRule, end time.Time, rangeSecond
 			Coverage:    min(1, float64(rule.LookbackSeconds)/float64(step)),
 			Series:      make([]models.BacktestPoint, 0, rangeSeconds/step),
 			Groups:      []models.BacktestGroup{},
+			Warnings:    coverageWarnings(rule.FrequencySeconds, rule.LookbackSeconds, step),
 		},
 	}
 	for i := 1; i <= rangeSeconds/step; i++ {
@@ -86,6 +92,43 @@ func Backtest(ctx context.Context, rule BacktestRule, end time.Time, rangeSecond
 	return r.result, nil
 }
 
+// coverageWarnings says which part of the range no lookback window reads.
+// When the rule's own frequency is longer than its lookback, live evaluation
+// has the same gap. Otherwise the gap comes from the evaluation budget, and a
+// shorter window replays in full.
+func coverageWarnings(frequency, lookback, step int) []string {
+	switch {
+	case step <= lookback:
+		return []string{}
+	case frequency > lookback:
+		return []string{fmt.Sprintf("The rule evaluates every %s and reads the last %s, so %.0f%% of the time is never read, live or in this replay: a burst that falls between two windows is missed. Make the lookback at least the frequency to read every minute.",
+			compactDuration(frequency), compactDuration(lookback), 100*(1-float64(lookback)/float64(frequency)))}
+	default:
+		return []string{fmt.Sprintf("To stay within %d evaluations the replay evaluates every %s with the rule's %s lookback, so it reads %.0f%% of the range and can miss an episode shorter than %s. Replay at most %s at a time with end_time to read all of it.",
+			models.MaxBacktestEvaluations, compactDuration(step), compactDuration(lookback), 100*float64(lookback)/float64(step), compactDuration(step), compactDuration(models.MaxBacktestEvaluations*lookback))}
+	}
+}
+
+// compactDuration writes seconds as 45s, 12m, 1h24m or 2d3h.
+func compactDuration(seconds int) string {
+	d, rest := seconds/86400, seconds%86400
+	h, rest := rest/3600, rest%3600
+	m, s := rest/60, rest%60
+	var b strings.Builder
+	for _, part := range []struct {
+		n    int
+		unit string
+	}{{d, "d"}, {h, "h"}, {m, "m"}, {s, "s"}} {
+		if part.n > 0 {
+			fmt.Fprintf(&b, "%d%s", part.n, part.unit)
+		}
+	}
+	if b.Len() == 0 {
+		return "0s"
+	}
+	return b.String()
+}
+
 // replay is the in-memory state of one backtest.
 type replay struct {
 	rule      BacktestRule
@@ -102,6 +145,7 @@ type groupTally struct {
 	episodes  int
 	breaching int
 	maxValue  *float64
+	minValue  *float64
 }
 
 // stopped reports that ctx ended. A deadline makes the result partial;
@@ -168,9 +212,15 @@ func (r *replay) apply(at time.Time, samples []Sample, changes []Change) {
 func (r *replay) count(change Change) {
 	summary := &r.result.Summary
 	tally := r.tally(change)
-	if change.Sampled && tally != nil && (tally.maxValue == nil || change.Value > *tally.maxValue) {
-		value := change.Value
-		tally.maxValue = &value
+	if change.Sampled && tally != nil {
+		if tally.maxValue == nil || change.Value > *tally.maxValue {
+			value := change.Value
+			tally.maxValue = &value
+		}
+		if tally.minValue == nil || change.Value < *tally.minValue {
+			value := change.Value
+			tally.minValue = &value
+		}
 	}
 	// The zero policy compares 0 for a tracked group without a row.
 	if change.To == models.AlertInstanceStateFiring && (change.Sampled || r.rule.NoData == models.AlertNoDataZero) {
@@ -183,8 +233,11 @@ func (r *replay) count(change Change) {
 	case change.From == models.AlertInstanceStateOK && change.To != models.AlertInstanceStateOK:
 		summary.Episodes++
 		summary.Notifications++
-		if tally != nil {
+		switch {
+		case tally != nil:
 			tally.episodes++
+		case r.rule.Grouped:
+			summary.EmptyResultEpisodes++
 		}
 	case change.From != change.To && change.To != models.AlertInstanceStateOK:
 		// An open episode that moves between firing and no_data notifies its new state.
@@ -282,6 +335,7 @@ func (r *replay) finish() {
 			Episodes:             tally.episodes,
 			BreachingEvaluations: tally.breaching,
 			MaxValue:             tally.maxValue,
+			MinValue:             tally.minValue,
 		})
 	}
 	r.result.GroupsOmitted = len(tallies) - len(shown)

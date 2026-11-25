@@ -155,3 +155,23 @@ func TestOAuthDashboardsWithoutAdminBypass(t *testing.T) {
 		t.Fatalf("admin OAuth reads another team's dashboard: status %d, want 403", resp.StatusCode)
 	}
 }
+
+// A scope that no OAuth sign-in can hold, such as tokens:read, is not fixed
+// by signing in again, so the 403 says to use an API token instead.
+func TestOAuthScopeOutsideOAuthNamesAPIToken(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	resp := e.apiGet("/api/v1/me/tokens", e.cliSignIn("profile:read"))
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403", resp.StatusCode)
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Message, "cannot hold the tokens:read scope") || strings.Contains(body.Message, "Sign in again") {
+		t.Fatalf("message %q, want the API token advice and no sign-in advice", body.Message)
+	}
+}

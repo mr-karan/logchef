@@ -23,6 +23,9 @@ const props = defineProps<{
   disabled: boolean;
 }>();
 
+// For an lt or lte rule the lowest value is the one that breaches.
+const showsMin = computed(() => props.request?.threshold_operator === "lt" || props.request?.threshold_operator === "lte");
+
 const ranges = [
   { seconds: 3600, key: "alerts.backtestRange1h" },
   { seconds: 6 * 3600, key: "alerts.backtestRange6h" },
@@ -177,7 +180,7 @@ function pointTitle(point: BacktestResult["series"][number]): string {
             <th class="py-1 pr-3 font-normal">{{ t("alerts.group") }}</th>
             <th class="py-1 pr-3 text-right font-normal">{{ t("alerts.backtestGroupEpisodes") }}</th>
             <th class="py-1 pr-3 text-right font-normal">{{ t("alerts.backtestGroupBreaching") }}</th>
-            <th class="py-1 text-right font-normal">{{ t("alerts.backtestGroupMax") }}</th>
+            <th class="py-1 text-right font-normal">{{ t(showsMin ? "alerts.backtestGroupMin" : "alerts.backtestGroupMax") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -185,7 +188,7 @@ function pointTitle(point: BacktestResult["series"][number]): string {
             <td class="py-1 pr-3 font-mono text-xs">{{ formatAlertGroup(group.group) }}</td>
             <td class="py-1 pr-3 text-right tabular-nums">{{ n(group.episodes) }}</td>
             <td class="py-1 pr-3 text-right tabular-nums">{{ n(group.breaching_evaluations) }}</td>
-            <td class="py-1 text-right tabular-nums">{{ group.max_value ?? "–" }}</td>
+            <td class="py-1 text-right tabular-nums">{{ (showsMin ? group.min_value : group.max_value) ?? "–" }}</td>
           </tr>
         </tbody>
       </table>

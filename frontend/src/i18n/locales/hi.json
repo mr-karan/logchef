@@ -1389,6 +1389,7 @@
   "alerts.backtestGroupEpisodes": "एपिसोड",
   "alerts.backtestGroupBreaching": "सीमा पार करने वाले मूल्यांकन",
   "alerts.backtestGroupMax": "अधिकतम मान",
+  "alerts.backtestGroupMin": "न्यूनतम मान",
   "alerts.backtestGroupsOmitted": "{count} और समूह नहीं दिखाया गया | {count} और समूह नहीं दिखाए गए",
   "ui.admin": "एडमिन",
   "routes.adminOverview": "एडमिन अवलोकन"
