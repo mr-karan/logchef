@@ -101,7 +101,7 @@ pub struct SqlArgs {
     stream: bool,
 
     /// Result row limit. A smaller LIMIT in the query wins. In stream mode this caps the download; otherwise it caps the preview.
-    #[arg(long)]
+    #[arg(long, short = 'l')]
     limit: Option<u32>,
 
     /// Output format
@@ -774,7 +774,10 @@ fn request_time_window(
 /// interpreted in `tz`, into a UTC instant. Generic over the timezone so this
 /// file needs no direct chrono-tz dependency (the concrete zone comes from
 /// `resolve_timezone`).
-fn wall_clock_to_utc<Tz: chrono::TimeZone>(value: &str, tz: Tz) -> Result<DateTime<Utc>> {
+pub(crate) fn wall_clock_to_utc<Tz: chrono::TimeZone>(
+    value: &str,
+    tz: Tz,
+) -> Result<DateTime<Utc>> {
     let value = value.trim();
     if let Ok(instant) = DateTime::parse_from_rfc3339(value) {
         return Ok(instant.with_timezone(&Utc));

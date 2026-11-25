@@ -1,29 +1,41 @@
 //! Alert rules, their dry runs (test and backtest), alert silences and
 //! notification destinations, read only. Each call returns the response
-//! `data` as the server sent it, for `--output json`, and parsed, for the
-//! text tables. The models hold only the fields the tables show; enumerated
-//! values stay strings, since the server adds kinds without a CLI release.
+//! `data` as the server sent it, for `--output json`, which the text tables
+//! parse. The models hold only the fields the tables show; enumerated values
+//! stay strings, since the server adds kinds without a CLI release.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 
-use super::{ApiResponse, Client};
+use super::{ApiResponse, Client, null_as_default};
 use crate::error::{Error, Result};
 
-/// A response's `data`, as sent and parsed.
+/// A response's `data` as the server sent it. Only `parse` reads it into the
+/// model, so `--output json` prints a field the model misreads unchanged.
 #[derive(Debug)]
 pub struct Data<T> {
     pub raw: serde_json::Value,
-    pub parsed: T,
+    model: PhantomData<fn() -> T>,
 }
 
 impl<T: DeserializeOwned> Data<T> {
-    pub(super) fn parse(raw: serde_json::Value) -> Result<Self> {
-        let parsed = serde_json::from_value(raw.clone())
-            .map_err(|e| Error::other(format!("Failed to parse response: {e} (data: {raw})")))?;
-        Ok(Self { raw, parsed })
+    pub(super) fn new(raw: serde_json::Value) -> Self {
+        Self {
+            raw,
+            model: PhantomData,
+        }
+    }
+
+    pub fn parse(&self) -> Result<T> {
+        serde_json::from_value(self.raw.clone()).map_err(|e| {
+            Error::other(format!(
+                "Failed to parse response: {e} (data: {})",
+                self.raw
+            ))
+        })
     }
 }
 
@@ -60,9 +72,9 @@ pub struct AlertTestResult {
     pub threshold_met: bool,
     pub execution_time_ms: i64,
     pub rows_returned: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub warnings: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub samples: Vec<AlertSample>,
     #[serde(default)]
     pub groups_total: i64,
@@ -71,7 +83,7 @@ pub struct AlertTestResult {
 
 #[derive(Debug, Deserialize)]
 pub struct AlertSample {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub group: BTreeMap<String, String>,
     pub value: f64,
     pub threshold_met: bool,
@@ -79,7 +91,8 @@ pub struct AlertSample {
 
 /// `POST /api/v1/alerts/backtest`: what an unsaved rule would have done over
 /// a past range. `coverage` is the share (0 to 1) of the range the evaluated
-/// lookback windows read.
+/// lookback windows read. Older servers send no `warnings`, no
+/// `empty_result_episodes` and no `min_value`.
 #[derive(Debug, Deserialize)]
 pub struct BacktestResult {
     pub start: DateTime<Utc>,
@@ -89,12 +102,14 @@ pub struct BacktestResult {
     pub coverage: f64,
     pub partial: bool,
     pub summary: BacktestSummary,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub groups: Vec<BacktestGroup>,
     #[serde(default)]
     pub groups_omitted: i64,
     #[serde(default)]
     pub first_error: Option<String>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,14 +120,20 @@ pub struct BacktestSummary {
     pub notifications: i64,
     pub no_data_evaluations: i64,
     pub errors: i64,
+    /// Episodes of a grouped rule whose whole result was empty, under its
+    /// no-data policy. They belong to no group, and `episodes` counts them.
+    #[serde(default)]
+    pub empty_result_episodes: i64,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct BacktestGroup {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub group: BTreeMap<String, String>,
     pub episodes: i64,
     pub breaching_evaluations: i64,
+    #[serde(default)]
+    pub min_value: Option<f64>,
     #[serde(default)]
     pub max_value: Option<f64>,
 }
@@ -125,7 +146,7 @@ pub struct AlertSilence {
     /// None covers every rule of the source.
     #[serde(default)]
     pub alert_id: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub matchers: BTreeMap<String, String>,
     #[serde(default)]
     pub comment: String,
@@ -165,7 +186,7 @@ pub struct Destination {
 impl Client {
     async fn get_data<T: DeserializeOwned>(&self, path: &str) -> Result<Data<T>> {
         let response: ApiResponse<serde_json::Value> = self.get(path).await?;
-        Data::parse(response.data)
+        Ok(Data::new(response.data))
     }
 
     async fn post_data<T: DeserializeOwned>(
@@ -174,7 +195,7 @@ impl Client {
         body: &serde_json::Value,
     ) -> Result<Data<T>> {
         let response: ApiResponse<serde_json::Value> = self.post(path, body).await?;
-        Data::parse(response.data)
+        Ok(Data::new(response.data))
     }
 
     /// Lists the rules the caller can see, of one source or of all.
@@ -226,10 +247,9 @@ mod tests {
         full["has_secret"] = true.into();
         full["created_at"] = "2026-11-01T00:00:00Z".into();
         for raw in [summary, full] {
-            let data: Data<Destination> = Data::parse(raw.clone()).expect("parse");
-            assert_eq!(data.parsed.kind, "slack");
-            assert_eq!(data.parsed.team_id, Some(2));
-            assert_eq!(data.raw, raw);
+            let destination: Destination = Data::new(raw).parse().expect("parse");
+            assert_eq!(destination.kind, "slack");
+            assert_eq!(destination.team_id, Some(2));
         }
     }
 }

@@ -150,3 +150,31 @@ fn dry_run_keeps_victorialogs_queries_as_written() {
         "error | stats count()\n"
     );
 }
+
+/// `-l` caps the rows as it does for `query`.
+#[test]
+fn sql_short_limit_flag_sends_the_limit() {
+    let server = FakeServer::start(false);
+    server.state().query_logs = vec![serde_json::json!({"n": 1})];
+    let home = TestHome::new("sql-short-limit");
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({"token": PAT, "token_expires_at": "2099-01-01T00:00:00Z"}),
+    ));
+    let mut cmd = home.logchef();
+    cmd.args([
+        "sql",
+        "SELECT n FROM logs.app",
+        "-t",
+        "1",
+        "-S",
+        "2",
+        "-l",
+        "7",
+        "--output",
+        "json",
+    ]);
+    let out = run(cmd);
+    assert_success(&out);
+    assert_eq!(server.state().native_requests[0]["limit"], 7);
+}

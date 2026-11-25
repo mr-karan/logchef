@@ -52,7 +52,7 @@ pub async fn run(args: DashboardsArgs, global: GlobalArgs) -> Result<()> {
         .context("Failed to list dashboards")?;
     match args.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&dashboards.raw)?),
-        OutputFormat::Text => print!("{}", render(&dashboards.parsed)),
+        OutputFormat::Text => print!("{}", render(&dashboards.parse()?)),
     }
     Ok(())
 }

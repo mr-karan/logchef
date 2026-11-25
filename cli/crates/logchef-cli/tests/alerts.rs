@@ -251,13 +251,13 @@ fn alerts_backtest_sets_the_range_and_frequency_and_prints_the_summary() {
     );
     let text = stdout(&out);
     for line in [
-        "Range:            2026-11-24 10:00 to 2026-11-25 10:00 UTC, 120 evaluations every 5m",
+        "Range:            2026-11-24 10:00 to 2026-11-25 10:00 UTC",
+        "Evaluated 120 times, every 5m (lookback 5m): coverage 50% of the range",
         "Episodes:         2",
         "Notifications:    4",
         "Firing time:      1h30m",
         "Breaching evals:  18",
         "Errors:           1",
-        "Coverage:         50.0%",
         "Partial:          no",
         "First error:      query timed out",
         "Top groups (1, 3 more not listed):",
@@ -389,4 +389,274 @@ fn destinations_list_reads_the_summary_and_the_full_shape() {
     let out = logchef(&home, &["destinations", "list", "--output", "json"]);
     let printed: Value = serde_json::from_str(&stdout(&out)).unwrap();
     assert_eq!(printed, json!([summary, full]));
+}
+
+/// Servers up to v2.8.2 send `null` for an empty list.
+#[test]
+fn alerts_test_and_backtest_read_null_lists_in_text_and_json() {
+    let mut test = test_result();
+    test["warnings"] = Value::Null;
+    test["samples"] = Value::Null;
+    let mut backtest = backtest_result();
+    backtest["warnings"] = Value::Null;
+    backtest["groups"] = Value::Null;
+    backtest["series"] = Value::Null;
+    let server = FakeServer::start(false);
+    server.stub("POST", "/api/v1/alerts/test", Stub::data(test.clone()));
+    server.stub(
+        "POST",
+        "/api/v1/alerts/backtest",
+        Stub::data(backtest.clone()),
+    );
+    let home = signed_in("alerts-null-lists", &server);
+    let request = rule().to_string();
+
+    for (command, data, line) in [
+        ("test", &test, "Value:          12"),
+        ("backtest", &backtest, "Episodes:         2"),
+    ] {
+        let mut cmd = home.logchef();
+        cmd.args(["alerts", command, "-f", "-", "-S", "2"]);
+        let out = run_with_stdin(cmd, &request);
+        assert_success(&out);
+        assert!(stdout(&out).contains(line), "{}", stdout(&out));
+
+        let mut cmd = home.logchef();
+        cmd.args(["alerts", command, "-f", "-", "-S", "2", "--output", "json"]);
+        let out = run_with_stdin(cmd, &request);
+        assert_success(&out);
+        let printed: Value = serde_json::from_str(&stdout(&out)).unwrap();
+        assert_eq!(&printed, data);
+    }
+}
+
+fn backtest(home: &TestHome, request: &Value, args: &[&str]) -> std::process::Output {
+    let mut cmd = home.logchef();
+    cmd.args(["alerts", "backtest", "-f", "-", "-S", "2"])
+        .args(args);
+    run_with_stdin(cmd, &request.to_string())
+}
+
+#[test]
+fn alerts_backtest_from_and_to_set_the_end_and_the_range() {
+    let server = FakeServer::start(false);
+    server.stub(
+        "POST",
+        "/api/v1/alerts/backtest",
+        Stub::data(backtest_result()),
+    );
+    let home = TestHome::new("alerts-backtest-window");
+    let mut config = config_with(&server.url, json!({"token": PAT}));
+    config["contexts"]["test"]["defaults"]["timezone"] = json!("Asia/Kolkata");
+    home.write_config(&config);
+
+    // RFC3339, and wall-clock in the effective timezone: 21:30 IST is 16:00 UTC.
+    let out = backtest(
+        &home,
+        &rule(),
+        &[
+            "--from",
+            "2026-11-24T10:00:00Z",
+            "--to",
+            "2026-11-24 21:30:00",
+            "--frequency",
+            "300",
+        ],
+    );
+    assert_success(&out);
+    let out = backtest(
+        &home,
+        &rule(),
+        &["--end", "2026-11-24T16:00:00Z", "--range", "1h"],
+    );
+    assert_success(&out);
+    let sent: Vec<(Value, Value)> = server
+        .requests_to("POST", "/api/v1/alerts/backtest")
+        .iter()
+        .map(|r| {
+            let body = r.json();
+            (body["end_time"].clone(), body["range_seconds"].clone())
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [
+            (json!("2026-11-24T16:00:00Z"), json!(6 * 3600)),
+            (json!("2026-11-24T16:00:00Z"), json!(3600)),
+        ]
+    );
+}
+
+#[test]
+fn alerts_backtest_rejects_a_window_outside_1h_to_7d_or_mixed_with_range() {
+    let server = FakeServer::start(false);
+    let home = signed_in("alerts-backtest-window-bad", &server);
+    for (args, message) in [
+        (
+            &[
+                "--from",
+                "2026-11-24T10:00:00Z",
+                "--to",
+                "2026-11-24T10:30:00Z",
+            ][..],
+            "spans 30m",
+        ),
+        (
+            &[
+                "--from",
+                "2026-11-14T10:00:00Z",
+                "--to",
+                "2026-11-24T10:00:00Z",
+            ][..],
+            "spans 10d",
+        ),
+        (
+            &[
+                "--from",
+                "2026-11-24T12:00:00Z",
+                "--to",
+                "2026-11-24T10:00:00Z",
+            ][..],
+            "--to must be after --from",
+        ),
+        (
+            &[
+                "--from",
+                "2026-11-24T10:00:00Z",
+                "--to",
+                "2026-11-24T16:00:00Z",
+                "--range",
+                "1h",
+            ][..],
+            "cannot be used with",
+        ),
+        (
+            &[
+                "--from",
+                "2026-11-24T10:00:00Z",
+                "--to",
+                "2026-11-24T16:00:00Z",
+                "--end",
+                "2026-11-24T16:00:00Z",
+            ][..],
+            "cannot be used with",
+        ),
+        (&["--from", "2026-11-24T10:00:00Z"][..], "--to"),
+        (&["--end", "yesterday"][..], "Invalid time format"),
+    ] {
+        let out = backtest(&home, &rule(), args);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(stderr(&out).contains(message), "{args:?}: {}", stderr(&out));
+    }
+    assert!(
+        server
+            .requests_to("POST", "/api/v1/alerts/backtest")
+            .is_empty()
+    );
+}
+
+#[test]
+fn alerts_backtest_prints_the_server_warnings_and_whole_result_episodes() {
+    let mut result = backtest_result();
+    result["coverage"] = json!(0.416);
+    result["step_seconds"] = json!(720);
+    result["warnings"] = json!(["the evaluations read 42% of the range"]);
+    result["summary"]["episodes"] = json!(5);
+    result["summary"]["empty_result_episodes"] = json!(3);
+    let server = FakeServer::start(false);
+    server.stub("POST", "/api/v1/alerts/backtest", Stub::data(result));
+    let home = signed_in("alerts-backtest-warnings", &server);
+
+    let out = backtest(&home, &rule(), &[]);
+    assert_success(&out);
+    let text = stdout(&out);
+    for line in [
+        "Evaluated 120 times, every 12m (lookback 5m): coverage 41% of the range",
+        "Episodes:         5 (3 whole-result no-data episodes, not in the groups table)",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+    assert_eq!(
+        stderr(&out),
+        "warning: the evaluations read 42% of the range\n"
+    );
+}
+
+#[test]
+fn alerts_backtest_warns_of_partial_coverage_an_older_server_left_unsaid() {
+    let server = FakeServer::start(false);
+    server.stub(
+        "POST",
+        "/api/v1/alerts/backtest",
+        Stub::data(backtest_result()),
+    );
+    let home = signed_in("alerts-backtest-coverage", &server);
+    let out = backtest(&home, &rule(), &[]);
+    assert_success(&out);
+    let err = stderr(&out);
+    assert!(err.starts_with("warning: "), "{err}");
+    for part in ["50%", "shorter than the 5m step", "--from/--to"] {
+        assert!(err.contains(part), "{part}: {err}");
+    }
+
+    let mut full = backtest_result();
+    full["coverage"] = json!(1.0);
+    server.stub("POST", "/api/v1/alerts/backtest", Stub::data(full));
+    let out = backtest(&home, &rule(), &[]);
+    assert_success(&out);
+    assert_eq!(stderr(&out), "");
+}
+
+#[test]
+fn alerts_backtest_shows_the_lowest_value_of_a_below_threshold_rule() {
+    let mut result = backtest_result();
+    result["groups"] = json!([
+        {"group": {"service": "api"}, "episodes": 2, "breaching_evaluations": 18,
+         "min_value": 1.5, "max_value": 40},
+        {"group": {"service": "web"}, "episodes": 0, "breaching_evaluations": 0,
+         "min_value": null, "max_value": null}
+    ]);
+    let mut older = backtest_result();
+    older["groups"] = json!([{"group": {"service": "api"}, "episodes": 2,
+                              "breaching_evaluations": 18, "max_value": 40}]);
+    let server = FakeServer::start(false);
+    let home = signed_in("alerts-backtest-min", &server);
+    let mut below = rule();
+    below["threshold_operator"] = json!("lt");
+
+    let table = |result: &Value, request: &Value| {
+        server.stub(
+            "POST",
+            "/api/v1/alerts/backtest",
+            Stub::data(result.clone()),
+        );
+        let out = backtest(&home, request, &[]);
+        assert_success(&out);
+        let text = stdout(&out);
+        let mut lines = text.lines().skip_while(|l| !l.starts_with("GROUP"));
+        let header = lines
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .last()
+            .unwrap()
+            .to_owned();
+        let rows: Vec<String> = lines
+            .skip(1)
+            .map(|l| l.split_whitespace().last().unwrap().to_owned())
+            .collect();
+        (header, rows)
+    };
+    assert_eq!(
+        table(&result, &below),
+        ("MIN".to_owned(), vec!["1.5".to_owned(), "-".to_owned()])
+    );
+    assert_eq!(
+        table(&result, &rule()),
+        ("MAX".to_owned(), vec!["40".to_owned(), "-".to_owned()])
+    );
+    assert_eq!(
+        table(&older, &below),
+        ("MAX".to_owned(), vec!["40".to_owned()])
+    );
 }

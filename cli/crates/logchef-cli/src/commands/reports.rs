@@ -164,7 +164,8 @@ async fn start(args: RunArgs, global: GlobalArgs) -> Result<()> {
 /// credential is an OAuth sign-in (which holds no report scope), or a
 /// non-admin asked for `--scope all`. A 404 on one report also hides a
 /// report the caller may not edit. The generic hints (sign in again,
-/// team/source access) would mislead, so both errors are replaced. `action`
+/// team/source access) would mislead, so both errors are replaced, and a
+/// missing scope's message too, since the advice here says it. `action`
 /// completes "Failed to ...", and `report` is None for the list.
 fn explain(
     err: logchef_core::Error,
@@ -172,6 +173,7 @@ fn explain(
     report: Option<i64>,
     scope: &str,
 ) -> anyhow::Error {
+    let scope_denied = err.is_scope_denied();
     match (err, report) {
         (
             logchef_core::Error::Api {
@@ -186,8 +188,13 @@ fn explain(
             } else {
                 ""
             };
+            let reason = if scope_denied {
+                ".".to_owned()
+            } else {
+                format!(": {message}")
+            };
             anyhow!(
-                "The server refused to {action}: {message}\n\
+                "The server refused to {action}{reason}\n\
                  It needs an API token with the {scope} scope (or *). A `logchef auth` sign-in \
                  cannot reach reports. Create a token on your Profile page, then pass it with \
                  --token or LOGCHEF_AUTH_TOKEN.{admin}"

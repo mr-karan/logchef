@@ -444,11 +444,7 @@ fn hint_for_core(err: &logchef_core::Error) -> Option<String> {
             status: Some(401), ..
         } => Some("token invalid or expired — run `logchef auth`".into()),
         // The client wrote the fix into a missing-scope message.
-        Error::Api {
-            status: Some(403),
-            message,
-            ..
-        } if message.contains("API token") => None,
+        err if err.is_scope_denied() => None,
         Error::Api {
             status: Some(403), ..
         } => Some("no access to that team/source — check `logchef whoami`".into()),
@@ -486,7 +482,7 @@ mod tests {
             Some(403),
             "API token does not have the required scope logs:read. Create a new API token with \
              the logs:read scope: a token cannot gain scopes after it is created",
-            Some("AuthorizationError".into()),
+            Some(logchef_core::error::INSUFFICIENT_SCOPE.into()),
         ));
         assert_eq!(hint_for_error(&err), None);
     }
