@@ -34,9 +34,16 @@ func BacktestStep(frequencySeconds, rangeSeconds int) int {
 	return max(frequencySeconds, perEvaluation)
 }
 
-// Backtest replays rule over the rangeSeconds that end at end, moved back to a
-// multiple of the step since the Unix epoch so the same request always reads
-// the same instants. It runs query
+// AlignBacktestEnd moves end back to a multiple of the step since the Unix
+// epoch, so a replay that ends now reads the same instants whenever it runs,
+// and whether a short burst is caught does not depend on the second asked.
+func AlignBacktestEnd(end time.Time, frequencySeconds, rangeSeconds int) time.Time {
+	step := int64(BacktestStep(frequencySeconds, rangeSeconds))
+	return time.Unix(end.Unix()-end.Unix()%step, 0).UTC()
+}
+
+// Backtest replays rule over the rangeSeconds that end at end, the last
+// evaluation at end itself. It runs query
 // once per step, oldest first, each at its own instant, and feeds the samples
 // through Transition with an in-memory set of instances, so grouping, the
 // no-data policy and the forget rule behave as they do live. It writes and
@@ -49,7 +56,6 @@ func BacktestStep(frequencySeconds, rangeSeconds int) int {
 func Backtest(ctx context.Context, rule BacktestRule, end time.Time, rangeSeconds int, query BacktestQuery) (*models.BacktestResult, error) {
 	rule.Grouped = len(rule.GroupBy) > 0
 	step := BacktestStep(rule.FrequencySeconds, rangeSeconds)
-	end = time.Unix(end.Unix()-end.Unix()%int64(step), 0).UTC()
 	start := end.Add(-time.Duration(rangeSeconds) * time.Second)
 	r := replay{
 		rule:      rule,

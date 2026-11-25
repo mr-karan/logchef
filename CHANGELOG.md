@@ -75,8 +75,9 @@ destinations, and get errors that say what to do.
   token with the scope.
 - `logchef sql --dry-run` fills `{{__time_filter}}`, `{{__from}}` and
   `{{__to}}` the way the server does on a ClickHouse source.
-- Backtest evaluation instants are multiples of the step since the Unix epoch,
-  so a rerun reads the same windows and catches the same bursts.
+- A backtest that ends now ends at a multiple of the step since the Unix
+  epoch, so a rerun reads the same windows and catches the same bursts. One
+  with `end_time` evaluates at that instant.
 - The alert test lists the groups closest to firing first, lowest for `lt`
   and `lte` and highest for `gt` and `gte`, and `value` is the first one's.
 - `get_all_field_dimensions` and the field sidebar leave out log-body columns

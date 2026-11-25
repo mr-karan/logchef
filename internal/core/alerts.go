@@ -751,7 +751,10 @@ func backtestAlert(ctx context.Context, db store.StoreOps, ds *datasource.Servic
 		return nil, fmt.Errorf("%w: lookback_seconds must be greater than zero", ErrInvalidAlertConfiguration)
 	}
 	now := time.Now().UTC()
-	end := now
+	// A replay that ends now is aligned to the step so a rerun reads the same
+	// windows; an end_time is an instant the caller chose, such as the end of
+	// an incident, and is evaluated as given.
+	end := alerts.AlignBacktestEnd(now, req.FrequencySeconds, req.RangeSeconds)
 	if req.EndTime != nil {
 		if req.EndTime.After(now) {
 			return nil, fmt.Errorf("%w: end_time %s is in the future", ErrInvalidAlertConfiguration, req.EndTime.UTC().Format(time.RFC3339))
