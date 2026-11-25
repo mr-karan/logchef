@@ -298,6 +298,42 @@ func AddTeamMember(ctx context.Context, db store.Store, log *slog.Logger, teamID
 	return before, after, nil
 }
 
+// UpdateTeamMemberRole changes the role of an existing team member. Unlike
+// AddTeamMember it never adds a membership, so a role change cannot re-add a
+// member someone else just removed. It returns the membership before and after
+// the change; they are equal when the role was already set.
+func UpdateTeamMemberRole(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, userID models.UserID, role models.TeamRole) (before, after *models.TeamMember, err error) {
+	if err := validateTeamMember(teamID, userID, role); err != nil {
+		return nil, nil, err
+	}
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if _, err := GetTeam(ctx, tx, teamID); err != nil {
+			return err
+		}
+		before, err = tx.GetTeamMemberForUpdate(ctx, teamID, userID)
+		if err != nil {
+			return fmt.Errorf("error checking team member: %w", err)
+		}
+		if before == nil {
+			return ErrTeamMemberNotFound
+		}
+		if before.Role == role {
+			after = before
+			return nil
+		}
+		log.Info("updating team member role", "team_id", teamID, "user_id", userID, "old_role", before.Role, "new_role", role)
+		if err := tx.UpdateTeamMemberRole(ctx, teamID, userID, role); err != nil {
+			return fmt.Errorf("error updating team member role: %w", err)
+		}
+		after, err = tx.GetTeamMember(ctx, teamID, userID)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
+}
+
 // RemoveTeamMember removes a user from a team and returns the membership it
 // removed, read under the row lock of the delete. Removing a non-member is a
 // no-op that returns a nil membership.

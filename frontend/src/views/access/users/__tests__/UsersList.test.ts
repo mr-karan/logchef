@@ -70,6 +70,16 @@ function respond(method: string, url: string, body?: unknown): Envelope {
     return ok([]);
   }
 
+  const memberPath = url.match(/^\/teams\/(\d+)\/members\/(\d+)$/);
+  if (memberPath && method === "put") {
+    const existing = server.memberships.find(
+      (m) => m.team_id === Number(memberPath[1]) && m.user_id === Number(memberPath[2]),
+    );
+    if (!existing) return { status: "error", message: "User is not a member of this team", error_type: "NotFoundError" };
+    existing.role = (body as { role: "admin" | "editor" | "member" }).role;
+    return ok({ message: "Team member role updated" });
+  }
+
   const memberDelete = url.match(/^\/teams\/(\d+)\/members\/(\d+)$/);
   if (memberDelete && method === "delete") {
     const teamId = Number(memberDelete[1]);
@@ -241,8 +251,9 @@ describe("People (UsersList + UserDetailDrawer)", () => {
 
     await chooseSelectOption(cruxRoleTrigger, "Editor");
 
-    const postCall = server.calls.find((c) => c.method === "post" && c.url === "/teams/10/members");
-    expect(postCall?.body).toEqual({ user_id: 2, role: "editor" });
+    const putCall = server.calls.find((c) => c.method === "put" && c.url === "/teams/10/members/2");
+    expect(putCall?.body).toEqual({ role: "editor" });
+    expect(server.calls.some((c) => c.method === "post")).toBe(false);
     expect(toasts.some((t) => t.message === "Team role updated")).toBe(true);
     expect(host.querySelector('[data-testid="people-row-2"]')?.textContent).toContain("Crux · editor");
   });
@@ -259,7 +270,7 @@ describe("People (UsersList + UserDetailDrawer)", () => {
     const dialog = document.querySelector("[role=alertdialog]");
     expect(dialog).not.toBeNull();
     expect(dialog?.textContent).toContain("provisioning");
-    expect(server.calls.some((c) => c.method === "post" && c.url === "/teams/20/members")).toBe(false);
+    expect(server.calls.some((c) => c.method === "put" && c.url === "/teams/20/members/2")).toBe(false);
 
     const confirmBtn = [...(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
       (b) => b.textContent?.trim() === "Change role",
@@ -267,8 +278,8 @@ describe("People (UsersList + UserDetailDrawer)", () => {
     confirmBtn?.click();
     await settle();
 
-    const postCall = server.calls.find((c) => c.method === "post" && c.url === "/teams/20/members");
-    expect(postCall?.body).toEqual({ user_id: 2, role: "admin" });
+    const putCall = server.calls.find((c) => c.method === "put" && c.url === "/teams/20/members/2");
+    expect(putCall?.body).toEqual({ role: "admin" });
   });
 
   it("asks with a ConfirmDialog before demoting yourself from global admin", async () => {

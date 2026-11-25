@@ -122,6 +122,23 @@ func TestAuditTeamAndMembershipEventsRecordFields(t *testing.T) {
 	wantChange(t, ev, "role", "member", "admin")
 	e.reset()
 
+	update := func(role string) auditResp {
+		t.Helper()
+		return e.do(http.MethodPut, teamPath+"/members/"+memberTarget, fmt.Sprintf(`{"role":%q}`, role), e.cookie)
+	}
+	wantStatus(t, update("editor"), http.StatusOK)
+	ev = e.only()
+	checkActorAndTarget(t, ev, "team_member.update", e.admin, "team_member", memberTarget)
+	wantChange(t, ev, "role", "admin", "editor")
+	e.reset()
+	// Setting the role a member already has records nothing.
+	wantStatus(t, update("editor"), http.StatusOK)
+	if got := e.events(); len(got) != 0 {
+		t.Errorf("an unchanged role stored %d events", len(got))
+	}
+	add("admin")
+	e.reset()
+
 	wantStatus(t, e.do(http.MethodDelete, teamPath+"/members/"+memberTarget, ``, e.cookie), http.StatusOK)
 	wantChange(t, e.only(), "role", "admin", nil)
 	e.reset()
@@ -129,6 +146,11 @@ func TestAuditTeamAndMembershipEventsRecordFields(t *testing.T) {
 	wantStatus(t, e.do(http.MethodDelete, teamPath+"/members/"+memberTarget, ``, e.cookie), http.StatusOK)
 	if got := e.events(); len(got) != 0 {
 		t.Errorf("removing a non-member stored %d events", len(got))
+	}
+	// A role change for a user who is not a member fails and records nothing.
+	wantStatus(t, update("member"), http.StatusNotFound)
+	if got := e.events(); len(got) != 0 {
+		t.Errorf("a role change for a non-member stored %d events", len(got))
 	}
 }
 

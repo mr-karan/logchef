@@ -454,6 +454,7 @@ func (s *Server) setupRoutes() {
 	teamMembers.Get("/", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeamMembers) // Any team member can view
 	// Team admins can add/remove members even on managed teams (day-to-day operations)
 	teamMembers.Post("/", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember).Name(string(audit.TeamMemberAdd))
+	teamMembers.Put("/:userID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeamMember).Name(string(audit.TeamMemberUpdate))
 	teamMembers.Delete("/:userID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember).Name(string(audit.TeamMemberRemove))
 
 	// Team settings — managed guard only on structural changes (rename/description)

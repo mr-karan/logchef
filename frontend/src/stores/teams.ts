@@ -345,7 +345,7 @@ export const useTeamsStore = defineStore("teams", () => {
     }
 
     return await state.callApi({
-      apiCall: () => teamsApi.addTeamMember(teamId, { user_id: userId, role }),
+      apiCall: () => teamsApi.updateTeamMemberRole(teamId, userId, role),
       successMessage: i18n.global.t("access.memberRoleUpdated"),
       operationKey: `updateTeamMemberRole-${teamId}-${userId}`,
       onSuccess: async () => {
