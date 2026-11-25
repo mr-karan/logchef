@@ -71,8 +71,9 @@ What each credential can do:
 A 403 that names a scope on a `logchef auth` sign-in means the sign-in predates
 that scope: run `logchef auth` again. The CLI and MCP never create items. To
 create them in the Apply phase, the user exports a short-lived personal API
-token as `LOGCHEF_AUTH_TOKEN` (the CLI uses it too), made under
-**Settings → API Tokens** with an expiry of a day and only these scopes:
+token as `LOGCHEF_AUTH_TOKEN` (the CLI uses it too), made under the user
+menu > **Profile** > **API tokens** (`/settings/profile`) > **Create Token**,
+with an expiry of a day and only these scopes:
 
 ```text
 profile:read teams:read sources:read logs:read saved_queries:read
@@ -119,15 +120,21 @@ curl -sS --fail-with-body -H "Authorization: Bearer $LOGCHEF_AUTH_TOKEN" \
 1. **Schema and formats.** `logchef schema` and `logchef fields` (MCP
    `get_source_schema`, `get_all_field_dimensions`). An app can log in more
    than one format: check whether both `level` and `lvl`, or structured and
-   plain lines, appear, and write filters that cover each.
+   plain lines, appear, and write filters that cover each. A field that
+   `get_all_field_dimensions` returns with an `error` (such as a timeout) and
+   empty values was not read: retry over `2m`, or read it alone with
+   `get_field_values`, `logchef fields <field>` or SQL.
 2. **Samples.** Ten to twenty recent rows, then ten to twenty error rows.
    Find where level, status, latency and error text live.
 3. **JSON inside a String column.** On ClickHouse, `msg.status` on a String
    column reads JSON with `JSONExtractString`, which returns a JSON number as
    text: `msg.status=400` matches, `msg.latency_ms>500` (unquoted) compares
    numbers, aggregates such as `p95(msg.latency_ms)` work, and only
-   `msg.latency_ms>"500"` (quoted) compares text. Run `logchef explain` (MCP
-   `translate_logchefql`) on every filter and act on its warnings. List the
+   `msg.latency_ms>"500"` (quoted) compares text. A missing key reads as `""`,
+   so `msg.status!=200` also matches every row without `status`: scope the
+   filter to the event that carries the key, or add `msg.status!=""` first.
+   Run `logchef explain` (MCP `translate_logchefql`) on every filter and act
+   on its warnings. List the
    keys an app writes, nested groups such as `engine.error` included, with
    `SELECT arrayJoin(JSONExtractKeys(assumeNotNull(msg), 'engine')) AS key,
    count() FROM <table> WHERE <app filter> GROUP BY key` in `logchef sql`.
@@ -316,12 +323,43 @@ annotation when the repository has one.
 
 ### Thresholds from data
 
-For each rule, count its exact filter per lookback window over 7 days:
-`'<rule filter> | count() as value by time(15m)' -s 7d -l 1000`, adding the
-group key for a grouped rule. Missing buckets count as 0. Report p50, p95, p99
-and the maximum, separately for peak and off-hours when they differ, and set
-the threshold above normal noise, usually at or above the 7-day p99 with
-headroom.
+For each rule, count its exact filter in windows as long as its lookback,
+over 7 days. Missing windows count as 0. A longer bucket overstates the
+count: `by time(15m)` holds three 5-minute windows, about 3 times what a 5m
+lookback sees.
+
+On ClickHouse, one query gives the exact figures. Take the rule filter's SQL
+from `logchef explain '<rule filter>'`, and for a 5m lookback run:
+
+```bash
+logchef sql -S <source> -s 7d '
+SELECT quantilesExact(0.5, 0.95, 0.99)(value) AS p50_p95_p99,
+       max(value) AS peak, count() AS windows
+FROM (
+  SELECT toDateTime(toStartOfFiveMinutes(_timestamp)) AS bucket, count() AS value
+  FROM logs.app
+  WHERE {{__time_filter}} AND <rule filter SQL>
+  GROUP BY bucket
+  ORDER BY bucket WITH FILL
+    FROM toDateTime(toStartOfFiveMinutes({{__from}})) TO toDateTime({{__to}}) STEP 300
+)'
+```
+
+`windows` is 2016 for 7 days, empty windows included. `{{__from}}` and
+`{{__to}}` are DateTime64, so the bucket and both fill bounds go through
+`toDateTime()`, or ClickHouse refuses the fill (code 475). For another
+lookback of `n` seconds, bucket with `toStartOfInterval(_timestamp, INTERVAL
+n SECOND)` and fill with `STEP n`. For a grouped rule, run it for the busiest
+group values, each with `AND <key> = '<value>'`.
+
+On VictoriaLogs or Loki, use `'<rule filter> | count() as value by time(5m)'
+-l 1000` in chunks of at most 3 days with `--from`/`--to`, since a `by time()`
+pipe allows 1,000 buckets.
+
+Fixed windows can split a burst in two, and a rule's sliding window can then
+see up to twice a window's count. Report p50, p95, p99 and the peak,
+separately for peak and off-hours when they differ, and set the threshold
+above normal noise, usually at or above the 7-day p99 with headroom.
 
 ### Validation
 

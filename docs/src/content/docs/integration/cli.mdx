@@ -222,7 +222,7 @@ logchef --token "logchef_1_abc123..." query ""
 logchef config set auth.token "logchef_1_abc123..."
 ```
 
-Generate API tokens from the Logchef web UI under your profile settings, or see
+Create an API token in the web UI under the user menu > **Profile** > **API tokens** (`/settings/profile`), or see
 [Service Tokens](/features/service-tokens/) for non-login automation accounts.
 
 ## Command Reference
@@ -471,7 +471,7 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 :::
 
 :::note[Time macros and variables]
-A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros/). With no time flag the window is the configured default range. On a ClickHouse source, `--dry-run` prints the query with `{{__time_filter}}`, `{{__from}}` and `{{__to}}` filled in as the server fills them, so the printed SQL runs as is. `{{__interval}}` and `{{__interval_s}}` need `--interval`, and the server refuses the query without it. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
+A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros/). With no time flag the window is the configured default range. On a ClickHouse source, `--dry-run` prints the query with `{{__time_filter}}`, `{{__from}}`, `{{__to}}` and `{{__timezone}}` filled in as the server fills them, so the printed SQL runs as is. `{{__interval}}` and `{{__interval_s}}` need `--interval`: the dry run leaves them as written without it, and the server refuses the query. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
 :::
 
 :::note[Auto-injected time predicate]
@@ -785,7 +785,7 @@ logchef alerts backtest -f rule.json -S app-logs --frequency 60 \
   --from '2026-01-15 09:00:00' --to '2026-01-15 13:00:00'
 ```
 
-`test` runs the rule once over its lookback and prints the value, whether it meets the threshold, the group samples and any warnings. `backtest` replays it over the range through the same group, no-data and forget rules as live evaluation, and prints the episodes, notifications, firing time, coverage and the groups that breached most. `--range` takes `1h`, `6h`, `24h` or `7d`; `--frequency` sets the seconds between evaluations. `--end` replays the range that ends at a past time, and `--from` with `--to` replays exactly that window (1 hour to 7 days), in RFC 3339 or `'YYYY-MM-DD HH:MM:SS'` in the effective timezone. A backtest runs at most 120 evaluations, so it reads the whole range only up to 120 times the lookback (10 hours for 5 minutes). The output shows the step and the coverage on their own line, and the server's warnings on stderr: below 100% an episode shorter than the step can be missed, so replay incident windows with `--from`/`--to`. For an `lt` or `lte` rule the groups table shows each group's lowest value. One backtest runs per user at a time. A ClickHouse SQL rule must read its window from `{{__time_filter}}` to be backtested. `--output json` prints the server's result as is.
+`test` runs the rule once over its lookback and prints the value, whether it meets the threshold, the group samples and any warnings. `backtest` replays it over the range through the same group, no-data and forget rules as live evaluation, and prints the episodes, notifications, firing time, coverage and the groups that breached most. Times print in the effective timezone, in the form `--from` and `--to` take, and each firing or no-data episode is listed with its start and end (up to 20), so you can replay one. `--range` takes `1h`, `6h`, `24h` or `7d`; `--frequency` sets the seconds between evaluations. `--end` replays the range that ends at a past time, and `--from` with `--to` replays exactly that window (1 hour to 7 days), in RFC 3339 or `'YYYY-MM-DD HH:MM:SS'` in the effective timezone. A backtest runs at most 120 evaluations, so it reads the whole range only up to 120 times the lookback (10 hours for 5 minutes). The output shows the step and the coverage on their own line, and the server's warnings on stderr: below 100% an episode shorter than the step can be missed, so replay incident windows with `--from`/`--to`. For an `lt` or `lte` rule the groups table shows each group's lowest value. One backtest runs per user at a time. A ClickHouse SQL rule must read its window from `{{__time_filter}}` to be backtested. `--output json` prints the server's result as is.
 
 ### Silences
 
