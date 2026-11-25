@@ -380,6 +380,7 @@ func (s *Server) setupRoutes() {
 	admin.Get("/users", s.requireTokenScope(models.TokenScopeUsersRead), s.handleListUsers)
 	admin.Post("/users", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleCreateUser).Name(string(audit.UserCreate))
 	admin.Get("/users/:userID", s.requireTokenScope(models.TokenScopeUsersRead), s.handleGetUser)
+	admin.Get("/users/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListUserTeams)
 	admin.Put("/users/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleUpdateUser).Name(string(audit.UserUpdate))
 	admin.Delete("/users/:userID", s.requireTokenScope(models.TokenScopeUsersWrite), s.handleDeleteUser).Name(string(audit.UserDelete))
 	admin.Get("/service-accounts", s.requireTokenScope(models.TokenScopeUsersRead), s.handleListServiceAccounts)
@@ -404,6 +405,7 @@ func (s *Server) setupRoutes() {
 
 	// Global Team Management
 	admin.Get("/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeams)
+	admin.Get("/team-memberships", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListAllTeamMemberships)
 	admin.Post("/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleCreateTeam).Name(string(audit.TeamCreate))
 	admin.Delete("/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamNotManaged, s.handleDeleteTeam).Name(string(audit.TeamDelete))
 
