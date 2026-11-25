@@ -41,6 +41,36 @@ func (s *Server) handleGetUser(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, user)
 }
 
+// handleListUserTeams lists all teams a human user belongs to, with their role
+// and whether each team is managed by provisioning config.
+// URL: GET /api/v1/admin/users/:userID/teams
+// Requires: Admin privileges (requireAdmin middleware)
+func (s *Server) handleListUserTeams(c fiber.Ctx) error {
+	user, ok := s.loadHumanUser(c)
+	if !ok {
+		return nil
+	}
+	teams, err := core.ListAdminUserTeams(c.Context(), s.store, user.ID)
+	if err != nil {
+		s.log.Error("failed to list user teams", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing user teams")
+	}
+	return SendSuccess(c, fiber.StatusOK, teams)
+}
+
+// handleListAllTeamMemberships lists all team memberships across all teams for
+// admin list views.
+// URL: GET /api/v1/admin/team-memberships
+// Requires: Admin privileges (requireAdmin middleware)
+func (s *Server) handleListAllTeamMemberships(c fiber.Ctx) error {
+	memberships, err := core.ListAllTeamMemberships(c.Context(), s.store)
+	if err != nil {
+		s.log.Error("failed to list team memberships", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing team memberships")
+	}
+	return SendSuccess(c, fiber.StatusOK, memberships)
+}
+
 // loadHumanUser parses :userID and returns the user only if it's a human account.
 // Service principals are managed via /admin/service-accounts/* and must not leak
 // through the human-user CRUD path.
