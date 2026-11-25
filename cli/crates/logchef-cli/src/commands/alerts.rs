@@ -1,11 +1,12 @@
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
-use logchef_core::api::{Alert, AlertTestResult, BacktestResult};
+use logchef_core::api::{Alert, AlertTestResult, BacktestPoint, BacktestResult};
 use logchef_core::cache::Cache;
 use logchef_core::timerange::resolve_timezone;
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::io::Read;
 
 use crate::cli::GlobalArgs;
@@ -20,6 +21,13 @@ const BACKTEST_TIMEOUT_SECS: u64 = 75;
 /// The shortest and longest range the server replays.
 const BACKTEST_MIN_RANGE_SECS: i64 = 3600;
 const BACKTEST_MAX_RANGE_SECS: i64 = 7 * 24 * 3600;
+
+/// The most episodes the text output lists.
+const MAX_LISTED_EPISODES: usize = 20;
+
+/// How the text output writes an instant: the wall-clock form `--from` and
+/// `--to` read, so an episode can be replayed as given.
+const WALL_CLOCK: &str = "%Y-%m-%d %H:%M:%S";
 
 #[derive(Args)]
 #[command(after_help = "EXAMPLES:
@@ -220,9 +228,9 @@ async fn backtest(args: BacktestArgs, global: GlobalArgs) -> Result<()> {
         ctx.timeout_secs.max(BACKTEST_TIMEOUT_SECS)
     })?;
     let mut request = read_request(&args.test, &s).await?;
+    let zone = resolve_timezone(s.ctx.defaults.timezone.as_deref());
     let instant = |value: &str| {
-        wall_clock_to_utc(value, resolve_timezone(s.ctx.defaults.timezone.as_deref()))
-            .with_context(|| format!("Invalid time '{value}'"))
+        wall_clock_to_utc(value, zone).with_context(|| format!("Invalid time '{value}'"))
     };
     let window = match (&args.from, &args.to, &args.end) {
         (Some(from), Some(to), _) => {
@@ -263,7 +271,7 @@ async fn backtest(args: BacktestArgs, global: GlobalArgs) -> Result<()> {
                     Some("lt" | "lte")
                 ),
             };
-            print!("{}", render_backtest(&result, &rule));
+            print!("{}", render_backtest(&result, &rule, &zone));
         }
     }
     Ok(())
@@ -426,7 +434,14 @@ fn render_test(result: &AlertTestResult) -> String {
     out
 }
 
-fn render_backtest(result: &BacktestResult, rule: &RuleShape) -> String {
+/// Renders the replay with its instants in `zone`, the zone `--from` and
+/// `--to` are read in.
+fn render_backtest<Z>(result: &BacktestResult, rule: &RuleShape, zone: &Z) -> String
+where
+    Z: TimeZone + Display,
+    Z::Offset: Display,
+{
+    let local = |t: DateTime<Utc>| t.with_timezone(zone).format(WALL_CLOCK).to_string();
     let summary = &result.summary;
     let lookback = rule
         .lookback_seconds
@@ -436,7 +451,7 @@ fn render_backtest(result: &BacktestResult, rule: &RuleShape) -> String {
         n => format!(" ({n} whole-result no-data episodes, not in the groups table)"),
     };
     let mut out = format!(
-        "Range:            {} to {} UTC\n\
+        "Range:            {} to {} {zone}\n\
          Evaluated {} times, every {}{lookback}: coverage {} of the range\n\
          Episodes:         {}{whole_result}\n\
          Notifications:    {}\n\
@@ -445,8 +460,8 @@ fn render_backtest(result: &BacktestResult, rule: &RuleShape) -> String {
          No-data evals:    {}\n\
          Errors:           {}\n\
          Partial:          {}\n",
-        result.start.format("%Y-%m-%d %H:%M"),
-        result.end.format("%Y-%m-%d %H:%M"),
+        local(result.start),
+        local(result.end),
         result.evaluations,
         duration(result.step_seconds),
         percent(result.coverage),
@@ -464,6 +479,22 @@ fn render_backtest(result: &BacktestResult, rule: &RuleShape) -> String {
     );
     if let Some(error) = &result.first_error {
         out.push_str(&format!("First error:      {error}\n"));
+    }
+    let episodes = episodes(&result.series);
+    if !episodes.is_empty() {
+        out.push_str(&format!("\nFiring or no-data episodes ({zone}):\n"));
+        for episode in episodes.iter().take(MAX_LISTED_EPISODES) {
+            let end = episode
+                .end
+                .map_or("ongoing at the end of the range".to_owned(), local);
+            out.push_str(&format!("{} to {end}\n", local(episode.start)));
+        }
+        if episodes.len() > MAX_LISTED_EPISODES {
+            out.push_str(&format!(
+                "... and {} more\n",
+                episodes.len() - MAX_LISTED_EPISODES
+            ));
+        }
     }
     if result.groups.is_empty() {
         return out;
@@ -496,10 +527,34 @@ fn render_backtest(result: &BacktestResult, rule: &RuleShape) -> String {
     out
 }
 
-/// A 0 to 1 share as a whole percent, rounded down so only a whole range
-/// reads 100%.
+/// A run of firing or no-data evaluations, from its first one to the first
+/// later `ok` one. An error evaluation keeps the states it found, so it
+/// neither starts nor ends a run. `end` is None for a run the range ends.
+struct Episode {
+    start: DateTime<Utc>,
+    end: Option<DateTime<Utc>>,
+}
+
+fn episodes(series: &[BacktestPoint]) -> Vec<Episode> {
+    let mut episodes: Vec<Episode> = Vec::new();
+    for point in series {
+        let open = episodes.last_mut().filter(|e| e.end.is_none());
+        match (point.status.as_str(), open) {
+            ("firing" | "no_data", None) => episodes.push(Episode {
+                start: point.t,
+                end: None,
+            }),
+            ("ok", Some(episode)) => episode.end = Some(point.t),
+            _ => {}
+        }
+    }
+    episodes
+}
+
+/// A 0 to 1 share as a whole percent, rounded as the server's warnings round
+/// it (Go's `%.0f`), so the summary and a warning agree.
 fn percent(share: f64) -> String {
-    format!("{}%", (share * 100.0).floor())
+    format!("{:.0}%", share * 100.0)
 }
 
 fn group(labels: &BTreeMap<String, String>) -> String {
@@ -555,6 +610,14 @@ mod tests {
         assert_eq!(duration(90), "1m30s");
         assert_eq!(duration(3600), "1h");
         assert_eq!(duration(7 * 86_400 + 60), "7d1m");
+    }
+
+    #[test]
+    fn coverage_rounds_as_the_server_warning_does() {
+        // Go's %.0f of 100*coverage: nearest, an exact half to even.
+        assert_eq!(percent(0.4167), "42%");
+        assert_eq!(percent(0.0595), "6%");
+        assert_eq!(percent(0.125), "12%");
     }
 
     #[test]

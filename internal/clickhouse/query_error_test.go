@@ -28,7 +28,7 @@ func TestPublicQueryErrorResourceLimits(t *testing.T) {
 }
 
 func TestPublicQueryErrorDistributedDiagnostics(t *testing.T) {
-	for _, code := range []int32{16, 34, 35, 36, 42, 43, 46, 47, 50, 53, 59, 60, 62, 63, 69, 70, 80, 81, 158, 184, 215, 307, 386, 396} {
+	for _, code := range []int32{10, 16, 34, 35, 36, 42, 43, 44, 46, 47, 50, 51, 52, 53, 59, 60, 62, 63, 69, 70, 80, 81, 158, 174, 179, 181, 182, 183, 184, 190, 206, 207, 215, 307, 352, 353, 386, 396, 475} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
 			for _, tc := range []struct {
 				name, message string

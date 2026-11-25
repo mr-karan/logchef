@@ -249,9 +249,11 @@ async fn login(config: &Config, global: GlobalArgs, open_browser: bool) -> Resul
     let Some(issuer) = meta.data.oauth_issuer else {
         anyhow::bail!(
             "{} (Logchef {}) does not offer Logchef OAuth sign-in. Upgrade the server and \
-             enable auth.oauth, or use an API token: pass --token or set LOGCHEF_AUTH_TOKEN.",
+             enable auth.oauth, or use an API token: pass --token or set LOGCHEF_AUTH_TOKEN. \
+             Create one under {}.",
             server_url,
-            meta.data.version
+            meta.data.version,
+            auth::API_TOKENS_PAGE
         );
     };
     if issuer != server_url {

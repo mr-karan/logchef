@@ -285,6 +285,8 @@ func TestClickHouseQueryFailureResponses(t *testing.T) {
 		{"aggregation", "/query", `{"query_text":"SELECT sum(number) FROM system.numbers WHERE sum(number) > 1"}`, "Aggregate"},
 		{"function", "/query", `{"query_text":"SELECT no_such_query_function(1)"}`, "no_such_query_function"},
 		{"histogram", "/histogram", `{"query_text":"SELECT missing_query_field FROM system.numbers","window":"1m","start_time":"2026-10-01T00:00:00Z","end_time":"2026-10-01T01:00:00Z"}`, "missing_query_field"},
+		// A DateTime bucket filled between DateTime64 bounds.
+		{"with fill", "/query", `{"query_text":"SELECT toStartOfFiveMinutes(now64(3)) AS b ORDER BY b WITH FILL FROM now64(3) - 900 TO now64(3) STEP 300"}`, "WITH FILL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := doAuthzRequest(t, env.s, http.MethodPost, path+tc.endpoint, tc.body, withSession(env.cookie))
@@ -293,6 +295,13 @@ func TestClickHouseQueryFailureResponses(t *testing.T) {
 			}
 		})
 	}
+	// An exception outside the public diagnostics shows only its code.
+	t.Run("other exception", func(t *testing.T) {
+		got := doAuthzRequest(t, env.s, http.MethodPost, path+"/query", `{"query_text":"SELECT throwIf(1, 'logchef private detail')"}`, withSession(env.cookie))
+		if got.status != 500 || got.message != "Failed to query logs (ClickHouse error code 395)" {
+			t.Fatalf("status=%d message=%q, want 500 with the error code only", got.status, got.message)
+		}
+	})
 	t.Run("success", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, path+"/query", strings.NewReader(`{"query_text":"SELECT number FROM numbers(3)"}`))
 		req.Header.Set("Content-Type", "application/json")

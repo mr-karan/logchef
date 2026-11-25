@@ -21,10 +21,26 @@ use crate::session;
 use crate::ui;
 
 const STREAMING_SQL_MIN_TIMEOUT_SECS: u32 = 120;
-/// The histogram windows, the only bucket sizes the server renders.
-const INTERVALS: [&str; 16] = [
-    "1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h",
-    "12h", "24h",
+/// The histogram windows, the only bucket sizes the server renders, with the
+/// seconds and the ClickHouse literal it renders for each (`intervals` in
+/// internal/template/builtins.go).
+const INTERVALS: [(&str, u32, &str); 16] = [
+    ("1s", 1, "INTERVAL 1 SECOND"),
+    ("5s", 5, "INTERVAL 5 SECOND"),
+    ("10s", 10, "INTERVAL 10 SECOND"),
+    ("15s", 15, "INTERVAL 15 SECOND"),
+    ("30s", 30, "INTERVAL 30 SECOND"),
+    ("1m", 60, "INTERVAL 1 MINUTE"),
+    ("5m", 300, "INTERVAL 5 MINUTE"),
+    ("10m", 600, "INTERVAL 10 MINUTE"),
+    ("15m", 900, "INTERVAL 15 MINUTE"),
+    ("30m", 1800, "INTERVAL 30 MINUTE"),
+    ("1h", 3600, "INTERVAL 1 HOUR"),
+    ("2h", 7200, "INTERVAL 2 HOUR"),
+    ("3h", 10800, "INTERVAL 3 HOUR"),
+    ("6h", 21600, "INTERVAL 6 HOUR"),
+    ("12h", 43200, "INTERVAL 12 HOUR"),
+    ("24h", 86400, "INTERVAL 1 DAY"),
 ];
 /// The macros the server renders from the request's time range.
 const TIME_MACROS: [&str; 4] = ["__from", "__to", "__time_filter", "__tz_offset"];
@@ -83,7 +99,7 @@ pub struct SqlArgs {
     to: Option<String>,
 
     /// Bucket size for the {{__interval}} and {{__interval_s}} macros
-    #[arg(long, value_parser = INTERVALS)]
+    #[arg(long, value_parser = INTERVALS.map(|(window, ..)| window))]
     interval: Option<String>,
 
     /// Value for a {{name}} placeholder, substituted by the server as a
@@ -129,8 +145,9 @@ pub struct SqlArgs {
     #[arg(long, visible_alias = "explain")]
     show_sql: bool,
 
-    /// Print the resolved query (after --since/--from/--to handling) to stdout
-    /// and exit without executing it. Pipes cleanly to other tools.
+    /// Print the resolved query (after --since/--from/--to handling, with a
+    /// ClickHouse query's macros rendered as the server renders them) to
+    /// stdout and exit without executing it. Pipes cleanly to other tools.
     #[arg(long)]
     dry_run: bool,
 }
@@ -329,17 +346,20 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     // For VictoriaLogs this is the raw LogsQL (the time window rides in the
     // request fields, never spliced into the query) — never ClickHouse SQL.
     if args.dry_run {
-        match &window {
-            Some((start, end)) if !is_victorialogs && !is_loki => println!(
-                "{}",
-                render_time_macros(
-                    &sql,
-                    parse_instant(start)?,
-                    parse_instant(end)?,
-                    timestamp_field(&source)
-                )
-            ),
-            _ => println!("{}", sql),
+        if is_victorialogs || is_loki {
+            println!("{sql}");
+        } else {
+            let window = match &window {
+                Some((start, end)) => Some((parse_instant(start)?, parse_instant(end)?)),
+                None => None,
+            };
+            let inputs = MacroInputs {
+                window,
+                interval: args.interval.as_deref(),
+                timezone: &timezone,
+                ts_field: timestamp_field(&source),
+            };
+            println!("{}", render_macros(&sql, &inputs));
         }
         return Ok(());
     }
@@ -846,18 +866,35 @@ fn parse_instant(value: &str) -> Result<DateTime<Utc>> {
         .with_timezone(&Utc))
 }
 
-/// Renders {{__from}}, {{__to}} and {{__time_filter}} outside quoted text and
-/// comments as the server renders them for ClickHouse (`renderInstant` and
-/// the `__time_filter` macro in internal/template/builtins.go). Other
-/// `{{...}}` stay as written.
-fn render_time_macros(sql: &str, from: DateTime<Utc>, to: DateTime<Utc>, ts_field: &str) -> String {
+/// The request values the server renders ClickHouse macros from.
+struct MacroInputs<'a> {
+    window: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    /// One of the `INTERVALS` windows.
+    interval: Option<&'a str>,
+    /// The effective timezone, an IANA name.
+    timezone: &'a str,
+    ts_field: &'a str,
+}
+
+/// Renders the built-in macros outside quoted text and comments as the server
+/// renders them for ClickHouse (the `macros` table in
+/// internal/template/builtins.go). A macro whose input the request lacks
+/// stays as written, as does {{__tz_offset}}, which the server rejects in
+/// ClickHouse SQL, and every other `{{...}}`.
+fn render_macros(sql: &str, inputs: &MacroInputs) -> String {
     let instant = |t: DateTime<Utc>| {
         format!(
             "toDateTime64('{}', 3, 'UTC')",
             t.format("%Y-%m-%d %H:%M:%S%.3f")
         )
     };
-    let column = format!("`{}`", ts_field.replace('\\', "\\\\").replace('`', "\\x60"));
+    let column = format!(
+        "`{}`",
+        inputs.ts_field.replace('\\', "\\\\").replace('`', "\\x60")
+    );
+    let interval = inputs
+        .interval
+        .and_then(|w| INTERVALS.iter().find(|(window, ..)| *window == w));
     let mut out = String::with_capacity(sql.len());
     let mut i = 0;
     while i < sql.len() {
@@ -869,14 +906,18 @@ fn render_time_macros(sql: &str, from: DateTime<Utc>, to: DateTime<Utc>, ts_fiel
         if sql[i..].starts_with("{{")
             && let Some(len) = sql[i + 2..].find("}}")
         {
-            let rendered = match sql[i + 2..i + 2 + len].trim() {
-                "__from" => Some(instant(from)),
-                "__to" => Some(instant(to)),
-                "__time_filter" => Some(format!(
+            let rendered = match (sql[i + 2..i + 2 + len].trim(), inputs.window) {
+                ("__from", Some((from, _))) => Some(instant(from)),
+                ("__to", Some((_, to))) => Some(instant(to)),
+                ("__time_filter", Some((from, to))) => Some(format!(
                     "{column} >= {} AND {column} < {}",
                     instant(from),
                     instant(to)
                 )),
+                ("__interval", _) => interval.map(|(_, _, literal)| literal.to_string()),
+                ("__interval_s", _) => interval.map(|(_, seconds, _)| seconds.to_string()),
+                // An IANA name holds no character a string literal escapes.
+                ("__timezone", _) => Some(format!("'{}'", inputs.timezone)),
                 _ => None,
             };
             if let Some(rendered) = rendered {
@@ -1843,14 +1884,25 @@ mod tests {
         );
     }
 
+    fn inputs(
+        window: Option<(&str, &str)>,
+        interval: Option<&'static str>,
+    ) -> MacroInputs<'static> {
+        MacroInputs {
+            window: window.map(|(from, to)| (from.parse().unwrap(), to.parse().unwrap())),
+            interval,
+            timezone: "Asia/Kolkata",
+            ts_field: "_timestamp",
+        }
+    }
+
     #[test]
     fn dry_run_renders_time_macros_as_the_server_does() {
-        let from = "2026-11-25T08:00:00.5Z".parse().unwrap();
-        let to = "2026-11-25T09:30:00Z".parse().unwrap();
+        let window = Some(("2026-11-25T08:00:00.5Z", "2026-11-25T09:30:00Z"));
         let sql = "SELECT '{{__from}}', {{ __from }} AS f, {{__to}} -- {{__to}}\n\
                    FROM t WHERE {{__time_filter}} AND x = {{service}} /* {{__from}} */";
         assert_eq!(
-            render_time_macros(sql, from, to, "_timestamp"),
+            render_macros(sql, &inputs(window, None)),
             "SELECT '{{__from}}', toDateTime64('2026-11-25 08:00:00.500', 3, 'UTC') AS f, \
              toDateTime64('2026-11-25 09:30:00.000', 3, 'UTC') -- {{__to}}\n\
              FROM t WHERE `_timestamp` >= toDateTime64('2026-11-25 08:00:00.500', 3, 'UTC') \
@@ -1861,11 +1913,44 @@ mod tests {
 
     #[test]
     fn dry_run_escapes_the_timestamp_column_as_the_server_does() {
-        let at = "2026-11-25T08:00:00Z".parse().unwrap();
+        let at = "2026-11-25T08:00:00Z";
+        let inputs = MacroInputs {
+            ts_field: "odd`ts\\x",
+            ..inputs(Some((at, at)), None)
+        };
         assert_eq!(
-            render_time_macros("{{__time_filter}}", at, at, "odd`ts\\x"),
+            render_macros("{{__time_filter}}", &inputs),
             "`odd\\x60ts\\\\x` >= toDateTime64('2026-11-25 08:00:00.000', 3, 'UTC') \
              AND `odd\\x60ts\\\\x` < toDateTime64('2026-11-25 08:00:00.000', 3, 'UTC')"
+        );
+    }
+
+    #[test]
+    fn dry_run_renders_the_interval_and_timezone_as_the_server_does() {
+        let sql = "SELECT toStartOfInterval(ts, {{__interval}}, {{ __timezone }}), \
+                   {{__interval_s}}, {{__tz_offset}}";
+        assert_eq!(
+            render_macros(sql, &inputs(None, Some("24h"))),
+            "SELECT toStartOfInterval(ts, INTERVAL 1 DAY, 'Asia/Kolkata'), 86400, {{__tz_offset}}"
+        );
+        assert_eq!(
+            render_macros("{{__interval}} {{__interval_s}}", &inputs(None, Some("5m"))),
+            "INTERVAL 5 MINUTE 300"
+        );
+        assert_eq!(
+            render_macros("{{__interval}} {{__interval_s}}", &inputs(None, Some("1s"))),
+            "INTERVAL 1 SECOND 1"
+        );
+    }
+
+    #[test]
+    fn dry_run_leaves_a_macro_without_its_input_as_written() {
+        assert_eq!(
+            render_macros(
+                "{{__from}} {{__to}} {{__time_filter}} {{__interval}} {{__interval_s}}",
+                &inputs(None, None)
+            ),
+            "{{__from}} {{__to}} {{__time_filter}} {{__interval}} {{__interval_s}}"
         );
     }
 }

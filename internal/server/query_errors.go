@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -67,6 +68,11 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 	case isUpstreamError:
 		return queryErrorResponse{fiber.StatusBadGateway, upstreamErr.Message, models.ExternalServiceErrorType}
 	default:
+		// The message of any other ClickHouse exception can name a server, so
+		// the response gives only its code.
+		if code, ok := clickhouse.ExceptionCode(err); ok {
+			failure = fmt.Sprintf("%s (ClickHouse error code %d)", failure, code)
+		}
 		return queryErrorResponse{fiber.StatusInternalServerError, failure, models.DatabaseErrorType}
 	}
 }

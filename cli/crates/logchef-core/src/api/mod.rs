@@ -8,7 +8,7 @@ pub use dashboards::*;
 pub use models::*;
 pub use reports::*;
 
-use crate::auth::{self, SavedCredential};
+use crate::auth::{self, API_TOKENS_PAGE, SavedCredential};
 use crate::error::{Error, INSUFFICIENT_SCOPE, Result};
 use reqwest::Client as HttpClient;
 use reqwest::header::{
@@ -248,11 +248,11 @@ impl Client {
                     return Error::auth_required(&saved.context, reason);
                 }
                 format!(
-                    "A `logchef auth` sign-in cannot hold {needs}. Pass an API token that has it with --token or LOGCHEF_AUTH_TOKEN."
+                    "A `logchef auth` sign-in cannot hold {needs}. Pass an API token that has it with --token or LOGCHEF_AUTH_TOKEN. Create one under {API_TOKENS_PAGE}."
                 )
             }
             Credential::Bearer(_) | Credential::None => format!(
-                "{}. Create a new API token with {needs}: a token cannot gain scopes after it is created",
+                "{}. A token cannot gain scopes after it is created. Create one with {needs} under {API_TOKENS_PAGE}.",
                 api_error.message.trim_end_matches('.')
             ),
         };

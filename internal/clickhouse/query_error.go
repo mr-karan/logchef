@@ -25,8 +25,9 @@ func publicQueryError(err error) error {
 	}
 	// Only query diagnostics from ClickHouse's src/Common/ErrorCodes.cpp are public.
 	switch exception.Code {
-	case 16, 34, 35, 36, 42, 43, 46, 47, 50, 53, 59, 60, 62, 63,
-		69, 70, 80, 81, 158, 184, 191, 215, 307, 386, 396:
+	case 10, 16, 34, 35, 36, 42, 43, 44, 46, 47, 50, 51, 52, 53, 59, 60, 62, 63,
+		69, 70, 80, 81, 158, 174, 179, 181, 182, 183, 184, 190, 191, 206, 207,
+		215, 307, 352, 353, 386, 396, 475:
 		message := exception.Message
 		for strings.HasPrefix(message, "Received from ") {
 			_, diagnostic, found := strings.Cut(message, ". DB::Exception: ")
@@ -46,6 +47,16 @@ func publicQueryError(err error) error {
 	default:
 		return err
 	}
+}
+
+// ExceptionCode returns the code of the ClickHouse exception in err. The code
+// is public even when the exception's message is not.
+func ExceptionCode(err error) (int32, bool) {
+	exception, ok := errors.AsType[*clickhouse.Exception](err)
+	if !ok {
+		return 0, false
+	}
+	return exception.Code, true
 }
 
 // Error codes of the two bounds of a LogchefQL aggregation, from

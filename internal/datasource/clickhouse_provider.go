@@ -583,6 +583,7 @@ func (p *ClickHouseProvider) GetAllFieldValues(ctx context.Context, source *mode
 			IsLowCardinality: fieldResult.IsLowCard,
 			Values:           values,
 			TotalDistinct:    fieldResult.TotalDistinct,
+			Error:            fieldResult.Error,
 		}
 	}
 

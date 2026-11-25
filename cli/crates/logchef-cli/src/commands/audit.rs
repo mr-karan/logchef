@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
 use logchef_core::api::{AuditEvent, AuditEventFilter};
+use logchef_core::auth::API_TOKENS_PAGE;
 
 use crate::cli::GlobalArgs;
 use crate::commands::parse_lookback;
@@ -10,7 +11,7 @@ use crate::session;
 use crate::ui;
 
 #[derive(Args)]
-#[command(after_help = "EXAMPLES:
+#[command(after_help = format!("EXAMPLES:
   # Every source change in the last 24 hours
   logchef audit list --action source. --since 24h
 
@@ -21,8 +22,9 @@ use crate::ui;
   logchef audit list --action session.login --outcome failure --since 7d
 
 The audit log is for global admins. Use an API token with the audit:read scope
-(pass it with --token or LOGCHEF_AUTH_TOKEN). A `logchef auth` sign-in cannot
-read it.")]
+(pass it with --token or LOGCHEF_AUTH_TOKEN). Create one under
+{API_TOKENS_PAGE}. A `logchef auth`
+sign-in cannot read it."))]
 pub struct AuditArgs {
     #[command(subcommand)]
     command: AuditCommand,
@@ -178,7 +180,7 @@ fn explain_forbidden(err: logchef_core::Error) -> anyhow::Error {
         } => anyhow!(
             "The server refused the audit log{}\n\
              Reading it needs a global admin's API token with the audit:read scope (or *). \
-             A `logchef auth` sign-in cannot read it. Create one on your Profile page, \
+             A `logchef auth` sign-in cannot read it. Create one under {API_TOKENS_PAGE}, \
              then pass it with --token or LOGCHEF_AUTH_TOKEN.",
             // A missing scope's message says what the advice below says.
             if scope_denied {
@@ -306,6 +308,14 @@ mod tests {
         let text = format!("{err:#}");
         assert!(text.contains("audit:read"), "{text}");
         assert!(text.contains("Admin access required"), "{text}");
+        assert_eq!(
+            text.matches(
+                "Create one under your user menu > Profile > API tokens (/settings/profile)"
+            )
+            .count(),
+            1,
+            "{text}"
+        );
         assert_eq!(crate::ui::hint_for_error(&err), None);
     }
 }

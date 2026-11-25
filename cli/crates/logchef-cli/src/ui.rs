@@ -480,8 +480,9 @@ mod tests {
     fn a_missing_scope_gets_no_access_hint() {
         let err = anyhow::Error::new(logchef_core::Error::api_with_type(
             Some(403),
-            "API token does not have the required scope logs:read. Create a new API token with \
-             the logs:read scope: a token cannot gain scopes after it is created",
+            "API token does not have the required scope logs:read. A token cannot gain scopes \
+             after it is created. Create one with the logs:read scope under your user menu > \
+             Profile > API tokens (/settings/profile).",
             Some(logchef_core::error::INSUFFICIENT_SCOPE.into()),
         ));
         assert_eq!(hint_for_error(&err), None);
