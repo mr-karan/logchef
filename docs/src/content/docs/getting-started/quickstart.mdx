@@ -11,7 +11,7 @@ This guide will help you get Logchef up and running quickly. We'll cover install
 ## Prerequisites
 
 - Docker (for the recommended setup) or a Linux/macOS system for binary installation
-- A ClickHouse or VictoriaLogs instance (ClickHouse is included in the Docker setup)
+- A ClickHouse or VictoriaLogs instance. The Docker setup includes ClickHouse. Logchef's built-in schema needs 26.8 or later for its text index. Older versions work with tables you create yourself.
 - SSO Provider (Dex is included in the Docker setup)
 
 ## Installation Options

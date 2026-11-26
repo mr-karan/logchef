@@ -145,6 +145,10 @@ when:
 - the result has more than 100 rows, or the backend cut it. Add a `HAVING`
   clause, or a `LIMIT` with an `ORDER BY`.
 
+A NULL value, such as `max()` over no row, is no data for its group and
+follows the rule's [no-data policy](#when-the-query-returns-no-rows), in every
+query language.
+
 The rule's page lists its groups with their state, value and how long they
 have been in it. The list of rules shows "3 firing" or "1 with no data".
 Changing **Group by** closes every open episode with the message "rule
@@ -451,6 +455,25 @@ long it fired, a state strip, the groups with the most breaching evaluations,
 and "Evaluated 96 of 1,440 ticks, covering 33% of the range" when the step is
 longer than the lookback.
 
+A backtest that ends now ends at the latest multiple of the step since the
+Unix epoch, so a rerun reads the same instants whenever it runs. Through the
+API, `end_time` replays the range that ends at a past moment, such as an
+incident, with the last evaluation at that moment.
+
+**Read the coverage.** The 120-evaluation budget reads the whole range only
+when the range is at most 120 times the lookback: 10 hours for a 5-minute
+lookback. Over 24 hours such a rule is evaluated every 12 minutes and reads
+42% of the range, and over 7 days every 84 minutes and 6%, so an episode
+shorter than the step can fall between two windows. The result's `warnings`
+say so, with the window that would read all of it. Replay known incident
+windows with `end_time` (`--from`/`--to` in `logchef alerts backtest`) at full
+coverage before trusting zero episodes.
+
+For a grouped rule, `summary.episodes` counts the episodes of every group plus
+`empty_result_episodes`: the no-data episodes of the whole result having no
+rows, which belong to no group. Each group reports its `min_value` and
+`max_value`; the lowest matters for an `lt` or `lte` rule.
+
 | Bound | Value |
 |-------|-------|
 | Range | 1 hour to 7 days |
@@ -465,8 +488,10 @@ similar) or names no macro gets 422. LogchefQL conditions, VictoriaLogs and
 Loki queries can always be backtested. A failed evaluation keeps the state, as it does live, and the
 response's `first_error` names the first failure.
 
-A backtest runs with your access: it needs `alerts:write` and the source
-visible through one of your teams. Global admins get no bypass.
+A test and a backtest run with your access: each needs `alerts:read` and the
+source visible through one of your teams. Global admins get no bypass. Neither
+writes anything nor sends a notification, so an OAuth sign-in such as
+`logchef auth` or an MCP client can run them.
 
 ## Evaluation and state
 
@@ -515,14 +540,14 @@ use email destinations.
 |-------|-------------|---------|
 | `GET /alerts`, `GET /alerts/:alertID` | `alerts:read` | Rules, with `group_by`, `no_data_policy`, `notify_on_resolve`, `destination_ids` and `instance_counts` |
 | `POST /alerts`, `PUT /alerts/:alertID`, `DELETE /alerts/:alertID` | `alerts:write` | Change a rule |
-| `POST /alerts/test` | `alerts:write` | Run a rule's query once. Takes `source_id`, `group_by` and `no_data_policy`; returns `samples` (at most 20), `groups_total` and `no_data` |
-| `POST /alerts/backtest` | `alerts:write` | The test body plus `frequency_seconds`, `range_seconds` and `notify_on_resolve` |
+| `POST /alerts/test` | `alerts:read` | Run a rule's query once. Takes `source_id`, `group_by` and `no_data_policy`; returns `samples` (at most 20, the groups closest to firing first: lowest for `lt`/`lte`, highest for `gt`/`gte`), `value` (the first sample's), `groups_total`, `no_data` and `warnings`, which flag a ClickHouse query that reads the current time or whose value column is not named `value` |
+| `POST /alerts/backtest` | `alerts:read` | The test body plus `frequency_seconds`, `range_seconds`, `notify_on_resolve` and an optional `end_time` (RFC 3339, not in the future); returns `warnings` about coverage |
 | `GET /alerts/:alertID/instances` | `alerts:read` | The rule's groups, at most 200, firing first |
 | `GET /alerts/:alertID/history` | `alerts:read` | Episodes, each with `group_key`, `group` and `deliveries` |
 | `POST /alerts/:alertID/resolve` | `alerts:write` | Resolve the rule, or one group with `group_key` |
 | `GET /alert-silences?source_id=` | `alerts:read` | A source's silences, with `active` |
 | `POST /alert-silences`, `PUT /alert-silences/:silenceID`, `DELETE /alert-silences/:silenceID` | `alerts:write` | Change a silence |
-| `GET /notification-destinations` | `destinations:read` | The destinations you can use |
+| `GET /notification-destinations` | `destinations:read` | The destinations you can use. An OAuth client, such as `logchef auth` or MCP, gets only `id`, `name`, `type`, `scope`, `team_id` and `is_active` |
 | `POST /notification-destinations`, `PUT /notification-destinations/:destinationID`, `DELETE /notification-destinations/:destinationID` | `destinations:write` | Change a destination |
 | `POST /notification-destinations/test` | `destinations:write` | Send a test to `{"id": 5}` or to an unsaved definition |
 
@@ -555,7 +580,10 @@ A destination body:
 
 A condition rule sends `"query_language": "logchefql"`, `"editor_mode":
 "condition"` and the LogchefQL rule in `query`, such as
-`level = "error" | count() as value by service`.
+`level = "error" | count() as value by service`. `condition_json` may be
+left out: the server stores the filter in front of the aggregation pipe,
+`level = "error"` here. A rule with no filter, such as `| count()`, must send
+`condition_json`. The same applies to the test and backtest routes.
 
 An email destination puts `{"user_ids": [3, 9], "addresses": ["oncall@example.com"]}`
 in `config` and no secret. Slack and PagerDuty destinations take an empty

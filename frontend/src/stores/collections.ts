@@ -9,6 +9,7 @@ import {
   type CreateCollectionRequest,
   type UpdateCollectionRequest,
   type AddCollectionMemberRequest,
+  type CollectionRole,
   type AddCollectionTeamRequest,
   type AddCollectionItemRequest,
   type CollectionItemLink,
@@ -115,6 +116,17 @@ export const useCollectionsStore = defineStore("collections", () => {
       apiCall: () => collectionsApi.addMember(id, payload),
       operationKey: `addMember-${id}`,
       successMessage: i18n.global.t("library.memberAdded"),
+      onSuccess: async () => {
+        await Promise.all([fetchMembers(id), fetchCollections()]);
+      },
+    });
+  }
+
+  async function updateMemberRole(id: number, userId: number, role: CollectionRole) {
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.updateMemberRole(id, userId, role),
+      operationKey: `updateMemberRole-${id}-${userId}`,
+      successMessage: i18n.global.t("library.memberRoleUpdated"),
       onSuccess: async () => {
         await Promise.all([fetchMembers(id), fetchCollections()]);
       },
@@ -241,6 +253,7 @@ export const useCollectionsStore = defineStore("collections", () => {
     deleteCollection,
     fetchMembers,
     addMember,
+    updateMemberRole,
     removeMember,
     fetchTeams,
     addTeam,

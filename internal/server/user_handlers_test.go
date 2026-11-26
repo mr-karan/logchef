@@ -448,3 +448,79 @@ func TestAdminAccountHandlersRejectMissingUsers(t *testing.T) {
 		})
 	}
 }
+
+func TestAdminListAllTeamMembershipsHTTP(t *testing.T) {
+	ctx := context.Background()
+	s := newAuthzTestServer(t)
+	admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
+	alice := mkTestUser(t, s.store, "alice@example.com", models.UserRoleMember)
+	bob := mkTestUser(t, s.store, "bob@example.com", models.UserRoleMember)
+
+	crux := &models.Team{Name: "Crux"}
+	nomad := &models.Team{Name: "Nomad"}
+	empty := &models.Team{Name: "Empty"}
+	for _, team := range []*models.Team{crux, nomad, empty} {
+		if err := s.store.CreateTeam(ctx, team); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.store.SetTeamManaged(ctx, nomad.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.AddTeamMember(ctx, crux.ID, alice.ID, models.TeamRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.AddTeamMember(ctx, nomad.ID, alice.ID, models.TeamRoleMember); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.AddTeamMember(ctx, nomad.ID, bob.ID, models.TeamRoleEditor); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("session returns all memberships sorted with managed flag", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/team-memberships", http.NoBody)
+		req.AddCookie(sessionCookie(t, s.store, admin))
+		resp, err := s.app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		var envelope struct {
+			Status string                         `json:"status"`
+			Data   []models.TeamMembershipSummary `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+			t.Fatal(err)
+		}
+		if len(envelope.Data) != 3 {
+			t.Fatalf("got %d memberships, want 3: %+v", len(envelope.Data), envelope.Data)
+		}
+		if envelope.Data[0].TeamName != "Crux" || envelope.Data[0].UserID != alice.ID || envelope.Data[0].Role != models.TeamRoleAdmin || envelope.Data[0].TeamManaged {
+			t.Errorf("row[0] = %+v, want Crux/alice/admin/unmanaged", envelope.Data[0])
+		}
+		if envelope.Data[1].TeamName != "Nomad" || envelope.Data[1].UserID != alice.ID || envelope.Data[1].Role != models.TeamRoleMember || !envelope.Data[1].TeamManaged {
+			t.Errorf("row[1] = %+v, want Nomad/alice/member/managed", envelope.Data[1])
+		}
+		if envelope.Data[2].TeamName != "Nomad" || envelope.Data[2].UserID != bob.ID || envelope.Data[2].Role != models.TeamRoleEditor || !envelope.Data[2].TeamManaged {
+			t.Errorf("row[2] = %+v, want Nomad/bob/editor/managed", envelope.Data[2])
+		}
+	})
+
+	t.Run("auth and token scope checks", func(t *testing.T) {
+		memberResp := doAuthzRequest(t, s, http.MethodGet, "/api/v1/admin/team-memberships", "", withSession(sessionCookie(t, s.store, alice)))
+		if memberResp.status != http.StatusForbidden {
+			t.Errorf("non-admin status = %d, want 403", memberResp.status)
+		}
+		wrongScope := doAuthzRequest(t, s, http.MethodGet, "/api/v1/admin/team-memberships", "", withBearer(apiToken(t, s, admin, models.TokenScopeUsersRead)))
+		if wrongScope.status != http.StatusForbidden {
+			t.Errorf("missing teams:read status = %d, want 403", wrongScope.status)
+		}
+		okScope := doAuthzRequest(t, s, http.MethodGet, "/api/v1/admin/team-memberships", "", withBearer(apiToken(t, s, admin, models.TokenScopeTeamsRead)))
+		if okScope.status != http.StatusOK {
+			t.Errorf("teams:read status = %d (%q), want 200", okScope.status, okScope.message)
+		}
+	})
+}

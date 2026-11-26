@@ -11,6 +11,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/audit"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -28,6 +29,8 @@ func (s *Server) sendDestinationError(c fiber.Ctx, err error, action string) err
 		return SendErrorWithType(c, fiber.StatusNotFound, "Notification destination not found", models.NotFoundErrorType)
 	case errors.Is(err, core.ErrDestinationInUse):
 		return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
+	case errors.Is(err, access.ErrInsufficientScope):
+		return sendInsufficientScope(c, principalFromLocals(c).User, err)
 	default:
 		s.log.Error("notification destination request failed", "action", action, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to "+action+" notification destination", models.GeneralErrorType)
@@ -39,8 +42,16 @@ func parseDestinationID(c fiber.Ctx) (models.DestinationID, error) {
 	return models.DestinationID(id), err
 }
 
-// handleListDestinations lists the destinations the caller can use.
+// handleListDestinations lists the destinations the caller may use. An OAuth
+// client gets summaries: no recipient address, user ID or receiver host.
 func (s *Server) handleListDestinations(c fiber.Ctx) error {
+	if p := principalFromLocals(c); p.Method == access.AuthOAuth {
+		summaries, err := core.ListDestinationSummariesForPrincipal(c.Context(), s.store, p)
+		if err != nil {
+			return s.sendDestinationError(c, err, "list")
+		}
+		return SendSuccess(c, fiber.StatusOK, summaries)
+	}
 	list, err := core.ListDestinationsForUser(c.Context(), s.store, currentUser(c))
 	if err != nil {
 		return s.sendDestinationError(c, err, "list")

@@ -154,7 +154,7 @@ func TestMCPUnauthorizedChallenge(t *testing.T) {
 	e := newOAuthEnv(t)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
 	wantPRM := `resource_metadata="` + testIssuer + `/.well-known/oauth-protected-resource/mcp"`
-	wantScope := `scope="profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read"`
+	wantScope := `scope="profile:read teams:read sources:read logs:read saved_queries:read collections:read alerts:read saved_views:read destinations:read dashboards:read"`
 
 	resp := e.mcpPost("", body, nil)
 	challenge := resp.Header.Get("WWW-Authenticate")

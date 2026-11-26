@@ -829,11 +829,52 @@ const unreleasedShots = [
       <p>What's new in Logchef.</p>
     </header>
 
+    <article class="version" id="v2.8.3">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.8.3">v2.8.3</a>
+        <span class="version-date">Nov 26, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.3" class="version-link" target="_blank" rel="noopener">Release notes &rarr;</a>
+      </div>
+
+      <p class="release-intro">
+        Read-only agent onboarding tools and the <code>logchef-setup</code> skill, streamlined admin People and collection member management, ClickHouse default text index, and alert backtest and query diagnostic fixes. No migrations: upgrade in place from v2.8.0, v2.8.1 or v2.8.2.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">Added</div>
+        <ul class="change-list">
+          <li>Read-only agent onboarding tools across MCP and the CLI: <code>test_alert</code>, <code>backtest_alert</code> (with past-window replay via <code>end_time</code> / <code>--from</code> / <code>--to</code>), <code>list_alert_silences</code>, <code>list_collections</code>, <code>list_destinations</code>, <code>list_dashboards</code>, <code>get_dashboard</code>, and the bundled <code>logchef-setup</code> skill (<code>logchef skills get setup</code>).</li>
+          <li>New OAuth read scopes <code>destinations:read</code> and <code>dashboards:read</code>, plus <code>logchef doctor</code> scope checks and actionable 403 missing-scope guidance.</li>
+          <li>Admin People view with a teams column, filters, user detail drawer, inline team role editing, and <code>PUT /teams/:teamID/members/:userID</code>. Collection owners can now invite members and change roles without global admin rights.</li>
+          <li>Unquoted numbers on dotted JSON paths in ClickHouse LogchefQL now compare numerically for ordering (<code>msg.latency_ms &gt; 500</code>) and as text for equality (<code>msg.status = 400</code>), with warnings when ordering against quoted numbers.</li>
+          <li>Default ClickHouse log table creation now uses ClickHouse's native text index on the log body.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">Changed</div>
+        <ul class="change-list">
+          <li><code>POST /api/v1/alerts/test</code> and <code>/alerts/backtest</code> now require <code>alerts:read</code> instead of <code>alerts:write</code>, and condition rules can omit <code>condition_json</code> (derived from the filter before the pipe).</li>
+          <li><code>get_all_field_dimensions</code> and the field sidebar skip log-body columns on ClickHouse and report timed-out or failing fields instead of silently dropping them.</li>
+          <li><code>logchef sql --dry-run</code> fills ClickHouse macros (<code>{"{{__time_filter}}"}</code>, <code>{"{{__from}}"}</code>, <code>{"{{__to}}"}</code>, <code>{"{{__timezone}}"}</code>, and <code>{"{{__interval}}"}</code> with <code>--interval</code>) the same way the server does.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>ClickHouse query diagnostics (such as invalid <code>WITH FILL</code>, ambiguous identifiers, or cyclic aliases) now return HTTP 400 with ClickHouse's error message, and other ClickHouse errors include their error code.</li>
+          <li>NULL values in ClickHouse SQL alert rules now follow the rule's no-data policy instead of failing evaluation, and ungrouped alert tests return empty <code>samples</code> and <code>warnings</code> lists instead of <code>null</code>.</li>
+          <li><code>logchef sql -s</code> injects the time filter into subqueries instead of failing with missing <code>_timestamp</code>, and <code>logchef find</code> applies per-source deadlines so slow sources never block results.</li>
+        </ul>
+      </div>
+    </article>
+
     <article class="version" id="v2.8.2">
       <div class="version-header">
         <a class="version-tag" href="#v2.8.2">v2.8.2</a>
         <span class="version-date">Nov 23, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.8.2" class="version-link" target="_blank" rel="noopener">Release notes &rarr;</a>
       </div>
 

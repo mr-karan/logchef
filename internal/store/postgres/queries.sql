@@ -224,6 +224,14 @@ JOIN users u ON tm.user_id = u.id
 WHERE tm.team_id = $1
 ORDER BY tm.created_at ASC;
 
+-- name: ListAllTeamMemberships :many
+-- List every team membership with its team, for admin views of all users
+SELECT tm.team_id, t.name AS team_name, t.managed AS team_managed, tm.user_id, tm.role, u.account_type, tm.created_at
+FROM team_members tm
+JOIN teams t ON t.id = tm.team_id
+JOIN users u ON u.id = tm.user_id
+ORDER BY LOWER(t.name), tm.team_id, tm.user_id;
+
 -- name: ListUserTeams :many
 -- List all teams a user is a member of
 SELECT t.*
@@ -977,6 +985,9 @@ FROM collection_members cm
 JOIN users u ON u.id = cm.user_id
 WHERE cm.collection_id = ANY(sqlc.arg(collection_ids)::bigint[]) AND cm.role IN ('owner', 'editor')
 ORDER BY cm.role DESC, u.email ASC;
+
+-- name: UpdateCollectionMemberRole :exec
+UPDATE collection_members SET role = $1 WHERE collection_id = $2 AND user_id = $3;
 
 -- name: RemoveCollectionMember :exec
 -- Remove a member from a collection

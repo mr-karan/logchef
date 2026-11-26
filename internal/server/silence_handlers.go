@@ -18,7 +18,7 @@ func (s *Server) sendSilenceError(c fiber.Ctx, err error, action string) error {
 	case errors.Is(err, core.ErrInvalidSilence):
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	case errors.Is(err, access.ErrInsufficientScope):
-		return SendErrorWithType(c, fiber.StatusForbidden, "This token lacks the alerts:write scope", models.AuthorizationErrorType)
+		return sendInsufficientScope(c, principalFromLocals(c).User, err)
 	case errors.Is(err, core.ErrSourceAccessDenied):
 		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 	case errors.Is(err, core.ErrSilenceForbidden):

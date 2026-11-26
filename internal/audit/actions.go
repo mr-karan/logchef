@@ -32,6 +32,7 @@ const (
 
 	CollectionMemberAdd    Action = "collection_member.add"
 	CollectionMemberRemove Action = "collection_member.remove"
+	CollectionMemberUpdate Action = "collection_member.update"
 
 	CollectionTeamAdd    Action = "collection_team.add"
 	CollectionTeamRemove Action = "collection_team.remove"
@@ -82,6 +83,7 @@ const (
 	TeamDelete Action = "team.delete"
 
 	TeamMemberAdd    Action = "team_member.add"
+	TeamMemberUpdate Action = "team_member.update"
 	TeamMemberRemove Action = "team_member.remove"
 
 	TeamSourceLink   Action = "team_source.link"
@@ -138,7 +140,7 @@ var registrations = []struct {
 	{AuditEventExport, false},
 	{CollectionCreate, true}, {CollectionUpdate, true}, {CollectionDelete, true},
 	{CollectionItemAdd, true}, {CollectionItemUpdate, true}, {CollectionItemRemove, true},
-	{CollectionMemberAdd, true}, {CollectionMemberRemove, true},
+	{CollectionMemberAdd, true}, {CollectionMemberUpdate, true}, {CollectionMemberRemove, true},
 	{CollectionTeamAdd, true}, {CollectionTeamRemove, true},
 	{DashboardCreate, true}, {DashboardUpdate, true}, {DashboardDelete, true},
 	// A completion and a download change no object: their detail is the
@@ -157,7 +159,7 @@ var registrations = []struct {
 	{SettingUpdate, true}, {SettingDelete, true}, {SettingTest, false},
 	{SourceCreate, true}, {SourceUpdate, true}, {SourceDelete, true},
 	{TeamCreate, true}, {TeamUpdate, true}, {TeamDelete, true},
-	{TeamMemberAdd, true}, {TeamMemberRemove, true},
+	{TeamMemberAdd, true}, {TeamMemberUpdate, true}, {TeamMemberRemove, true},
 	{TeamSourceLink, true}, {TeamSourceUnlink, true},
 	{UserCreate, true}, {UserUpdate, true}, {UserDelete, true},
 	{SavedViewCreate, true}, {SavedViewUpdate, true}, {SavedViewDelete, true}, {SavedViewSetDefault, true}, {SavedViewClearDefault, true},

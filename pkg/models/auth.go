@@ -165,6 +165,18 @@ type UserTeamDetails struct {
 	Role        TeamRole  `json:"role"`
 }
 
+// TeamMembershipSummary represents one user's membership in a team for admin
+// list views without N+1 per-user lookups.
+type TeamMembershipSummary struct {
+	TeamID      TeamID          `json:"team_id"`
+	TeamName    string          `json:"team_name"`
+	TeamManaged bool            `json:"team_managed"`
+	UserID      UserID          `json:"user_id"`
+	Role        TeamRole        `json:"role"`
+	AccountType UserAccountType `json:"account_type,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
 // APIToken represents an API token for authentication
 type APIToken struct {
 	ID         int          `json:"id" db:"id"`

@@ -37,23 +37,19 @@ import {
   Users,
   Search,
   Command,
-  Database,
   UserCircle2,
-  UsersRound,
   ChevronsUpDown,
+  ChevronRight,
   Sun,
   Moon,
   Monitor,
   Bell,
-  Wrench,
   FolderOpen,
-  KeyRound,
   LayoutDashboard,
   CalendarClock,
-  Activity,
-  ScrollText,
   ExternalLink,
   LockKeyhole,
+  Shield,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -63,10 +59,12 @@ import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
 import VersionBanner from "@/components/VersionBanner.vue";
 import { ref, watch, onMounted, computed } from "vue";
+import { useRoute } from "vue-router";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
 
 const { t } = useI18n();
+const route = useRoute();
 const palette = usePaletteHost();
 
 const authStore = useAuthStore();
@@ -180,50 +178,27 @@ const mainNavItems = computed(() =>
   allMainNavItems.filter((item) => item.url !== "/logs/alerts" || metaStore.alertsEnabled)
 );
 
-const adminNavItems: NavItem[] = [
-  {
-    get title() { return t('ui.sources'); },
-    icon: Database,
-    url: "/admin/sources",
-    adminOnly: true,
-  },
-  {
-    get title() { return t('ui.users'); },
-    icon: UsersRound,
-    url: "/admin/users",
-    adminOnly: true,
-  },
-  {
-    get title() { return t('ui.serviceTokens'); },
-    icon: KeyRound,
-    url: "/admin/service-tokens",
-    adminOnly: true,
-  },
-  {
-    get title() { return t('ui.teams'); },
-    icon: Users,
-    url: "/admin/teams",
-    adminOnly: true,
-  },
-  {
-    get title() { return t('ui.systemSettings'); },
-    icon: Wrench,
-    url: "/admin/settings",
-    adminOnly: true,
-  },
-  {
-    get title() { return t('ui.queryActivity'); },
-    icon: Activity,
-    url: "/admin/query-activity",
-    adminOnly: true,
-  },
-  {
-    get title() { return t('ui.auditLog'); },
-    icon: ScrollText,
-    url: "/admin/audit-log",
-    adminOnly: true,
-  },
-];
+const adminEntry = computed<NavItem | null>(() => {
+  if (isGlobalAdmin.value) {
+    return {
+      title: t("ui.admin"),
+      icon: Shield,
+      url: "/admin",
+    };
+  }
+  if (isAnyTeamAdmin.value) {
+    return {
+      title: t("ui.teams"),
+      icon: Users,
+      url: "/admin/teams",
+    };
+  }
+  return null;
+});
+
+const isAdminActive = computed(() =>
+  route.path === "/admin" || route.path.startsWith("/admin/")
+);
 
 const navItems = [
   {
@@ -298,22 +273,22 @@ const navItems = [
           </SidebarGroup>
 
           <!-- Administration section: visible to global admins and any-team admins.
-               Global admins see every item; team admins see only Teams. -->
-          <SidebarGroup v-if="isGlobalAdmin || isAnyTeamAdmin" class="mt-4">
+               Global admins see a single Admin entry opening the /admin section shell;
+               team admins see only Teams, scoped to their teams. -->
+          <SidebarGroup v-if="adminEntry" class="mt-4">
             <SidebarGroupLabel v-if="sidebarOpen">{{ t('ui.administration') }}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <template v-for="item in adminNavItems" :key="item.title">
-                  <SidebarMenuItem v-if="isGlobalAdmin || item.url === '/admin/teams'">
-                    <SidebarMenuButton asChild :tooltip="item.title"
-                      class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url" class="flex items-center" active-class="font-medium">
-                        <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
-                        <span v-if="sidebarOpen">{{ item.title }}</span>
-                      </router-link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </template>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild :tooltip="adminEntry.title" :is-active="isAdminActive"
+                    class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
+                    <router-link :to="adminEntry.url" class="flex items-center" active-class="font-medium">
+                      <component :is="adminEntry.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
+                      <span v-if="sidebarOpen">{{ adminEntry.title }}</span>
+                      <ChevronRight v-if="sidebarOpen && isGlobalAdmin" class="ml-auto size-4 opacity-60" />
+                    </router-link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

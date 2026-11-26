@@ -396,6 +396,8 @@ type CompiledLogchefQL struct {
 	// Aggregation describes the result of an aggregated query. Nil for a
 	// query that returns log rows.
 	Aggregation *logchefql.AggregationInfo
+	// Warnings note a query that compiles but may not match what it says.
+	Warnings []string
 }
 
 // LogchefQLCompiler is an optional interface for providers that can compile

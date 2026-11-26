@@ -213,6 +213,47 @@ func (s *Server) handleAddTeamMember(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member added successfully"})
 }
 
+// handleUpdateTeamMember changes an existing member's role.
+// URL: PUT /api/v1/teams/:teamID/members/:userID
+// Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)
+func (s *Server) handleUpdateTeamMember(c fiber.Ctx) error {
+	teamID, err := core.ParseTeamID(c.Params("teamID"))
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+	}
+	userID, err := core.ParseUserID(c.Params("userID"))
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid user ID: "+err.Error())
+	}
+	var req struct {
+		Role models.TeamRole `json:"role"`
+	}
+	if err := c.Bind().Body(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	before, after, err := core.UpdateTeamMemberRole(c.Context(), s.store, s.log, teamID, userID, req.Role)
+	if err != nil {
+		if errors.Is(err, core.ErrTeamNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
+		}
+		if errors.Is(err, core.ErrTeamMemberNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "User is not a member of this team", models.NotFoundErrorType)
+		}
+		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
+		}
+		s.log.Error("failed to update team member role", "error", err, "team_id", teamID, "user_id", userID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to update team member role")
+	}
+	if before.Role == after.Role {
+		auditNoChange(c)
+	} else {
+		auditSet(c, audit.TeamMemberTarget(teamID, userID), audit.TeamMemberFields(before), audit.TeamMemberFields(after))
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team member role updated"})
+}
+
 // handleRemoveTeamMember removes a user from a team.
 // URL: DELETE /api/v1/teams/:teamID/members/:userID
 // Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)

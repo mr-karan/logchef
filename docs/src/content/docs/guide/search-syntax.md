@@ -213,7 +213,12 @@ For ClickHouse sources, LogchefQL converts to optimized SQL queries:
 
 - The `~` and `!~` operators use ClickHouse's `positionCaseInsensitive` function for efficient partial matches
 - Nested field access on Map columns uses subscript notation: `column['key']`
-- Nested field access on JSON/String columns uses `JSONExtractString`
+- Nested field access on a String column that holds JSON uses `JSONExtractString`,
+  which returns a JSON number as text (`400` as `"400"`). `msg.status=400`
+  compares that text. `msg.latency_ms>500` with an unquoted number compares
+  numbers through `toFloat64OrNull`, and so do aggregates such as
+  `p95(msg.latency_ms)`. `msg.latency_ms>"500"` with a quoted number compares
+  text, so `"1000"` sorts before `"500"`, and the translation carries a warning.
 - A default time range and limit is automatically applied
 - Results are ordered by timestamp in descending order
 

@@ -4,7 +4,7 @@ import { createPinia, type Pinia } from "pinia";
 import { i18n } from "@/i18n";
 import type { User } from "@/types";
 import type { Collection, CollectionMember, CollectionTeam } from "@/api/collections";
-import type { Team, TeamWithMemberCount, UserTeamMembership } from "@/api/teams";
+import type { Team, TeamMember, TeamWithMemberCount, UserTeamMembership } from "@/api/teams";
 
 // Only the HTTP API and the auth/teams context are faked; the collections
 // store, permission composable, and pane render for real. The fake API keeps
@@ -17,7 +17,10 @@ const server = {
   // Teams the caller belongs to (/me/teams) and all teams (/admin/teams).
   userTeams: [] as UserTeamMembership[],
   adminTeams: [] as TeamWithMemberCount[],
+  teamMembersByTeam: {} as Record<number, TeamMember[]>,
+  addMemberRequests: [] as Array<{ user_id: number; role: string }>,
   addTeamRequests: [] as number[],
+  roleUpdates: [] as { userId: number; role: string }[],
   removeTeamRequests: [] as number[],
 };
 
@@ -40,7 +43,27 @@ vi.mock("@/api/collections", () => ({
     list: () => ok([serverCollection()]),
     listItems: () => ok([]),
     listMembers: () => ok([...server.members]),
+    addMember: (_id: number, payload: { user_id: number; role: CollectionMember["role"] }) => {
+      server.addMemberRequests.push(payload);
+      if (!server.members.some((m) => m.user_id === payload.user_id)) {
+        const match = Object.values(server.teamMembersByTeam).flat().find((tm) => tm.user_id === payload.user_id);
+        server.members.push({
+          collection_id: 1,
+          user_id: payload.user_id,
+          role: payload.role,
+          created_at: "",
+          email: match?.email ?? `user${payload.user_id}@example.com`,
+          full_name: match?.full_name,
+        });
+      }
+      return ok({ message: "ok" });
+    },
     listTeams: () => ok([...server.teams]),
+    updateMemberRole: (_id: number, userId: number, role: CollectionMember["role"]) => {
+      server.roleUpdates.push({ userId, role });
+      server.members = server.members.map((m) => (m.user_id === userId ? { ...m, role } : m));
+      return ok({ message: "ok" });
+    },
     addTeam: (_id: number, payload: { team_id: number }) => {
       server.addTeamRequests.push(payload.team_id);
       if (!server.teams.some((t) => t.team_id === payload.team_id)) {
@@ -67,6 +90,11 @@ vi.mock("@/stores/auth", () => ({
 // earlier view loaded, which may be stale relative to the server.
 const cachedUserTeams = ref<UserTeamMembership[]>([]);
 const cachedAdminTeams = ref<TeamWithMemberCount[]>([]);
+vi.mock("@/api/teams", () => ({
+  teamsApi: {
+    listTeamMembers: (teamId: number) => ok([...(server.teamMembersByTeam[teamId] ?? [])]),
+  },
+}));
 vi.mock("@/stores/teams", () => ({
   useTeamsStore: () => ({
     get userTeams() { return cachedUserTeams.value; },
@@ -182,7 +210,10 @@ beforeEach(() => {
   server.teams = [project14];
   server.userTeams = [];
   server.adminTeams = [];
+  server.teamMembersByTeam = {};
+  server.addMemberRequests = [];
   server.addTeamRequests = [];
+  server.roleUpdates = [];
   server.removeTeamRequests = [];
   cachedUserTeams.value = [];
   cachedAdminTeams.value = [];
@@ -317,5 +348,109 @@ describe("CollectionDetailPane team sharing", () => {
     await render();
     await click("Share with team");
     expect(await openPickerOptions()).toEqual(["Project 14", "Created elsewhere"]);
+  });
+
+  it("lets a non-admin owner who belongs to a team invite a teammate directly", async () => {
+    mockUser.value = user("member");
+    cachedUserTeams.value = [userTeam(14, "Project 14")];
+    server.teamMembersByTeam = {
+      14: [
+        { team_id: 14, user_id: 99, role: "member", created_at: "", updated_at: "", email: "owner@example.com", full_name: "Owner", account_type: "human" },
+        { team_id: 14, user_id: 42, role: "member", created_at: "", updated_at: "", email: "alice@example.com", full_name: "Alice", account_type: "human" },
+      ],
+    };
+
+    const root = await render();
+    expect(buttonTitles(root)).toContain("Invite member");
+
+    await click("Invite member");
+    const dialog = [...document.body.querySelectorAll<HTMLElement>("[role=dialog]")].find((d) =>
+      d.textContent?.includes("Invite member"),
+    );
+    if (!dialog) throw new Error("invite dialog not open");
+    expect(dialog.textContent).toContain("You can invite teammates from your teams.");
+
+    const trigger = dialog.querySelector<HTMLButtonElement>("[role=combobox]");
+    trigger?.click();
+    await flush();
+    const options = [...document.body.querySelectorAll<HTMLButtonElement>("button[data-item]")].map((b) => b.textContent?.trim() ?? "");
+    expect(options).toEqual(["alice@example.comAlice"]);
+
+    document.body.querySelector<HTMLButtonElement>("button[data-item]")?.click();
+    await flush();
+    dialog.querySelector<HTMLButtonElement>("button[type=submit]")?.click();
+    await flush();
+
+    expect(server.addMemberRequests).toEqual([{ user_id: 42, role: "member" }]);
+    expect(root.textContent).toContain("Alice");
+  });
+
+  it("hides Invite member from a non-owner global admin", async () => {
+    mockUser.value = user("admin");
+    server.callerRole = "member";
+
+    const root = await render();
+    expect(buttonTitles(root)).not.toContain("Invite member");
+  });
+});
+
+describe("CollectionDetailPane member roles", () => {
+  const editorRow: CollectionMember = { collection_id: 1, user_id: 7, role: "editor", created_at: "", email: "editor@example.com" };
+  const meAsOwner: CollectionMember = { collection_id: 1, user_id: 10, role: "owner", created_at: "", email: "user@example.com" };
+
+  function roleSelect(name: string): HTMLButtonElement {
+    const trigger = document.body.querySelector<HTMLButtonElement>(`[aria-label="Role for ${name}"]`);
+    if (!trigger) throw new Error(`role select for ${name} not found`);
+    return trigger;
+  }
+
+  async function chooseRole(name: string, label: string) {
+    roleSelect(name).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector("[role=option]")).not.toBeNull());
+    const option = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((el) => el.textContent?.trim() === label);
+    if (!option) throw new Error(`no option ${label}`);
+    option.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flush();
+  }
+
+  it("lets the owner change a member's role in place", async () => {
+    mockUser.value = user("member");
+    server.members = [ownerRow, editorRow];
+
+    await render();
+    await chooseRole("editor@example.com", "Member");
+
+    expect(server.roleUpdates).toEqual([{ userId: 7, role: "member" }]);
+    expect(roleSelect("editor@example.com").textContent).toContain("Member");
+  });
+
+  it("locks the role of the only owner", async () => {
+    mockUser.value = user("member");
+    server.members = [ownerRow, editorRow];
+
+    await render();
+    expect(roleSelect("owner@example.com").disabled).toBe(true);
+    expect(roleSelect("editor@example.com").disabled).toBe(false);
+  });
+
+  it("asks before an owner demotes themselves", async () => {
+    mockUser.value = user("member");
+    server.members = [ownerRow, meAsOwner];
+
+    await render();
+    await chooseRole("user@example.com", "Editor");
+    expect(server.roleUpdates).toEqual([]);
+
+    await click("Change my role");
+    expect(server.roleUpdates).toEqual([{ userId: 10, role: "editor" }]);
+  });
+
+  it("shows roles read-only to a global admin who does not own the collection", async () => {
+    mockUser.value = user("admin");
+    server.callerRole = "member";
+    server.members = [ownerRow, editorRow];
+
+    await render();
+    expect(document.body.querySelector('[aria-label^="Role for"]')).toBeNull();
   });
 });

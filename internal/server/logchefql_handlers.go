@@ -36,6 +36,7 @@ type TranslateResponse struct {
 	Conditions             []logchefql.FilterCondition `json:"conditions"`
 	FieldsUsed             []string                    `json:"fields_used"`
 	Aggregation            *logchefql.AggregationInfo  `json:"aggregation,omitempty"`
+	Warnings               []string                    `json:"warnings,omitempty"`
 }
 
 // ValidateRequest represents the request body for LogchefQL validation
@@ -88,6 +89,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		Conditions:             translation.Conditions,
 		FieldsUsed:             translation.FieldsUsed,
 		Aggregation:            translation.Aggregation,
+		Warnings:               translation.Warnings,
 	}
 
 	// Ensure conditions is never nil

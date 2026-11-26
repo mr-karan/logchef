@@ -141,7 +141,7 @@ func (s *Server) sendSchemaAdviceError(c fiber.Ctx, p access.Principal, sourceID
 	case errors.Is(err, access.ErrGlobalAdminRequired):
 		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
 	case errors.Is(err, access.ErrInsufficientScope):
-		return sendInsufficientScope(c, p.User)
+		return sendInsufficientScope(c, p.User, err)
 	case errors.Is(err, core.ErrSourceNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	case errors.Is(err, core.ErrSchemaFindingNotFound):

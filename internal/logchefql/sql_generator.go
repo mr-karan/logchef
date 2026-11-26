@@ -18,6 +18,29 @@ type SQLGenerator struct {
 	// expression/select field.
 	colTypes      map[string]string
 	defaultMapCol string
+	// warnings are notes about a query that translates but may not do what
+	// it says, in the order found, without repeats.
+	warnings []string
+}
+
+// Warnings returns the notes the generator collected.
+func (g *SQLGenerator) Warnings() []string {
+	return slices.Clone(g.warnings)
+}
+
+func (g *SQLGenerator) warn(message string) {
+	if !slices.Contains(g.warnings, message) {
+		g.warnings = append(g.warnings, message)
+	}
+}
+
+// warnJSONTextOrdering notes an ordering comparison of a JSON path read from
+// a String column with a quoted value: JSONExtractString returns the text of
+// a JSON number, so the comparison orders text and "1000" sorts before "500".
+func (g *SQLGenerator) warnJSONTextOrdering(node *ExpressionNode, field sqlField) {
+	name := getFieldName(node.Key)
+	g.warn(fmt.Sprintf("%s %s %q compares the JSON value inside the String column %s as text, so \"1000\" sorts before \"500\". Write the number without quotes to compare numbers: %s %s %v.",
+		name, node.Operator, node.Value, field.jsonTextColumn, name, node.Operator, node.Value))
 }
 
 // NewSQLGenerator creates a new SQL generator with optional schema
@@ -119,11 +142,26 @@ func (g *SQLGenerator) visitExpression(node *ExpressionNode) (string, *ParseErro
 	if field.sql == "" {
 		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
 	}
-	if _, numeric := node.Value.(NumericLiteral); numeric && g.isStringType(field.columnType) {
-		return "", &ParseError{
-			Code:    ErrUnsupportedFeature,
-			Message: "numeric comparisons require a numeric field; quote the value to compare text",
+	ordering := slices.Contains([]Operator{OpGT, OpLT, OpGTE, OpLTE}, node.Operator)
+	if number, numeric := node.Value.(NumericLiteral); numeric && g.isStringType(field.columnType) {
+		if field.jsonTextColumn == "" {
+			return "", &ParseError{
+				Code:    ErrUnsupportedFeature,
+				Message: "numeric comparisons require a numeric field; quote the value to compare text",
+			}
 		}
+		// JSONExtractString returns the text of a JSON number ("400"), so an
+		// ordering compares the parsed number, and any other operator
+		// compares or searches the text.
+		if ordering {
+			parsed := field
+			parsed.sql = "toFloat64OrNull(" + field.sql + ")"
+			return g.generateComparisonExpression(parsed, node.Operator, string(number))
+		}
+		return g.generateComparisonExpression(field, node.Operator, g.formatValue(string(number)))
+	}
+	if field.jsonTextColumn != "" && ordering {
+		g.warnJSONTextOrdering(node, field)
 	}
 	return g.generateComparisonExpression(field, node.Operator, g.formatValue(node.Value))
 }
@@ -259,6 +297,9 @@ type sqlField struct {
 	sql             string
 	columnType      string
 	resolutionError *ParseError
+	// jsonTextColumn names the String column that a nested path reads with
+	// JSONExtractString. Empty for any other field.
+	jsonTextColumn string
 }
 
 // resolveField is shared by WHERE comparisons and pipe projections.
@@ -287,7 +328,7 @@ func (g *SQLGenerator) resolveField(field any) sqlField {
 			}
 			return sqlField{sql: g.nativeJSONPath(f.Base, f.Path, columnType), columnType: pathType}
 		case columnType == "" || g.isStringType(columnType):
-			return sqlField{sql: g.jsonExtraction(f.Base, f.Path), columnType: "String"}
+			return sqlField{sql: g.jsonExtraction(f.Base, f.Path), columnType: "String", jsonTextColumn: f.Base}
 		default:
 			return sqlField{resolutionError: &ParseError{
 				Code:    ErrUnsupportedFeature,

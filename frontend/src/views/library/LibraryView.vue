@@ -189,6 +189,7 @@ function onDeleted() {
         v-else-if="selectedId"
         :key="selectedId"
         :collection-id="selectedId"
+        :focus-section="route.query.section === 'members' ? 'members' : undefined"
         @deleted="onDeleted"
       />
     </section>

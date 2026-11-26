@@ -3,12 +3,14 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
 use logchef_core::api::{Report, ReportRun, ReportSchedule};
+use logchef_core::auth::API_TOKENS_PAGE;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
-#[command(after_help = "EXAMPLES:
+#[command(after_help = format!("EXAMPLES:
   # Your reports, with their next and last run
   logchef reports list
 
@@ -23,8 +25,9 @@ use crate::session;
   logchef reports run 4 --all
 
 Reports need an API token with the reports:read scope (reports:write for
-`run`), or *. Pass it with --token or LOGCHEF_AUTH_TOKEN. A `logchef auth`
-sign-in cannot reach reports. Create and edit reports in the web UI.")]
+`run`), or *. Pass it with --token or LOGCHEF_AUTH_TOKEN. Create one under
+{API_TOKENS_PAGE}. A `logchef auth`
+sign-in cannot reach reports. Create and edit reports in the web UI."))]
 pub struct ReportsArgs {
     #[command(subcommand)]
     command: ReportsCommand,
@@ -163,7 +166,8 @@ async fn start(args: RunArgs, global: GlobalArgs) -> Result<()> {
 /// credential is an OAuth sign-in (which holds no report scope), or a
 /// non-admin asked for `--scope all`. A 404 on one report also hides a
 /// report the caller may not edit. The generic hints (sign in again,
-/// team/source access) would mislead, so both errors are replaced. `action`
+/// team/source access) would mislead, so both errors are replaced, and a
+/// missing scope's message too, since the advice here says it. `action`
 /// completes "Failed to ...", and `report` is None for the list.
 fn explain(
     err: logchef_core::Error,
@@ -171,6 +175,7 @@ fn explain(
     report: Option<i64>,
     scope: &str,
 ) -> anyhow::Error {
+    let scope_denied = err.is_scope_denied();
     match (err, report) {
         (
             logchef_core::Error::Api {
@@ -185,10 +190,15 @@ fn explain(
             } else {
                 ""
             };
+            let reason = if scope_denied {
+                ".".to_owned()
+            } else {
+                format!(": {message}")
+            };
             anyhow!(
-                "The server refused to {action}: {message}\n\
+                "The server refused to {action}{reason}\n\
                  It needs an API token with the {scope} scope (or *). A `logchef auth` sign-in \
-                 cannot reach reports. Create a token on your Profile page, then pass it with \
+                 cannot reach reports. Create one under {API_TOKENS_PAGE}, then pass it with \
                  --token or LOGCHEF_AUTH_TOKEN.{admin}"
             )
         }
@@ -247,11 +257,11 @@ fn render_reports(reports: &[Report]) -> String {
         out.push_str(&format!(
             "{:<6} {:<28} {:<24} {:<36} {:<18} {:<30} {}\n",
             r.id,
-            truncate(&r.name, 28),
-            truncate(&r.source.name, 24),
-            truncate(&format!("{} {}", schedule(&r.schedule), r.timezone), 36),
+            ui::truncate(&r.name, 28),
+            ui::truncate(&r.source.name, 24),
+            ui::truncate(&format!("{} {}", schedule(&r.schedule), r.timezone), 36),
             next,
-            truncate(&last, 30),
+            ui::truncate(&last, 30),
             owner,
         ));
     }
@@ -293,7 +303,7 @@ fn render_runs(runs: &[ReportRun]) -> String {
             minute(&run.started_at),
             run.trigger,
             run.status,
-            truncate(reason, 22),
+            ui::truncate(reason, 22),
             panels,
         ));
     }
@@ -324,15 +334,6 @@ fn schedule(s: &ReportSchedule) -> String {
         "monthly" => format!("monthly day {} {at}", s.day_of_month.unwrap_or(1)),
         other => other.to_owned(),
     }
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_owned();
-    }
-    let mut out: String = value.chars().take(width - 1).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]

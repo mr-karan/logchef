@@ -113,4 +113,19 @@ describe("alert backtest panel", () => {
       app.unmount();
     }
   });
+
+  it("shows each group's lowest value for an lt rule", async () => {
+    const groups = [{ group: { service: "api" }, episodes: 1, breaching_evaluations: 2, max_value: 9, min_value: 1 }];
+    vi.spyOn(alertsApi, "backtest").mockResolvedValue({ status: "success", data: backtestResult({ groups }) });
+    const { element, app, run } = mount(ref({ ...request, threshold_operator: "lt" as const }));
+    try {
+      run();
+      await flush();
+      const table = element.querySelector("table");
+      expect(table?.textContent).toContain("Min value");
+      expect(table?.querySelector("tbody td:last-child")?.textContent).toBe("1");
+    } finally {
+      app.unmount();
+    }
+  });
 });

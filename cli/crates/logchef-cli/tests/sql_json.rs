@@ -107,3 +107,98 @@ fn sql_on_a_loki_source_sends_the_default_window() {
         .expect("end_time is RFC3339");
     assert_eq!(end - start, chrono::Duration::minutes(15));
 }
+
+fn dry_run(name: &str, source_type: &str, sql: &str, extra: &[&str]) -> String {
+    let server = FakeServer::start(false);
+    server.state().source_type = Some(source_type.to_string());
+    let home = TestHome::new(name);
+    let mut config = config_with(&server.url, serde_json::json!({"token": PAT}));
+    config["contexts"]["test"]["defaults"]["timezone"] = "Asia/Kolkata".into();
+    home.write_config(&config);
+    let mut cmd = home.logchef();
+    cmd.args(["sql", "-t", "1", "-S", "2", "--dry-run"])
+        .args([
+            "--from",
+            "2026-11-25 13:30:00",
+            "--to",
+            "2026-11-25 14:30:00",
+        ])
+        .args(extra)
+        .arg(sql);
+    let out = run(cmd);
+    assert_success(&out);
+    stdout(&out)
+}
+
+#[test]
+fn dry_run_renders_clickhouse_time_macros_with_the_source_timestamp() {
+    assert_eq!(
+        dry_run(
+            "dry-run-macros",
+            "clickhouse",
+            "SELECT count() FROM logs.app WHERE {{__time_filter}} AND t < {{__to}}",
+            &[]
+        ),
+        "SELECT count() FROM logs.app WHERE `timestamp` >= toDateTime64('2026-11-25 08:00:00.000', 3, 'UTC') \
+         AND `timestamp` < toDateTime64('2026-11-25 09:00:00.000', 3, 'UTC') \
+         AND t < toDateTime64('2026-11-25 09:00:00.000', 3, 'UTC')\n"
+    );
+}
+
+#[test]
+fn dry_run_keeps_victorialogs_queries_as_written() {
+    assert_eq!(
+        dry_run(
+            "dry-run-vl",
+            "victorialogs",
+            "error | stats count() by (_time:{{__interval}})",
+            &["--interval", "1h"]
+        ),
+        "error | stats count() by (_time:{{__interval}})\n"
+    );
+}
+
+#[test]
+fn dry_run_renders_the_interval_and_the_effective_timezone() {
+    assert_eq!(
+        dry_run(
+            "dry-run-interval",
+            "clickhouse",
+            "SELECT toStartOfInterval(timestamp, {{__interval}}, {{__timezone}}) t, \
+             {{__interval_s}} s FROM logs.app GROUP BY t",
+            &["--interval", "15m"]
+        ),
+        "SELECT toStartOfInterval(timestamp, INTERVAL 15 MINUTE, 'Asia/Kolkata') t, \
+         900 s FROM logs.app \
+         WHERE `timestamp` BETWEEN toDateTime('2026-11-25 13:30:00', 'Asia/Kolkata') \
+         AND toDateTime('2026-11-25 14:30:00', 'Asia/Kolkata') GROUP BY t\n"
+    );
+}
+
+/// `-l` caps the rows as it does for `query`.
+#[test]
+fn sql_short_limit_flag_sends_the_limit() {
+    let server = FakeServer::start(false);
+    server.state().query_logs = vec![serde_json::json!({"n": 1})];
+    let home = TestHome::new("sql-short-limit");
+    home.write_config(&config_with(
+        &server.url,
+        serde_json::json!({"token": PAT, "token_expires_at": "2099-01-01T00:00:00Z"}),
+    ));
+    let mut cmd = home.logchef();
+    cmd.args([
+        "sql",
+        "SELECT n FROM logs.app",
+        "-t",
+        "1",
+        "-S",
+        "2",
+        "-l",
+        "7",
+        "--output",
+        "json",
+    ]);
+    let out = run(cmd);
+    assert_success(&out);
+    assert_eq!(server.state().native_requests[0]["limit"], 7);
+}

@@ -140,7 +140,7 @@ on them:
 
 - **Relevance-ranked full-text search.** Elasticsearch's BM25 scoring ranks
   matches by relevance. ClickHouse log queries in Logchef do substring/token
-  matching (`~`, `positionCaseInsensitive`, `tokenbf_v1` skip indexes) — fast
+  matching (`~`, `positionCaseInsensitive`, `text` skip indexes) — fast
   filtering, not ranked search. If you're running a search product on top of
   your log index, not just log analytics, Elasticsearch is still the better
   fit.

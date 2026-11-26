@@ -101,7 +101,8 @@ func TestHistogramErrorResponses(t *testing.T) {
 		{"canceled fill", fmt.Errorf("provider: %w", context.Canceled), fiber.StatusRequestTimeout, "Request cancelled"},
 		{"server timeout", fmt.Errorf("query: %w", &ch.Exception{Code: 159, Message: internalDetail}), fiber.StatusRequestTimeout, "Request timed out"},
 		{"socket timeout", fmt.Errorf("query: %w", &ch.Exception{Code: 209, Message: internalDetail}), fiber.StatusRequestTimeout, "Request timed out"},
-		{"memory limit", &ch.Exception{Code: 241, Message: internalDetail}, fiber.StatusInternalServerError, histogramFailure},
+		// Only the code of a ClickHouse error outside the public diagnostics.
+		{"memory limit", &ch.Exception{Code: 241, Message: internalDetail}, fiber.StatusInternalServerError, histogramFailure + " (ClickHouse error code 241)"},
 		{"fill deadline", context.DeadlineExceeded, fiber.StatusRequestTimeout, "Request timed out"},
 		{"untyped invalid error", fmt.Errorf("invalid response: %s", internalDetail), fiber.StatusInternalServerError, histogramFailure},
 	} {

@@ -253,6 +253,27 @@ func (s *Store) ListTeamMembersWithDetails(ctx context.Context, teamID models.Te
 	return members, nil
 }
 
+// ListAllTeamMemberships retrieves every team membership with its team's name and managed flag.
+func (s *Store) ListAllTeamMemberships(ctx context.Context) ([]*models.TeamMembershipSummary, error) {
+	rows, err := s.q.ListAllTeamMemberships(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing all team memberships: %w", err)
+	}
+	memberships := make([]*models.TeamMembershipSummary, 0, len(rows))
+	for _, row := range rows {
+		memberships = append(memberships, &models.TeamMembershipSummary{
+			TeamID:      models.TeamID(row.TeamID),
+			TeamName:    row.TeamName,
+			TeamManaged: row.TeamManaged,
+			UserID:      models.UserID(row.UserID),
+			Role:        models.TeamRole(row.Role),
+			AccountType: models.UserAccountType(row.AccountType),
+			CreatedAt:   row.CreatedAt.Time,
+		})
+	}
+	return memberships, nil
+}
+
 // ListUserTeams retrieves all teams a user is a member of.
 func (s *Store) ListUserTeams(ctx context.Context, userID models.UserID) ([]*models.Team, error) {
 	rows, err := s.q.ListUserTeams(ctx, int64(userID))

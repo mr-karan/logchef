@@ -30,6 +30,16 @@ pub fn interactive() -> bool {
     std::io::stdin().is_terminal() && !crate::env_flags::ci()
 }
 
+/// Cuts `value` to `width` characters, ending a cut value with `…`.
+pub fn truncate(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.to_owned();
+    }
+    let mut out: String = value.chars().take(width.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
 /// Formats an integer with thousands separators: `1234567` → `"1,234,567"`.
 pub fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
@@ -433,15 +443,8 @@ fn hint_for_core(err: &logchef_core::Error) -> Option<String> {
         Error::Api {
             status: Some(401), ..
         } => Some("token invalid or expired — run `logchef auth`".into()),
-        Error::Api {
-            status: Some(403),
-            message,
-            ..
-        } if message.contains("required scope") => Some(
-            "the credential lacks a scope this command needs — run `logchef auth` again (a \
-             sign-in from an older CLI lacks saved_views:read), or use an API token with the scope"
-                .into(),
-        ),
+        // The client wrote the fix into a missing-scope message.
+        err if err.is_scope_denied() => None,
         Error::Api {
             status: Some(403), ..
         } => Some("no access to that team/source — check `logchef whoami`".into()),
@@ -474,17 +477,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_missing_scope_says_to_sign_in_again() {
+    fn a_missing_scope_gets_no_access_hint() {
         let err = anyhow::Error::new(logchef_core::Error::api_with_type(
             Some(403),
-            "API token does not have the required scope",
-            Some("AuthorizationError".into()),
+            "API token does not have the required scope logs:read. A token cannot gain scopes \
+             after it is created. Create one with the logs:read scope under your user menu > \
+             Profile > API tokens (/settings/profile).",
+            Some(logchef_core::error::INSUFFICIENT_SCOPE.into()),
         ));
-        assert!(
-            hint_for_error(&err)
-                .unwrap()
-                .contains("run `logchef auth` again")
-        );
+        assert_eq!(hint_for_error(&err), None);
     }
 
     #[test]

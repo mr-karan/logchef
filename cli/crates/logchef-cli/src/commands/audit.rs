@@ -3,13 +3,15 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
 use logchef_core::api::{AuditEvent, AuditEventFilter};
+use logchef_core::auth::API_TOKENS_PAGE;
 
 use crate::cli::GlobalArgs;
 use crate::commands::parse_lookback;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
-#[command(after_help = "EXAMPLES:
+#[command(after_help = format!("EXAMPLES:
   # Every source change in the last 24 hours
   logchef audit list --action source. --since 24h
 
@@ -20,8 +22,9 @@ use crate::session;
   logchef audit list --action session.login --outcome failure --since 7d
 
 The audit log is for global admins. Use an API token with the audit:read scope
-(pass it with --token or LOGCHEF_AUTH_TOKEN). A `logchef auth` sign-in cannot
-read it.")]
+(pass it with --token or LOGCHEF_AUTH_TOKEN). Create one under
+{API_TOKENS_PAGE}. A `logchef auth`
+sign-in cannot read it."))]
 pub struct AuditArgs {
     #[command(subcommand)]
     command: AuditCommand,
@@ -168,16 +171,23 @@ fn parse_target(value: &str) -> Result<(Option<String>, Option<String>)> {
 /// generic 403 hint (team/source access, sign in again) would mislead, so the
 /// error is replaced.
 fn explain_forbidden(err: logchef_core::Error) -> anyhow::Error {
+    let scope_denied = err.is_scope_denied();
     match err {
         logchef_core::Error::Api {
             status: Some(403),
             message,
             ..
         } => anyhow!(
-            "The server refused the audit log: {message}\n\
+            "The server refused the audit log{}\n\
              Reading it needs a global admin's API token with the audit:read scope (or *). \
-             A `logchef auth` sign-in cannot read it. Create one on your Profile page, \
-             then pass it with --token or LOGCHEF_AUTH_TOKEN."
+             A `logchef auth` sign-in cannot read it. Create one under {API_TOKENS_PAGE}, \
+             then pass it with --token or LOGCHEF_AUTH_TOKEN.",
+            // A missing scope's message says what the advice below says.
+            if scope_denied {
+                ".".to_owned()
+            } else {
+                format!(": {message}")
+            }
         ),
         other => anyhow::Error::new(other).context("Failed to list audit events"),
     }
@@ -200,9 +210,9 @@ fn render_table(events: &[AuditEvent]) -> String {
         out.push_str(&format!(
             "{:<24} {:<30} {:<28} {:<30} {:<8} {}\n",
             event.occurred_at.format("%Y-%m-%d %H:%M:%S%.3f"),
-            truncate(&actor(event), 30),
-            truncate(&event.action, 28),
-            truncate(&target(event), 30),
+            ui::truncate(&actor(event), 30),
+            ui::truncate(&event.action, 28),
+            ui::truncate(&target(event), 30),
             event.outcome,
             event.ip,
         ));
@@ -232,15 +242,6 @@ fn target(event: &AuditEvent) -> String {
         &event.target_label
     };
     format!("{}:{}", event.target_type, name)
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_owned();
-    }
-    let mut out: String = value.chars().take(width - 1).collect();
-    out.push('…');
-    out
 }
 
 #[cfg(test)]
@@ -307,6 +308,14 @@ mod tests {
         let text = format!("{err:#}");
         assert!(text.contains("audit:read"), "{text}");
         assert!(text.contains("Admin access required"), "{text}");
+        assert_eq!(
+            text.matches(
+                "Create one under your user menu > Profile > API tokens (/settings/profile)"
+            )
+            .count(),
+            1,
+            "{text}"
+        );
         assert_eq!(crate::ui::hint_for_error(&err), None);
     }
 }

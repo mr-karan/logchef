@@ -5,6 +5,9 @@
 
 mod loopback;
 
+/// Where the web UI creates an API token, for messages that ask for one.
+pub const API_TOKENS_PAGE: &str = "your user menu > Profile > API tokens (/settings/profile)";
+
 pub use loopback::{CallbackLimits, CallbackListener, ExpectedCallback, wait_for_code};
 
 use crate::config::{Config, ContextAuth, OAuthCredential, context_lock_path, lock_exclusive};
@@ -20,7 +23,7 @@ pub const CLIENT_ID: &str = "logchef-cli";
 
 /// The read scopes. The CLI asks for each one the server advertises, plus
 /// `offline_access`.
-pub const READ_SCOPES: [&str; 8] = [
+pub const READ_SCOPES: [&str; 10] = [
     "profile:read",
     "teams:read",
     "sources:read",
@@ -29,6 +32,8 @@ pub const READ_SCOPES: [&str; 8] = [
     "collections:read",
     "alerts:read",
     "saved_views:read",
+    "destinations:read",
+    "dashboards:read",
 ];
 const OFFLINE_ACCESS: &str = "offline_access";
 
@@ -255,6 +260,17 @@ fn requested_scopes(metadata: &ServerMetadata) -> Vec<String> {
         })
         .map(|scope| scope.to_string())
         .collect()
+}
+
+/// The read scopes the server offers that `credential` was not granted. A
+/// grant keeps its scopes across refreshes, so a scope the server added after
+/// the sign-in stays missing until the next `logchef auth`.
+pub async fn missing_read_scopes(credential: &OAuthCredential) -> Result<Vec<String>> {
+    let metadata = discover(&http_client()?, &credential.issuer).await?;
+    Ok(requested_scopes(&metadata)
+        .into_iter()
+        .filter(|scope| !credential.scopes.contains(scope))
+        .collect())
 }
 
 /// How `login` shows the authorization URL.

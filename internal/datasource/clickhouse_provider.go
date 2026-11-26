@@ -583,6 +583,7 @@ func (p *ClickHouseProvider) GetAllFieldValues(ctx context.Context, source *mode
 			IsLowCardinality: fieldResult.IsLowCard,
 			Values:           values,
 			TotalDistinct:    fieldResult.TotalDistinct,
+			Error:            fieldResult.Error,
 		}
 	}
 
@@ -1227,6 +1228,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.
 		FieldsUsed: translateResult.FieldsUsed,
 		FilterOnly: translateResult.SQL,
 		Query:      translateResult.SQL,
+		Warnings:   translateResult.Warnings,
 	}
 	if translateResult.Aggregation != nil {
 		compiled.Aggregation = translateResult.Aggregation.Info()

@@ -328,6 +328,113 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
+  async function updateTeamMemberRole(
+    teamId: number,
+    userId: number,
+    role: "admin" | "member" | "editor"
+  ) {
+    if (!teamId || !userId) {
+      return state.handleError(
+        {
+          status: "error",
+          message: "Invalid team or user ID",
+          error_type: "ValidationError",
+        } as APIErrorResponse,
+        `updateTeamMemberRole-${teamId}-${userId}`
+      );
+    }
+
+    return await state.callApi({
+      apiCall: () => teamsApi.updateTeamMemberRole(teamId, userId, role),
+      successMessage: i18n.global.t("access.memberRoleUpdated"),
+      operationKey: `updateTeamMemberRole-${teamId}-${userId}`,
+      onSuccess: async () => {
+        const cached = state.data.value.teamMembersMap[teamId];
+        if (cached) {
+          state.data.value.teamMembersMap[teamId] = cached.map((m) =>
+            Number(m.user_id) === Number(userId) ? { ...m, role } : m
+          );
+        }
+
+        const currentUserId = authStore.user?.id;
+        if (currentUserId && Number(userId) === Number(currentUserId)) {
+          await loadUserTeams();
+        }
+      },
+    });
+  }
+
+  async function addTeamMembers(
+    teamId: number,
+    userIds: number[],
+    role: "admin" | "member" | "editor"
+  ) {
+    const uniqueIds = [...new Set(userIds)].filter((id) => Number.isFinite(id) && id > 0);
+    if (!teamId || uniqueIds.length === 0) {
+      return { success: false, added: 0, failed: 0, failedIds: [] };
+    }
+
+    return await state.withLoading(`addTeamMember-${teamId}`, async () => {
+      let added = 0;
+      const failedIds: number[] = [];
+      let lastError: APIErrorResponse | undefined;
+
+      for (const userId of uniqueIds) {
+        try {
+          const response = await teamsApi.addTeamMember(teamId, { user_id: userId, role });
+          if (isSuccessResponse(response)) {
+            added++;
+          } else {
+            failedIds.push(userId);
+            lastError = response;
+          }
+        } catch (err) {
+          failedIds.push(userId);
+          lastError = err as APIErrorResponse;
+        }
+      }
+      const failed = failedIds.length;
+
+      if (added > 0) {
+        const membersRes = await listTeamMembers(teamId);
+        if (membersRes.success && Array.isArray(membersRes.data)) {
+          patchTeam(teamId, () => ({ member_count: membersRes.data!.length }));
+        } else {
+          patchTeam(teamId, (team) => ({ member_count: (team.member_count || 0) + added }));
+        }
+
+        const currentUserId = authStore.user?.id;
+        if (currentUserId && uniqueIds.includes(Number(currentUserId))) {
+          await loadUserTeams();
+        }
+      }
+
+      const { useToast } = await import("@/composables/useToast");
+      const { toast } = useToast();
+      if (added > 0 && failed === 0) {
+        toast({ title: i18n.global.t("access.membersAddedCount", { count: added }, added) });
+        return { success: true, added, failed, failedIds };
+      }
+      if (added > 0 && failed > 0) {
+        toast({
+          title: i18n.global.t("access.membersAddPartialFailure", { added, failed }),
+          variant: "destructive",
+        });
+        return { success: false, added, failed, failedIds, error: lastError };
+      }
+
+      return {
+        ...state.handleError(
+          lastError ?? { status: "error", message: "Failed to add team members", error_type: "GeneralError" },
+          `addTeamMember-${teamId}`,
+        ),
+        added,
+        failed,
+        failedIds,
+      };
+    });
+  }
+
   async function removeTeamMember(teamId: number, userId: number) {
     // Validate parameters
     if (!teamId || !userId) {
@@ -486,6 +593,8 @@ export const useTeamsStore = defineStore("teams", () => {
     deleteTeam,
     listTeamMembers,
     addTeamMember,
+    addTeamMembers,
+    updateTeamMemberRole,
     removeTeamMember,
     listTeamSources,
     addTeamSource,

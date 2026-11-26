@@ -1,10 +1,13 @@
 pub mod advisor;
 pub mod agent;
+pub mod alerts;
 pub mod audit;
 pub mod auth;
 pub mod collections;
 pub mod completions;
 pub mod config;
+pub mod dashboards;
+pub mod destinations;
 pub mod doctor;
 pub mod explain;
 pub mod fields;
@@ -16,6 +19,7 @@ pub mod query;
 pub mod reports;
 pub mod saved_queries;
 pub mod schema;
+pub mod silences;
 pub mod skills;
 pub mod sources;
 pub mod sql;
@@ -145,4 +149,18 @@ pub(crate) async fn resolve_source(
                 .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", name))
         }
     }
+}
+
+/// Resolves a source given by id without a team, or by name within the team.
+pub(crate) async fn resolve_source_id(
+    client: &Client,
+    cache: &mut Cache,
+    team: Option<String>,
+    source: String,
+) -> Result<i64> {
+    if let Identifier::Id(id) = parse_identifier(&source) {
+        return Ok(id);
+    }
+    let team_id = resolve_team(client, cache, team).await?;
+    resolve_source(client, cache, team_id, Some(source)).await
 }

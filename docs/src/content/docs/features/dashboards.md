@@ -444,7 +444,9 @@ request.
 
 `GET /dashboards` returns one summary per dashboard (panel count, panel
 kinds, tab count, revision, `can_edit`, `can_delete` and a corrupt flag) and no panel
-blobs. Read a dashboard's panels with `GET /dashboards/:id`. Every update
+blobs. An OAuth client, such as `logchef auth` or MCP, reads it and
+`GET /dashboards/:id` with `dashboards:read`, and sees what its user sees as a
+team member: an admin's OAuth token gets no admin bypass. Read a dashboard's panels with `GET /dashboards/:id`. Every update
 must carry the `revision` from that read, and the panel blob may be up to
 512 KiB.
 

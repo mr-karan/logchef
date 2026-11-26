@@ -191,3 +191,55 @@ func TestAlertBacktestEvaluationErrors(t *testing.T) {
 		t.Fatalf("first_error = %q", got.result.FirstError)
 	}
 }
+
+// TestAlertValidationNeedsOnlyAlertsRead: test and backtest write nothing and
+// send nothing, so a token with alerts:read runs them and a token without an
+// alerts scope gets 403 naming alerts:read.
+func TestAlertValidationNeedsOnlyAlertsRead(t *testing.T) {
+	upstream := &backtestUpstream{burst: time.Now().Add(-30 * time.Minute)}
+	env := newErrorResponseServer(t, upstream.ServeHTTP)
+	user, err := env.s.store.GetUserByEmail(t.Context(), "admin@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := apiToken(t, env.s, user, models.TokenScopeAlertsRead)
+	logsOnly := apiToken(t, env.s, user, models.TokenScopeLogsRead)
+	rule := fmt.Sprintf(`"source_id":%d,"query_language":"logsql","editor_mode":"native","query":"* | stats count() as value","threshold_operator":"gt","threshold_value":10,"lookback_seconds":60`, env.vlSource)
+
+	for _, route := range []struct{ path, body string }{
+		{"/api/v1/alerts/test", "{" + rule + "}"},
+		{"/api/v1/alerts/backtest", "{" + rule + `,"frequency_seconds":60,"range_seconds":3600}`},
+	} {
+		if got := doAuthzRequest(t, env.s, http.MethodPost, route.path, route.body, withBearer(reader)); got.status != http.StatusOK {
+			t.Errorf("%s with alerts:read: status %d message %q, want 200", route.path, got.status, got.message)
+		}
+		got := doAuthzRequest(t, env.s, http.MethodPost, route.path, route.body, withBearer(logsOnly))
+		if got.status != http.StatusForbidden || got.message != "API token does not have the required scope alerts:read" {
+			t.Errorf("%s without alerts:read: status %d message %q, want 403 naming alerts:read", route.path, got.status, got.message)
+		}
+	}
+}
+
+// TestAlertBacktestEndTime replays a past window that holds a burst, at full
+// coverage, and refuses an end in the future.
+func TestAlertBacktestEndTime(t *testing.T) {
+	burst := time.Now().Add(-5 * time.Hour).Truncate(time.Minute)
+	upstream := &backtestUpstream{burst: burst}
+	env := newErrorResponseServer(t, upstream.ServeHTTP)
+	body := func(end time.Time) string {
+		return fmt.Sprintf(`{"source_id":%d,"query_language":"logsql","editor_mode":"native","query":"* | stats count() as value","threshold_operator":"gt","threshold_value":10,"lookback_seconds":60,"frequency_seconds":60,"range_seconds":3600,"end_time":%q}`, env.vlSource, end.UTC().Format(time.RFC3339))
+	}
+
+	got := postBacktest(t, env.s, env.cookie, body(burst.Add(30*time.Minute)))
+	if got.status != http.StatusOK {
+		t.Fatalf("status=%d message=%q", got.status, got.message)
+	}
+	r := got.result
+	if !r.End.Equal(burst.Add(30*time.Minute)) || r.Coverage != 1 || r.Summary.Episodes != 1 || r.Summary.FiringSeconds != 5*60 {
+		t.Fatalf("end=%s coverage=%v summary=%+v, want the burst window replayed in full", r.End, r.Coverage, r.Summary)
+	}
+
+	if got := postBacktest(t, env.s, env.cookie, body(time.Now().Add(time.Hour))); got.status != http.StatusBadRequest || !strings.Contains(got.message, "in the future") {
+		t.Fatalf("future end_time: status=%d message=%q, want 400", got.status, got.message)
+	}
+}

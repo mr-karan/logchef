@@ -108,7 +108,7 @@ const clickHouseSchemaTemplate = `CREATE TABLE IF NOT EXISTS {{database_name}}.{
     INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
     INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    INDEX idx_body body TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree()
 PARTITION BY toDate(timestamp)

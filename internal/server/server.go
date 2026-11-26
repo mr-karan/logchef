@@ -404,6 +404,7 @@ func (s *Server) setupRoutes() {
 
 	// Global Team Management
 	admin.Get("/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeams)
+	admin.Get("/team-memberships", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListAllTeamMemberships)
 	admin.Post("/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleCreateTeam).Name(string(audit.TeamCreate))
 	admin.Delete("/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamNotManaged, s.handleDeleteTeam).Name(string(audit.TeamDelete))
 
@@ -453,6 +454,7 @@ func (s *Server) setupRoutes() {
 	teamMembers.Get("/", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeamMembers) // Any team member can view
 	// Team admins can add/remove members even on managed teams (day-to-day operations)
 	teamMembers.Post("/", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleAddTeamMember).Name(string(audit.TeamMemberAdd))
+	teamMembers.Put("/:userID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeamMember).Name(string(audit.TeamMemberUpdate))
 	teamMembers.Delete("/:userID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.requireTeamAdminOrGlobalAdmin, s.handleRemoveTeamMember).Name(string(audit.TeamMemberRemove))
 
 	// Team settings — managed guard only on structural changes (rename/description)
@@ -476,6 +478,7 @@ func (s *Server) setupRoutes() {
 	collections.Put("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollection).Name(string(audit.CollectionUpdate))
 	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleDeleteCollection).Name(string(audit.CollectionDelete))
 	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionMember).Name(string(audit.CollectionMemberAdd))
+	collections.Put("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollectionMember).Name(string(audit.CollectionMemberUpdate))
 	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionMember).Name(string(audit.CollectionMemberRemove))
 	collections.Post("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionTeam).Name(string(audit.CollectionTeamAdd))
 	collections.Delete("/:collectionID/teams/:teamID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionTeam).Name(string(audit.CollectionTeamRemove))
@@ -558,8 +561,8 @@ func (s *Server) setupRoutes() {
 	alertRoutes := api.Group("/alerts", s.requireAuth, s.requireAlertsEnabled)
 	alertRoutes.Get("/", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlerts)
 	alertRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateAlert).Name(string(audit.AlertCreate))
-	alertRoutes.Post("/test", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleTestAlertQuery)
-	alertRoutes.Post("/backtest", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleBacktestAlert)
+	alertRoutes.Post("/test", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleTestAlertQuery)
+	alertRoutes.Post("/backtest", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleBacktestAlert)
 	alertRoutes.Get("/:alertID", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleGetAlert)
 	alertRoutes.Put("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleUpdateAlert).Name(string(audit.AlertUpdate))
 	alertRoutes.Delete("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteAlert).Name(string(audit.AlertDelete))

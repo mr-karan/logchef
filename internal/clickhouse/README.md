@@ -3,7 +3,8 @@
 LogChef uses the native `clickhouse-go` API. The driver is pinned to v2.48.0.
 Upstream's supported server range starts at 25.8. LogChef also tests its query
 paths against 23.7.4.5 and 24.1.2.5 for existing installations. These tests cover
-LogChef behavior. They do not extend upstream's support policy.
+LogChef behavior. They do not extend upstream's support policy. Creating a
+table from the default schema needs 26.8, because it adds a `text` index.
 
 ## Result values
 

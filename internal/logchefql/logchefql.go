@@ -88,6 +88,7 @@ func translateAST(ast ASTNode, schema *Schema, interval string) *TranslateResult
 	result.SelectClause = selectClause
 	result.FieldsUsed = extractFieldsFromAST(ast)
 	result.Conditions = extractConditionsFromAST(ast)
+	result.Warnings = generator.Warnings()
 	return result
 }
 

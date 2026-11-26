@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -640,6 +641,19 @@ func DeleteDashboard(ctx context.Context, db store.Store, log *slog.Logger, id i
 		return nil, 0, fmt.Errorf("failed to delete dashboard: %w", err)
 	}
 	return deleted, reports, nil
+}
+
+// DashboardViewer is the user that dashboard visibility and redaction run
+// for. The dashboard rules read global admin rights from the user's role, but
+// an OAuth, assistant or report principal never acts as a global admin, so
+// for one of those an admin user is read as a member.
+func DashboardViewer(p access.Principal) *models.User {
+	if p.User == nil || p.User.Role != models.UserRoleAdmin || p.RequireGlobalAdmin() == nil {
+		return p.User
+	}
+	viewer := *p.User
+	viewer.Role = models.UserRoleMember
+	return &viewer
 }
 
 // DashboardCreatorOrAdmin grants delete access and permits editing without a team role.

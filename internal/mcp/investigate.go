@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -46,8 +47,37 @@ type ListAlertsParams struct {
 }
 
 type GetAlertHistoryParams struct {
-	AlertID int `json:"alert_id" jsonschema:"Alert ID"`
+	AlertID int    `json:"alert_id" jsonschema:"Alert ID"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"Most episodes to return, newest first: 1 to 100, default 20"`
+	Since   string `json:"since,omitempty" jsonschema:"Only episodes that started at or after this RFC3339 time"`
+	Status  string `json:"status,omitempty" jsonschema:"Only episodes with this status: triggered, no_data, resolved or error"`
 }
+
+// Alert history bounds of the MCP tool.
+const (
+	defaultHistoryEpisodes = 20
+	maxHistoryEpisodes     = 100
+	// maxHistoryScan bounds the rows read to apply since and status.
+	maxHistoryScan = 500
+)
+
+// alertHistoryResult names the rule once, so the episodes need not repeat
+// its query.
+type alertHistoryResult struct {
+	Alert   alertHistoryRule            `json:"alert"`
+	History []*models.AlertHistoryEntry `json:"history"`
+}
+
+type alertHistoryRule struct {
+	ID            models.AlertID       `json:"id"`
+	Name          string               `json:"name"`
+	QueryLanguage models.QueryLanguage `json:"query_language"`
+	Query         string               `json:"query"`
+}
+
+// ruleFieldsInPayload are the payload entries that copy the rule, which the
+// result states once.
+var ruleFieldsInPayload = []string{"query", "condition_json", "query_language", "editor_mode"}
 
 // --- Handlers ---
 
@@ -224,19 +254,87 @@ func (t *tools) listAlerts(ctx context.Context, sourceID int) ([]*models.Alert, 
 }
 
 func (t *tools) handleGetAlertHistory(ctx context.Context, _ mcp.CallToolRequest, params GetAlertHistoryParams) (*mcp.CallToolResult, error) {
+	const op = "get alert history failed"
+	limit := params.Limit
+	switch {
+	case limit == 0:
+		limit = defaultHistoryEpisodes
+	case limit < 0 || limit > maxHistoryEpisodes:
+		return t.errorResult(fmt.Errorf("%s: %w: limit must be 1 to %d", op, errInvalidArgument, maxHistoryEpisodes)), nil
+	}
+	var since time.Time
+	if params.Since != "" {
+		parsed, err := time.Parse(time.RFC3339, params.Since)
+		if err != nil {
+			return t.errorResult(fmt.Errorf("%s: %w: since must be an RFC3339 time: %w", op, errInvalidArgument, err)), nil
+		}
+		since = parsed
+	}
+	status := models.AlertStatus(params.Status)
+	switch status {
+	case "", models.AlertStatusTriggered, models.AlertStatusNoData, models.AlertStatusResolved, models.AlertStatusError:
+	default:
+		return t.errorResult(fmt.Errorf("%s: %w: status must be triggered, no_data, resolved or error", op, errInvalidArgument)), nil
+	}
+
 	p, err := t.alertsPrincipal(ctx)
 	if err != nil {
-		return t.errorResult(t.storeError("get alert history failed", err)), nil
+		return t.errorResult(t.storeError(op, err)), nil
 	}
-	limit := t.deps.Config.Alerts.HistoryLimit
-	if limit <= 0 {
-		limit = models.DefaultAlertHistoryLimit
-	}
-	history, err := core.ListAlertHistoryForPrincipal(ctx, t.deps.DB, t.deps.Log, p, models.AlertID(params.AlertID), limit)
+	alert, err := core.GetAlertForPrincipal(ctx, t.deps.DB, t.deps.Log, p, models.AlertID(params.AlertID))
 	if err != nil {
-		return t.errorResult(t.storeError("get alert history failed", err)), nil
+		return t.errorResult(t.storeError(op, err)), nil
 	}
-	return jsonTextResult(history)
+	scan := limit
+	if !since.IsZero() || status != "" {
+		scan = maxHistoryScan
+	}
+	history, err := core.ListAlertHistory(ctx, t.deps.DB, alert.ID, scan)
+	if err != nil {
+		return t.errorResult(t.storeError(op, err)), nil
+	}
+	kept := make([]*models.AlertHistoryEntry, 0, min(limit, len(history)))
+	for _, entry := range history {
+		if len(kept) == limit {
+			break
+		}
+		if entry.TriggeredAt.Before(since) || (status != "" && entry.Status != status) {
+			continue
+		}
+		kept = append(kept, withoutRuleFields(entry))
+	}
+	return jsonTextResult(alertHistoryResult{
+		Alert:   alertHistoryRule{ID: alert.ID, Name: alert.Name, QueryLanguage: alert.QueryLanguage, Query: alert.Query},
+		History: kept,
+	})
+}
+
+// withoutRuleFields copies entry without the payload entries that repeat the
+// rule, at the top level and in the annotations.
+func withoutRuleFields(entry *models.AlertHistoryEntry) *models.AlertHistoryEntry {
+	trimmed := *entry
+	if entry.Payload == nil {
+		return &trimmed
+	}
+	trimmed.Payload = maps.Clone(entry.Payload)
+	for _, key := range ruleFieldsInPayload {
+		delete(trimmed.Payload, key)
+	}
+	switch annotations := trimmed.Payload["annotations"].(type) {
+	case map[string]any:
+		kept := maps.Clone(annotations)
+		for _, key := range ruleFieldsInPayload {
+			delete(kept, key)
+		}
+		trimmed.Payload["annotations"] = kept
+	case map[string]string:
+		kept := maps.Clone(annotations)
+		for _, key := range ruleFieldsInPayload {
+			delete(kept, key)
+		}
+		trimmed.Payload["annotations"] = kept
+	}
+	return &trimmed
 }
 
 // alertsPrincipal returns the principal when alerting is enabled and the
@@ -289,7 +387,8 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 	s.AddTool(listAlertsTool, mcp.NewTypedToolHandler(t.handleListAlerts))
 
 	alertHistoryTool := mcp.NewTool("get_alert_history",
-		mcp.WithDescription("Get the history of a specific alert. Each entry is one episode of one group (group_key, group) with status triggered, no_data, resolved or error, the value, its times and the state of each notification delivery. silenced_by in the payload means a silence muted the episode."),
+		mcp.WithDescription("Get the history of a specific alert, newest first: 20 episodes unless limit says otherwise (at most 100), optionally since a time and of one status. Each entry is one episode of one group (group_key, group) with status triggered, no_data, resolved or error, the value, its times and the state of each notification delivery. silenced_by in the payload means a silence muted the episode. The rule's query is given once, as alert.query, not in each entry."),
+
 		mcp.WithInputSchema[GetAlertHistoryParams](),
 		mcp.WithTitleAnnotation("Get Alert History"),
 		readOnlyTool,

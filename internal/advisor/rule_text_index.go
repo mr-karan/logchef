@@ -77,7 +77,7 @@ func textIndexFindings(a *analysis) []finding {
 			Column:   name,
 			Evidence: evidence,
 			DDL: []string{
-				fmt.Sprintf("%s ADD INDEX IF NOT EXISTS %s %s TYPE text(tokenizer = splitByNonAlpha);", a.alterTable(), queryescape.ClickHouseIdentifier(index), ident),
+				fmt.Sprintf("%s ADD INDEX IF NOT EXISTS %s %s TYPE %s;", a.alterTable(), queryescape.ClickHouseIdentifier(index), ident, models.TextIndexType),
 				fmt.Sprintf("%s MATERIALIZE INDEX %s;", a.alterTable(), queryescape.ClickHouseIdentifier(index)),
 			},
 			Gain: "hasToken, hasAllTokens and hasAnyTokens read the index. LIKE uses it when the pattern holds a complete token.",

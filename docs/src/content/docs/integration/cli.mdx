@@ -222,7 +222,7 @@ logchef --token "logchef_1_abc123..." query ""
 logchef config set auth.token "logchef_1_abc123..."
 ```
 
-Generate API tokens from the Logchef web UI under your profile settings, or see
+Create an API token in the web UI under the user menu > **Profile** > **API tokens** (`/settings/profile`), or see
 [Service Tokens](/features/service-tokens/) for non-login automation accounts.
 
 ## Command Reference
@@ -374,7 +374,7 @@ logchef sql 'level:="error" | fields _time, _msg, service'
 | `--interval` | | Bucket size for the `{{__interval}}` and `{{__interval_s}}` macros: `1s` to `24h` | |
 | `--var` | | Value for a `{{name}}` placeholder (`NAME=VALUE`, or `NAME:number=VALUE`, `NAME:date=VALUE`). Repeatable | |
 | `--timeout` | | Query timeout in seconds | 30 |
-| `--limit` | | Request row limit. A smaller `LIMIT` in the query wins | (from config) |
+| `--limit` | `-l` | Request row limit. A smaller `LIMIT` in the query wins | (from config) |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `csv`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
@@ -471,11 +471,11 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 :::
 
 :::note[Time macros and variables]
-A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros/). With no time flag the window is the configured default range. `{{__interval}}` and `{{__interval_s}}` need `--interval`, and the server refuses the query without it. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
+A query that uses `{{__time_filter}}`, `{{__from}}`, `{{__to}}` or `{{__tz_offset}}` keeps its text. The CLI sends the window from `--since` / `--from` / `--to` with the request, and the server fills the [time macros](/guide/time-macros/). With no time flag the window is the configured default range. On a ClickHouse source, `--dry-run` prints the query with `{{__time_filter}}`, `{{__from}}`, `{{__to}}` and `{{__timezone}}` filled in as the server fills them, so the printed SQL runs as is. `{{__interval}}` and `{{__interval_s}}` need `--interval`: the dry run leaves them as written without it, and the server refuses the query. `--var` values are substituted by the server as literals of their type, so a value cannot change the query.
 :::
 
 :::note[Auto-injected time predicate]
-`--since` / `--from` / `--to` work on the top-level SELECT. The CLI walks the SQL skipping string literals, quoted identifiers, and parenthesized subqueries, then injects the predicate before the first top-level `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`. For CTEs (`WITH ... AS (...)`) or any case where you want full control, use the `__START__` / `__END__` placeholders explicitly.
+`--since` / `--from` / `--to` work on the query that reads the table. The CLI walks the SQL skipping string literals, quoted identifiers, and parenthesized subqueries, then injects the predicate before the first top-level `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`. When the top-level `FROM` reads a subquery, as in `SELECT ... FROM (SELECT ... FROM logs.app) HAVING count() >= 50`, the predicate goes into the subquery, since the outer query sees only the subquery's columns. For CTEs (`WITH ... AS (...)`) or any case where you want full control, use the `__START__` / `__END__` placeholders explicitly.
 :::
 
 ### Explain a Query
@@ -494,6 +494,8 @@ logchef explain 'level="error" and service="api"' -t production -S app-logs
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--since` | `-s` | Compile over the window that ends now, such as `1h` | the context's `since` for an aggregation |
+| `--from`, `--to` | | Compile over an absolute window | |
 | `--interval` | | Bucket size of a bare `by time` key in an aggregation | |
 | `--output` | | Output format (`text`, `json`, `jsonl`) | `text` |
 
@@ -512,6 +514,12 @@ logchef explain 'level="error" | count() by service | limit 10'
 
 ClickHouse builds an aggregated query only for a time range, so `explain`
 compiles an aggregation over the default `since` range of the context.
+
+When a query translates but may not match what it says, `explain` prints a
+warning on stderr (and a `warnings` array with `--output json`). The main
+case: a dotted path on a String column reads JSON as text, so
+`msg.latency_ms > "500"` with a quoted number compares text and `"1000"` sorts
+before `"500"`. Write the number without quotes to compare numbers.
 
 :::tip[`explain` vs `--explain`/`--show-sql`]
 `explain` is a translate-and-validate step that **never executes**. The `--explain` / `--show-sql` flags on `query` and `sql` trace the generated backend query on stderr but **still run** it. Use `explain` when you only want to see or check the query; use the flags when you want the results and the query.
@@ -616,7 +624,8 @@ logchef find payments-api --team production --since 6h
 | `--since` | `-s` | Lookback window | `24h` |
 | `--column` | | Candidate column to search; repeatable | Common service/job/host/message columns |
 | `--limit` | | Maximum matching sources to print | `10` |
-| `--timeout` | | Per-source query timeout in seconds | `30` |
+| `--timeout` | | Seconds each source may take, from its schema read to its samples | `30` |
+| `--concurrency` | | Sources searched at once, 1 to 32 | `4` |
 | `--no-samples` | | Skip the per-column sample fetch | `false` |
 | `--output` | | Output format (`text`, `json`, `jsonl`) | `text` |
 
@@ -630,7 +639,7 @@ team=8 source=11 (logs.app)  matches=1401245 in 30m columns=job_name,msg
 
 Label-shaped columns (`service`, `host`, `job_name`, …) get the top 3 values with counts; free-form text columns (`msg`, `message`, `body`) get a single truncated sample row. Pass `--no-samples` to suppress and get just the summary line. In JSON / JSONL output, samples are included as a `samples: [{column, values: [{value, count?}]}]` field.
 
-Sources that fail to inspect (permissions, schema fetch, or query errors) are silently skipped. The text output reports the skip count on stderr; pass the global `--debug` flag to see per-source diagnostics. If a source consistently times out (e.g. very wide table over a long lookback), raise `--timeout` or narrow with `--since` / `--column`.
+A source that fails (permissions, schema fetch or a query error) or takes longer than `--timeout` is skipped. The matches from the other sources still print, and stderr names each skipped source with the reason, even with `--quiet`. On a terminal, a progress line counts the sources searched. The command fails only when no source could be searched. If a source keeps timing out (a very wide table over a long lookback), raise `--timeout` or narrow with `--team`, `--since` or `--column`.
 
 ### Tail
 
@@ -746,7 +755,63 @@ ID     NAME                           SCOPE     DEFAULT  SETS
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
 | `--output` | | `text` or `json` (the server's list response) | `text` |
 
-A browser sign-in made before saved views existed does not hold the `saved_views:read` scope, so `views list` and `open --view <name>` answer that the token lacks the required scope. Run `logchef auth` again to sign in with it.
+A browser sign-in keeps the scopes it was approved with. One made before saved views existed does not hold `saved_views:read`, so `views list` and `open --view <name>` fail with an error that names the scope and the `logchef auth` command that signs in again. `logchef doctor` reports the read scopes a sign-in lacks.
+
+### Alerts
+
+The `alerts` command lists alert rules and checks an unsaved rule against live data. It is read-only: `test` and `backtest` save nothing and notify no one. Create and edit rules in the web UI. A `logchef auth` sign-in can run all three; an API token needs `alerts:read`.
+
+```bash
+logchef alerts list                          # every rule you can see
+logchef alerts list -t production -S app-logs
+```
+
+`test` and `backtest` read the JSON body of [`POST /alerts/test`](/features/alerting/#api) from a file, or from stdin with `-f -`. A missing `source_id` comes from `-S` or the default source.
+
+```json
+{
+  "query_language": "logchefql",
+  "query": "level=\"error\" | count() as value by service",
+  "lookback_seconds": 300,
+  "threshold_operator": "gt",
+  "threshold_value": 10
+}
+```
+
+```bash
+logchef alerts test -f rule.json -S app-logs
+logchef alerts backtest -f rule.json -S app-logs --range 24h --frequency 60
+logchef alerts backtest -f rule.json -S app-logs --frequency 60 \
+  --from '2026-01-15 09:00:00' --to '2026-01-15 13:00:00'
+```
+
+`test` runs the rule once over its lookback and prints the value, whether it meets the threshold, the group samples and any warnings. `backtest` replays it over the range through the same group, no-data and forget rules as live evaluation, and prints the episodes, notifications, firing time, coverage and the groups that breached most. Times print in the effective timezone, in the form `--from` and `--to` take, and each firing or no-data episode is listed with its start and end (up to 20), so you can replay one. `--range` takes `1h`, `6h`, `24h` or `7d`; `--frequency` sets the seconds between evaluations. `--end` replays the range that ends at a past time, and `--from` with `--to` replays exactly that window (1 hour to 7 days), in RFC 3339 or `'YYYY-MM-DD HH:MM:SS'` in the effective timezone. A backtest runs at most 120 evaluations, so it reads the whole range only up to 120 times the lookback (10 hours for 5 minutes). The output shows the step and the coverage on their own line, and the server's warnings on stderr: below 100% an episode shorter than the step can be missed, so replay incident windows with `--from`/`--to`. For an `lt` or `lte` rule the groups table shows each group's lowest value. One backtest runs per user at a time. A ClickHouse SQL rule must read its window from `{{__time_filter}}` to be backtested. `--output json` prints the server's result as is.
+
+### Silences
+
+`silences list` lists the [silences](/features/alerting/#silences) of a source: the rule each one covers, its matchers, its once or weekly schedule and whether it mutes now. Create and edit silences in the web UI.
+
+```bash
+logchef silences list -t production -S app-logs
+```
+
+### Destinations
+
+`destinations list` lists the notification destinations you may put on an alert rule, with their ID for `destination_ids`. A `logchef auth` sign-in sees each destination's ID, name, type, scope, team and whether it is active, never its recipients, URL or key. A sign-in made before the server offered `destinations:read` must run `logchef auth` again.
+
+```bash
+logchef destinations list
+logchef destinations list --output json
+```
+
+### Dashboards
+
+`dashboards list` lists the dashboards you can see: those you created and those with a panel on one of your teams. Each row has the ID, name, panel count, tab count, panel kinds, whether you can edit it and when it changed. It reads no panels. Create and edit dashboards in the web UI. A sign-in made before the server offered `dashboards:read` must run `logchef auth` again.
+
+```bash
+logchef dashboards list
+logchef dashboards list --output json
+```
 
 ### Reports
 
@@ -997,7 +1062,7 @@ logchef schema --team "production" --source "nginx-logs"
 
 ### Doctor
 
-The `doctor` command runs a one-shot health check of your setup, so it's a good first step when something isn't working. It checks: the config file, current context, server reachability, CLI auth availability, the token and its expiry, whether the CLI and server versions match, and whether your default team/source actually resolve. Each line is `✓` (ok), `⚠` (warning), or `✗` (problem); every warning or problem prints an actionable `→` fix. It exits `0` when there are no problems (warnings are fine) and `1` otherwise.
+The `doctor` command runs a one-shot health check of your setup, so it's a good first step when something isn't working. It checks: the config file, current context, server reachability, CLI auth availability, the token and its expiry, whether a `logchef auth` sign-in holds every read scope the server offers, whether the CLI and server versions match, and whether your default team/source actually resolve. Each line is `✓` (ok), `⚠` (warning), or `✗` (problem); every warning or problem prints an actionable `→` fix. It exits `0` when there are no problems (warnings are fine) and `1` otherwise.
 
 ```bash
 logchef doctor
@@ -1024,7 +1089,14 @@ logchef doctor --server https://logs.example.com
 
 ### Skills
 
-The CLI bundles its own usage skill, embedded at build time so its content always matches your installed binary. `skills list` shows what's available; `skills get core` prints the guide. This is the best way to get usage instructions that match your version — point an agent (or yourself) at it instead of guessing at flags.
+The CLI bundles two skills, embedded at build time so their content always matches your installed binary. `skills list` shows them; `skills get <name>` prints one.
+
+| Skill | What it covers |
+| :--- | :--- |
+| `core` | CLI usage, LogchefQL, SQL, LogsQL and LogQL syntax, and investigation workflows |
+| `setup` | Setting up Logchef for an app from its repository: find its production source, measure volume and noise, and propose saved queries, a collection, views, alert rules with thresholds from data, silences and scheduled reports. It previews everything and asks before it creates anything |
+
+`skills get core` prints the usage guide. This is the best way to get usage instructions that match your version — point an agent (or yourself) at it instead of guessing at flags.
 
 ```bash
 # List the bundled skills
@@ -1038,6 +1110,9 @@ logchef skills get core --full
 
 # Feed the guide to an agent as JSON
 logchef skills get core --json
+
+# The setup guide, to paste into an agent working in your app's repository
+logchef skills get setup
 ```
 
 :::tip[For agents]

@@ -41,6 +41,19 @@ func (s *Server) handleGetUser(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, user)
 }
 
+// handleListAllTeamMemberships lists all team memberships across all teams for
+// admin list views.
+// URL: GET /api/v1/admin/team-memberships
+// Requires: Admin privileges (requireAdmin middleware)
+func (s *Server) handleListAllTeamMemberships(c fiber.Ctx) error {
+	memberships, err := s.store.ListAllTeamMemberships(c.Context())
+	if err != nil {
+		s.log.Error("failed to list team memberships", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing team memberships")
+	}
+	return SendSuccess(c, fiber.StatusOK, memberships)
+}
+
 // loadHumanUser parses :userID and returns the user only if it's a human account.
 // Service principals are managed via /admin/service-accounts/* and must not leak
 // through the human-user CRUD path.

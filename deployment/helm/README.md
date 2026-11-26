@@ -3,6 +3,10 @@
 The chart deploys Logchef, optional Dex, and an optional Altinity
 ClickHouseInstallation. ClickHouse requires the Altinity operator CRDs.
 
+The chart runs ClickHouse 26.8.2.7. Logchef's built-in schema needs 26.8 or
+later for its text index. An external ClickHouse on an older version works
+with tables you create yourself.
+
 ## Authentication and secrets
 
 Set `logchef.auth.existingSecret` to a persistent Secret containing the
