@@ -16,6 +16,11 @@ func CSVValue(value any) string {
 		return ""
 	case time.Time:
 		return v.Format(time.RFC3339Nano)
+	case *time.Time:
+		if v == nil {
+			return ""
+		}
+		return v.Format(time.RFC3339Nano)
 	case []byte:
 		return string(v)
 	case fmt.Stringer:

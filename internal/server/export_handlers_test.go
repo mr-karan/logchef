@@ -161,17 +161,27 @@ func TestExportQueriesClickHouse(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, want string
 		settings         *models.ClickHouseQuerySettings
+		jobOnly          bool
 	}{
 		{name: "optional block", body: `{"query_text":"SELECT 1 AS value [[WHERE 1={{x}}]]","format":"ndjson"}`, want: `"row":{"value":1}`},
+		{
+			name:    "nullable timestamp from outer join",
+			body:    `{"query_text":"SELECT l.number AS id, r.ts AS ts FROM numbers(2) AS l LEFT JOIN (SELECT 0 AS id, -3 AS diff, toDateTime64('2026-01-02 03:04:05.123456789', 9, 'UTC') AS ts) AS r ON l.number = r.id ORDER BY abs(r.diff) DESC SETTINGS join_use_nulls = 1","format":"csv"}`,
+			want:    "id,ts\n0,2026-01-02T03:04:05.123456789Z\n1,\n",
+			jobOnly: true,
+		},
 		{name: "byte cap the result stays under", body: `{"query_text":"SELECT number FROM numbers(30)","format":"ndjson"}`, want: `"truncation":"none"`, settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(1_000_000))}},
 		{name: "silent byte cap", body: `{"query_text":"SELECT number FROM numbers(10000) SETTINGS max_block_size=10, max_threads=1","format":"ndjson"}`, want: `"truncation":"unknown"`, settings: &models.ClickHouseQuerySettings{MaxResultBytes: new(int64(100)), ResultOverflowMode: new("break")}},
 	} {
 		for _, operation := range []string{"stream", "job"} {
+			if tc.jobOnly && operation == "stream" {
+				continue
+			}
 			t.Run(tc.name+"/"+operation, func(t *testing.T) {
 				s := newDashboardTestServer(t)
 				s.config = &config.Config{Export: config.ExportConfig{
 					MaxRows: 100, DefaultTimeoutSeconds: 5, MaxTimeoutSeconds: 10,
-					ArtifactTTL: time.Hour, Formats: []string{"ndjson"},
+					ArtifactTTL: time.Hour, Formats: []string{"ndjson", "csv"},
 				}}
 				s.clickhouse = clickhouse.NewManager(s.log)
 				t.Cleanup(func() { _ = s.clickhouse.Close() })
