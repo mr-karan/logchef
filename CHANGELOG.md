@@ -7,11 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Read-only tools that let a coding agent set up Logchef for an app: check
-alert rules before a person saves them, see silences, collections and
-destinations, and get errors that say what to do.
+## [2.8.3] - 2026-11-26
+
+Read-only agent onboarding tools (alert test/backtest, dashboards, silences,
+collections, destinations, and the `logchef-setup` skill), streamlined admin
+People and collection member management, ClickHouse default text index, and
+alert/ClickHouse query diagnostics fixes. No migrations: upgrade in place from
+v2.8.0, v2.8.1 or v2.8.2.
 
 ### Added
+
+- Admin People view with a teams column, filters, user detail drawer, inline
+  team role editing, multi-select member picker, and `PUT /teams/:teamID/members/:userID`
+  for changing a team member's role.
+- Collection owners can invite members without global admin rights and change a
+  collection member's role, plus a streamlined Save Query dialog.
+- Default ClickHouse log table creation now uses ClickHouse's native text
+  index on the log body.
 
 - MCP tools `test_alert`, `backtest_alert`, `list_alert_silences`,
   `list_collections` and `list_destinations`.
@@ -2717,7 +2729,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.2...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.3...HEAD
+[2.8.3]: https://github.com/mr-karan/logchef/compare/v2.8.2...v2.8.3
 [2.8.2]: https://github.com/mr-karan/logchef/compare/v2.8.1...v2.8.2
 [2.8.1]: https://github.com/mr-karan/logchef/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/mr-karan/logchef/compare/v2.7.0...v2.8.0
