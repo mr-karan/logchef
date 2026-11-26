@@ -163,6 +163,7 @@ type CollectionStore interface {
 	GetCollectionMember(ctx context.Context, collectionID int, userID models.UserID) (*models.CollectionMember, error)
 	ListCollectionEditors(ctx context.Context, collectionIDs []int) ([]*models.CollectionMember, error)
 	ListCollectionMembers(ctx context.Context, collectionID int) ([]*models.CollectionMember, error)
+	UpdateCollectionMemberRole(ctx context.Context, collectionID int, userID models.UserID, role models.CollectionRole) error
 	RemoveCollectionMember(ctx context.Context, collectionID int, userID models.UserID) error
 	AddCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID, addedBy *models.UserID) error
 	RemoveCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID) error
@@ -654,6 +655,9 @@ type TeamStore interface {
 	UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
 	ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
+	// ListAllTeamMemberships returns every membership in every team, ordered
+	// by team name (case-insensitive), team ID, then user ID.
+	ListAllTeamMemberships(ctx context.Context) ([]*models.TeamMembershipSummary, error)
 
 	AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error
 	RemoveTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error

@@ -21,10 +21,26 @@ use crate::session;
 use crate::ui;
 
 const STREAMING_SQL_MIN_TIMEOUT_SECS: u32 = 120;
-/// The histogram windows, the only bucket sizes the server renders.
-const INTERVALS: [&str; 16] = [
-    "1s", "5s", "10s", "15s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "2h", "3h", "6h",
-    "12h", "24h",
+/// The histogram windows, the only bucket sizes the server renders, with the
+/// seconds and the ClickHouse literal it renders for each (`intervals` in
+/// internal/template/builtins.go).
+const INTERVALS: [(&str, u32, &str); 16] = [
+    ("1s", 1, "INTERVAL 1 SECOND"),
+    ("5s", 5, "INTERVAL 5 SECOND"),
+    ("10s", 10, "INTERVAL 10 SECOND"),
+    ("15s", 15, "INTERVAL 15 SECOND"),
+    ("30s", 30, "INTERVAL 30 SECOND"),
+    ("1m", 60, "INTERVAL 1 MINUTE"),
+    ("5m", 300, "INTERVAL 5 MINUTE"),
+    ("10m", 600, "INTERVAL 10 MINUTE"),
+    ("15m", 900, "INTERVAL 15 MINUTE"),
+    ("30m", 1800, "INTERVAL 30 MINUTE"),
+    ("1h", 3600, "INTERVAL 1 HOUR"),
+    ("2h", 7200, "INTERVAL 2 HOUR"),
+    ("3h", 10800, "INTERVAL 3 HOUR"),
+    ("6h", 21600, "INTERVAL 6 HOUR"),
+    ("12h", 43200, "INTERVAL 12 HOUR"),
+    ("24h", 86400, "INTERVAL 1 DAY"),
 ];
 /// The macros the server renders from the request's time range.
 const TIME_MACROS: [&str; 4] = ["__from", "__to", "__time_filter", "__tz_offset"];
@@ -83,7 +99,7 @@ pub struct SqlArgs {
     to: Option<String>,
 
     /// Bucket size for the {{__interval}} and {{__interval_s}} macros
-    #[arg(long, value_parser = INTERVALS)]
+    #[arg(long, value_parser = INTERVALS.map(|(window, ..)| window))]
     interval: Option<String>,
 
     /// Value for a {{name}} placeholder, substituted by the server as a
@@ -101,7 +117,7 @@ pub struct SqlArgs {
     stream: bool,
 
     /// Result row limit. A smaller LIMIT in the query wins. In stream mode this caps the download; otherwise it caps the preview.
-    #[arg(long)]
+    #[arg(long, short = 'l')]
     limit: Option<u32>,
 
     /// Output format
@@ -129,8 +145,9 @@ pub struct SqlArgs {
     #[arg(long, visible_alias = "explain")]
     show_sql: bool,
 
-    /// Print the resolved query (after --since/--from/--to handling) to stdout
-    /// and exit without executing it. Pipes cleanly to other tools.
+    /// Print the resolved query (after --since/--from/--to handling, with a
+    /// ClickHouse query's macros rendered as the server renders them) to
+    /// stdout and exit without executing it. Pipes cleanly to other tools.
     #[arg(long)]
     dry_run: bool,
 }
@@ -329,7 +346,21 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     // For VictoriaLogs this is the raw LogsQL (the time window rides in the
     // request fields, never spliced into the query) — never ClickHouse SQL.
     if args.dry_run {
-        println!("{}", sql);
+        if is_victorialogs || is_loki {
+            println!("{sql}");
+        } else {
+            let window = match &window {
+                Some((start, end)) => Some((parse_instant(start)?, parse_instant(end)?)),
+                None => None,
+            };
+            let inputs = MacroInputs {
+                window,
+                interval: args.interval.as_deref(),
+                timezone: &timezone,
+                ts_field: timestamp_field(&source),
+            };
+            println!("{}", render_macros(&sql, &inputs));
+        }
         return Ok(());
     }
 
@@ -763,7 +794,10 @@ fn request_time_window(
 /// interpreted in `tz`, into a UTC instant. Generic over the timezone so this
 /// file needs no direct chrono-tz dependency (the concrete zone comes from
 /// `resolve_timezone`).
-fn wall_clock_to_utc<Tz: chrono::TimeZone>(value: &str, tz: Tz) -> Result<DateTime<Utc>> {
+pub(crate) fn wall_clock_to_utc<Tz: chrono::TimeZone>(
+    value: &str,
+    tz: Tz,
+) -> Result<DateTime<Utc>> {
     let value = value.trim();
     if let Ok(instant) = DateTime::parse_from_rfc3339(value) {
         return Ok(instant.with_timezone(&Utc));
@@ -796,13 +830,8 @@ fn apply_clickhouse_time_range(
         args.to.as_deref(),
         ctx.defaults.timezone.as_deref(),
     )?;
-    let timestamp_field = source
-        .meta_ts_field
-        .as_deref()
-        .filter(|field| !field.trim().is_empty())
-        .unwrap_or("_timestamp");
     let condition = sql_time_condition(
-        timestamp_field,
+        timestamp_field(source),
         &time_range.start,
         &time_range.end,
         &time_range.timezone,
@@ -820,6 +849,88 @@ fn apply_clickhouse_time_range(
     }
 
     Ok(inject_sql_condition(&sql, &condition))
+}
+
+/// The source's timestamp column, `_timestamp` when it names none.
+fn timestamp_field(source: &Source) -> &str {
+    source
+        .meta_ts_field
+        .as_deref()
+        .filter(|field| !field.trim().is_empty())
+        .unwrap_or("_timestamp")
+}
+
+fn parse_instant(value: &str) -> Result<DateTime<Utc>> {
+    Ok(DateTime::parse_from_rfc3339(value)
+        .with_context(|| format!("Invalid time window bound '{value}'"))?
+        .with_timezone(&Utc))
+}
+
+/// The request values the server renders ClickHouse macros from.
+struct MacroInputs<'a> {
+    window: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    /// One of the `INTERVALS` windows.
+    interval: Option<&'a str>,
+    /// The effective timezone, an IANA name.
+    timezone: &'a str,
+    ts_field: &'a str,
+}
+
+/// Renders the built-in macros outside quoted text and comments as the server
+/// renders them for ClickHouse (the `macros` table in
+/// internal/template/builtins.go). A macro whose input the request lacks
+/// stays as written, as does {{__tz_offset}}, which the server rejects in
+/// ClickHouse SQL, and every other `{{...}}`.
+fn render_macros(sql: &str, inputs: &MacroInputs) -> String {
+    let instant = |t: DateTime<Utc>| {
+        format!(
+            "toDateTime64('{}', 3, 'UTC')",
+            t.format("%Y-%m-%d %H:%M:%S%.3f")
+        )
+    };
+    let column = format!(
+        "`{}`",
+        inputs.ts_field.replace('\\', "\\\\").replace('`', "\\x60")
+    );
+    let interval = inputs
+        .interval
+        .and_then(|w| INTERVALS.iter().find(|(window, ..)| *window == w));
+    let mut out = String::with_capacity(sql.len());
+    let mut i = 0;
+    while i < sql.len() {
+        if let Some(end) = sql_skip_end(sql, i) {
+            out.push_str(&sql[i..end]);
+            i = end;
+            continue;
+        }
+        if sql[i..].starts_with("{{")
+            && let Some(len) = sql[i + 2..].find("}}")
+        {
+            let rendered = match (sql[i + 2..i + 2 + len].trim(), inputs.window) {
+                ("__from", Some((from, _))) => Some(instant(from)),
+                ("__to", Some((_, to))) => Some(instant(to)),
+                ("__time_filter", Some((from, to))) => Some(format!(
+                    "{column} >= {} AND {column} < {}",
+                    instant(from),
+                    instant(to)
+                )),
+                ("__interval", _) => interval.map(|(_, _, literal)| literal.to_string()),
+                ("__interval_s", _) => interval.map(|(_, seconds, _)| seconds.to_string()),
+                // An IANA name holds no character a string literal escapes.
+                ("__timezone", _) => Some(format!("'{}'", inputs.timezone)),
+                _ => None,
+            };
+            if let Some(rendered) = rendered {
+                out.push_str(&rendered);
+                i += len + 4;
+                continue;
+            }
+        }
+        let ch = sql[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 fn parse_time_range(
@@ -914,10 +1025,32 @@ fn inject_sql_condition(sql: &str, condition: &str) -> String {
     let trimmed = sql.trim();
     let has_semicolon = trimmed.ends_with(';');
     let body = trimmed.trim_end_matches(';').trim_end();
-    let (where_pos, clause_pos) = scan_top_level_clauses(body);
-    let insert_at = clause_pos.unwrap_or(body.len());
+    format!(
+        "{}{}",
+        inject_into_query(body, condition),
+        if has_semicolon { ";" } else { "" }
+    )
+}
 
-    let connector = if where_pos.map(|w| w < insert_at).unwrap_or(false) {
+/// Adds `condition` to the query that reads the table. When the top-level
+/// FROM is a parenthesized subquery, the outer query reads only the
+/// subquery's columns, so the condition goes into the subquery, recursively.
+fn inject_into_query(body: &str, condition: &str) -> String {
+    let clauses = scan_top_level_clauses(body);
+    if let Some((open, close)) = clauses.from_subquery {
+        let inner = &body[open + 1..close];
+        let start = open + 1 + (inner.len() - inner.trim_start().len());
+        let end = open + 1 + inner.trim_end().len();
+        return format!(
+            "{}{}{}",
+            &body[..start],
+            inject_into_query(&body[start..end], condition),
+            &body[end..]
+        );
+    }
+    let insert_at = clauses.clause_pos.unwrap_or(body.len());
+
+    let connector = if clauses.where_pos.is_some_and(|w| w < insert_at) {
         "AND"
     } else {
         "WHERE"
@@ -933,27 +1066,36 @@ fn inject_sql_condition(sql: &str, condition: &str) -> String {
         " "
     };
     format!(
-        "{}{}{} {}{}{}{}",
+        "{}{}{} {}{}{}",
         head,
         joiner,
         connector,
         condition,
         separator,
         tail.trim_start(),
-        if has_semicolon { ";" } else { "" }
     )
 }
 
-/// Walks the SQL skipping string literals, backtick identifiers, and
-/// parenthesized groups (subqueries). Returns the byte offset of the first
-/// top-level WHERE keyword and the first top-level clause boundary among
-/// GROUP/ORDER/LIMIT/HAVING/SETTINGS/FORMAT.
-fn scan_top_level_clauses(sql: &str) -> (Option<usize>, Option<usize>) {
+/// The top-level structure of a query that time injection needs.
+#[derive(Debug, Default)]
+struct TopLevelClauses {
+    /// The first top-level WHERE keyword.
+    where_pos: Option<usize>,
+    /// The first top-level GROUP BY, ORDER BY, LIMIT, HAVING, SETTINGS or
+    /// FORMAT keyword.
+    clause_pos: Option<usize>,
+    /// The parentheses around a SELECT that the top-level FROM reads.
+    from_subquery: Option<(usize, usize)>,
+}
+
+/// Walks the SQL skipping string literals, backtick identifiers, comments
+/// and parenthesized groups (subqueries), and reports the top-level clauses.
+fn scan_top_level_clauses(sql: &str) -> TopLevelClauses {
     let bytes = sql.as_bytes();
     let mut i = 0;
     let mut paren_depth = 0i32;
-    let mut where_pos: Option<usize> = None;
-    let mut clause_pos: Option<usize> = None;
+    let mut seen_from = false;
+    let mut found = TopLevelClauses::default();
 
     while i < bytes.len() {
         let b = bytes[i];
@@ -974,41 +1116,90 @@ fn scan_top_level_clauses(sql: &str) -> (Option<usize>, Option<usize>) {
         }
 
         if paren_depth == 0 && is_keyword_boundary(bytes, i) {
-            if where_pos.is_none() && matches_kw(bytes, i, b"WHERE") {
-                where_pos = Some(i);
+            if !seen_from && matches_kw(bytes, i, b"FROM") {
+                seen_from = true;
+                found.from_subquery = subquery_at(sql, skip_blank(sql, i + 4));
+                i += 4;
+                continue;
+            }
+            if found.where_pos.is_none() && matches_kw(bytes, i, b"WHERE") {
+                found.where_pos = Some(i);
                 i += 5;
                 continue;
             }
-            if clause_pos.is_none() {
-                for kw in [
-                    &b"GROUP"[..],
-                    &b"ORDER"[..],
-                    &b"LIMIT"[..],
-                    &b"HAVING"[..],
-                    &b"SETTINGS"[..],
-                    &b"FORMAT"[..],
-                ] {
-                    if matches_kw(bytes, i, kw) {
-                        // Ensure GROUP/ORDER are followed by BY (with whitespace)
-                        let needs_by = kw == b"GROUP" || kw == b"ORDER";
-                        if needs_by {
-                            let after = i + kw.len();
-                            if !followed_by(bytes, after, b"BY") {
-                                continue;
-                            }
+            for kw in [
+                &b"GROUP"[..],
+                &b"ORDER"[..],
+                &b"LIMIT"[..],
+                &b"HAVING"[..],
+                &b"SETTINGS"[..],
+                &b"FORMAT"[..],
+            ] {
+                if matches_kw(bytes, i, kw) {
+                    // Ensure GROUP/ORDER are followed by BY (with whitespace)
+                    let needs_by = kw == b"GROUP" || kw == b"ORDER";
+                    if needs_by {
+                        let after = i + kw.len();
+                        if !followed_by(bytes, after, b"BY") {
+                            continue;
                         }
-                        clause_pos = Some(i);
-                        break;
                     }
-                }
-                if clause_pos.is_some() {
-                    return (where_pos, clause_pos);
+                    found.clause_pos = Some(i);
+                    return found;
                 }
             }
         }
         i += 1;
     }
-    (where_pos, clause_pos)
+    found
+}
+
+/// The offset of the first byte at or after `from` that is not whitespace or
+/// part of a comment.
+fn skip_blank(sql: &str, mut from: usize) -> usize {
+    while from < sql.len() {
+        if sql.as_bytes()[from].is_ascii_whitespace() {
+            from += 1;
+        } else if let Some(end) = sql_skip_end(sql, from).filter(|_| is_sql_comment(sql, from)) {
+            from = end;
+        } else {
+            break;
+        }
+    }
+    from
+}
+
+/// The offsets of the parentheses of a `(SELECT ...)` or `(WITH ...)` that
+/// opens at `open`, or None when none does.
+fn subquery_at(sql: &str, open: usize) -> Option<(usize, usize)> {
+    let bytes = sql.as_bytes();
+    if bytes.get(open) != Some(&b'(') {
+        return None;
+    }
+    let first = skip_blank(sql, open + 1);
+    if !(matches_kw(bytes, first, b"SELECT") || matches_kw(bytes, first, b"WITH")) {
+        return None;
+    }
+    let mut depth = 0;
+    let mut i = open;
+    while i < bytes.len() {
+        if let Some(end) = sql_skip_end(sql, i) {
+            i = end.max(i + 1);
+            continue;
+        }
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((open, i));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn is_keyword_boundary(bytes: &[u8], pos: usize) -> bool {
@@ -1372,13 +1563,13 @@ mod tests {
 
     #[test]
     fn ignores_clause_keywords_in_subquery() {
-        let sql = "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s";
+        let sql = "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t LIMIT 5)";
         let out = inject_sql_condition(sql, "X");
         // The inner LIMIT inside the subquery must not become the top-level
-        // clause boundary; injection appends WHERE at end of body.
+        // clause boundary; injection appends AND at end of body.
         assert_eq!(
             out,
-            "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s WHERE X"
+            "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t LIMIT 5) AND X"
         );
     }
 
@@ -1633,5 +1824,133 @@ mod tests {
         let span = DateTime::parse_from_rfc3339(&end).unwrap()
             - DateTime::parse_from_rfc3339(&start).unwrap();
         assert_eq!(span, ChronoDuration::minutes(30));
+    }
+
+    #[test]
+    fn injects_into_a_from_subquery_with_group_by_and_having() {
+        let sql = "SELECT job_name, count() AS c FROM (SELECT job_name FROM logs.app WHERE job_name = 'x') GROUP BY job_name HAVING count() >= 50";
+        assert_eq!(
+            inject_sql_condition(sql, "X"),
+            "SELECT job_name, count() AS c FROM (SELECT job_name FROM logs.app WHERE job_name = 'x' AND X) GROUP BY job_name HAVING count() >= 50"
+        );
+    }
+
+    #[test]
+    fn injects_into_a_from_subquery_with_only_having() {
+        let sql = "SELECT count() FROM (SELECT job_name FROM logs.app WHERE job_name = 'x') HAVING count() >= 50";
+        assert_eq!(
+            inject_sql_condition(sql, "X"),
+            "SELECT count() FROM (SELECT job_name FROM logs.app WHERE job_name = 'x' AND X) HAVING count() >= 50"
+        );
+    }
+
+    #[test]
+    fn injects_into_the_innermost_of_nested_subqueries() {
+        let sql = "SELECT count() FROM ( SELECT j FROM (SELECT job_name AS j FROM logs.app) WHERE j != '' ) AS o;";
+        assert_eq!(
+            inject_sql_condition(sql, "X"),
+            "SELECT count() FROM ( SELECT j FROM (SELECT job_name AS j FROM logs.app WHERE X) WHERE j != '' ) AS o;"
+        );
+    }
+
+    #[test]
+    fn injects_before_the_clauses_of_a_subquery() {
+        let sql = "SELECT * FROM (SELECT service, count() AS c FROM logs.app WHERE level = 'error' GROUP BY service ORDER BY c DESC LIMIT 5) AS s ORDER BY c";
+        assert_eq!(
+            inject_sql_condition(sql, "X"),
+            "SELECT * FROM (SELECT service, count() AS c FROM logs.app WHERE level = 'error' AND X GROUP BY service ORDER BY c DESC LIMIT 5) AS s ORDER BY c"
+        );
+    }
+
+    #[test]
+    fn a_subquery_ending_in_a_line_comment_keeps_the_condition_live() {
+        let sql =
+            "SELECT count() FROM (\n  SELECT 1 FROM logs.app -- ')'\n) /* (SELECT */ GROUP BY 1";
+        assert_eq!(
+            inject_sql_condition(sql, "X"),
+            "SELECT count() FROM (\n  SELECT 1 FROM logs.app -- ')'\nWHERE X\n) /* (SELECT */ GROUP BY 1"
+        );
+    }
+
+    #[test]
+    fn a_table_function_or_parenthesized_table_is_not_a_subquery() {
+        assert_eq!(
+            inject_sql_condition("SELECT * FROM merge('logs', '^app') LIMIT 5", "X"),
+            "SELECT * FROM merge('logs', '^app') WHERE X LIMIT 5"
+        );
+        assert_eq!(
+            inject_sql_condition("SELECT * FROM `(SELECT` LIMIT 5", "X"),
+            "SELECT * FROM `(SELECT` WHERE X LIMIT 5"
+        );
+    }
+
+    fn inputs(
+        window: Option<(&str, &str)>,
+        interval: Option<&'static str>,
+    ) -> MacroInputs<'static> {
+        MacroInputs {
+            window: window.map(|(from, to)| (from.parse().unwrap(), to.parse().unwrap())),
+            interval,
+            timezone: "Asia/Kolkata",
+            ts_field: "_timestamp",
+        }
+    }
+
+    #[test]
+    fn dry_run_renders_time_macros_as_the_server_does() {
+        let window = Some(("2026-11-25T08:00:00.5Z", "2026-11-25T09:30:00Z"));
+        let sql = "SELECT '{{__from}}', {{ __from }} AS f, {{__to}} -- {{__to}}\n\
+                   FROM t WHERE {{__time_filter}} AND x = {{service}} /* {{__from}} */";
+        assert_eq!(
+            render_macros(sql, &inputs(window, None)),
+            "SELECT '{{__from}}', toDateTime64('2026-11-25 08:00:00.500', 3, 'UTC') AS f, \
+             toDateTime64('2026-11-25 09:30:00.000', 3, 'UTC') -- {{__to}}\n\
+             FROM t WHERE `_timestamp` >= toDateTime64('2026-11-25 08:00:00.500', 3, 'UTC') \
+             AND `_timestamp` < toDateTime64('2026-11-25 09:30:00.000', 3, 'UTC') \
+             AND x = {{service}} /* {{__from}} */"
+        );
+    }
+
+    #[test]
+    fn dry_run_escapes_the_timestamp_column_as_the_server_does() {
+        let at = "2026-11-25T08:00:00Z";
+        let inputs = MacroInputs {
+            ts_field: "odd`ts\\x",
+            ..inputs(Some((at, at)), None)
+        };
+        assert_eq!(
+            render_macros("{{__time_filter}}", &inputs),
+            "`odd\\x60ts\\\\x` >= toDateTime64('2026-11-25 08:00:00.000', 3, 'UTC') \
+             AND `odd\\x60ts\\\\x` < toDateTime64('2026-11-25 08:00:00.000', 3, 'UTC')"
+        );
+    }
+
+    #[test]
+    fn dry_run_renders_the_interval_and_timezone_as_the_server_does() {
+        let sql = "SELECT toStartOfInterval(ts, {{__interval}}, {{ __timezone }}), \
+                   {{__interval_s}}, {{__tz_offset}}";
+        assert_eq!(
+            render_macros(sql, &inputs(None, Some("24h"))),
+            "SELECT toStartOfInterval(ts, INTERVAL 1 DAY, 'Asia/Kolkata'), 86400, {{__tz_offset}}"
+        );
+        assert_eq!(
+            render_macros("{{__interval}} {{__interval_s}}", &inputs(None, Some("5m"))),
+            "INTERVAL 5 MINUTE 300"
+        );
+        assert_eq!(
+            render_macros("{{__interval}} {{__interval_s}}", &inputs(None, Some("1s"))),
+            "INTERVAL 1 SECOND 1"
+        );
+    }
+
+    #[test]
+    fn dry_run_leaves_a_macro_without_its_input_as_written() {
+        assert_eq!(
+            render_macros(
+                "{{__from}} {{__to}} {{__time_filter}} {{__interval}} {{__interval_s}}",
+                &inputs(None, None)
+            ),
+            "{{__from}} {{__to}} {{__time_filter}} {{__interval}} {{__interval_s}}"
+        );
     }
 }

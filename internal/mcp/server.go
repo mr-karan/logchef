@@ -30,6 +30,9 @@ type QueryClass int
 const (
 	QueryClassPreview QueryClass = iota + 1
 	QueryClassHistogram
+	// QueryClassBacktest replays an alert rule: up to 120 queries, so its
+	// budget is smaller than a preview's.
+	QueryClassBacktest
 )
 
 // AdmitQuery reserves a slot in the server's query admission tracker under
@@ -117,6 +120,8 @@ func newMCPServer(deps Deps) *server.MCPServer {
 	t.addInvestigateTools(s)
 	t.addAnalysisTools(s)
 	t.addDiscoverTools(s)
+	t.addAlertingTools(s)
+	t.addDashboardTools(s)
 	t.addResourceTemplates(s)
 	addPrompts(s)
 	return s
@@ -171,6 +176,13 @@ var toolScopes = map[string][]models.TokenScope{
 	"get_log_context":          {models.TokenScopeLogsRead},
 	"list_alerts":              {models.TokenScopeAlertsRead},
 	"get_alert_history":        {models.TokenScopeAlertsRead},
+	"test_alert":               {models.TokenScopeAlertsRead},
+	"backtest_alert":           {models.TokenScopeAlertsRead},
+	"list_alert_silences":      {models.TokenScopeAlertsRead},
+	"list_collections":         {models.TokenScopeCollectionsRead},
+	"list_destinations":        {models.TokenScopeDestinationsRead},
+	"list_dashboards":          {models.TokenScopeDashboardsRead},
+	"get_dashboard":            {models.TokenScopeDashboardsRead},
 	"compare_windows":          {models.TokenScopeLogsRead},
 	"top_values":               {models.TokenScopeSourcesRead, models.TokenScopeLogsRead},
 	"get_all_field_dimensions": {models.TokenScopeLogsRead},
@@ -302,6 +314,9 @@ func knownError(op string, err error) error {
 	if admitErr, ok := errors.AsType[*admissionError](err); ok {
 		return &maskedError{msg: op + ": " + admitErr.message, cause: err}
 	}
+	if replayErr, ok := errors.AsType[*datasource.ReplayError](err); ok {
+		return &maskedError{msg: op + ": " + replayErr.Reason, cause: err}
+	}
 	switch {
 	case errors.Is(err, errNoPrincipal),
 		errors.Is(err, access.ErrInsufficientScope),
@@ -312,6 +327,8 @@ func knownError(op string, err error) error {
 		errors.Is(err, core.ErrTeamNotFound),
 		errors.Is(err, core.ErrQueryNotFound),
 		errors.Is(err, core.ErrAlertNotFound),
+		errors.Is(err, core.ErrInvalidAlertConfiguration),
+		errors.Is(err, core.ErrDashboardNotFound),
 		errors.Is(err, core.ErrLogchefQLNotSupported),
 		errors.Is(err, models.ErrHistogramBudgetExceeded),
 		errors.Is(err, errAlertsDisabled),

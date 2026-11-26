@@ -4367,6 +4367,53 @@ func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQuerie
 	return items, nil
 }
 
+const listAllTeamMemberships = `-- name: ListAllTeamMemberships :many
+SELECT tm.team_id, t.name AS team_name, t.managed AS team_managed, tm.user_id, tm.role, u.account_type, tm.created_at
+FROM team_members tm
+JOIN teams t ON t.id = tm.team_id
+JOIN users u ON u.id = tm.user_id
+ORDER BY LOWER(t.name), tm.team_id, tm.user_id
+`
+
+type ListAllTeamMembershipsRow struct {
+	TeamID      int64              `json:"team_id"`
+	TeamName    string             `json:"team_name"`
+	TeamManaged bool               `json:"team_managed"`
+	UserID      int64              `json:"user_id"`
+	Role        string             `json:"role"`
+	AccountType string             `json:"account_type"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// List every team membership with its team, for admin views of all users
+func (q *Queries) ListAllTeamMemberships(ctx context.Context) ([]ListAllTeamMembershipsRow, error) {
+	rows, err := q.db.Query(ctx, listAllTeamMemberships)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllTeamMembershipsRow{}
+	for rows.Next() {
+		var i ListAllTeamMembershipsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.TeamName,
+			&i.TeamManaged,
+			&i.UserID,
+			&i.Role,
+			&i.AccountType,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditEventsAsc = `-- name: ListAuditEventsAsc :many
 SELECT id, occurred_at, action, outcome, reason, actor_type, actor_id, actor_label, auth_method, credential_id, client_id, target_type, target_id, target_label, team_id, source_id, ip, user_agent, http_method, route, status, changes, detail FROM audit_events
 WHERE ($1::timestamptz IS NULL OR occurred_at >= $1)
@@ -8993,6 +9040,21 @@ type UpdateCollectionParams struct {
 // Update name/description (owner only - enforced in app code)
 func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error {
 	_, err := q.db.Exec(ctx, updateCollection, arg.Name, arg.Description, arg.ID)
+	return err
+}
+
+const updateCollectionMemberRole = `-- name: UpdateCollectionMemberRole :exec
+UPDATE collection_members SET role = $1 WHERE collection_id = $2 AND user_id = $3
+`
+
+type UpdateCollectionMemberRoleParams struct {
+	Role         string `json:"role"`
+	CollectionID int64  `json:"collection_id"`
+	UserID       int64  `json:"user_id"`
+}
+
+func (q *Queries) UpdateCollectionMemberRole(ctx context.Context, arg UpdateCollectionMemberRoleParams) error {
+	_, err := q.db.Exec(ctx, updateCollectionMemberRole, arg.Role, arg.CollectionID, arg.UserID)
 	return err
 }
 

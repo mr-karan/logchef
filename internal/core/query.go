@@ -361,6 +361,8 @@ type LogchefQLTranslation struct {
 	// Aggregation describes the result of an aggregated query. Nil for a
 	// query that returns log rows.
 	Aggregation *logchefql.AggregationInfo
+	// Warnings note a query that translates but may not match what it says.
+	Warnings []string
 }
 
 // TranslateLogchefQL compiles a LogchefQL query without running it. A query
@@ -405,6 +407,7 @@ func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.
 		Conditions:     compiled.Conditions,
 		FieldsUsed:     compiled.FieldsUsed,
 		Aggregation:    compiled.Aggregation,
+		Warnings:       compiled.Warnings,
 	}
 	if compiled.Language == models.QueryLanguageClickHouseSQL {
 		translation.SQL = compiled.FilterOnly

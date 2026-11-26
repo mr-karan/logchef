@@ -7,6 +7,141 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.3] - 2026-11-26
+
+Read-only agent onboarding tools (alert test/backtest, dashboards, silences,
+collections, destinations, and the `logchef-setup` skill), streamlined admin
+People and collection member management, ClickHouse default text index, and
+alert/ClickHouse query diagnostics fixes. No migrations: upgrade in place from
+v2.8.0, v2.8.1 or v2.8.2.
+
+### Added
+
+- Admin People view with a teams column, filters, user detail drawer, inline
+  team role editing, multi-select member picker, and `PUT /teams/:teamID/members/:userID`
+  for changing a team member's role.
+- Collection owners can invite members without global admin rights and change a
+  collection member's role, plus a streamlined Save Query dialog.
+- Default ClickHouse log table creation now uses ClickHouse's native text
+  index on the log body.
+
+- MCP tools `test_alert`, `backtest_alert`, `list_alert_silences`,
+  `list_collections` and `list_destinations`.
+- CLI commands `logchef alerts list`, `alerts test`, `alerts backtest`,
+  `silences list` and `destinations list`. `test` and `backtest` read the rule
+  as JSON from a file or stdin and save nothing.
+- `destinations:read` is an OAuth scope. An OAuth client, such as `logchef
+  auth` or MCP, lists each destination it may use without its recipients,
+  receiver URL or key. A client connected before this release must sign in
+  again to get it.
+- LogchefQL translation returns `warnings`. A dotted path on a String column
+  ordered against a quoted number (`msg.latency_ms > "500"`) gets one:
+  `JSONExtractString` returns a JSON number as text, so the comparison orders
+  text. `logchef explain` and the MCP `translate_logchefql` tool show it.
+- On a dotted path on a String column, an unquoted number compares as a number
+  in an ordering (`msg.latency_ms > 500` reads
+  `toFloat64OrNull(JSONExtractString(...))`) and as text with `=` and `!=`
+  (`msg.status = 400` matches the JSON number 400). Before, both were refused.
+- `logchef doctor` reports the read scopes that a `logchef auth` sign-in
+  lacks.
+- `logchef find --concurrency` sets how many sources are searched at once.
+- `dashboards:read` is an OAuth scope, with the MCP tools `list_dashboards`
+  and `get_dashboard` and the CLI command `logchef dashboards list`. An OAuth
+  caller sees the dashboards its user sees as a team member, with panels on
+  sources it cannot reach locked; an admin's OAuth token gets no admin
+  bypass. A client connected before this release must sign in again to get
+  the scope.
+- The `logchef-setup` skill proposes and creates one overview dashboard per
+  app, and a scheduled report can email it. A test checks the skill's
+  example dashboard against the schema 2 validator and its features header.
+- The `logchef-setup` skill, also bundled as `logchef skills get setup`,
+  walks a coding agent through setting up Logchef for an app from its
+  repository: it finds the production source, measures volume and noise,
+  proposes saved queries, a collection, views, alert rules backtested on real
+  data, silences and scheduled reports, and creates only what the user
+  confirms.
+- Alert backtests replay a past window: `end_time` in `POST /alerts/backtest`
+  and MCP `backtest_alert`, and `--end` or `--from`/`--to` in `logchef alerts
+  backtest`. The result carries `warnings` that say how much of the range the
+  120-evaluation budget reads, `summary.empty_result_episodes` for a grouped
+  rule's whole-result no-data episodes, and each group's `min_value`.
+- MCP `backtest_alert` returns only the evaluations where the status changed
+  unless `include_series` is set. MCP `get_alert_history` takes `limit`
+  (default 20, at most 100), `since` and `status`, and states the rule's query
+  once instead of in every episode.
+- The alert test warns about a ClickHouse query that reads the current time,
+  which a backtest refuses, and about a value column not named `value`.
+- `logchef explain` takes `-s`/`--since` or `--from`/`--to`, and `logchef sql`
+  takes `-l` for its row limit.
+
+### Changed
+
+- `POST /api/v1/alerts/test` and `/alerts/backtest` need `alerts:read`
+  instead of `alerts:write`: they save nothing and send nothing. A token with
+  `alerts:write` and no `alerts:read` can no longer call them.
+- A condition rule may leave out `condition_json`; the server takes the
+  filter in front of the aggregation pipe.
+- A 403 for a missing scope names the scope. For an OAuth caller it asks for
+  a new sign-in, and the `insufficient_scope` challenge carries `scope=`.
+  The CLI turns it into the command to run, or into a hint to use an API
+  token with the scope.
+- `logchef sql --dry-run` fills `{{__time_filter}}`, `{{__from}}`, `{{__to}}`,
+  `{{__timezone}}`, and with `--interval` `{{__interval}}` and
+  `{{__interval_s}}`, the way the server does on a ClickHouse source.
+- `logchef alerts backtest` prints the replayed range in the effective
+  timezone and names it, lists each firing or no-data episode's start and end
+  (up to 20), and rounds coverage as the server's warning does, so the two
+  agree.
+- `get_all_field_dimensions` and `GET .../fields/values` list a ClickHouse
+  field whose query timed out or failed with an `error` and empty values.
+  Before, the field was left out, as if it did not exist.
+- CLI messages that ask for an API token say where to create one: the user
+  menu > Profile > API tokens (`/settings/profile`).
+- A backtest that ends now ends at a multiple of the step since the Unix
+  epoch, so a rerun reads the same windows and catches the same bursts. One
+  with `end_time` evaluates at that instant.
+- The alert test lists the groups closest to firing first, lowest for `lt`
+  and `lte` and highest for `gt` and `gte`, and `value` is the first one's.
+- `get_all_field_dimensions` and the field sidebar leave out log-body columns
+  (`msg`, `message`, `body`, `log`, `_msg`, `raw` and similar) on ClickHouse:
+  their top values are whole log lines and cost a distinct count over every
+  body. A field asked for by name still returns its values.
+- MCP `get_alert_history` returns `{"alert": ..., "history": [...]}` instead of
+  a bare list.
+
+### Fixed
+
+- `logchef views list` and other commands under a sign-in made before the
+  server ran v2.8.0 failed with "API token does not have the required scope"
+  and no way forward. The error now names `saved_views:read` and the `logchef auth`
+  command to run.
+- `logchef find` without `-t` or `-S` could run for minutes with no output.
+  Each source now has a deadline, a slow or failing source is skipped and
+  named, and the matches from the others print.
+- `logchef sql -s` put the time filter on the outer query of
+  `SELECT ... FROM (SELECT ... FROM table) HAVING ...`, which failed with
+  `Missing columns: '_timestamp'`. The filter now goes into the subquery that
+  reads the table.
+- `logchef alerts test` and `alerts backtest` crashed on `"warnings": null`
+  from servers up to v2.8.2, in text and `--output json`. The CLI reads null
+  lists as empty and prints JSON without parsing it, and the server now sends
+  an empty list.
+- A NULL value in a ClickHouse SQL rule, such as `max()` over no row, failed
+  the evaluation, so a firing group kept firing. It is now no data and follows
+  the no-data policy.
+- A 403 for a scope no OAuth sign-in can hold, such as `reports:read`, told an
+  OAuth caller to sign in again. It now says to use an API token, and the CLI
+  prints that once.
+- A ClickHouse query that failed with an error such as an invalid `WITH FILL`
+  (code 475), an ambiguous identifier or a cyclic alias answered only "Failed
+  to query logs". These diagnostics now come back as a 400 with ClickHouse's
+  message, and any other ClickHouse error adds its code, such as "Failed to
+  query logs (ClickHouse error code 49)", without the message, which can name
+  a server.
+- `logchef alerts test` on an ungrouped rule got `"samples": null`; the server
+  now sends an empty list.
+
+
 ## [2.8.2] - 2026-11-23
 
 Fixes for rough edges found while recording the v2.8.0 launch videos. No
@@ -2594,7 +2729,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.2...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.8.3...HEAD
+[2.8.3]: https://github.com/mr-karan/logchef/compare/v2.8.2...v2.8.3
 [2.8.2]: https://github.com/mr-karan/logchef/compare/v2.8.1...v2.8.2
 [2.8.1]: https://github.com/mr-karan/logchef/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/mr-karan/logchef/compare/v2.7.0...v2.8.0

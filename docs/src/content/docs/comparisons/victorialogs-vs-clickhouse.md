@@ -57,7 +57,7 @@ A LogsQL query is a set of filters followed by optional pipes. The query `error`
 
 ClickHouse asks you to "embrace SQL-based observability" ([observability intro](https://clickhouse.com/docs/guides/use-cases/observability/build-your-own/introduction)). In return you get arbitrary analytics and joins between logs and any other table.
 
-Full-text search is automatic in VictoriaLogs. In ClickHouse you add a text index to the columns you search. ClickHouse now marks the older `tokenbf_v1` and `ngrambf_v1` indexes as deprecated in favor of the text index ([skip indexes](https://clickhouse.com/docs/concepts/features/performance/skip-indexes/skipping-indexes)). Logchef's built-in schema still uses `tokenbf_v1` on the log body.
+Full-text search is automatic in VictoriaLogs. In ClickHouse you add a text index to the columns you search. ClickHouse now marks the older `tokenbf_v1` and `ngrambf_v1` indexes as deprecated in favor of the text index ([skip indexes](https://clickhouse.com/docs/concepts/features/performance/skip-indexes/skipping-indexes)). Logchef's built-in schema puts a text index on the log body.
 
 ### Streams versus ordering keys
 

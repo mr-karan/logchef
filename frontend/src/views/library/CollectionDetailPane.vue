@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMetaStore } from "@/stores/meta";
 import { storeToRefs } from "pinia";
@@ -62,7 +62,7 @@ import { useCollectionsStore } from "@/stores/collections";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useAuthStore } from "@/stores/auth";
 import { useTeamPermissions } from "@/composables/useTeamPermissions";
-import { useUsersStore } from "@/stores/users";
+import { useCollectionInvitableUsers } from "@/composables/useCollectionInvitableUsers";
 import { useTeamsStore } from "@/stores/teams";
 import {
   Select,
@@ -73,12 +73,12 @@ import {
 } from "@/components/ui/select";
 import { SearchableSelect, type SearchableItem } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
-import type { CollectionItem } from "@/api/collections";
+import type { CollectionItem, CollectionMember, CollectionRole } from "@/api/collections";
 import { canManageLink, canRemoveLink, linkKindForAdd, linkKindForMove, showsLinkToggle } from "@/utils/collectionLinks";
 
 // The selected collection is supplied by the Library shell so this pane can be
 // swapped in place as the rail selection changes — no full-page navigation.
-const props = defineProps<{ collectionId: number }>();
+const props = defineProps<{ collectionId: number; focusSection?: "members" }>();
 const emit = defineEmits<{ deleted: [id: number] }>();
 
 const router = useRouter();
@@ -88,10 +88,23 @@ const { t } = useI18n();
 const store = useCollectionsStore();
 const savedQueriesStore = useSavedQueriesStore();
 const authStore = useAuthStore();
-const usersStore = useUsersStore();
 const teamsStore = useTeamsStore();
 const { data } = storeToRefs(store);
-const { isAnyTeamAdmin, isGlobalAdmin, canManageCollection } = useTeamPermissions();
+const { isGlobalAdmin, canManageCollection } = useTeamPermissions();
+const {
+  canListAllUsers,
+  canInviteToCollection,
+  loadCandidates,
+  availableUserItems: getAvailableUserItems,
+} = useCollectionInvitableUsers();
+
+const membersSectionEl = ref<HTMLElement | null>(null);
+const teamsSectionEl = ref<HTMLElement | null>(null);
+
+function scrollToSection(section: "members" | "teams") {
+  const target = section === "members" ? membersSectionEl.value : teamsSectionEl.value;
+  target?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+}
 
 const collectionID = computed(() => props.collectionId);
 const collection = computed(() => store.collections.find((c) => c.id === collectionID.value) ?? null);
@@ -168,11 +181,9 @@ function scheduleReport(queryId: number) {
 function hasItemActions(item: CollectionItem): boolean {
   return canScheduleItem(item) || (canCurate.value && (canMoveItem(item) || canConvertItem(item) || canRemoveItem(item)));
 }
-// Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
-// invite UI from owners who lack that role since the dropdown can't be
-// populated without it.
-const canListUsers = computed(() => isGlobalAdmin.value || isAnyTeamAdmin.value);
-const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !collection.value?.is_personal);
+// Global/team admins pick from the user directory; regular collection owners
+// pick from teammates in their teams. Backend requires direct ownership.
+const canInviteMembers = computed(() => canInviteToCollection(collection.value));
 // Team shares are managed by actual collection owners only: the server rejects
 // global admins who do not own the collection, so canManageCollection's admin
 // bypass must not apply. Owners need no user directory to share with a team.
@@ -193,18 +204,8 @@ const showAddMember = ref(false);
 const newMemberId = ref("");
 const newMemberRole = ref<"owner" | "editor" | "member">("member");
 
-// Users available for invite: all users minus current members
-const availableUsers = computed(() => {
-  const memberIds = new Set(members.value.map((m) => String(m.user_id)));
-  return (usersStore.users ?? []).filter((u) => !memberIds.has(String(u.id)));
-});
-const availableUserItems = computed<SearchableItem[]>(() =>
-  availableUsers.value.map((u) => ({
-    value: String(u.id),
-    label: u.email,
-    sublabel: u.full_name || undefined,
-  }))
-);
+// Users available for invite: candidates minus current members
+const availableUserItems = computed<SearchableItem[]>(() => getAvailableUserItems(members.value));
 
 const showAddTeam = ref(false);
 const newTeamId = ref("");
@@ -249,14 +250,20 @@ async function load() {
 
 onMounted(load);
 watch(collectionID, load);
+watch(
+  [() => props.focusSection, () => collection.value?.id],
+  ([section, id]) => {
+    if (section === "members" && id) {
+      void nextTick(() => scrollToSection("members"));
+    }
+  },
+  { immediate: true },
+);
 
-// Load users only when the invite dialog opens, and only if the caller can
-// list users. Guards against 403 spam when a non-team-admin owner opens it.
+// Load invite candidates only when the invite dialog opens.
 watch(showAddMember, async (isOpen) => {
-  if (!isOpen || !canListUsers.value) return;
-  if (!usersStore.users.length) {
-    await usersStore.loadUsers();
-  }
+  if (!isOpen || !canInviteMembers.value) return;
+  await loadCandidates();
 });
 
 // Reload candidates on every open: team membership can change in another
@@ -302,6 +309,37 @@ async function handleAddMember() {
     newMemberId.value = "";
     newMemberRole.value = "member";
   }
+}
+
+// Role changes need direct ownership on the server, so a global admin who
+// does not own the collection sees roles read-only.
+const canChangeRoles = computed(() => collection.value?.caller_role === "owner");
+// The only owner cannot change their own role: the server rejects it, and the
+// collection would be left with nobody to manage it.
+const ownerCount = computed(() => members.value.filter((m) => m.role === "owner").length);
+function isSoleOwner(m: CollectionMember): boolean {
+  return m.role === "owner" && ownerCount.value <= 1;
+}
+
+// Demoting yourself from owner hides this pane's management controls, so it
+// asks first. Every other role change saves straight away.
+const pendingSelfDemotion = ref<CollectionRole | null>(null);
+
+async function handleRoleChange(m: CollectionMember, role: CollectionRole) {
+  if (role === m.role) return;
+  if (isCurrentUser(m.user_id) && m.role === "owner") {
+    pendingSelfDemotion.value = role;
+    return;
+  }
+  await store.updateMemberRole(collectionID.value, m.user_id, role);
+}
+
+async function confirmSelfDemotion() {
+  const role = pendingSelfDemotion.value;
+  const me = members.value.find((m) => isCurrentUser(m.user_id));
+  pendingSelfDemotion.value = null;
+  if (!role || !me) return;
+  await store.updateMemberRole(collectionID.value, me.user_id, role);
 }
 
 function handleRemoveMember(userId: number) {
@@ -444,14 +482,6 @@ async function handleDeleteCollection() {
             <Pencil class="mr-2 h-4 w-4" />
             {{ t('library.rename') }}
           </Button>
-          <Button v-if="canInviteMembers" variant="outline" size="sm" @click="showAddMember = true">
-            <UserPlus class="mr-2 h-4 w-4" />
-            {{ t('library.inviteMember') }}
-          </Button>
-          <Button v-if="canManageTeams" variant="outline" size="sm" @click="showAddTeam = true">
-            <Users class="mr-2 h-4 w-4" />
-            {{ t('library.shareWithTeam') }}
-          </Button>
           <Button v-if="isOwner && !collection.is_personal" variant="destructive" size="sm" @click="showDeleteDialog = true">
             <Trash2 class="mr-2 h-4 w-4" />
             {{ t('ui.delete') }}
@@ -482,13 +512,25 @@ async function handleDeleteCollection() {
         </i18n-t>
         <template v-if="!collection.is_personal && isOwner">
           <span class="text-muted-foreground/40">•</span>
-          <i18n-t keypath="collections.members" :plural="memberCount" scope="global">
-            <template #count><span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span></template>
-          </i18n-t>
+          <button
+            type="button"
+            class="transition-colors hover:text-foreground hover:underline"
+            @click="scrollToSection('members')"
+          >
+            <i18n-t keypath="collections.members" :plural="memberCount" scope="global">
+              <template #count><span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span></template>
+            </i18n-t>
+          </button>
           <span class="text-muted-foreground/40">•</span>
-          <i18n-t keypath="library.teamCount" :plural="teamCount" scope="global">
-            <template #count><span class="font-medium text-foreground tabular-nums">{{ teamCount }}</span></template>
-          </i18n-t>
+          <button
+            type="button"
+            class="transition-colors hover:text-foreground hover:underline"
+            @click="scrollToSection('teams')"
+          >
+            <i18n-t keypath="library.teamCount" :plural="teamCount" scope="global">
+              <template #count><span class="font-medium text-foreground tabular-nums">{{ teamCount }}</span></template>
+            </i18n-t>
+          </button>
         </template>
         <template v-if="collection.created_at">
           <span class="text-muted-foreground/40">•</span>
@@ -639,90 +681,124 @@ async function handleDeleteCollection() {
         </template>
       </PageSection>
 
-      <PageSection
-        v-if="!collection.is_personal && isOwner"
-        :title="t('library.members')"
-        :description="t('library.collectionMembersDescription')"
-        flush
-      >
-        <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
-        <ul v-else class="divide-y">
-          <li v-for="m in members" :key="m.user_id" class="flex items-center gap-3 px-4 py-3">
-            <div
-              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground"
-              aria-hidden="true"
-            >
-              {{ memberInitials(m) }}
-            </div>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium">
-                {{ m.full_name || m.email || t('pages.userNumber', { id: m.user_id }) }}
-                <span v-if="isCurrentUser(m.user_id)" class="ml-1 text-xs font-normal text-muted-foreground">({{ t('library.you') }})</span>
-              </p>
-              <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
-            </div>
-            <Badge
-              :variant="m.role === 'owner' ? 'secondary' : 'outline'"
-              class="w-16 shrink-0 justify-center capitalize"
-            >
-              {{ translateCollectionRole(m.role) }}
-            </Badge>
-            <div class="flex w-8 shrink-0 justify-center">
-              <Button
-                v-if="isOwner && !isCurrentUser(m.user_id)"
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                :title="t('library.removeMember')"
-                @click="handleRemoveMember(m.user_id)"
+      <div v-if="!collection.is_personal && isOwner" id="members" ref="membersSectionEl">
+        <PageSection
+          :title="t('library.members')"
+          :description="t('library.collectionMembersDescription')"
+          flush
+        >
+          <template v-if="canInviteMembers" #actions>
+            <Button variant="outline" size="sm" @click="showAddMember = true">
+              <UserPlus class="mr-2 h-4 w-4" />
+              {{ t('library.inviteMember') }}
+            </Button>
+          </template>
+          <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
+          <ul v-else class="divide-y">
+            <li v-for="m in members" :key="m.user_id" class="flex items-center gap-3 px-4 py-3">
+              <div
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground"
+                aria-hidden="true"
               >
-                <X class="h-4 w-4" />
-              </Button>
-            </div>
-          </li>
-        </ul>
-      </PageSection>
+                {{ memberInitials(m) }}
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium">
+                  {{ m.full_name || m.email || t('pages.userNumber', { id: m.user_id }) }}
+                  <span v-if="isCurrentUser(m.user_id)" class="ml-1 text-xs font-normal text-muted-foreground">({{ t('library.you') }})</span>
+                </p>
+                <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
+              </div>
+              <Select
+                v-if="canChangeRoles"
+                :model-value="m.role"
+                :disabled="isSoleOwner(m)"
+                @update:model-value="(role) => handleRoleChange(m, role as CollectionRole)"
+              >
+                <SelectTrigger
+                  class="h-8 w-28 shrink-0"
+                  :aria-label="t('library.memberRoleFor', { name: m.full_name || m.email || m.user_id })"
+                  :title="isSoleOwner(m) ? t('library.soleOwnerRoleLocked') : undefined"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="owner">{{ t('library.roleOwner') }}</SelectItem>
+                  <SelectItem value="editor">{{ t('library.roleEditor') }}</SelectItem>
+                  <SelectItem value="member">{{ t('library.roleMember') }}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Badge
+                v-else
+                :variant="m.role === 'owner' ? 'secondary' : 'outline'"
+                class="w-16 shrink-0 justify-center capitalize"
+              >
+                {{ translateCollectionRole(m.role) }}
+              </Badge>
+              <div class="flex w-8 shrink-0 justify-center">
+                <Button
+                  v-if="collection.caller_role === 'owner' && !isCurrentUser(m.user_id)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  :title="t('library.removeMember')"
+                  @click="handleRemoveMember(m.user_id)"
+                >
+                  <X class="h-4 w-4" />
+                </Button>
+              </div>
+            </li>
+          </ul>
+        </PageSection>
+      </div>
 
-      <PageSection
-        v-if="!collection.is_personal && isOwner"
-        :title="t('library.sharedTeams')"
-        :description="t('library.sharedTeamsDescription')"
-        flush
-      >
-        <LoadingState v-if="store.isLoadingOperation(`listTeams-${collectionID}`)" />
-        <EmptyState
-          v-else-if="sharedTeams.length === 0"
-          class="py-6"
-          :icon="Users"
-          :description="t('library.noSharedTeams')"
-        />
-        <ul v-else class="divide-y">
-          <li v-for="team in sharedTeams" :key="team.team_id" class="flex items-center gap-3 px-4 py-3">
-            <div
-              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
-              aria-hidden="true"
-            >
-              <Users class="h-4 w-4" />
-            </div>
-            <p class="min-w-0 flex-1 truncate text-sm font-medium">{{ team.team_name }}</p>
-            <Badge variant="outline" class="w-16 shrink-0 justify-center capitalize">
-              {{ translateCollectionRole('member') }}
-            </Badge>
-            <div class="flex w-8 shrink-0 justify-center">
-              <Button
-                v-if="canManageTeams"
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                :title="t('library.removeTeamShare')"
-                @click="pendingTeamRemoval = team.team_id"
+      <div v-if="!collection.is_personal && isOwner" id="teams" ref="teamsSectionEl">
+        <PageSection
+          :title="t('library.sharedTeams')"
+          :description="t('library.sharedTeamsDescription')"
+          flush
+        >
+          <template v-if="canManageTeams" #actions>
+            <Button variant="outline" size="sm" @click="showAddTeam = true">
+              <Users class="mr-2 h-4 w-4" />
+              {{ t('library.shareWithTeam') }}
+            </Button>
+          </template>
+          <LoadingState v-if="store.isLoadingOperation(`listTeams-${collectionID}`)" />
+          <EmptyState
+            v-else-if="sharedTeams.length === 0"
+            class="py-6"
+            :icon="Users"
+            :description="t('library.noSharedTeams')"
+          />
+          <ul v-else class="divide-y">
+            <li v-for="team in sharedTeams" :key="team.team_id" class="flex items-center gap-3 px-4 py-3">
+              <div
+                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                aria-hidden="true"
               >
-                <X class="h-4 w-4" />
-              </Button>
-            </div>
-          </li>
-        </ul>
-      </PageSection>
+                <Users class="h-4 w-4" />
+              </div>
+              <p class="min-w-0 flex-1 truncate text-sm font-medium">{{ team.team_name }}</p>
+              <Badge variant="outline" class="w-16 shrink-0 justify-center capitalize">
+                {{ translateCollectionRole('member') }}
+              </Badge>
+              <div class="flex w-8 shrink-0 justify-center">
+                <Button
+                  v-if="canManageTeams"
+                  variant="ghost"
+                  size="icon"
+                  class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  :title="t('library.removeTeamShare')"
+                  @click="pendingTeamRemoval = team.team_id"
+                >
+                  <X class="h-4 w-4" />
+                </Button>
+              </div>
+            </li>
+          </ul>
+        </PageSection>
+      </div>
     </template>
 
     <Dialog :open="showAddTeam" @update:open="(val) => !val && (showAddTeam = false)">
@@ -768,6 +844,9 @@ async function handleDeleteCollection() {
               :placeholder="t('library.selectUserToInvite')"
               :search-placeholder="t('access.searchUsers')"
               :empty-text="t('access.noUsersAvailable')" />
+            <p v-if="!canListAllUsers" class="text-xs text-muted-foreground">
+              {{ t('library.inviteTeammatesHint') }}
+            </p>
           </div>
           <div class="grid gap-2">
             <Label>{{ t('ui.role') }}</Label>
@@ -814,19 +893,19 @@ async function handleDeleteCollection() {
 
     <!-- Add an existing saved query to this collection (fix 4) -->
     <Dialog :open="showAddQuery" @update:open="(val) => !val && (showAddQuery = false)">
-      <DialogContent class="sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent class="sm:max-w-lg max-h-[calc(100dvh-2rem)] flex flex-col gap-0 p-0 overflow-hidden">
+        <DialogHeader class="shrink-0 border-b px-6 pt-5 pb-3.5 pr-12 text-left">
           <DialogTitle>{{ t('library.addQuery') }}</DialogTitle>
           <DialogDescription>
             {{ t('library.addQueryDescription') }}
           </DialogDescription>
         </DialogHeader>
-        <div class="space-y-3 min-w-0">
-          <SearchInput v-model="addQuerySearch" :placeholder="t('library.searchQueries')" class="max-w-none" />
-          <div v-if="showsAddToggle" class="flex items-start space-x-3 rounded-md border p-3">
-            <Checkbox id="add_editors_can_edit" :model-value="editorsCanEdit" @update:model-value="(value) => (editorsCanEdit = value === true)" />
-            <div class="space-y-1 leading-none">
-              <Label for="add_editors_can_edit" class="cursor-pointer">{{ t('library.editorsCanEdit') }}</Label>
+        <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-4">
+          <SearchInput v-model="addQuerySearch" :placeholder="t('library.searchQueries')" class="max-w-none shrink-0" />
+          <div v-if="showsAddToggle" class="flex items-start gap-2.5 rounded-md border bg-muted/25 px-3 py-2.5 shrink-0">
+            <Checkbox id="add_editors_can_edit" class="mt-0.5" :model-value="editorsCanEdit" @update:model-value="(value) => (editorsCanEdit = value === true)" />
+            <div class="space-y-0.5 leading-snug">
+              <Label for="add_editors_can_edit" class="cursor-pointer text-sm font-medium">{{ t('library.editorsCanEdit') }}</Label>
               <p class="text-xs text-muted-foreground">{{ t('library.editorsCanEditDescription') }} {{ t('library.editorsCanEditAddHint') }}</p>
             </div>
           </div>
@@ -836,7 +915,7 @@ async function handleDeleteCollection() {
             class="py-6"
             :description="addQuerySearch ? t('library.noQueriesMatch') : t('library.noQueriesAvailable')"
           />
-          <ul v-else class="max-h-72 overflow-y-auto divide-y rounded-md border">
+          <ul v-else class="min-h-0 max-h-72 overflow-y-auto divide-y rounded-md border">
             <li v-for="sq in addableQueries" :key="sq.id" class="flex items-center gap-3 px-3 py-2">
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium">{{ sq.name }}</p>
@@ -848,7 +927,7 @@ async function handleDeleteCollection() {
             </li>
           </ul>
         </div>
-        <DialogFooter>
+        <DialogFooter class="shrink-0 border-t px-6 py-3.5">
           <Button type="button" variant="outline" @click="showAddQuery = false">{{ t('library.done') }}</Button>
         </DialogFooter>
       </DialogContent>
@@ -887,6 +966,15 @@ async function handleDeleteCollection() {
       destructive
       @update:open="(v) => { if (!v) pendingMemberRemoval = null }"
       @confirm="confirmMemberRemoval"
+    />
+    <ConfirmDialog
+      :open="pendingSelfDemotion !== null"
+      :title="t('library.demoteSelfTitle')"
+      :description="t('library.demoteSelfDescription')"
+      :confirm-text="t('library.demoteSelfConfirm')"
+      destructive
+      @update:open="(v) => { if (!v) pendingSelfDemotion = null }"
+      @confirm="confirmSelfDemotion"
     />
     <ConfirmDialog
       :open="pendingTeamRemoval !== null"

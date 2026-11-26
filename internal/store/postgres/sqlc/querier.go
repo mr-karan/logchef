@@ -317,6 +317,8 @@ type Querier interface {
 	// List every saved query without a source-access gate. This is only for the
 	// global-admin browse surface; callers must authorize before invoking it.
 	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
+	// List every team membership with its team, for admin views of all users
+	ListAllTeamMemberships(ctx context.Context) ([]ListAllTeamMembershipsRow, error)
 	// Oldest first, with the same filters as ListAuditEventsDesc.
 	ListAuditEventsAsc(ctx context.Context, arg ListAuditEventsAscParams) ([]AuditEvent, error)
 	// Newest first. An empty text argument or a NULL argument disables its
@@ -580,6 +582,7 @@ type Querier interface {
 	UpdateAlertSilence(ctx context.Context, arg UpdateAlertSilenceParams) (AlertSilence, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
+	UpdateCollectionMemberRole(ctx context.Context, arg UpdateCollectionMemberRoleParams) error
 	// Compare-and-swap on the client revision; no row means missing or stale. The
 	// derived columns move with the blob in this one statement.
 	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)

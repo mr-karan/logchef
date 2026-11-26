@@ -3,6 +3,7 @@ use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::{TranslateRequest, ValidateRequest};
 use logchef_core::cache::Cache;
+use logchef_core::timerange::ResolvedTimeRange;
 use serde::Serialize;
 
 use crate::cli::GlobalArgs;
@@ -19,8 +20,8 @@ use crate::ui;
   # Validate a filter's syntax in a script (exit stays 0; check the JSON)
   logchef explain 'status>=500' --output json | jq '.valid'
 
-  # See the query an aggregation compiles to
-  logchef explain 'level=\"error\" | count() by service'")]
+  # See the query an aggregation compiles to, over the last 6 hours
+  logchef explain 'level=\"error\" | count() by service' -s 6h")]
 pub struct ExplainArgs {
     /// LogchefQL query to translate (e.g. `level="error" and service="api"`)
     query: String,
@@ -37,6 +38,21 @@ pub struct ExplainArgs {
     /// own, such as 1m, 5m or 1h.
     #[arg(long)]
     interval: Option<String>,
+
+    /// Compile over this relative window (e.g. 15m, 1h, 24h). Without a
+    /// window a filter compiles alone, and an aggregation over the
+    /// context's default since.
+    #[arg(long, short = 's', conflicts_with = "from")]
+    since: Option<String>,
+
+    /// Compile over an absolute window from this time: an RFC3339 instant,
+    /// or YYYY-MM-DD HH:MM:SS in the effective timezone. Requires --to.
+    #[arg(long, requires = "to")]
+    from: Option<String>,
+
+    /// End of the absolute window, in the same forms as --from.
+    #[arg(long, requires = "from")]
+    to: Option<String>,
 
     /// Output format
     #[arg(long, default_value = "text")]
@@ -60,6 +76,7 @@ struct JsonOutput<'a> {
     error: Option<&'a logchef_core::api::QueryParseError>,
     #[serde(skip_serializing_if = "Option::is_none")]
     aggregation: Option<&'a logchef_core::api::AggregationInfo>,
+    warnings: &'a [String],
 }
 
 pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
@@ -74,7 +91,7 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
     let team_id = resolve_team(client, &mut cache, team).await?;
     let source_id = resolve_source(client, &mut cache, team_id, source).await?;
 
-    // Translate without a time range: this reports the engine-agnostic
+    // Without a window, translate alone: this reports the engine-agnostic
     // translation (filter conditions for ClickHouse, native LogsQL for
     // VictoriaLogs, LogQL for Loki) without executing anything.
     let mut request = TranslateRequest {
@@ -86,6 +103,14 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
         limit: None,
         interval: args.interval.clone(),
     };
+    let tz = ctx.defaults.timezone.as_deref();
+    if args.since.is_some() || args.from.is_some() {
+        let since = args.since.as_deref().unwrap_or(&ctx.defaults.since);
+        set_range(
+            &mut request,
+            parse_time_range(since, args.from.as_deref(), args.to.as_deref(), tz)?,
+        );
+    }
     let mut translate = client
         .translate_logchefql(team_id, source_id, &request)
         .await
@@ -94,16 +119,14 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
     // An aggregation compiles against a time range: ClickHouse builds the
     // SELECT only with one, and VictoriaLogs aligns buckets to its timezone.
     // Ask again over the range that `logchef query` uses by default.
-    if translate.aggregation.is_some() && translate.full_sql.is_empty() {
-        let range = parse_time_range(
-            &ctx.defaults.since,
-            None,
-            None,
-            ctx.defaults.timezone.as_deref(),
-        )?;
-        request.start_time = Some(range.start);
-        request.end_time = Some(range.end);
-        request.timezone = Some(range.timezone);
+    if translate.aggregation.is_some()
+        && translate.full_sql.is_empty()
+        && request.start_time.is_none()
+    {
+        set_range(
+            &mut request,
+            parse_time_range(&ctx.defaults.since, None, None, tz)?,
+        );
         translate = client
             .translate_logchefql(team_id, source_id, &request)
             .await
@@ -125,30 +148,22 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
     let valid = translate.valid && validate.valid;
     let error = validate.error.as_ref().or(translate.error.as_ref());
 
+    let output = JsonOutput {
+        query: &args.query,
+        valid,
+        generated_query: translate.generated_query(),
+        generated_query_language: translate.generated_query_language.as_deref(),
+        error,
+        aggregation: translate.aggregation.as_ref(),
+        warnings: &translate.warnings,
+    };
     match args.output {
-        OutputFormat::Json => {
-            let output = JsonOutput {
-                query: &args.query,
-                valid,
-                generated_query: translate.generated_query(),
-                generated_query_language: translate.generated_query_language.as_deref(),
-                error,
-                aggregation: translate.aggregation.as_ref(),
-            };
-            println!("{}", serde_json::to_string_pretty(&output)?);
-        }
-        OutputFormat::Jsonl => {
-            let output = JsonOutput {
-                query: &args.query,
-                valid,
-                generated_query: translate.generated_query(),
-                generated_query_language: translate.generated_query_language.as_deref(),
-                error,
-                aggregation: translate.aggregation.as_ref(),
-            };
-            println!("{}", serde_json::to_string(&output)?);
-        }
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&output)?),
+        OutputFormat::Jsonl => println!("{}", serde_json::to_string(&output)?),
         OutputFormat::Text => {
+            for warning in &translate.warnings {
+                eprintln!("Warning: {warning}");
+            }
             if valid {
                 println!("Valid: yes");
             } else {
@@ -179,4 +194,10 @@ pub async fn run(args: ExplainArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn set_range(request: &mut TranslateRequest, range: ResolvedTimeRange) {
+    request.start_time = Some(range.start);
+    request.end_time = Some(range.end);
+    request.timezone = Some(range.timezone);
 }

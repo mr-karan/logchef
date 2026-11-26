@@ -1389,5 +1389,8 @@
   "alerts.backtestGroupEpisodes": "事件",
   "alerts.backtestGroupBreaching": "超過閾值的評估",
   "alerts.backtestGroupMax": "最大值",
-  "alerts.backtestGroupsOmitted": "還有 {count} 個群組未顯示"
+  "alerts.backtestGroupMin": "最小值",
+  "alerts.backtestGroupsOmitted": "還有 {count} 個群組未顯示",
+  "ui.admin": "管理",
+  "routes.adminOverview": "管理概覽"
 }

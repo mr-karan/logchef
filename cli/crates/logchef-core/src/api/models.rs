@@ -302,6 +302,10 @@ pub struct TranslateResponse {
     pub error: Option<QueryParseError>,
     #[serde(default)]
     pub aggregation: Option<AggregationInfo>,
+    /// Problems with a valid query, such as a comparison that never matches.
+    /// Servers before v2.8.2 send none, and up to v2.8.2 send null.
+    #[serde(default, deserialize_with = "super::null_as_default")]
+    pub warnings: Vec<String>,
 }
 
 impl TranslateResponse {
@@ -753,6 +757,13 @@ fn whole_millis<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<i64
 mod source_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_translation_reads_null_warnings_as_none() {
+        let translation: TranslateResponse =
+            serde_json::from_value(json!({"valid": true, "warnings": null})).unwrap();
+        assert!(translation.warnings.is_empty());
+    }
 
     #[test]
     fn loki_source_displays_its_backend_and_target() {

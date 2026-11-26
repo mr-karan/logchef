@@ -11,7 +11,7 @@ CREATE TABLE default.http
     `bytes` UInt32 CODEC(ZSTD(1)),
     INDEX idx_method method TYPE set(100) GRANULARITY 4,
     INDEX idx_status status TYPE minmax GRANULARITY 4,
-    INDEX idx_referer referer TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    INDEX idx_referer referer TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(timestamp)

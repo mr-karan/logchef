@@ -330,9 +330,12 @@ func TestToolsListFiltersByScope(t *testing.T) {
 			"get_meta", "open_investigation", "query_logchefql", "query_logs", "translate_logchefql", "validate_logchefql",
 		}},
 		{"saved queries and alerts", token(w.member, models.TokenScopeSavedQueriesRead, models.TokenScopeAlertsRead), []string{
-			"get_alert_history", "get_meta", "get_saved_query", "list_alerts", "list_saved_queries",
+			"backtest_alert", "get_alert_history", "get_meta", "get_saved_query", "list_alert_silences", "list_alerts", "list_saved_queries", "test_alert",
 		}},
 		{"saved views only", token(w.member, models.TokenScopeSavedViewsRead), []string{"get_meta", "list_saved_views"}},
+		{"collections only", token(w.member, models.TokenScopeCollectionsRead), []string{"get_meta", "list_collections"}},
+		{"destinations only", token(w.member, models.TokenScopeDestinationsRead), []string{"get_meta", "list_destinations"}},
+		{"dashboards only", token(w.member, models.TokenScopeDashboardsRead), []string{"get_dashboard", "get_meta", "list_dashboards"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := listToolNames(t, s, tc.p)

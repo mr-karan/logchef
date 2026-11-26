@@ -217,6 +217,18 @@ func (s *Store) ListCollectionEditors(ctx context.Context, collectionIDs []int) 
 	return out, nil
 }
 
+// UpdateCollectionMemberRole changes the role of an existing member.
+func (s *Store) UpdateCollectionMemberRole(ctx context.Context, collectionID int, userID models.UserID, role models.CollectionRole) error {
+	if err := s.q.UpdateCollectionMemberRole(ctx, sqlc.UpdateCollectionMemberRoleParams{
+		Role:         string(role),
+		CollectionID: int64(collectionID),
+		UserID:       int64(userID),
+	}); err != nil {
+		return fmt.Errorf("error updating collection member role: %w", err)
+	}
+	return nil
+}
+
 // RemoveCollectionMember drops a member from a collection.
 func (s *Store) RemoveCollectionMember(ctx context.Context, collectionID int, userID models.UserID) error {
 	if err := s.q.RemoveCollectionMember(ctx, sqlc.RemoveCollectionMemberParams{

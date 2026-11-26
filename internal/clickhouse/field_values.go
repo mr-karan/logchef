@@ -5,6 +5,7 @@ package clickhouse
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -29,6 +30,10 @@ type FieldValuesResult struct {
 	IsLowCard     bool             `json:"is_low_cardinality"`
 	Values        []FieldValueInfo `json:"values"`
 	TotalDistinct int64            `json:"total_distinct"`
+	// Error says why a field of GetAllFilterableFieldValues was not read,
+	// such as a timeout. Values is then empty and does not mean the field
+	// has no values.
+	Error string `json:"error,omitempty"`
 }
 
 // FieldValuesParams holds parameters for fetching field distinct values.
@@ -362,10 +367,26 @@ func isFilterableColumnType(colType string) bool {
 	return false
 }
 
+// logBodyColumns are the names that conventionally hold a whole log line. The
+// top values of such a column are raw log lines, which can carry personal
+// data, and counting them reads every body in the window, so a listing of
+// every field leaves them out. GetFieldDistinctValues still reads one by name.
+var logBodyColumns = map[string]struct{}{
+	"msg": {}, "message": {}, "body": {}, "log": {}, "_msg": {}, "raw": {},
+	"raw_log": {}, "raw_message": {}, "log_message": {}, "log_body": {},
+}
+
+func isLogBodyColumn(name string) bool {
+	_, ok := logBodyColumns[strings.ToLower(name)]
+	return ok
+}
+
 // GetAllFilterableFieldValues retrieves distinct values for all filterable fields within a time range.
-// Filterable fields include: LowCardinality, String, Nullable(String), and Enum types.
+// Filterable fields include: LowCardinality, String, Nullable(String), and Enum types, except
+// the log-body columns (msg, message, body and the like).
 // This is useful for populating a field sidebar with filterable values.
 // For String fields, a shorter timeout is used to gracefully handle high cardinality columns.
+// A field that times out, fails or is not queried before ctx ends is listed with Error set.
 // IMPORTANT: Time range is required to avoid scanning entire tables.
 func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, table string, params AllFieldValuesParams) (map[string]*FieldValuesResult, error) {
 	// Reuse existing getColumns function to get column metadata
@@ -391,15 +412,25 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	sem := make(chan struct{}, fieldValuesConcurrency)
 	var wg sync.WaitGroup
 
-	for _, col := range columns {
-		// Stop launching new work once the caller's context is done.
-		if ctx.Err() != nil {
-			c.logger.Debug("context cancelled, stopping field value queries", "error", ctx.Err())
-			break
+	// unread lists a field without its values, so a caller can tell it from
+	// a field that does not exist.
+	unread := func(name, colType, reason string) {
+		mu.Lock()
+		defer mu.Unlock()
+		results[name] = &FieldValuesResult{
+			FieldName: name, FieldType: colType, IsLowCard: strings.Contains(colType, "LowCardinality"),
+			Values: []FieldValueInfo{}, Error: reason,
 		}
+	}
 
+	for _, col := range columns {
 		// Check if this column type is suitable for distinct value queries
-		if !isFilterableColumnType(col.Type) {
+		if !isFilterableColumnType(col.Type) || isLogBodyColumn(col.Name) {
+			continue
+		}
+		// Launch no new work once the caller's context is done.
+		if ctx.Err() != nil {
+			unread(col.Name, col.Type, errFieldNotStarted)
 			continue
 		}
 
@@ -433,22 +464,23 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			c.logger.Debug("context cancelled while awaiting field-value slot", "error", ctx.Err())
 		}
 		if ctx.Err() != nil {
-			break // exit the loop; wg.Wait below drains in-flight queries
+			unread(col.Name, col.Type, errFieldNotStarted)
+			continue // wg.Wait below drains in-flight queries
 		}
 		wg.Go(func() {
 			defer func() { <-sem }()
 
 			fieldResult, err := c.GetFieldDistinctValues(ctx, database, table, fieldParams)
 			if err != nil {
-				// Log but don't fail - this field just won't have values shown.
-				// Common for high cardinality String fields that timeout.
-				c.logger.Debug("skipping field values (likely timeout or high cardinality)",
+				// One failed field does not fail the others. Common for a
+				// high cardinality String field that times out.
+				c.logger.Debug("field values not read",
 					"field", fieldParams.FieldName,
 					"type", fieldParams.FieldType,
 					"error", err)
+				unread(fieldParams.FieldName, fieldParams.FieldType, fieldReadError(ctx, err, *fieldParams.Timeout))
 				return
 			}
 			mu.Lock()
@@ -458,5 +490,24 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	}
 
 	wg.Wait()
-	return results, nil //nolint:nilerr // on cancellation, return the fields already fetched
+	return results, nil
+}
+
+// errFieldNotStarted is the error of a field whose query did not start before
+// the request ended.
+const errFieldNotStarted = "not read: the request ended before this field was queried"
+
+// fieldReadError says why a field was not read, in text a caller may see: a
+// timeout, or a ClickHouse diagnostic about the query.
+func fieldReadError(ctx context.Context, err error, timeoutSeconds int) string {
+	if ctx.Err() != nil {
+		return "not read: the request ended before this field's query finished"
+	}
+	if IsQueryTimeoutError(err) {
+		return fmt.Sprintf("timed out after %ds", timeoutSeconds)
+	}
+	if queryErr, ok := errors.AsType[*QueryError](err); ok {
+		return queryErr.Message
+	}
+	return "the query for this field failed"
 }

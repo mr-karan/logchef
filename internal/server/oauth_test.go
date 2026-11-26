@@ -547,8 +547,8 @@ func TestOAuthIssuerIdentification(t *testing.T) {
 	if !as.AuthorizationResponseIssParameterSupported || prm.Resource != testMCPResource {
 		t.Fatalf("metadata %+v PRM %+v", as, prm)
 	}
-	if slices.Contains(prm.ScopesSupported, "offline_access") || len(prm.ScopesSupported) != 8 {
-		t.Fatalf("PRM scopes %v, want the eight read scopes only", prm.ScopesSupported)
+	if slices.Contains(prm.ScopesSupported, "offline_access") || len(prm.ScopesSupported) != 10 {
+		t.Fatalf("PRM scopes %v, want the ten read scopes only", prm.ScopesSupported)
 	}
 }
 
@@ -558,7 +558,7 @@ func TestOAuthScopePolicy(t *testing.T) {
 	t.Parallel()
 	e := newOAuthEnv(t)
 	p := newPKCE()
-	for _, scope := range []string{"logs:write", "*", "tokens:read", "users:read", "dashboards:read", "openid", "email", "profile", "offline_access", "", "logs:read openid"} {
+	for _, scope := range []string{"logs:write", "*", "tokens:read", "users:read", "reports:read", "openid", "email", "profile", "offline_access", "", "logs:read openid"} {
 		t.Run(scope, func(t *testing.T) {
 			v := webAuthorizeParams(p)
 			v.Set("scope", scope)

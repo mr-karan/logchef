@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("TeamMapping", func(t *testing.T) { testTeamMapping(t, ctx, s) })
 	t.Run("GetNotFound", func(t *testing.T) { testGetNotFound(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
+	t.Run("AllTeamMemberships", func(t *testing.T) { testAllTeamMemberships(t, ctx, s) })
 	t.Run("LokiSource", func(t *testing.T) { testLokiSource(t, ctx, s) })
 	t.Run("SourceHeaderSecretRefs", func(t *testing.T) { testSourceHeaderSecretRefs(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
@@ -35,6 +37,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("SettingsParsing", func(t *testing.T) { testSettingsParsing(t, ctx, s) })
 	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
+	t.Run("CollectionMemberRoles", func(t *testing.T) { testCollectionMemberRoles(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("CollectionLinks", func(t *testing.T) { testCollectionLinks(t, ctx, s) })
 	t.Run("SavedViews", func(t *testing.T) { testSavedViews(t, ctx, s) })
@@ -240,6 +243,68 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 	srcs, err := s.ListTeamSources(ctx, team.ID)
 	if err != nil || len(srcs) != 1 {
 		t.Fatalf("ListTeamSources: %v / %d", err, len(srcs))
+	}
+}
+
+func testAllTeamMemberships(t *testing.T, ctx context.Context, s store.Store) {
+	ann := mkUser(t, ctx, s, "all-memberships-ann@test.dev")
+	ben := mkUser(t, ctx, s, "all-memberships-ben@test.dev")
+	// Team names sort case-insensitively, so "aaa-yankee" precedes "AAA-Zulu".
+	zulu := &models.Team{Name: "AAA-Zulu"}
+	yankee := &models.Team{Name: "aaa-yankee"}
+	empty := &models.Team{Name: "AAA-Empty"}
+	for _, team := range []*models.Team{zulu, yankee, empty} {
+		if err := s.CreateTeam(ctx, team); err != nil {
+			t.Fatalf("CreateTeam(%s): %v", team.Name, err)
+		}
+	}
+	if err := s.SetTeamManaged(ctx, zulu.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []struct {
+		team *models.Team
+		user *models.User
+		role models.TeamRole
+	}{
+		{zulu, ben, models.TeamRoleEditor},
+		{zulu, ann, models.TeamRoleAdmin},
+		{yankee, ben, models.TeamRoleMember},
+	} {
+		if err := s.AddTeamMember(ctx, m.team.ID, m.user.ID, m.role); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := s.ListAllTeamMemberships(ctx)
+	if err != nil {
+		t.Fatalf("ListAllTeamMemberships: %v", err)
+	}
+	type row struct {
+		team    models.TeamID
+		name    string
+		managed bool
+		user    models.UserID
+		role    models.TeamRole
+		account models.UserAccountType
+	}
+	ours := map[models.TeamID]bool{zulu.ID: true, yankee.ID: true, empty.ID: true}
+	var got []row
+	for _, m := range all {
+		if !ours[m.TeamID] {
+			continue
+		}
+		if m.CreatedAt.IsZero() {
+			t.Errorf("membership %+v has zero CreatedAt", m)
+		}
+		got = append(got, row{m.TeamID, m.TeamName, m.TeamManaged, m.UserID, m.Role, m.AccountType})
+	}
+	want := []row{
+		{yankee.ID, "aaa-yankee", false, ben.ID, models.TeamRoleMember, models.UserAccountTypeHuman},
+		{zulu.ID, "AAA-Zulu", true, ann.ID, models.TeamRoleAdmin, models.UserAccountTypeHuman},
+		{zulu.ID, "AAA-Zulu", true, ben.ID, models.TeamRoleEditor, models.UserAccountTypeHuman},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListAllTeamMemberships rows = %+v, want %+v", got, want)
 	}
 }
 
@@ -455,6 +520,25 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	}
 	if _, err := s.GetCollectionMember(ctx, pc.ID, stranger.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("GetCollectionMember(non-member) err = %v, want ErrNotFound", err)
+	}
+}
+
+// testCollectionMemberRoles covers changing a direct member's role in place.
+func testCollectionMemberRoles(t *testing.T, ctx context.Context, s store.Store) {
+	owner := mkUser(t, ctx, s, "roles-owner@test.dev")
+	member := mkUser(t, ctx, s, "roles-member@test.dev")
+	shared, err := s.CreateCollection(ctx, "Shared", "", false, owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection(shared): %v", err)
+	}
+	if err := s.AddCollectionMember(ctx, shared.ID, member.ID, models.CollectionRoleMember, &owner.ID); err != nil {
+		t.Fatalf("AddCollectionMember: %v", err)
+	}
+	if err := s.UpdateCollectionMemberRole(ctx, shared.ID, member.ID, models.CollectionRoleEditor); err != nil {
+		t.Fatalf("UpdateCollectionMemberRole: %v", err)
+	}
+	if got, err := s.GetCollectionMember(ctx, shared.ID, member.ID); err != nil || got.Role != models.CollectionRoleEditor {
+		t.Errorf("member after role update = %+v / %v, want editor", got, err)
 	}
 }
 

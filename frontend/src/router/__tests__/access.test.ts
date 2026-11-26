@@ -119,9 +119,13 @@ describe('router guard', () => {
   }
 
   it.each<[Role, string, string]>([
+    ['admin', '/admin', '/admin'],
     ['admin', '/admin/users', '/admin/users'],
+    ['admin', '/admin/people', '/admin/users'],
+    ['teamAdmin', '/admin', '/admin/teams'],
     ['teamAdmin', '/admin/users', '/forbidden'],
     ['teamAdmin', '/admin/teams', '/admin/teams'],
+    ['member', '/admin', '/forbidden'],
     ['member', '/admin/teams', '/forbidden'],
     ['member', '/logs/alerts', '/logs/alerts'],
   ])('sends a %s from %s to %s', async (role, from, to) => {

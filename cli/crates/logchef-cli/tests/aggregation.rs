@@ -211,6 +211,43 @@ fn explain_of_a_filter_translates_once() {
 }
 
 #[test]
+fn explain_prints_the_translation_warnings() {
+    let warning = "msg.latency_ms reads a JSON value inside the String column msg with \
+                   JSONExtractString, which returns an empty string for a JSON number, so this \
+                   numeric comparison never matches.";
+    let translated = json!({
+        "valid": true, "generated_query": "x", "generated_query_language": "clickhouse-sql",
+        "warnings": [warning],
+    });
+    let server = FakeServer::start(false);
+    server.state().translate_responses = [translated.clone()].into();
+    let out = logchef(&server, "explain-warn", &["explain", "msg.latency_ms>500"]);
+    assert_success(&out);
+    assert_eq!(stderr(&out), format!("Warning: {warning}\n"));
+    assert!(!stdout(&out).contains("Warning"), "{}", stdout(&out));
+
+    server.state().translate_responses = [translated].into();
+    let out = logchef(
+        &server,
+        "explain-warn-json",
+        &["explain", "msg.latency_ms>500", "--output", "json"],
+    );
+    assert_success(&out);
+    let output: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(output["warnings"], json!([warning]));
+
+    // A server before translate warnings sends none.
+    let out = logchef(
+        &server,
+        "explain-warn-none",
+        &["explain", "level=error", "--output", "json"],
+    );
+    assert_success(&out);
+    let output: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(output["warnings"], json!([]));
+}
+
+#[test]
 fn tail_prints_the_server_denial_and_stops() {
     let server = FakeServer::start(false);
     let message =
@@ -311,4 +348,70 @@ fn saved_queries_and_collections_json_adds_the_aggregation() {
         );
         assert_eq!(output["aggregation"], grouped_info(), "{command}");
     }
+}
+
+#[test]
+fn explain_compiles_over_the_window_it_is_given() {
+    let server = FakeServer::start(false);
+    let out = logchef(
+        &server,
+        "explain-since",
+        &["explain", "level=error | count() by service", "-s", "1h"],
+    );
+    assert_success(&out);
+    let out = logchef(
+        &server,
+        "explain-from-to",
+        &[
+            "explain",
+            "level=error",
+            "--from",
+            "2026-11-24 10:00:00",
+            "--to",
+            "2026-11-24T11:00:00Z",
+        ],
+    );
+    assert_success(&out);
+
+    let requests = server.state().translate_requests.clone();
+    assert_eq!(requests.len(), 2, "one translation each: {requests:?}");
+    let instant = |v: &Value| chrono::DateTime::parse_from_rfc3339(v.as_str().unwrap()).unwrap();
+    assert_eq!(
+        instant(&requests[0]["end_time"]) - instant(&requests[0]["start_time"]),
+        chrono::Duration::hours(1)
+    );
+    assert_eq!(requests[1]["start_time"], "2026-11-24 10:00:00");
+    assert_eq!(requests[1]["end_time"], "2026-11-24T11:00:00Z");
+    assert!(requests[1]["timezone"].is_string(), "{}", requests[1]);
+}
+
+#[test]
+fn explain_takes_one_window() {
+    let server = FakeServer::start(false);
+    for (name, args, message) in [
+        (
+            "explain-since-from",
+            &[
+                "explain",
+                "level=error",
+                "-s",
+                "1h",
+                "--from",
+                "2026-11-24 10:00:00",
+                "--to",
+                "2026-11-24 11:00:00",
+            ][..],
+            "'--since <SINCE>' cannot be used with '--from <FROM>'",
+        ),
+        (
+            "explain-from-only",
+            &["explain", "level=error", "--from", "2026-11-24 10:00:00"][..],
+            "--to <TO>",
+        ),
+    ] {
+        let out = logchef(&server, name, args);
+        assert!(!out.status.success(), "{args:?}");
+        assert!(stderr(&out).contains(message), "{}", stderr(&out));
+    }
+    assert!(server.state().translate_requests.is_empty());
 }

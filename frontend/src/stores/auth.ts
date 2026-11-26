@@ -72,6 +72,22 @@ export const useAuthStore = defineStore("auth", () => {
     });
   }
 
+  // Reload the signed-in user after a change to their own account, such as
+  // their role. initialize() runs only once per page load.
+  async function refreshSession() {
+    return await state.callApi({
+      apiCall: () => authApi.getSession(),
+      showToast: false,
+      onSuccess: (response: SessionResponse | null) => {
+        if (response) {
+          state.data.value.user = response.user;
+          state.data.value.session = response.session;
+        }
+      },
+      onError: () => clearState(),
+    });
+  }
+
   // Clear auth state
   function clearState() {
     state.data.value.user = null;
@@ -156,6 +172,7 @@ export const useAuthStore = defineStore("auth", () => {
     isInitializing,
     error,
     initialize,
+    refreshSession,
     startLogin,
     localLogin,
     logout,

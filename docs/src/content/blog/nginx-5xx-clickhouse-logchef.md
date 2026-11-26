@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS default.http
     `bytes`            UInt32 CODEC(ZSTD(1)),
     INDEX idx_method method TYPE set(100) GRANULARITY 4,
     INDEX idx_status status TYPE minmax GRANULARITY 4,
-    INDEX idx_referer referer TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    INDEX idx_referer referer TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree
 PARTITION BY toDate(timestamp)
@@ -39,7 +39,7 @@ TTL toDateTime(toUnixTimestamp(timestamp)) + toIntervalDay(7)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
-`host` here is whichever edge/app node emitted the log line, useful once you have more than one nginx instance behind a load balancer, which is exactly the case where "one bad host" is a plausible root cause. `ORDER BY (host, timestamp)` means queries that filter or group by `host` first are cheap; the `minmax` index on `status` and the token bloom filter on `referer` keep filtered scans fast without a full column scan.
+`host` here is whichever edge/app node emitted the log line, useful once you have more than one nginx instance behind a load balancer, which is exactly the case where "one bad host" is a plausible root cause. `ORDER BY (host, timestamp)` means queries that filter or group by `host` first are cheap; the `minmax` index on `status` and the text index on `referer` keep filtered scans fast without a full column scan.
 
 A Vector pipeline that gets nginx's combined log format into this shape:
 

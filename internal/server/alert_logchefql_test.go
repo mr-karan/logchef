@@ -193,3 +193,65 @@ func TestLogchefQLAlertBacktest(t *testing.T) {
 		}
 	}
 }
+
+// A LogchefQL condition may leave out condition_json: the server takes the
+// filter in front of the aggregation pipe, on create, test and backtest. A
+// rule with no filter still needs one.
+func TestLogchefQLConditionDerivesConditionJSON(t *testing.T) {
+	upstream := &statsUpstream{}
+	e, sourceID := newConditionRouteEnv(t, upstream)
+	noConditionJSON := map[string]any{"condition_json": nil, "query": `level="error" and service="api" | count() by service`}
+
+	resp := e.do(http.MethodPost, "/api/v1/alerts", conditionBody(t, sourceID, noConditionJSON), e.cookie)
+	wantStatus(t, resp, http.StatusCreated)
+	var alert models.Alert
+	created(t, resp, &alert)
+	if want := `level="error" and service="api"`; alert.ConditionJSON != want {
+		t.Fatalf("condition_json = %q, want %q", alert.ConditionJSON, want)
+	}
+
+	wantStatus(t, e.do(http.MethodPost, "/api/v1/alerts/test", conditionBody(t, sourceID, noConditionJSON), e.cookie), http.StatusOK)
+	backtest := maps.Clone(noConditionJSON)
+	backtest["range_seconds"] = 3600
+	wantStatus(t, e.do(http.MethodPost, "/api/v1/alerts/backtest", conditionBody(t, sourceID, backtest), e.cookie), http.StatusOK)
+
+	resp = e.do(http.MethodPost, "/api/v1/alerts/test", conditionBody(t, sourceID, map[string]any{"condition_json": nil, "query": `| count()`}), e.cookie)
+	if resp.status != http.StatusBadRequest || !strings.Contains(string(resp.body), "no filter in front of its aggregation") {
+		t.Fatalf("rule without a filter: status %d %s, want 400", resp.status, resp.body)
+	}
+}
+
+// The test route puts the group closest to firing first: the lowest value
+// for lt, the highest for gt, and warnings is a list even when empty.
+func TestAlertTestValueAndWarnings(t *testing.T) {
+	upstream := &statsUpstream{}
+	e, sourceID := newConditionRouteEnv(t, upstream)
+	grouped := `level="error" | count() by service`
+	test := func(fields map[string]any) (models.TestAlertQueryResponse, string) {
+		t.Helper()
+		resp := e.do(http.MethodPost, "/api/v1/alerts/test", conditionBody(t, sourceID, fields), e.cookie)
+		wantStatus(t, resp, http.StatusOK)
+		var parsed struct {
+			Data models.TestAlertQueryResponse `json:"data"`
+		}
+		if err := json.Unmarshal(resp.body, &parsed); err != nil {
+			t.Fatal(err)
+		}
+		return parsed.Data, string(resp.body)
+	}
+
+	got, raw := test(map[string]any{"query": grouped, "threshold_operator": "lt", "threshold_value": 5})
+	if got.Value != 2 || got.Samples[0].Group["service"] != "search" || !got.ThresholdMet {
+		t.Fatalf("lt: value %v, first sample %v, want search with 2", got.Value, got.Samples[0])
+	}
+	if !strings.Contains(raw, `"warnings":[]`) {
+		t.Errorf("warnings of a clean test is not an empty list: %s", raw)
+	}
+	if _, raw := test(map[string]any{"query": `level="error" | count()`}); !strings.Contains(raw, `"samples":[]`) {
+		t.Errorf("samples of an ungrouped test is not an empty list: %s", raw)
+	}
+	if got, _ := test(map[string]any{"query": grouped, "threshold_operator": "gt", "threshold_value": 5}); got.Value != 7 || got.Samples[0].Group["service"] != "checkout" {
+		t.Fatalf("gt: value %v, first sample %v, want checkout with 7", got.Value, got.Samples[0])
+	}
+
+}

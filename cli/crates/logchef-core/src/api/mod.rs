@@ -1,18 +1,35 @@
+mod alerts;
+mod dashboards;
 mod models;
 mod reports;
 
+pub use alerts::*;
+pub use dashboards::*;
 pub use models::*;
 pub use reports::*;
 
-use crate::auth::{self, SavedCredential};
-use crate::error::{Error, Result};
+use crate::auth::{self, API_TOKENS_PAGE, SavedCredential};
+use crate::error::{Error, INSUFFICIENT_SCOPE, Result};
 use reqwest::Client as HttpClient;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{
+    AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT, WWW_AUTHENTICATE,
+};
 use reqwest::{RequestBuilder, Response, StatusCode};
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::debug;
+
+/// Reads `null` as the empty value: servers up to v2.8.2 send an empty list
+/// or map as `null`.
+fn null_as_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 const USER_AGENT_VALUE: &str = concat!("logchef-cli/", env!("CARGO_PKG_VERSION"));
 
@@ -165,24 +182,9 @@ impl Client {
     }
 
     async fn handle_response<T: DeserializeOwned>(&self, response: reqwest::Response) -> Result<T> {
-        let status = response.status();
-        let status_code = status.as_u16();
-
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-
-            if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) {
-                return Err(Error::api_with_type(
-                    Some(status_code),
-                    api_error.message,
-                    api_error.error_type,
-                ));
-            }
-
-            return Err(Error::api(
-                Some(status_code),
-                format!("HTTP {}: {}", status_code, body),
-            ));
+        let status_code = response.status().as_u16();
+        if !response.status().is_success() {
+            return Err(self.error_from(response).await);
         }
 
         let body = response.text().await?;
@@ -204,6 +206,57 @@ impl Client {
 
         serde_json::from_str(&body)
             .map_err(|e| Error::other(format!("Failed to parse response: {} (body: {})", e, body)))
+    }
+
+    /// The error for a failed response. A 403 for a missing scope becomes an
+    /// error that names the scope and how to get a credential with it.
+    async fn error_from(&self, response: Response) -> Error {
+        let status = response.status().as_u16();
+        let challenge = response
+            .headers()
+            .get(WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let body = response.text().await.unwrap_or_default();
+        let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) else {
+            return Error::api(Some(status), format!("HTTP {status}: {body}"));
+        };
+        if status == 403
+            && let Some(scope) = denied_scope(challenge.as_deref(), &api_error.message)
+        {
+            return self.scope_error(scope, api_error).await;
+        }
+        Error::api_with_type(Some(status), api_error.message, api_error.error_type)
+    }
+
+    /// A saved OAuth sign-in keeps the scopes it was granted across refreshes,
+    /// so it gets a read scope the server added later only by signing in
+    /// again. It never holds another scope, and an API token never gains one,
+    /// so those need a new API token. For a sign-in the server's message is
+    /// left out: it says the same, or on servers before v2.8.2 names an API
+    /// token the caller does not use.
+    async fn scope_error(&self, scope: Option<String>, api_error: ApiErrorResponse) -> Error {
+        let needs = scope
+            .as_ref()
+            .map_or("the scope this command needs".to_owned(), |s| {
+                format!("the {s} scope")
+            });
+        let message = match &self.credential {
+            Credential::OAuth(state) => {
+                let saved = state.lock().await.saved.clone();
+                if let Some(reason) = sign_in_lacks(&saved, scope.as_deref()).await {
+                    return Error::auth_required(&saved.context, reason);
+                }
+                format!(
+                    "A `logchef auth` sign-in cannot hold {needs}. Pass an API token that has it with --token or LOGCHEF_AUTH_TOKEN. Create one under {API_TOKENS_PAGE}."
+                )
+            }
+            Credential::Bearer(_) | Credential::None => format!(
+                "{}. A token cannot gain scopes after it is created. Create one with {needs} under {API_TOKENS_PAGE}.",
+                api_error.message.trim_end_matches('.')
+            ),
+        };
+        Error::api_with_type(Some(403), message, Some(INSUFFICIENT_SCOPE.to_owned()))
     }
 
     pub async fn get_meta(&self) -> Result<MetaResponse> {
@@ -378,23 +431,8 @@ impl Client {
 
         let response = self.send(|| self.http.post(&url).json(request)).await?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let status_code = status.as_u16();
-            let body = response.text().await.unwrap_or_default();
-
-            if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) {
-                return Err(Error::api_with_type(
-                    Some(status_code),
-                    api_error.message,
-                    api_error.error_type,
-                ));
-            }
-
-            return Err(Error::api(
-                Some(status_code),
-                format!("HTTP {}: {}", status_code, body),
-            ));
+        if !response.status().is_success() {
+            return Err(self.error_from(response).await);
         }
 
         Ok(response)
@@ -433,23 +471,8 @@ impl Client {
 
         let response = self.send(|| http.get(&url)).await?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let status_code = status.as_u16();
-            let body = response.text().await.unwrap_or_default();
-
-            if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) {
-                return Err(Error::api_with_type(
-                    Some(status_code),
-                    api_error.message,
-                    api_error.error_type,
-                ));
-            }
-
-            return Err(Error::api(
-                Some(status_code),
-                format!("HTTP {}: {}", status_code, body),
-            ));
+        if !response.status().is_success() {
+            return Err(self.error_from(response).await);
         }
 
         Ok(response)
@@ -498,23 +521,8 @@ impl Client {
         debug!(url = %url, "GET export download request");
 
         let response = self.send(|| self.http.get(&url)).await?;
-        let status = response.status();
-        if !status.is_success() {
-            let status_code = status.as_u16();
-            let body = response.text().await.unwrap_or_default();
-
-            if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body) {
-                return Err(Error::api_with_type(
-                    Some(status_code),
-                    api_error.message,
-                    api_error.error_type,
-                ));
-            }
-
-            return Err(Error::api(
-                Some(status_code),
-                format!("HTTP {}: {}", status_code, body),
-            ));
+        if !response.status().is_success() {
+            return Err(self.error_from(response).await);
         }
 
         Ok(response)
@@ -670,6 +678,59 @@ fn audit_query(filter: &AuditEventFilter, limit: usize, cursor: &str) -> String 
         }
     }
     query.finish()
+}
+
+/// Reads a 403 that denies a missing scope: `Some(Some(scope))` when the
+/// `WWW-Authenticate` challenge or the message names the scope, `Some(None)`
+/// when neither does (servers before v2.8.2), and `None` for any other 403.
+fn denied_scope(challenge: Option<&str>, message: &str) -> Option<Option<String>> {
+    let challenge = challenge.unwrap_or_default();
+    let from_challenge = challenge
+        .split(',')
+        .filter_map(|param| param.split_once('='))
+        .find(|(key, _)| {
+            let key = key.trim();
+            key == "scope" || key.ends_with(" scope")
+        })
+        .map(|(_, value)| value.trim().trim_matches('"').to_owned());
+    let from_message = message
+        .split_once("required scope ")
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+        .or_else(|| {
+            message
+                .split_once("does not grant the ")
+                .and_then(|(_, rest)| rest.split_once(" scope"))
+                .map(|(scope, _)| scope)
+        })
+        .map(|scope| scope.trim_end_matches('.').to_owned());
+    let denied = challenge.contains("insufficient_scope")
+        || message.contains("required scope")
+        || from_message.is_some();
+    denied.then(|| from_challenge.or(from_message).filter(|s| !s.is_empty()))
+}
+
+/// Why a saved sign-in was denied, when signing in again would grant the
+/// scope: the denied scope is a read scope the CLI requests, or the server
+/// did not name it and the sign-in lacks a read scope the server offers.
+async fn sign_in_lacks(saved: &SavedCredential, scope: Option<&str>) -> Option<String> {
+    let lacks = format!(
+        "The saved sign-in for context '{}' lacks a scope this command needs",
+        saved.context
+    );
+    match scope {
+        Some(scope) => scope
+            .split_whitespace()
+            .all(|s| auth::READ_SCOPES.contains(&s))
+            .then(|| format!("{lacks}: it does not grant {scope}")),
+        None => match auth::missing_read_scopes(&saved.credential).await {
+            Ok(missing) if missing.is_empty() => None,
+            Ok(missing) => Some(format!("{lacks}: it does not grant {}", missing.join(", "))),
+            Err(err) => {
+                debug!(error = %err, "Could not read the scopes the server offers");
+                Some(lacks)
+            }
+        },
+    }
 }
 
 /// Refreshes the grant and marks the client's one refresh as used.
@@ -850,6 +911,37 @@ mod tests {
                 "GET /api/v1/reports/4/runs?limit=20 HTTP/1.1",
             ]
         );
+    }
+
+    #[test]
+    fn denied_scope_reads_the_challenge_then_the_message() {
+        let oauth =
+            "This sign-in does not grant the saved_views:read scope. Sign in again to grant it.";
+        let pat = "API token does not have the required scope saved_views:read";
+        let older = "API token does not have the required scope";
+        let cases = [
+            (
+                Some(r#"Bearer error="insufficient_scope", scope="saved_views:read""#),
+                older,
+                Some(Some("saved_views:read")),
+            ),
+            (None, oauth, Some(Some("saved_views:read"))),
+            (None, pat, Some(Some("saved_views:read"))),
+            (
+                Some(r#"Bearer error="insufficient_scope""#),
+                older,
+                Some(None),
+            ),
+            (None, older, Some(None)),
+            (None, "You do not have access to this source", None),
+        ];
+        for (challenge, message, expected) in cases {
+            assert_eq!(
+                denied_scope(challenge, message),
+                expected.map(|s| s.map(str::to_owned)),
+                "{challenge:?} {message}"
+            );
+        }
     }
 
     #[tokio::test]

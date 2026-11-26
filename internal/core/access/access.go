@@ -59,6 +59,22 @@ var (
 	ErrGlobalAdminRequired = errors.New("global admin required")
 )
 
+// InsufficientScopeError names the scope a credential lacks. It matches
+// ErrInsufficientScope, so callers that only test for the sentinel keep
+// working, and an entrypoint can tell the caller which scope to obtain.
+type InsufficientScopeError struct {
+	Scope models.TokenScope
+}
+
+func (e *InsufficientScopeError) Error() string {
+	return ErrInsufficientScope.Error() + " " + string(e.Scope)
+}
+
+// Is reports that the error is ErrInsufficientScope.
+func (e *InsufficientScopeError) Is(target error) bool {
+	return target == ErrInsufficientScope
+}
+
 // Principal identifies a request caller or trusted system work.
 type Principal struct {
 	User   *models.User
@@ -121,7 +137,7 @@ func (p Principal) Scopes() []models.TokenScope {
 	return slices.Clone(p.scopes)
 }
 
-// Require returns ErrInsufficientScope unless the principal holds scope.
+// Require returns an *InsufficientScopeError unless the principal holds scope.
 // Sessions hold every scope. API tokens also honor the "*" scope. OAuth,
 // assistant and report principals need an exact match. Any other method is
 // denied.
@@ -134,13 +150,13 @@ func (p Principal) Require(scope models.TokenScope) error {
 			return nil
 		}
 	case AuthSystem:
-		return ErrInsufficientScope
+		return &InsufficientScopeError{Scope: scope}
 	case AuthOAuth, AuthAssistant, AuthReport:
 		if slices.Contains(p.scopes, scope) {
 			return nil
 		}
 	}
-	return ErrInsufficientScope
+	return &InsufficientScopeError{Scope: scope}
 }
 
 // RequireGlobalAdmin returns ErrGlobalAdminRequired unless the user is a

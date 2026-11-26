@@ -106,9 +106,16 @@ func (s *Server) mcpUnauthorized(c fiber.Ctx, oauthError string) error {
 // admitMCPQuery admits an MCP log query under the same per-user and global
 // caps as the HTTP API.
 func (s *Server) admitMCPQuery(class mcp.QueryClass, src access.AuthorizedSource, queryText string, cancel context.CancelFunc) (queryID string, release func(), err error) {
-	trackerClass := QueryClassPreview
-	if class == mcp.QueryClassHistogram {
+	var trackerClass QueryClass
+	switch class {
+	case mcp.QueryClassPreview:
+		trackerClass = QueryClassPreview
+	case mcp.QueryClassHistogram:
 		trackerClass = QueryClassHistogram
+	case mcp.QueryClassBacktest:
+		trackerClass = QueryClassBacktest
+	default:
+		return "", nil, fmt.Errorf("unknown MCP query class %d", class)
 	}
 	maxPerUser, maxGlobal := s.admissionLimits(trackerClass)
 	queryID, err = queryTracker.StartQuery(trackerClass, src.UserID(), src.SourceID(), src.TeamID(), queryText, cancel, maxPerUser, maxGlobal)

@@ -359,11 +359,15 @@ const (
 	MaxBacktestGroups = 20
 )
 
-// BacktestAlertRequest replays an unsaved rule over the past range_seconds.
+// BacktestAlertRequest replays an unsaved rule over the range_seconds that end
+// at end_time, or now.
 type BacktestAlertRequest struct {
 	TestAlertQueryRequest
 	FrequencySeconds int `json:"frequency_seconds"`
 	RangeSeconds     int `json:"range_seconds"`
+	// EndTime replays a past window, such as an incident. It may not be in
+	// the future.
+	EndTime *time.Time `json:"end_time,omitempty"`
 	// NotifyOnResolve defaults to true when absent, as on a new rule.
 	NotifyOnResolve *bool `json:"notify_on_resolve"`
 }
@@ -397,6 +401,9 @@ type BacktestResult struct {
 	// from FirstErr by the caller, which knows what a user may read.
 	FirstError string `json:"first_error,omitempty"`
 	FirstErr   error  `json:"-"`
+	// Warnings say what the replay cannot see, such as the part of the range
+	// that no lookback window reads.
+	Warnings []string `json:"warnings"`
 }
 
 // BacktestSummary counts what the replay saw. FiringSeconds is the time at
@@ -405,7 +412,11 @@ type BacktestResult struct {
 // sent: one per episode and per move between firing and no data, plus one
 // per resolve when notify_on_resolve is set.
 type BacktestSummary struct {
-	Episodes             int `json:"episodes"`
+	Episodes int `json:"episodes"`
+	// EmptyResultEpisodes counts the episodes of a grouped rule whose whole
+	// result was empty under the no_data policy. They belong to no group, so
+	// Episodes is the episodes of every group plus these.
+	EmptyResultEpisodes  int `json:"empty_result_episodes"`
 	FiringSeconds        int `json:"firing_seconds"`
 	BreachingEvaluations int `json:"breaching_evaluations"`
 	Notifications        int `json:"notifications"`
@@ -428,6 +439,8 @@ type BacktestGroup struct {
 	Episodes             int               `json:"episodes"`
 	BreachingEvaluations int               `json:"breaching_evaluations"`
 	MaxValue             *float64          `json:"max_value"`
+	// MinValue is the value that matters for an lt or lte rule.
+	MinValue *float64 `json:"min_value"`
 }
 
 // DefaultAlertHistoryLimit controls the number of history entries returned when unspecified.

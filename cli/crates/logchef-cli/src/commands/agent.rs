@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use logchef_core::Config;
+use logchef_core::auth::API_TOKENS_PAGE;
 use logchef_core::config::ContextAuth;
 use serde::Serialize;
 use url::Url;
@@ -70,7 +71,7 @@ struct Instance {
 #[derive(Serialize)]
 struct Step {
     id: &'static str,
-    description: &'static str,
+    description: String,
     command: String,
 }
 
@@ -223,23 +224,28 @@ fn steps(instance: &Instance, authentication: Authentication) -> Vec<Step> {
         Authentication::NotNeeded => {}
         Authentication::OAuth | Authentication::OAuthUnverified => steps.push(Step {
             id: "auth",
-            description: "Sign in with Logchef OAuth in a browser and save the grant for this instance",
+            description:
+                "Sign in with Logchef OAuth in a browser and save the grant for this instance"
+                    .into(),
             command: auth_command(instance),
         }),
         Authentication::ApiToken => steps.push(Step {
             id: "token",
-            description: "This server does not offer Logchef OAuth sign-in. Upgrade it, or create an API token in the web UI and set it",
+            description: format!(
+                "This server does not offer Logchef OAuth sign-in. Upgrade it, or create an API \
+                 token under {API_TOKENS_PAGE} and set it"
+            ),
             command: "export LOGCHEF_AUTH_TOKEN=<your-api-token>".to_string(),
         }),
     }
     steps.push(Step {
         id: "verify",
-        description: "Check config, connectivity, token, and defaults",
+        description: "Check config, connectivity, token, and defaults".into(),
         command: doctor_command(instance),
     });
     steps.push(Step {
         id: "skills",
-        description: "Read the bundled usage guide for LogchefQL, SQL, and LogsQL",
+        description: "Read the bundled usage guide for LogchefQL, SQL, and LogsQL".into(),
         command: "logchef skills get core".to_string(),
     });
     steps

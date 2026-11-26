@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::Client;
-use logchef_core::config::{Context as CtxConfig, ContextAuth};
+use logchef_core::auth::API_TOKENS_PAGE;
+use logchef_core::config::{Context as CtxConfig, ContextAuth, OAuthCredential};
 use logchef_core::timerange::{parse_timezone, resolve_timezone};
 use serde::Serialize;
 use std::io::IsTerminal;
@@ -248,7 +249,10 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
                 None => checks.push(Check::warn(
                     "CLI auth",
                     "server does not offer Logchef OAuth sign-in",
-                    "upgrade the server and enable auth.oauth, or use an API token (--token or LOGCHEF_AUTH_TOKEN)",
+                    format!(
+                        "upgrade the server and enable auth.oauth, or use an API token (--token \
+                         or LOGCHEF_AUTH_TOKEN). Create one under {API_TOKENS_PAGE}"
+                    ),
                 )),
             }
             // The CLI (0.x) and server (2.x) are versioned independently, so
@@ -325,6 +329,12 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
         }
     }
 
+    if let (Some(ContextAuth::OAuth(credential)), Some(resolved), true) =
+        (&saved_auth, &resolved, oauth_saved && meta.is_ok())
+    {
+        checks.push(scope_check(credential, &resolved.name).await);
+    }
+
     // ---- Defaults --------------------------------------------------------
     // Only meaningful when authenticated and the server is up.
     let can_resolve = token_present && meta.is_ok();
@@ -339,6 +349,30 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     Diagnosis {
         checks,
         oauth_enabled,
+    }
+}
+
+/// Compares the scopes of a saved sign-in with the read scopes the server
+/// offers. A sign-in made before the server added a scope lacks it, and only
+/// a new sign-in grants it.
+async fn scope_check(credential: &OAuthCredential, context: &str) -> Check {
+    match logchef_core::auth::missing_read_scopes(credential).await {
+        Ok(missing) if missing.is_empty() => {
+            Check::ok("OAuth scopes", "every read scope the server offers")
+        }
+        Ok(missing) => Check::fail(
+            "OAuth scopes",
+            format!("this sign-in does not grant {}", missing.join(", ")),
+            format!(
+                "run `logchef auth --context {}` to sign in again and grant them",
+                logchef_core::error::shell_quote(context)
+            ),
+        ),
+        Err(err) => Check::warn(
+            "OAuth scopes",
+            format!("could not read the scopes the server offers: {err}"),
+            "check connectivity, then re-run `logchef doctor`",
+        ),
     }
 }
 

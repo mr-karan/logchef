@@ -178,6 +178,9 @@ type TranslateResult struct {
 	// Aggregation is the compiled aggregation pipe. Nil for a query that
 	// returns log rows.
 	Aggregation *SQLAggregation `json:"-"`
+	// Warnings note a query that translates but may not match what it says,
+	// such as a JSON number read as text.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ValidateResult represents the result of validating a LogchefQL query

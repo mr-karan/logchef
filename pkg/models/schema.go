@@ -13,6 +13,10 @@ type QueryResult struct {
 	Warnings []QueryWarning   `json:"warnings,omitempty"`
 }
 
+// TextIndexType is the text index that Logchef creates and advises. A text
+// index ignores GRANULARITY.
+const TextIndexType = "text(tokenizer = splitByNonAlpha)"
+
 // Schema Constants
 const (
 	// OTELLogsTableSchema is the schema for OpenTelemetry logs
@@ -33,7 +37,7 @@ const (
 		INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
 		INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
 		INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-		INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+		INDEX idx_body body TYPE ` + TextIndexType + `
 	)
 	ENGINE = MergeTree()
 	PARTITION BY toDate(timestamp)

@@ -96,6 +96,7 @@ Logchef connects to remote datasource backends as sources:
 
 - **Requirements**:
 
+  - ClickHouse. Creating a table from Logchef's built-in schema needs 26.8 or later, for its text index. Existing tables work on older versions.
   - ClickHouse requires a timestamp field (DateTime/DateTime64)
   - VictoriaLogs defaults to `_time`
 

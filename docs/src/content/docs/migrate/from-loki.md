@@ -146,8 +146,8 @@ every 2 seconds.
 - **Real indexing on log content.** Loki's line filters (`|=`, `!~`) scan
   decompressed chunks within the streams selected by labels — fast because
   labels narrow scope first, but the content scan itself is unindexed grep.
-  ClickHouse can use bloom-filter and token-based skip indexes
-  (`tokenbf_v1`, `bloom_filter`) on the body/attribute columns, so line-content
+  ClickHouse can use text and bloom-filter skip indexes
+  (`text`, `bloom_filter`) on the body/attribute columns, so line-content
   filtering doesn't have to fall back to a full chunk scan.
 - **SQL aggregations without a metric-query DSL.** `GROUP BY`, joins, and
   window functions are ordinary SQL, versus LogQL's separate metric-query

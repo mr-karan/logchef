@@ -6,6 +6,8 @@ head:
 description: "Design ClickHouse tables for log analytics with Logchef. Choose columns, ordering keys, and retention settings for efficient storage and queries."
 ---
 
+The built-in schemas below index the log body with a `text` index, which needs ClickHouse 26.8 or later. On an older server, create your own table with a different body index, or none, and point Logchef at it.
+
 Logchef works with any ClickHouse table that has a timestamp field. If you don't have an existing schema, or want to start ingesting logs quickly without worrying about the details, you can use the optimized built-in schemas Logchef provides.
 
 ## OpenTelemetry Schema
@@ -29,7 +31,7 @@ CREATE TABLE "{{database_name}}"."{{table_name}}" (
     INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
     INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    INDEX idx_body body TYPE text(tokenizer = splitByNonAlpha)
 )
 ENGINE = MergeTree()
 PARTITION BY toDate(timestamp)
@@ -58,8 +60,10 @@ INDEX idx_trace_id trace_id TYPE bloom_filter(0.001) GRANULARITY 1
 INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4
 INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1
 INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1
-INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+INDEX idx_body body TYPE text(tokenizer = splitByNonAlpha)
 ```
+
+ClickHouse deprecates `tokenbf_v1` and `ngrambf_v1` in favor of the `text` index. `hasToken`, `hasAnyTokens` and `hasAllTokens` read the text index. Filters with `=`, `IN`, `startsWith` and many `LIKE` patterns use it to skip data. No index serves the LogchefQL `~` operator, which compiles to `positionCaseInsensitive`. To check a query, run `EXPLAIN indexes = 1` on it.
 
 4. **Partitioning and Ordering**
 

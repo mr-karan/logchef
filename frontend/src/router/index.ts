@@ -182,7 +182,13 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: "",
-        redirect: "users",
+        name: "AdminOverview",
+        component: lazy("AdminOverview", () => import("@/views/admin/AdminOverview.vue")),
+        meta: { title: "routes.adminOverview", requiresAdmin: true, palette: { icon: "admin" } },
+      },
+      {
+        path: "people",
+        redirect: { name: "ManageUsers" },
       },
       {
         path: "users",
@@ -385,6 +391,13 @@ router.beforeEach(async (to) => {
 
   if (unmet("alerts")) {
     return { path: "/logs/explore" };
+  }
+
+  if (to.name === "AdminOverview" && unmet("admin")) {
+    const { useTeamsStore } = await import("@/stores/teams");
+    if (useTeamsStore().isAnyTeamAdmin) {
+      return { name: "Teams" };
+    }
   }
 
   if (unmet("admin") || unmet("anyTeamAdmin")) {

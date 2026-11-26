@@ -15,8 +15,10 @@ pub enum Error {
     Api {
         status: Option<u16>,
         message: String,
-        /// The server's `error_type` from `ApiErrorResponse`, when present.
-        /// Used to select an actionable CLI hint (see `ui::hint_for_error`).
+        /// The server's `error_type` from `ApiErrorResponse`, when present,
+        /// or [`INSUFFICIENT_SCOPE`] when the client read a 403 as a missing
+        /// scope. Used to select an actionable CLI hint (see
+        /// `ui::hint_for_error`).
         error_type: Option<String>,
     },
 
@@ -54,6 +56,10 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// The `error_type` of a 403 for a missing scope, named after the RFC 6750
+/// error code. Its message already says how to get a credential with it.
+pub const INSUFFICIENT_SCOPE: &str = "insufficient_scope";
+
 impl Error {
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())
@@ -85,6 +91,11 @@ impl Error {
             message: msg.into(),
             error_type,
         }
+    }
+
+    /// A 403 for a missing scope, whose message names the fix.
+    pub fn is_scope_denied(&self) -> bool {
+        matches!(self, Self::Api { error_type: Some(kind), .. } if kind == INSUFFICIENT_SCOPE)
     }
 
     pub fn oauth(msg: impl Into<String>) -> Self {

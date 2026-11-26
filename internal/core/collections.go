@@ -27,6 +27,12 @@ var (
 	// ErrLastOwnerRemoval is returned when removing a member would leave
 	// the collection ownerless. Surfaces to the API as a 409 Conflict.
 	ErrLastOwnerRemoval = errors.New("cannot remove the last owner; delete the collection instead")
+	// ErrLastOwnerDemotion is returned when a role change would leave the
+	// collection ownerless. Surfaces to the API as a 409 Conflict.
+	ErrLastOwnerDemotion = errors.New("cannot change the role of the last owner; make someone else an owner first")
+	// ErrCollectionMemberNotFound is returned when a role change targets a user
+	// with no direct membership. Surfaces to the API as a 404.
+	ErrCollectionMemberNotFound = errors.New("user is not a direct member of this collection")
 	// ErrCollectionTeamNotMember is returned when a collection owner who is not
 	// a global admin tries to share with a team they do not belong to.
 	ErrCollectionTeamNotMember = errors.New("you can only share a collection with teams you belong to")
@@ -317,6 +323,68 @@ func AddCollectionMember(ctx context.Context, db store.Store, log *slog.Logger, 
 		return nil, err
 	}
 	return added, nil
+}
+
+// UpdateCollectionMemberRole changes a direct member's role. Only owners may
+// change roles, and the last owner cannot be demoted. It returns the
+// membership before and after the change; they are equal when the role was
+// already set.
+func UpdateCollectionMemberRole(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, callerID, targetUserID models.UserID, role models.CollectionRole) (before, after *models.CollectionMember, err error) {
+	switch role {
+	case models.CollectionRoleOwner, models.CollectionRoleEditor, models.CollectionRoleMember:
+	default:
+		return nil, nil, ErrInvalidCollectionRole
+	}
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := lockCollection(ctx, tx, collectionID); err != nil {
+			return err
+		}
+		collection, callerRole, err := GetCollectionForUser(ctx, tx, log, collectionID, callerID)
+		if err != nil {
+			return err
+		}
+		if callerRole != models.CollectionRoleOwner {
+			return ErrCollectionForbidden
+		}
+		if collection.IsPersonal {
+			return ErrPersonalCollectionImmutable
+		}
+		before, err = tx.GetCollectionMember(ctx, collectionID, targetUserID)
+		if models.IsNotFound(err) {
+			return ErrCollectionMemberNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if before.Role == role {
+			after = before
+			return nil
+		}
+		if before.Role == models.CollectionRoleOwner {
+			members, err := tx.ListCollectionMembers(ctx, collectionID)
+			if err != nil {
+				return err
+			}
+			owners := 0
+			for _, m := range members {
+				if m.Role == models.CollectionRoleOwner {
+					owners++
+				}
+			}
+			if owners <= 1 {
+				return ErrLastOwnerDemotion
+			}
+		}
+		if err := tx.UpdateCollectionMemberRole(ctx, collectionID, targetUserID, role); err != nil {
+			return err
+		}
+		after, err = tx.GetCollectionMember(ctx, collectionID, targetUserID)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
 }
 
 // RemoveCollectionMember drops a direct membership row. Owners can remove

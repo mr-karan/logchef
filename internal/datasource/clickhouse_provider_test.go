@@ -644,3 +644,57 @@ func TestQueryWarningsForBuildResult(t *testing.T) {
 		t.Fatalf("aggregated capped warnings=%+v, want LIMIT_CAPPED", got)
 	}
 }
+
+func TestPrepareSourceCreatesBodyIndexClickHouse(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rawConn, err := ch.Open(&ch.Options{Addr: []string{addr}, Auth: ch.Auth{Database: "default"}})
+	if err != nil {
+		t.Fatalf("open ClickHouse admin connection: %v", err)
+	}
+	t.Cleanup(func() { _ = rawConn.Close() })
+	version, err := rawConn.ServerVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := version.Version; v.Major < 26 || v.Major == 26 && v.Minor < 8 {
+		t.Skipf("the built-in schema's text index needs ClickHouse 26.8, server is %d.%d", v.Major, v.Minor)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := clickhouse.NewManager(log)
+	t.Cleanup(func() { _ = manager.Close() })
+	table := fmt.Sprintf("test_auto_created_%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_ = rawConn.Exec(cleanupCtx, "DROP TABLE IF EXISTS default."+table)
+	})
+	connection, err := json.Marshal(models.ConnectionInfo{Host: addr, Database: "default", TableName: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := NewClickHouseProvider(manager, log)
+	if _, err := provider.PrepareSource(ctx, &models.CreateSourceRequest{
+		Name:              table,
+		MetaIsAutoCreated: true,
+		SourceType:        models.SourceTypeClickHouse,
+		Connection:        connection,
+		TTLDays:           1,
+	}); err != nil {
+		t.Fatalf("PrepareSource() = %v", err)
+	}
+
+	var got string
+	if err := rawConn.QueryRow(ctx, "SELECT type FROM system.data_skipping_indices WHERE database = 'default' AND table = ? AND name = 'idx_body'", table).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "text" {
+		t.Fatalf("idx_body type = %q, want text", got)
+	}
+}

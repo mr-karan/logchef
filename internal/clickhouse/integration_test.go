@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -204,5 +206,70 @@ func TestConcurrentCloseClickHouse(t *testing.T) {
 	}
 	if err := client.Ping(ctx, "", ""); !errors.Is(err, ch.ErrConnectionClosed) {
 		t.Fatalf("ping on closed client: %v", err)
+	}
+}
+
+// A listing of every field's top values leaves out the log-body columns: their
+// values are whole log lines, which can carry personal data, and counting
+// them reads every body in the window. A column asked for by name is read.
+func TestAllFieldValuesSkipsLogBodiesClickHouse(t *testing.T) {
+	client, ctx := integrationClient(t)
+	table := fmt.Sprintf("logchef_body_test_%d", time.Now().UnixNano())
+	conn := client.conn
+	if err := conn.Exec(ctx, "CREATE TABLE "+table+" (ts DateTime64(3), job_name String, msg String, Message String, body String) ENGINE=MergeTree ORDER BY ts"); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE "+table)
+	if err := conn.Exec(ctx, "INSERT INTO "+table+" VALUES (toDateTime64('2026-09-09 12:00:00', 3, 'UTC'), 'payments', 'client 4711 paid', 'x', 'y')"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.GetAllFilterableFieldValues(ctx, "default", table, AllFieldValuesParams{
+		TimestampField: "ts", Timezone: "UTC", Limit: 10,
+		StartTime: time.Date(2026, 9, 9, 11, 0, 0, 0, time.UTC), EndTime: time.Date(2026, 9, 9, 13, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result["job_name"]; !ok || len(result) != 1 {
+		t.Fatalf("fields %v, want job_name only", slices.Sorted(maps.Keys(result)))
+	}
+	named, err := client.GetFieldDistinctValues(ctx, "default", table, FieldValuesParams{
+		FieldName: "msg", FieldType: "String", TimestampField: "ts", Timezone: "UTC", Limit: 10,
+		StartTime: time.Date(2026, 9, 9, 11, 0, 0, 0, time.UTC), EndTime: time.Date(2026, 9, 9, 13, 0, 0, 0, time.UTC),
+	})
+	if err != nil || len(named.Values) != 1 {
+		t.Fatalf("msg by name: %+v %v, want its one value", named, err)
+	}
+}
+
+// A field whose query times out is listed with the error and no values, so a
+// caller does not take it for a field that does not exist. The other fields
+// keep their values.
+func TestAllFieldValuesListsATimedOutFieldClickHouse(t *testing.T) {
+	client, ctx := integrationClient(t)
+	table := fmt.Sprintf("logchef_slow_field_test_%d", time.Now().UnixNano())
+	conn := client.conn
+	// Reading slow sleeps a second a row, so its query outlasts a 1 s timeout.
+	if err := conn.Exec(ctx, "CREATE TABLE "+table+" (ts DateTime64(3), job_name String, slow String ALIAS toString(sleepEachRow(1))) ENGINE=MergeTree ORDER BY ts"); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Exec(ctx, "DROP TABLE "+table)
+	if err := conn.Exec(ctx, "INSERT INTO "+table+" SELECT toDateTime64('2026-09-09 12:00:00', 3, 'UTC'), 'payments' FROM numbers(3)"); err != nil {
+		t.Fatal(err)
+	}
+	timeout := 1
+	result, err := client.GetAllFilterableFieldValues(ctx, "default", table, AllFieldValuesParams{
+		TimestampField: "ts", Timezone: "UTC", Limit: 10, Timeout: &timeout,
+		StartTime: time.Date(2026, 9, 9, 11, 0, 0, 0, time.UTC), EndTime: time.Date(2026, 9, 9, 13, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job := result["job_name"]; job == nil || job.Error != "" || len(job.Values) != 1 {
+		t.Fatalf("job_name = %+v, want its one value", job)
+	}
+	slow := result["slow"]
+	if slow == nil || slow.Error != "timed out after 1s" || slow.Values == nil || len(slow.Values) != 0 {
+		t.Fatalf("slow = %+v, want the timeout and an empty list of values", slow)
 	}
 }
