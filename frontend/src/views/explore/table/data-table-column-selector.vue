@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import SearchInput from '@/components/layout/SearchInput.vue'
 import {
   Popover,
   PopoverContent,
@@ -11,7 +12,7 @@ import {
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Columns3 } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Table } from './tableFeatures'
 
 const { t } = useI18n();
@@ -31,23 +32,29 @@ const emit = defineEmits<{
 
 const columns = computed(() => props.table.getAllColumns().filter(column => column.getCanHide()))
 const visibleColumns = computed(() => columns.value.filter(column => column.getIsVisible()))
+const search = ref('')
+const filteredColumns = computed(() => {
+  const query = search.value.trim().toLowerCase()
+  return columns.value.filter(column => column.id.toLowerCase().includes(query))
+})
 
-const isAllSelected = computed(() => {
-  const hideable = columns.value.length
-  const visible = visibleColumns.value.length
+const isAllSelected = computed<boolean | 'indeterminate'>(() => {
+  const hideable = filteredColumns.value.length
+  const visible = filteredColumns.value.filter(column => column.getIsVisible()).length
+  if (visible > 0 && visible < hideable) return 'indeterminate'
   return hideable > 0 && hideable === visible
 })
 
 const toggleAll = (checked: boolean | 'indeterminate') => {
   const visible = checked === true
-  columns.value.forEach(column => {
+  filteredColumns.value.forEach(column => {
     column.toggleVisibility(visible)
   })
 }
 </script>
 
 <template>
-  <Popover>
+  <Popover @update:open="search = ''">
     <PopoverTrigger as-child>
       <Button variant='outline' size="sm" class='h-7 px-2 lg:w-[130px]' :title="t('ui.selectColumns')">
         <Columns3 class="h-4 w-4" />
@@ -76,10 +83,11 @@ const toggleAll = (checked: boolean | 'indeterminate') => {
             </Button>
           </div>
         </div>
+        <SearchInput v-model="search" :placeholder="t('ui.searchFields')" />
         <ScrollArea class="h-[300px] pr-4">
           <div class="grid gap-2">
             <!-- Select All option -->
-            <div class="flex items-center space-x-2 py-1 border-b border-border mb-2">
+            <div v-if="filteredColumns.length" class="flex items-center space-x-2 py-1 border-b border-border mb-2">
               <Checkbox
                 id="select-all"
                 :model-value="isAllSelected"
@@ -91,7 +99,7 @@ const toggleAll = (checked: boolean | 'indeterminate') => {
             </div>
 
             <div
-              v-for="column in columns"
+              v-for="column in filteredColumns"
               :key="column.id"
               class="flex items-center space-x-2 py-1"
             >
@@ -104,6 +112,9 @@ const toggleAll = (checked: boolean | 'indeterminate') => {
                 {{ column.id }}
               </Label>
             </div>
+            <p v-if="!filteredColumns.length" class="py-4 text-center text-sm text-muted-foreground">
+              {{ t('access.noResults') }}
+            </p>
           </div>
         </ScrollArea>
       </div>
